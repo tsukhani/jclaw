@@ -79,6 +79,21 @@ public final class ToolCallLoopRunner {
         public LoopOutcome(String content) { this(content, false); }
     }
 
+    /**
+     * Mutable per-turn audio-retry bookkeeping for {@link #callWithToolLoop}.
+     * Tracks the single-shot JCLAW-165 retry and whether the request was
+     * already shipped as text (so the AUDIO_PASSTHROUGH_OUTCOME log carries
+     * the right {@code transcript_awaited} flag).
+     */
+    private static final class AudioRetryState {
+        boolean retryAttempted;
+        boolean transcriptAwaited;
+
+        AudioRetryState(boolean transcriptAwaited) {
+            this.transcriptAwaited = transcriptAwaited;
+        }
+    }
+
     @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is JCLAW-165's single-use audio-format retry
     static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
                                          List<ChatMessage> messages, List<ToolDef> tools,
@@ -97,8 +112,7 @@ public final class ToolCallLoopRunner {
         var effectiveModelId = ModelResolver.effectiveModelId(agent, conversation);
         var modelInfoForOutcome = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioInitially = modelInfoForOutcome != null && modelInfoForOutcome.supportsAudio();
-        boolean audioRetryAttempted = false;
-        boolean transcriptAwaitedAlready = !supportsAudioInitially && !audioBearers.isEmpty();
+        var audioState = new AudioRetryState(!supportsAudioInitially && !audioBearers.isEmpty());
 
         for (int round = 0; round < AgentRunner.maxToolRounds(); round++) {
             // JCLAW-291: cooperative-cancel checkpoint at the top of each
@@ -114,107 +128,159 @@ public final class ToolCallLoopRunner {
                         ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType)
                         : primary.chat(effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType);
             } catch (Exception e) {
-                // JCLAW-165: provider-side audio-format rejection — fall back
-                // to transcript-as-text and retry once. Only kicks in when the
-                // request actually carried audio (audioBearers non-empty) and
-                // we haven't already retried this turn.
-                if (!audioRetryAttempted && !audioBearers.isEmpty() && AudioRetryStrategy.isAudioFormatRejection(e)) {
-                    audioRetryAttempted = true;
-                    transcriptAwaitedAlready = true;
-                    if (!AudioRetryStrategy.anyTranscriptAvailable(audioBearers)) {
-                        // No usable transcript means we'd just send fallback
-                        // notes — better to fail with a clear error than
-                        // ship a degraded prompt the user can't tell came
-                        // from a transcription failure.
-                        AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
-                                "no_transcript_after_rejection", true);
-                        EventLogger.warn("llm", agent.name, null,
-                                "Audio format rejected and no transcript available — failing turn");
-                        return new LoopOutcome("I'm sorry — the audio attachment couldn't be transcribed and the model rejected the audio format directly. Please try again.");
-                    }
-                    EventLogger.warn("llm", agent.name, null,
-                            "Provider %s rejected audio format; retrying with transcript-as-text"
-                                    .formatted(primary.config().name()));
-                    currentMessages = new ArrayList<>(VisionAudioAssembler.applyTranscriptsForCapability(
-                            currentMessages, audioBearers, false));
+                var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, audioState, currentMessages);
+                if (retryOutcome.retry()) {
+                    currentMessages = retryOutcome.rewrittenMessages();
                     round--;  // JCLAW-165: re-issue this round with the rewritten messages (gated by audioRetryAttempted)
                     continue;
                 }
-                EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
-                if (!audioBearers.isEmpty()) {
-                    AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
-                            AudioRetryStrategy.shortErrorTag(e), transcriptAwaitedAlready);
-                }
-                return new LoopOutcome("I'm sorry, I encountered an error communicating with the AI provider. Please try again.");
+                return retryOutcome.outcome();
             }
             // Successful response. Fire AUDIO_PASSTHROUGH_OUTCOME log when the
             // request carried audio so the field-data set we'll later use to
             // grow a known-good provider/format matrix has full coverage.
             if (round == 0 && !audioBearers.isEmpty()) {
                 AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
-                        audioRetryAttempted ? "downgraded" : "accepted",
-                        null, transcriptAwaitedAlready);
+                        audioState.retryAttempted ? "downgraded" : "accepted",
+                        null, audioState.transcriptAwaited);
             }
 
             if (response.choices() == null || response.choices().isEmpty()) {
                 return new LoopOutcome("No response received from the AI provider.");
             }
 
-            var choice = response.choices().getFirst();
-            var assistantMsg = choice.message();
-            boolean toolCallsEmpty = assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty();
-
-            // No tool calls — return the content. JCLAW-291: when finish_reason
-            // signals truncation on this branch, the model ran out of output
-            // budget mid-reply (the prompt-fills-window scenario). Carry the
-            // flag up to the persist site so the chat UI can mark the row.
-            if (toolCallsEmpty) {
-                if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
-                    TruncationDiagnostics.logEmptyToolCallsTruncation("callWithToolLoop", agent, conversation, primary,
-                            conversation.channelType, choice.finishReason(), currentMessages, tools);
-                    return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()), true);
-                }
-                return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()));
-            }
-
-            // Check for truncated response (max tokens hit mid-tool-call)
-            if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
-                EventLogger.warn("llm", agent.name, null,
-                        "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
-                var content = assistantMsg.content() != null ? (String) assistantMsg.content()
-                        : "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach.";
-                return new LoopOutcome(content, true);
-            }
-
-            // Tool calls — execute (in parallel when multiple) and continue
-            currentMessages.add(assistantMsg);
-            int toolResultsAnchor = currentMessages.size();
-            EventLogger.info("tool", agent.name, null,
-                    "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
-
-            ParallelToolExecutor.executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
-                    currentMessages, null, null, null, null, sink);
-
-            // JCLAW-291: cooperative-cancel checkpoint between tool calls
-            // and the next LLM round. If /subagent kill landed during the
-            // tool-call batch, abort here rather than spending another
-            // round on the now-stale plan.
-            AgentRunner.checkSubagentCancel(conversation);
-
-            // JCLAW-273: detect a successful yield_to_subagent call and bail
-            // out of the tool-call loop without continuing to the next LLM
-            // round. The runner returns YIELDED_RESPONSE so the caller skips
-            // its final-assistant-message persist; the parent's logical
-            // turn resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce
-            // once the child terminates.
-            if (yieldRequestedInLastRound(currentMessages, toolResultsAnchor)) {
-                EventLogger.info("tool", agent.name, null,
-                        "Round %d: yield_to_subagent invoked — suspending parent turn".formatted(round + 1));
-                return new LoopOutcome(AgentRunner.YIELDED_RESPONSE);
-            }
+            var roundOutcome = handleSyncRoundResponse(response, agent, conversation, conversationId, primary,
+                    currentMessages, tools, sink, round);
+            if (roundOutcome != null) return roundOutcome;
         }
 
         return new LoopOutcome("I reached the maximum number of tool execution rounds. Please try a simpler request.");
+    }
+
+    /**
+     * Result of {@link #handleLlmCallException}: either a terminal
+     * {@link LoopOutcome} or an instruction to retry the current round
+     * with rewritten messages (JCLAW-165 transcript-as-text fallback).
+     */
+    private record LlmCallExceptionOutcome(LoopOutcome outcome, boolean retry, ArrayList<ChatMessage> rewrittenMessages) {
+        static LlmCallExceptionOutcome terminal(LoopOutcome outcome) {
+            return new LlmCallExceptionOutcome(outcome, false, null);
+        }
+
+        static LlmCallExceptionOutcome retry(ArrayList<ChatMessage> rewritten) {
+            return new LlmCallExceptionOutcome(null, true, rewritten);
+        }
+    }
+
+    /**
+     * Map an exception thrown by the LLM call to either a single-shot
+     * JCLAW-165 transcript-as-text retry (rewrites the messages and
+     * tells the caller to re-issue the round) or a terminal failure
+     * {@link LoopOutcome}.
+     */
+    private static LlmCallExceptionOutcome handleLlmCallException(Exception e, Agent agent, Conversation conversation,
+                                                                   LlmProvider primary,
+                                                                   List<VisionAudioAssembler.AudioBearer> audioBearers,
+                                                                   AudioRetryState audioState,
+                                                                   ArrayList<ChatMessage> currentMessages) {
+        // JCLAW-165: provider-side audio-format rejection — fall back
+        // to transcript-as-text and retry once. Only kicks in when the
+        // request actually carried audio (audioBearers non-empty) and
+        // we haven't already retried this turn.
+        if (!audioState.retryAttempted && !audioBearers.isEmpty() && AudioRetryStrategy.isAudioFormatRejection(e)) {
+            audioState.retryAttempted = true;
+            audioState.transcriptAwaited = true;
+            if (!AudioRetryStrategy.anyTranscriptAvailable(audioBearers)) {
+                // No usable transcript means we'd just send fallback
+                // notes — better to fail with a clear error than
+                // ship a degraded prompt the user can't tell came
+                // from a transcription failure.
+                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
+                        "no_transcript_after_rejection", true);
+                EventLogger.warn("llm", agent.name, null,
+                        "Audio format rejected and no transcript available — failing turn");
+                return LlmCallExceptionOutcome.terminal(new LoopOutcome(
+                        "I'm sorry — the audio attachment couldn't be transcribed and the model rejected the audio format directly. Please try again."));
+            }
+            EventLogger.warn("llm", agent.name, null,
+                    "Provider %s rejected audio format; retrying with transcript-as-text"
+                            .formatted(primary.config().name()));
+            var rewritten = new ArrayList<>(VisionAudioAssembler.applyTranscriptsForCapability(
+                    currentMessages, audioBearers, false));
+            return LlmCallExceptionOutcome.retry(rewritten);
+        }
+        EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
+        if (!audioBearers.isEmpty()) {
+            AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
+                    AudioRetryStrategy.shortErrorTag(e), audioState.transcriptAwaited);
+        }
+        return LlmCallExceptionOutcome.terminal(new LoopOutcome(
+                "I'm sorry, I encountered an error communicating with the AI provider. Please try again."));
+    }
+
+    /**
+     * Process a successful per-round {@link ChatResponse}: either return
+     * a terminal {@link LoopOutcome} (no tool calls, truncation, or
+     * yield) or execute the tool calls and return {@code null} so the
+     * caller continues to the next round.
+     */
+    private static LoopOutcome handleSyncRoundResponse(ChatResponse response, Agent agent, Conversation conversation,
+                                                       Long conversationId, LlmProvider primary,
+                                                       ArrayList<ChatMessage> currentMessages, List<ToolDef> tools,
+                                                       AgentExecutionSink sink, int round) {
+        var choice = response.choices().getFirst();
+        var assistantMsg = choice.message();
+        boolean toolCallsEmpty = assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty();
+
+        // No tool calls — return the content. JCLAW-291: when finish_reason
+        // signals truncation on this branch, the model ran out of output
+        // budget mid-reply (the prompt-fills-window scenario). Carry the
+        // flag up to the persist site so the chat UI can mark the row.
+        if (toolCallsEmpty) {
+            if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
+                TruncationDiagnostics.logEmptyToolCallsTruncation("callWithToolLoop", agent, conversation, primary,
+                        conversation.channelType, choice.finishReason(), currentMessages, tools);
+                return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()), true);
+            }
+            return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()));
+        }
+
+        // Check for truncated response (max tokens hit mid-tool-call)
+        if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
+            EventLogger.warn("llm", agent.name, null,
+                    "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
+            var content = assistantMsg.content() != null ? (String) assistantMsg.content()
+                    : "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach.";
+            return new LoopOutcome(content, true);
+        }
+
+        // Tool calls — execute (in parallel when multiple) and continue
+        currentMessages.add(assistantMsg);
+        int toolResultsAnchor = currentMessages.size();
+        EventLogger.info("tool", agent.name, null,
+                "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
+
+        ParallelToolExecutor.executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
+                currentMessages, null, null, null, null, sink);
+
+        // JCLAW-291: cooperative-cancel checkpoint between tool calls
+        // and the next LLM round. If /subagent kill landed during the
+        // tool-call batch, abort here rather than spending another
+        // round on the now-stale plan.
+        AgentRunner.checkSubagentCancel(conversation);
+
+        // JCLAW-273: detect a successful yield_to_subagent call and bail
+        // out of the tool-call loop without continuing to the next LLM
+        // round. The runner returns YIELDED_RESPONSE so the caller skips
+        // its final-assistant-message persist; the parent's logical
+        // turn resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce
+        // once the child terminates.
+        if (yieldRequestedInLastRound(currentMessages, toolResultsAnchor)) {
+            EventLogger.info("tool", agent.name, null,
+                    "Round %d: yield_to_subagent invoked — suspending parent turn".formatted(round + 1));
+            return new LoopOutcome(AgentRunner.YIELDED_RESPONSE);
+        }
+        return null;
     }
 
     /**
@@ -332,16 +398,7 @@ public final class ToolCallLoopRunner {
         // a Gson EOFException and the user sees a cryptic "End of input" error. Instead,
         // surface a clear message so the LLM can retry with a more concise approach.
         if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
-            EventLogger.warn("tool", agent.name, null,
-                    "Response truncated (finish_reason=%s) with pending tool calls in round %d — skipping execution of incomplete tool arguments"
-                            .formatted(accumulator.finishReason, round + 1));
-            var truncMsg = accumulator.content != null && !accumulator.content.isEmpty()
-                    ? accumulator.content + "\n\n*[Response was truncated before the next tool call could complete. Try breaking the task into smaller steps.]*"
-                    : "I tried to use a tool but the response exceeded the token limit before the tool arguments finished. Try breaking the task into smaller steps — for example, write large files in multiple append operations instead of one big write.";
-            cb.onToken().accept(accumulator.content != null && !accumulator.content.isEmpty()
-                    ? "\n\n*[Response was truncated before the next tool call could complete.]*"
-                    : truncMsg);
-            return truncMsg;
+            return handleTruncatedToolCallAccumulator(accumulator, agent, cb, round);
         }
 
         // Recursively handle if more tool calls. JCLAW-104: pass the SAME
@@ -359,53 +416,94 @@ public final class ToolCallLoopRunner {
         // even when the user clearly wants synthesis. Retry once with an explicit synthesis
         // nudge before giving up and emitting a diagnostic fallback.
         if (accumulator.content == null || accumulator.content.isBlank()) {
-            EventLogger.warn("llm", agent.name, null,
-                    "Empty continuation after tool calls in round %d — retrying with synthesis nudge"
-                            .formatted(round + 1));
-            cb.onStatus().accept("Synthesizing response (retry)...");
-
-            var retryMessages = new ArrayList<>(currentMessages);
-            retryMessages.add(ChatMessage.user(
-                    "Synthesize the final response for me now using the tool results above. "
-                            + "Do not call any more tools. Write the full answer as markdown."));
-
-            var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, retryMessages, tools);
-            var retry = provider.chatStreamAccumulate(
-                    effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(),
-                    retryMaxTokens, thinkingMode, channelType);
-            try {
-                if (!CancellationManager.awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb))
-                    return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
-            }
-
-            // Retry round is a real LLM call — its usage counts too (JCLAW-76).
-            turnUsage.addRound(retry);
-
-            if (retry.content != null && !retry.content.isBlank()) {
-                return MessageDeduplicator.buildImagePrefix(collectedImages, retry.content)
-                        + retry.content
-                        + MessageDeduplicator.buildDownloadSuffix(collectedImages, retry.content, channelType);
-            }
-
-            // Retry also empty — emit a labeled diagnostic so the user knows why.
-            EventLogger.warn("llm", agent.name, null,
-                    "Retry also returned empty content — emitting diagnostic fallback");
-            // No LLM content to dedupe against — prepend every collected image unchanged.
-            var fallbackPrefix = collectedImages.isEmpty() ? ""
-                    : String.join("\n\n", collectedImages) + "\n\n";
-            var fallbackSuffix = MessageDeduplicator.buildDownloadSuffix(collectedImages, "", channelType);
-            var fallback = fallbackPrefix
-                    + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*"
-                    + fallbackSuffix;
-            cb.onToken().accept(fallback);
-            return fallback;
+            return retryEmptyContinuation(agent, conversation, provider, cb, thinkingMode, round, isCancelled,
+                    turnUsage, collectedImages, channelType, currentMessages, tools,
+                    effectiveModelIdForCall, priorContent);
         }
 
         return MessageDeduplicator.buildImagePrefix(collectedImages, accumulator.content)
                 + accumulator.content
                 + MessageDeduplicator.buildDownloadSuffix(collectedImages, accumulator.content, channelType);
+    }
+
+    /**
+     * Streaming-side counterpart to the sync truncation guard: report the
+     * incomplete tool-call to the user via {@code cb.onToken} and return
+     * the LoopOutcome content. Used when {@code finish_reason=length}
+     * with non-empty {@code toolCalls} (the model ran out of output
+     * budget mid-arguments-JSON).
+     */
+    private static String handleTruncatedToolCallAccumulator(LlmProvider.StreamAccumulator accumulator,
+                                                              Agent agent,
+                                                              AgentRunner.StreamingCallbacks cb,
+                                                              int round) {
+        EventLogger.warn("tool", agent.name, null,
+                "Response truncated (finish_reason=%s) with pending tool calls in round %d — skipping execution of incomplete tool arguments"
+                        .formatted(accumulator.finishReason, round + 1));
+        var truncMsg = accumulator.content != null && !accumulator.content.isEmpty()
+                ? accumulator.content + "\n\n*[Response was truncated before the next tool call could complete. Try breaking the task into smaller steps.]*"
+                : "I tried to use a tool but the response exceeded the token limit before the tool arguments finished. Try breaking the task into smaller steps — for example, write large files in multiple append operations instead of one big write.";
+        cb.onToken().accept(accumulator.content != null && !accumulator.content.isEmpty()
+                ? "\n\n*[Response was truncated before the next tool call could complete.]*"
+                : truncMsg);
+        return truncMsg;
+    }
+
+    /**
+     * Retry once with an explicit synthesis nudge after an empty
+     * continuation. If the retry also returns empty, emit a labeled
+     * diagnostic fallback so the user knows why the chat went silent.
+     */
+    @SuppressWarnings("java:S107") // mirrors the orchestration state of handleToolCallsStreaming
+    private static String retryEmptyContinuation(Agent agent, Conversation conversation, LlmProvider provider,
+                                                  AgentRunner.StreamingCallbacks cb, String thinkingMode,
+                                                  int round, AtomicBoolean isCancelled,
+                                                  LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
+                                                  String channelType, ArrayList<ChatMessage> currentMessages,
+                                                  List<ToolDef> tools, String effectiveModelIdForCall,
+                                                  String priorContent) {
+        EventLogger.warn("llm", agent.name, null,
+                "Empty continuation after tool calls in round %d — retrying with synthesis nudge"
+                        .formatted(round + 1));
+        cb.onStatus().accept("Synthesizing response (retry)...");
+
+        var retryMessages = new ArrayList<>(currentMessages);
+        retryMessages.add(ChatMessage.user(
+                "Synthesize the final response for me now using the tool results above. "
+                        + "Do not call any more tools. Write the full answer as markdown."));
+
+        var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, retryMessages, tools);
+        var retry = provider.chatStreamAccumulate(
+                effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(),
+                retryMaxTokens, thinkingMode, channelType);
+        try {
+            if (!CancellationManager.awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb))
+                return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+        }
+
+        // Retry round is a real LLM call — its usage counts too (JCLAW-76).
+        turnUsage.addRound(retry);
+
+        if (retry.content != null && !retry.content.isBlank()) {
+            return MessageDeduplicator.buildImagePrefix(collectedImages, retry.content)
+                    + retry.content
+                    + MessageDeduplicator.buildDownloadSuffix(collectedImages, retry.content, channelType);
+        }
+
+        // Retry also empty — emit a labeled diagnostic so the user knows why.
+        EventLogger.warn("llm", agent.name, null,
+                "Retry also returned empty content — emitting diagnostic fallback");
+        // No LLM content to dedupe against — prepend every collected image unchanged.
+        var fallbackPrefix = collectedImages.isEmpty() ? ""
+                : String.join("\n\n", collectedImages) + "\n\n";
+        var fallbackSuffix = MessageDeduplicator.buildDownloadSuffix(collectedImages, "", channelType);
+        var fallback = fallbackPrefix
+                + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*"
+                + fallbackSuffix;
+        cb.onToken().accept(fallback);
+        return fallback;
     }
 }

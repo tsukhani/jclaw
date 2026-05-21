@@ -146,45 +146,71 @@ public final class VisionAudioAssembler {
         }
 
         var text = msg.content == null ? "" : msg.content;
-        var fileNotes = new StringBuilder();
-        var parts = new ArrayList<Map<String, Object>>();
-        for (var a : atts) {
-            if (!a.isImage() && !a.isAudio()) {
-                // FILE-kind attachments are surfaced to the LLM as a
-                // filename + workspace path it can read via the filesystem
-                // tool. Images and audio ride as structured content parts
-                // below, so they skip this branch.
-                fileNotes.append("\n[Attached file: ")
-                        .append(a.originalFilename)
-                        .append(" — workspace:")
-                        .append(a.storagePath)
-                        .append("]");
-            }
-        }
+        var fileNotes = collectFileNotes(atts);
         // Transcript blocks for the !supportsAudio branch ride INSIDE the
         // text part so the LLM sees one cohesive prompt rather than fragmented
         // text + transcript. Append after the user's typed content (if any).
-        var transcriptBlocks = new StringBuilder();
-        if (!supportsAudio) {
-            for (var a : atts) {
-                if (a.isAudio()) {
-                    var transcript = a.transcript;
-                    if (transcript != null && !transcript.isBlank()) {
-                        transcriptBlocks.append("\n\n[Voice note transcription: ")
-                                .append(transcript.trim())
-                                .append("]");
-                    } else {
-                        transcriptBlocks.append("\n\n[Voice note ")
-                                .append(a.originalFilename != null ? a.originalFilename : "unnamed")
-                                .append(": transcription unavailable]");
-                    }
-                }
-            }
-        }
+        var transcriptBlocks = supportsAudio ? "" : collectTranscriptBlocks(atts);
         var combinedText = text + fileNotes + transcriptBlocks;
+
+        var parts = new ArrayList<Map<String, Object>>();
         if (!combinedText.isBlank()) {
             parts.add(Map.of("type", "text", "text", combinedText));
         }
+        addMediaParts(parts, atts, supportsAudio);
+        return new ChatMessage(MessageRole.USER.value, parts, null, null, null);
+    }
+
+    /**
+     * FILE-kind attachments are surfaced to the LLM as a filename +
+     * workspace path it can read via the filesystem tool. Images and
+     * audio ride as structured content parts elsewhere, so they skip
+     * this branch.
+     */
+    private static String collectFileNotes(List<models.MessageAttachment> atts) {
+        var fileNotes = new StringBuilder();
+        for (var a : atts) {
+            if (a.isImage() || a.isAudio()) continue;
+            fileNotes.append("\n[Attached file: ")
+                    .append(a.originalFilename)
+                    .append(" — workspace:")
+                    .append(a.storagePath)
+                    .append("]");
+        }
+        return fileNotes.toString();
+    }
+
+    /**
+     * Build the {@code [Voice note transcription: ...]} blocks for the
+     * !supportsAudio branch. Missing/blank transcripts fall back to a
+     * "transcription unavailable" note that preserves the user's
+     * original filename.
+     */
+    private static String collectTranscriptBlocks(List<models.MessageAttachment> atts) {
+        var transcriptBlocks = new StringBuilder();
+        for (var a : atts) {
+            if (!a.isAudio()) continue;
+            var transcript = a.transcript;
+            if (transcript != null && !transcript.isBlank()) {
+                transcriptBlocks.append("\n\n[Voice note transcription: ")
+                        .append(transcript.trim())
+                        .append("]");
+            } else {
+                transcriptBlocks.append("\n\n[Voice note ")
+                        .append(a.originalFilename != null ? a.originalFilename : "unnamed")
+                        .append(": transcription unavailable]");
+            }
+        }
+        return transcriptBlocks.toString();
+    }
+
+    /**
+     * Append {@code image_url} parts for every image attachment, plus
+     * {@code input_audio} parts for every audio attachment when the
+     * active model supports audio.
+     */
+    private static void addMediaParts(List<Map<String, Object>> parts,
+                                      List<models.MessageAttachment> atts, boolean supportsAudio) {
         for (var a : atts) {
             if (a.isImage()) {
                 parts.add(Map.of(
@@ -198,7 +224,6 @@ public final class VisionAudioAssembler {
                 parts.add(Map.of("type", "input_audio", "input_audio", inner));
             }
         }
-        return new ChatMessage(MessageRole.USER.value, parts, null, null, null);
     }
 
     /**
@@ -226,29 +251,8 @@ public final class VisionAudioAssembler {
 
         // Phase 1 (no Tx): await each in-flight future. Bounded timeout
         // protects against a stuck Whisper from blocking the LLM call
-        // indefinitely. Failures resolve with empty-string sentinel via
-        // the dispatcher's catch-all, so .get() returns "" rather than
-        // throwing — the timeout branch is the only one the catch handles.
-        for (var b : audioBearers) {
-            for (var attId : b.audioAttachmentIds()) {
-                var future = PendingTranscripts.lookup(attId);
-                if (future.isEmpty()) continue;
-                try {
-                    future.get().get(TRANSCRIPT_AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                } catch (TimeoutException e) {
-                    EventLogger.warn("transcription",
-                            "Transcript await timeout for attachment %d after %ds"
-                                    .formatted(attId, TRANSCRIPT_AWAIT_TIMEOUT_SECONDS));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return messages;
-                } catch (Exception _) {
-                    // ExecutionException — the dispatcher's silent-failure
-                    // contract means this shouldn't fire, but treat any
-                    // surprise as "use the fallback note."
-                }
-            }
-        }
+        // indefinitely.
+        if (!awaitPendingTranscripts(audioBearers)) return messages;
 
         // Phase 2 (fresh Tx): refetch each affected message + rebuild.
         return Tx.run(() -> {
@@ -260,5 +264,42 @@ public final class VisionAudioAssembler {
             }
             return rewritten;
         });
+    }
+
+    /**
+     * Await each in-flight transcript future. Failures resolve with the
+     * empty-string sentinel via the dispatcher's catch-all, so
+     * {@code .get()} returns "" rather than throwing — the timeout
+     * branch is the only one the catch handles. Returns {@code false}
+     * when interrupted so the caller can bail out without rewriting.
+     */
+    private static boolean awaitPendingTranscripts(List<AudioBearer> audioBearers) {
+        for (var b : audioBearers) {
+            for (var attId : b.audioAttachmentIds()) {
+                if (!awaitOneTranscript(attId)) return false;
+            }
+        }
+        return true;
+    }
+
+    /** Await one transcript future. Returns {@code false} on interrupt. */
+    private static boolean awaitOneTranscript(Long attId) {
+        var future = PendingTranscripts.lookup(attId);
+        if (future.isEmpty()) return true;
+        try {
+            future.get().get(TRANSCRIPT_AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            EventLogger.warn("transcription",
+                    "Transcript await timeout for attachment %d after %ds"
+                            .formatted(attId, TRANSCRIPT_AWAIT_TIMEOUT_SECONDS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception _) {
+            // ExecutionException — the dispatcher's silent-failure
+            // contract means this shouldn't fire, but treat any
+            // surprise as "use the fallback note."
+        }
+        return true;
     }
 }

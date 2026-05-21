@@ -174,29 +174,40 @@ public final class ContextWindowManager {
     public static int estimateTokens(List<ChatMessage> messages) {
         int chars = 0;
         for (var msg : messages) {
-            if (msg.content() instanceof String s) {
-                chars += s.length();
-            } else if (msg.content() instanceof List<?> parts) {
-                // Multi-part content (vision/image blocks): sum text parts only.
-                // Image data is base64 and doesn't meaningfully correspond to
-                // chars/4 token estimation — providers count image tokens separately.
-                for (var part : parts) {
-                    if (part instanceof Map<?,?> m) {
-                        var text = m.get("text");
-                        if (text instanceof String t) chars += t.length();
-                    }
-                }
-            }
-            // Tool call names + arguments also consume input tokens.
-            if (msg.toolCalls() != null) {
-                for (var tc : msg.toolCalls()) {
-                    if (tc.function() != null) {
-                        if (tc.function().name() != null) chars += tc.function().name().length();
-                        if (tc.function().arguments() != null) chars += tc.function().arguments().length();
-                    }
-                }
-            }
+            chars += contentChars(msg.content());
+            chars += toolCallChars(msg.toolCalls());
         }
         return chars / 4; // rough approximation: ~4 chars per token
+    }
+
+    /**
+     * Count chars in a {@link ChatMessage#content()} field. Strings count
+     * directly; multi-part content (vision/image blocks) sums text parts
+     * only — image data is base64 and doesn't meaningfully correspond to
+     * the chars/4 heuristic (providers count image tokens separately).
+     */
+    private static int contentChars(Object content) {
+        if (content instanceof String s) return s.length();
+        if (!(content instanceof List<?> parts)) return 0;
+        int chars = 0;
+        for (var part : parts) {
+            if (part instanceof Map<?,?> m && m.get("text") instanceof String t) {
+                chars += t.length();
+            }
+        }
+        return chars;
+    }
+
+    /** Tool call names + arguments also consume input tokens. */
+    private static int toolCallChars(List<llm.LlmTypes.ToolCall> toolCalls) {
+        if (toolCalls == null) return 0;
+        int chars = 0;
+        for (var tc : toolCalls) {
+            var fn = tc.function();
+            if (fn == null) continue;
+            if (fn.name() != null) chars += fn.name().length();
+            if (fn.arguments() != null) chars += fn.arguments().length();
+        }
+        return chars;
     }
 }

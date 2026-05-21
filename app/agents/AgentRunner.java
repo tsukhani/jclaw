@@ -808,17 +808,9 @@ public class AgentRunner {
         // (text-only model), false when the audio rode native (passthrough
         // happy path on a supportsAudio model).
         boolean hasAudioForStream = !prepared.audioBearers().isEmpty();
-        if (accumulator.error != null) {
-            if (hasAudioForStream) {
-                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
-                        AudioRetryStrategy.shortErrorTag(accumulator.error), !supportsAudioForStream);
-            }
-            cb.onError().accept(accumulator.error);
+        if (!logStreamingAudioOutcomeAndCheckOk(accumulator, hasAudioForStream, agent, conversation, primary,
+                supportsAudioForStream, cb)) {
             return;
-        }
-        if (hasAudioForStream) {
-            AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "accepted",
-                    null, !supportsAudioForStream);
         }
 
         // Round 1 folded into turn-level usage. addRound also propagates
@@ -830,36 +822,7 @@ public class AgentRunner {
 
         // Check for truncated response (max tokens hit mid-tool-call)
         if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
-            EventLogger.warn("llm", agent.name, channelType,
-                    "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
-            var truncMsg = content.isEmpty()
-                    ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
-                    : content;
-            cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
-            trace.mark(LatencyTrace.STREAM_BODY_END);
-            var finalContent = truncMsg;
-            // JCLAW-100: run the DB persist concurrently with the terminal
-            // delivery. No data dependency between them, and the terminal
-            // emit blocks on a Telegram Bot API round-trip (~500 ms p99) for
-            // Telegram turns — so piggy-backing persist on that window hides
-            // its ~8 ms entirely from the user-visible path. We still join
-            // before returning, because the outer runStreaming finally →
-            // processQueueDrain needs the conversation committed so the next
-            // queued turn loads fresh history.
-            // Persist BEFORE the terminal frame so the assistant message is
-            // committed by the time the SSE closes / HTTP response completes.
-            // The previous parallel-vthread arrangement (JCLAW-100) raced on
-            // web: cb.onComplete fires sse.close, the controller's await
-            // unblocks, and the HTTP response went out before persist had a
-            // chance to run — letting downstream cleanup observe a "done"
-            // request whose message wasn't actually saved. The defensive
-            // null-check stays as belt-and-suspenders against any future
-            // re-introduction of an out-of-order delete.
-            long truncPersistStartNs = System.nanoTime();
-            services.Tx.run(() -> sink.appendAssistantMessage(finalContent, null));
-            utils.LatencyStats.record(channelType, "persist",
-                    (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
-            cb.onComplete().accept(finalContent);
+            persistAndCompleteTruncatedToolCall(content, agent, channelType, trace, sink, cb);
             return;
         }
 
@@ -952,6 +915,56 @@ public class AgentRunner {
         utils.LatencyStats.record(channelType, "persist",
                 (System.nanoTime() - persistStartNs) / 1_000_000L);
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
+    }
+
+    /**
+     * JCLAW-165: fire the AUDIO_PASSTHROUGH_OUTCOME log for the round-1
+     * streaming call. Returns {@code false} (with onError fired) when
+     * the accumulator carried an error; {@code true} otherwise.
+     */
+    private static boolean logStreamingAudioOutcomeAndCheckOk(LlmProvider.StreamAccumulator accumulator,
+                                                              boolean hasAudioForStream, Agent agent,
+                                                              Conversation conversation, LlmProvider primary,
+                                                              boolean supportsAudioForStream,
+                                                              StreamingCallbacks cb) {
+        if (accumulator.error != null) {
+            if (hasAudioForStream) {
+                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
+                        AudioRetryStrategy.shortErrorTag(accumulator.error), !supportsAudioForStream);
+            }
+            cb.onError().accept(accumulator.error);
+            return false;
+        }
+        if (hasAudioForStream) {
+            AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "accepted",
+                    null, !supportsAudioForStream);
+        }
+        return true;
+    }
+
+    /**
+     * Streaming-side truncated-tool-call handler: emit a retry marker,
+     * persist the truncated content, and fire the terminal complete
+     * callback. Persist BEFORE the terminal frame so the assistant
+     * message is committed by the time the SSE closes / HTTP response
+     * completes.
+     */
+    private static void persistAndCompleteTruncatedToolCall(String content, Agent agent, String channelType,
+                                                            LatencyTrace trace, AgentExecutionSink sink,
+                                                            StreamingCallbacks cb) {
+        EventLogger.warn("llm", agent.name, channelType,
+                "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
+        var truncMsg = content.isEmpty()
+                ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
+                : content;
+        cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
+        trace.mark(LatencyTrace.STREAM_BODY_END);
+        var finalContent = truncMsg;
+        long truncPersistStartNs = System.nanoTime();
+        services.Tx.run(() -> sink.appendAssistantMessage(finalContent, null));
+        utils.LatencyStats.record(channelType, "persist",
+                (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
+        cb.onComplete().accept(finalContent);
     }
 
     // --- Internal ---

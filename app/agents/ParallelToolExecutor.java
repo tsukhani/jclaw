@@ -158,86 +158,117 @@ public final class ParallelToolExecutor {
                 results[0] = runToolCall(toolCalls.getFirst(), agent, onStatus);
             }
         } else {
-            // Partition calls into work units:
-            //   - parallel-safe tools → one work unit per CALL (each races freely)
-            //   - non-parallel-safe tools → one work unit per
-            //     {@link ToolRegistry.Tool#serializationGroup() group key}
-            //     (calls within it run sequentially in declared order)
-            // Default group key is the tool's own name, so distinct tools
-            // still parallelize. Tools that share state across names (e.g.
-            // spawn_subagent + yield_to_subagent both return
-            // "subagent_lifecycle") merge into one serial queue.
-            // LinkedHashMap preserves first-occurrence order so the unsafe
-            // groups, like the safe singletons, see their declared positions.
-            var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
-            var safeCalls = new ArrayList<Integer>();
-            for (int i = 0; i < n; i++) {
-                var name = toolCalls.get(i).function().name();
-                var groupKey = ToolRegistry.serializationGroupFor(name);
-                if (groupKey == null) {
-                    safeCalls.add(i);
-                } else {
-                    unsafeGroups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(i);
-                }
-            }
+            dispatchMultiToolCalls(toolCalls, agent, results, onStatus, isCancelled);
+        }
 
-            int workUnits = safeCalls.size() + unsafeGroups.size();
-            var latch = new CountDownLatch(workUnits);
+        commitToolResults(toolCalls, results, agent, currentMessages, onToolCall, imageCollector, sink);
+    }
 
-            // One virtual thread per parallel-safe call — full concurrency.
-            for (int idx : safeCalls) {
-                final int i = idx;
-                Thread.ofVirtual().name("agent-tool-parallel").start(() -> {
-                    try {
-                        if (isCancelled != null && isCancelled.get()) return;
-                        var tc = toolCalls.get(i);
-                        try {
-                            results[i] = runToolCall(tc, agent, onStatus);
-                        } catch (Exception e) {
-                            EventLogger.error("tool", agent.name, null,
-                                    "Tool '%s' threw: %s"
-                                            .formatted(tc.function().name(), e.getMessage()));
-                            results[i] = ToolRegistry.ToolResult.text("Error executing tool: " + e.getMessage());
-                        }
-                    } finally {
-                        latch.countDown();
-                    }
-                });
-            }
-
-            // One virtual thread per non-parallel-safe tool-name group —
-            // calls within execute sequentially in declared order.
-            for (var group : unsafeGroups.values()) {
-                Thread.ofVirtual().name("agent-tool-serial").start(() -> {
-                    try {
-                        for (int idx : group) {
-                            if (isCancelled != null && isCancelled.get()) break;
-                            var tc = toolCalls.get(idx);
-                            try {
-                                results[idx] = runToolCall(tc, agent, onStatus);
-                            } catch (Exception e) {
-                                EventLogger.error("tool", agent.name, null,
-                                        "Tool '%s' threw: %s"
-                                                .formatted(tc.function().name(), e.getMessage()));
-                                results[idx] = ToolRegistry.ToolResult.text("Error executing tool: " + e.getMessage());
-                            }
-                        }
-                    } finally {
-                        latch.countDown();
-                    }
-                });
-            }
-
-            try {
-                latch.await();
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
+    /**
+     * Partition calls into work units and run them under the three-tier
+     * scheduling model:
+     * <ul>
+     *   <li>parallel-safe tools → one work unit per CALL (each races freely)</li>
+     *   <li>non-parallel-safe tools → one work unit per
+     *       {@link ToolRegistry.Tool#serializationGroup() group key}
+     *       (calls within it run sequentially in declared order)</li>
+     * </ul>
+     * Default group key is the tool's own name, so distinct tools still
+     * parallelize. Tools that share state across names (e.g.
+     * {@code spawn_subagent} + {@code yield_to_subagent} both return
+     * {@code "subagent_lifecycle"}) merge into one serial queue.
+     * LinkedHashMap preserves first-occurrence order so the unsafe groups,
+     * like the safe singletons, see their declared positions.
+     */
+    private static void dispatchMultiToolCalls(List<ToolCall> toolCalls, Agent agent,
+                                               ToolRegistry.ToolResult[] results,
+                                               Consumer<String> onStatus, AtomicBoolean isCancelled) {
+        var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
+        var safeCalls = new ArrayList<Integer>();
+        for (int i = 0; i < toolCalls.size(); i++) {
+            var name = toolCalls.get(i).function().name();
+            var groupKey = ToolRegistry.serializationGroupFor(name);
+            if (groupKey == null) {
+                safeCalls.add(i);
+            } else {
+                unsafeGroups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(i);
             }
         }
 
-        // Commit phase: append to message history and persist to DB in
-        // original order, preserving LLM tool_result ordering invariants.
-        for (int i = 0; i < n; i++) {
+        int workUnits = safeCalls.size() + unsafeGroups.size();
+        var latch = new CountDownLatch(workUnits);
+
+        // One virtual thread per parallel-safe call — full concurrency.
+        for (int idx : safeCalls) {
+            final int i = idx;
+            Thread.ofVirtual().name("agent-tool-parallel").start(() ->
+                    runSafeCall(toolCalls, i, agent, results, onStatus, isCancelled, latch));
+        }
+
+        // One virtual thread per non-parallel-safe tool-name group —
+        // calls within execute sequentially in declared order.
+        for (var group : unsafeGroups.values()) {
+            Thread.ofVirtual().name("agent-tool-serial").start(() ->
+                    runSerialGroup(toolCalls, group, agent, results, onStatus, isCancelled, latch));
+        }
+
+        try {
+            latch.await();
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Body of one parallel-safe work unit: dispatch a single call. */
+    private static void runSafeCall(List<ToolCall> toolCalls, int i, Agent agent,
+                                    ToolRegistry.ToolResult[] results, Consumer<String> onStatus,
+                                    AtomicBoolean isCancelled, CountDownLatch latch) {
+        try {
+            if (isCancelled != null && isCancelled.get()) return;
+            results[i] = runToolCallSafely(toolCalls.get(i), agent, onStatus);
+        } finally {
+            latch.countDown();
+        }
+    }
+
+    /** Body of one serial work unit: dispatch calls in declared order. */
+    private static void runSerialGroup(List<ToolCall> toolCalls, List<Integer> group, Agent agent,
+                                       ToolRegistry.ToolResult[] results, Consumer<String> onStatus,
+                                       AtomicBoolean isCancelled, CountDownLatch latch) {
+        try {
+            for (int idx : group) {
+                if (isCancelled != null && isCancelled.get()) break;
+                results[idx] = runToolCallSafely(toolCalls.get(idx), agent, onStatus);
+            }
+        } finally {
+            latch.countDown();
+        }
+    }
+
+    /**
+     * Dispatch one call and convert any thrown exception into an
+     * {@code Error executing tool} {@link ToolRegistry.ToolResult}.
+     */
+    private static ToolRegistry.ToolResult runToolCallSafely(ToolCall tc, Agent agent, Consumer<String> onStatus) {
+        try {
+            return runToolCall(tc, agent, onStatus);
+        } catch (Exception e) {
+            EventLogger.error("tool", agent.name, null,
+                    "Tool '%s' threw: %s"
+                            .formatted(tc.function().name(), e.getMessage()));
+            return ToolRegistry.ToolResult.text("Error executing tool: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Commit phase: append to message history and persist to DB in
+     * original order, preserving LLM tool_result ordering invariants.
+     */
+    private static void commitToolResults(List<ToolCall> toolCalls, ToolRegistry.ToolResult[] results,
+                                          Agent agent, List<ChatMessage> currentMessages,
+                                          Consumer<AgentRunner.ToolCallEvent> onToolCall,
+                                          List<String> imageCollector, AgentExecutionSink sink) {
+        for (int i = 0; i < toolCalls.size(); i++) {
             var result = results[i];
             if (result == null) continue; // skipped due to cancellation
             var tc = toolCalls.get(i);
@@ -268,4 +299,5 @@ public final class ParallelToolExecutor {
             }
         }
     }
+
 }

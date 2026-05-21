@@ -453,33 +453,39 @@ public class ToolRegistry {
             // Unsaved agents have no configs; treat as "nothing disabled."
             return Set.of();
         }
-        return DISABLED_TOOLS_CACHE.get(agent.id, _ -> {
-            var configs = AgentToolConfig.findByAgent(agent);
-            var explicitState = new HashMap<String, Boolean>();
-            for (var c : configs) explicitState.put(c.toolName, c.enabled);
+        return DISABLED_TOOLS_CACHE.get(agent.id, _ -> computeDisabledTools(agent));
+    }
 
-            var disabled = new HashSet<String>();
-            for (var entry : explicitState.entrySet()) {
-                if (entry.getValue()) continue;
-                disabled.add(entry.getKey());
-            }
-            // MCP tools default-disabled for non-main agents (operator
-            // opts-in per server via PUT /api/agents/:id/tool-groups/:group).
-            // Main agent unaffected. MCP enablement is server-level only:
-            // updateGroupForAgent writes a single AgentToolConfig row keyed
-            // by the server-level handle name (mcp_<group>) and the LLM's
-            // schema only exposes that handle, so there's no per-action
-            // bridging to do — every grouped tool without an explicit row
-            // gets added to disabled, full stop.
-            if (!agent.isMain()) {
-                for (var tool : tools.values()) {
-                    if (tool.group() == null) continue;
-                    if (explicitState.containsKey(tool.name())) continue;
-                    disabled.add(tool.name());
-                }
-            }
-            return Collections.unmodifiableSet(disabled);
-        });
+    private static Set<String> computeDisabledTools(Agent agent) {
+        var configs = AgentToolConfig.findByAgent(agent);
+        var explicitState = new HashMap<String, Boolean>();
+        for (var c : configs) explicitState.put(c.toolName, c.enabled);
+
+        var disabled = new HashSet<String>();
+        for (var entry : explicitState.entrySet()) {
+            if (!entry.getValue()) disabled.add(entry.getKey());
+        }
+        if (!agent.isMain()) {
+            addMcpDefaultDisabled(disabled, explicitState);
+        }
+        return Collections.unmodifiableSet(disabled);
+    }
+
+    /**
+     * MCP tools default-disabled for non-main agents (operator opts-in per
+     * server via PUT /api/agents/:id/tool-groups/:group). MCP enablement is
+     * server-level only: {@code updateGroupForAgent} writes a single
+     * {@link AgentToolConfig} row keyed by the server-level handle name
+     * ({@code mcp_<group>}) and the LLM's schema only exposes that handle,
+     * so there's no per-action bridging to do — every grouped tool without
+     * an explicit row gets added to {@code disabled}, full stop.
+     */
+    private static void addMcpDefaultDisabled(HashSet<String> disabled, HashMap<String, Boolean> explicitState) {
+        for (var tool : tools.values()) {
+            if (tool.group() == null) continue;
+            if (explicitState.containsKey(tool.name())) continue;
+            disabled.add(tool.name());
+        }
     }
 
     /** Invalidate the cached disabled-tools set for a specific agent. */

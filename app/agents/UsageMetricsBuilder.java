@@ -93,46 +93,61 @@ public final class UsageMetricsBuilder {
         var durationMs = System.currentTimeMillis() - streamStartMs;
         var reasoningMs = turnUsage.reasoningDurationMs(System.nanoTime());
         if (!turnUsage.hasProviderUsage) {
-            // Tail fragment optionally carries reasoning + streamBody durations
-            // when known. Built here rather than via JsonObject because the
-            // no-provider-usage path historically returns a hand-formatted
-            // string for the smaller payload size.
-            var tail = new StringBuilder();
-            if (reasoningMs > 0L) tail.append(",\"reasoningDurationMs\":").append(reasoningMs);
-            if (streamBodyMs > 0L) tail.append(",\"streamBodyMs\":").append(streamBodyMs);
-            return "{\"durationMs\":%s%s}".formatted(durationMs, tail);
+            return buildNoProviderUsageJson(durationMs, reasoningMs, streamBodyMs);
         }
 
-        var reasoningCount = effectiveReasoningTokens(turnUsage);
         var usageMap = new com.google.gson.JsonObject();
         usageMap.addProperty("prompt", turnUsage.promptTokens);
         usageMap.addProperty("completion", turnUsage.completionTokens);
         usageMap.addProperty("total", turnUsage.totalTokens);
-        usageMap.addProperty("reasoning", reasoningCount);
+        usageMap.addProperty("reasoning", effectiveReasoningTokens(turnUsage));
         usageMap.addProperty("cached", turnUsage.cachedTokens);
         usageMap.addProperty("cacheCreation", turnUsage.cacheCreationTokens);
         usageMap.addProperty("durationMs", durationMs);
         if (reasoningMs > 0L) usageMap.addProperty("reasoningDurationMs", reasoningMs);
         if (streamBodyMs > 0L) usageMap.addProperty("streamBodyMs", streamBodyMs);
 
-        if (modelInfo != null) {
-            if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());
-            if (modelInfo.completionPrice() >= 0) usageMap.addProperty("completionPrice", modelInfo.completionPrice());
-            if (modelInfo.cachedReadPrice() >= 0) usageMap.addProperty("cachedReadPrice", modelInfo.cachedReadPrice());
-            if (modelInfo.cacheWritePrice() >= 0) usageMap.addProperty("cacheWritePrice", modelInfo.cacheWritePrice());
-            if (modelInfo.contextWindow() > 0) usageMap.addProperty("contextWindow", modelInfo.contextWindow());
-        }
-        // JCLAW-107 / JCLAW-108: capture per-turn model identity so the
-        // cost aggregator can attribute each turn without needing live
-        // provider lookup. Writes the RESOLVED values (conversation
-        // override when present, agent's default otherwise) — this is
-        // the identity of the model that actually ran the turn, which
-        // is what cost attribution needs.
+        addModelInfoFields(usageMap, modelInfo);
+        addResolvedModelIdentity(usageMap, agent, conversation);
+        return gson.toJson(usageMap);
+    }
+
+    /**
+     * Build the compact no-provider-usage JSON. Tail fragment optionally
+     * carries reasoning + streamBody durations when known. Hand-formatted
+     * (rather than via JsonObject) because this path historically returns
+     * a hand-formatted string for the smaller payload size.
+     */
+    private static String buildNoProviderUsageJson(long durationMs, long reasoningMs, long streamBodyMs) {
+        var tail = new StringBuilder();
+        if (reasoningMs > 0L) tail.append(",\"reasoningDurationMs\":").append(reasoningMs);
+        if (streamBodyMs > 0L) tail.append(",\"streamBodyMs\":").append(streamBodyMs);
+        return "{\"durationMs\":%s%s}".formatted(durationMs, tail);
+    }
+
+    /** Append non-negative pricing fields and the context window when {@code modelInfo} is present. */
+    private static void addModelInfoFields(com.google.gson.JsonObject usageMap, ModelInfo modelInfo) {
+        if (modelInfo == null) return;
+        if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());
+        if (modelInfo.completionPrice() >= 0) usageMap.addProperty("completionPrice", modelInfo.completionPrice());
+        if (modelInfo.cachedReadPrice() >= 0) usageMap.addProperty("cachedReadPrice", modelInfo.cachedReadPrice());
+        if (modelInfo.cacheWritePrice() >= 0) usageMap.addProperty("cacheWritePrice", modelInfo.cacheWritePrice());
+        if (modelInfo.contextWindow() > 0) usageMap.addProperty("contextWindow", modelInfo.contextWindow());
+    }
+
+    /**
+     * JCLAW-107 / JCLAW-108: capture per-turn model identity so the
+     * cost aggregator can attribute each turn without needing live
+     * provider lookup. Writes the RESOLVED values (conversation
+     * override when present, agent's default otherwise) — this is
+     * the identity of the model that actually ran the turn, which
+     * is what cost attribution needs.
+     */
+    private static void addResolvedModelIdentity(com.google.gson.JsonObject usageMap, Agent agent, Conversation conversation) {
         var resolvedProvider = ModelResolver.effectiveModelProvider(agent, conversation);
         var resolvedModelId = ModelResolver.effectiveModelId(agent, conversation);
         if (resolvedProvider != null) usageMap.addProperty("modelProvider", resolvedProvider);
         if (resolvedModelId != null) usageMap.addProperty("modelId", resolvedModelId);
-        return gson.toJson(usageMap);
     }
 
     /**

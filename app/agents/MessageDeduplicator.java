@@ -97,25 +97,43 @@ public final class MessageDeduplicator {
         // the reply. Plain-text URL / filename / link mentions are intentionally
         // NOT collected here — that's the behavioral distinction from the prior
         // filename-substring dedup.
-        var embeddedFilenames = new HashSet<String>();
-        for (var pattern : List.of(ANY_IMAGE_EMBED, HTML_IMG_EMBED)) {
-            var m = pattern.matcher(safeContent);
-            while (m.find()) {
-                var fn = extractFilename(m.group(1));
-                if (!fn.isEmpty()) embeddedFilenames.add(fn);
-            }
-        }
+        var embeddedFilenames = collectMatchedFilenames(safeContent,
+                List.of(ANY_IMAGE_EMBED, HTML_IMG_EMBED));
 
         var missing = new ArrayList<String>();
         for (var img : collectedImages) {
-            var m = PAREN_URL_PATTERN.matcher(img);
-            if (m.find()) {
-                var filename = extractFilename(m.group(1));
-                if (!filename.isEmpty() && embeddedFilenames.contains(filename)) continue;
-            }
+            if (collectedImageMatches(img, embeddedFilenames)) continue;
             missing.add(img);
         }
         return missing.isEmpty() ? "" : String.join("\n\n", missing) + "\n\n";
+    }
+
+    /**
+     * Scan {@code content} with each {@code pattern} and accumulate
+     * filenames extracted from the first capture group via
+     * {@link #extractFilename}. Skips empty filenames.
+     */
+    private static HashSet<String> collectMatchedFilenames(String content, List<java.util.regex.Pattern> patterns) {
+        var filenames = new HashSet<String>();
+        for (var pattern : patterns) {
+            var m = pattern.matcher(content);
+            while (m.find()) {
+                var fn = extractFilename(m.group(1));
+                if (!fn.isEmpty()) filenames.add(fn);
+            }
+        }
+        return filenames;
+    }
+
+    /**
+     * True when the collected image markdown {@code img} resolves to a
+     * filename present in {@code knownFilenames}.
+     */
+    private static boolean collectedImageMatches(String img, HashSet<String> knownFilenames) {
+        var m = PAREN_URL_PATTERN.matcher(img);
+        if (!m.find()) return false;
+        var filename = extractFilename(m.group(1));
+        return !filename.isEmpty() && knownFilenames.contains(filename);
     }
 
     /**
@@ -183,33 +201,37 @@ public final class MessageDeduplicator {
         // — image and plain link — plus HTML <img> and <a href>). If the
         // LLM already wrote a link to a file, we leave that as the user's
         // download affordance and skip our suffix entry for that file.
-        var linkedFilenames = new HashSet<String>();
-        for (var pattern : List.of(MARKDOWN_LINK_OR_IMAGE, HTML_IMG_EMBED, HTML_ANCHOR)) {
-            var m = pattern.matcher(safeContent);
-            while (m.find()) {
-                var fn = extractFilename(m.group(1));
-                if (!fn.isEmpty()) linkedFilenames.add(fn);
-            }
-        }
+        var linkedFilenames = collectMatchedFilenames(safeContent,
+                List.of(MARKDOWN_LINK_OR_IMAGE, HTML_IMG_EMBED, HTML_ANCHOR));
 
         var downloads = new ArrayList<String>();
         for (var img : collectedImages) {
-            // img is "![alt](url)" shape. Extract url + alt for the link.
-            var urlMatcher = PAREN_URL_PATTERN.matcher(img);
-            if (!urlMatcher.find()) continue;
-            var url = urlMatcher.group(1);
-            var filename = extractFilename(url);
-            if (!filename.isEmpty() && linkedFilenames.contains(filename)) continue;
-
-            // Pull alt text out of the leading "![alt]" portion; fall back
-            // to an empty alt (= just "download" as the link label) if the
-            // pattern doesn't match (shouldn't happen for well-formed
-            // collected entries but guarded for safety).
-            var altMatcher = ALT_TEXT_PATTERN.matcher(img);
-            var alt = altMatcher.find() ? altMatcher.group(1).trim() : "";
-            var label = alt.isEmpty() ? "download" : "download " + alt;
-            downloads.add("[" + label + "](" + url + ")");
+            var entry = downloadEntryFor(img, linkedFilenames);
+            if (entry != null) downloads.add(entry);
         }
         return downloads.isEmpty() ? "" : "\n\n" + String.join("\n\n", downloads);
+    }
+
+    /**
+     * Build a "[download alt](url)" entry for {@code img} (a collected
+     * "![alt](url)" markdown). Returns {@code null} when the URL can't
+     * be extracted or when the filename is already linked in
+     * {@code linkedFilenames} (LLM already wrote a download affordance).
+     */
+    private static String downloadEntryFor(String img, HashSet<String> linkedFilenames) {
+        var urlMatcher = PAREN_URL_PATTERN.matcher(img);
+        if (!urlMatcher.find()) return null;
+        var url = urlMatcher.group(1);
+        var filename = extractFilename(url);
+        if (!filename.isEmpty() && linkedFilenames.contains(filename)) return null;
+
+        // Pull alt text out of the leading "![alt]" portion; fall back
+        // to an empty alt (= just "download" as the link label) if the
+        // pattern doesn't match (shouldn't happen for well-formed
+        // collected entries but guarded for safety).
+        var altMatcher = ALT_TEXT_PATTERN.matcher(img);
+        var alt = altMatcher.find() ? altMatcher.group(1).trim() : "";
+        var label = alt.isEmpty() ? "download" : "download " + alt;
+        return "[" + label + "](" + url + ")";
     }
 }

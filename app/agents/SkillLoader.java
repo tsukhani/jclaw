@@ -126,50 +126,49 @@ public class SkillLoader {
     public static void syncSkillConfigs() {
         // Collect all skill names that exist on disk (global + all agent workspaces)
         var existingSkills = new HashSet<String>();
+        collectSkillNamesUnder(globalSkillsPath(), existingSkills);
+        collectWorkspaceSkillNames(AgentService.workspaceRoot(), existingSkills);
+        removeOrphanedSkillConfigs(existingSkills);
+    }
 
-        // Global skills
-        var globalDir = globalSkillsPath();
-        if (Files.isDirectory(globalDir)) {
-            try (var dirs = Files.list(globalDir)) {
-                dirs.filter(Files::isDirectory).forEach(dir -> {
-                    if (Files.exists(dir.resolve("SKILL.md"))) {
-                        var info = parseSkillFile(dir.resolve("SKILL.md"));
-                        if (info != null) existingSkills.add(info.name());
-                    }
-                });
-            } catch (IOException e) {
-                EventLogger.warn("skills", "Failed to scan global skills directory %s: %s"
-                        .formatted(globalDir, e.getMessage()));
-            }
+    /**
+     * Add the {@code name()} of every {@code SKILL.md}-bearing immediate
+     * subdirectory under {@code dir} to {@code out}. No-op when {@code dir}
+     * isn't a directory.
+     */
+    private static void collectSkillNamesUnder(Path dir, HashSet<String> out) {
+        if (!Files.isDirectory(dir)) return;
+        try (var dirs = Files.list(dir)) {
+            dirs.filter(Files::isDirectory).forEach(d -> {
+                var skillFile = d.resolve("SKILL.md");
+                if (Files.exists(skillFile)) {
+                    var info = parseSkillFile(skillFile);
+                    if (info != null) out.add(info.name());
+                }
+            });
+        } catch (IOException e) {
+            EventLogger.warn("skills", "Failed to scan skills directory %s: %s"
+                    .formatted(dir, e.getMessage()));
         }
+    }
 
-        // Agent workspace skills
-        var workspaceRoot = AgentService.workspaceRoot();
-        if (Files.isDirectory(workspaceRoot)) {
-            try (var agents = Files.list(workspaceRoot)) {
-                agents.filter(Files::isDirectory).forEach(agentDir -> {
-                    var skillsDir = agentDir.resolve("skills");
-                    if (Files.isDirectory(skillsDir)) {
-                        try (var dirs = Files.list(skillsDir)) {
-                            dirs.filter(Files::isDirectory).forEach(dir -> {
-                                if (Files.exists(dir.resolve("SKILL.md"))) {
-                                    var info = parseSkillFile(dir.resolve("SKILL.md"));
-                                    if (info != null) existingSkills.add(info.name());
-                                }
-                            });
-                        } catch (IOException e) {
-                            EventLogger.warn("skills", "Failed to scan agent skills directory %s: %s"
-                                    .formatted(skillsDir, e.getMessage()));
-                        }
-                    }
-                });
-            } catch (IOException e) {
-                EventLogger.warn("skills", "Failed to scan workspace root %s: %s"
-                        .formatted(workspaceRoot, e.getMessage()));
-            }
+    /**
+     * Walk {@code workspaceRoot}'s agent directories and collect skill
+     * names from each agent's {@code skills/} subdirectory.
+     */
+    private static void collectWorkspaceSkillNames(Path workspaceRoot, HashSet<String> out) {
+        if (!Files.isDirectory(workspaceRoot)) return;
+        try (var agents = Files.list(workspaceRoot)) {
+            agents.filter(Files::isDirectory).forEach(agentDir ->
+                    collectSkillNamesUnder(agentDir.resolve("skills"), out));
+        } catch (IOException e) {
+            EventLogger.warn("skills", "Failed to scan workspace root %s: %s"
+                    .formatted(workspaceRoot, e.getMessage()));
         }
+    }
 
-        // Remove orphaned configs
+    /** Delete every {@link AgentSkillConfig} whose skill no longer exists on disk. */
+    private static void removeOrphanedSkillConfigs(HashSet<String> existingSkills) {
         services.Tx.run(() -> {
             List<AgentSkillConfig> allConfigs = AgentSkillConfig.findAll();
             int removed = 0;
@@ -197,10 +196,28 @@ public class SkillLoader {
         var agentDir = workspaceDir.resolve("skills");
         scanSkillsDirectory(agentDir, allSkills);
 
-        // Make locations relative to the agent's workspace (readFile tool resolves relative to workspace).
-        // Preserve every field on the record — earlier truncated constructors silently
-        // defaulted later fields to empty, which is how JCLAW-71's icon field leaked
-        // back to "" after parsing. JCLAW-281 adds mcpServers as the tenth field.
+        relativizeSkillLocations(allSkills, workspaceDir);
+        applyAgentPermissionFilters(allSkills, agentName);
+        if (!"main".equalsIgnoreCase(agentName)) {
+            filterOutdatedSkillCreator(allSkills, agentName);
+        }
+
+        // Sort by name for deterministic ordering — the skills block is part of the
+        // LLM prompt prefix, and filesystem iteration order is not stable.
+        return allSkills.stream()
+                .sorted(java.util.Comparator.comparing(SkillInfo::name))
+                .limit(MAX_SKILLS)
+                .toList();
+    }
+
+    /**
+     * Make locations relative to the agent's workspace (readFile tool
+     * resolves relative to workspace). Preserves every field on the
+     * record — earlier truncated constructors silently defaulted later
+     * fields to empty, which is how JCLAW-71's icon field leaked back
+     * to "" after parsing. JCLAW-281 adds mcpServers as the tenth field.
+     */
+    private static void relativizeSkillLocations(List<SkillInfo> allSkills, Path workspaceDir) {
         allSkills.replaceAll(s -> {
             if (s.location() != null && s.location().startsWith(workspaceDir)) {
                 return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()),
@@ -209,9 +226,14 @@ public class SkillLoader {
             }
             return s;
         });
+    }
 
-        // Filter by permissions + validate tool requirements (JPA access — may be called from tool execution
-        // outside a request thread, so wrap in a Tx)
+    /**
+     * Filter by permissions + validate tool requirements (JPA access —
+     * may be called from tool execution outside a request thread, so
+     * wrap in a Tx).
+     */
+    private static void applyAgentPermissionFilters(List<SkillInfo> allSkills, String agentName) {
         services.Tx.run(() -> {
             var agent = Agent.findByName(agentName);
             if (agent == null) return;
@@ -229,49 +251,50 @@ public class SkillLoader {
             // (catches skills authored outside the drag-drop API flow, e.g. by skill-creator writing files
             // directly).
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
-            allSkills.removeIf(s -> {
-                if (s.tools() == null || s.tools().isEmpty()) return false;
-                var result = ToolCatalog.validateSkillTools(disabledTools, s.tools());
-                if (!result.isOk()) {
-                    EventLogger.warn("skills", "Excluding skill '%s' from agent '%s': missing tools %s"
-                            .formatted(s.name(), agentName, result.missing()));
-                    return true;
-                }
-                return false;
-            });
+            allSkills.removeIf(s -> skillMissingTools(s, disabledTools, agentName));
         });
+    }
 
-        // Non-main agents may not use an out-of-date skill-creator. If the global
-        // skill-creator exists and is newer than this agent's workspace copy, hide the
-        // workspace copy from <available_skills> so the LLM cannot invoke it. The user
-        // must explicitly update by dragging skill-creator from the global registry onto
-        // the agent card.
-        if (!"main".equalsIgnoreCase(agentName)) {
-            var globalSkillCreatorPath = globalSkillsPath().resolve("skill-creator").resolve("SKILL.md");
-            if (Files.exists(globalSkillCreatorPath)) {
-                var globalSkillCreator = parseSkillFile(globalSkillCreatorPath);
-                if (globalSkillCreator != null) {
-                    var globalVersion = globalSkillCreator.version();
-                    allSkills.removeIf(s -> {
-                        if (!"skill-creator".equals(s.name())) return false;
-                        if (compareVersions(s.version(), globalVersion) < 0) {
-                            EventLogger.warn("skills",
-                                    "Excluding out-of-date skill-creator for agent '%s': workspace v%s < global v%s (drag skill-creator from global to update)"
-                                            .formatted(agentName, s.version(), globalVersion));
-                            return true;
-                        }
-                        return false;
-                    });
-                }
-            }
+    /**
+     * True when the skill declares tool requirements that aren't all
+     * available to {@code agentName} — used as the {@code removeIf}
+     * predicate by {@link #applyAgentPermissionFilters}.
+     */
+    private static boolean skillMissingTools(SkillInfo s, java.util.Set<String> disabledTools, String agentName) {
+        if (s.tools() == null || s.tools().isEmpty()) return false;
+        var result = ToolCatalog.validateSkillTools(disabledTools, s.tools());
+        if (!result.isOk()) {
+            EventLogger.warn("skills", "Excluding skill '%s' from agent '%s': missing tools %s"
+                    .formatted(s.name(), agentName, result.missing()));
+            return true;
         }
+        return false;
+    }
 
-        // Sort by name for deterministic ordering — the skills block is part of the
-        // LLM prompt prefix, and filesystem iteration order is not stable.
-        return allSkills.stream()
-                .sorted(java.util.Comparator.comparing(SkillInfo::name))
-                .limit(MAX_SKILLS)
-                .toList();
+    /**
+     * Non-main agents may not use an out-of-date skill-creator. If the
+     * global skill-creator exists and is newer than this agent's
+     * workspace copy, hide the workspace copy from
+     * {@code <available_skills>} so the LLM cannot invoke it. The user
+     * must explicitly update by dragging skill-creator from the global
+     * registry onto the agent card.
+     */
+    private static void filterOutdatedSkillCreator(List<SkillInfo> allSkills, String agentName) {
+        var globalSkillCreatorPath = globalSkillsPath().resolve("skill-creator").resolve("SKILL.md");
+        if (!Files.exists(globalSkillCreatorPath)) return;
+        var globalSkillCreator = parseSkillFile(globalSkillCreatorPath);
+        if (globalSkillCreator == null) return;
+        var globalVersion = globalSkillCreator.version();
+        allSkills.removeIf(s -> {
+            if (!"skill-creator".equals(s.name())) return false;
+            if (compareVersions(s.version(), globalVersion) < 0) {
+                EventLogger.warn("skills",
+                        "Excluding out-of-date skill-creator for agent '%s': workspace v%s < global v%s (drag skill-creator from global to update)"
+                                .formatted(agentName, s.version(), globalVersion));
+                return true;
+            }
+            return false;
+        });
     }
 
     private static void scanSkillsDirectory(Path skillsDir, List<SkillInfo> skills) {
@@ -387,29 +410,27 @@ public class SkillLoader {
     public static SkillInfo parseSkillContent(String content, Path locationHint) {
         if (content == null) return null;
         var matcher = FRONTMATTER_PATTERN.matcher(content);
-        if (matcher.find()) {
-            var frontmatter = matcher.group(1);
-            var name = extractYamlValue(frontmatter, "name");
-            var description = extractYamlValue(frontmatter, "description");
-            var toolsDeclared = TOOLS_KEY_PRESENT.matcher(frontmatter).find();
-            var tools = extractYamlList(frontmatter, "tools");
-            var version = extractYamlValue(frontmatter, "version");
-            var commands = extractYamlList(frontmatter, "commands");
-            var author = extractYamlValue(frontmatter, "author");
-            var icon = extractYamlValue(frontmatter, "icon");
-            // JCLAW-281: MCP server dependencies (sibling to tools:). Empty
-            // list when the key is absent — extractYamlList returns List.of()
-            // for that case, which matches the "no servers needed" intent.
-            var mcpServers = extractYamlList(frontmatter, "mcp_servers");
-            if (name != null) {
-                return new SkillInfo(name, description != null ? description : "", locationHint,
-                        tools, toolsDeclared, version != null ? version : "0.0.0",
-                        commands, author != null ? author : "",
-                        icon != null ? icon : "",
-                        mcpServers);
-            }
-        }
-        return null;
+        if (!matcher.find()) return null;
+        var frontmatter = matcher.group(1);
+        var name = extractYamlValue(frontmatter, "name");
+        if (name == null) return null;
+        var description = extractYamlValue(frontmatter, "description");
+        var version = extractYamlValue(frontmatter, "version");
+        var author = extractYamlValue(frontmatter, "author");
+        var icon = extractYamlValue(frontmatter, "icon");
+        // JCLAW-281: MCP server dependencies (sibling to tools:). Empty
+        // list when the key is absent — extractYamlList returns List.of()
+        // for that case, which matches the "no servers needed" intent.
+        return new SkillInfo(name,
+                description != null ? description : "",
+                locationHint,
+                extractYamlList(frontmatter, "tools"),
+                TOOLS_KEY_PRESENT.matcher(frontmatter).find(),
+                version != null ? version : "0.0.0",
+                extractYamlList(frontmatter, "commands"),
+                author != null ? author : "",
+                icon != null ? icon : "",
+                extractYamlList(frontmatter, "mcp_servers"));
     }
 
     /**
@@ -426,35 +447,39 @@ public class SkillLoader {
         var inlinePattern = "tools".equals(key) ? TOOLS_INLINE_LIST
                 : Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
         var inlineMatcher = inlinePattern.matcher(yaml);
-        if (inlineMatcher.find()) {
-            var items = inlineMatcher.group(1).strip();
-            if (items.isEmpty()) return List.of();
-            var result = new ArrayList<String>();
-            for (var part : items.split(",")) {
-                var cleaned = part.strip().replaceAll("(^[\"'])|([\"']$)", "");
-                if (!cleaned.isEmpty()) result.add(cleaned);
-            }
-            return result;
-        }
+        if (inlineMatcher.find()) return parseInlineYamlList(inlineMatcher.group(1));
 
         // Block form: key:\n  - a\n  - b
         var blockPattern = "tools".equals(key) ? TOOLS_BLOCK_LIST
                 : Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\n((?:\\s*-\\s*.*\\n?)+)", Pattern.MULTILINE);
         var blockMatcher = blockPattern.matcher(yaml);
-        if (blockMatcher.find()) {
-            var body = blockMatcher.group(1);
-            var result = new ArrayList<String>();
-            for (var line : body.split("\\n")) {
-                var trimmed = line.strip();
-                if (trimmed.startsWith("-")) {
-                    var item = trimmed.substring(1).strip().replaceAll("(^[\"'])|([\"']$)", "");
-                    if (!item.isEmpty()) result.add(item);
-                }
-            }
-            return result;
-        }
+        if (blockMatcher.find()) return parseBlockYamlList(blockMatcher.group(1));
 
         return List.of();
+    }
+
+    /** Parse a YAML inline-list body (the contents inside {@code [...]}). */
+    private static List<String> parseInlineYamlList(String body) {
+        var items = body.strip();
+        if (items.isEmpty()) return List.of();
+        var result = new ArrayList<String>();
+        for (var part : items.split(",")) {
+            var cleaned = part.strip().replaceAll("(^[\"'])|([\"']$)", "");
+            if (!cleaned.isEmpty()) result.add(cleaned);
+        }
+        return result;
+    }
+
+    /** Parse a YAML block-list body (one {@code "- item"} per line). */
+    private static List<String> parseBlockYamlList(String body) {
+        var result = new ArrayList<String>();
+        for (var line : body.split("\\n")) {
+            var trimmed = line.strip();
+            if (!trimmed.startsWith("-")) continue;
+            var item = trimmed.substring(1).strip().replaceAll("(^[\"'])|([\"']$)", "");
+            if (!item.isEmpty()) result.add(item);
+        }
+        return result;
     }
 
     // --- Text classification ---

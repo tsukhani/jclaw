@@ -90,33 +90,8 @@ public final class MessageHydrator {
         for (var msg : history) {
             var role = MessageRole.fromValue(msg.role);
             messages.add(switch (role != null ? role : MessageRole.USER) {
-                case USER -> {
-                    // Capture audio-bearer ids before assembling the
-                    // ChatMessage so the rewrite path can re-target the
-                    // exact slot in the messages list.
-                    var atts = msg.attachments;
-                    if (atts == null) atts = models.MessageAttachment.findByMessage(msg);
-                    var audioIds = new ArrayList<Long>();
-                    for (var a : atts) {
-                        if (a.isAudio() && a.id != null) audioIds.add(a.id);
-                    }
-                    if (!audioIds.isEmpty()) {
-                        audioBearersOut.add(new VisionAudioAssembler.AudioBearer(messages.size(), msg.id, audioIds));
-                    }
-                    yield VisionAudioAssembler.userMessageFor(msg);
-                }
-                case ASSISTANT -> {
-                    if (msg.toolCalls != null && !msg.toolCalls.isBlank()) {
-                        var toolCalls = parseToolCalls(msg.toolCalls);
-                        for (var tc : toolCalls) {
-                            if (tc.id() != null && tc.function() != null && tc.function().name() != null) {
-                                toolNamesById.put(tc.id(), tc.function().name());
-                            }
-                        }
-                        yield ChatMessage.assistant(msg.content, toolCalls);
-                    }
-                    yield ChatMessage.assistant(msg.content != null ? msg.content : "");
-                }
+                case USER -> hydrateUserMessage(msg, messages.size(), audioBearersOut);
+                case ASSISTANT -> hydrateAssistantMessage(msg, toolNamesById);
                 // JCLAW-119: sanitize the tool_call_id on the TOOL-role row so
                 // it matches the normalized id on the assistant-row tool_calls.
                 // Paired normalization is deterministic — same input string
@@ -131,6 +106,44 @@ public final class MessageHydrator {
         }
 
         return messages;
+    }
+
+    /**
+     * Build the USER {@link ChatMessage} and (when audio attachments are
+     * present) record an {@link VisionAudioAssembler.AudioBearer} entry
+     * into {@code audioBearersOut} so the post-Tx rewrite path can
+     * re-target the exact slot in the messages list.
+     */
+    private static ChatMessage hydrateUserMessage(models.Message msg, int chatMessageIndex,
+                                                  List<VisionAudioAssembler.AudioBearer> audioBearersOut) {
+        var atts = msg.attachments;
+        if (atts == null) atts = models.MessageAttachment.findByMessage(msg);
+        var audioIds = new ArrayList<Long>();
+        for (var a : atts) {
+            if (a.isAudio() && a.id != null) audioIds.add(a.id);
+        }
+        if (!audioIds.isEmpty()) {
+            audioBearersOut.add(new VisionAudioAssembler.AudioBearer(chatMessageIndex, msg.id, audioIds));
+        }
+        return VisionAudioAssembler.userMessageFor(msg);
+    }
+
+    /**
+     * Build the ASSISTANT {@link ChatMessage}, registering each tool_call
+     * id → function name pair into {@code toolNamesById} so the matching
+     * TOOL-row hydration can recover the function name (JCLAW-193).
+     */
+    private static ChatMessage hydrateAssistantMessage(models.Message msg, HashMap<String, String> toolNamesById) {
+        if (msg.toolCalls == null || msg.toolCalls.isBlank()) {
+            return ChatMessage.assistant(msg.content != null ? msg.content : "");
+        }
+        var toolCalls = parseToolCalls(msg.toolCalls);
+        for (var tc : toolCalls) {
+            if (tc.id() != null && tc.function() != null && tc.function().name() != null) {
+                toolNamesById.put(tc.id(), tc.function().name());
+            }
+        }
+        return ChatMessage.assistant(msg.content, toolCalls);
     }
 
     /**
