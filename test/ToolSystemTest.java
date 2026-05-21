@@ -214,6 +214,80 @@ class ToolSystemTest extends UnitTest {
                 "expected plural deletion message: " + result);
     }
 
+    // pause/resume/cancelTask/runNow — required-name + not-found branches.
+
+    @Test
+    void taskToolPauseRequiresName() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\":\"pause\"}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("'name' is required"));
+    }
+
+    @Test
+    void taskToolPauseUnknownNameReportsNotFound() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\":\"pause\",\"name\":\"never-existed\"}", agent);
+        assertTrue(result.contains("No task found"));
+    }
+
+    @Test
+    void taskToolResumeRequiresName() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\":\"resume\"}", agent);
+        assertTrue(result.startsWith("Error"));
+    }
+
+    @Test
+    void taskToolResumeUnknownNameReportsNotFound() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\":\"resume\",\"name\":\"missing\"}", agent);
+        assertTrue(result.contains("No task found"));
+    }
+
+    @Test
+    void taskToolCancelRequiresName() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\":\"cancelTask\"}", agent);
+        assertTrue(result.startsWith("Error"));
+    }
+
+    @Test
+    void taskToolCancelUnknownNameReportsNotFound() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\":\"cancelTask\",\"name\":\"missing\"}", agent);
+        assertTrue(result.contains("No task found"));
+    }
+
+    @Test
+    void taskToolRunNowRequiresName() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\":\"runNow\"}", agent);
+        assertTrue(result.startsWith("Error"));
+    }
+
+    @Test
+    void taskToolRunNowUnknownNameReportsNotFound() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\":\"runNow\",\"name\":\"missing\"}", agent);
+        assertTrue(result.contains("No task found"));
+    }
+
+    @Test
+    void taskToolPauseAndResumeRoundTripsOnExistingTask() {
+        // Happy path through pause + resume — exercises the for-loop body and
+        // the singular-message branch (1 match → "Task 'X' paused.").
+        ToolRegistry.execute("task_manager", """
+                {"action": "createTask", "name": "pausable", "description": "x", "schedule": "every 1h"}
+                """, agent);
+        var pauseResult = ToolRegistry.execute("task_manager",
+                "{\"action\":\"pause\",\"name\":\"pausable\"}", agent);
+        assertTrue(pauseResult.contains("paused"), "got: " + pauseResult);
+        var resumeResult = ToolRegistry.execute("task_manager",
+                "{\"action\":\"resume\",\"name\":\"pausable\"}", agent);
+        assertTrue(resumeResult.contains("resumed"), "got: " + resumeResult);
+    }
+
     // --- CheckListTool ---
 
     @Test
