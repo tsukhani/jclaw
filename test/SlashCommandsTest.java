@@ -889,6 +889,80 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("Model:"), "model line present: " + text);
     }
 
+    // --- buildCompactResponseText branches ---
+
+    private String callBuildCompactResponseText(services.SessionCompactor.CompactionResult result, String args)
+            throws Exception {
+        var m = Commands.class.getDeclaredMethod(
+                "buildCompactResponseText",
+                services.SessionCompactor.CompactionResult.class, String.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, result, args);
+    }
+
+    @Test
+    void buildCompactResponseTextNoSafeBoundary() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.skipped(
+                "no safe boundary or below min-turns");
+        var text = callBuildCompactResponseText(result, null);
+        assertTrue(text.contains("Nothing to compact"), "got: " + text);
+    }
+
+    @Test
+    void buildCompactResponseTextLlmError() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.skipped("llm error");
+        var text = callBuildCompactResponseText(result, null);
+        assertTrue(text.contains("Compaction failed"), "got: " + text);
+        assertTrue(text.contains("LLM call"), "got: " + text);
+    }
+
+    @Test
+    void buildCompactResponseTextEmptySummary() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.skipped("empty summary");
+        var text = callBuildCompactResponseText(result, null);
+        assertTrue(text.contains("empty response"), "got: " + text);
+    }
+
+    @Test
+    void buildCompactResponseTextGenericSkipReason() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.skipped("some other reason");
+        var text = callBuildCompactResponseText(result, null);
+        assertTrue(text.contains("Compaction skipped"), "got: " + text);
+        assertTrue(text.contains("some other reason"), "got: " + text);
+    }
+
+    @Test
+    void buildCompactResponseTextNullSkipReason() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.skipped(null);
+        var text = callBuildCompactResponseText(result, null);
+        assertTrue(text.contains("unknown reason"), "got: " + text);
+    }
+
+    @Test
+    void buildCompactResponseTextSuccessNoHint() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.success(3, 800);
+        var text = callBuildCompactResponseText(result, null);
+        assertTrue(text.contains("Conversation Compacted"), "got: " + text);
+        assertTrue(text.contains("Summarized 3 earlier turns"), "got: " + text);
+        assertFalse(text.contains("guidance:"), "no hint with null args: " + text);
+    }
+
+    @Test
+    void buildCompactResponseTextSuccessBlankArgsNoHint() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.success(2, 400);
+        var text = callBuildCompactResponseText(result, "   ");
+        assertFalse(text.contains("guidance:"),
+                "blank args must not surface guidance: " + text);
+    }
+
+    @Test
+    void buildCompactResponseTextSuccessWithHintEchoesArgs() throws Exception {
+        var result = services.SessionCompactor.CompactionResult.success(5, 1200);
+        var text = callBuildCompactResponseText(result, "focus on code review notes");
+        assertTrue(text.contains("(guidance: focus on code review notes)"),
+                "guidance must echo args verbatim: " + text);
+    }
+
     @Test
     void findLatestAssistantUsageSkipsMalformedJson() throws Exception {
         // Exception-catch path — malformed usageJson must not crash; the
