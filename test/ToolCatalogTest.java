@@ -155,4 +155,56 @@ class ToolCatalogTest extends UnitTest {
             @Override public String execute(String argsJson, models.Agent agent) { return ""; }
         };
     }
+
+    @Test
+    void validateSkillToolsEmptyRequiredListYieldsEmptyResult() {
+        var result = agents.ToolCatalog.validateSkillTools(java.util.Set.of(), java.util.List.of());
+        assertTrue(result.unknown().isEmpty());
+        assertTrue(result.disabled().isEmpty());
+        assertTrue(result.isOk());
+    }
+
+    @Test
+    void validateSkillToolsNullRequiredListYieldsEmptyResult() {
+        var result = agents.ToolCatalog.validateSkillTools(java.util.Set.of(), null);
+        assertTrue(result.unknown().isEmpty());
+        assertTrue(result.disabled().isEmpty());
+    }
+
+    @Test
+    void validateSkillToolsSkipsBlankAndNullEntries() {
+        var result = agents.ToolCatalog.validateSkillTools(java.util.Set.of(),
+                java.util.Arrays.asList(null, "", "   ", "filesystem"));
+        // Blank/null entries are silently dropped; only filesystem (known) is processed.
+        assertTrue(result.unknown().isEmpty());
+        assertTrue(result.disabled().isEmpty(),
+                "filesystem isn't in the disabled set");
+    }
+
+    @Test
+    void validateSkillToolsReportsUnknownToolsExplicitly() {
+        var result = agents.ToolCatalog.validateSkillTools(java.util.Set.of(),
+                java.util.List.of("definitely-not-a-real-tool"));
+        assertEquals(java.util.List.of("definitely-not-a-real-tool"), result.unknown());
+        assertTrue(result.disabled().isEmpty());
+    }
+
+    @Test
+    void validateSkillToolsReportsDisabledKnownTools() {
+        // filesystem is registered; pretending the agent has it disabled.
+        var result = agents.ToolCatalog.validateSkillTools(
+                java.util.Set.of("filesystem"),
+                java.util.List.of("filesystem"));
+        assertTrue(result.unknown().isEmpty());
+        assertEquals(java.util.List.of("filesystem"), result.disabled());
+        assertFalse(result.isOk());
+    }
+
+    @Test
+    void validateSkillToolsAllKnownRequiredDisabledStillReportsThem() {
+        var result = agents.ToolCatalog.validateSkillTools(
+                java.util.Set.of("filesystem"),
+                java.util.List.of("filesystem", "exec"));
+        assertEquals(java.util.List.of("filesystem"), result.disabled());
+    }
 }
