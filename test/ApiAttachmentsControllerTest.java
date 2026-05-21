@@ -351,4 +351,46 @@ class ApiAttachmentsControllerTest extends FunctionalTest {
         assertNotNull(cacheControl, "Cache-Control header should be set");
         assertEquals("private, max-age=300", cacheControl.value());
     }
+
+    // --- asciiSafeFilename helper (reflection) ---
+
+    private String asciiSafeFilename(String name) throws Exception {
+        var m = controllers.ApiAttachmentsController.class.getDeclaredMethod(
+                "asciiSafeFilename", String.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, name);
+    }
+
+    @Test
+    void asciiSafeFilenameReturnsDefaultForNull() throws Exception {
+        assertEquals("file", asciiSafeFilename(null));
+    }
+
+    @Test
+    void asciiSafeFilenameReturnsDefaultForEmptyInput() throws Exception {
+        assertEquals("file", asciiSafeFilename(""));
+    }
+
+    @Test
+    void asciiSafeFilenameReplacesQuoteAndBackslashWithUnderscore() throws Exception {
+        // The two explicit exclusions in the ASCII range.
+        var result = asciiSafeFilename("nasty\"name\\thing.txt");
+        assertEquals("nasty_name_thing.txt", result);
+    }
+
+    @Test
+    void asciiSafeFilenameReplacesControlAndHighBitsWithUnderscore() throws Exception {
+        // Char < 0x20 (control chars) and >= 0x7F (DEL + high) become _.
+        var withControlAndDel = "okend.txt";
+        var result = asciiSafeFilename(withControlAndDel);
+        assertEquals("ok__end.txt", result);
+    }
+
+    @Test
+    void asciiSafeFilenameKeepsExtensionForNonAsciiBase() throws Exception {
+        // Non-ASCII chars get replaced but ASCII chars in the extension survive.
+        var result = asciiSafeFilename("文件.docx");
+        assertFalse(result.isEmpty());
+        assertTrue(result.endsWith(".docx"));
+    }
 }
