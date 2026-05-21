@@ -723,6 +723,67 @@ class ApiConversationsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    // --- deleteConversations branch coverage ---
+
+    @Test
+    void deleteByEmptyIdsArrayReturnsZero() {
+        // Edge case: {"ids":[]} should short-circuit to deleted=0 before any
+        // DB call, rather than fall through to badRequest.
+        login();
+        var resp = deleteWithJsonBody("/api/conversations", "{\"ids\":[]}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":0"),
+                "empty ids array must return deleted=0: " + getContent(resp));
+    }
+
+    @Test
+    void deleteByFilterWithBlankFieldsTreatedAsAbsent() {
+        // stringField returns null for blank strings; deleteByFilter then
+        // treats those fields as not-specified. With ALL filter fields blank,
+        // it's effectively an empty-filter delete (wipe everything).
+        login();
+        commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = "blank-fields-agent";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            ConversationService.create(agent, "web", "u1");
+            ConversationService.create(agent, "telegram", "u2");
+            return null;
+        });
+
+        var resp = deleteWithJsonBody("/api/conversations",
+                "{\"filter\":{\"channel\":\"   \",\"name\":\"\",\"peer\":null}}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":2"),
+                "blank filter fields must collapse to wipe-all: " + getContent(resp));
+    }
+
+    @Test
+    void deleteByFilterWithBlankAgentIdHonoredAsNull() {
+        // Specifically the longField path: missing/null agentId → null →
+        // service-level "any agent". Combined with a channel filter to scope
+        // the wipe.
+        login();
+        Long convoId = commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = "long-field-null";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var c1 = ConversationService.create(agent, "slack", "uX");
+            ConversationService.create(agent, "web", "uY");
+            return c1.id;
+        });
+        // agentId omitted entirely; only channel set.
+        var resp = deleteWithJsonBody("/api/conversations",
+                "{\"filter\":{\"channel\":\"slack\"}}");
+        assertIsOk(resp);
+        Boolean slackGone = commitInFreshTx(() -> Conversation.findById(convoId) == null);
+        assertTrue(slackGone, "slack conversation should have been deleted");
+    }
+
     @Test
     void clearModelOverrideRemovesPersistedValues() {
         login();
