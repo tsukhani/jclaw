@@ -723,6 +723,91 @@ class ApiConversationsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    // --- enrichToolCallsWithIcons additional branches ---
+
+    @Test
+    void getMessagesAcceptsToolCallsPersistedAsJsonArray() {
+        // Existing test covers the single-object → array wrap path; this
+        // covers the alternate isJsonArray branch (some legacy rows persist
+        // as ["..."]) plus the "function is not an object" continue arm.
+        login();
+        var cid = commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = "tool-call-array-shape";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var conv = ConversationService.create(agent, "web", "u");
+            Message asst = new Message();
+            asst.conversation = conv;
+            asst.role = MessageRole.ASSISTANT.value;
+            // Two entries: one well-formed function object, one shape the
+            // enricher must skip (function is a string, not object). Both
+            // must round-trip without crashing.
+            asst.toolCalls = "[{\"id\":\"a\",\"function\":{\"name\":\"web_search\"}},"
+                    + "{\"id\":\"b\",\"function\":\"malformed-string\"}]";
+            asst.save();
+            return conv.id;
+        });
+        var resp = GET("/api/conversations/" + cid + "/messages");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"toolCalls\":[{"),
+                "array shape should pass through, got: " + body);
+        assertTrue(body.contains("\"name\":\"web_search\""),
+                "first entry's name resolves, got: " + body);
+    }
+
+    @Test
+    void getMessagesHandlesMalformedToolCallsJson() {
+        // The Exception catch returns null — the row should still serialize
+        // without breaking the endpoint.
+        login();
+        var cid = commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = "tool-call-malformed";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var conv = ConversationService.create(agent, "web", "u");
+            Message asst = new Message();
+            asst.conversation = conv;
+            asst.role = MessageRole.ASSISTANT.value;
+            asst.toolCalls = "{not valid json";
+            asst.save();
+            return conv.id;
+        });
+        var resp = GET("/api/conversations/" + cid + "/messages");
+        assertIsOk(resp);
+        // Malformed → null → toolCalls field absent OR explicitly null.
+        var body = getContent(resp);
+        assertTrue(body.contains("\"toolCalls\":null") || !body.contains("\"toolCalls\":["),
+                "malformed JSON must not crash the endpoint: " + body);
+    }
+
+    @Test
+    void getMessagesHandlesPrimitiveToolCallsValue() {
+        // enrichToolCallsWithIcons's "neither array nor object" branch:
+        // persisted value is a JSON primitive (number/bool/string).
+        login();
+        var cid = commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = "tool-call-primitive";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var conv = ConversationService.create(agent, "web", "u");
+            Message asst = new Message();
+            asst.conversation = conv;
+            asst.role = MessageRole.ASSISTANT.value;
+            asst.toolCalls = "42";  // JSON primitive — neither array nor object
+            asst.save();
+            return conv.id;
+        });
+        var resp = GET("/api/conversations/" + cid + "/messages");
+        assertIsOk(resp);
+    }
+
     // --- deleteConversations branch coverage ---
 
     @Test
