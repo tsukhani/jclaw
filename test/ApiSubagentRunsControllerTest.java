@@ -304,6 +304,83 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    // ── kill body-reason branch coverage ─────────────────────────────
+
+    @Test
+    void killEndpointAcceptsExplicitReason() {
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-kill-reason-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-kill-reason-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+        });
+        var resp = POST("/api/subagent-runs/" + runId + "/kill",
+                "application/json",
+                "{\"reason\":\"operator-supplied reason\"}");
+        assertIsOk(resp);
+        // The server persists the reason on the SubagentRun row's outcome field.
+        JPA.em().clear();
+        var fresh = (SubagentRun) SubagentRun.findById(runId);
+        assertEquals(SubagentRun.Status.KILLED, fresh.status);
+    }
+
+    @Test
+    void killEndpointIgnoresBlankReasonAndUsesDefault() {
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-kill-blank-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-kill-blank-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+        });
+        var resp = POST("/api/subagent-runs/" + runId + "/kill",
+                "application/json",
+                "{\"reason\":\"   \"}");
+        assertIsOk(resp);
+    }
+
+    @Test
+    void killEndpointHandlesNullReasonInBody() {
+        // body.has("reason") is true but get("reason").isJsonNull() is also
+        // true → controller falls back to the default reason.
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-kill-null-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-kill-null-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+        });
+        var resp = POST("/api/subagent-runs/" + runId + "/kill",
+                "application/json",
+                "{\"reason\":null}");
+        assertIsOk(resp);
+    }
+
+    @Test
+    void killEndpointOnAlreadyTerminalRunReportsKilledFalseWithStatus() {
+        // Killing a COMPLETED row: SubagentRegistry.kill returns killed=false
+        // but finalStatus is set (the existing terminal status), so the
+        // controller renders an envelope with killed=false rather than 404.
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-kill-completed-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-kill-completed-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.COMPLETED);
+        });
+        var resp = POST("/api/subagent-runs/" + runId + "/kill",
+                "application/json", "{}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"killed\":false"),
+                "already-terminal kill must return killed=false: " + body);
+    }
+
     // ── collectModesForRuns branch coverage ───────────────────────────
 
     @Test
