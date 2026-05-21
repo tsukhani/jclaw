@@ -27,6 +27,19 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static final long IDLE_TIMEOUT_MS = 5L * 60 * 1000; // 5 minutes
     private static final ConcurrentHashMap<String, BrowserSession> sessions = new ConcurrentHashMap<>();
 
+    // Action names dispatched in execute()
+    private static final String ACTION_NAVIGATE = "navigate";
+    private static final String ACTION_CLICK = "click";
+    private static final String ACTION_FILL = "fill";
+    private static final String ACTION_GET_TEXT = "getText";
+    private static final String ACTION_SCREENSHOT = "screenshot";
+    private static final String ACTION_EVALUATE = "evaluate";
+    private static final String ACTION_CLOSE = "close";
+
+    // JSON argument keys
+    private static final String ARG_ACTION = "action";
+    private static final String ARG_SELECTOR = "selector";
+
     /**
      * Playwright's {@link Page} API is not thread-safe — concurrent navigate /
      * screenshot calls on the same Page corrupt its internal request map and
@@ -61,13 +74,13 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     @Override
     public java.util.List<agents.ToolAction> actions() {
         return java.util.List.of(
-                new agents.ToolAction("navigate",   "Load a URL, wait for network idle, and return page text"),
-                new agents.ToolAction("click",      "Click a DOM element by CSS selector"),
-                new agents.ToolAction("fill",       "Fill a form field with a value by CSS selector"),
-                new agents.ToolAction("getText",    "Extract the text content of a CSS selector"),
-                new agents.ToolAction("screenshot", "Capture a full-page screenshot and save it to the workspace"),
-                new agents.ToolAction("evaluate",   "Execute a JavaScript expression and return the result"),
-                new agents.ToolAction("close",      "Close the browser session and free all resources")
+                new agents.ToolAction(ACTION_NAVIGATE,   "Load a URL, wait for network idle, and return page text"),
+                new agents.ToolAction(ACTION_CLICK,      "Click a DOM element by CSS selector"),
+                new agents.ToolAction(ACTION_FILL,       "Fill a form field with a value by CSS selector"),
+                new agents.ToolAction(ACTION_GET_TEXT,    "Extract the text content of a CSS selector"),
+                new agents.ToolAction(ACTION_SCREENSHOT, "Capture a full-page screenshot and save it to the workspace"),
+                new agents.ToolAction(ACTION_EVALUATE,   "Execute a JavaScript expression and return the result"),
+                new agents.ToolAction(ACTION_CLOSE,      "Close the browser session and free all resources")
         );
     }
 
@@ -84,29 +97,29 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
-                        "action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of("navigate", "click", "fill", "getText", "screenshot", "evaluate", "close"),
+                        ARG_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of(ACTION_NAVIGATE, ACTION_CLICK, ACTION_FILL, ACTION_GET_TEXT, ACTION_SCREENSHOT, ACTION_EVALUATE, ACTION_CLOSE),
                                 SchemaKeys.DESCRIPTION, "The browser action to perform"),
                         "url", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "URL to navigate to (for navigate action)"),
-                        "selector", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                        ARG_SELECTOR, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "CSS selector (for click, fill, getText actions)"),
                         "value", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "Value to fill (for fill action)"),
                         "expression", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "JavaScript expression (for evaluate action)")
                 ),
-                SchemaKeys.REQUIRED, List.of("action")
+                SchemaKeys.REQUIRED, List.of(ARG_ACTION)
         );
     }
 
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var action = args.get("action").getAsString();
+        var action = args.get(ARG_ACTION).getAsString();
 
         // "close" tears down the session; don't re-create one just to close it.
-        if ("close".equals(action)) {
+        if (ACTION_CLOSE.equals(action)) {
             closeSession(agent.name);
             return "Browser session closed.";
         }
@@ -119,14 +132,14 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         try {
             var page = session.page();
             return switch (action) {
-                case "navigate" -> navigate(page, args.get("url").getAsString());
-                case "click" -> click(page, args.get("selector").getAsString());
-                case "fill" -> fill(page, args.get("selector").getAsString(),
+                case ACTION_NAVIGATE -> navigate(page, args.get("url").getAsString());
+                case ACTION_CLICK -> click(page, args.get(ARG_SELECTOR).getAsString());
+                case ACTION_FILL -> fill(page, args.get(ARG_SELECTOR).getAsString(),
                                     args.get("value").getAsString());
-                case "getText" -> getText(page,
-                        args.has("selector") ? args.get("selector").getAsString() : "body");
-                case "screenshot" -> screenshot(page, agent.name, agent.id);
-                case "evaluate" -> evaluate(page, args.get("expression").getAsString());
+                case ACTION_GET_TEXT -> getText(page,
+                        args.has(ARG_SELECTOR) ? args.get(ARG_SELECTOR).getAsString() : "body");
+                case ACTION_SCREENSHOT -> screenshot(page, agent.name, agent.id);
+                case ACTION_EVALUATE -> evaluate(page, args.get("expression").getAsString());
                 default -> "Error: Unknown action '%s'".formatted(action);
             };
         } catch (PlaywrightException e) {

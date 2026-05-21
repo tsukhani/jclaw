@@ -38,6 +38,18 @@ public class DocumentsTool implements ToolRegistry.Tool {
     private static final int MAX_WRITE_MARKDOWN_CHARS = 500_000;
     private static final List<String> WRITE_FORMATS = List.of("html", "pdf", "docx");
 
+    // Action names dispatched in execute()
+    private static final String ACTION_READ = "readDocument";
+    private static final String ACTION_WRITE = "writeDocument";
+    private static final String ACTION_APPEND = "appendDocument";
+    private static final String ACTION_RENDER = "renderDocument";
+
+    // JSON argument keys
+    private static final String ARG_ACTION = "action";
+    private static final String ARG_CONTENT = "content";
+    private static final String ARG_SOURCE_PATH = "sourcePath";
+    private static final String ARG_FORMAT = "format";
+
     @Override
     public String name() { return "documents"; }
 
@@ -55,10 +67,10 @@ public class DocumentsTool implements ToolRegistry.Tool {
     @Override
     public java.util.List<agents.ToolAction> actions() {
         return java.util.List.of(
-                new agents.ToolAction("readDocument",   "Extract text from PDF, DOCX, XLSX, PPTX, HTML, RTF, ODT, EPUB via Apache Tika"),
-                new agents.ToolAction("writeDocument",  "Author a new HTML, PDF, or DOCX file from markdown input"),
-                new agents.ToolAction("appendDocument", "Append markdown to a draft file for incremental large-document authoring"),
-                new agents.ToolAction("renderDocument", "Convert an accumulated markdown draft into the target output format")
+                new agents.ToolAction(ACTION_READ,   "Extract text from PDF, DOCX, XLSX, PPTX, HTML, RTF, ODT, EPUB via Apache Tika"),
+                new agents.ToolAction(ACTION_WRITE,  "Author a new HTML, PDF, or DOCX file from markdown input"),
+                new agents.ToolAction(ACTION_APPEND, "Append markdown to a draft file for incremental large-document authoring"),
+                new agents.ToolAction(ACTION_RENDER, "Convert an accumulated markdown draft into the target output format")
         );
     }
 
@@ -86,27 +98,27 @@ public class DocumentsTool implements ToolRegistry.Tool {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
-                        "action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of("readDocument", "writeDocument", "appendDocument", "renderDocument"),
+                        ARG_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of(ACTION_READ, ACTION_WRITE, ACTION_APPEND, ACTION_RENDER),
                                 SchemaKeys.DESCRIPTION, "The document operation to perform"),
                         "path", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "File path relative to the agent workspace (target for writeDocument/renderDocument, source for readDocument)"),
-                        "sourcePath", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                        ARG_SOURCE_PATH, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "For renderDocument only: workspace-relative path to an existing markdown file whose contents should be rendered to 'path'."),
-                        "content", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                        ARG_CONTENT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "Markdown content (for writeDocument and appendDocument)"),
-                        "format", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                        ARG_FORMAT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.ENUM, WRITE_FORMATS,
                                 SchemaKeys.DESCRIPTION, "Output format for writeDocument/renderDocument: html, pdf, or docx. If omitted, inferred from the target path extension.")
                 ),
-                SchemaKeys.REQUIRED, List.of("action", "path")
+                SchemaKeys.REQUIRED, List.of(ARG_ACTION, "path")
         );
     }
 
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var action = args.get("action").getAsString();
+        var action = args.get(ARG_ACTION).getAsString();
         var relativePath = args.get("path").getAsString();
 
         Path target;
@@ -117,24 +129,24 @@ public class DocumentsTool implements ToolRegistry.Tool {
         }
 
         return switch (action) {
-            case "readDocument" -> readDocument(target);
-            case "appendDocument", "appendFile" -> {
-                var content = args.has("content") && !args.get("content").isJsonNull()
-                        ? args.get("content").getAsString() : "";
+            case ACTION_READ -> readDocument(target);
+            case ACTION_APPEND, "appendFile" -> {
+                var content = args.has(ARG_CONTENT) && !args.get(ARG_CONTENT).isJsonNull()
+                        ? args.get(ARG_CONTENT).getAsString() : "";
                 yield appendDocument(target, relativePath, content);
             }
-            case "writeDocument" -> {
-                var content = args.has("content") && !args.get("content").isJsonNull()
-                        ? args.get("content").getAsString() : "";
-                var format = args.has("format") && !args.get("format").isJsonNull()
-                        ? args.get("format").getAsString() : null;
+            case ACTION_WRITE -> {
+                var content = args.has(ARG_CONTENT) && !args.get(ARG_CONTENT).isJsonNull()
+                        ? args.get(ARG_CONTENT).getAsString() : "";
+                var format = args.has(ARG_FORMAT) && !args.get(ARG_FORMAT).isJsonNull()
+                        ? args.get(ARG_FORMAT).getAsString() : null;
                 yield writeDocument(target, relativePath, content, format);
             }
-            case "renderDocument" -> {
-                if (!args.has("sourcePath") || args.get("sourcePath").isJsonNull()) {
+            case ACTION_RENDER -> {
+                if (!args.has(ARG_SOURCE_PATH) || args.get(ARG_SOURCE_PATH).isJsonNull()) {
                     yield "Error: renderDocument requires 'sourcePath' (workspace-relative markdown file to render).";
                 }
-                var sourceRelative = args.get("sourcePath").getAsString();
+                var sourceRelative = args.get(ARG_SOURCE_PATH).getAsString();
                 Path source;
                 try {
                     source = AgentService.acquireWorkspacePath(agent.name, sourceRelative);
@@ -150,8 +162,8 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 } catch (IOException e) {
                     yield "Error reading sourcePath: %s".formatted(e.getMessage());
                 }
-                var format = args.has("format") && !args.get("format").isJsonNull()
-                        ? args.get("format").getAsString() : null;
+                var format = args.has(ARG_FORMAT) && !args.get(ARG_FORMAT).isJsonNull()
+                        ? args.get(ARG_FORMAT).getAsString() : null;
                 yield writeDocument(target, relativePath, content, format);
             }
             default -> "Error: Unknown action '%s'".formatted(action);

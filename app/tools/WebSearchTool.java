@@ -35,6 +35,26 @@ public class WebSearchTool implements ToolRegistry.Tool {
     private static final int MAX_NUM_RESULTS = 10;
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json");
 
+    // Action / tool-call vocabulary
+    private static final String ACTION_SEARCH = "search";
+
+    // JSON argument and provider request-body keys
+    private static final String ARG_QUERY = "query";
+    private static final String ARG_NUM_RESULTS = "numResults";
+    private static final String FIELD_MAX_RESULTS = "max_results";
+
+    // JSON response keys used by multiple providers
+    private static final String KEY_RESULTS = "results";
+    private static final String KEY_HIGHLIGHTS = "highlights";
+    private static final String KEY_RESOURCES = "resources";
+    private static final String KEY_ANSWER = "answer";
+
+    // HTTP header / auth literals shared by Bearer-token providers
+    private static final String HEADER_AUTHORIZATION = "Authorization";
+    private static final String BEARER_PREFIX = "Bearer ";
+
+    private static final String NO_RESULTS_MESSAGE = "No results found.";
+
     /**
      * JCLAW-170: structured per-result shape the UI renders as clickable chips.
      * {@code faviconUrl} resolves through the DuckDuckGo favicon service, which
@@ -65,7 +85,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
     public String category() { return "Web"; }
 
     @Override
-    public String icon() { return "search"; }
+    public String icon() { return ACTION_SEARCH; }
 
     @Override
     public String shortDescription() {
@@ -75,7 +95,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
     @Override
     public java.util.List<agents.ToolAction> actions() {
         return java.util.List.of(
-                new agents.ToolAction("search", "Execute a web search; provider is auto-selected or can be specified explicitly")
+                new agents.ToolAction(ACTION_SEARCH, "Execute a web search; provider is auto-selected or can be specified explicitly")
         );
     }
 
@@ -92,11 +112,11 @@ public class WebSearchTool implements ToolRegistry.Tool {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
-                        "query", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "The search query"),
-                        "numResults", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                        ARG_QUERY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "The search query"),
+                        ARG_NUM_RESULTS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                                 SchemaKeys.DESCRIPTION, "Number of results to return (default: 5, max: 10)")
                 ),
-                SchemaKeys.REQUIRED, List.of("query")
+                SchemaKeys.REQUIRED, List.of(ARG_QUERY)
         );
     }
 
@@ -123,15 +143,15 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
         var payload = new LinkedHashMap<String, Object>();
         payload.put("provider", outcome.providerDisplayName());
-        payload.put("results", outcome.results());
+        payload.put(KEY_RESULTS, outcome.results());
         return new ToolRegistry.ToolResult(outcome.text(), gson.toJson(payload));
     }
 
     private SearchOutcome runFromArgs(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var query = args.get("query").getAsString();
-        var numResults = args.has("numResults")
-                ? Math.min(args.get("numResults").getAsInt(), MAX_NUM_RESULTS) : DEFAULT_NUM_RESULTS;
+        var query = args.get(ARG_QUERY).getAsString();
+        var numResults = args.has(ARG_NUM_RESULTS)
+                ? Math.min(args.get(ARG_NUM_RESULTS).getAsInt(), MAX_NUM_RESULTS) : DEFAULT_NUM_RESULTS;
         // Always use the configured provider priority order — the LLM should not
         // pick a provider. The 'provider' parameter was removed from the schema;
         // any stale tool-call that still passes it is silently ignored.
@@ -153,7 +173,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             var outcome = doSearch(entry.provider(), entry.apiKey(), query, numResults, agent);
             if (outcome.ok()) return outcome;
             lastError = outcome;
-            EventLogger.warn("search", agent != null ? agent.name : null, null,
+            EventLogger.warn(ACTION_SEARCH, agent != null ? agent.name : null, null,
                     "%s failed, trying next provider. Error: %s".formatted(
                             entry.provider().displayName(), outcome.text()));
         }
@@ -184,7 +204,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
     private SearchOutcome doSearch(SearchProvider provider, String apiKey, String query, int numResults, Agent agent) {
         try {
-            EventLogger.info("search", agent != null ? agent.name : null, null,
+            EventLogger.info(ACTION_SEARCH, agent != null ? agent.name : null, null,
                     "Searching via %s: \"%s\" (numResults=%d)".formatted(provider.displayName(), query, numResults));
 
             var request = provider.buildRequest(apiKey, query, numResults);
@@ -199,7 +219,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             }
 
             if (statusCode != 200) {
-                EventLogger.error("search", agent != null ? agent.name : null, null,
+                EventLogger.error(ACTION_SEARCH, agent != null ? agent.name : null, null,
                         "%s API returned HTTP %d: %s".formatted(provider.displayName(), statusCode,
                                 responseBody.substring(0, Math.min(responseBody.length(), 200))));
                 return SearchOutcome.error("Error: %s API returned HTTP %d: %s".formatted(
@@ -209,12 +229,12 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
             var results = provider.parseResults(responseBody);
             var markdown = provider.formatResults(responseBody, results);
-            EventLogger.info("search", agent != null ? agent.name : null, null,
+            EventLogger.info(ACTION_SEARCH, agent != null ? agent.name : null, null,
                     "%s returned %d chars for \"%s\"".formatted(provider.displayName(), markdown.length(), query));
 
             return new SearchOutcome(markdown, results, provider.displayName(), true);
         } catch (Exception e) {
-            EventLogger.error("search", agent != null ? agent.name : null, null,
+            EventLogger.error(ACTION_SEARCH, agent != null ? agent.name : null, null,
                     "%s search failed: %s".formatted(provider.displayName(), e.getMessage()));
             return SearchOutcome.error("Error: searching with %s: %s".formatted(provider.displayName(), e.getMessage()));
         }
@@ -244,7 +264,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
      *  shape stays identical before and after JCLAW-170's structured-result
      *  refactor. */
     private static String renderMarkdown(List<SearchResult> results, String providerDisplayName) {
-        if (results.isEmpty()) return "No results found.";
+        if (results.isEmpty()) return NO_RESULTS_MESSAGE;
         var sb = new StringBuilder("Found %d results (via %s):\n\n".formatted(results.size(), providerDisplayName));
         for (int i = 0; i < results.size(); i++) {
             appendMarkdownResult(sb, i + 1, results.get(i));
@@ -342,9 +362,9 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
             var body = new java.util.HashMap<String, Object>();
-            body.put("query", query);
-            body.put("numResults", numResults);
-            body.put("contents", Map.of("highlights", Map.of("maxCharacters", 4000)));
+            body.put(ARG_QUERY, query);
+            body.put(ARG_NUM_RESULTS, numResults);
+            body.put("contents", Map.of(KEY_HIGHLIGHTS, Map.of("maxCharacters", 4000)));
             return new Request.Builder()
                     .url(baseUrl())
                     .header("x-api-key", apiKey)
@@ -354,7 +374,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public List<SearchResult> parseResults(String responseJson) {
-            var arr = topLevelArray(responseJson, "results");
+            var arr = topLevelArray(responseJson, KEY_RESULTS);
             if (arr == null) return List.of();
             return parseResultArray(arr, "url", ExaProvider::joinedHighlights);
         }
@@ -364,17 +384,17 @@ public class WebSearchTool implements ToolRegistry.Tool {
             // Exa's markdown shape historically emitted one line per highlight,
             // not a joined snippet. Preserve that so existing LLM prompts see
             // the same structure.
-            if (parsed.isEmpty()) return "No results found.";
+            if (parsed.isEmpty()) return NO_RESULTS_MESSAGE;
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            var arr = json.getAsJsonArray("results");
+            var arr = json.getAsJsonArray(KEY_RESULTS);
             var sb = new StringBuilder("Found %d results (via Exa):\n\n".formatted(parsed.size()));
             for (int i = 0; i < arr.size(); i++) {
                 var r = arr.get(i).getAsJsonObject();
                 var result = parsed.get(i);
                 sb.append("### %d. %s\n".formatted(i + 1, result.title()));
                 sb.append("URL: %s\n".formatted(result.url()));
-                if (r.has("highlights") && r.getAsJsonArray("highlights").size() > 0) {
-                    for (var h : r.getAsJsonArray("highlights")) {
+                if (r.has(KEY_HIGHLIGHTS) && r.getAsJsonArray(KEY_HIGHLIGHTS).size() > 0) {
+                    for (var h : r.getAsJsonArray(KEY_HIGHLIGHTS)) {
                         sb.append("> %s\n".formatted(h.getAsString().strip()));
                     }
                 }
@@ -384,9 +404,9 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
 
         private static String joinedHighlights(JsonObject result) {
-            if (!result.has("highlights") || result.getAsJsonArray("highlights").isEmpty()) return null;
+            if (!result.has(KEY_HIGHLIGHTS) || result.getAsJsonArray(KEY_HIGHLIGHTS).isEmpty()) return null;
             var sb = new StringBuilder();
-            for (var h : result.getAsJsonArray("highlights")) {
+            for (var h : result.getAsJsonArray(KEY_HIGHLIGHTS)) {
                 if (!sb.isEmpty()) sb.append(' ');
                 sb.append(h.getAsString().strip());
             }
@@ -416,11 +436,11 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override
         public List<SearchResult> parseResults(String responseJson) {
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("web") || !json.getAsJsonObject("web").has("results")
-                    || json.getAsJsonObject("web").getAsJsonArray("results").isEmpty()) {
+            if (!json.has("web") || !json.getAsJsonObject("web").has(KEY_RESULTS)
+                    || json.getAsJsonObject("web").getAsJsonArray(KEY_RESULTS).isEmpty()) {
                 return List.of();
             }
-            var arr = json.getAsJsonObject("web").getAsJsonArray("results");
+            var arr = json.getAsJsonObject("web").getAsJsonArray(KEY_RESULTS);
             return parseResultArray(arr, "url", r -> nullableString(r, SchemaKeys.DESCRIPTION));
         }
     }
@@ -435,20 +455,20 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
             var body = new java.util.HashMap<String, Object>();
-            body.put("query", query);
-            body.put("max_results", numResults);
+            body.put(ARG_QUERY, query);
+            body.put(FIELD_MAX_RESULTS, numResults);
             body.put("search_depth", "basic");
             body.put("include_answer", false);
             return new Request.Builder()
                     .url(baseUrl())
-                    .header("Authorization", "Bearer " + apiKey)
+                    .header(HEADER_AUTHORIZATION, BEARER_PREFIX + apiKey)
                     .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
 
         @Override
         public List<SearchResult> parseResults(String responseJson) {
-            var arr = topLevelArray(responseJson, "results");
+            var arr = topLevelArray(responseJson, KEY_RESULTS);
             return arr == null ? List.of() : parseResultArray(arr, "url", WebSearchTool::trimmedContentSnippet);
         }
     }
@@ -473,22 +493,22 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
             var body = new java.util.HashMap<String, Object>();
-            body.put("query", query);
-            body.put("max_results", numResults);
+            body.put(ARG_QUERY, query);
+            body.put(FIELD_MAX_RESULTS, numResults);
             var recency = ConfigService.get("search.perplexity.recencyFilter", DEFAULT_RECENCY_FILTER);
             if (recency != null && !recency.isBlank() && !"none".equalsIgnoreCase(recency)) {
                 body.put("search_recency_filter", recency);
             }
             return new Request.Builder()
                     .url(baseUrl())
-                    .header("Authorization", "Bearer " + apiKey)
+                    .header(HEADER_AUTHORIZATION, BEARER_PREFIX + apiKey)
                     .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
 
         @Override
         public List<SearchResult> parseResults(String responseJson) {
-            var arr = topLevelArray(responseJson, "results");
+            var arr = topLevelArray(responseJson, KEY_RESULTS);
             return arr == null ? List.of() : parseResultArray(arr, "url", r -> nullableString(r, "snippet"));
         }
     }
@@ -503,18 +523,18 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
             var body = new java.util.HashMap<String, Object>();
-            body.put("query", query);
-            body.put("max_results", Math.min(numResults, 10));
+            body.put(ARG_QUERY, query);
+            body.put(FIELD_MAX_RESULTS, Math.min(numResults, 10));
             return new Request.Builder()
                     .url(baseUrl())
-                    .header("Authorization", "Bearer " + apiKey)
+                    .header(HEADER_AUTHORIZATION, BEARER_PREFIX + apiKey)
                     .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
 
         @Override
         public List<SearchResult> parseResults(String responseJson) {
-            var arr = topLevelArray(responseJson, "results");
+            var arr = topLevelArray(responseJson, KEY_RESULTS);
             return arr == null ? List.of() : parseResultArray(arr, "url", WebSearchTool::trimmedContentSnippet);
         }
     }
@@ -528,10 +548,10 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
-            var body = Map.of("query", query);
+            var body = Map.of(ARG_QUERY, query);
             return new Request.Builder()
                     .url(baseUrl())
-                    .header("Authorization", "Bearer " + apiKey)
+                    .header(HEADER_AUTHORIZATION, BEARER_PREFIX + apiKey)
                     .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
@@ -541,8 +561,8 @@ public class WebSearchTool implements ToolRegistry.Tool {
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
             if (!json.has("data") || json.get("data").isJsonNull()) return List.of();
             var data = json.getAsJsonObject("data");
-            if (!data.has("resources") || data.getAsJsonArray("resources").isEmpty()) return List.of();
-            var arr = data.getAsJsonArray("resources");
+            if (!data.has(KEY_RESOURCES) || data.getAsJsonArray(KEY_RESOURCES).isEmpty()) return List.of();
+            var arr = data.getAsJsonArray(KEY_RESOURCES);
             return parseResultArray(arr, "link", r -> nullableString(r, "snippet"));
         }
 
@@ -551,14 +571,14 @@ public class WebSearchTool implements ToolRegistry.Tool {
             // Felo emits an answer summary alongside its resources; prepend it
             // so the LLM sees the same two-part shape as before JCLAW-170.
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("data") || json.get("data").isJsonNull()) return "No results found.";
+            if (!json.has("data") || json.get("data").isJsonNull()) return NO_RESULTS_MESSAGE;
             var data = json.getAsJsonObject("data");
             var sb = new StringBuilder();
-            if (data.has("answer") && !data.get("answer").isJsonNull()) {
-                var answer = data.get("answer").getAsString().strip();
+            if (data.has(KEY_ANSWER) && !data.get(KEY_ANSWER).isJsonNull()) {
+                var answer = data.get(KEY_ANSWER).getAsString().strip();
                 if (!answer.isEmpty()) sb.append("**Felo summary:** ").append(answer).append("\n\n");
             }
-            if (parsed.isEmpty()) return sb.isEmpty() ? "No results found." : sb.append("No results found.").toString().strip();
+            if (parsed.isEmpty()) return sb.isEmpty() ? NO_RESULTS_MESSAGE : sb.append(NO_RESULTS_MESSAGE).toString().strip();
             sb.append(renderMarkdown(parsed, "Felo"));
             return sb.toString().strip();
         }
