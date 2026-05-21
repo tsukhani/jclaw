@@ -59,62 +59,80 @@ public class SkillBinaryScanner {
         if (skillDir == null || !Files.isDirectory(skillDir)) return violations;
 
         var skillName = skillDir.getFileName() != null ? skillDir.getFileName().toString() : "?";
-        int scanned = 0;
 
         // Snapshot enabled scanners once per scan so every file is checked by the same set —
         // avoids weird mid-scan config flips and makes the audit log consistent.
-        var availableScanners = scanners != null ? scanners : List.<Scanner>of();
-        var activeScanners = availableScanners.stream().filter(Scanner::isEnabled).toList();
+        var activeScanners = activeScanners(scanners);
         if (activeScanners.isEmpty()) {
             return violations;
         }
 
-        try (var walk = Files.walk(skillDir)) {
-            var binaries = walk.filter(Files::isRegularFile)
-                    .filter(p -> !SkillLoader.isTextFile(skillDir.relativize(p).toString()))
-                    .toList();
-
-            for (var file : binaries) {
-                var relName = skillDir.relativize(file).toString();
-                String sha256;
-                try {
-                    sha256 = sha256Of(file);
-                } catch (IOException | NoSuchAlgorithmException e) {
-                    EventLogger.warn("scanner",
-                            "Skipping '%s' in skill '%s': hash failed (%s) — failing open"
-                                    .formatted(relName, skillName, e.getMessage()));
-                    continue;
-                }
-
-                scanned++;
-                boolean flagged = false;
-                for (var scanner : activeScanners) {
-                    var verdict = scanner.lookup(sha256);
-                    if (verdict.malicious()) {
-                        flagged = true;
-                        EventLogger.warn("scanner",
-                                "Malware detected in skill '%s': %s (%s, %s)".formatted(
-                                        skillName, relName, verdict.reason(), scanner.name()));
-                        violations.add(new Violation(
-                                relName, sha256, scanner.name(), verdict.reason()));
-                    }
-                }
-                if (!flagged) {
-                    EventLogger.info("scanner",
-                            "Scanned '%s' in skill '%s': clean (%d scanner(s), sha256=%s)".formatted(
-                                    relName, skillName, activeScanners.size(), sha256.substring(0, 12)));
-                }
-            }
-        } catch (IOException e) {
-            EventLogger.warn("scanner",
-                    "Walk failed for skill '%s': %s — failing open".formatted(skillName, e.getMessage()));
-        }
+        int scanned = walkAndScan(skillDir, skillName, activeScanners, violations);
 
         if (scanned > 0 && violations.isEmpty()) {
             EventLogger.info("scanner",
                     "Skill '%s' scan complete: %d binary file(s) clean".formatted(skillName, scanned));
         }
         return violations;
+    }
+
+    private static List<Scanner> activeScanners(List<Scanner> scanners) {
+        var available = scanners != null ? scanners : List.<Scanner>of();
+        return available.stream().filter(Scanner::isEnabled).toList();
+    }
+
+    /** Walks the skill dir and dispatches binary files to {@link #scanFile}. Returns number of files scanned. */
+    private static int walkAndScan(Path skillDir, String skillName,
+                                   List<Scanner> activeScanners, ArrayList<Violation> violations) {
+        int scanned = 0;
+        try (var walk = Files.walk(skillDir)) {
+            var binaries = walk.filter(Files::isRegularFile)
+                    .filter(p -> !SkillLoader.isTextFile(skillDir.relativize(p).toString()))
+                    .toList();
+            for (var file : binaries) {
+                if (scanFile(skillDir, skillName, file, activeScanners, violations)) {
+                    scanned++;
+                }
+            }
+        } catch (IOException e) {
+            EventLogger.warn("scanner",
+                    "Walk failed for skill '%s': %s — failing open".formatted(skillName, e.getMessage()));
+        }
+        return scanned;
+    }
+
+    /** Hash and dispatch one file to every scanner. Returns true when the hash succeeded. */
+    private static boolean scanFile(Path skillDir, String skillName, Path file,
+                                    List<Scanner> activeScanners, ArrayList<Violation> violations) {
+        var relName = skillDir.relativize(file).toString();
+        String sha256;
+        try {
+            sha256 = sha256Of(file);
+        } catch (IOException | NoSuchAlgorithmException e) {
+            EventLogger.warn("scanner",
+                    "Skipping '%s' in skill '%s': hash failed (%s) — failing open"
+                            .formatted(relName, skillName, e.getMessage()));
+            return false;
+        }
+
+        boolean flagged = false;
+        for (var scanner : activeScanners) {
+            var verdict = scanner.lookup(sha256);
+            if (verdict.malicious()) {
+                flagged = true;
+                EventLogger.warn("scanner",
+                        "Malware detected in skill '%s': %s (%s, %s)".formatted(
+                                skillName, relName, verdict.reason(), scanner.name()));
+                violations.add(new Violation(
+                        relName, sha256, scanner.name(), verdict.reason()));
+            }
+        }
+        if (!flagged) {
+            EventLogger.info("scanner",
+                    "Scanned '%s' in skill '%s': clean (%d scanner(s), sha256=%s)".formatted(
+                            relName, skillName, activeScanners.size(), sha256.substring(0, 12)));
+        }
+        return true;
     }
 
     private static String sha256Of(Path file) throws IOException, NoSuchAlgorithmException {

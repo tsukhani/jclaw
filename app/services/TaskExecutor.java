@@ -69,21 +69,8 @@ public final class TaskExecutor {
 
         // Open the TaskRun in RUNNING state before any LLM/tool work so
         // observers (monitoring UI, db-scheduler heartbeat) see a row to
-        // attach to even if the body throws partway through. The re-query
-        // can race with deletion (Fixtures.deleteDatabase in tests, or an
-        // operator cancel + delete in prod) — handle null by returning
-        // null so TaskExecutionHandler can drop the orphan via
-        // defaultCompletion (same path as its own pre-flight null check).
-        final TaskRun run = Tx.run(() -> {
-            var resolvedTask = (Task) Task.findById(task.id);
-            if (resolvedTask == null) return null;
-            var r = new TaskRun();
-            r.task = resolvedTask;
-            r.startedAt = Instant.now();
-            r.status = TaskRun.Status.RUNNING;
-            r.save();
-            return r;
-        });
+        // attach to even if the body throws partway through.
+        final TaskRun run = openRunningTaskRun(task);
         if (run == null) {
             EventLogger.warn("task", null, null,
                     "TaskExecutor.runTask: Task id %d disappeared between handler resolution and TaskRun creation; skipping"
@@ -100,6 +87,39 @@ public final class TaskExecutor {
 
         var sink = new TaskRunSink(run);
         sink.onStart();
+        if (!driveAgentLoop(task, run, sink)) {
+            return run;
+        }
+
+        return finalizeRun(task, run);
+    }
+
+    /**
+     * Open the TaskRun in RUNNING state. The re-query can race with deletion
+     * (Fixtures.deleteDatabase in tests, or an operator cancel + delete in
+     * prod) — return null so TaskExecutionHandler can drop the orphan via
+     * defaultCompletion (same path as its own pre-flight null check).
+     */
+    private static TaskRun openRunningTaskRun(Task task) {
+        return Tx.run(() -> {
+            var resolvedTask = (Task) Task.findById(task.id);
+            if (resolvedTask == null) return null;
+            var r = new TaskRun();
+            r.task = resolvedTask;
+            r.startedAt = Instant.now();
+            r.status = TaskRun.Status.RUNNING;
+            r.save();
+            return r;
+        });
+    }
+
+    /**
+     * Resolve the executing agent + user prompt, then drive the agent loop.
+     * Returns true on success/normal completion, false when the Task was
+     * deleted mid-execution (in which case the sink has already been failed).
+     * Rethrows on RuntimeException so JClawFailureHandler can classify.
+     */
+    private static boolean driveAgentLoop(Task task, TaskRun run, TaskRunSink sink) {
         try {
             // Resolve the executing agent + user prompt inside a short Tx.
             // task.agent is @ManyToOne (EAGER by default), so the captured
@@ -122,7 +142,7 @@ public final class TaskExecutor {
                         "TaskExecutor.runTask: Task id %d deleted after RUNNING row created; marking TaskRun FAILED"
                                 .formatted(task.id));
                 sink.onFailure(msg);
-                return run;
+                return false;
             }
 
             // Drive the agent loop through the same machinery chat uses —
@@ -137,6 +157,7 @@ public final class TaskExecutor {
             // inside runForTask stamped it); the summary is the surface
             // operators see at a glance.
             sink.onComplete(outcome.content());
+            return true;
         } catch (RuntimeException e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             sink.onFailure(msg);
@@ -147,7 +168,13 @@ public final class TaskExecutor {
             // handler emits TASK_FAILED only when its Decision is Fail.
             throw e;
         }
+    }
 
+    /**
+     * Re-read the closed TaskRun, mark one-shot Tasks COMPLETED on success,
+     * and emit the TASK_COMPLETED lifecycle event.
+     */
+    private static TaskRun finalizeRun(Task task, TaskRun run) {
         // Re-read the closed TaskRun so durationMs reflects the
         // sink.onComplete-written value rather than recomputing.
         var closed = Tx.run(() -> (TaskRun) TaskRun.findById(run.id));
@@ -161,18 +188,22 @@ public final class TaskExecutor {
             // FAILED write on terminal failure (we don't pair this
             // with PENDING resets — once a one-shot succeeds it's done).
             if (task.type == Task.Type.IMMEDIATE || task.type == Task.Type.SCHEDULED) {
-                Tx.run(() -> {
-                    var fresh = (Task) Task.findById(task.id);
-                    if (fresh != null && fresh.status == Task.Status.PENDING) {
-                        fresh.status = Task.Status.COMPLETED;
-                        fresh.save();
-                    }
-                    return null;
-                });
+                markTaskCompleted(task.id);
             }
             TaskLifecycleEvents.recordCompleted(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
         }
         return closed;
+    }
+
+    private static void markTaskCompleted(Long taskId) {
+        Tx.run(() -> {
+            var fresh = (Task) Task.findById(taskId);
+            if (fresh != null && fresh.status == Task.Status.PENDING) {
+                fresh.status = Task.Status.COMPLETED;
+                fresh.save();
+            }
+            return null;
+        });
     }
 }

@@ -89,57 +89,81 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
      * reason names up to three flagging engines plus the malicious/total count
      * so operators can see how widely the sample is detected.
      */
-    private Verdict parseVerdict(JsonObject json) {
-        if (!json.has("data") || !json.get("data").isJsonObject()) {
-            return Verdict.clean();
-        }
-        var data = json.getAsJsonObject("data");
-        if (!data.has("attributes") || !data.get("attributes").isJsonObject()) {
-            return Verdict.clean();
-        }
-        var attributes = data.getAsJsonObject("attributes");
+    /** {@code [malicious, total]} pair extracted from {@code last_analysis_stats}. */
+    private record AnalysisCounts(int malicious, int total) {}
 
+    private Verdict parseVerdict(JsonObject json) {
+        var attributes = extractAttributes(json);
+        if (attributes == null) return Verdict.clean();
+
+        var counts = countAnalysisStats(attributes);
+        if (counts.malicious() <= 0) {
+            return Verdict.clean();
+        }
+
+        var threats = collectMaliciousThreats(attributes);
+        var prefix = counts.total() > 0
+                ? "VirusTotal %d/%d engines flagged".formatted(counts.malicious(), counts.total())
+                : "VirusTotal %d engines flagged".formatted(counts.malicious());
+        return Verdict.malicious(
+                threats.isEmpty() ? prefix : prefix + " — " + String.join(", ", threats));
+    }
+
+    private static JsonObject extractAttributes(JsonObject json) {
+        if (!json.has("data") || !json.get("data").isJsonObject()) return null;
+        var data = json.getAsJsonObject("data");
+        if (!data.has("attributes") || !data.get("attributes").isJsonObject()) return null;
+        return data.getAsJsonObject("attributes");
+    }
+
+    private static AnalysisCounts countAnalysisStats(JsonObject attributes) {
         int malicious = 0;
         int total = 0;
-        if (attributes.has("last_analysis_stats") && attributes.get("last_analysis_stats").isJsonObject()) {
-            var stats = attributes.getAsJsonObject("last_analysis_stats");
-            for (var statEntry : stats.entrySet()) {
-                if (statEntry.getValue().isJsonPrimitive() && statEntry.getValue().getAsJsonPrimitive().isNumber()) {
-                    int count = statEntry.getValue().getAsInt();
-                    total += count;
-                    if ("malicious".equals(statEntry.getKey())) {
-                        malicious = count;
-                    }
-                }
+        if (!attributes.has("last_analysis_stats") || !attributes.get("last_analysis_stats").isJsonObject()) {
+            return new AnalysisCounts(0, 0);
+        }
+        var stats = attributes.getAsJsonObject("last_analysis_stats");
+        for (var statEntry : stats.entrySet()) {
+            if (!statEntry.getValue().isJsonPrimitive() || !statEntry.getValue().getAsJsonPrimitive().isNumber()) {
+                continue;
+            }
+            int count = statEntry.getValue().getAsInt();
+            total += count;
+            if ("malicious".equals(statEntry.getKey())) {
+                malicious = count;
             }
         }
+        return new AnalysisCounts(malicious, total);
+    }
 
-        if (malicious <= 0) {
-            return Verdict.clean();
-        }
-
+    /** Walk last_analysis_results, collecting up to 3 "engine: threat" labels for the reason string. */
+    private static ArrayList<String> collectMaliciousThreats(JsonObject attributes) {
         var threats = new ArrayList<String>();
-        if (attributes.has("last_analysis_results") && attributes.get("last_analysis_results").isJsonObject()) {
-            var results = attributes.getAsJsonObject("last_analysis_results");
-            for (var engineEntry : results.entrySet()) {
-                if (!engineEntry.getValue().isJsonObject()) continue;
-                var engineObj = engineEntry.getValue().getAsJsonObject();
-                var category = engineObj.has("category") && !engineObj.get("category").isJsonNull()
-                        ? engineObj.get("category").getAsString() : "";
-                if (!"malicious".equals(category)) continue;
-                var threat = engineObj.has("result") && !engineObj.get("result").isJsonNull()
-                        ? engineObj.get("result").getAsString() : "";
-                if (threat.isBlank()) continue;
-                threats.add(engineEntry.getKey() + ": " + threat);
+        if (!attributes.has("last_analysis_results") || !attributes.get("last_analysis_results").isJsonObject()) {
+            return threats;
+        }
+        var results = attributes.getAsJsonObject("last_analysis_results");
+        for (var engineEntry : results.entrySet()) {
+            var label = extractMaliciousLabel(engineEntry.getKey(), engineEntry.getValue());
+            if (label != null) {
+                threats.add(label);
                 if (threats.size() >= 3) break;
             }
         }
+        return threats;
+    }
 
-        var prefix = total > 0
-                ? "VirusTotal %d/%d engines flagged".formatted(malicious, total)
-                : "VirusTotal %d engines flagged".formatted(malicious);
-        return Verdict.malicious(
-                threats.isEmpty() ? prefix : prefix + " — " + String.join(", ", threats));
+    /** Returns "engine: threat" only when the engine reported category=malicious + a non-blank result. */
+    private static String extractMaliciousLabel(String engineName, com.google.gson.JsonElement engineResult) {
+        if (!engineResult.isJsonObject()) return null;
+        var engineObj = engineResult.getAsJsonObject();
+        var category = engineObj.has("category") && !engineObj.get("category").isJsonNull()
+                ? engineObj.get("category").getAsString() : "";
+        if (!"malicious".equals(category)) return null;
+        var threat = engineObj.has("result") && !engineObj.get("result").isJsonNull()
+                ? engineObj.get("result").getAsString() : "";
+        if (threat.isBlank()) return null;
+        return engineName + ": " + threat;
     }
 
 }

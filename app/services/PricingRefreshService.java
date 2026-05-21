@@ -177,41 +177,54 @@ public final class PricingRefreshService {
         var raw = ConfigService.get(configKey);
         if (raw == null || raw.isBlank()) return 0;
 
-        JsonArray models;
-        try {
-            models = JsonParser.parseString(raw).getAsJsonArray();
-        } catch (Exception _) {
-            return 0;
-        }
+        JsonArray models = parseModelsArray(raw);
+        if (models == null) return 0;
 
         int modelsUpdated = 0;
         for (var el : models) {
-            if (!el.isJsonObject()) continue;
-            var model = el.getAsJsonObject();
-            var id = model.has("id") && !model.get("id").isJsonNull()
-                    ? model.get("id").getAsString() : null;
-            if (id == null || id.isBlank()) continue;
-
-            var litellmEntry = lookupCatalog(catalog, id);
-            if (litellmEntry == null) continue;
-
-            boolean changed = false;
-            changed |= fillIfMissing(model, "promptPrice",
-                    extractPerMillion(litellmEntry, "input_cost_per_token"));
-            changed |= fillIfMissing(model, "completionPrice",
-                    extractPerMillion(litellmEntry, "output_cost_per_token"));
-            changed |= fillIfMissing(model, "cachedReadPrice",
-                    extractPerMillion(litellmEntry, "cache_read_input_token_cost"));
-            changed |= fillIfMissing(model, "cacheWritePrice",
-                    extractPerMillion(litellmEntry, "cache_creation_input_token_cost"));
-
-            if (changed) modelsUpdated++;
+            if (applyToModel(el, catalog)) modelsUpdated++;
         }
 
         if (modelsUpdated > 0) {
             ConfigService.set(configKey, GsonHolder.INSTANCE.toJson(models));
         }
         return modelsUpdated;
+    }
+
+    private static JsonArray parseModelsArray(String raw) {
+        try {
+            return JsonParser.parseString(raw).getAsJsonArray();
+        } catch (Exception _) {
+            return null;
+        }
+    }
+
+    /** Returns true if any field on the model was filled from the catalog. */
+    private static boolean applyToModel(com.google.gson.JsonElement el, JsonObject catalog) {
+        if (!el.isJsonObject()) return false;
+        var model = el.getAsJsonObject();
+        var id = extractModelId(model);
+        if (id == null) return false;
+
+        var litellmEntry = lookupCatalog(catalog, id);
+        if (litellmEntry == null) return false;
+
+        boolean changed = false;
+        changed |= fillIfMissing(model, "promptPrice",
+                extractPerMillion(litellmEntry, "input_cost_per_token"));
+        changed |= fillIfMissing(model, "completionPrice",
+                extractPerMillion(litellmEntry, "output_cost_per_token"));
+        changed |= fillIfMissing(model, "cachedReadPrice",
+                extractPerMillion(litellmEntry, "cache_read_input_token_cost"));
+        changed |= fillIfMissing(model, "cacheWritePrice",
+                extractPerMillion(litellmEntry, "cache_creation_input_token_cost"));
+        return changed;
+    }
+
+    private static String extractModelId(JsonObject model) {
+        if (!model.has("id") || model.get("id").isJsonNull()) return null;
+        var id = model.get("id").getAsString();
+        return (id == null || id.isBlank()) ? null : id;
     }
 
     /**

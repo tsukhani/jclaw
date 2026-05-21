@@ -98,34 +98,49 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
         }
         var scanResults = json.getAsJsonObject("scan_results");
 
-        int resultCode = scanResults.has("scan_all_result_i") && !scanResults.get("scan_all_result_i").isJsonNull()
-                ? scanResults.get("scan_all_result_i").getAsInt()
-                : -1;
-
+        int resultCode = extractResultCode(scanResults);
         if (resultCode != 1) {
             // 0=clean, 2+=various unknown/unscanned states — all treated as clean
             return Verdict.clean();
         }
 
-        var threats = new ArrayList<String>();
-        if (scanResults.has("scan_details") && scanResults.get("scan_details").isJsonObject()) {
-            var scanDetails = scanResults.getAsJsonObject("scan_details");
-            for (var engineEntry : scanDetails.entrySet()) {
-                var engineResult = engineEntry.getValue();
-                if (!engineResult.isJsonObject()) continue;
-                var engineObj = engineResult.getAsJsonObject();
-                if (engineObj.has("threat_found") && !engineObj.get("threat_found").isJsonNull()) {
-                    var threat = engineObj.get("threat_found").getAsString();
-                    if (!threat.isBlank()) {
-                        threats.add(engineEntry.getKey() + ": " + threat);
-                        if (threats.size() >= 3) break; // cap the reason string
-                    }
-                }
-            }
-        }
-
+        var threats = collectThreats(scanResults);
         var reason = threats.isEmpty() ? "MetaDefender match" : String.join(", ", threats);
         return Verdict.malicious(reason);
+    }
+
+    private static int extractResultCode(JsonObject scanResults) {
+        if (!scanResults.has("scan_all_result_i") || scanResults.get("scan_all_result_i").isJsonNull()) {
+            return -1;
+        }
+        return scanResults.get("scan_all_result_i").getAsInt();
+    }
+
+    /** Walk scan_details, collecting up to 3 "engine: threat" labels for the reason string. */
+    private static ArrayList<String> collectThreats(JsonObject scanResults) {
+        var threats = new ArrayList<String>();
+        if (!scanResults.has("scan_details") || !scanResults.get("scan_details").isJsonObject()) {
+            return threats;
+        }
+        var scanDetails = scanResults.getAsJsonObject("scan_details");
+        for (var engineEntry : scanDetails.entrySet()) {
+            var threat = extractThreatLabel(engineEntry.getKey(), engineEntry.getValue());
+            if (threat != null) {
+                threats.add(threat);
+                if (threats.size() >= 3) break; // cap the reason string
+            }
+        }
+        return threats;
+    }
+
+    /** Returns "engine: threat" when the engine reported a non-blank threat, null otherwise. */
+    private static String extractThreatLabel(String engineName, com.google.gson.JsonElement engineResult) {
+        if (!engineResult.isJsonObject()) return null;
+        var engineObj = engineResult.getAsJsonObject();
+        if (!engineObj.has("threat_found") || engineObj.get("threat_found").isJsonNull()) return null;
+        var threat = engineObj.get("threat_found").getAsString();
+        if (threat.isBlank()) return null;
+        return engineName + ": " + threat;
     }
 
 }

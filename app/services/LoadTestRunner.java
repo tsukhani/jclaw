@@ -200,26 +200,11 @@ public final class LoadTestRunner {
             throw new IllegalArgumentException("concurrency and turns must be ≥ 1");
         }
 
-        var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
-        if (!req.realProvider()) LoadTestHarness.setScenario(req.scenario());
-        // Run setup in a dedicated transaction so the __loadtest__ agent and
-        // provider config are committed and visible to the HTTP request threads
-        // before any loadtest requests fire.
-        var realProviderName = (req.provider() == null || req.provider().isBlank())
-                ? DEFAULT_REAL_PROVIDER : req.provider();
-        long agentId;
-        try {
-            agentId = JPA.withTransaction("default", false,
-                    (play.libs.F.Function0<Long>) () -> req.realProvider()
-                            ? ensureLoadtestAgentRealInner(realProviderName, req.model())
-                            : ensureLoadtestAgentInner(mockPort));
-        } catch (Throwable t) {
-            throw t instanceof Exception e ? e : new RuntimeException(t);
-        }
+        long agentId = setupLoadtestAgent(req);
 
         var sessionCookie = mintAdminSessionCookie();
-
         var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
+
         // Resolve per-turn message strategy. {@code prompts} (when present)
         // overrides {@code userMessage}: turn t sends prompts.get(t), exposing
         // the model to a varied question sequence inside the same growing
@@ -228,19 +213,8 @@ public final class LoadTestRunner {
         // diagnostics. JsonObject + addProperty handles escaping for both
         // paths so quotes, backslashes, or non-ASCII flow through the wire
         // format unchanged.
-        var userMessage = (req.userMessage() == null || req.userMessage().isBlank())
-                ? DEFAULT_USER_MESSAGE : req.userMessage();
-        boolean variedPrompts = req.prompts() != null && !req.prompts().isEmpty();
-        java.util.function.IntFunction<String> messageFor = variedPrompts
-                ? idx -> req.prompts().get(idx)
-                : idx -> userMessage;
-        // Warmup body uses the first prompt (or the single message). Any
-        // valid request shape works for warmup since its purpose is JIT/cache
-        // warming, not measurement; the result is discarded by resetPoint.
-        var warmupBodyObj = new com.google.gson.JsonObject();
-        warmupBodyObj.addProperty("agentId", agentId);
-        warmupBodyObj.addProperty("message", messageFor.apply(0));
-        var warmupBody = warmupBodyObj.toString();
+        var messageFor = resolveMessageStrategy(req);
+
         // Drive the loadtest through the same OkHttp client tuning that the
         // production LLM stack uses — virtual-thread dispatcher, 64-slot
         // ConnectionPool — so concurrent loadtest workers exercise the
@@ -249,121 +223,124 @@ public final class LoadTestRunner {
         // Call below.
         var client = utils.HttpFactories.llmSingleShot();
 
-        // Warmup: a single sequential request ensures agent lookup, provider
-        // cache, session affinity, and JIT are stable before concurrent workers
-        // start. Without this, the first few turns of a cold run can error
-        // in a pattern that's indistinguishable from a real performance problem.
-        //
-        // Snapshot before warmup and restore after, so we drop only the warmup
-        // sample without losing data accumulated by prior runs (or by real
-        // chat traffic the operator cares about).
-        var resetPoint = utils.LatencyStats.captureResetPoint();
-        warmupRequest(client, baseUrl, sessionCookie, warmupBody, req.compress());
-        resetPoint.run();
+        runWarmup(client, baseUrl, sessionCookie, agentId, messageFor, req.compress());
 
-        var success = new AtomicInteger();
-        var error = new AtomicInteger();
-        var totalDuration = new AtomicLong();
-        var minDur = new AtomicLong(Long.MAX_VALUE);
-        var maxDur = new AtomicLong(Long.MIN_VALUE);
+        var metrics = new RunMetrics(req.concurrency(), req.turns());
+        var segmentsBefore = snapshotTrackedSegments();
+        long persistMarker = System.currentTimeMillis();
 
-        // Per-worker, per-turn metric arrays. Heap is trivial: at the
-        // configured ceiling (c=100, t=50) this is 100*50*8*2 = 80 KB.
-        // Pre-fill with -1 so error/timeout slots are distinguishable from
-        // real 0-ms readings during aggregation.
-        long[][] turnTtftMs = new long[req.concurrency()][req.turns()];
-        long[][] turnDurationMs = new long[req.concurrency()][req.turns()];
-        for (int w = 0; w < req.concurrency(); w++) {
-            java.util.Arrays.fill(turnTtftMs[w], -1L);
-            java.util.Arrays.fill(turnDurationMs[w], -1L);
+        long startNs = System.nanoTime();
+        runConcurrentWorkers(req, baseUrl, sessionCookie, agentId, messageFor, client, metrics);
+        long wall = (System.nanoTime() - startNs) / 1_000_000L;
+
+        var serverSegments = computeSegmentDeltas(segmentsBefore);
+        long avgTtftMs = extractServerTtftMs(serverSegments);
+
+        // Pull avg completion tokens AND avg per-request tokens-per-second
+        // from the assistant messages this run persisted under the loadtest
+        // agent. Per-row tokens/s = completion / (durationMs/1000), then
+        // arithmetic mean across rows — this is the "average generation
+        // speed observed" metric, not the aggregate-throughput ratio
+        // (which biases toward longer responses).
+        var tokenStats = perRequestTokenStats(agentId, persistMarker);
+
+        // Per-turn breakdown only when there's something to distribute over.
+        // Single-turn runs collapse to a 1-row table that adds noise, not signal.
+        var turnBuckets = req.turns() > 1
+                ? buildTurnBuckets(metrics.turnTtftMs, metrics.turnDurationMs)
+                : null;
+
+        int total = req.concurrency() * req.turns();
+        return new Result(
+                total,
+                metrics.success.get(),
+                metrics.error.get(),
+                wall,
+                total > 0 ? metrics.totalDuration.get() / total : 0,
+                metrics.minDur.get() == Long.MAX_VALUE ? 0 : metrics.minDur.get(),
+                metrics.maxDur.get() == Long.MIN_VALUE ? 0 : metrics.maxDur.get(),
+                avgTtftMs,
+                tokenStats.avgVisibleTokens(),
+                tokenStats.avgReasoningTokens(),
+                tokenStats.avgRate(),
+                turnBuckets,
+                serverSegments);
+    }
+
+    /**
+     * Setup the harness (when in mock mode) and the {@code __loadtest__}
+     * agent + provider config in a committed transaction so HTTP request
+     * threads can read them. Returns the agent id used by all workers.
+     */
+    private static long setupLoadtestAgent(Request req) throws Exception {
+        var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
+        if (!req.realProvider()) LoadTestHarness.setScenario(req.scenario());
+        var realProviderName = (req.provider() == null || req.provider().isBlank())
+                ? DEFAULT_REAL_PROVIDER : req.provider();
+        try {
+            return JPA.withTransaction("default", false,
+                    (play.libs.F.Function0<Long>) () -> req.realProvider()
+                            ? ensureLoadtestAgentRealInner(realProviderName, req.model())
+                            : ensureLoadtestAgentInner(mockPort));
+        } catch (Throwable t) {
+            throw t instanceof Exception e ? e : new RuntimeException(t);
         }
+    }
 
-        // Snapshot all tracked segments BEFORE workers fire so we can
-        // subtract at the end and get this-run-only deltas. The reset point
-        // above only drops the warmup contribution; histograms still carry
-        // whatever was there from prior runs / real chat traffic.
+    private static java.util.function.IntFunction<String> resolveMessageStrategy(Request req) {
+        var userMessage = (req.userMessage() == null || req.userMessage().isBlank())
+                ? DEFAULT_USER_MESSAGE : req.userMessage();
+        boolean variedPrompts = req.prompts() != null && !req.prompts().isEmpty();
+        return variedPrompts
+                ? idx -> req.prompts().get(idx)
+                : idx -> userMessage;
+    }
+
+    /**
+     * Single sequential request: stabilises agent lookup, provider cache,
+     * session affinity, and JIT before concurrent workers start. Snapshot
+     * before/restore after so only the warmup sample is dropped — data
+     * accumulated by prior runs (or by real chat traffic the operator cares
+     * about) survives.
+     */
+    private static void runWarmup(okhttp3.OkHttpClient client, String baseUrl, String sessionCookie,
+                                   long agentId, java.util.function.IntFunction<String> messageFor,
+                                   boolean compress) {
+        // Warmup body uses the first prompt (or the single message). Any
+        // valid request shape works for warmup since its purpose is JIT/cache
+        // warming, not measurement; the result is discarded by resetPoint.
+        var warmupBodyObj = new com.google.gson.JsonObject();
+        warmupBodyObj.addProperty("agentId", agentId);
+        warmupBodyObj.addProperty("message", messageFor.apply(0));
+        var warmupBody = warmupBodyObj.toString();
+        var resetPoint = utils.LatencyStats.captureResetPoint();
+        warmupRequest(client, baseUrl, sessionCookie, warmupBody, compress);
+        resetPoint.run();
+    }
+
+    /**
+     * Snapshot all tracked segments BEFORE workers fire so we can subtract
+     * at the end and get this-run-only deltas. The warmup resetPoint only
+     * drops the warmup contribution; histograms still carry whatever was
+     * there from prior runs / real chat traffic.
+     */
+    private static java.util.LinkedHashMap<String, long[]> snapshotTrackedSegments() {
         var segmentsBefore = new java.util.LinkedHashMap<String, long[]>();
         for (var seg : TRACKED_SEGMENTS) {
             segmentsBefore.put(seg, readSegmentSnapshot("web", seg));
         }
-        long persistMarker = System.currentTimeMillis();
+        return segmentsBefore;
+    }
 
-        var latch = new CountDownLatch(req.concurrency());
-        long startNs = System.nanoTime();
-        try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (int w = 0; w < req.concurrency(); w++) {
-                final int workerIdx = w;
-                exec.submit(() -> {
-                    // Captured from turn 1's SSE init event; subsequent turns
-                    // POST it back so the server resumes the same conversation
-                    // (loading prior messages, growing the assembled prompt,
-                    // hitting any provider-side prompt cache).
-                    Long conversationId = null;
-                    try {
-                        for (int t = 0; t < req.turns(); t++) {
-                            // Build per-turn body: pull message from prompts[t]
-                            // when in varied-prompts mode, replay userMessage
-                            // otherwise. conversationId is set from turn 2
-                            // onward so the server resumes the same row.
-                            var turnBodyObj = new com.google.gson.JsonObject();
-                            turnBodyObj.addProperty("agentId", agentId);
-                            turnBodyObj.addProperty("message", messageFor.apply(t));
-                            if (conversationId != null) {
-                                turnBodyObj.addProperty("conversationId", conversationId);
-                            }
-                            String turnBody = turnBodyObj.toString();
-                            long t0 = System.nanoTime();
-                            try {
-                                var builder = new okhttp3.Request.Builder()
-                                        .url(baseUrl + "/api/chat/stream")
-                                        .header("Cookie", sessionCookie)
-                                        .post(okhttp3.RequestBody.create(turnBody, JSON_MEDIA_TYPE));
-                                if (req.compress()) builder.header("Accept-Encoding", "br, gzip");
-                                var call = client.newCall(builder.build());
-                                call.timeout().timeout(120, java.util.concurrent.TimeUnit.SECONDS);
-                                try (var resp = call.execute()) {
-                                    if (resp.code() == 200 && resp.body() != null) {
-                                        // Stream-parse the SSE body to capture the
-                                        // server-assigned conversationId (init event)
-                                        // and client-side TTFT (first token frame).
-                                        // Drain to end so timing covers full round-trip.
-                                        var sse = consumeSseStream(resp.body(), t0);
-                                        if (conversationId == null && sse.conversationId() != null) {
-                                            conversationId = sse.conversationId();
-                                        }
-                                        if (sse.ttftMs() >= 0) {
-                                            turnTtftMs[workerIdx][t] = sse.ttftMs();
-                                        }
-                                        success.incrementAndGet();
-                                    } else {
-                                        if (resp.body() != null) resp.body().bytes();
-                                        error.incrementAndGet();
-                                    }
-                                }
-                            } catch (Exception _) {
-                                error.incrementAndGet();
-                            } finally {
-                                long d = (System.nanoTime() - t0) / 1_000_000L;
-                                totalDuration.addAndGet(d);
-                                updateMinMax(minDur, maxDur, d);
-                                turnDurationMs[workerIdx][t] = d;
-                            }
-                        }
-                    } finally {
-                        latch.countDown();
-                    }
-                });
-            }
-            latch.await();
-        }
-        long wall = (System.nanoTime() - startNs) / 1_000_000L;
-        int total = req.concurrency() * req.turns();
-
-        // Compute this-run deltas across all tracked segments. The histograms
-        // already aggregate per-request values, so sum_ms / count IS the
-        // arithmetic mean of per-request samples — what we want for dominant-
-        // segment diagnosis. Order is preserved (LinkedHashMap) so the
-        // breakdown renders in pipeline order rather than alphabetical.
+    /**
+     * Compute this-run deltas across all tracked segments. The histograms
+     * already aggregate per-request values, so sum_ms / count IS the
+     * arithmetic mean of per-request samples — what we want for dominant-
+     * segment diagnosis. Order is preserved (LinkedHashMap) so the
+     * breakdown renders in pipeline order rather than alphabetical.
+     */
+    private static java.util.ArrayList<SegmentBreakdown> computeSegmentDeltas(
+            java.util.LinkedHashMap<String, long[]> segmentsBefore) {
         var serverSegments = new java.util.ArrayList<SegmentBreakdown>(TRACKED_SEGMENTS.length);
         for (var seg : TRACKED_SEGMENTS) {
             var before = segmentsBefore.get(seg);
@@ -373,41 +350,142 @@ public final class LoadTestRunner {
             long meanMs = countDelta > 0 ? sumDelta / countDelta : 0;
             serverSegments.add(new SegmentBreakdown(seg, countDelta, sumDelta, meanMs));
         }
+        return serverSegments;
+    }
+
+    private static long extractServerTtftMs(java.util.List<SegmentBreakdown> serverSegments) {
         var ttftSeg = serverSegments.stream()
                 .filter(s -> "ttft".equals(s.segment())).findFirst().orElse(null);
-        long avgTtftMs = ttftSeg != null ? ttftSeg.meanMs() : 0;
+        return ttftSeg != null ? ttftSeg.meanMs() : 0;
+    }
 
-        // Pull avg completion tokens AND avg per-request tokens-per-second
-        // from the assistant messages this run persisted under the loadtest
-        // agent. Per-row tokens/s = completion / (durationMs/1000), then
-        // arithmetic mean across rows — this is the "average generation
-        // speed observed" metric, not the aggregate-throughput ratio
-        // (which biases toward longer responses).
-        var tokenStats = perRequestTokenStats(agentId, persistMarker);
-        long avgResponseTokens = tokenStats.avgVisibleTokens();
-        long avgReasoningTokens = tokenStats.avgReasoningTokens();
-        double avgTokensPerSec = tokenStats.avgRate();
+    /**
+     * Per-worker, per-turn metric arrays plus aggregate counters. Heap is
+     * trivial: at the configured ceiling (c=100, t=50) this is 100*50*8*2 =
+     * 80 KB. Arrays pre-filled with -1 so error/timeout slots are distinguishable
+     * from real 0-ms readings during aggregation.
+     */
+    private static final class RunMetrics {
+        final AtomicInteger success = new AtomicInteger();
+        final AtomicInteger error = new AtomicInteger();
+        final AtomicLong totalDuration = new AtomicLong();
+        final AtomicLong minDur = new AtomicLong(Long.MAX_VALUE);
+        final AtomicLong maxDur = new AtomicLong(Long.MIN_VALUE);
+        final long[][] turnTtftMs;
+        final long[][] turnDurationMs;
 
-        // Per-turn breakdown only when there's something to distribute over.
-        // Single-turn runs collapse to a 1-row table that adds noise, not signal.
-        var turnBuckets = req.turns() > 1
-                ? buildTurnBuckets(turnTtftMs, turnDurationMs)
-                : null;
+        RunMetrics(int concurrency, int turns) {
+            turnTtftMs = new long[concurrency][turns];
+            turnDurationMs = new long[concurrency][turns];
+            for (int w = 0; w < concurrency; w++) {
+                java.util.Arrays.fill(turnTtftMs[w], -1L);
+                java.util.Arrays.fill(turnDurationMs[w], -1L);
+            }
+        }
+    }
 
-        return new Result(
-                total,
-                success.get(),
-                error.get(),
-                wall,
-                total > 0 ? totalDuration.get() / total : 0,
-                minDur.get() == Long.MAX_VALUE ? 0 : minDur.get(),
-                maxDur.get() == Long.MIN_VALUE ? 0 : maxDur.get(),
-                avgTtftMs,
-                avgResponseTokens,
-                avgReasoningTokens,
-                avgTokensPerSec,
-                turnBuckets,
-                serverSegments);
+    private static void runConcurrentWorkers(Request req, String baseUrl, String sessionCookie,
+                                              long agentId, java.util.function.IntFunction<String> messageFor,
+                                              okhttp3.OkHttpClient client, RunMetrics metrics)
+            throws InterruptedException {
+        var latch = new CountDownLatch(req.concurrency());
+        try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int w = 0; w < req.concurrency(); w++) {
+                final int workerIdx = w;
+                exec.submit(() -> runWorker(workerIdx, req, baseUrl, sessionCookie,
+                        agentId, messageFor, client, metrics, latch));
+            }
+            latch.await();
+        }
+    }
+
+    private static void runWorker(int workerIdx, Request req, String baseUrl, String sessionCookie,
+                                   long agentId, java.util.function.IntFunction<String> messageFor,
+                                   okhttp3.OkHttpClient client, RunMetrics metrics, CountDownLatch latch) {
+        // Captured from turn 1's SSE init event; subsequent turns
+        // POST it back so the server resumes the same conversation
+        // (loading prior messages, growing the assembled prompt,
+        // hitting any provider-side prompt cache).
+        Long conversationId = null;
+        try {
+            for (int t = 0; t < req.turns(); t++) {
+                conversationId = runTurn(workerIdx, t, req, baseUrl, sessionCookie,
+                        agentId, messageFor, client, metrics, conversationId);
+            }
+        } finally {
+            latch.countDown();
+        }
+    }
+
+    /**
+     * Send one turn for a worker; updates metrics + returns the (possibly
+     * newly-discovered) conversationId for the next turn.
+     */
+    private static Long runTurn(int workerIdx, int t, Request req, String baseUrl, String sessionCookie,
+                                 long agentId, java.util.function.IntFunction<String> messageFor,
+                                 okhttp3.OkHttpClient client, RunMetrics metrics, Long conversationId) {
+        // Build per-turn body: pull message from prompts[t] when in
+        // varied-prompts mode, replay userMessage otherwise.
+        // conversationId is set from turn 2 onward so the server
+        // resumes the same row.
+        var turnBodyObj = new com.google.gson.JsonObject();
+        turnBodyObj.addProperty("agentId", agentId);
+        turnBodyObj.addProperty("message", messageFor.apply(t));
+        if (conversationId != null) {
+            turnBodyObj.addProperty("conversationId", conversationId);
+        }
+        String turnBody = turnBodyObj.toString();
+        long t0 = System.nanoTime();
+        Long newConversationId = conversationId;
+        try {
+            var resolved = executeChatRequest(client, baseUrl, sessionCookie, turnBody, req.compress(), t0);
+            if (resolved != null) {
+                if (newConversationId == null && resolved.conversationId() != null) {
+                    newConversationId = resolved.conversationId();
+                }
+                if (resolved.ttftMs() >= 0) {
+                    metrics.turnTtftMs[workerIdx][t] = resolved.ttftMs();
+                }
+                metrics.success.incrementAndGet();
+            } else {
+                metrics.error.incrementAndGet();
+            }
+        } catch (Exception _) {
+            metrics.error.incrementAndGet();
+        } finally {
+            long d = (System.nanoTime() - t0) / 1_000_000L;
+            metrics.totalDuration.addAndGet(d);
+            updateMinMax(metrics.minDur, metrics.maxDur, d);
+            metrics.turnDurationMs[workerIdx][t] = d;
+        }
+        return newConversationId;
+    }
+
+    /**
+     * Send one /api/chat/stream request and parse the SSE response. Returns
+     * the SSE result on 200, null on any non-200 status (caller increments
+     * error counter). Throws on socket errors / timeouts (caller catches).
+     */
+    private static SseConsumeResult executeChatRequest(okhttp3.OkHttpClient client, String baseUrl,
+                                                        String sessionCookie, String turnBody,
+                                                        boolean compress, long t0) throws java.io.IOException {
+        var builder = new okhttp3.Request.Builder()
+                .url(baseUrl + "/api/chat/stream")
+                .header("Cookie", sessionCookie)
+                .post(okhttp3.RequestBody.create(turnBody, JSON_MEDIA_TYPE));
+        if (compress) builder.header("Accept-Encoding", "br, gzip");
+        var call = client.newCall(builder.build());
+        call.timeout().timeout(120, java.util.concurrent.TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            if (resp.code() == 200 && resp.body() != null) {
+                // Stream-parse the SSE body to capture the server-assigned
+                // conversationId (init event) and client-side TTFT (first
+                // token frame). Drain to end so timing covers full round-trip.
+                return consumeSseStream(resp.body(), t0);
+            }
+            if (resp.body() != null) resp.body().bytes();
+            return null;
+        }
     }
 
     /**
@@ -449,16 +527,22 @@ public final class LoadTestRunner {
                     ttftMs = (System.nanoTime() - t0Nanos) / 1_000_000L;
                 }
                 if (conversationId == null && jsonStr.contains("\"type\":\"init\"")) {
-                    try {
-                        var json = com.google.gson.JsonParser.parseString(jsonStr).getAsJsonObject();
-                        if (json.has("conversationId")) {
-                            conversationId = json.get("conversationId").getAsLong();
-                        }
-                    } catch (Exception _) { /* malformed init — skip, keep draining */ }
+                    conversationId = tryParseConversationId(jsonStr);
                 }
             }
         }
         return new SseConsumeResult(conversationId, ttftMs);
+    }
+
+    /** Parse the conversationId out of an init frame; null on any parse error. */
+    private static Long tryParseConversationId(String jsonStr) {
+        try {
+            var json = com.google.gson.JsonParser.parseString(jsonStr).getAsJsonObject();
+            if (json.has("conversationId")) {
+                return json.get("conversationId").getAsLong();
+            }
+        } catch (Exception _) { /* malformed init — skip, keep draining */ }
+        return null;
     }
 
     /**
@@ -575,57 +659,77 @@ public final class LoadTestRunner {
      */
     private static TokenStats perRequestTokenStats(long agentId, long sinceMillis) {
         try {
-            return JPA.withTransaction("default", true, () -> {
-                @SuppressWarnings("unchecked")
-                var rows = (java.util.List<Object[]>) JPA.em().createQuery(
-                        "SELECT m.content, m.usageJson FROM Message m "
-                        + "WHERE m.conversation.agent.id = :aid "
-                        + "AND m.role = 'assistant' "
-                        + "AND m.usageJson IS NOT NULL "
-                        + "AND m.createdAt >= :since")
-                    .setParameter("aid", agentId)
-                    .setParameter("since", java.time.Instant.ofEpochMilli(sinceMillis))
-                    .getResultList();
-                long visSum = 0;
-                long reasonSum = 0;
-                long tokCount = 0;
-                double rateSum = 0.0;
-                long rateCount = 0;
-                for (var row : rows) {
-                    try {
-                        var content = (String) row[0];
-                        var json = (String) row[1];
-                        var obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
-                        long visible = approxTokens(content == null ? 0 : content.length());
-                        // completion - visible = "everything else the provider
-                        // billed for but didn't show the user" (true internal
-                        // work). More accurate than the provider's reasoning
-                        // field for models that under-report it.
-                        long completion = obj.has("completion") ? obj.get("completion").getAsLong() : 0L;
-                        long internal = Math.max(0L, completion - visible);
-                        visSum += visible;
-                        reasonSum += internal;
-                        tokCount++;
-                        if (visible > 0) {
-                            long denomMs;
-                            if (obj.has("streamBodyMs")) denomMs = obj.get("streamBodyMs").getAsLong();
-                            else if (obj.has("durationMs")) denomMs = obj.get("durationMs").getAsLong();
-                            else denomMs = 0L;
-                            if (denomMs > 0) {
-                                rateSum += (visible * 1000.0) / denomMs;
-                                rateCount++;
-                            }
-                        }
-                    } catch (Exception _) { /* skip malformed entries */ }
-                }
-                return new TokenStats(
-                        tokCount > 0 ? visSum / tokCount : 0L,
-                        tokCount > 0 ? reasonSum / tokCount : 0L,
-                        rateCount > 0 ? rateSum / rateCount : 0.0);
-            });
+            return JPA.withTransaction("default", true, () -> aggregateTokenStats(agentId, sinceMillis));
         } catch (Throwable _) {
             return new TokenStats(0L, 0L, 0.0);
         }
+    }
+
+    private static TokenStats aggregateTokenStats(long agentId, long sinceMillis) {
+        @SuppressWarnings("unchecked")
+        var rows = (java.util.List<Object[]>) JPA.em().createQuery(
+                "SELECT m.content, m.usageJson FROM Message m "
+                + "WHERE m.conversation.agent.id = :aid "
+                + "AND m.role = 'assistant' "
+                + "AND m.usageJson IS NOT NULL "
+                + "AND m.createdAt >= :since")
+            .setParameter("aid", agentId)
+            .setParameter("since", java.time.Instant.ofEpochMilli(sinceMillis))
+            .getResultList();
+        long visSum = 0;
+        long reasonSum = 0;
+        long tokCount = 0;
+        double rateSum = 0.0;
+        long rateCount = 0;
+        for (var row : rows) {
+            var parsed = parseTokenRow(row);
+            if (parsed == null) continue;
+            visSum += parsed.visible();
+            reasonSum += parsed.internal();
+            tokCount++;
+            if (parsed.rate() > 0) {
+                rateSum += parsed.rate();
+                rateCount++;
+            }
+        }
+        return new TokenStats(
+                tokCount > 0 ? visSum / tokCount : 0L,
+                tokCount > 0 ? reasonSum / tokCount : 0L,
+                rateCount > 0 ? rateSum / rateCount : 0.0);
+    }
+
+    /** Per-row token accounting extracted from a Message: visible tokens, "internal" (provider billed but not visible), and the per-second rate (0 when undefined). */
+    private record RowTokenStats(long visible, long internal, double rate) {}
+
+    private static RowTokenStats parseTokenRow(Object[] row) {
+        try {
+            var content = (String) row[0];
+            var json = (String) row[1];
+            var obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            long visible = approxTokens(content == null ? 0 : content.length());
+            // completion - visible = "everything else the provider
+            // billed for but didn't show the user" (true internal
+            // work). More accurate than the provider's reasoning
+            // field for models that under-report it.
+            long completion = obj.has("completion") ? obj.get("completion").getAsLong() : 0L;
+            long internal = Math.max(0L, completion - visible);
+            double rate = 0.0;
+            if (visible > 0) {
+                long denomMs = extractDenominatorMs(obj);
+                if (denomMs > 0) {
+                    rate = (visible * 1000.0) / denomMs;
+                }
+            }
+            return new RowTokenStats(visible, internal, rate);
+        } catch (Exception _) {
+            return null;
+        }
+    }
+
+    private static long extractDenominatorMs(com.google.gson.JsonObject obj) {
+        if (obj.has("streamBodyMs")) return obj.get("streamBodyMs").getAsLong();
+        if (obj.has("durationMs")) return obj.get("durationMs").getAsLong();
+        return 0L;
     }
 
     private static void warmupRequest(okhttp3.OkHttpClient client, String baseUrl,

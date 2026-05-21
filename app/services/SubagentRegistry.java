@@ -161,22 +161,7 @@ public final class SubagentRegistry {
         // dodge race with a near-simultaneous terminal write from the spawn
         // VT itself.
         if (existing.status != SubagentRun.Status.RUNNING) {
-            // Idempotent terminal case: still flip the flag + cancel the
-            // Future in case unregister hasn't fired yet, but DO NOT remove
-            // the entry — the running VT's own finally block calls
-            // unregister(), which is the canonical cleanup path. Removing
-            // here would race the AgentRunner checkpoint into reading
-            // isCancelled()=false and continuing the round.
-            var stale = ACTIVE.get(runId);
-            if (stale != null) {
-                stale.cancelRequested().set(true);
-                // mayInterruptIfRunning=false: the cooperative flag is the
-                // signal; we never want the JDK to interrupt the carrier
-                // thread (see class comment for the H2 corruption story).
-                stale.future().cancel(false);
-            }
-            return new KillResult(false, existing.status,
-                    "Run " + runId + " is already " + existing.status.name().toLowerCase() + ".");
+            return handleAlreadyTerminal(runId, existing.status);
         }
 
         // JCLAW-291: flip the cooperative-cancellation flag BEFORE the DB
@@ -192,13 +177,51 @@ public final class SubagentRegistry {
         // cleanup path; removing here would let the runner's checkpoint
         // miss the flag (it would see no entry → isCancelled returns false
         // → the round continues to LLM call).
+        flipCancelFlag(runId);
+
+        var updatedStatus = transitionToKilled(runId, reason);
+
+        if (updatedStatus == SubagentRun.Status.KILLED) {
+            emitKillEvent(runId, reason);
+            return new KillResult(true, SubagentRun.Status.KILLED,
+                    "Run " + runId + " killed.");
+        }
+
+        return new KillResult(false, updatedStatus,
+                "Run " + runId + " was already " + (updatedStatus != null ? updatedStatus.name().toLowerCase() : "gone")
+                        + " before kill landed.");
+    }
+
+    /**
+     * Idempotent terminal case: flip the flag + cancel the Future in case
+     * unregister hasn't fired yet, but DO NOT remove the entry — the running
+     * VT's own finally block calls unregister(), which is the canonical
+     * cleanup path. Removing here would race the AgentRunner checkpoint into
+     * reading isCancelled()=false and continuing the round.
+     */
+    private static KillResult handleAlreadyTerminal(Long runId, SubagentRun.Status status) {
+        var stale = ACTIVE.get(runId);
+        if (stale != null) {
+            stale.cancelRequested().set(true);
+            // mayInterruptIfRunning=false: the cooperative flag is the
+            // signal; we never want the JDK to interrupt the carrier
+            // thread (see class comment for the H2 corruption story).
+            stale.future().cancel(false);
+        }
+        return new KillResult(false, status,
+                "Run " + runId + " is already " + status.name().toLowerCase() + ".");
+    }
+
+    private static void flipCancelFlag(Long runId) {
         var entry = ACTIVE.get(runId);
         if (entry != null) {
             entry.cancelRequested().set(true);
             entry.future().cancel(false);
         }
+    }
 
-        var updatedStatus = Tx.run(() -> {
+    private static SubagentRun.Status transitionToKilled(Long runId, String reason) {
+        return Tx.run(() -> {
             var fresh = (SubagentRun) SubagentRun.findById(runId);
             if (fresh == null) return null;
             if (fresh.status != SubagentRun.Status.RUNNING) {
@@ -211,31 +234,27 @@ public final class SubagentRegistry {
             fresh.save();
             return SubagentRun.Status.KILLED;
         });
+    }
 
-        if (updatedStatus == SubagentRun.Status.KILLED) {
-            // Read names + mode/context outside the previous Tx to avoid
-            // dragging the event-emit into the critical path's transaction.
-            var meta = Tx.run(() -> {
-                var fresh = (SubagentRun) SubagentRun.findById(runId);
-                if (fresh == null) return null;
-                String parentName = fresh.parentAgent != null ? fresh.parentAgent.name : null;
-                String childName = fresh.childAgent != null ? fresh.childAgent.name : null;
-                return new String[]{parentName, childName};
-            });
-            String parentName = meta != null ? meta[0] : null;
-            String childName = meta != null ? meta[1] : null;
-            // mode/context not stored on SubagentRun — pass null. The typed
-            // EventLogger helper tolerates null fields gracefully.
-            EventLogger.recordSubagentKill(parentName, childName,
-                    String.valueOf(runId), null, null,
-                    reason != null && !reason.isBlank() ? reason : "Killed by operator");
-            return new KillResult(true, SubagentRun.Status.KILLED,
-                    "Run " + runId + " killed.");
-        }
-
-        return new KillResult(false, updatedStatus,
-                "Run " + runId + " was already " + (updatedStatus != null ? updatedStatus.name().toLowerCase() : "gone")
-                        + " before kill landed.");
+    /**
+     * Read names + mode/context outside the kill Tx to avoid dragging the
+     * event-emit into the critical path's transaction.
+     */
+    private static void emitKillEvent(Long runId, String reason) {
+        var meta = Tx.run(() -> {
+            var fresh = (SubagentRun) SubagentRun.findById(runId);
+            if (fresh == null) return null;
+            String parentName = fresh.parentAgent != null ? fresh.parentAgent.name : null;
+            String childName = fresh.childAgent != null ? fresh.childAgent.name : null;
+            return new String[]{parentName, childName};
+        });
+        String parentName = meta != null ? meta[0] : null;
+        String childName = meta != null ? meta[1] : null;
+        // mode/context not stored on SubagentRun — pass null. The typed
+        // EventLogger helper tolerates null fields gracefully.
+        EventLogger.recordSubagentKill(parentName, childName,
+                String.valueOf(runId), null, null,
+                reason != null && !reason.isBlank() ? reason : "Killed by operator");
     }
 
     /** Convenience for tests + callers that don't care about the parent agent

@@ -286,35 +286,39 @@ public final class TaskExecutionHandler {
     private static CompletionHandler<Void> scheduleCronNextCompletion(Task task) {
         return (executionComplete, executionOperations) -> {
             executionOperations.stop();
-            try {
-                Instant next = JClawCronUtils.nextExecution(task.cronExpression);
-                if (next == null) {
-                    EventLogger.warn("task",
-                            task.agent != null ? task.agent.name : null, null,
-                            "Task '%s' CRON expression '%s' yielded no next fire; pausing self-reschedule"
-                                    .formatted(task.name, task.cronExpression));
-                    return;
-                }
-                SchedulerClient client = schedulerClient;
-                if (client == null) {
-                    EventLogger.warn("task",
-                            task.agent != null ? task.agent.name : null, null,
-                            "SchedulerClient not wired; cannot reschedule Task '%s' next CRON fire"
-                                    .formatted(task.name));
-                    return;
-                }
-                String instanceId = task.id.toString();
-                client.schedule(new TaskInstance<>(TASK_NAME, instanceId), next);
-                EventLogger.info("task",
-                        task.agent != null ? task.agent.name : null, null,
-                        "Rescheduled Task '%s' next CRON fire for %s"
-                                .formatted(task.name, next));
-            } catch (Exception e) {
-                EventLogger.error("task",
-                        task.agent != null ? task.agent.name : null, null,
-                        "Failed to reschedule next CRON fire for Task '%s': %s"
-                                .formatted(task.name, e.getMessage()));
-            }
+            rescheduleCronFire(task);
         };
+    }
+
+    private static void rescheduleCronFire(Task task) {
+        try {
+            Instant next = JClawCronUtils.nextExecution(task.cronExpression);
+            if (next == null) {
+                EventLogger.warn("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "Task '%s' CRON expression '%s' yielded no next fire; pausing self-reschedule"
+                                .formatted(task.name, task.cronExpression));
+                return;
+            }
+            SchedulerClient client = schedulerClient;
+            if (client == null) {
+                EventLogger.warn("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "SchedulerClient not wired; cannot reschedule Task '%s' next CRON fire"
+                                .formatted(task.name));
+                return;
+            }
+            String instanceId = task.id.toString();
+            client.schedule(new TaskInstance<>(TASK_NAME, instanceId), next);
+            EventLogger.info("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "Rescheduled Task '%s' next CRON fire for %s"
+                            .formatted(task.name, next));
+        } catch (Exception e) {
+            EventLogger.error("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "Failed to reschedule next CRON fire for Task '%s': %s"
+                            .formatted(task.name, e.getMessage()));
+        }
     }
 }

@@ -148,27 +148,39 @@ public final class McpServerService {
     public static String composeConfigJson(McpServer.Transport transport, JsonObject body) {
         var cfg = new JsonObject();
         switch (transport) {
-            case STDIO -> {
-                if (body.has("command") && !body.get("command").isJsonNull()) {
-                    cfg.addProperty("command", body.get("command").getAsString());
-                }
-                if (body.has("args") && body.get("args").isJsonArray()) {
-                    cfg.add("args", body.get("args").getAsJsonArray());
-                }
-                if (body.has("env") && body.get("env").isJsonObject()) {
-                    cfg.add("env", body.get("env").getAsJsonObject());
-                }
-            }
-            case HTTP -> {
-                if (body.has("url") && !body.get("url").isJsonNull()) {
-                    cfg.addProperty("url", body.get("url").getAsString());
-                }
-                if (body.has("headers") && body.get("headers").isJsonObject()) {
-                    cfg.add("headers", body.get("headers").getAsJsonObject());
-                }
-            }
+            case STDIO -> composeStdioConfig(body, cfg);
+            case HTTP -> composeHttpConfig(body, cfg);
         }
         return cfg.toString();
+    }
+
+    private static void composeStdioConfig(JsonObject body, JsonObject cfg) {
+        copyStringProperty(body, cfg, "command");
+        copyJsonArray(body, cfg, "args");
+        copyJsonObject(body, cfg, "env");
+    }
+
+    private static void composeHttpConfig(JsonObject body, JsonObject cfg) {
+        copyStringProperty(body, cfg, "url");
+        copyJsonObject(body, cfg, "headers");
+    }
+
+    private static void copyStringProperty(JsonObject src, JsonObject dst, String key) {
+        if (src.has(key) && !src.get(key).isJsonNull()) {
+            dst.addProperty(key, src.get(key).getAsString());
+        }
+    }
+
+    private static void copyJsonArray(JsonObject src, JsonObject dst, String key) {
+        if (src.has(key) && src.get(key).isJsonArray()) {
+            dst.add(key, src.get(key).getAsJsonArray());
+        }
+    }
+
+    private static void copyJsonObject(JsonObject src, JsonObject dst, String key) {
+        if (src.has(key) && src.get(key).isJsonObject()) {
+            dst.add(key, src.get(key).getAsJsonObject());
+        }
     }
 
     /** Inverse of {@link #composeConfigJson}: parse the row's stored JSON

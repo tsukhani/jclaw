@@ -340,75 +340,98 @@ public class DocumentWriter {
             r.setColor("888888");
         }
 
-        private void visitTable(TableBlock table) {
-            // Count rows and columns.
-            int rows = 0;
-            int cols = 0;
-            for (Node section = table.getFirstChild(); section != null; section = section.getNext()) {
-                if (section instanceof TableHead || section instanceof TableBody) {
-                    for (Node row = section.getFirstChild(); row != null; row = row.getNext()) {
-                        if (row instanceof TableRow tr) {
-                            rows++;
-                            int c = 0;
-                            for (Node cell = tr.getFirstChild(); cell != null; cell = cell.getNext()) {
-                                if (cell instanceof TableCell) c++;
-                            }
-                            cols = Math.max(cols, c);
-                        }
-                    }
-                }
-            }
-            if (rows == 0 || cols == 0) return;
+        /** Row/column dimensions of a markdown table. */
+        private record TableDims(int rows, int cols) {}
 
-            XWPFTable xwpfTable = doc.createTable(rows, cols);
+        private void visitTable(TableBlock table) {
+            var dims = measureTable(table);
+            if (dims.rows() == 0 || dims.cols() == 0) return;
+
+            XWPFTable xwpfTable = doc.createTable(dims.rows(), dims.cols());
             // POI's createTable leaves the grid and cell widths unset, which makes
             // Word / LibreOffice fall back to minimum content width — long words end
             // up wrapping one character per line. Pin a sensible total width
             // (~6.25" of Letter/A4 content area at 1440 DXA/inch) and distribute
             // evenly across columns in both tblGrid and per-cell tcW.
-            final int totalWidth = TABLE_TOTAL_WIDTH;
-            final int colWidth = totalWidth / cols;
-            xwpfTable.setWidth(String.valueOf(totalWidth));
+            final int colWidth = TABLE_TOTAL_WIDTH / dims.cols();
+            applyTableGrid(xwpfTable, dims.cols(), colWidth);
+            populateTableCells(table, xwpfTable, colWidth);
+            // Trailing spacing paragraph.
+            doc.createParagraph();
+        }
+
+        private static TableDims measureTable(TableBlock table) {
+            int rows = 0;
+            int cols = 0;
+            for (Node section = table.getFirstChild(); section != null; section = section.getNext()) {
+                if (!(section instanceof TableHead) && !(section instanceof TableBody)) continue;
+                for (Node row = section.getFirstChild(); row != null; row = row.getNext()) {
+                    if (!(row instanceof TableRow tr)) continue;
+                    rows++;
+                    cols = Math.max(cols, countCells(tr));
+                }
+            }
+            return new TableDims(rows, cols);
+        }
+
+        private static int countCells(TableRow tr) {
+            int c = 0;
+            for (Node cell = tr.getFirstChild(); cell != null; cell = cell.getNext()) {
+                if (cell instanceof TableCell) c++;
+            }
+            return c;
+        }
+
+        private static void applyTableGrid(XWPFTable xwpfTable, int cols, int colWidth) {
+            xwpfTable.setWidth(String.valueOf(TABLE_TOTAL_WIDTH));
             var ctTbl = xwpfTable.getCTTbl();
             var ctGrid = ctTbl.getTblGrid() != null ? ctTbl.getTblGrid() : ctTbl.addNewTblGrid();
             while (ctGrid.sizeOfGridColArray() > 0) ctGrid.removeGridCol(0);
             for (int i = 0; i < cols; i++) {
                 ctGrid.addNewGridCol().setW(BigInteger.valueOf(colWidth));
             }
+        }
 
+        private void populateTableCells(TableBlock table, XWPFTable xwpfTable, int colWidth) {
             int rowIdx = 0;
             for (Node section = table.getFirstChild(); section != null; section = section.getNext()) {
+                if (!(section instanceof TableHead) && !(section instanceof TableBody)) continue;
                 boolean isHeader = section instanceof TableHead;
-                if (section instanceof TableHead || section instanceof TableBody) {
-                    for (Node row = section.getFirstChild(); row != null; row = row.getNext()) {
-                        if (!(row instanceof TableRow tr)) continue;
-                        int colIdx = 0;
-                        XWPFTableRow xwpfRow = xwpfTable.getRow(rowIdx);
-                        for (Node cell = tr.getFirstChild(); cell != null; cell = cell.getNext()) {
-                            if (!(cell instanceof TableCell tc)) continue;
-                            XWPFTableCell xwpfCell = xwpfRow.getCell(colIdx);
-                            // Fix the cell width too (tcW) — some viewers ignore
-                            // tblGrid unless individual cells also declare a width.
-                            var ctTc = xwpfCell.getCTTc();
-                            var tcPr = ctTc.getTcPr() != null ? ctTc.getTcPr() : ctTc.addNewTcPr();
-                            var tcW = tcPr.isSetTcW() ? tcPr.getTcW() : tcPr.addNewTcW();
-                            tcW.setW(BigInteger.valueOf(colWidth));
-                            tcW.setType(STTblWidth.DXA);
-
-                            // Remove the default paragraph that POI auto-adds.
-                            xwpfCell.removeParagraph(0);
-                            var cellP = xwpfCell.addParagraph();
-                            currentParagraph = cellP;
-                            emitInline(tc, isHeader, false, false, false, BODY_FONT_SIZE, null);
-                            currentParagraph = null;
-                            colIdx++;
-                        }
-                        rowIdx++;
-                    }
+                for (Node row = section.getFirstChild(); row != null; row = row.getNext()) {
+                    if (!(row instanceof TableRow tr)) continue;
+                    populateRowCells(tr, xwpfTable.getRow(rowIdx), isHeader, colWidth);
+                    rowIdx++;
                 }
             }
-            // Trailing spacing paragraph.
-            doc.createParagraph();
+        }
+
+        private void populateRowCells(TableRow tr, XWPFTableRow xwpfRow, boolean isHeader, int colWidth) {
+            int colIdx = 0;
+            for (Node cell = tr.getFirstChild(); cell != null; cell = cell.getNext()) {
+                if (!(cell instanceof TableCell tc)) continue;
+                XWPFTableCell xwpfCell = xwpfRow.getCell(colIdx);
+                applyCellWidth(xwpfCell, colWidth);
+
+                // Remove the default paragraph that POI auto-adds.
+                xwpfCell.removeParagraph(0);
+                var cellP = xwpfCell.addParagraph();
+                currentParagraph = cellP;
+                emitInline(tc, isHeader, false, false, false, BODY_FONT_SIZE, null);
+                currentParagraph = null;
+                colIdx++;
+            }
+        }
+
+        /**
+         * Fix the cell width (tcW) — some viewers ignore tblGrid unless
+         * individual cells also declare a width.
+         */
+        private static void applyCellWidth(XWPFTableCell xwpfCell, int colWidth) {
+            var ctTc = xwpfCell.getCTTc();
+            var tcPr = ctTc.getTcPr() != null ? ctTc.getTcPr() : ctTc.addNewTcPr();
+            var tcW = tcPr.isSetTcW() ? tcPr.getTcW() : tcPr.addNewTcW();
+            tcW.setW(BigInteger.valueOf(colWidth));
+            tcW.setType(STTblWidth.DXA);
         }
 
         /** Render a node's inline children into {@link #currentParagraph}. */

@@ -213,6 +213,45 @@ public class SkillPromotionService {
         EventLogger.info("skills", "Starting background promotion of '%s'".formatted(skillName));
 
         // ── Capability gate: only agents with skill-creator installed + enabled may promote ──
+        if (!checkCapabilityGate(skillName, agentId)) return;
+
+        // ── Hash-based noop check ──
+        if (skipForGlobalCheck(skillDir, skillName)) return;
+
+        // ── Malware scan ──
+        if (!checkMalwareScan(skillDir, skillName)) return;
+
+        // ── Read source files ──
+        var sourceTextFiles = new LinkedHashMap<String, String>();
+        var sourceBinaryFiles = new ArrayList<String>();
+        if (!readSourceFiles(skillDir, sourceTextFiles, sourceBinaryFiles)) return;
+
+        // ── Enforce directory structure ──
+        var textFiles = enforceTextFileStructure(sourceTextFiles);
+        var binaryFiles = enforceBinaryFileStructure(sourceBinaryFiles);
+
+        // ── Strip credentials ──
+        stripCredentialFiles(textFiles);
+
+        // ── Preserve SKILL.md frontmatter ──
+        SkillLoader.FrontmatterSplit originalSplit = stashFrontmatter(textFiles);
+
+        // ── LLM sanitization ──
+        var sanitized = sanitizeWithLlm(textFiles);
+
+        // ── Reinject frontmatter ──
+        reinjectFrontmatter(originalSplit, sanitized);
+
+        // ── Atomic write to global registry ──
+        writeToGlobalRegistry(skillDir, skillName, sanitized, binaryFiles);
+    }
+
+    /**
+     * Validate the requesting agent exists and has skill-creator installed.
+     * Returns true when promotion may proceed, false when refused (with the
+     * appropriate event-log + notification already emitted).
+     */
+    private static boolean checkCapabilityGate(String skillName, Long agentId) {
         // Note: Agent.findById() inherits from play.db.jpa.Model and returns JPABase;
         // explicit type is required so downstream callers see the Agent API.
         Agent agent = Agent.findById(agentId);
@@ -223,7 +262,7 @@ public class SkillPromotionService {
                     "skillName", skillName,
                     "error", "Requesting agent not found."
             ));
-            return;
+            return false;
         }
         if (!hasSkillCreatorCapability(agent)) {
             EventLogger.warn("skills",
@@ -234,54 +273,67 @@ public class SkillPromotionService {
                     "error", "Agent '" + agent.name + "' lacks the skill-creator capability. "
                             + "Install the skill-creator skill in this agent's workspace first."
             ));
-            return;
+            return false;
         }
+        return true;
+    }
 
-        // ── Hash-based noop check ──
+    /** Returns true when promotion should short-circuit (identical or downgrade). */
+    private static boolean skipForGlobalCheck(Path skillDir, String skillName) {
         var globalDirCheck = SkillLoader.globalSkillsPath().resolve(skillName);
-        if (Files.isDirectory(globalDirCheck) && Files.exists(globalDirCheck.resolve("SKILL.md"))) {
-            if (isIdenticalToGlobal(skillDir, globalDirCheck, skillName)) return;
-            if (isDowngrade(skillDir, globalDirCheck, skillName)) return;
+        if (!Files.isDirectory(globalDirCheck) || !Files.exists(globalDirCheck.resolve("SKILL.md"))) {
+            return false;
         }
+        return isIdenticalToGlobal(skillDir, globalDirCheck, skillName)
+                || isDowngrade(skillDir, globalDirCheck, skillName);
+    }
 
-        // ── Malware scan ──
+    /** Returns true when no malware was found; false (with notification emitted) when violations exist. */
+    private static boolean checkMalwareScan(Path skillDir, String skillName) {
         var violations = SkillBinaryScanner.scan(skillDir);
-        if (!violations.isEmpty()) {
-            EventLogger.warn("skills", "Promotion of '%s' refused: malware detected in %d file(s)"
-                    .formatted(skillName, violations.size()));
-            NotificationBus.publish("skill.promote_failed", Map.of(
-                    "skillName", skillName,
-                    "error", "Malware detected — " + formatViolations(violations)
-                            + ". Remove the flagged file(s) and try again."
-            ));
-            return;
-        }
+        if (violations.isEmpty()) return true;
+        EventLogger.warn("skills", "Promotion of '%s' refused: malware detected in %d file(s)"
+                .formatted(skillName, violations.size()));
+        NotificationBus.publish("skill.promote_failed", Map.of(
+                "skillName", skillName,
+                "error", "Malware detected — " + formatViolations(violations)
+                        + ". Remove the flagged file(s) and try again."
+        ));
+        return false;
+    }
 
-        // ── Read source files ──
-        var sourceTextFiles = new LinkedHashMap<String, String>();
-        var sourceBinaryFiles = new ArrayList<String>();
+    /** Returns false on IO error (with event-log emitted). */
+    private static boolean readSourceFiles(Path skillDir,
+                                            LinkedHashMap<String, String> textFiles,
+                                            ArrayList<String> binaryFiles) {
         try (var walk = Files.walk(skillDir)) {
             walk.filter(Files::isRegularFile).forEach(file -> {
                 var relName = skillDir.relativize(file).toString();
                 try {
                     if (SkillLoader.isTextFile(relName)) {
-                        sourceTextFiles.put(relName, Files.readString(file));
+                        textFiles.put(relName, Files.readString(file));
                     } else {
-                        sourceBinaryFiles.add(relName);
+                        binaryFiles.add(relName);
                     }
                 } catch (IOException _) {}
             });
+            return true;
         } catch (IOException e) {
             EventLogger.error("skills", "Failed to read skill files: " + e.getMessage());
-            return;
+            return false;
         }
+    }
 
-        // ── Enforce directory structure ──
+    private static LinkedHashMap<String, String> enforceTextFileStructure(
+            LinkedHashMap<String, String> sourceTextFiles) {
         var textFiles = new LinkedHashMap<String, String>();
         for (var entry : sourceTextFiles.entrySet()) {
             textFiles.put(enforceTextFilePath(entry.getKey()), entry.getValue());
         }
+        return textFiles;
+    }
 
+    private static ArrayList<String> enforceBinaryFileStructure(ArrayList<String> sourceBinaryFiles) {
         var binaryFiles = new ArrayList<String>();
         for (var binFile : sourceBinaryFiles) {
             if (binFile.startsWith("tools/")) {
@@ -292,36 +344,42 @@ public class SkillPromotionService {
                 EventLogger.info("skills", "Relocated binary '%s' → 'tools/%s'".formatted(binFile, fileName));
             }
         }
+        return binaryFiles;
+    }
 
-        // ── Strip credentials ──
+    private static void stripCredentialFiles(LinkedHashMap<String, String> textFiles) {
         for (var key : textFiles.keySet().stream().toList()) {
             if (key.startsWith("credentials/")) {
                 textFiles.put(key, stripCredentialsJson(textFiles.get(key)));
             }
         }
+    }
 
-        // ── Preserve SKILL.md frontmatter ──
-        SkillLoader.FrontmatterSplit originalSplit = null;
-        if (textFiles.containsKey("SKILL.md")) {
-            originalSplit = SkillLoader.splitFrontmatter(textFiles.get("SKILL.md"));
-            if (originalSplit.frontmatter() != null) {
-                textFiles.put("SKILL.md", originalSplit.body() != null ? originalSplit.body() : "");
-            }
+    /**
+     * Pull SKILL.md frontmatter out of the text payload and replace the entry
+     * with the body alone. Returns the original split so {@link #reinjectFrontmatter}
+     * can put it back after LLM sanitization. Returns null when SKILL.md is
+     * absent (no frontmatter to preserve).
+     */
+    private static SkillLoader.FrontmatterSplit stashFrontmatter(LinkedHashMap<String, String> textFiles) {
+        if (!textFiles.containsKey("SKILL.md")) return null;
+        var originalSplit = SkillLoader.splitFrontmatter(textFiles.get("SKILL.md"));
+        if (originalSplit.frontmatter() != null) {
+            textFiles.put("SKILL.md", originalSplit.body() != null ? originalSplit.body() : "");
         }
+        return originalSplit;
+    }
 
-        // ── LLM sanitization ──
-        var sanitized = sanitizeWithLlm(textFiles);
-
-        // ── Reinject frontmatter ──
-        if (originalSplit != null && originalSplit.frontmatter() != null && sanitized.containsKey("SKILL.md")) {
-            var sanitizedSplit = SkillLoader.splitFrontmatter(sanitized.get("SKILL.md"));
-            var sanitizedBody = sanitizedSplit.frontmatter() != null ? sanitizedSplit.body() : sanitized.get("SKILL.md");
-            if (sanitizedBody == null) sanitizedBody = "";
-            sanitized.put("SKILL.md", originalSplit.frontmatter() + sanitizedBody);
+    private static void reinjectFrontmatter(SkillLoader.FrontmatterSplit originalSplit,
+                                             LinkedHashMap<String, String> sanitized) {
+        if (originalSplit == null || originalSplit.frontmatter() == null
+                || !sanitized.containsKey("SKILL.md")) {
+            return;
         }
-
-        // ── Atomic write to global registry ──
-        writeToGlobalRegistry(skillDir, skillName, sanitized, binaryFiles);
+        var sanitizedSplit = SkillLoader.splitFrontmatter(sanitized.get("SKILL.md"));
+        var sanitizedBody = sanitizedSplit.frontmatter() != null ? sanitizedSplit.body() : sanitized.get("SKILL.md");
+        if (sanitizedBody == null) sanitizedBody = "";
+        sanitized.put("SKILL.md", originalSplit.frontmatter() + sanitizedBody);
     }
 
     // --- Internal helpers ---
@@ -390,41 +448,9 @@ public class SkillPromotionService {
             Files.createDirectories(stagingDir.resolve("credentials"));
             Files.createDirectories(stagingDir.resolve("tools"));
 
-            for (var entry : sanitized.entrySet()) {
-                var stagedFile = stagingDir.resolve(entry.getKey());
-                Files.createDirectories(stagedFile.getParent());
-                Files.writeString(stagedFile, entry.getValue());
-            }
-            for (var sourceName : binaryFiles) {
-                var source = skillDir.resolve(sourceName);
-                if (!Files.exists(source)) {
-                    var fileName = sourceName.contains("/") ? sourceName.substring(sourceName.lastIndexOf('/') + 1) : sourceName;
-                    try (var srcWalk = Files.walk(skillDir)) {
-                        source = srcWalk.filter(Files::isRegularFile)
-                                .filter(f -> f.getFileName().toString().equals(fileName))
-                                .findFirst().orElse(null);
-                    }
-                }
-                if (source != null && Files.exists(source)) {
-                    var staged = stagingDir.resolve(sourceName);
-                    Files.createDirectories(staged.getParent());
-                    Files.copy(source, staged, StandardCopyOption.REPLACE_EXISTING);
-                }
-            }
-
-            // Remove empty subdirectories from staging
-            for (var subDir : List.of("credentials", "tools")) {
-                var dir = stagingDir.resolve(subDir);
-                if (Files.isDirectory(dir)) {
-                    boolean empty;
-                    try (var entries = Files.list(dir)) {
-                        empty = entries.findAny().isEmpty();
-                    }
-                    if (empty) {
-                        Files.delete(dir);
-                    }
-                }
-            }
+            writeSanitizedTextFiles(stagingDir, sanitized);
+            stageBinaryFiles(skillDir, stagingDir, binaryFiles);
+            pruneEmptyConventionDirs(stagingDir);
 
             atomicSwap(targetDir, stagingDir, backupDir, replacingExisting);
             SkillLoader.clearCache();
@@ -452,6 +478,58 @@ public class SkillPromotionService {
                     "skillName", skillName,
                     "error", e.getMessage()
             ));
+        }
+    }
+
+    private static void writeSanitizedTextFiles(Path stagingDir,
+                                                 LinkedHashMap<String, String> sanitized) throws IOException {
+        for (var entry : sanitized.entrySet()) {
+            var stagedFile = stagingDir.resolve(entry.getKey());
+            Files.createDirectories(stagedFile.getParent());
+            Files.writeString(stagedFile, entry.getValue());
+        }
+    }
+
+    private static void stageBinaryFiles(Path skillDir, Path stagingDir,
+                                          List<String> binaryFiles) throws IOException {
+        for (var sourceName : binaryFiles) {
+            var source = resolveBinarySource(skillDir, sourceName);
+            if (source != null && Files.exists(source)) {
+                var staged = stagingDir.resolve(sourceName);
+                Files.createDirectories(staged.getParent());
+                Files.copy(source, staged, StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+    }
+
+    /**
+     * Resolve a binary's on-disk location. Tries the canonical path first; if
+     * the file isn't there (the structure enforcer relocated it into tools/),
+     * falls back to walking skillDir for any file with the same basename.
+     */
+    private static Path resolveBinarySource(Path skillDir, String sourceName) throws IOException {
+        var source = skillDir.resolve(sourceName);
+        if (Files.exists(source)) return source;
+        var fileName = sourceName.contains("/") ? sourceName.substring(sourceName.lastIndexOf('/') + 1) : sourceName;
+        try (var srcWalk = Files.walk(skillDir)) {
+            return srcWalk.filter(Files::isRegularFile)
+                    .filter(f -> f.getFileName().toString().equals(fileName))
+                    .findFirst().orElse(null);
+        }
+    }
+
+    /** Remove credentials/ and tools/ from staging when nothing was placed in them. */
+    private static void pruneEmptyConventionDirs(Path stagingDir) throws IOException {
+        for (var subDir : List.of("credentials", "tools")) {
+            var dir = stagingDir.resolve(subDir);
+            if (!Files.isDirectory(dir)) continue;
+            boolean empty;
+            try (var entries = Files.list(dir)) {
+                empty = entries.findAny().isEmpty();
+            }
+            if (empty) {
+                Files.delete(dir);
+            }
         }
     }
 

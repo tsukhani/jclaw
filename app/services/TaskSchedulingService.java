@@ -226,49 +226,55 @@ public final class TaskSchedulingService {
     }
 
     private static Instant computeFirstFire(Task task) {
-        switch (task.type) {
-            case IMMEDIATE:
-                return Instant.now();
-            case SCHEDULED:
-                if (task.scheduledAt == null) {
-                    EventLogger.warn("task",
-                            task.agent != null ? task.agent.name : null, null,
-                            "SCHEDULED Task '%s' has null scheduledAt; firing now as fallback"
-                                    .formatted(task.name));
-                    return Instant.now();
-                }
-                return task.scheduledAt;
-            case INTERVAL:
-                if (task.intervalSeconds == null || task.intervalSeconds <= 0) {
-                    EventLogger.warn("task",
-                            task.agent != null ? task.agent.name : null, null,
-                            "INTERVAL Task '%s' has invalid intervalSeconds (%s); skipping registration"
-                                    .formatted(task.name, task.intervalSeconds));
-                    return null;
-                }
-                // First fire happens immediately; subsequent fires
-                // self-reschedule from TaskExecutionHandler's
-                // CompletionHandler at {@code completionTime + intervalSeconds}.
-                return Instant.now();
-            case CRON:
-                if (task.cronExpression == null || task.cronExpression.isBlank()) {
-                    EventLogger.warn("task",
-                            task.agent != null ? task.agent.name : null, null,
-                            "CRON Task '%s' has blank cronExpression; skipping registration"
-                                    .formatted(task.name));
-                    return null;
-                }
-                Instant next = JClawCronUtils.nextExecution(task.cronExpression);
-                if (next == null) {
-                    EventLogger.warn("task",
-                            task.agent != null ? task.agent.name : null, null,
-                            "CRON Task '%s' expression '%s' yielded no next fire; skipping"
-                                    .formatted(task.name, task.cronExpression));
-                }
-                return next;
-            default:
-                return null;
+        return switch (task.type) {
+            case IMMEDIATE -> Instant.now();
+            case SCHEDULED -> computeScheduledFire(task);
+            case INTERVAL -> computeIntervalFirstFire(task);
+            case CRON -> computeCronFirstFire(task);
+        };
+    }
+
+    private static Instant computeScheduledFire(Task task) {
+        if (task.scheduledAt == null) {
+            EventLogger.warn("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "SCHEDULED Task '%s' has null scheduledAt; firing now as fallback"
+                            .formatted(task.name));
+            return Instant.now();
         }
+        return task.scheduledAt;
+    }
+
+    private static Instant computeIntervalFirstFire(Task task) {
+        if (task.intervalSeconds == null || task.intervalSeconds <= 0) {
+            EventLogger.warn("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "INTERVAL Task '%s' has invalid intervalSeconds (%s); skipping registration"
+                            .formatted(task.name, task.intervalSeconds));
+            return null;
+        }
+        // First fire happens immediately; subsequent fires
+        // self-reschedule from TaskExecutionHandler's
+        // CompletionHandler at {@code completionTime + intervalSeconds}.
+        return Instant.now();
+    }
+
+    private static Instant computeCronFirstFire(Task task) {
+        if (task.cronExpression == null || task.cronExpression.isBlank()) {
+            EventLogger.warn("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "CRON Task '%s' has blank cronExpression; skipping registration"
+                            .formatted(task.name));
+            return null;
+        }
+        Instant next = JClawCronUtils.nextExecution(task.cronExpression);
+        if (next == null) {
+            EventLogger.warn("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "CRON Task '%s' expression '%s' yielded no next fire; skipping"
+                            .formatted(task.name, task.cronExpression));
+        }
+        return next;
     }
 
     /**
