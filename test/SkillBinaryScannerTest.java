@@ -335,4 +335,30 @@ class SkillBinaryScannerTest extends UnitTest {
         assertNotEquals(mbVerdict.reason(), mdVerdict.reason(),
                 "Two independent scanners should return different reason strings");
     }
+
+    @Test
+    void scanReturnsEmptyForNullSkillDir() {
+        // First guard in scan: null skillDir → empty list, no work performed.
+        var result = SkillBinaryScanner.scan(null);
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void scanReturnsEmptyForEmptyScannerList() throws Exception {
+        // Empty active-scanner list path: even with binaries on disk, with
+        // no enabled scanners the walk is short-circuited.
+        var dir = java.nio.file.Files.createTempDirectory("scanner-no-active-");
+        try {
+            java.nio.file.Files.write(dir.resolve("payload.bin"), new byte[]{1, 2, 3, 4});
+            var result = SkillBinaryScanner.scan(dir, java.util.List.of());
+            assertTrue(result.isEmpty(),
+                    "no active scanners → no violations regardless of file contents");
+        } finally {
+            try (var walk = java.nio.file.Files.walk(dir)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                    try { java.nio.file.Files.deleteIfExists(p); } catch (Exception _) {}
+                });
+            }
+        }
+    }
 }
