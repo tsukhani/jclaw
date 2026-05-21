@@ -533,6 +533,31 @@ class AgentServiceTest extends UnitTest {
         }
     }
 
+    // --- writeWorkspaceFile branch coverage ---
+
+    @Test
+    void writeWorkspaceFileWritesContentToTargetPath() throws Exception {
+        AgentService.create("svc-write-ok", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile("svc-write-ok", "notes.txt", "hello");
+        var written = AgentService.workspacePath("svc-write-ok").resolve("notes.txt");
+        assertTrue(Files.exists(written));
+        assertEquals("hello", Files.readString(written));
+    }
+
+    @Test
+    void writeWorkspaceFileBlocksTraversalSilently() throws Exception {
+        AgentService.create("svc-write-trav", "openrouter", "gpt-4.1");
+        // The SecurityException catch logs a warn and returns without
+        // writing. We verify no file lands outside the workspace.
+        AgentService.writeWorkspaceFile("svc-write-trav", "../escaped.txt", "content");
+        var ws = AgentService.workspacePath("svc-write-trav");
+        // The legitimate workspace dir gets created lazily, but no escaped.txt
+        // should exist at its parent.
+        var escapeTarget = ws.getParent().resolve("escaped.txt");
+        assertFalse(Files.exists(escapeTarget),
+                "escape attempt must not produce a file at: " + escapeTarget);
+    }
+
     // --- syncEnabledStates branch coverage ---
 
     @Test
