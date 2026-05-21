@@ -180,4 +180,46 @@ class MemoryStoreTest extends UnitTest {
         assertEquals(0, removed);
         assertEquals(1, store.list("agent-keep").size());
     }
+
+    @Test
+    void factoryFallsBackToJpaForUnknownBackend() {
+        // Set memory.backend to a name no switch arm handles → default
+        // branch logs an error and yields JpaMemoryStore.
+        var prior = play.Play.configuration.getProperty("memory.backend");
+        play.Play.configuration.setProperty("memory.backend", "definitely-not-a-real-backend");
+        try {
+            MemoryStoreFactory.reset();
+            var store = MemoryStoreFactory.get();
+            assertInstanceOf(JpaMemoryStore.class, store);
+        } finally {
+            if (prior == null) {
+                play.Play.configuration.remove("memory.backend");
+            } else {
+                play.Play.configuration.setProperty("memory.backend", prior);
+            }
+            MemoryStoreFactory.reset();
+        }
+    }
+
+    @Test
+    void factoryFallsBackToJpaWhenNeo4jDriverMissing() {
+        // memory.backend=neo4j: factory tries Class.forName on the Neo4j
+        // driver. In the test JVM the driver is not on the classpath, so
+        // the ClassNotFoundException catch fires and falls back to JPA.
+        var prior = play.Play.configuration.getProperty("memory.backend");
+        play.Play.configuration.setProperty("memory.backend", "neo4j");
+        try {
+            MemoryStoreFactory.reset();
+            var store = MemoryStoreFactory.get();
+            assertInstanceOf(JpaMemoryStore.class, store,
+                    "missing Neo4j driver must yield a JpaMemoryStore fallback");
+        } finally {
+            if (prior == null) {
+                play.Play.configuration.remove("memory.backend");
+            } else {
+                play.Play.configuration.setProperty("memory.backend", prior);
+            }
+            MemoryStoreFactory.reset();
+        }
+    }
 }
