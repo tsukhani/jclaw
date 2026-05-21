@@ -21,24 +21,29 @@ public record CallToolResult(String content, boolean isError) {
             JsonArray parts = obj.getAsJsonArray("content");
             for (var part : parts) {
                 if (!part.isJsonObject()) continue;
-                var p = part.getAsJsonObject();
-                var type = p.has("type") ? p.get("type").getAsString() : "";
-                switch (type) {
-                    case "text" -> sb.append(p.has("text") ? p.get("text").getAsString() : "");
-                    case "image" -> sb.append("[image: ")
-                            .append(p.has("mimeType") ? p.get("mimeType").getAsString() : "unknown")
-                            .append("]");
-                    case "resource" -> {
-                        var res = p.has("resource") && p.get("resource").isJsonObject()
-                                ? p.getAsJsonObject("resource") : null;
-                        sb.append("[resource: ")
-                                .append(res != null && res.has("uri") ? res.get("uri").getAsString() : "?")
-                                .append("]");
-                    }
-                    default -> sb.append(p.toString());
-                }
+                appendPart(sb, part.getAsJsonObject());
             }
         }
         return new CallToolResult(sb.toString(), isError);
+    }
+
+    private static void appendPart(StringBuilder sb, JsonObject p) {
+        var type = p.has("type") ? p.get("type").getAsString() : "";
+        switch (type) {
+            case "text" -> sb.append(p.has("text") ? p.get("text").getAsString() : "");
+            case "image" -> sb.append("[image: ")
+                    .append(p.has("mimeType") ? p.get("mimeType").getAsString() : "unknown")
+                    .append("]");
+            case "resource" -> appendResource(sb, p);
+            default -> sb.append(p.toString());
+        }
+    }
+
+    private static void appendResource(StringBuilder sb, JsonObject p) {
+        var res = p.has("resource") && p.get("resource").isJsonObject()
+                ? p.getAsJsonObject("resource") : null;
+        sb.append("[resource: ")
+                .append(res != null && res.has("uri") ? res.get("uri").getAsString() : "?")
+                .append("]");
     }
 }

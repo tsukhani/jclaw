@@ -321,51 +321,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         var toolCallAccumulator = new java.util.HashMap<Integer, ToolCallBuilder>();
 
         chatStream(model, messages, tools,
-                chunk -> {
-                    if (chunk.usage() != null) {
-                        accumulator.usage = chunk.usage();
-                        if (chunk.usage().reasoningTokens() > 0) {
-                            accumulator.reasoningDetected = true;
-                            accumulator.reasoningTokens = chunk.usage().reasoningTokens();
-                        }
-                    }
-                    for (var choice : chunk.choices()) {
-                        var delta = choice.delta();
-                        // Skip empty-content chunks: OpenAI-compatible providers
-                        // (e.g. OpenRouter routing Gemini-3-flash-preview, Kimi K2.5)
-                        // emit `content: ""` interleaved with every reasoning chunk
-                        // because the schema requires the field. Counting these as
-                        // real content stamps firstContentNanos at the same instant
-                        // as reasoningStartNanos → reasoningDurationMs collapses to 0
-                        // → the frontend renders the generic "Thinking" label after
-                        // reload. Mirrors the frontend's `if (!event.content) continue`
-                        // guard at chat.vue:1116.
-                        if (delta.content() != null && !delta.content().isEmpty()) {
-                            accumulator.noteFirstContentChunk();
-                            contentBuilder.append(delta.content());
-                            onToken.accept(delta.content());
-                        }
-                        // Delegate reasoning extraction to the provider subclass.
-                        // We buffer the text even when the consumer doesn't supply an
-                        // onReasoning callback, because the length feeds the token-count
-                        // estimate for providers (e.g. Ollama Cloud on glm-5.1) that
-                        // stream reasoning but omit reasoning_tokens from usage.
-                        var reasoningText = extractReasoningFromDelta(delta);
-                        if (reasoningText != null) {
-                            accumulator.reasoningDetected = true;
-                            accumulator.appendReasoningText(reasoningText);
-                            if (onReasoning != null) onReasoning.accept(reasoningText);
-                        }
-                        // JCLAW-120: Gemini-via-Ollama-Cloud streams parallel
-                        // tool calls all at the same index. mergeToolCallChunks
-                        // detects id / function-name mismatches and allocates
-                        // fresh slots so parallel calls stay distinct.
-                        mergeToolCallChunks(delta.toolCalls(), toolCallAccumulator);
-                        if (choice.finishReason() != null) {
-                            accumulator.finishReason = choice.finishReason();
-                        }
-                    }
-                },
+                chunk -> accumulateChunk(chunk, accumulator, contentBuilder, toolCallAccumulator,
+                        onToken, onReasoning),
                 () -> {
                     accumulator.content = contentBuilder.toString();
                     accumulator.toolCalls = toolCallAccumulator.values().stream()
@@ -379,6 +336,67 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                 maxTokens, thinkingMode, channel);
 
         return accumulator;
+    }
+
+    private void accumulateChunk(ChatCompletionChunk chunk,
+                                 StreamAccumulator accumulator,
+                                 StringBuilder contentBuilder,
+                                 java.util.Map<Integer, ToolCallBuilder> toolCallAccumulator,
+                                 Consumer<String> onToken,
+                                 Consumer<String> onReasoning) {
+        if (chunk.usage() != null) {
+            accumulator.usage = chunk.usage();
+            if (chunk.usage().reasoningTokens() > 0) {
+                accumulator.reasoningDetected = true;
+                accumulator.reasoningTokens = chunk.usage().reasoningTokens();
+            }
+        }
+        for (var choice : chunk.choices()) {
+            applyChoiceDelta(choice, accumulator, contentBuilder, toolCallAccumulator,
+                    onToken, onReasoning);
+        }
+    }
+
+    private void applyChoiceDelta(ChunkChoice choice,
+                                  StreamAccumulator accumulator,
+                                  StringBuilder contentBuilder,
+                                  java.util.Map<Integer, ToolCallBuilder> toolCallAccumulator,
+                                  Consumer<String> onToken,
+                                  Consumer<String> onReasoning) {
+        var delta = choice.delta();
+        // Skip empty-content chunks: OpenAI-compatible providers
+        // (e.g. OpenRouter routing Gemini-3-flash-preview, Kimi K2.5)
+        // emit `content: ""` interleaved with every reasoning chunk
+        // because the schema requires the field. Counting these as
+        // real content stamps firstContentNanos at the same instant
+        // as reasoningStartNanos → reasoningDurationMs collapses to 0
+        // → the frontend renders the generic "Thinking" label after
+        // reload. Mirrors the frontend's `if (!event.content) continue`
+        // guard at chat.vue:1116.
+        if (delta.content() != null && !delta.content().isEmpty()) {
+            accumulator.noteFirstContentChunk();
+            contentBuilder.append(delta.content());
+            onToken.accept(delta.content());
+        }
+        // Delegate reasoning extraction to the provider subclass.
+        // We buffer the text even when the consumer doesn't supply an
+        // onReasoning callback, because the length feeds the token-count
+        // estimate for providers (e.g. Ollama Cloud on glm-5.1) that
+        // stream reasoning but omit reasoning_tokens from usage.
+        var reasoningText = extractReasoningFromDelta(delta);
+        if (reasoningText != null) {
+            accumulator.reasoningDetected = true;
+            accumulator.appendReasoningText(reasoningText);
+            if (onReasoning != null) onReasoning.accept(reasoningText);
+        }
+        // JCLAW-120: Gemini-via-Ollama-Cloud streams parallel
+        // tool calls all at the same index. mergeToolCallChunks
+        // detects id / function-name mismatches and allocates
+        // fresh slots so parallel calls stay distinct.
+        mergeToolCallChunks(delta.toolCalls(), toolCallAccumulator);
+        if (choice.finishReason() != null) {
+            accumulator.finishReason = choice.finishReason();
+        }
     }
 
     // ─── Embeddings ──────────────────────────────────────────────────────
@@ -542,26 +560,9 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
-                var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout, channel);
-
-                if (reply.statusCode() == 200) return reply.body();
-
-                if (reply.statusCode() == 429) {
-                    var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
-                    var retryAfter = reply.retryAfterSeconds().orElse(defaultBackoff);
-                    EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(config.name(), retryAfter));
-                    parkForMillis(retryAfter * 1000);
-                    continue;
-                }
-
-                if (reply.statusCode() >= 400 && reply.statusCode() < 500) {
-                    throw new LlmException("HTTP %d from %s: %s".formatted(
-                            reply.statusCode(), config.name(), reply.body()));
-                }
-
-                lastException = new LlmException("HTTP %d from %s: %s".formatted(
-                        reply.statusCode(), config.name(), reply.body()));
-
+                var outcome = attemptRequest(uri, auth, json, timeout, channel, attempt);
+                if (outcome.body() != null) return outcome.body();
+                if (outcome.error() != null) lastException = outcome.error();
             } catch (LlmException e) {
                 throw e;
             } catch (InterruptedException ie) {
@@ -572,19 +573,54 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             }
 
             if (attempt < MAX_RETRIES) {
-                try {
-                    var backoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
-                    EventLogger.warn("llm", "Retry %d/%d for %s after %dms"
-                            .formatted(attempt + 1, MAX_RETRIES, config.name(), backoff));
-                    parkForMillis(backoff);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new LlmException("Interrupted during retry", ie);
-                }
+                backoffBeforeRetry(attempt);
             }
         }
 
         throw new LlmException("All retries exhausted for " + config.name(), lastException);
+    }
+
+    /** Outcome of a single attempt: either {@code body} is a success body, or {@code error} carries a retryable error. */
+    private record AttemptOutcome(String body, Exception error) {}
+
+    /**
+     * Execute one request attempt. Returns a body on 200, parks for retry-after on 429
+     * (and returns an empty outcome so the caller advances), throws on 4xx, or returns
+     * an error outcome on 5xx for the caller to retry.
+     */
+    private AttemptOutcome attemptRequest(URI uri, String auth, String json, Duration timeout,
+                                          String channel, int attempt) throws InterruptedException, java.io.IOException {
+        var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout, channel);
+
+        if (reply.statusCode() == 200) return new AttemptOutcome(reply.body(), null);
+
+        if (reply.statusCode() == 429) {
+            var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
+            var retryAfter = reply.retryAfterSeconds().orElse(defaultBackoff);
+            EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(config.name(), retryAfter));
+            parkForMillis(retryAfter * 1000);
+            return new AttemptOutcome(null, null);
+        }
+
+        if (reply.statusCode() >= 400 && reply.statusCode() < 500) {
+            throw new LlmException("HTTP %d from %s: %s".formatted(
+                    reply.statusCode(), config.name(), reply.body()));
+        }
+
+        return new AttemptOutcome(null, new LlmException("HTTP %d from %s: %s".formatted(
+                reply.statusCode(), config.name(), reply.body())));
+    }
+
+    private void backoffBeforeRetry(int attempt) {
+        try {
+            var backoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
+            EventLogger.warn("llm", "Retry %d/%d for %s after %dms"
+                    .formatted(attempt + 1, MAX_RETRIES, config.name(), backoff));
+            parkForMillis(backoff);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new LlmException("Interrupted during retry", ie);
+        }
     }
 
     private static void parkForMillis(long delayMs) throws InterruptedException {

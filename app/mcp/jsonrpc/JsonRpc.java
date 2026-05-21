@@ -118,17 +118,21 @@ public final class JsonRpc {
                     root.has(KEY_PARAMS) ? root.get(KEY_PARAMS) : null);
         }
         if (hasResult || hasError) {
-            Object id = hasId ? decodeId(root.get(KEY_ID)) : null;
-            JsonElement result = hasResult ? root.get(KEY_RESULT) : null;
-            Error err = null;
-            if (hasError) {
-                var e = root.getAsJsonObject(KEY_ERROR);
-                err = new Error(e.get("code").getAsInt(), e.get("message").getAsString(),
-                        e.has(KEY_DATA) ? e.get(KEY_DATA) : null);
-            }
-            return new Response(id, result, err);
+            return decodeResponse(root, hasId, hasResult, hasError);
         }
         throw new IllegalArgumentException("Not a recognizable JSON-RPC message: " + wire);
+    }
+
+    private static Response decodeResponse(JsonObject root, boolean hasId, boolean hasResult, boolean hasError) {
+        Object id = hasId ? decodeId(root.get(KEY_ID)) : null;
+        JsonElement result = hasResult ? root.get(KEY_RESULT) : null;
+        Error err = hasError ? decodeError(root.getAsJsonObject(KEY_ERROR)) : null;
+        return new Response(id, result, err);
+    }
+
+    private static Error decodeError(JsonObject e) {
+        return new Error(e.get("code").getAsInt(), e.get("message").getAsString(),
+                e.has(KEY_DATA) ? e.get(KEY_DATA) : null);
     }
 
     private static JsonElement idJson(Object id) {

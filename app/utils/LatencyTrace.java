@@ -124,10 +124,18 @@ public final class LatencyTrace {
         LatencyStats.record(channel, "total", nsToMs(endNs - startNs));
         LatencyStats.record(channel, "prologue", nsToMs(prologueDone - startNs));
 
-        // Prologue sub-segments — missing marks are OK, we just skip that sub-bucket.
-        // The sequence is: startNs → request_parsed → conv_resolved → prompt_assembled → prologue_done.
-        // Each emitted sub-segment measures the gap between adjacent marks so they sum back
-        // to `prologue` (modulo integer ms rounding).
+        recordPrologueSubSegments(prologueDone);
+        recordStreamSegments(prologueDone);
+        recordToolSegments();
+    }
+
+    /**
+     * Prologue sub-segments — missing marks are OK, we just skip that sub-bucket.
+     * The sequence is: startNs → request_parsed → conv_resolved → prompt_assembled → prologue_done.
+     * Each emitted sub-segment measures the gap between adjacent marks so they sum back
+     * to {@code prologue} (modulo integer ms rounding).
+     */
+    private void recordPrologueSubSegments(long prologueDone) {
         Long requestParsed = marks.get(PROLOGUE_REQUEST_PARSED);
         Long convResolved = marks.get(PROLOGUE_CONV_RESOLVED);
         Long promptAssembled = marks.get(PROLOGUE_PROMPT_ASSEMBLED);
@@ -144,7 +152,25 @@ public final class LatencyTrace {
         if (promptAssembled != null) {
             LatencyStats.record(channel, "prologue_tools", nsToMs(prologueDone - promptAssembled));
         }
+    }
 
+    /**
+     * Stream-phase segments: ttft, stream_body, persist, terminal_tail.
+     *
+     * <p>{@code persist} is no longer derived here — it's recorded directly by AgentRunner
+     * because it now runs AFTER the terminal SSE frame (off the user-visible path),
+     * and trace.end() fires as soon as the terminal SSE write returns. The legacy
+     * PERSIST_DONE constant is retained so older callers / tests that still set it
+     * can produce a persist sample via this path.
+     *
+     * <p>{@code terminal_tail} measures the gap between stream_body_end and the terminal
+     * SSE frame being written to the response — that is, the wall time for the
+     * final usage-logging callbacks, onStatus + onComplete dispatch, and the
+     * terminal writeChunk itself. This is part of {@code total} (pre-refactor it was
+     * hidden behind the DB persist); surfacing it lets us confirm the post-stream
+     * emit path stays cheap.
+     */
+    private void recordStreamSegments(long prologueDone) {
         Long firstToken = marks.get(FIRST_TOKEN);
         if (firstToken != null) {
             LatencyStats.record(channel, "ttft", nsToMs(firstToken - prologueDone));
@@ -155,27 +181,18 @@ public final class LatencyTrace {
             LatencyStats.record(channel, "stream_body", nsToMs(streamBodyEnd - firstToken));
         }
 
-        // `persist` is no longer derived here — it's recorded directly by AgentRunner
-        // because it now runs AFTER the terminal SSE frame (off the user-visible path),
-        // and trace.end() fires as soon as the terminal SSE write returns. The legacy
-        // PERSIST_DONE constant is retained so older callers / tests that still set it
-        // can produce a persist sample via this path.
         Long persistDone = marks.get(PERSIST_DONE);
         if (streamBodyEnd != null && persistDone != null) {
             LatencyStats.record(channel, "persist", nsToMs(persistDone - streamBodyEnd));
         }
 
-        // `terminal_tail` measures the gap between stream_body_end and the terminal
-        // SSE frame being written to the response — that is, the wall time for the
-        // final usage-logging callbacks, onStatus + onComplete dispatch, and the
-        // terminal writeChunk itself. This is part of `total` (pre-refactor it was
-        // hidden behind the DB persist); surfacing it lets us confirm the post-stream
-        // emit path stays cheap.
         Long terminalSent = marks.get(TERMINAL_SENT);
         if (streamBodyEnd != null && terminalSent != null) {
             LatencyStats.record(channel, "terminal_tail", nsToMs(terminalSent - streamBodyEnd));
         }
+    }
 
+    private void recordToolSegments() {
         if (toolRoundCount.get() > 0) {
             LatencyStats.record(channel, "tool_exec", toolExecMs.get());
             LatencyStats.record(channel, "tool_round_count", toolRoundCount.get());

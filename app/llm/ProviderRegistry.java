@@ -96,49 +96,62 @@ public final class ProviderRegistry {
         // LinkedHashMap preserves insertion order so getPrimary()/getSecondary() are deterministic.
         var newCache = new LinkedHashMap<String, LlmProvider>();
         for (var name : providerNames) {
-            var baseUrl = configMap.get("provider." + name + ".baseUrl");
-            var apiKey = configMap.get("provider." + name + ".apiKey");
-            if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) continue;
-
-            var modelsJson = configMap.get("provider." + name + ".models");
-            List<ModelInfo> models = List.of();
-            if (modelsJson != null && !modelsJson.isBlank()) {
-                try {
-                    models = gson.fromJson(modelsJson, new TypeToken<List<ModelInfo>>() {}.getType());
-                } catch (Exception _) {
-                    // Skip malformed model JSON
-                }
-            }
-
-            // JCLAW-280: payment modality + monthly subscription price.
-            // Defaults derive from the provider's supported-modality set,
-            // so a fresh-install Ollama-Cloud row is SUBSCRIPTION without
-            // any explicit config row; OpenAI defaults to PER_TOKEN; and
-            // free-at-point-of-use providers (ollama-local, lm-studio)
-            // get an empty supported set so the registry leaves modality
-            // at its safe PER_TOKEN default — the cost path treats them
-            // as free-tier regardless.
-            var modalityRaw = configMap.get("provider." + name + ".paymentModality");
-            var modality = PaymentModality.parseOrDefault(modalityRaw, name);
-            var subscriptionRaw = configMap.get("provider." + name + ".subscriptionMonthlyUsd");
-            BigDecimal subscriptionMonthly = BigDecimal.ZERO;
-            if (subscriptionRaw != null && !subscriptionRaw.isBlank()) {
-                try {
-                    subscriptionMonthly = new BigDecimal(subscriptionRaw.trim());
-                    if (subscriptionMonthly.signum() < 0) subscriptionMonthly = BigDecimal.ZERO;
-                } catch (NumberFormatException _) {
-                    // Malformed price — fall back to zero rather than refuse the provider.
-                }
-            }
-
-            var config = new ProviderConfig(name, baseUrl, apiKey, models, modality, subscriptionMonthly);
-            newCache.put(name, LlmProvider.forConfig(config));
+            var config = buildProviderConfig(name, configMap);
+            if (config != null) newCache.put(name, LlmProvider.forConfig(config));
         }
 
         // Only hold the lock for the atomic pointer swap
         synchronized (refreshLock) {
             cache = Collections.unmodifiableMap(newCache);
             lastRefresh = System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * Assemble a {@link ProviderConfig} for {@code name} from {@code configMap},
+     * or return {@code null} when required credentials are missing.
+     */
+    private static ProviderConfig buildProviderConfig(String name, HashMap<String, String> configMap) {
+        var baseUrl = configMap.get("provider." + name + ".baseUrl");
+        var apiKey = configMap.get("provider." + name + ".apiKey");
+        if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) return null;
+
+        var models = parseModels(configMap.get("provider." + name + ".models"));
+
+        // JCLAW-280: payment modality + monthly subscription price.
+        // Defaults derive from the provider's supported-modality set,
+        // so a fresh-install Ollama-Cloud row is SUBSCRIPTION without
+        // any explicit config row; OpenAI defaults to PER_TOKEN; and
+        // free-at-point-of-use providers (ollama-local, lm-studio)
+        // get an empty supported set so the registry leaves modality
+        // at its safe PER_TOKEN default — the cost path treats them
+        // as free-tier regardless.
+        var modalityRaw = configMap.get("provider." + name + ".paymentModality");
+        var modality = PaymentModality.parseOrDefault(modalityRaw, name);
+        var subscriptionMonthly = parseSubscriptionMonthly(
+                configMap.get("provider." + name + ".subscriptionMonthlyUsd"));
+
+        return new ProviderConfig(name, baseUrl, apiKey, models, modality, subscriptionMonthly);
+    }
+
+    private static List<ModelInfo> parseModels(String modelsJson) {
+        if (modelsJson == null || modelsJson.isBlank()) return List.of();
+        try {
+            return gson.fromJson(modelsJson, new TypeToken<List<ModelInfo>>() {}.getType());
+        } catch (Exception _) {
+            // Skip malformed model JSON
+            return List.of();
+        }
+    }
+
+    private static BigDecimal parseSubscriptionMonthly(String raw) {
+        if (raw == null || raw.isBlank()) return BigDecimal.ZERO;
+        try {
+            var v = new BigDecimal(raw.trim());
+            return v.signum() < 0 ? BigDecimal.ZERO : v;
+        } catch (NumberFormatException _) {
+            // Malformed price — fall back to zero rather than refuse the provider.
+            return BigDecimal.ZERO;
         }
     }
 

@@ -144,22 +144,30 @@ public final class McpStreamableHttpTransport implements McpTransport {
             var line = source.readUtf8Line();
             if (line == null) break;  // server closed
             if (line.isEmpty()) {
-                if (data.length() > 0) {
-                    dispatchSseEvent(data.toString());
-                    data.setLength(0);
-                }
+                flushSseEvent(data);
                 continue;
             }
             if (line.startsWith("data:")) {
-                var value = line.substring(5);
-                if (value.startsWith(" ")) value = value.substring(1);
-                if (data.length() > 0) data.append('\n');
-                data.append(value);
+                appendSseDataLine(data, line);
             }
             // event:, id:, retry:, comment lines (':...') — all ignored for MCP
         }
         // EOF without trailing blank line: dispatch any buffered event.
         if (data.length() > 0) dispatchSseEvent(data.toString());
+    }
+
+    private void flushSseEvent(StringBuilder data) {
+        if (data.length() > 0) {
+            dispatchSseEvent(data.toString());
+            data.setLength(0);
+        }
+    }
+
+    private static void appendSseDataLine(StringBuilder data, String line) {
+        var value = line.substring(5);
+        if (value.startsWith(" ")) value = value.substring(1);
+        if (data.length() > 0) data.append('\n');
+        data.append(value);
     }
 
     private void dispatchSseEvent(String payload) {

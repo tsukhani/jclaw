@@ -420,57 +420,61 @@ public final class Commands {
      */
     private static Result executeModel(Agent agent, String channelType, Conversation current, String args) {
         if (args == null || args.isBlank()) {
-            // JCLAW-109: on Telegram, render the short summary with an
-            // inline-keyboard selector. The handler sends the keyboard
-            // message itself via TelegramChannel.sendMessageWithKeyboard,
-            // so we return an empty responseText — processInboundForAgentStreaming
-            // skips the default sink.seal when the text is empty.
-            if ("telegram".equals(channelType) && current != null && agent != null) {
-                var delivered = channels.TelegramModelSelector.sendSummary(agent, current);
-                EventLogger.info("SLASH_COMMAND", agent.name, channelType,
-                        "/model (summary+keyboard) for conversation " + current.id
-                                + (delivered ? "" : " — delivery failed"));
-                return new Result(current, delivered ? "" : buildModelResponse(agent, current), Command.MODEL);
-            }
-            // Web, tests, or no-conversation fallback: full detail text as before.
-            var responseText = Tx.run(() -> {
-                var text = buildModelResponse(agent, current);
-                persistCannedResponseInTx(current, text);
-                return text;
-            });
-            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
-                    "/model" + (current != null ? " for conversation " + current.id : ""));
-            return new Result(current, responseText, Command.MODEL);
+            return executeModelSummary(agent, channelType, current);
         }
-        // /model status — the full detail view, callable explicitly on any channel.
         if (args.equalsIgnoreCase("status")) {
-            var responseText = Tx.run(() -> {
-                var text = buildModelResponse(agent, current);
-                persistCannedResponseInTx(current, text);
-                return text;
-            });
-            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
-                    "/model status" + (current != null ? " for conversation " + current.id : ""));
-            return new Result(current, responseText, Command.MODEL);
+            // /model status — the full detail view, callable explicitly on any channel.
+            return executeModelStatus(agent, channelType, current);
         }
         if (args.equalsIgnoreCase("reset")) {
-            var responseText = Tx.run(() -> {
-                var text = performModelReset(agent, current);
-                persistCannedResponseInTx(current, text);
-                return text;
-            });
-            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
-                    "/model reset" + (current != null ? " for conversation " + current.id : ""));
-            return new Result(current, responseText, Command.MODEL);
+            return executeModelReset(agent, channelType, current);
         }
-        // Write path: /model provider/model-id
+        return executeModelSwitch(agent, channelType, current, args);
+    }
+
+    /**
+     * JCLAW-109: on Telegram, render the short summary with an inline-keyboard selector.
+     * The handler sends the keyboard message itself via TelegramChannel.sendMessageWithKeyboard,
+     * so we return an empty responseText — processInboundForAgentStreaming skips the default
+     * sink.seal when the text is empty. Web/tests/no-conversation fall back to full detail.
+     */
+    private static Result executeModelSummary(Agent agent, String channelType, Conversation current) {
+        if ("telegram".equals(channelType) && current != null && agent != null) {
+            var delivered = channels.TelegramModelSelector.sendSummary(agent, current);
+            EventLogger.info("SLASH_COMMAND", agent.name, channelType,
+                    "/model (summary+keyboard) for conversation " + current.id
+                            + (delivered ? "" : " — delivery failed"));
+            return new Result(current, delivered ? "" : buildModelResponse(agent, current), Command.MODEL);
+        }
+        return persistAndLogModel(agent, channelType, current, "/model",
+                () -> buildModelResponse(agent, current));
+    }
+
+    private static Result executeModelStatus(Agent agent, String channelType, Conversation current) {
+        return persistAndLogModel(agent, channelType, current, "/model status",
+                () -> buildModelResponse(agent, current));
+    }
+
+    private static Result executeModelReset(Agent agent, String channelType, Conversation current) {
+        return persistAndLogModel(agent, channelType, current, "/model reset",
+                () -> performModelReset(agent, current));
+    }
+
+    private static Result executeModelSwitch(Agent agent, String channelType, Conversation current, String args) {
+        return persistAndLogModel(agent, channelType, current, "/model " + args,
+                () -> performModelSwitch(agent, current, args));
+    }
+
+    /** Tx-wrap response build, persist a canned assistant message, and emit the SLASH_COMMAND event log. */
+    private static Result persistAndLogModel(Agent agent, String channelType, Conversation current,
+                                             String logPrefix, java.util.function.Supplier<String> build) {
         var responseText = Tx.run(() -> {
-            var text = performModelSwitch(agent, current, args);
+            var text = build.get();
             persistCannedResponseInTx(current, text);
             return text;
         });
         EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
-                "/model " + args + (current != null ? " for conversation " + current.id : ""));
+                logPrefix + (current != null ? " for conversation " + current.id : ""));
         return new Result(current, responseText, Command.MODEL);
     }
 
@@ -957,19 +961,18 @@ public final class Commands {
         sb.append("Status: ").append(run.status.name()).append('\n');
         sb.append("Started: ").append(run.startedAt != null ? run.startedAt.toString() : "?").append('\n');
         sb.append("Ended: ").append(run.endedAt != null ? run.endedAt.toString() : "—").append('\n');
-        if (run.outcome != null && !run.outcome.isBlank()) {
-            // Truncate long outcomes so an LLM-essay reply doesn't blow up
-            // the chat bubble; the full text is on the child Conversation
-            // page anyway.
-            var outcome = run.outcome.length() > 500
-                    ? run.outcome.substring(0, 497) + "..."
-                    : run.outcome;
-            sb.append("Outcome: ").append(outcome);
-        }
-        else {
-            sb.append("Outcome: —");
-        }
+        sb.append("Outcome: ").append(formatRunOutcome(run.outcome));
         return sb.toString();
+    }
+
+    /**
+     * Truncate long outcomes so an LLM-essay reply doesn't blow up the chat
+     * bubble; the full text is on the child Conversation page anyway. Returns
+     * a dash when no outcome has been recorded.
+     */
+    private static String formatRunOutcome(String outcome) {
+        if (outcome == null || outcome.isBlank()) return "—";
+        return outcome.length() > 500 ? outcome.substring(0, 497) + "..." : outcome;
     }
 
     private static String renderSubagentLog(Long runId) {
