@@ -92,16 +92,7 @@ public class ApiMcpServersController extends Controller {
         // (under the OLD name) before re-syncing under the new one. Otherwise
         // McpConnectionManager would carry a stale entry forever.
         var priorName = row.name;
-        if (body.has("name") && !body.get("name").isJsonNull()) {
-            var newName = body.get("name").getAsString();
-            if (!newName.equals(row.name)) {
-                var existing = McpServer.findByName(newName);
-                if (existing != null && !existing.id.equals(row.id)) {
-                    error(409, "An MCP server named '%s' already exists".formatted(newName));
-                }
-                row.name = newName;
-            }
-        }
+        applyRenameIfPresent(row, body);
         if (body.has("enabled") && !body.get("enabled").isJsonNull()) {
             row.enabled = body.get("enabled").getAsBoolean();
         }
@@ -127,6 +118,17 @@ public class ApiMcpServersController extends Controller {
         }
         McpServerService.syncRuntime(row);
         renderJSON(gson.toJson(McpServerService.View.of(row)));
+    }
+
+    private static void applyRenameIfPresent(McpServer row, com.google.gson.JsonObject body) {
+        if (!body.has("name") || body.get("name").isJsonNull()) return;
+        var newName = body.get("name").getAsString();
+        if (newName.equals(row.name)) return;
+        var existing = McpServer.findByName(newName);
+        if (existing != null && !existing.id.equals(row.id)) {
+            error(409, "An MCP server named '%s' already exists".formatted(newName));
+        }
+        row.name = newName;
     }
 
     public static void delete(Long id) {

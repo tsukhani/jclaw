@@ -241,32 +241,8 @@ public class ApiAgentsController extends Controller {
         if (body == null) badRequest();
 
         var name = body.has("name") ? body.get("name").getAsString() : agent.name;
-        // JCLAW-115: only validate when the name actually changes. Existing
-        // agents grandfathered in — rejecting their current name on an
-        // unrelated PUT (thinking-mode toggle, etc.) would break workflows.
-        if (!name.equals(agent.name)) validateAgentName(name);
-        // The reserved name "main" is a singleton: no other agent may take the name,
-        // and the main agent may not be renamed away from it.
-        if (!agent.isMain() && Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
-            error(409, "The agent name 'main' is reserved for the built-in agent");
-        }
-        if (agent.isMain() && !Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
-            error(409, "The main agent cannot be renamed");
-        }
-        if (isReservedName(name)) {
-            error(409, "The agent name '%s' is reserved for internal use"
-                    .formatted(services.LoadTestRunner.LOADTEST_AGENT_NAME));
-        }
-        // Rename collision: another agent already owns this name. Skip the
-        // check when the name is unchanged so a PUT that only updates
-        // unrelated fields (thinking-mode, enabled, ...) doesn't false-
-        // positive on its own row.
-        if (!name.equals(agent.name)) {
-            var conflicting = Agent.findByName(name);
-            if (conflicting != null && !conflicting.id.equals(agent.id)) {
-                error(409, "An agent named '" + name + "' already exists");
-            }
-        }
+        validateRenameRules(agent, name);
+
         var modelProvider = body.has("modelProvider") ? body.get("modelProvider").getAsString() : agent.modelProvider;
         var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;
         var enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : agent.enabled;
@@ -293,6 +269,41 @@ public class ApiAgentsController extends Controller {
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);
         renderJSON(gson.toJson(AgentView.of(agent)));
+    }
+
+    /**
+     * Enforce the full rename ruleset on a proposed {@code name} against the
+     * current {@code agent}: slug format, "main" singleton rules, reserved-name
+     * gate, and unique-name collision. Each rule short-circuits via
+     * {@code error(...)} which throws a Result.
+     */
+    private static void validateRenameRules(Agent agent, String name) {
+        // JCLAW-115: only validate when the name actually changes. Existing
+        // agents grandfathered in — rejecting their current name on an
+        // unrelated PUT (thinking-mode toggle, etc.) would break workflows.
+        if (!name.equals(agent.name)) validateAgentName(name);
+        // The reserved name "main" is a singleton: no other agent may take the name,
+        // and the main agent may not be renamed away from it.
+        if (!agent.isMain() && Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
+            error(409, "The agent name 'main' is reserved for the built-in agent");
+        }
+        if (agent.isMain() && !Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
+            error(409, "The main agent cannot be renamed");
+        }
+        if (isReservedName(name)) {
+            error(409, "The agent name '%s' is reserved for internal use"
+                    .formatted(services.LoadTestRunner.LOADTEST_AGENT_NAME));
+        }
+        // Rename collision: another agent already owns this name. Skip the
+        // check when the name is unchanged so a PUT that only updates
+        // unrelated fields (thinking-mode, enabled, ...) doesn't false-
+        // positive on its own row.
+        if (!name.equals(agent.name)) {
+            var conflicting = Agent.findByName(name);
+            if (conflicting != null && !conflicting.id.equals(agent.id)) {
+                error(409, "An agent named '" + name + "' already exists");
+            }
+        }
     }
 
     public static void delete(Long id) {

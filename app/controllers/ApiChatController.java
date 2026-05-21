@@ -121,18 +121,21 @@ public class ApiChatController extends Controller {
         var arr = body.getAsJsonArray("attachments");
         var out = new java.util.ArrayList<services.AttachmentService.Input>(arr.size());
         for (var el : arr) {
-            var o = el.getAsJsonObject();
-            var id = o.has("attachmentId") ? o.get("attachmentId").getAsString() : null;
-            if (id == null || id.isBlank()) {
-                error(400, "attachment missing attachmentId");
-            }
-            var originalFilename = o.has("originalFilename") ? o.get("originalFilename").getAsString() : null;
-            var mimeType = o.has("mimeType") ? o.get("mimeType").getAsString() : null;
-            var sizeBytes = o.has("sizeBytes") ? o.get("sizeBytes").getAsLong() : 0L;
-            var kind = o.has("kind") ? o.get("kind").getAsString() : models.MessageAttachment.KIND_FILE;
-            out.add(new services.AttachmentService.Input(id, originalFilename, mimeType, sizeBytes, kind));
+            out.add(parseAttachment(el.getAsJsonObject()));
         }
         return out;
+    }
+
+    private static services.AttachmentService.Input parseAttachment(JsonObject o) {
+        var id = o.has("attachmentId") ? o.get("attachmentId").getAsString() : null;
+        if (id == null || id.isBlank()) {
+            error(400, "attachment missing attachmentId");
+        }
+        var originalFilename = o.has("originalFilename") ? o.get("originalFilename").getAsString() : null;
+        var mimeType = o.has("mimeType") ? o.get("mimeType").getAsString() : null;
+        var sizeBytes = o.has("sizeBytes") ? o.get("sizeBytes").getAsLong() : 0L;
+        var kind = o.has("kind") ? o.get("kind").getAsString() : models.MessageAttachment.KIND_FILE;
+        return new services.AttachmentService.Input(id, originalFilename, mimeType, sizeBytes, kind);
     }
 
     /**
@@ -204,6 +207,27 @@ public class ApiChatController extends Controller {
         Agent agent = Agent.findById(agentId);
         if (agent == null) notFound();
 
+        validateUploads(files);
+        java.nio.file.Path stagingDir = acquireStagingDir(agent);
+
+        var results = new ArrayList<Map<String, Object>>();
+        try {
+            Files.createDirectories(stagingDir);
+            for (var upload : files) {
+                results.add(stageOneUpload(stagingDir, upload));
+            }
+        } catch (java.io.IOException e) {
+            EventLogger.error("chat", "Chat upload failed for agent %s: %s"
+                    .formatted(agent.name, e.getMessage()));
+            error(500, "Upload failed: " + e.getMessage());
+        }
+
+        var resp = new HashMap<String, Object>();
+        resp.put("files", results);
+        renderJSON(gson.toJson(resp));
+    }
+
+    private static void validateUploads(play.data.Upload[] files) {
         if (files == null || files.length == 0) {
             error(400, "No files uploaded");
             return;
@@ -215,72 +239,73 @@ public class ApiChatController extends Controller {
         for (var u : files) {
             if (u == null || u.asFile() == null || !u.asFile().exists()) error(400, "Invalid file upload");
         }
+    }
 
-        java.nio.file.Path stagingDir;
+    private static java.nio.file.Path acquireStagingDir(Agent agent) {
         try {
-            stagingDir = AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
+            return AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
         } catch (SecurityException e) {
             error(400, "Invalid upload target");
-            return;
+            return null; // unreachable — error() throws
         }
+    }
 
-        var results = new ArrayList<Map<String, Object>>();
-        try {
-            Files.createDirectories(stagingDir);
-            for (var upload : files) {
-                var f = upload.asFile();
-                var safeName = sanitizeFilename(upload.getFileName() != null ? upload.getFileName() : f.getName());
-                if (safeName.isEmpty()) {
-                    error(400, "Invalid filename: " + upload.getFileName());
-                }
-                var uuid = UUID.randomUUID().toString();
-                // Tika reads file magic bytes — authoritative over browser-declared
-                // Content-Type for spoofing-resistance. ONE narrow exception
-                // (JCLAW-165 follow-up): Tika sniffs a WebM container as
-                // video/webm regardless of whether it has video tracks, so
-                // browser-recorded voice notes from MediaRecorder({audio:true})
-                // get misclassified as KIND_FILE and never enter the
-                // transcription pipeline. When the browser explicitly declared
-                // audio/* AND Tika returned the ambiguous video/webm, trust
-                // the browser hint. Other ambiguities still fall to Tika.
-                var sniffedMime = TIKA.detect(f);
-                var browserMime = upload.getContentType();
-                if ("video/webm".equals(sniffedMime)
-                        && browserMime != null && browserMime.startsWith("audio/")) {
-                    sniffedMime = "audio/webm";
-                }
-                var kind = models.MessageAttachment.kindForMime(sniffedMime);
-                var cap = services.UploadLimits.forKind(kind);
-                if (f.length() > cap) {
-                    error(400, "%s too large: %s (max %d MB for %s)"
-                            .formatted(services.UploadLimits.displayName(kind),
-                                    upload.getFileName(), cap / (1024 * 1024),
-                                    services.UploadLimits.displayName(kind)));
-                }
-                var ext = extensionFromFilename(safeName);
-                if (ext.isEmpty()) ext = canonicalExtensionForMime(sniffedMime);
-                var onDiskName = uuid + (ext.isEmpty() ? "" : "." + ext);
-
-                var target = acquireContainedOr400(stagingDir, onDiskName, upload.getFileName());
-                Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
-
-                var entry = new HashMap<String, Object>();
-                entry.put("attachmentId", uuid);
-                entry.put("originalFilename", safeName);
-                entry.put("mimeType", sniffedMime);
-                entry.put("sizeBytes", Files.size(target));
-                entry.put("kind", kind);
-                results.add(entry);
-            }
-        } catch (java.io.IOException e) {
-            EventLogger.error("chat", "Chat upload failed for agent %s: %s"
-                    .formatted(agent.name, e.getMessage()));
-            error(500, "Upload failed: " + e.getMessage());
+    private static Map<String, Object> stageOneUpload(java.nio.file.Path stagingDir, play.data.Upload upload)
+            throws java.io.IOException {
+        var f = upload.asFile();
+        var safeName = sanitizeFilename(upload.getFileName() != null ? upload.getFileName() : f.getName());
+        if (safeName.isEmpty()) {
+            error(400, "Invalid filename: " + upload.getFileName());
         }
+        var sniffedMime = sniffMime(f, upload.getContentType());
+        var kind = models.MessageAttachment.kindForMime(sniffedMime);
+        enforceUploadCap(f, kind, upload.getFileName());
 
-        var resp = new HashMap<String, Object>();
-        resp.put("files", results);
-        renderJSON(gson.toJson(resp));
+        var uuid = UUID.randomUUID().toString();
+        var ext = extensionFromFilename(safeName);
+        if (ext.isEmpty()) ext = canonicalExtensionForMime(sniffedMime);
+        var onDiskName = uuid + (ext.isEmpty() ? "" : "." + ext);
+
+        var target = acquireContainedOr400(stagingDir, onDiskName, upload.getFileName());
+        Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
+
+        var entry = new HashMap<String, Object>();
+        entry.put("attachmentId", uuid);
+        entry.put("originalFilename", safeName);
+        entry.put("mimeType", sniffedMime);
+        entry.put("sizeBytes", Files.size(target));
+        entry.put("kind", kind);
+        return entry;
+    }
+
+    /**
+     * Tika reads file magic bytes — authoritative over browser-declared
+     * Content-Type for spoofing-resistance. ONE narrow exception
+     * (JCLAW-165 follow-up): Tika sniffs a WebM container as
+     * video/webm regardless of whether it has video tracks, so
+     * browser-recorded voice notes from MediaRecorder({audio:true})
+     * get misclassified as KIND_FILE and never enter the
+     * transcription pipeline. When the browser explicitly declared
+     * audio/* AND Tika returned the ambiguous video/webm, trust
+     * the browser hint. Other ambiguities still fall to Tika.
+     */
+    private static String sniffMime(java.io.File f, String browserMime) throws java.io.IOException {
+        var sniffedMime = TIKA.detect(f);
+        if ("video/webm".equals(sniffedMime)
+                && browserMime != null && browserMime.startsWith("audio/")) {
+            return "audio/webm";
+        }
+        return sniffedMime;
+    }
+
+    private static void enforceUploadCap(java.io.File f, String kind, String originalName) {
+        var cap = services.UploadLimits.forKind(kind);
+        if (f.length() > cap) {
+            error(400, "%s too large: %s (max %d MB for %s)"
+                    .formatted(services.UploadLimits.displayName(kind),
+                            originalName, cap / (1024 * 1024),
+                            services.UploadLimits.displayName(kind)));
+        }
     }
 
     /**
@@ -389,41 +414,69 @@ public class ApiChatController extends Controller {
         var cancelled = new AtomicBoolean(false);
         sse.onClose(() -> cancelled.set(true));
 
-        // JCLAW-26: slash-command intercept. /new creates a fresh conversation
-        // (init frame carries the new id so the frontend switches); /reset +
-        // /help mutate/query the current conversation. Unknown /foo falls
-        // through as normal text. Emits SSE frames directly; never calls
-        // runStreaming, so the model isn't invoked at all.
-        var slashCmd = slash.Commands.parse(messageText);
-        if (slashCmd.isPresent()) {
-            Conversation slashConv;
-            if (slashCmd.get() == slash.Commands.Command.NEW) {
-                slashConv = null;
-            } else if (conversationId != null) {
-                // JCLAW-199: streamChat is @NoTransaction; explicit Tx.run for
-                // the lookup since ConversationService.findById assumes its
-                // caller owns the tx.
-                final Long capturedConvId = conversationId;
-                slashConv = services.Tx.run(() -> ConversationService.findById(capturedConvId));
-                if (slashConv == null) notFound();
-            } else {
-                slashConv = services.Tx.run(() -> ConversationService.findOrCreate(agent, "web", username));
-            }
-            // JCLAW-111: args-aware execute so /model status etc. work via SSE.
-            var slashResult = slash.Commands.execute(
-                    slashCmd.get(), agent, "web", username, slashConv,
-                    slash.Commands.extractArgs(messageText));
-            if (slashResult.conversation() != null) {
-                sse.send(Map.of("type", "init", "conversationId", slashResult.conversation().id));
-            }
-            sse.send(Map.of("type", "complete", "content", slashResult.responseText()));
-            sse.close();
-            // Slash commands are synthetic turns — no LLM, no prologue → intentionally
-            // not instrumented so they don't skew the Chat Performance histograms.
-            await(sse.completion());
+        if (handleStreamingSlashCommand(sse, agent, messageText, conversationId, username)) {
             return;
         }
 
+        var callbacks = buildStreamingCallbacks(sse, agent);
+        AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
+                cancelled, callbacks, acceptedAtNs, ctx.attachments());
+
+        // Suspend this invocation until the SSE stream closes (terminal frame,
+        // disconnect, or 10-min timeout). The Play worker thread returns to
+        // the pool immediately; all real work happens on the agent's virtual
+        // thread via sse.send() / sse.close() calls.
+        await(sse.completion());
+    }
+
+    /**
+     * JCLAW-26: slash-command intercept. /new creates a fresh conversation
+     * (init frame carries the new id so the frontend switches); /reset +
+     * /help mutate/query the current conversation. Unknown /foo falls
+     * through as normal text. Emits SSE frames directly; never calls
+     * runStreaming, so the model isn't invoked at all.
+     *
+     * @return true when the command was handled (caller must return); false
+     *         when the message is not a slash command and normal streaming
+     *         should proceed.
+     */
+    private static boolean handleStreamingSlashCommand(SseStream sse, Agent agent, String messageText,
+                                                       Long conversationId, String username) {
+        var slashCmd = slash.Commands.parse(messageText);
+        if (slashCmd.isEmpty()) return false;
+
+        Conversation slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
+        // JCLAW-111: args-aware execute so /model status etc. work via SSE.
+        var slashResult = slash.Commands.execute(
+                slashCmd.get(), agent, "web", username, slashConv,
+                slash.Commands.extractArgs(messageText));
+        if (slashResult.conversation() != null) {
+            sse.send(Map.of("type", "init", "conversationId", slashResult.conversation().id));
+        }
+        sse.send(Map.of("type", "complete", "content", slashResult.responseText()));
+        sse.close();
+        // Slash commands are synthetic turns — no LLM, no prologue → intentionally
+        // not instrumented so they don't skew the Chat Performance histograms.
+        await(sse.completion());
+        return true;
+    }
+
+    private static Conversation resolveSlashConversation(slash.Commands.Command cmd, Agent agent,
+                                                          Long conversationId, String username) {
+        if (cmd == slash.Commands.Command.NEW) return null;
+        if (conversationId != null) {
+            // JCLAW-199: streamChat is @NoTransaction; explicit Tx.run for
+            // the lookup since ConversationService.findById assumes its
+            // caller owns the tx.
+            final Long capturedConvId = conversationId;
+            var conv = services.Tx.run(() -> ConversationService.findById(capturedConvId));
+            if (conv == null) notFound();
+            return conv;
+        }
+        return services.Tx.run(() -> ConversationService.findOrCreate(agent, "web", username));
+    }
+
+    private static AgentRunner.StreamingCallbacks buildStreamingCallbacks(SseStream sse, Agent agent) {
         // Switch SSE payload shape on the first token only (includes a timestamp
         // field the frontend uses for TTFT visualization). Subsequent tokens take
         // a leaner shape. This is purely a wire-format decision — trace-side
@@ -441,26 +494,8 @@ public class ApiChatController extends Controller {
                 s -> sendChunkFrame(sse, SSE_TOKEN_PREFIX, s));
         var reasoningCoalescer = new utils.TokenCoalescer(coalesceChars,
                 s -> sendChunkFrame(sse, SSE_REASONING_PREFIX, s));
-        var callbacks = new AgentRunner.StreamingCallbacks(
-                conversation -> {
-                    var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
-                    // Use the agent's persisted thinking mode, gated by the model's
-                    // current capability — same semantics as AgentRunner so the UI
-                    // reflects what the LLM will actually receive.
-                    if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
-                        var provider = llm.ProviderRegistry.get(agent.modelProvider);
-                        if (provider != null) {
-                            var valid = provider.config().models().stream()
-                                    .filter(m -> m.id().equals(agent.modelId))
-                                    .findFirst()
-                                    .filter(llm.LlmTypes.ModelInfo::supportsThinking)
-                                    .map(m -> m.effectiveThinkingLevels().contains(agent.thinkingMode))
-                                    .orElse(false);
-                            if (valid) initData.put("thinkingMode", agent.thinkingMode);
-                        }
-                    }
-                    sse.send(initData);
-                },
+        return new AgentRunner.StreamingCallbacks(
+                conversation -> sendInitFrame(sse, agent, conversation),
                 token -> {
                     if (firstToken.compareAndSet(true, false)) {
                         // First-token path keeps the timestamp field for TTFT
@@ -475,25 +510,7 @@ public class ApiChatController extends Controller {
                 },
                 reasoning -> reasoningCoalescer.accept(reasoning),
                 status -> sse.send(Map.of("type", "status", "content", status)),
-                // JCLAW-170: tool-call frame. structuredJson rides as a raw
-                // JsonElement (not a nested string) so the frontend can parse
-                // it as an object tree — search-style tools embed a
-                // {provider, results:[...]} payload that the UI turns into
-                // clickable result chips.
-                ev -> {
-                    var payload = new java.util.LinkedHashMap<String, Object>();
-                    payload.put("type", "tool_call");
-                    payload.put("id", ev.id());
-                    payload.put("name", ev.name());
-                    payload.put("icon", ev.icon());
-                    payload.put("arguments", ev.arguments());
-                    payload.put("resultText", ev.resultText() == null ? "" : ev.resultText());
-                    if (ev.resultStructuredJson() != null) {
-                        payload.put("resultStructured",
-                                com.google.gson.JsonParser.parseString(ev.resultStructuredJson()));
-                    }
-                    sse.send(payload);
-                },
+                ev -> sendToolCallFrame(sse, ev),
                 content -> {
                     // JCLAW-200: drain coalescer buffers before the terminal
                     // frame so any tail tokens reach the client. No-op when
@@ -518,13 +535,47 @@ public class ApiChatController extends Controller {
                 // (typing-heartbeat cleanup) can rely on the callback firing.
                 () -> {}
         );
-        AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
-                cancelled, callbacks, acceptedAtNs, ctx.attachments());
+    }
 
-        // Suspend this invocation until the SSE stream closes (terminal frame,
-        // disconnect, or 10-min timeout). The Play worker thread returns to
-        // the pool immediately; all real work happens on the agent's virtual
-        // thread via sse.send() / sse.close() calls.
-        await(sse.completion());
+    private static void sendInitFrame(SseStream sse, Agent agent, Conversation conversation) {
+        var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
+        // Use the agent's persisted thinking mode, gated by the model's
+        // current capability — same semantics as AgentRunner so the UI
+        // reflects what the LLM will actually receive.
+        if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
+            var provider = llm.ProviderRegistry.get(agent.modelProvider);
+            if (provider != null) {
+                var valid = provider.config().models().stream()
+                        .filter(m -> m.id().equals(agent.modelId))
+                        .findFirst()
+                        .filter(llm.LlmTypes.ModelInfo::supportsThinking)
+                        .map(m -> m.effectiveThinkingLevels().contains(agent.thinkingMode))
+                        .orElse(false);
+                if (valid) initData.put("thinkingMode", agent.thinkingMode);
+            }
+        }
+        sse.send(initData);
+    }
+
+    /**
+     * JCLAW-170: tool-call frame. structuredJson rides as a raw
+     * JsonElement (not a nested string) so the frontend can parse
+     * it as an object tree — search-style tools embed a
+     * {provider, results:[...]} payload that the UI turns into
+     * clickable result chips.
+     */
+    private static void sendToolCallFrame(SseStream sse, AgentRunner.ToolCallEvent ev) {
+        var payload = new java.util.LinkedHashMap<String, Object>();
+        payload.put("type", "tool_call");
+        payload.put("id", ev.id());
+        payload.put("name", ev.name());
+        payload.put("icon", ev.icon());
+        payload.put("arguments", ev.arguments());
+        payload.put("resultText", ev.resultText() == null ? "" : ev.resultText());
+        if (ev.resultStructuredJson() != null) {
+            payload.put("resultStructured",
+                    com.google.gson.JsonParser.parseString(ev.resultStructuredJson()));
+        }
+        sse.send(payload);
     }
 }

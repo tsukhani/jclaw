@@ -171,74 +171,80 @@ public class ApiConversationsController extends Controller {
         setPaginationHeaders(total);
 
         var jsonParser = new com.google.gson.JsonParser();
-        var result = messages.stream().map(m -> {
-            var map = new HashMap<String, Object>();
-            map.put("id", m.id);
-            map.put("role", m.role);
-            map.put("content", m.content);
-            // JCLAW-170: enrich each persisted tool call with the registry's
-            // current {@code icon} hint so the chat UI can render historical
-            // tool-call rows without maintaining a client-side name→icon
-            // mapping. Parsed to a JsonArray so the enriched payload lands
-            // as a real array in the response (not a stringified nested JSON).
-            map.put("toolCalls", enrichToolCallsWithIcons(m.toolCalls, jsonParser));
-            map.put("toolResults", m.toolResults);
-            if (m.toolResultStructured != null) {
-                map.put("toolResultStructured", jsonParser.parse(m.toolResultStructured));
-            }
-            // Include reasoning text so the collapsible thinking bubble
-            // re-renders identically after a conversation reload. Null for
-            // assistant turns without thinking and for user/tool rows.
-            if (m.reasoning != null) map.put("reasoning", m.reasoning);
-            map.put("createdAt", m.createdAt.toString());
-            if (m.usageJson != null) {
-                map.put("usage", jsonParser.parse(m.usageJson));
-            }
-            // JCLAW-267: marker for inline-mode subagent runs. The chat UI
-            // folds consecutive messages sharing this id into a single
-            // collapsible nested-turn block. Null for every non-inline-
-            // subagent row (the dominant case) and omitted from the wire
-            // shape so the frontend's `m.subagentRunId` test stays falsy.
-            if (m.subagentRunId != null) {
-                map.put("subagentRunId", m.subagentRunId);
-            }
-            // JCLAW-270: surface async-spawn announce metadata. The chat UI
-            // switches to the structured-card render path whenever
-            // {@code messageKind} is set; {@code metadata} carries the
-            // kind-specific JSON payload (e.g. {runId, label, status,
-            // reply, childConversationId} for "subagent_announce"). Both
-            // fields are omitted entirely when null so the dominant
-            // non-announce path stays small on the wire.
-            if (m.messageKind != null) {
-                map.put("messageKind", m.messageKind);
-                if (m.metadata != null) {
-                    map.put("metadata", jsonParser.parse(m.metadata));
-                }
-            }
-            // JCLAW-291: model-output truncation flag. Surfaced only when true
-            // so the dominant non-truncated row stays small on the wire.
-            if (m.truncated) {
-                map.put("truncated", Boolean.TRUE);
-            }
-            // JCLAW-279: surface attachment metadata so the chat UI can render
-            // download chips on conversation reload. Empty list rather than
-            // absent so the frontend can rely on the field always being present.
-            if (m.attachments != null && !m.attachments.isEmpty()) {
-                var atts = m.attachments.stream().map(a -> {
-                    var av = new HashMap<String, Object>();
-                    av.put("uuid", a.uuid);
-                    av.put("originalFilename", a.originalFilename);
-                    av.put("mimeType", a.mimeType);
-                    av.put("sizeBytes", a.sizeBytes);
-                    av.put("kind", a.kind);
-                    return av;
-                }).toList();
-                map.put("attachments", atts);
-            }
-            return map;
-        }).toList();
+        var result = messages.stream().map(m -> messageToMap(m, jsonParser)).toList();
 
         renderJSON(gson.toJson(result));
+    }
+
+    private static HashMap<String, Object> messageToMap(Message m, com.google.gson.JsonParser jsonParser) {
+        var map = new HashMap<String, Object>();
+        map.put("id", m.id);
+        map.put("role", m.role);
+        map.put("content", m.content);
+        // JCLAW-170: enrich each persisted tool call with the registry's
+        // current {@code icon} hint so the chat UI can render historical
+        // tool-call rows without maintaining a client-side name→icon
+        // mapping. Parsed to a JsonArray so the enriched payload lands
+        // as a real array in the response (not a stringified nested JSON).
+        map.put("toolCalls", enrichToolCallsWithIcons(m.toolCalls, jsonParser));
+        map.put("toolResults", m.toolResults);
+        if (m.toolResultStructured != null) {
+            map.put("toolResultStructured", jsonParser.parse(m.toolResultStructured));
+        }
+        // Include reasoning text so the collapsible thinking bubble
+        // re-renders identically after a conversation reload. Null for
+        // assistant turns without thinking and for user/tool rows.
+        if (m.reasoning != null) map.put("reasoning", m.reasoning);
+        map.put("createdAt", m.createdAt.toString());
+        if (m.usageJson != null) {
+            map.put("usage", jsonParser.parse(m.usageJson));
+        }
+        // JCLAW-267: marker for inline-mode subagent runs. The chat UI
+        // folds consecutive messages sharing this id into a single
+        // collapsible nested-turn block. Null for every non-inline-
+        // subagent row (the dominant case) and omitted from the wire
+        // shape so the frontend's `m.subagentRunId` test stays falsy.
+        if (m.subagentRunId != null) {
+            map.put("subagentRunId", m.subagentRunId);
+        }
+        // JCLAW-270: surface async-spawn announce metadata. The chat UI
+        // switches to the structured-card render path whenever
+        // {@code messageKind} is set; {@code metadata} carries the
+        // kind-specific JSON payload (e.g. {runId, label, status,
+        // reply, childConversationId} for "subagent_announce"). Both
+        // fields are omitted entirely when null so the dominant
+        // non-announce path stays small on the wire.
+        if (m.messageKind != null) {
+            map.put("messageKind", m.messageKind);
+            if (m.metadata != null) {
+                map.put("metadata", jsonParser.parse(m.metadata));
+            }
+        }
+        // JCLAW-291: model-output truncation flag. Surfaced only when true
+        // so the dominant non-truncated row stays small on the wire.
+        if (m.truncated) {
+            map.put("truncated", Boolean.TRUE);
+        }
+        // JCLAW-279: surface attachment metadata so the chat UI can render
+        // download chips on conversation reload. Empty list rather than
+        // absent so the frontend can rely on the field always being present.
+        if (m.attachments != null && !m.attachments.isEmpty()) {
+            map.put("attachments", attachmentsToList(m.attachments));
+        }
+        return map;
+    }
+
+    private static List<HashMap<String, Object>> attachmentsToList(
+            java.util.List<models.MessageAttachment> attachments) {
+        return attachments.stream().map(a -> {
+            var av = new HashMap<String, Object>();
+            av.put("uuid", a.uuid);
+            av.put("originalFilename", a.originalFilename);
+            av.put("mimeType", a.mimeType);
+            av.put("sizeBytes", a.sizeBytes);
+            av.put("kind", a.kind);
+            return av;
+        }).toList();
     }
 
     /**

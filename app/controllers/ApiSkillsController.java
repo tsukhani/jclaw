@@ -158,40 +158,56 @@ public class ApiSkillsController extends Controller {
         var detectedTools = new java.util.ArrayList<java.util.Map<String, String>>();
         var seen = new java.util.HashSet<String>();
 
-        // Scan every live tool name from the registry against the body text
+        scanRegisteredToolNames(content, detectedTools, seen);
+        scanToolAliases(content, detectedTools, seen);
+        scanImplicitShellUsage(content, detectedTools, seen);
+
+        return detectedTools;
+    }
+
+    /** Scan every live tool name from the registry against the body text. */
+    private static void scanRegisteredToolNames(String content,
+            java.util.List<java.util.Map<String, String>> detectedTools, java.util.Set<String> seen) {
         for (var tool : agents.ToolRegistry.listTools()) {
             if (content.contains(tool.name()) && seen.add(tool.name())) {
                 detectedTools.add(java.util.Map.of("name", tool.name(),
                         "description", tool.description() != null ? tool.description() : ""));
             }
         }
+    }
 
-        // Informal aliases (readFile, shell, writeFile) → map to the canonical tool
+    /** Informal aliases (readFile, shell, writeFile) → map to the canonical tool. */
+    private static void scanToolAliases(String content,
+            java.util.List<java.util.Map<String, String>> detectedTools, java.util.Set<String> seen) {
         for (var entry : TOOL_ALIASES.entrySet()) {
             if (content.contains(entry.getKey()) && seen.add(entry.getValue())) {
                 var canonical = entry.getValue();
-                var tool = agents.ToolRegistry.listTools().stream()
-                        .filter(t -> t.name().equals(canonical))
-                        .findFirst()
-                        .orElse(null);
+                var tool = lookupToolByName(canonical);
                 detectedTools.add(java.util.Map.of("name", canonical,
                         "description", tool != null && tool.description() != null ? tool.description() : ""));
             }
         }
+    }
 
-        // Implicit shell usage — bash/sh code fences
-        if (seen.add("exec")
-                && (content.contains("```bash") || content.contains("```sh")
-                    || content.contains("```shell") || content.contains("run the command")
-                    || content.contains("execute the command"))) {
-            var tool = agents.ToolRegistry.listTools().stream()
-                    .filter(t -> t.name().equals("exec"))
-                    .findFirst()
-                    .orElse(null);
-            detectedTools.add(java.util.Map.of("name", "exec",
-                    "description", tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
+    /** Implicit shell usage — bash/sh code fences. */
+    private static void scanImplicitShellUsage(String content,
+            java.util.List<java.util.Map<String, String>> detectedTools, java.util.Set<String> seen) {
+        if (!seen.add("exec")) return;
+        if (!(content.contains("```bash") || content.contains("```sh")
+                || content.contains("```shell") || content.contains("run the command")
+                || content.contains("execute the command"))) {
+            return;
         }
-        return detectedTools;
+        var tool = lookupToolByName("exec");
+        detectedTools.add(java.util.Map.of("name", "exec",
+                "description", tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
+    }
+
+    private static agents.ToolRegistry.Tool lookupToolByName(String name) {
+        return agents.ToolRegistry.listTools().stream()
+                .filter(t -> t.name().equals(name))
+                .findFirst()
+                .orElse(null);
     }
 
     private static boolean isTextFile(Path p) {
@@ -430,55 +446,70 @@ public class ApiSkillsController extends Controller {
 
     // --- Shared helpers for global / agent-workspace skill operations ---
 
+    /** Aggregated file metadata + concatenated text content from a skill dir walk. */
+    private record SkillDirWalk(java.util.List<java.util.Map<String, Object>> files, String allTextContent) {}
+
+    /** Frontmatter fields surfaced alongside the file list. */
+    private record SkillMeta(java.util.List<String> commands, String author) {
+        static SkillMeta empty() { return new SkillMeta(java.util.List.of(), ""); }
+    }
+
     /** Walk a skill directory and render files + detected tools as JSON. */
     private static void listSkillFilesFrom(Path dir) {
         try {
-            var files = new java.util.ArrayList<java.util.Map<String, Object>>();
-            var allTextContent = new StringBuilder();
-            try (var walk = Files.walk(dir)) {
-                walk.filter(Files::isRegularFile)
-                    .sorted()
-                    .forEach(p -> {
-                        var rel = dir.relativize(p).toString();
-                        var map = new java.util.HashMap<String, Object>();
-                        map.put("path", rel);
-                        map.put("name", p.getFileName().toString());
-                        try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
-                        var text = isTextFile(p);
-                        map.put("isText", text);
-                        files.add(map);
-                        if (text) {
-                            try { allTextContent.append(Files.readString(p)).append("\n"); } catch (IOException _) {}
-                        }
-                    });
-            }
-
-            var content = allTextContent.toString();
-            var detectedTools = resolveSkillTools(dir, content);
-
-            // Shell commands declared in the SKILL.md frontmatter — the set
-            // this skill will contribute to an installing agent's allowlist.
-            // Surfaced here so the detail page can render a "Commands" pill row.
-            var skillMd = dir.resolve("SKILL.md");
-            java.util.List<String> commands = java.util.List.of();
-            String author = "";
-            if (Files.exists(skillMd)) {
-                var info = SkillLoader.parseSkillFile(skillMd);
-                if (info != null) {
-                    if (info.commands() != null) commands = info.commands();
-                    if (info.author() != null) author = info.author();
-                }
-            }
+            var walked = walkSkillDir(dir);
+            var detectedTools = resolveSkillTools(dir, walked.allTextContent());
+            var meta = readSkillMeta(dir);
 
             var result = new java.util.HashMap<String, Object>();
-            result.put("files", files);
+            result.put("files", walked.files());
             result.put("tools", detectedTools);
-            result.put("commands", commands);
-            result.put("author", author);
+            result.put("commands", meta.commands());
+            result.put("author", meta.author());
             renderJSON(gson.toJson(result));
         } catch (IOException e) {
             error(500, "Failed to list skill files: " + e.getMessage());
         }
+    }
+
+    private static SkillDirWalk walkSkillDir(Path dir) throws IOException {
+        var files = new java.util.ArrayList<java.util.Map<String, Object>>();
+        var allTextContent = new StringBuilder();
+        try (var walk = Files.walk(dir)) {
+            walk.filter(Files::isRegularFile)
+                .sorted()
+                .forEach(p -> files.add(buildFileEntry(dir, p, allTextContent)));
+        }
+        return new SkillDirWalk(files, allTextContent.toString());
+    }
+
+    private static java.util.Map<String, Object> buildFileEntry(Path dir, Path p, StringBuilder allTextContent) {
+        var rel = dir.relativize(p).toString();
+        var map = new java.util.HashMap<String, Object>();
+        map.put("path", rel);
+        map.put("name", p.getFileName().toString());
+        try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
+        var text = isTextFile(p);
+        map.put("isText", text);
+        if (text) {
+            try { allTextContent.append(Files.readString(p)).append("\n"); } catch (IOException _) { /* skip unreadable */ }
+        }
+        return map;
+    }
+
+    /**
+     * Shell commands declared in the SKILL.md frontmatter — the set
+     * this skill will contribute to an installing agent's allowlist.
+     * Surfaced here so the detail page can render a "Commands" pill row.
+     */
+    private static SkillMeta readSkillMeta(Path dir) {
+        var skillMd = dir.resolve("SKILL.md");
+        if (!Files.exists(skillMd)) return SkillMeta.empty();
+        var info = SkillLoader.parseSkillFile(skillMd);
+        if (info == null) return SkillMeta.empty();
+        var commands = info.commands() != null ? info.commands() : java.util.List.<String>of();
+        var author = info.author() != null ? info.author() : "";
+        return new SkillMeta(commands, author);
     }
 
     /** Read a single file from a skill directory, with path-traversal protection. */

@@ -70,30 +70,11 @@ public class ApiSubagentRunsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubagentRunView.class))))
     public static void list(Long parentAgentId, String status, String since,
                             Integer limit, Integer offset) {
-        Instant sinceInstant = null;
-        if (since != null && !since.isBlank()) {
-            try {
-                sinceInstant = Instant.parse(since);
-            } catch (Exception e) {
-                response.status = 400;
-                renderJSON(gson.toJson(new ErrorResponse(
-                        "Invalid 'since' value '" + since + "' — expected ISO-8601 instant.")));
-                return;
-            }
-        }
+        Instant sinceInstant = parseSinceFilter(since);
+        if (sinceInstant == null && since != null && !since.isBlank()) return;
 
-        SubagentRun.Status statusEnum = null;
-        if (status != null && !status.isBlank()) {
-            try {
-                statusEnum = SubagentRun.Status.valueOf(status.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                response.status = 400;
-                renderJSON(gson.toJson(new ErrorResponse(
-                        "Invalid 'status' value '" + status
-                                + "' — expected one of RUNNING / COMPLETED / FAILED / KILLED / TIMEOUT.")));
-                return;
-            }
-        }
+        SubagentRun.Status statusEnum = parseStatusFilter(status);
+        if (statusEnum == null && status != null && !status.isBlank()) return;
 
         var filter = new JpqlFilter()
                 .eq("parentAgent.id", parentAgentId)
@@ -123,25 +104,50 @@ public class ApiSubagentRunsController extends Controller {
         // category, and the result-set size is bounded by `effectiveLimit`.
         Map<Long, String> modeByRunId = collectModesForRuns(runs);
 
-        var result = runs.stream().map(r -> {
-            var view = new SubagentRunView(
-                    r.id,
-                    r.parentAgent != null ? r.parentAgent.id : null,
-                    r.parentAgent != null ? r.parentAgent.name : null,
-                    r.childAgent != null ? r.childAgent.id : null,
-                    r.childAgent != null ? r.childAgent.name : null,
-                    r.parentConversation != null ? r.parentConversation.id : null,
-                    r.childConversation != null ? r.childConversation.id : null,
-                    modeByRunId.get(r.id),
-                    r.status != null ? r.status.name() : null,
-                    r.startedAt != null ? r.startedAt.toString() : null,
-                    r.endedAt != null ? r.endedAt.toString() : null,
-                    r.outcome
-            );
-            return view;
-        }).toList();
-
+        var result = runs.stream().map(r -> toView(r, modeByRunId)).toList();
         renderJSON(gson.toJson(result));
+    }
+
+    private static Instant parseSinceFilter(String since) {
+        if (since == null || since.isBlank()) return null;
+        try {
+            return Instant.parse(since);
+        } catch (Exception e) {
+            response.status = 400;
+            renderJSON(gson.toJson(new ErrorResponse(
+                    "Invalid 'since' value '" + since + "' — expected ISO-8601 instant.")));
+            return null;
+        }
+    }
+
+    private static SubagentRun.Status parseStatusFilter(String status) {
+        if (status == null || status.isBlank()) return null;
+        try {
+            return SubagentRun.Status.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            response.status = 400;
+            renderJSON(gson.toJson(new ErrorResponse(
+                    "Invalid 'status' value '" + status
+                            + "' — expected one of RUNNING / COMPLETED / FAILED / KILLED / TIMEOUT.")));
+            return null;
+        }
+    }
+
+    private static SubagentRunView toView(SubagentRun r, Map<Long, String> modeByRunId) {
+        return new SubagentRunView(
+                r.id,
+                r.parentAgent != null ? r.parentAgent.id : null,
+                r.parentAgent != null ? r.parentAgent.name : null,
+                r.childAgent != null ? r.childAgent.id : null,
+                r.childAgent != null ? r.childAgent.name : null,
+                r.parentConversation != null ? r.parentConversation.id : null,
+                r.childConversation != null ? r.childConversation.id : null,
+                modeByRunId.get(r.id),
+                r.status != null ? r.status.name() : null,
+                r.startedAt != null ? r.startedAt.toString() : null,
+                r.endedAt != null ? r.endedAt.toString() : null,
+                r.outcome
+        );
     }
 
     /**
@@ -253,23 +259,28 @@ public class ApiSubagentRunsController extends Controller {
         var idSet = new java.util.HashSet<>(ids);
         var result = new HashMap<Long, String>();
         for (var ev : events) {
-            if (ev.details == null) continue;
-            try {
-                var obj = JsonParser.parseString(ev.details).getAsJsonObject();
-                if (!obj.has("run_id") || obj.get("run_id").isJsonNull()) continue;
-                Long parsedId;
-                try {
-                    parsedId = Long.parseLong(obj.get("run_id").getAsString());
-                } catch (NumberFormatException _) { continue; }
-                if (!idSet.contains(parsedId)) continue;
-                if (result.containsKey(parsedId)) continue; // keep first (most recent due to ORDER BY)
-                if (obj.has("mode") && !obj.get("mode").isJsonNull()) {
-                    result.put(parsedId, obj.get("mode").getAsString());
-                }
-            } catch (Exception _) {
-                // Malformed details — skip, the row simply won't carry a mode.
-            }
+            applySpawnEventMode(ev, idSet, result);
         }
         return result;
+    }
+
+    /** Parse one SUBAGENT_SPAWN details payload and populate the run→mode map (most-recent wins). */
+    private static void applySpawnEventMode(EventLog ev, java.util.Set<Long> idSet, Map<Long, String> result) {
+        if (ev.details == null) return;
+        try {
+            var obj = JsonParser.parseString(ev.details).getAsJsonObject();
+            if (!obj.has("run_id") || obj.get("run_id").isJsonNull()) return;
+            Long parsedId;
+            try {
+                parsedId = Long.parseLong(obj.get("run_id").getAsString());
+            } catch (NumberFormatException _) { return; }
+            if (!idSet.contains(parsedId)) return;
+            if (result.containsKey(parsedId)) return; // keep first (most recent due to ORDER BY)
+            if (obj.has("mode") && !obj.get("mode").isJsonNull()) {
+                result.put(parsedId, obj.get("mode").getAsString());
+            }
+        } catch (Exception _) {
+            // Malformed details — skip, the row simply won't carry a mode.
+        }
     }
 }

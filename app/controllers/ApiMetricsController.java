@@ -120,31 +120,9 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CostResponse.class)))
     public static void cost() {
-        var sinceParam = params.get("since");
-        var agentIdParam = params.get("agentId");
+        java.time.Instant since = parseSinceParam(params.get("since"));
+        Long agentId = parseAgentIdParam(params.get("agentId"));
         var channelTypeParam = params.get("channelType");
-
-        java.time.Instant since;
-        if (sinceParam != null && !sinceParam.isBlank()) {
-            try {
-                since = java.time.Instant.parse(sinceParam);
-            } catch (java.time.format.DateTimeParseException e) {
-                error(400, "Invalid 'since' — must be ISO-8601 instant (e.g. 2026-04-10T00:00:00Z)");
-                return;
-            }
-        } else {
-            since = java.time.Instant.now().minus(30, java.time.temporal.ChronoUnit.DAYS);
-        }
-
-        Long agentId = null;
-        if (agentIdParam != null && !agentIdParam.isBlank()) {
-            try {
-                agentId = Long.parseLong(agentIdParam);
-            } catch (NumberFormatException e) {
-                error(400, "Invalid 'agentId' — must be numeric");
-                return;
-            }
-        }
         String channelType = (channelTypeParam != null && !channelTypeParam.isBlank())
                 ? channelTypeParam : null;
 
@@ -238,8 +216,63 @@ public class ApiMetricsController extends Controller {
      * <p>Returns the aggregate counts + wall-clock. Use GET
      * /api/metrics/latency afterwards for per-segment histograms.
      */
+    /** Parsed loadtest request — collapses the body-parsing branch tower into one record carrier. */
+    private record LoadtestInput(int concurrency, int turns, int ttftMs, int tokensPerSecond,
+                                 int responseTokens, int simulatedToolCalls, int toolSleepMs,
+                                 boolean compress, String provider, String model, boolean real,
+                                 String userMessage, java.util.List<String> prompts) {}
+
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoadtestResponse.class)))
     public static void loadtest() {
+        var input = parseLoadtestInput();
+        validateLoadtestInput(input);
+        enableMockProviderIfNeeded(input.real());
+
+        // Auto-bump the LLM dispatcher cap if --concurrency would saturate it.
+        // The default 64-per-host (or auto-tuned 8*cores) is sized for steady
+        // production traffic; loadtest at higher concurrency against one host
+        // (mock or single real provider) would otherwise queue at the
+        // dispatcher and inflate the ttft segment by the queue time. Snapshot
+        // here, restore in finally so the cap returns to its operator-tuned
+        // value after the test.
+        int origPerHost = utils.HttpFactories.llmDispatcherMaxRequestsPerHost();
+        int origMax = utils.HttpFactories.llmDispatcherMaxRequests();
+        boolean dispatcherBumped = input.concurrency() > origPerHost;
+        if (dispatcherBumped) {
+            int newPerHost = input.concurrency() + 16;
+            int newMax = Math.max(origMax, newPerHost * 2);
+            utils.HttpFactories.setLlmDispatcherCapTransient(newPerHost, newMax);
+        }
+
+        try {
+            var result = LoadTestRunner.run(new LoadTestRunner.Request(
+                    input.concurrency(), input.turns(), input.compress(),
+                    new LoadTestHarness.Scenario(input.ttftMs(), input.tokensPerSecond(), input.responseTokens(),
+                            input.simulatedToolCalls(), input.toolSleepMs()),
+                    input.real(), input.provider(), input.model(), input.userMessage(), input.prompts()));
+
+            if (!input.real()) {
+                LoadTestHarness.stop();
+                LoadTestRunner.disable();
+            }
+
+            renderJSON(INSTANCE.toJson(buildLoadtestResponse(result, input)));
+        } catch (play.mvc.results.Result r) {
+            throw r;
+        } catch (Exception e) {
+            if (!input.real()) {
+                LoadTestHarness.stop();
+                LoadTestRunner.disable();
+            }
+            error(500, "Load test failed: " + e.getMessage());
+        } finally {
+            if (dispatcherBumped) {
+                utils.HttpFactories.setLlmDispatcherCapTransient(origPerHost, origMax);
+            }
+        }
+    }
+
+    private static LoadtestInput parseLoadtestInput() {
         var body = JsonBodyReader.readJsonBody();
         int concurrency = readInt(body, "concurrency", 10);
         int turns = readInt(body, "turns", 5);
@@ -266,138 +299,112 @@ public class ApiMetricsController extends Controller {
         // Optional per-run user message override. Default lives in
         // LoadTestRunner so the constant has one home.
         String userMessage = readString(body, "userMessage", null);
+        var prompts = parsePromptsField(body, userMessage);
 
-        // Optional varied-prompts mode: an array of per-turn user messages.
-        // When present, turn t sends prompts[t] instead of replaying
-        // userMessage. Mutually exclusive with a non-blank userMessage so the
-        // wire format never carries two conflicting per-turn message
-        // strategies. Validated against `turns` below so workers can index
-        // the array directly without bounds-checking.
-        java.util.List<String> prompts = null;
-        if (body != null && body.has("prompts") && !body.get("prompts").isJsonNull()) {
-            try {
-                var arr = body.getAsJsonArray("prompts");
-                prompts = new java.util.ArrayList<>(arr.size());
-                for (var el : arr) prompts.add(el.getAsString());
-            } catch (Exception _) {
-                error(400, "Invalid 'prompts' — must be an array of strings");
-            }
-            if (userMessage != null && !userMessage.isBlank()) {
-                error(400, "userMessage and prompts are mutually exclusive");
-            }
+        return new LoadtestInput(concurrency, turns, ttftMs, tokensPerSecond, responseTokens,
+                simulatedToolCalls, toolSleepMs, compress, provider, model, real, userMessage, prompts);
+    }
+
+    /**
+     * Optional varied-prompts mode: an array of per-turn user messages.
+     * When present, turn t sends prompts[t] instead of replaying
+     * userMessage. Mutually exclusive with a non-blank userMessage so the
+     * wire format never carries two conflicting per-turn message
+     * strategies.
+     */
+    private static java.util.List<String> parsePromptsField(JsonObject body, String userMessage) {
+        if (body == null || !body.has("prompts") || body.get("prompts").isJsonNull()) return null;
+        java.util.List<String> prompts;
+        try {
+            var arr = body.getAsJsonArray("prompts");
+            prompts = new java.util.ArrayList<>(arr.size());
+            for (var el : arr) prompts.add(el.getAsString());
+        } catch (Exception _) {
+            error(400, "Invalid 'prompts' — must be an array of strings");
+            return null; // unreachable — error() throws
         }
+        if (userMessage != null && !userMessage.isBlank()) {
+            error(400, "userMessage and prompts are mutually exclusive");
+        }
+        return prompts;
+    }
 
+    private static void validateLoadtestInput(LoadtestInput input) {
         int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
         int maxTurns = ConfigService.getInt("provider.loadtest-mock.maxTurns", 50);
-        if (concurrency < 1 || concurrency > maxConcurrency) {
+        if (input.concurrency() < 1 || input.concurrency() > maxConcurrency) {
             error(400, "concurrency must be between 1 and " + maxConcurrency);
         }
-        if (turns < 1 || turns > maxTurns) {
+        if (input.turns() < 1 || input.turns() > maxTurns) {
             error(400, "turns must be between 1 and " + maxTurns);
         }
-        if (prompts != null && prompts.size() < turns) {
-            error(400, "prompts array has " + prompts.size() + " entries but turns=" + turns
+        if (input.prompts() != null && input.prompts().size() < input.turns()) {
+            error(400, "prompts array has " + input.prompts().size() + " entries but turns=" + input.turns()
                     + "; provide at least one prompt per turn");
         }
+    }
 
-        // Enable the mock provider in its own transaction so it's committed
-        // before the loadtest requests fire (they use separate connections).
-        // Skip in real-provider mode — that path uses an existing registered
-        // provider seeded by DefaultConfigJob or the operator at boot.
-        if (!real) {
-            try {
-                JPA.withTransaction("default", false,
-                        (play.libs.F.Function0<Void>) () -> {
-                            ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
-                            return null;
-                        });
-            } catch (Throwable t) {
-                error(500, "Failed to enable mock provider: " + t.getMessage());
-            }
-        }
-
-        // Auto-bump the LLM dispatcher cap if --concurrency would saturate it.
-        // The default 64-per-host (or auto-tuned 8*cores) is sized for steady
-        // production traffic; loadtest at higher concurrency against one host
-        // (mock or single real provider) would otherwise queue at the
-        // dispatcher and inflate the ttft segment by the queue time. Snapshot
-        // here, restore in finally so the cap returns to its operator-tuned
-        // value after the test.
-        int origPerHost = utils.HttpFactories.llmDispatcherMaxRequestsPerHost();
-        int origMax = utils.HttpFactories.llmDispatcherMaxRequests();
-        boolean dispatcherBumped = concurrency > origPerHost;
-        if (dispatcherBumped) {
-            int newPerHost = concurrency + 16;
-            int newMax = Math.max(origMax, newPerHost * 2);
-            utils.HttpFactories.setLlmDispatcherCapTransient(newPerHost, newMax);
-        }
-
+    /**
+     * Enable the mock provider in its own transaction so it's committed
+     * before the loadtest requests fire (they use separate connections).
+     * Skip in real-provider mode — that path uses an existing registered
+     * provider seeded by DefaultConfigJob or the operator at boot.
+     */
+    private static void enableMockProviderIfNeeded(boolean real) {
+        if (real) return;
         try {
-            var result = LoadTestRunner.run(new LoadTestRunner.Request(
-                    concurrency, turns, compress,
-                    new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens,
-                            simulatedToolCalls, toolSleepMs),
-                    real, provider, model, userMessage, prompts));
-
-            if (!real) {
-                LoadTestHarness.stop();
-                LoadTestRunner.disable();
-            }
-
-            var out = new JsonObject();
-            out.addProperty("totalRequests", result.totalRequests());
-            out.addProperty("successCount", result.successCount());
-            out.addProperty("errorCount", result.errorCount());
-            out.addProperty("wallClockMs", result.wallClockMs());
-            out.addProperty("avgPerRequestMs", result.avgPerRequestMs());
-            out.addProperty("minPerRequestMs", result.minPerRequestMs());
-            out.addProperty("maxPerRequestMs", result.maxPerRequestMs());
-            // Per-run averages — useful in both modes. For mock runs they
-            // confirm the harness honored the requested scenario; for real-
-            // provider runs they're the only reliable view of provider
-            // performance (the mock-shape ttftMs / tokensPerSecond inputs are
-            // ignored by the runner once it routes to a real provider).
-            out.addProperty("avgTtftMs", result.avgTtftMs());
-            out.addProperty("avgResponseTokens", result.avgResponseTokens());
-            // Reasoning tokens are surfaced separately so cross-model
-            // comparisons see the full picture: a "70 visible / 3000 reasoning"
-            // model is doing very different work from a "70 visible / 0
-            // reasoning" model even when their visible-token rates match.
-            out.addProperty("avgReasoningTokens", result.avgReasoningTokens());
-            out.addProperty("avgTokensPerSec", round1(result.avgTokensPerSec()));
-            // Provider/model are echoed only in real-provider mode. Their
-            // presence (vs absence) IS the run-mode signal — no separate
-            // `realProvider` field needed.
-            if (real) {
-                out.addProperty("provider", provider);
-                out.addProperty("model", model);
-            }
-            // Per-turn breakdown only when turns > 1 (LoadTestRunner returns
-            // null otherwise). Renders as an array of {turn, count, ttftMeanMs,
-            // ttftP50Ms, ...} objects, ordered by turn position.
-            if (result.turnBuckets() != null) {
-                out.add("turnBuckets", INSTANCE.toJsonTree(result.turnBuckets()));
-            }
-            // Server-side segment breakdown for this run only — see
-            // LoadTestRunner.SegmentBreakdown. Always present (single-turn
-            // runs still benefit from the segment view).
-            if (result.serverSegments() != null && !result.serverSegments().isEmpty()) {
-                out.add("serverSegments", INSTANCE.toJsonTree(result.serverSegments()));
-            }
-            renderJSON(INSTANCE.toJson(out));
-        } catch (play.mvc.results.Result r) {
-            throw r;
-        } catch (Exception e) {
-            if (!real) {
-                LoadTestHarness.stop();
-                LoadTestRunner.disable();
-            }
-            error(500, "Load test failed: " + e.getMessage());
-        } finally {
-            if (dispatcherBumped) {
-                utils.HttpFactories.setLlmDispatcherCapTransient(origPerHost, origMax);
-            }
+            JPA.withTransaction("default", false,
+                    (play.libs.F.Function0<Void>) () -> {
+                        ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
+                        return null;
+                    });
+        } catch (Throwable t) {
+            error(500, "Failed to enable mock provider: " + t.getMessage());
         }
+    }
+
+    private static JsonObject buildLoadtestResponse(LoadTestRunner.Result result, LoadtestInput input) {
+        var out = new JsonObject();
+        out.addProperty("totalRequests", result.totalRequests());
+        out.addProperty("successCount", result.successCount());
+        out.addProperty("errorCount", result.errorCount());
+        out.addProperty("wallClockMs", result.wallClockMs());
+        out.addProperty("avgPerRequestMs", result.avgPerRequestMs());
+        out.addProperty("minPerRequestMs", result.minPerRequestMs());
+        out.addProperty("maxPerRequestMs", result.maxPerRequestMs());
+        // Per-run averages — useful in both modes. For mock runs they
+        // confirm the harness honored the requested scenario; for real-
+        // provider runs they're the only reliable view of provider
+        // performance (the mock-shape ttftMs / tokensPerSecond inputs are
+        // ignored by the runner once it routes to a real provider).
+        out.addProperty("avgTtftMs", result.avgTtftMs());
+        out.addProperty("avgResponseTokens", result.avgResponseTokens());
+        // Reasoning tokens are surfaced separately so cross-model
+        // comparisons see the full picture: a "70 visible / 3000 reasoning"
+        // model is doing very different work from a "70 visible / 0
+        // reasoning" model even when their visible-token rates match.
+        out.addProperty("avgReasoningTokens", result.avgReasoningTokens());
+        out.addProperty("avgTokensPerSec", round1(result.avgTokensPerSec()));
+        // Provider/model are echoed only in real-provider mode. Their
+        // presence (vs absence) IS the run-mode signal — no separate
+        // `realProvider` field needed.
+        if (input.real()) {
+            out.addProperty("provider", input.provider());
+            out.addProperty("model", input.model());
+        }
+        // Per-turn breakdown only when turns > 1 (LoadTestRunner returns
+        // null otherwise). Renders as an array of {turn, count, ttftMeanMs,
+        // ttftP50Ms, ...} objects, ordered by turn position.
+        if (result.turnBuckets() != null) {
+            out.add("turnBuckets", INSTANCE.toJsonTree(result.turnBuckets()));
+        }
+        // Server-side segment breakdown for this run only — see
+        // LoadTestRunner.SegmentBreakdown. Always present (single-turn
+        // runs still benefit from the segment view).
+        if (result.serverSegments() != null && !result.serverSegments().isEmpty()) {
+            out.add("serverSegments", INSTANCE.toJsonTree(result.serverSegments()));
+        }
+        return out;
     }
 
     /** DELETE /api/metrics/loadtest — stop the embedded mock provider. */
@@ -447,5 +454,27 @@ public class ApiMetricsController extends Controller {
     /** Round to one decimal so tokens-per-second prints as 47.3 instead of 47.27272727. */
     private static double round1(double v) {
         return Math.round(v * 10.0) / 10.0;
+    }
+
+    private static java.time.Instant parseSinceParam(String sinceParam) {
+        if (sinceParam == null || sinceParam.isBlank()) {
+            return java.time.Instant.now().minus(30, java.time.temporal.ChronoUnit.DAYS);
+        }
+        try {
+            return java.time.Instant.parse(sinceParam);
+        } catch (java.time.format.DateTimeParseException e) {
+            error(400, "Invalid 'since' — must be ISO-8601 instant (e.g. 2026-04-10T00:00:00Z)");
+            return null; // unreachable — error() throws
+        }
+    }
+
+    private static Long parseAgentIdParam(String agentIdParam) {
+        if (agentIdParam == null || agentIdParam.isBlank()) return null;
+        try {
+            return Long.parseLong(agentIdParam);
+        } catch (NumberFormatException e) {
+            error(400, "Invalid 'agentId' — must be numeric");
+            return null; // unreachable — error() throws
+        }
     }
 }
