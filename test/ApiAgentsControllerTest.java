@@ -329,6 +329,62 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void updateRejectsRenameCollisionAcrossExistingAgent() {
+        // Two agents A and B; PUT on A trying to rename to B's name → 409.
+        login();
+        createAgent("collision-target");
+        var renamerId = createAgent("collision-renamer");
+        var body = """
+                {"name": "collision-target"}
+                """;
+        var response = PUT("/api/agents/" + renamerId, "application/json", body);
+        assertEquals(409, response.status.intValue());
+    }
+
+    @Test
+    void updateThinkingModeExplicitNullClears() {
+        // thinkingMode is optional on update: explicit null clears it.
+        // (Setting a non-null mode requires the agent's model to advertise
+        // that level in ProviderRegistry, which the test JVM doesn't seed.)
+        // Exercises the readOptionalString branch with the present-null shape.
+        login();
+        var id = createAgent("thinking-mode-clear-agent");
+        var resp = PUT("/api/agents/" + id, "application/json", """
+                {"thinkingMode": null}
+                """);
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"thinkingMode\":null"));
+    }
+
+    @Test
+    void updateDescriptionRoundTrips() {
+        login();
+        var id = createAgent("desc-agent");
+        var resp = PUT("/api/agents/" + id, "application/json", """
+                {"description": "a helpful agent"}
+                """);
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"description\":\"a helpful agent\""));
+    }
+
+    @Test
+    void updateLeavesUnspecifiedFieldsUnchanged() {
+        // PUT with only enabled=false on a non-main agent — name, provider,
+        // model, thinkingMode all stay as-is. Exercises the absent-key
+        // default branches in update.
+        login();
+        var id = createAgent("partial-update-agent");
+        var resp = PUT("/api/agents/" + id, "application/json", """
+                {"enabled": false}
+                """);
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"enabled\":false"));
+        assertTrue(body.contains("\"name\":\"partial-update-agent\""),
+                "name should be preserved: " + body);
+    }
+
+    @Test
     void mainAgentIsHiddenFromListEndpointWhenReservedFilterApplies() {
         // Sanity check: the "main" agent IS visible via the list endpoint
         // (only __loadtest__ is hidden). This test guards against an
