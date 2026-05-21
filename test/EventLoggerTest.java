@@ -112,4 +112,21 @@ class EventLoggerTest extends UnitTest {
         assertTrue(e.details.contains("\"child_agent_id\":null"));
         assertTrue(e.details.contains("\"reason\":\"max depth 3 reached\""));
     }
+
+    @Test
+    void errorWithThrowableStringifiesIntoDetails() {
+        // The (category, message, Throwable) overload — previously 0%-covered —
+        // routes Throwable.toString() into the details field.
+        var t = new RuntimeException("synthetic boom");
+        EventLogger.error("test-cat-throwable", "ouch", t);
+        EventLogger.flush();
+        var events = EventLog.findRecent(40);
+        var found = events.stream().anyMatch(e ->
+                "test-cat-throwable".equals(e.category)
+                && "ouch".equals(e.message)
+                && e.details != null
+                && e.details.contains("RuntimeException")
+                && e.details.contains("synthetic boom"));
+        assertTrue(found, "Throwable.toString() must land in details");
+    }
 }
