@@ -127,4 +127,67 @@ class SkillVersionManagerTest extends UnitTest {
         var content = "---\nversion: 1.0.0\n---\n# Same body";
         assertFalse(SkillVersionManager.contentDiffersIgnoringVersion(content, content));
     }
+
+    private static String callEnsureVersion(String content, String targetVersion) {
+        try {
+            var m = SkillVersionManager.class.getDeclaredMethod(
+                    "ensureVersionInFrontmatter", String.class, String.class);
+            m.setAccessible(true);
+            return (String) m.invoke(null, content, targetVersion);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void ensureVersionWrapsContentWhenNoFrontmatter() {
+        var result = callEnsureVersion("# body only", "2.1.0");
+        assertTrue(result.startsWith("---\nversion: 2.1.0\n---"));
+        assertTrue(result.contains("# body only"));
+    }
+
+    @Test
+    void ensureVersionDefaultsTo1_0_0WhenNullAndNoFrontmatter() {
+        var result = callEnsureVersion("body only", null);
+        assertTrue(result.startsWith("---\nversion: 1.0.0\n---"));
+    }
+
+    @Test
+    void ensureVersionAcceptsNullContent() {
+        var result = callEnsureVersion(null, "3.0.0");
+        assertTrue(result.startsWith("---\nversion: 3.0.0\n---"));
+    }
+
+    @Test
+    void ensureVersionReplacesExistingWhenTargetSet() {
+        var input = "---\nname: x\nversion: 0.1.0\n---\n# body";
+        var result = callEnsureVersion(input, "1.5.0");
+        assertTrue(result.contains("version: 1.5.0"), "got: " + result);
+        assertFalse(result.contains("version: 0.1.0"));
+    }
+
+    @Test
+    void ensureVersionKeepsExistingWhenTargetNull() {
+        var input = "---\nname: x\nversion: 0.7.7\n---\n# body";
+        var result = callEnsureVersion(input, null);
+        assertTrue(result.contains("version: 0.7.7"),
+                "existing version preserved when target null: " + result);
+    }
+
+    @Test
+    void ensureVersionInsertsAfterDescriptionWhenVersionMissing() {
+        var input = "---\nname: x\ndescription: hello\n---\n# body";
+        var result = callEnsureVersion(input, "1.2.3");
+        int descIdx = result.indexOf("description:");
+        int verIdx = result.indexOf("version: 1.2.3");
+        assertTrue(descIdx >= 0 && verIdx > descIdx,
+                "version must follow description: " + result);
+    }
+
+    @Test
+    void ensureVersionAppendsAtEndOfFrontmatterWhenNoDescription() {
+        var input = "---\nname: x\n---\n# body";
+        var result = callEnsureVersion(input, "4.0.0");
+        assertTrue(result.contains("version: 4.0.0"));
+    }
 }
