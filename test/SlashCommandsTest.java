@@ -889,6 +889,55 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("Model:"), "model line present: " + text);
     }
 
+    // --- formatPricing branches ---
+
+    private llm.LlmTypes.ModelInfo modelWithPrices(double p, double c, double cr, double cw) {
+        return new llm.LlmTypes.ModelInfo(
+                "id", "name", 4096, 1024, false, false, false,
+                p, c, cr, cw, java.util.List.of(), false);
+    }
+
+    private String formatPricing(llm.LlmTypes.ModelInfo m) throws Exception {
+        var meth = Commands.class.getDeclaredMethod("formatPricing", llm.LlmTypes.ModelInfo.class);
+        meth.setAccessible(true);
+        return (String) meth.invoke(null, m);
+    }
+
+    @Test
+    void formatPricingReturnsUnknownWhenAllNegative() throws Exception {
+        var m = modelWithPrices(-1, -1, -1, -1);
+        assertEquals("unknown", formatPricing(m));
+    }
+
+    @Test
+    void formatPricingRendersAllFourComponents() throws Exception {
+        var m = modelWithPrices(2.50, 7.50, 0.10, 0.25);
+        var result = formatPricing(m);
+        assertTrue(result.contains("input $2.50"), "got: " + result);
+        assertTrue(result.contains("output $7.50"), "got: " + result);
+        assertTrue(result.contains("cache read $0.100"), "got: " + result);
+        assertTrue(result.contains("cache write $0.250"), "got: " + result);
+    }
+
+    @Test
+    void formatPricingHandlesMixedNegativeAndPositive() throws Exception {
+        // One negative, others positive: still doesn't trip the all-negative
+        // unknown branch.
+        var m = modelWithPrices(2.50, 7.50, -1.0, 0.25);
+        var result = formatPricing(m);
+        assertTrue(result.contains("cache read n/a"), "got: " + result);
+        assertTrue(result.contains("input $2.50"));
+    }
+
+    @Test
+    void formatPricingHandlesZeroAsFreeTier() throws Exception {
+        var m = modelWithPrices(0, 0, 0, 0);
+        var result = formatPricing(m);
+        assertTrue(result.contains("free"));
+        assertFalse(result.equals("unknown"),
+                "zero is a known price, not unknown: " + result);
+    }
+
     // --- formatTokenCapacity branches ---
 
     private String formatTokenCapacity(int tokens) throws Exception {
