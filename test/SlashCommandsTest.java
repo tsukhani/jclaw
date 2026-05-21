@@ -889,6 +889,75 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("Model:"), "model line present: " + text);
     }
 
+    // --- renderThinkingSelection branches ---
+
+    private String renderThinkingSelection(Agent agent, llm.LlmTypes.ModelInfo m) throws Exception {
+        var meth = Commands.class.getDeclaredMethod(
+                "renderThinkingSelection", Agent.class, llm.LlmTypes.ModelInfo.class);
+        meth.setAccessible(true);
+        return (String) meth.invoke(null, agent, m);
+    }
+
+    @Test
+    void renderThinkingSelectionReturnsNotEnabledForBlankAgentMode() throws Exception {
+        var a = new Agent();
+        a.thinkingMode = null;
+        var m = new llm.LlmTypes.ModelInfo(
+                "id", "name", 4096, 1024, true, false, false,
+                0, 0, 0, 0, java.util.List.of("low", "medium", "high"), false);
+        var result = renderThinkingSelection(a, m);
+        assertTrue(result.contains("not currently enabled"), "got: " + result);
+    }
+
+    @Test
+    void renderThinkingSelectionReturnsNotEnabledForEmptyAgentMode() throws Exception {
+        var a = new Agent();
+        a.thinkingMode = "   ";
+        var m = new llm.LlmTypes.ModelInfo(
+                "id", "name", 4096, 1024, true, false, false,
+                0, 0, 0, 0, java.util.List.of("low", "high"), false);
+        var result = renderThinkingSelection(a, m);
+        assertTrue(result.contains("not currently enabled"), "got: " + result);
+    }
+
+    @Test
+    void renderThinkingSelectionFlagsLevelNotAdvertisedByModel() throws Exception {
+        // Agent has thinkingMode="high" but the model's advertised levels
+        // only include ["low", "medium"] — should surface the "not advertised"
+        // warning.
+        var a = new Agent();
+        a.thinkingMode = "high";
+        var m = new llm.LlmTypes.ModelInfo(
+                "id", "name", 4096, 1024, true, false, false,
+                0, 0, 0, 0, java.util.List.of("low", "medium"), false);
+        var result = renderThinkingSelection(a, m);
+        assertTrue(result.contains("not advertised"), "got: " + result);
+        assertTrue(result.contains("effectively off"), "got: " + result);
+    }
+
+    @Test
+    void renderThinkingSelectionReportsEffortWhenLevelAdvertised() throws Exception {
+        var a = new Agent();
+        a.thinkingMode = "high";
+        var m = new llm.LlmTypes.ModelInfo(
+                "id", "name", 4096, 1024, true, false, false,
+                0, 0, 0, 0, java.util.List.of("low", "medium", "high"), false);
+        var result = renderThinkingSelection(a, m);
+        assertTrue(result.contains("effort: high"), "got: " + result);
+    }
+
+    @Test
+    void renderThinkingSelectionReportsEffortWhenModelHasNoLevelsList() throws Exception {
+        // levels is null/empty → no membership check → report effort directly.
+        var a = new Agent();
+        a.thinkingMode = "medium";
+        var m = new llm.LlmTypes.ModelInfo(
+                "id", "name", 4096, 1024, true, false, false,
+                0, 0, 0, 0, java.util.List.of(), false);
+        var result = renderThinkingSelection(a, m);
+        assertTrue(result.contains("effort: medium"), "got: " + result);
+    }
+
     // --- formatPricing branches ---
 
     private llm.LlmTypes.ModelInfo modelWithPrices(double p, double c, double cr, double cw) {
