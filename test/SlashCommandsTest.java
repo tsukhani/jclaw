@@ -889,6 +889,73 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("Model:"), "model line present: " + text);
     }
 
+    // --- formatHistoryMessage + truncateContent branches ---
+
+    private String formatHistoryMessage(models.Message msg) throws Exception {
+        var meth = Commands.class.getDeclaredMethod("formatHistoryMessage", models.Message.class);
+        meth.setAccessible(true);
+        return (String) meth.invoke(null, msg);
+    }
+
+    @Test
+    void formatHistoryMessageRendersBareMessageWithNullFields() throws Exception {
+        // All optional fields null → fallback markers "?" and no content/tool sections.
+        var msg = new models.Message();
+        msg.createdAt = null;
+        msg.role = null;
+        msg.content = null;
+        msg.toolCalls = null;
+        msg.toolResults = null;
+        var result = formatHistoryMessage(msg);
+        assertTrue(result.contains("[?]"), "missing-timestamp marker: " + result);
+        assertTrue(result.contains("?:"), "missing-role marker: " + result);
+        assertFalse(result.contains("tool_calls:"), "got: " + result);
+        assertFalse(result.contains("tool_results:"), "got: " + result);
+    }
+
+    @Test
+    void formatHistoryMessageRendersContentInline() throws Exception {
+        var msg = new models.Message();
+        msg.createdAt = java.time.Instant.parse("2026-05-21T12:00:00Z");
+        msg.role = "user";
+        msg.content = "hello world";
+        var result = formatHistoryMessage(msg);
+        assertTrue(result.contains("hello world"));
+        assertTrue(result.contains("user"));
+    }
+
+    @Test
+    void formatHistoryMessageTruncatesLongContent() throws Exception {
+        // Content longer than SUBAGENT_HISTORY_CONTENT_CAP must be truncated
+        // with "..." suffix.
+        var msg = new models.Message();
+        msg.role = "assistant";
+        msg.content = "x".repeat(5000);
+        var result = formatHistoryMessage(msg);
+        assertTrue(result.endsWith("..."), "must truncate: tail=" +
+                result.substring(Math.max(0, result.length() - 10)));
+    }
+
+    @Test
+    void formatHistoryMessageIncludesToolCallSection() throws Exception {
+        var msg = new models.Message();
+        msg.role = "assistant";
+        msg.content = "calling tool";
+        msg.toolCalls = "{\"id\":\"a\",\"function\":{\"name\":\"web_search\"}}";
+        var result = formatHistoryMessage(msg);
+        assertTrue(result.contains("tool_calls:"), "got: " + result);
+        assertTrue(result.contains("chars)"), "summarizeToolField marker: " + result);
+    }
+
+    @Test
+    void formatHistoryMessageIncludesToolResultsSection() throws Exception {
+        var msg = new models.Message();
+        msg.role = "tool";
+        msg.toolResults = "{\"result\":\"data\"}";
+        var result = formatHistoryMessage(msg);
+        assertTrue(result.contains("tool_results:"), "got: " + result);
+    }
+
     // --- /stop branches ---
 
     @Test
