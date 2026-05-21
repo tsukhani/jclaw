@@ -343,6 +343,65 @@ class DocumentsToolTest extends UnitTest {
         assertTrue(result.contains("not found"), "got: " + result);
     }
 
+    // ----- appendDocument branches -------------------------------------------
+
+    @Test
+    void execute_appendDocumentRequiresContent() throws Exception {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-append-no-content");
+        var result = tool.execute(
+                "{\"action\":\"appendDocument\",\"path\":\"draft.md\",\"content\":\"\"}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("requires 'content'"), "got: " + result);
+    }
+
+    @Test
+    void execute_appendDocumentRejectsBinaryExtension() {
+        // Cannot append text to .docx/.pdf — the LLM gets a redirect to .md.
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-append-binary");
+        var result = tool.execute(
+                "{\"action\":\"appendDocument\",\"path\":\"final.docx\",\"content\":\"hi\"}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("binary format"), "got: " + result);
+        assertTrue(result.contains(".md draft"), "must redirect to .md: " + result);
+    }
+
+    @Test
+    void execute_appendDocumentCreatesDraftWhenMissing() {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-append-create");
+        var result = tool.execute(
+                "{\"action\":\"appendDocument\",\"path\":\"new-draft.md\",\"content\":\"first chunk\"}",
+                agent);
+        assertTrue(result.contains("Draft created"), "got: " + result);
+    }
+
+    @Test
+    void execute_appendDocumentAppendsToExisting() {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-append-extend");
+        tool.execute(
+                "{\"action\":\"appendDocument\",\"path\":\"chunked.md\",\"content\":\"# header\\n\"}",
+                agent);
+        var result = tool.execute(
+                "{\"action\":\"appendDocument\",\"path\":\"chunked.md\",\"content\":\"second chunk\"}",
+                agent);
+        assertTrue(result.contains("Appended"), "got: " + result);
+    }
+
+    @Test
+    void execute_pathTraversalReturns400StyleError() {
+        // AgentService.acquireWorkspacePath throws SecurityException for ../
+        // escapes; execute() maps that to a deterministic error string.
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-traversal");
+        var result = tool.execute(
+                "{\"action\":\"readDocument\",\"path\":\"../../etc/passwd\"}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("escapes"), "must surface SecurityException as escape: " + result);
+    }
+
     private models.Agent freshAgent(String name) {
         play.test.Fixtures.deleteDatabase();
         return services.AgentService.create(name, "openrouter", "gpt-4.1");
