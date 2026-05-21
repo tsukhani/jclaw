@@ -242,4 +242,71 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
                 "TASK_MGMT_UPDATE", "%audited-update%");
         assertEquals(1L, count, "expected exactly one TASK_MGMT_UPDATE event");
     }
+
+    // --- Remaining optional-string field branches ---
+
+    @Test
+    void updatesEnabledToolNames() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "tools-task", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"enabledToolNames": "filesystem,exec"}
+                """);
+        assertIsOk(resp);
+        assertContentMatch("\"enabledToolNames\":\"filesystem,exec\"", resp);
+    }
+
+    @Test
+    void updatesPreCheck() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "precheck-task", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"preCheck": "exit 0"}
+                """);
+        assertIsOk(resp);
+        assertContentMatch("\"preCheck\":\"exit 0\"", resp);
+    }
+
+    @Test
+    void updatesScript() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "script-task", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"script": "echo hello"}
+                """);
+        assertIsOk(resp);
+        assertContentMatch("\"script\":\"echo hello\"", resp);
+    }
+
+    @Test
+    void updatesContextFromTaskIds() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "ctx-task", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"contextFromTaskIds": "1,2,3"}
+                """);
+        assertIsOk(resp);
+        assertContentMatch("\"contextFromTaskIds\":\"1,2,3\"", resp);
+    }
+
+    @Test
+    void updatesMultipleOptionalStringFieldsInOnePatch() {
+        // One PATCH carries enabledToolNames + preCheck + script — exercises
+        // multiple sequential body.has() branches in the same request.
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "multi-field-task", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"enabledToolNames": "filesystem", "preCheck": "test -d /tmp", "script": "ls"}
+                """);
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"enabledToolNames\":\"filesystem\""));
+        assertTrue(body.contains("\"preCheck\":\"test -d /tmp\""));
+        assertTrue(body.contains("\"script\":\"ls\""));
+    }
 }
