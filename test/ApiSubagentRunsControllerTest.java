@@ -304,6 +304,101 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    // ── collectModesForRuns branch coverage ───────────────────────────
+
+    @Test
+    void listSurfacesModeFromMatchingSubagentSpawnEvent() {
+        // Happy path through collectModesForRuns: when a SUBAGENT_SPAWN
+        // EventLog row carries this run's id and a non-null mode, the
+        // listing response must echo that mode for the row.
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-mode-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-mode-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+        });
+        commitInFreshTx(() -> {
+            EventLogger.recordSubagentSpawn("api-mode-p", "api-mode-c",
+                    String.valueOf(runId), "inline", "build the docs");
+            EventLogger.flush();
+            return null;
+        });
+        var resp = GET("/api/subagent-runs");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"mode\":\"inline\""),
+                "mode from SUBAGENT_SPAWN event must surface on the row: " + body);
+    }
+
+    @Test
+    void listIgnoresSpawnEventsWithNonNumericRunId() {
+        // collectModesForRuns has a NumberFormatException guard for run_id
+        // strings that don't parse as Long. Seed an event whose details
+        // carry a clearly non-numeric run_id, then list — no mode should
+        // be attached to any row.
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-bad-runid-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-bad-runid-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+        });
+        commitInFreshTx(() -> {
+            EventLogger.recordSubagentSpawn("api-bad-runid-p", "api-bad-runid-c",
+                    "not-a-number", "inline", "ctx");
+            EventLogger.flush();
+            return null;
+        });
+        var resp = GET("/api/subagent-runs");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        // Row exists but no mode attached — mode field absent or null.
+        assertTrue(body.contains("\"id\":" + runId),
+                "row should still appear in listing: " + body);
+        assertFalse(body.contains("\"mode\":\"inline\""),
+                "no mode should attach when run_id isn't parseable: " + body);
+    }
+
+    @Test
+    void listKeepsOnlyMostRecentModeWhenMultipleSpawnEventsExist() {
+        // collectModesForRuns iterates events in DESC timestamp order and
+        // takes the FIRST hit per run id (containsKey skip). Two spawn
+        // events for the same run with different modes → only the newer
+        // mode appears.
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-multi-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-multi-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+        });
+        commitInFreshTx(() -> {
+            // Older event first.
+            EventLogger.recordSubagentSpawn("api-multi-p", "api-multi-c",
+                    String.valueOf(runId), "session", "first");
+            EventLogger.flush();
+            return null;
+        });
+        commitInFreshTx(() -> {
+            // Newer event — its mode should win.
+            EventLogger.recordSubagentSpawn("api-multi-p", "api-multi-c",
+                    String.valueOf(runId), "inline", "second");
+            EventLogger.flush();
+            return null;
+        });
+        var resp = GET("/api/subagent-runs");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"mode\":\"inline\""),
+                "most recent mode (inline) should win: " + body);
+        assertFalse(body.contains("\"mode\":\"session\""),
+                "older mode (session) should not appear: " + body);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────
 
     private static long persistRun(Agent p, Agent c, Conversation pc, Conversation cc,
