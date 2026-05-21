@@ -21,7 +21,7 @@ class SubagentOrphanRecoveryJobTest extends UnitTest {
     void doJobIsNoopWhenNoOrphans() {
         // Empty DB → orphans list is empty → early return without touching
         // anything. The test passes if no exception escapes.
-        new SubagentOrphanRecoveryJob().doJob();
+        assertDoesNotThrow(() -> new SubagentOrphanRecoveryJob().doJob());
     }
 
     @Test

@@ -72,7 +72,7 @@ public final class TaskLifecycleEvents {
      * Mark fire start. {@code run.startedAt} is already populated
      * by the caller (TaskExecutor opens the TaskRun row first).
      */
-    public static void started(Task task, TaskRun run) {
+    public static void recordStarted(Task task, TaskRun run) {
         var agentName = task.agent != null ? task.agent.name : null;
         var message = "Task '%s' fire started (run=%d)".formatted(task.name, run.id);
         var details = detailsJson(
@@ -88,7 +88,7 @@ public final class TaskLifecycleEvents {
      * in rather than recomputing so the value matches what the
      * monitoring UI reads back.
      */
-    public static void completed(Task task, TaskRun run, long durationMs) {
+    public static void recordCompleted(Task task, TaskRun run, long durationMs) {
         var agentName = task.agent != null ? task.agent.name : null;
         var message = "Task '%s' completed in %dms (run=%d)".formatted(
                 task.name, durationMs, run.id);
@@ -115,8 +115,8 @@ public final class TaskLifecycleEvents {
      *        carried so the dashboard can show "what actually
      *        happened" without joining to the TaskRun row.
      */
-    public static void failed(Task task, TaskRun run,
-                              String classification, String errorMessage) {
+    public static void recordFailed(Task task, TaskRun run,
+                                    String classification, String errorMessage) {
         var agentName = task.agent != null ? task.agent.name : null;
         long durationMs = run != null && run.startedAt != null
                 ? Duration.between(run.startedAt, Instant.now()).toMillis()
@@ -133,13 +133,13 @@ public final class TaskLifecycleEvents {
     }
 
     /**
-     * Mark a RUNNING Task as LOST. Distinct from {@link #failed} because
+     * Mark a RUNNING Task as LOST. Distinct from {@link #recordFailed} because
      * the recovery surface is db-scheduler, not the operator —
      * {@code staleSeconds} is preserved in the details payload so
      * dashboards can distinguish "barely past the threshold" from
      * "JVM was offline for an hour" without joining to scheduled_tasks.
      */
-    public static void lost(Task task, long staleSeconds) {
+    public static void recordLost(Task task, long staleSeconds) {
         var agentName = task.agent != null ? task.agent.name : null;
         var message = "Task '%s' marked LOST after %ds of stale heartbeat"
                 .formatted(task.name, staleSeconds);

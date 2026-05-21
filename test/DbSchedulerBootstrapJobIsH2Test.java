@@ -63,8 +63,8 @@ class DbSchedulerBootstrapJobIsH2Test extends UnitTest {
             throw new SQLException("simulated failure");
         }
         @Override public java.io.PrintWriter getLogWriter() { return null; }
-        @Override public void setLogWriter(java.io.PrintWriter out) {}
-        @Override public void setLoginTimeout(int seconds) {}
+        @Override public void setLogWriter(java.io.PrintWriter out) { /* no-op: test-only DataSource stub, no logger/timeout state to track */ }
+        @Override public void setLoginTimeout(int seconds) { /* no-op: test-only DataSource stub, no logger/timeout state to track */ }
         @Override public int getLoginTimeout() { return 0; }
         @Override public java.util.logging.Logger getParentLogger() { return null; }
         @Override public <T> T unwrap(Class<T> iface) { return null; }
@@ -107,8 +107,8 @@ class DbSchedulerBootstrapJobIsH2Test extends UnitTest {
         }
         @Override public Connection getConnection(String u, String p) throws SQLException { return getConnection(); }
         @Override public java.io.PrintWriter getLogWriter() { return null; }
-        @Override public void setLogWriter(java.io.PrintWriter out) {}
-        @Override public void setLoginTimeout(int seconds) {}
+        @Override public void setLogWriter(java.io.PrintWriter out) { /* no-op: test-only DataSource stub, no logger/timeout state to track */ }
+        @Override public void setLoginTimeout(int seconds) { /* no-op: test-only DataSource stub, no logger/timeout state to track */ }
         @Override public int getLoginTimeout() { return 0; }
         @Override public java.util.logging.Logger getParentLogger() { return null; }
         @Override public <T> T unwrap(Class<T> iface) { return null; }

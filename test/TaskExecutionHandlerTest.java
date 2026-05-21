@@ -672,8 +672,8 @@ class TaskExecutionHandlerTest extends UnitTest {
 
         @Override public void stop() { stopped = true; }
         @Override public void remove() { stopped = true; }
-        @Override public void reschedule(ExecutionComplete c, Instant n) { }
-        @Override public void removeAndScheduleNew(SchedulableInstance<?> i) { }
+        @Override public void reschedule(ExecutionComplete c, Instant n) { /* no-op: this test doesn't exercise reschedule paths */ }
+        @Override public void removeAndScheduleNew(SchedulableInstance<?> i) { /* no-op: this test doesn't exercise reschedule paths */ }
     }
 
     /**

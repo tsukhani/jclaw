@@ -96,7 +96,7 @@ public final class TaskExecutor {
         // without depending on the heartbeat to catch up. Sibling
         // events COMPLETED (below) and FAILED (in JClawFailureHandler)
         // bracket the fire.
-        TaskLifecycleEvents.started(task, run);
+        TaskLifecycleEvents.recordStarted(task, run);
 
         var sink = new TaskRunSink(run);
         sink.onStart();
@@ -170,7 +170,7 @@ public final class TaskExecutor {
                     return null;
                 });
             }
-            TaskLifecycleEvents.completed(task, closed,
+            TaskLifecycleEvents.recordCompleted(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
         }
         return closed;

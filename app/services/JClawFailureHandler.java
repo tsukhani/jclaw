@@ -168,7 +168,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
         // while still showing the operator what actually happened.
         var runForLifecycle = Tx.run(() ->
                 (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", jclawTaskId).first());
-        TaskLifecycleEvents.failed(task, runForLifecycle, reason, errorMessage);
+        TaskLifecycleEvents.recordFailed(task, runForLifecycle, reason, errorMessage);
 
         return new Decision.Fail(reason);
     }

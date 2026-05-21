@@ -195,7 +195,8 @@ class AgentRunnerWebhookDispatchTest extends UnitTest {
         JPA.em().getTransaction().begin();
 
         // Must not throw — the catch at AgentRunner.java:1132 swallows.
-        dispatchToChannelMethod().invoke(null, null, "telegram", "tg-user-2", "hello");
+        assertDoesNotThrow(() ->
+                dispatchToChannelMethod().invoke(null, null, "telegram", "tg-user-2", "hello"));
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────

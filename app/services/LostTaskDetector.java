@@ -127,7 +127,7 @@ public final class LostTaskDetector {
                     long staleSeconds = row.lastHeartbeat() != null
                             ? Math.max(0L, Duration.between(row.lastHeartbeat(), now).getSeconds())
                             : STALE_THRESHOLD.getSeconds();
-                    TaskLifecycleEvents.lost(task, staleSeconds);
+                    TaskLifecycleEvents.recordLost(task, staleSeconds);
                 }
             }
         }

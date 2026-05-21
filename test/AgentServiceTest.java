@@ -565,7 +565,7 @@ class AgentServiceTest extends UnitTest {
         // No agents that need flipping → the early-return short-circuit path.
         // No assertions on side effects; we just want the no-change branch
         // hit cleanly.
-        AgentService.syncEnabledStates();
+        assertDoesNotThrow(() -> AgentService.syncEnabledStates());
     }
 
     @Test
