@@ -269,4 +269,74 @@ class PricingRefreshServiceTest extends UnitTest {
     private void seedProviderModels(String name, String modelsJson) {
         ConfigService.set("provider." + name + ".models", modelsJson);
     }
+
+    // --- private helper branch coverage (reflection) ---
+
+    private static double callExtractPerMillion(com.google.gson.JsonObject entry, String key)
+            throws Exception {
+        var m = PricingRefreshService.class.getDeclaredMethod(
+                "extractPerMillion", com.google.gson.JsonObject.class, String.class);
+        m.setAccessible(true);
+        return (double) m.invoke(null, entry, key);
+    }
+
+    private static boolean callFillIfMissing(com.google.gson.JsonObject model, String field, double value)
+            throws Exception {
+        var m = PricingRefreshService.class.getDeclaredMethod(
+                "fillIfMissing", com.google.gson.JsonObject.class, String.class, double.class);
+        m.setAccessible(true);
+        return (boolean) m.invoke(null, model, field, value);
+    }
+
+    @Test
+    void extractPerMillionReturnsNegativeOneForMissingKey() throws Exception {
+        var entry = new com.google.gson.JsonObject();
+        assertEquals(-1.0, callExtractPerMillion(entry, "absent"), 0.0001);
+    }
+
+    @Test
+    void extractPerMillionReturnsNegativeOneForNullValue() throws Exception {
+        var entry = new com.google.gson.JsonObject();
+        entry.add("k", com.google.gson.JsonNull.INSTANCE);
+        assertEquals(-1.0, callExtractPerMillion(entry, "k"), 0.0001);
+    }
+
+    @Test
+    void extractPerMillionConvertsPerTokenToPerMillion() throws Exception {
+        var entry = new com.google.gson.JsonObject();
+        entry.addProperty("input_cost_per_token", 0.000003);
+        assertEquals(3.0, callExtractPerMillion(entry, "input_cost_per_token"), 0.0001);
+    }
+
+    @Test
+    void fillIfMissingReturnsFalseForNegativeNewValue() throws Exception {
+        var model = new com.google.gson.JsonObject();
+        assertFalse(callFillIfMissing(model, "promptPrice", -1.0));
+        assertFalse(model.has("promptPrice"));
+    }
+
+    @Test
+    void fillIfMissingPersistsWhenFieldAbsent() throws Exception {
+        var model = new com.google.gson.JsonObject();
+        assertTrue(callFillIfMissing(model, "promptPrice", 2.5));
+        assertEquals(2.5, model.get("promptPrice").getAsDouble(), 0.0001);
+    }
+
+    @Test
+    void fillIfMissingPreservesExistingNonSentinelValue() throws Exception {
+        // Operator-set value (anything other than -1) must survive.
+        var model = new com.google.gson.JsonObject();
+        model.addProperty("promptPrice", 5.0);
+        assertFalse(callFillIfMissing(model, "promptPrice", 99.0));
+        assertEquals(5.0, model.get("promptPrice").getAsDouble(), 0.0001);
+    }
+
+    @Test
+    void fillIfMissingOverwritesSentinelValue() throws Exception {
+        // -1 sentinel means "no value yet" → overwrite with the new value.
+        var model = new com.google.gson.JsonObject();
+        model.addProperty("promptPrice", -1.0);
+        assertTrue(callFillIfMissing(model, "promptPrice", 4.2));
+        assertEquals(4.2, model.get("promptPrice").getAsDouble(), 0.0001);
+    }
 }
