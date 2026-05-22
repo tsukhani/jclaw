@@ -10,7 +10,16 @@ import java.util.List;
 @Table(name = "message", indexes = {
         @Index(name = "idx_message_conversation", columnList = "conversation_id"),
         @Index(name = "idx_message_conversation_created", columnList = "conversation_id,created_at"),
-        @Index(name = "idx_message_subagent_run", columnList = "subagent_run_id")
+        @Index(name = "idx_message_subagent_run", columnList = "subagent_run_id"),
+        // Covering index for TokenizerCalibrationJob's recurring scan:
+        //   WHERE role = 'assistant' AND usageJson IS NOT NULL
+        //         AND created_at > <since> ORDER BY created_at DESC
+        // (role, created_at) narrows by the high-selectivity role column first
+        // and then range-scans on created_at so LIMIT N short-circuits cleanly
+        // without re-sorting. NULL filter on usage_json resolves per-row off
+        // the index — fine at this row count, and partial indexes aren't
+        // portable across H2 / Postgres / MySQL the way compound indexes are.
+        @Index(name = "idx_message_role_created", columnList = "role,created_at")
 })
 public class Message extends Model {
 

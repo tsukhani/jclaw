@@ -266,19 +266,17 @@ public final class ContextWindowManager {
         // doing most of the bloat, head/tail-truncate just that message
         // instead of dropping entire history turns. Cheaper and preserves
         // conversational structure — drop-oldest is the fallback below.
-        var afterToolTruncation = truncateOversizedToolResults(messages, providerName, modelId, modelMatched,
-                trimTarget, estimatedTokens, agent, conv, provider, tools);
-        if (afterToolTruncation != messages) {
-            var newEstimate = estimateProviderPromptTokens(agent, conv, provider, afterToolTruncation, tools);
-            int newAdjusted = adjustedPromptTokens(providerName, modelId, newEstimate);
-            if (newAdjusted <= trimTarget) {
+        var truncationResult = truncateOversizedToolResults(messages, providerName, modelId, modelMatched,
+                trimTarget, estimatedTokens, agent);
+        if (truncationResult != null) {
+            if (truncationResult.adjustedEstimate() <= trimTarget) {
                 // Truncating tool results alone got us under the budget.
-                return afterToolTruncation;
+                return truncationResult.messages();
             }
             // Truncation reduced the deficit but didn't close it — proceed to
             // drop-oldest with the already-truncated list as the new baseline.
-            messages = afterToolTruncation;
-            estimatedTokens = newAdjusted;
+            messages = truncationResult.messages();
+            estimatedTokens = truncationResult.adjustedEstimate();
         }
 
         // Stage 2: find how many oldest non-system messages to drop. Scan
@@ -322,19 +320,31 @@ public final class ContextWindowManager {
     /** Don't touch tool results in the last N messages — recent results are most relevant. */
     static final int DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT = 4;
 
+    /** Outcome of a truncation pass: the rebuilt messages list and the running adjusted estimate. */
+    private record TruncationOutcome(List<ChatMessage> messages, int adjustedEstimate) {}
+
     /**
      * Head/tail-truncate the largest tool-result messages until the prompt
      * estimate fits in {@code trimTarget}, or no more candidates are
-     * available. Returns the original list reference if no truncation was
-     * needed or possible (caller can detect via identity check). Always
-     * preserves tool results in the last {@code PRESERVE_RECENT} messages
-     * regardless of size — recency wins over size for the model's immediate
-     * context.
+     * available. Returns {@code null} when no truncation was needed or
+     * possible; otherwise returns the rebuilt list together with the running
+     * adjusted estimate so the caller can decide whether to short-circuit
+     * or fall through to drop-oldest.
+     *
+     * <p>Per-truncation delta accounting: instead of re-tokenizing the full
+     * prompt after each truncation, only tokenize the message that changed
+     * and subtract {@code (old_msg_tokens - new_msg_tokens) × multiplier}
+     * from the running total. Drops the loop from O(n × candidates) full
+     * tokenizations to O(n + candidates × avg_message) — meaningful when
+     * the prompt is large and there are multiple oversized tool results.
+     *
+     * <p>Always preserves tool results in the last
+     * {@link #DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT} messages regardless of
+     * size — recency wins over size for the model's immediate context.
      */
-    private static List<ChatMessage> truncateOversizedToolResults(
+    private static TruncationOutcome truncateOversizedToolResults(
             List<ChatMessage> messages, String providerName, String modelId, boolean modelMatched,
-            int trimTarget, int estimatedTokens,
-            Agent agent, Conversation conv, LlmProvider provider, List<ToolDef> tools) {
+            int trimTarget, int estimatedTokens, Agent agent) {
         int minChars = ConfigService.getInt(TOOL_TRUNCATE_MIN_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_MIN_CHARS);
         int keepHead = ConfigService.getInt(TOOL_TRUNCATE_KEEP_HEAD_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_KEEP_HEAD_CHARS);
         int keepTail = ConfigService.getInt(TOOL_TRUNCATE_KEEP_TAIL_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_KEEP_TAIL_CHARS);
@@ -353,7 +363,7 @@ public final class ContextWindowManager {
             if (s.length() < minChars) continue;
             candidates.add(new Candidate(i, s.length()));
         }
-        if (candidates.isEmpty()) return messages;
+        if (candidates.isEmpty()) return null;
 
         // Largest first — biggest savings per truncation, lowest count of
         // messages disturbed.
@@ -362,32 +372,41 @@ public final class ContextWindowManager {
         var working = new ArrayList<>(messages);
         int truncatedCount = 0;
         long charsElided = 0;
-        // Stop as soon as the running estimate fits — re-estimate after each
-        // truncation so we don't over-truncate.
+        int runningEstimate = estimatedTokens;
+        // Stop as soon as the running estimate fits — delta-based accounting
+        // means we only tokenize the message that just changed, not the
+        // whole prompt, per iteration.
         for (var cand : candidates) {
             var original = working.get(cand.index());
             var originalText = (String) original.content();
             var truncated = truncateToolResultContent(originalText, keepHead, keepTail);
             if (truncated.length() >= originalText.length()) continue; // would not save anything
-            working.set(cand.index(), new ChatMessage(
-                    original.role(), truncated, original.toolCalls(),
-                    original.toolCallId(), original.toolName()));
+
+            // Local delta: tokenize only the old and new versions of THIS
+            // message. The framing tokens (TOKENS_PER_MESSAGE + role) cancel
+            // out across the diff because we're keeping the same message
+            // shape and role, so the delta is purely content-driven.
+            int oldMsgTokens = TokenUsageEstimator.estimateMessage(modelId, original).tokens();
+            var newMsg = new ChatMessage(original.role(), truncated, original.toolCalls(),
+                    original.toolCallId(), original.toolName());
+            int newMsgTokens = TokenUsageEstimator.estimateMessage(modelId, newMsg).tokens();
+            int rawDelta = oldMsgTokens - newMsgTokens;
+            if (rawDelta <= 0) continue; // tokenizer didn't see savings (unlikely)
+            int adjustedDelta = adjustedMessageTokens(rawDelta, modelMatched, providerName, modelId);
+
+            working.set(cand.index(), newMsg);
             truncatedCount++;
             charsElided += (originalText.length() - truncated.length());
+            runningEstimate -= adjustedDelta;
 
-            // Re-estimate against the working list. This is the expensive
-            // bit (jtokkit pass over all messages), so we only do it when we
-            // actually changed something.
-            var checkEstimate = estimateProviderPromptTokens(agent, conv, provider, working, tools);
-            int adjusted = adjustedPromptTokens(providerName, modelId, checkEstimate);
-            if (adjusted <= trimTarget) break;
+            if (runningEstimate <= trimTarget) break;
         }
 
-        if (truncatedCount == 0) return messages;
+        if (truncatedCount == 0) return null;
         EventLogger.warn("llm", agent.name, null,
-                "Truncated %d oversized tool result(s) (~%d chars elided, head=%d tail=%d, original estimate=%d, target=%d)"
-                        .formatted(truncatedCount, charsElided, keepHead, keepTail, estimatedTokens, trimTarget));
-        return working;
+                "Truncated %d oversized tool result(s) (~%d chars elided, head=%d tail=%d, original estimate=%d, post-truncate=%d, target=%d)"
+                        .formatted(truncatedCount, charsElided, keepHead, keepTail, estimatedTokens, runningEstimate, trimTarget));
+        return new TruncationOutcome(working, runningEstimate);
     }
 
     /**
