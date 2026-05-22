@@ -85,43 +85,8 @@ public class TokenizerCalibrationJob extends Job<Void> {
 
         if (recent.isEmpty()) return;
 
-        // Group ratios by "provider/modelId" key. Each entry is the list of
-        // observed (provider_prompt / jtokkit_prompt) ratios for that pair.
-        Map<String, List<Double>> ratiosByKey = new HashMap<>();
-        for (var msg : recent) {
-            var sample = parseSample(msg.usageJson);
-            if (sample == null) continue;
-            ratiosByKey.computeIfAbsent(sample.key(), k -> new ArrayList<>()).add(sample.ratio());
-        }
-
-        int updated = 0;
-        for (var entry : ratiosByKey.entrySet()) {
-            var key = entry.getKey();
-            var ratios = entry.getValue();
-            if (ratios.size() < MIN_SAMPLES_PER_GROUP) continue;
-
-            double baseRatio = ratios.size() >= P95_THRESHOLD_SAMPLES
-                    ? p95(ratios)
-                    : maxOf(ratios);
-            double newMultiplier = clamp(baseRatio * HEADROOM,
-                    ContextWindowManager.MIN_SAFETY_MULTIPLIER,
-                    ContextWindowManager.MAX_SAFETY_MULTIPLIER);
-
-            var configKey = ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + key;
-            var existingRaw = ConfigService.get(configKey, null);
-            double existing = parseDouble(existingRaw, -1.0);
-
-            if (existing < 0 || Math.abs(newMultiplier - existing) > UPDATE_DELTA_THRESHOLD) {
-                ConfigService.set(configKey, "%.2f".formatted(newMultiplier));
-                EventLogger.info("tokenizer-calibration", null, null,
-                        "Updated %s = %.2f (samples=%d, %s=%.2f, prior=%s)".formatted(
-                                configKey, newMultiplier, ratios.size(),
-                                ratios.size() >= P95_THRESHOLD_SAMPLES ? "p95" : "max",
-                                baseRatio,
-                                existingRaw == null ? "unset" : existingRaw));
-                updated++;
-            }
-        }
+        var ratiosByKey = collectRatios(recent);
+        int updated = applyCalibrations(ratiosByKey);
 
         if (updated > 0) {
             EventLogger.info("tokenizer-calibration", null, null,
@@ -131,11 +96,70 @@ public class TokenizerCalibrationJob extends Job<Void> {
     }
 
     /**
+     * Group observed (provider_prompt / jtokkit_prompt) ratios by
+     * "provider.modelId" key. Each entry is the list of valid samples for
+     * that pair after the parseSample filter drops modelMatched=true rows
+     * and malformed entries.
+     */
+    public static Map<String, List<Double>> collectRatios(List<Message> recent) {
+        var ratiosByKey = new HashMap<String, List<Double>>();
+        for (var msg : recent) {
+            var sample = parseSample(msg.usageJson);
+            if (sample != null) {
+                ratiosByKey.computeIfAbsent(sample.key(), k -> new ArrayList<>()).add(sample.ratio());
+            }
+        }
+        return ratiosByKey;
+    }
+
+    /**
+     * Walk grouped ratios, compute a per-group safety multiplier, and write
+     * to ConfigService when the change clears the update threshold. Returns
+     * the count of groups whose stored multiplier was updated.
+     */
+    public static int applyCalibrations(Map<String, List<Double>> ratiosByKey) {
+        int updated = 0;
+        for (var entry : ratiosByKey.entrySet()) {
+            if (maybeUpdateMultiplier(entry.getKey(), entry.getValue())) updated++;
+        }
+        return updated;
+    }
+
+    /**
+     * Compute the per-group multiplier from observed ratios and write it
+     * to Config when it differs from the stored value by more than
+     * {@link #UPDATE_DELTA_THRESHOLD}. Returns true when an update was made.
+     * Skips groups below {@link #MIN_SAMPLES_PER_GROUP}.
+     */
+    private static boolean maybeUpdateMultiplier(String key, List<Double> ratios) {
+        if (ratios.size() < MIN_SAMPLES_PER_GROUP) return false;
+        boolean p95Branch = ratios.size() >= P95_THRESHOLD_SAMPLES;
+        double baseRatio = p95Branch ? p95(ratios) : maxOf(ratios);
+        double newMultiplier = Math.clamp(baseRatio * HEADROOM,
+                ContextWindowManager.MIN_SAFETY_MULTIPLIER,
+                ContextWindowManager.MAX_SAFETY_MULTIPLIER);
+
+        var configKey = ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + key;
+        var existingRaw = ConfigService.get(configKey, null);
+        double existing = parseDouble(existingRaw, -1.0);
+
+        if (existing >= 0 && Math.abs(newMultiplier - existing) <= UPDATE_DELTA_THRESHOLD) return false;
+        ConfigService.set(configKey, "%.2f".formatted(newMultiplier));
+        EventLogger.info("tokenizer-calibration", null, null,
+                "Updated %s = %.2f (samples=%d, %s=%.2f, prior=%s)".formatted(
+                        configKey, newMultiplier, ratios.size(),
+                        p95Branch ? "p95" : "max",
+                        baseRatio,
+                        existingRaw == null ? "unset" : existingRaw));
+        return true;
+    }
+
+    /**
      * Parse one usageJson row into a calibration sample, or return null if
      * the row is missing fields, the model matched its native encoding
      * (multiplier doesn't apply), or the ratio is degenerate.
      */
-    private static Sample parseSample(String usageJson) {
+    public static Sample parseSample(String usageJson) {
         if (usageJson == null || usageJson.isBlank()) return null;
         try {
             var obj = JsonParser.parseString(usageJson).getAsJsonObject();
@@ -152,18 +176,18 @@ public class TokenizerCalibrationJob extends Job<Void> {
             int jtokkitPrompt = asInt(obj, "jtokkitPrompt", 0);
             if (providerPrompt <= 0 || jtokkitPrompt <= 0) return null;
 
-            double ratio = (double) providerPrompt / jtokkitPrompt;
             // Defensive: ratios below 1.0 mean jtokkit OVER-counted (safe
             // direction); we still record them so a long run of safe
             // measurements doesn't get masked by one bad outlier.
+            double ratio = (double) providerPrompt / jtokkitPrompt;
             return new Sample(provider + "." + modelId, ratio);
         }
-        catch (Exception e) {
+        catch (Exception _) {
             return null;
         }
     }
 
-    private record Sample(String key, double ratio) {}
+    public record Sample(String key, double ratio) {}
 
     private static String asString(JsonObject obj, String key) {
         return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : null;
@@ -180,23 +204,19 @@ public class TokenizerCalibrationJob extends Job<Void> {
     private static double parseDouble(String raw, double fallback) {
         if (raw == null || raw.isBlank()) return fallback;
         try { return Double.parseDouble(raw); }
-        catch (NumberFormatException e) { return fallback; }
+        catch (NumberFormatException _) { return fallback; }
     }
 
-    private static double p95(List<Double> values) {
+    public static double p95(List<Double> values) {
         var sorted = new ArrayList<>(values);
         java.util.Collections.sort(sorted);
-        int idx = (int) Math.ceil(0.95 * sorted.size()) - 1;
-        return sorted.get(Math.max(0, Math.min(sorted.size() - 1, idx)));
+        int idx = Math.clamp((int) Math.ceil(0.95 * sorted.size()) - 1, 0, sorted.size() - 1);
+        return sorted.get(idx);
     }
 
-    private static double maxOf(List<Double> values) {
+    public static double maxOf(List<Double> values) {
         double max = 0;
         for (var v : values) if (v > max) max = v;
         return max;
-    }
-
-    private static double clamp(double value, double min, double max) {
-        return Math.min(max, Math.max(min, value));
     }
 }

@@ -163,10 +163,9 @@ public final class ContextWindowManager {
     private static Double parseMultiplier(String raw) {
         if (raw == null || raw.isBlank()) return null;
         try {
-            var value = Double.parseDouble(raw);
-            return Math.min(MAX_SAFETY_MULTIPLIER, Math.max(MIN_SAFETY_MULTIPLIER, value));
+            return Math.clamp(Double.parseDouble(raw), MIN_SAFETY_MULTIPLIER, MAX_SAFETY_MULTIPLIER);
         }
-        catch (NumberFormatException e) {
+        catch (NumberFormatException _) {
             return null;
         }
     }
@@ -342,6 +341,8 @@ public final class ContextWindowManager {
      * {@link #DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT} messages regardless of
      * size — recency wins over size for the model's immediate context.
      */
+    private record Candidate(int index, int contentLength) {}
+
     private static TruncationOutcome truncateOversizedToolResults(
             List<ChatMessage> messages, String providerName, String modelId, boolean modelMatched,
             int trimTarget, int estimatedTokens, Agent agent) {
@@ -351,20 +352,8 @@ public final class ContextWindowManager {
         int preserveRecent = ConfigService.getInt(TOOL_TRUNCATE_PRESERVE_RECENT_KEY,
                 DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT);
 
-        // Eligible indices: role=tool, content is a String (skip multi-part),
-        // size >= minChars, not in the protected-recent suffix.
-        int cutoff = Math.max(0, messages.size() - preserveRecent);
-        record Candidate(int index, int contentLength) {}
-        var candidates = new ArrayList<Candidate>();
-        for (int i = 0; i < cutoff; i++) {
-            var m = messages.get(i);
-            if (!MessageRole.TOOL.value.equals(m.role())) continue;
-            if (!(m.content() instanceof String s)) continue;
-            if (s.length() < minChars) continue;
-            candidates.add(new Candidate(i, s.length()));
-        }
+        var candidates = collectCandidates(messages, minChars, preserveRecent);
         if (candidates.isEmpty()) return null;
-
         // Largest first — biggest savings per truncation, lowest count of
         // messages disturbed.
         candidates.sort((a, b) -> Integer.compare(b.contentLength(), a.contentLength()));
@@ -377,29 +366,14 @@ public final class ContextWindowManager {
         // means we only tokenize the message that just changed, not the
         // whole prompt, per iteration.
         for (var cand : candidates) {
-            var original = working.get(cand.index());
-            var originalText = (String) original.content();
-            var truncated = truncateToolResultContent(originalText, keepHead, keepTail);
-            if (truncated.length() >= originalText.length()) continue; // would not save anything
-
-            // Local delta: tokenize only the old and new versions of THIS
-            // message. The framing tokens (TOKENS_PER_MESSAGE + role) cancel
-            // out across the diff because we're keeping the same message
-            // shape and role, so the delta is purely content-driven.
-            int oldMsgTokens = TokenUsageEstimator.estimateMessage(modelId, original).tokens();
-            var newMsg = new ChatMessage(original.role(), truncated, original.toolCalls(),
-                    original.toolCallId(), original.toolName());
-            int newMsgTokens = TokenUsageEstimator.estimateMessage(modelId, newMsg).tokens();
-            int rawDelta = oldMsgTokens - newMsgTokens;
-            if (rawDelta <= 0) continue; // tokenizer didn't see savings (unlikely)
-            int adjustedDelta = adjustedMessageTokens(rawDelta, modelMatched, providerName, modelId);
-
-            working.set(cand.index(), newMsg);
-            truncatedCount++;
-            charsElided += (originalText.length() - truncated.length());
-            runningEstimate -= adjustedDelta;
-
-            if (runningEstimate <= trimTarget) break;
+            var savings = attemptTruncate(working, cand, modelId, modelMatched, providerName,
+                    keepHead, keepTail);
+            if (savings != null) {
+                truncatedCount++;
+                charsElided += savings.charsElided();
+                runningEstimate -= savings.adjustedDelta();
+                if (runningEstimate <= trimTarget) break;
+            }
         }
 
         if (truncatedCount == 0) return null;
@@ -409,15 +383,66 @@ public final class ContextWindowManager {
         return new TruncationOutcome(working, runningEstimate);
     }
 
+    /** Find tool-result messages eligible for head/tail truncation. */
+    private static List<Candidate> collectCandidates(List<ChatMessage> messages, int minChars, int preserveRecent) {
+        int cutoff = Math.max(0, messages.size() - preserveRecent);
+        var candidates = new ArrayList<Candidate>();
+        for (int i = 0; i < cutoff; i++) {
+            var m = messages.get(i);
+            if (MessageRole.TOOL.value.equals(m.role())
+                    && m.content() instanceof String s
+                    && s.length() >= minChars) {
+                candidates.add(new Candidate(i, s.length()));
+            }
+        }
+        return candidates;
+    }
+
+    /** Outcome of a per-message truncation attempt. */
+    private record TruncationSavings(int adjustedDelta, int charsElided) {}
+
+    /**
+     * Apply head/tail truncation to one candidate message in {@code working}.
+     * Returns {@code null} if the truncation wouldn't actually save anything
+     * (content already short enough, or tokenizer didn't see savings).
+     * Otherwise mutates {@code working} in place and returns the deltas the
+     * caller's running totals need.
+     */
+    private static TruncationSavings attemptTruncate(List<ChatMessage> working, Candidate cand,
+                                                       String modelId, boolean modelMatched, String providerName,
+                                                       int keepHead, int keepTail) {
+        var original = working.get(cand.index());
+        var originalText = (String) original.content();
+        var truncated = truncateToolResultContent(originalText, keepHead, keepTail);
+        // Local delta: tokenize only the old and new versions of THIS
+        // message. The framing tokens (TOKENS_PER_MESSAGE + role) cancel out
+        // across the diff because we're keeping the same message shape and
+        // role, so the delta is purely content-driven.
+        if (truncated.length() >= originalText.length()) return null;
+        int oldMsgTokens = TokenUsageEstimator.estimateMessage(modelId, original).tokens();
+        var newMsg = new ChatMessage(original.role(), truncated, original.toolCalls(),
+                original.toolCallId(), original.toolName());
+        int newMsgTokens = TokenUsageEstimator.estimateMessage(modelId, newMsg).tokens();
+        int rawDelta = oldMsgTokens - newMsgTokens;
+        if (rawDelta <= 0) return null;
+        working.set(cand.index(), newMsg);
+        return new TruncationSavings(
+                adjustedMessageTokens(rawDelta, modelMatched, providerName, modelId),
+                originalText.length() - truncated.length());
+    }
+
     /**
      * Head/tail-truncate a tool-result body. Keeps the first
      * {@code keepHead} chars and the last {@code keepTail} chars, joined by
      * an inline elision marker that tells the model (and operators reading
      * the trace) exactly how much was removed. Returns the original string
      * if it's already short enough that truncation wouldn't save bytes.
+     *
+     * <p>Required non-null; callers in
+     * {@link #truncateOversizedToolResults} already filter via
+     * {@code instanceof String} so this never sees a null body.
      */
-    private static String truncateToolResultContent(String original, int keepHead, int keepTail) {
-        if (original == null) return null;
+    public static String truncateToolResultContent(String original, int keepHead, int keepTail) {
         int len = original.length();
         // Don't bother if the elided fragment is shorter than the marker
         // itself — keep the original for readability.

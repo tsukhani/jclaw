@@ -87,15 +87,19 @@ public final class CompactionGate {
             return new CompactionDecision(mi, modelId, conv.channelType);
         });
         if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
+        // No-op when the caller has no provider wired up — without one we
+        // can't even make the summarization LLM call. Bail out instead of
+        // letting providerName/modelLabel construction NPE later.
+        if (primary == null || primary.config() == null) return current;
+        final var providerName = primary.config().name();
         var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current, tools);
-        var providerName = primary != null && primary.config() != null ? primary.config().name() : null;
         int estimatedTokens = ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(), estimate);
         if (!SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) return current;
 
         final var modelId = snapshot.modelId();
         final var compactionChannel = snapshot.channelType();
         final var maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
-        final var modelLabel = primary.config().name() + "/" + modelId;
+        final var modelLabel = providerName + "/" + modelId;
 
         SessionCompactor.Summarizer summarizer = sumMsgs -> {
             var resp = primary.chat(modelId, sumMsgs, List.of(), maxOutput, null, compactionChannel);
