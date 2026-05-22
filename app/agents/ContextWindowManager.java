@@ -10,6 +10,7 @@ import llm.LlmTypes.ToolDef;
 import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
+import models.MessageRole;
 import services.ConfigService;
 import services.EventLogger;
 
@@ -260,10 +261,31 @@ public final class ContextWindowManager {
 
         if (estimatedTokens <= trimTarget) return messages;
 
-        // Find how many oldest non-system messages to drop. Scan forward from index 1
-        // (first after system prompt) and accumulate tokens to remove until we fit.
-        // Per-message tokens scaled by the same safety multiplier so the running
-        // accumulator stays consistent with the budget check above.
+        // Stage 1 (ported from OpenClaw's preemptive-compaction route
+        // "truncate_tool_results_only"): when a single oversized tool result is
+        // doing most of the bloat, head/tail-truncate just that message
+        // instead of dropping entire history turns. Cheaper and preserves
+        // conversational structure — drop-oldest is the fallback below.
+        var afterToolTruncation = truncateOversizedToolResults(messages, providerName, modelId, modelMatched,
+                trimTarget, estimatedTokens, agent, conv, provider, tools);
+        if (afterToolTruncation != messages) {
+            var newEstimate = estimateProviderPromptTokens(agent, conv, provider, afterToolTruncation, tools);
+            int newAdjusted = adjustedPromptTokens(providerName, modelId, newEstimate);
+            if (newAdjusted <= trimTarget) {
+                // Truncating tool results alone got us under the budget.
+                return afterToolTruncation;
+            }
+            // Truncation reduced the deficit but didn't close it — proceed to
+            // drop-oldest with the already-truncated list as the new baseline.
+            messages = afterToolTruncation;
+            estimatedTokens = newAdjusted;
+        }
+
+        // Stage 2: find how many oldest non-system messages to drop. Scan
+        // forward from index 1 (first after system prompt) and accumulate
+        // tokens to remove until we fit. Per-message tokens scaled by the
+        // same safety multiplier so the running accumulator stays consistent
+        // with the budget check above.
         int total = estimatedTokens;
         int dropCount = 0;
         for (int i = 1; i < messages.size() - 1 && total > trimTarget; i++) {
@@ -282,6 +304,114 @@ public final class ContextWindowManager {
             return trimmed;
         }
         return messages;
+    }
+
+    // ─── Tool-result truncation ─────────────────────────────────────────────
+
+    static final String TOOL_TRUNCATE_MIN_CHARS_KEY = "chat.truncateToolResultsMinChars";
+    static final String TOOL_TRUNCATE_KEEP_HEAD_CHARS_KEY = "chat.truncateToolResultsKeepHeadChars";
+    static final String TOOL_TRUNCATE_KEEP_TAIL_CHARS_KEY = "chat.truncateToolResultsKeepTailChars";
+    static final String TOOL_TRUNCATE_PRESERVE_RECENT_KEY = "chat.truncateToolResultsPreserveRecent";
+
+    /** Below this content length, truncating wouldn't save enough to be worth it. */
+    static final int DEFAULT_TOOL_TRUNCATE_MIN_CHARS = 5000;
+    /** Bytes kept from the start of an oversized tool result. */
+    static final int DEFAULT_TOOL_TRUNCATE_KEEP_HEAD_CHARS = 500;
+    /** Bytes kept from the end of an oversized tool result. */
+    static final int DEFAULT_TOOL_TRUNCATE_KEEP_TAIL_CHARS = 500;
+    /** Don't touch tool results in the last N messages — recent results are most relevant. */
+    static final int DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT = 4;
+
+    /**
+     * Head/tail-truncate the largest tool-result messages until the prompt
+     * estimate fits in {@code trimTarget}, or no more candidates are
+     * available. Returns the original list reference if no truncation was
+     * needed or possible (caller can detect via identity check). Always
+     * preserves tool results in the last {@code PRESERVE_RECENT} messages
+     * regardless of size — recency wins over size for the model's immediate
+     * context.
+     */
+    private static List<ChatMessage> truncateOversizedToolResults(
+            List<ChatMessage> messages, String providerName, String modelId, boolean modelMatched,
+            int trimTarget, int estimatedTokens,
+            Agent agent, Conversation conv, LlmProvider provider, List<ToolDef> tools) {
+        int minChars = ConfigService.getInt(TOOL_TRUNCATE_MIN_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_MIN_CHARS);
+        int keepHead = ConfigService.getInt(TOOL_TRUNCATE_KEEP_HEAD_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_KEEP_HEAD_CHARS);
+        int keepTail = ConfigService.getInt(TOOL_TRUNCATE_KEEP_TAIL_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_KEEP_TAIL_CHARS);
+        int preserveRecent = ConfigService.getInt(TOOL_TRUNCATE_PRESERVE_RECENT_KEY,
+                DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT);
+
+        // Eligible indices: role=tool, content is a String (skip multi-part),
+        // size >= minChars, not in the protected-recent suffix.
+        int cutoff = Math.max(0, messages.size() - preserveRecent);
+        record Candidate(int index, int contentLength) {}
+        var candidates = new ArrayList<Candidate>();
+        for (int i = 0; i < cutoff; i++) {
+            var m = messages.get(i);
+            if (!MessageRole.TOOL.value.equals(m.role())) continue;
+            if (!(m.content() instanceof String s)) continue;
+            if (s.length() < minChars) continue;
+            candidates.add(new Candidate(i, s.length()));
+        }
+        if (candidates.isEmpty()) return messages;
+
+        // Largest first — biggest savings per truncation, lowest count of
+        // messages disturbed.
+        candidates.sort((a, b) -> Integer.compare(b.contentLength(), a.contentLength()));
+
+        var working = new ArrayList<>(messages);
+        int truncatedCount = 0;
+        long charsElided = 0;
+        // Stop as soon as the running estimate fits — re-estimate after each
+        // truncation so we don't over-truncate.
+        for (var cand : candidates) {
+            var original = working.get(cand.index());
+            var originalText = (String) original.content();
+            var truncated = truncateToolResultContent(originalText, keepHead, keepTail);
+            if (truncated.length() >= originalText.length()) continue; // would not save anything
+            working.set(cand.index(), new ChatMessage(
+                    original.role(), truncated, original.toolCalls(),
+                    original.toolCallId(), original.toolName()));
+            truncatedCount++;
+            charsElided += (originalText.length() - truncated.length());
+
+            // Re-estimate against the working list. This is the expensive
+            // bit (jtokkit pass over all messages), so we only do it when we
+            // actually changed something.
+            var checkEstimate = estimateProviderPromptTokens(agent, conv, provider, working, tools);
+            int adjusted = adjustedPromptTokens(providerName, modelId, checkEstimate);
+            if (adjusted <= trimTarget) break;
+        }
+
+        if (truncatedCount == 0) return messages;
+        EventLogger.warn("llm", agent.name, null,
+                "Truncated %d oversized tool result(s) (~%d chars elided, head=%d tail=%d, original estimate=%d, target=%d)"
+                        .formatted(truncatedCount, charsElided, keepHead, keepTail, estimatedTokens, trimTarget));
+        return working;
+    }
+
+    /**
+     * Head/tail-truncate a tool-result body. Keeps the first
+     * {@code keepHead} chars and the last {@code keepTail} chars, joined by
+     * an inline elision marker that tells the model (and operators reading
+     * the trace) exactly how much was removed. Returns the original string
+     * if it's already short enough that truncation wouldn't save bytes.
+     */
+    private static String truncateToolResultContent(String original, int keepHead, int keepTail) {
+        if (original == null) return null;
+        int len = original.length();
+        // Don't bother if the elided fragment is shorter than the marker
+        // itself — keep the original for readability.
+        int markerOverhead = 96; // approximate length of the marker template
+        if (len <= keepHead + keepTail + markerOverhead) return original;
+        var head = original.substring(0, Math.min(keepHead, len));
+        var tail = original.substring(Math.max(0, len - keepTail));
+        int elidedChars = len - head.length() - tail.length();
+        return head
+                + "\n\n[...JClaw elided " + elidedChars
+                + " chars of this tool result to fit the context window. "
+                + "The full output is preserved in the conversation history database.]\n\n"
+                + tail;
     }
 
     static llm.TokenUsageEstimator.ChatRequestTokens estimateProviderPromptTokens(
