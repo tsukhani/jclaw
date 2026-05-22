@@ -7,8 +7,10 @@ import java.util.Map;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
+import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
+import services.ConfigService;
 import services.EventLogger;
 
 /**
@@ -64,7 +66,55 @@ public final class ContextWindowManager {
      */
     static final int RESERVED_OUTPUT_TOKENS = 4096;
 
+    /**
+     * Config key for the safety multiplier applied to jtokkit-estimated
+     * prompt tokens when the encoding does not match the model family
+     * (cl100k_base fallback for Kimi/DeepSeek/Gemma/Qwen/GLM/Mistral/Llama).
+     * The empirical Kimi-on-Ollama-Cloud measurement showed cl100k_base
+     * under-counting plain-English-heavy prompts by up to 25%, which let
+     * JClaw ship over-window payloads that the provider then rejected with
+     * HTTP 400. Bumping the estimate by this factor before comparison to
+     * trim/compact thresholds keeps JClaw on the safe side of that gap.
+     * Override via {@code ConfigService.set("jtokkit.safetyMultiplier.unmatched", "1.5")}.
+     */
+    static final String SAFETY_MULTIPLIER_KEY = "jtokkit.safetyMultiplier.unmatched";
+    static final double DEFAULT_SAFETY_MULTIPLIER = 1.4;
+
     private ContextWindowManager() {}
+
+    /**
+     * Return the prompt-token estimate adjusted for known tokenizer-mismatch
+     * bias. When jtokkit's encoding matches the model family, returns the
+     * raw estimate. When it does not (cl100k_base fallback for non-OpenAI
+     * models), multiplies by {@link #SAFETY_MULTIPLIER_KEY} (default
+     * {@value #DEFAULT_SAFETY_MULTIPLIER}) to bias toward earlier
+     * trim / compaction and avoid provider-side context-length rejections.
+     */
+    public static int adjustedPromptTokens(TokenUsageEstimator.ChatRequestTokens estimate) {
+        if (estimate.modelMatched()) return estimate.promptTokens();
+        return (int) Math.ceil(estimate.promptTokens() * safetyMultiplier());
+    }
+
+    /**
+     * Apply the same per-call safety multiplier to a per-message estimate
+     * so the trim loop's accumulator stays consistent with the budget
+     * check produced by {@link #adjustedPromptTokens}.
+     */
+    public static int adjustedMessageTokens(int rawTokens, boolean modelMatched) {
+        if (modelMatched) return rawTokens;
+        return (int) Math.ceil(rawTokens * safetyMultiplier());
+    }
+
+    private static double safetyMultiplier() {
+        var raw = ConfigService.get(SAFETY_MULTIPLIER_KEY, null);
+        if (raw == null || raw.isBlank()) return DEFAULT_SAFETY_MULTIPLIER;
+        try {
+            return Double.parseDouble(raw);
+        }
+        catch (NumberFormatException e) {
+            return DEFAULT_SAFETY_MULTIPLIER;
+        }
+    }
 
     /**
      * Derive the effective {@code max_tokens} for a specific LLM call,
@@ -94,7 +144,7 @@ public final class ContextWindowManager {
         int configured = modelInfo.maxTokens();
         if (modelInfo.contextWindow() <= 0) return configured;
 
-        int promptTokens = estimateProviderPromptTokens(agent, conv, provider, messages, tools).promptTokens();
+        int promptTokens = adjustedPromptTokens(estimateProviderPromptTokens(agent, conv, provider, messages, tools));
         int headroom = modelInfo.contextWindow() - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS;
         // NB: not Math.clamp — when configured < MIN_OUTPUT_TOKENS (small / mis-configured model) we still want MIN_OUTPUT_TOKENS, which clamp would reject as min>max.
         @SuppressWarnings("java:S6885")
@@ -141,7 +191,9 @@ public final class ContextWindowManager {
 
         int contextWindow = modelInfo.contextWindow();
         var modelId = modelIdFor(agent, conv, provider);
-        int estimatedTokens = estimateProviderPromptTokens(agent, conv, provider, messages, tools).promptTokens();
+        var rawEstimate = estimateProviderPromptTokens(agent, conv, provider, messages, tools);
+        int estimatedTokens = adjustedPromptTokens(rawEstimate);
+        boolean modelMatched = rawEstimate.modelMatched();
         // JCLAW-291: trim target reserves RESERVED_OUTPUT_TOKENS so the reply has
         // a real budget — without this, headroom in effectiveMaxTokens collapses
         // and the model truncates with finish_reason=length on plain replies.
@@ -154,10 +206,13 @@ public final class ContextWindowManager {
 
         // Find how many oldest non-system messages to drop. Scan forward from index 1
         // (first after system prompt) and accumulate tokens to remove until we fit.
+        // Per-message tokens scaled by the same safety multiplier so the running
+        // accumulator stays consistent with the budget check above.
         int total = estimatedTokens;
         int dropCount = 0;
         for (int i = 1; i < messages.size() - 1 && total > trimTarget; i++) {
-            total -= llm.TokenUsageEstimator.estimateMessage(modelId, messages.get(i)).tokens();
+            int rawMsgTokens = TokenUsageEstimator.estimateMessage(modelId, messages.get(i)).tokens();
+            total -= adjustedMessageTokens(rawMsgTokens, modelMatched);
             dropCount++;
         }
         if (dropCount > 0) {

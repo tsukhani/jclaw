@@ -87,8 +87,8 @@ public final class CompactionGate {
             return new CompactionDecision(mi, modelId, conv.channelType);
         });
         if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
-        int estimatedTokens = TokenUsageEstimator.estimateChatRequest(
-                snapshot.modelId(), current, tools).promptTokens();
+        var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current, tools);
+        int estimatedTokens = ContextWindowManager.adjustedPromptTokens(estimate);
         if (!SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) return current;
 
         final var modelId = snapshot.modelId();
