@@ -50,11 +50,17 @@ public class ApiBindingsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw new AssertionError("unreachable: badRequest() throws");
+        }
 
         var agentId = body.get(KEY_AGENT_ID).getAsLong();
         var agent = (Agent) Agent.findById(agentId);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw new AssertionError("unreachable: notFound() throws");
+        }
 
         var binding = new AgentBinding();
         binding.agent = agent;
@@ -71,14 +77,23 @@ public class ApiBindingsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
     public static void update(Long id) {
         var binding = (AgentBinding) AgentBinding.findById(id);
-        if (binding == null) notFound();
+        if (binding == null) {
+            notFound();
+            throw new AssertionError("unreachable: notFound() throws");
+        }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw new AssertionError("unreachable: badRequest() throws");
+        }
 
         if (body.has(KEY_AGENT_ID)) {
             var agent = (Agent) Agent.findById(body.get(KEY_AGENT_ID).getAsLong());
-            if (agent == null) notFound();
+            if (agent == null) {
+                notFound();
+                throw new AssertionError("unreachable: notFound() throws");
+            }
             binding.agent = agent;
         }
         if (body.has(KEY_CHANNEL_TYPE)) binding.channelType = body.get(KEY_CHANNEL_TYPE).getAsString();
@@ -91,7 +106,10 @@ public class ApiBindingsController extends Controller {
 
     public static void delete(Long id) {
         var binding = (AgentBinding) AgentBinding.findById(id);
-        if (binding == null) notFound();
+        if (binding == null) {
+            notFound();
+            throw new AssertionError("unreachable: notFound() throws");
+        }
         binding.delete();
         renderJSON(gson.toJson(Map.of("status", "ok")));
     }

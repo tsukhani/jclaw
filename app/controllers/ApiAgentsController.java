@@ -374,7 +374,10 @@ public class ApiAgentsController extends Controller {
     public static void saveWorkspaceFile(Long id, String filename) {
         var agent = requireAgent(id);
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_CONTENT)) badRequest();
+        if (body == null || !body.has(KEY_CONTENT)) {
+            badRequest();
+            throw new AssertionError("unreachable: badRequest() throws");
+        }
         AgentService.writeWorkspaceFile(agent.name, filename, body.get(KEY_CONTENT).getAsString());
         renderJSON(gson.toJson(java.util.Map.of("status", "ok", "filename", filename)));
     }

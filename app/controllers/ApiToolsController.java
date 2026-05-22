@@ -120,10 +120,16 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolToggleResponse.class)))
     public static void updateForAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw new AssertionError("unreachable: notFound() throws");
+        }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_ENABLED)) badRequest();
+        if (body == null || !body.has(KEY_ENABLED)) {
+            badRequest();
+            throw new AssertionError("unreachable: badRequest() throws");
+        }
         var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         // Reject per-action MCP toggles. A non-null group on a non-server-

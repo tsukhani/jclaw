@@ -717,7 +717,7 @@ public class AgentRunner {
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
-        var prepared = buildStreamingPrologue(agent, conversation, userMessage, primary);
+        var prepared = buildStreamingPrologue(agent, conversation, userMessage);
 
         var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
@@ -783,7 +783,6 @@ public class AgentRunner {
 
         var post = runPostAccumulatorToolLoop(accumulator, agent, conversation, primary, channelType, messages, tools,
                 cb, thinkingMode, isCancelled, trace, turnUsage, sink);
-        if (post == null) return;
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
@@ -824,7 +823,7 @@ public class AgentRunner {
      * inside helpers don't open additional connections.
      */
     private static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
-                                                            String userMessage, LlmProvider primary) {
+                                                            String userMessage) {
         return services.Tx.run(() -> {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
             var convo = ConversationService.findById(conversation.id);
@@ -912,8 +911,7 @@ public class AgentRunner {
                                                                         StreamingCallbacks cb, String thinkingMode,
                                                                         AtomicBoolean isCancelled, LatencyTrace trace,
                                                                         LlmProvider.TurnUsage turnUsage,
-                                                                        AgentExecutionSink sink)
-            throws InterruptedException {
+                                                                        AgentExecutionSink sink) {
         var content = accumulator.content;
 
         // JCLAW-291: detect the empty-toolCalls truncation case — a plain

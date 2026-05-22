@@ -70,8 +70,10 @@ public class ApiMcpServersController extends Controller {
         var transport = readTransport(body);
         var row = new McpServer();
         row.name = name;
-        row.enabled = body.has(KEY_ENABLED) && !body.get(KEY_ENABLED).isJsonNull()
-                ? body.get(KEY_ENABLED).getAsBoolean() : true;
+        // Default true when the key is absent or explicitly null; otherwise
+        // honor the user-supplied boolean.
+        row.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).isJsonNull()
+                || body.get(KEY_ENABLED).getAsBoolean();
         row.transport = transport;
         row.configJson = McpServerService.composeConfigJson(transport, body);
         try {

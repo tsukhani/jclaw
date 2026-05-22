@@ -315,7 +315,10 @@ public class ApiMetricsController extends Controller {
      * strategies.
      */
     private static java.util.List<String> parsePromptsField(JsonObject body, String userMessage) {
-        if (body == null || !body.has(KEY_PROMPTS) || body.get(KEY_PROMPTS).isJsonNull()) return null;
+        // LoadTestRunner treats null and empty identically (`!= null && !isEmpty()` guard
+        // at the consumer); returning an empty list rather than null keeps the contract
+        // predictable for any caller that doesn't replicate that guard.
+        if (body == null || !body.has(KEY_PROMPTS) || body.get(KEY_PROMPTS).isJsonNull()) return java.util.List.of();
         java.util.List<String> prompts;
         try {
             var arr = body.getAsJsonArray(KEY_PROMPTS);
