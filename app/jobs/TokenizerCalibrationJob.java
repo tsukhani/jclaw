@@ -210,7 +210,12 @@ public class TokenizerCalibrationJob extends Job<Void> {
     public static double p95(List<Double> values) {
         var sorted = new ArrayList<>(values);
         java.util.Collections.sort(sorted);
-        int idx = Math.clamp((int) Math.ceil(0.95 * sorted.size()) - 1, 0, sorted.size() - 1);
+        // Cast to long BEFORE the -1 so a hypothetical near-Integer.MAX_VALUE
+        // sample count can't wrap on the int subtraction. In practice n is
+        // tiny (per-(provider, model) sample groups from one job cycle), but
+        // S2184 wants the explicit widening.
+        long ceil = (long) Math.ceil(0.95 * sorted.size());
+        int idx = Math.clamp(ceil - 1, 0, sorted.size() - 1);
         return sorted.get(idx);
     }
 

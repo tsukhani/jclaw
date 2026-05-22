@@ -1,13 +1,9 @@
 import agents.ContextWindowManager;
-import llm.LlmTypes.ChatMessage;
 import llm.TokenUsageEstimator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Coverage tests for the safety-multiplier lookup chain and the
@@ -133,17 +129,5 @@ class ContextWindowSafetyMultiplierTest extends UnitTest {
         var truncated = ContextWindowManager.truncateToolResultContent(original, 500, 500);
         assertTrue(truncated.length() < original.length(),
                 "just over threshold should still shrink");
-    }
-
-    // ─── Helpers ────────────────────────────────────────────────────────
-
-    private static List<ChatMessage> buildMessagesWithLargeToolResult(int bodyChars) {
-        var msgs = new ArrayList<ChatMessage>();
-        msgs.add(ChatMessage.system("sp"));
-        msgs.add(ChatMessage.user("query"));
-        msgs.add(ChatMessage.assistant("calling tool", List.of()));
-        msgs.add(ChatMessage.toolResult("call_1", "do_search", "x".repeat(bodyChars)));
-        msgs.add(ChatMessage.assistant("here is the answer"));
-        return msgs;
     }
 }
