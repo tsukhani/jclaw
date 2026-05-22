@@ -169,16 +169,12 @@ public final class TelegramMarkdownFormatter {
 
         /** List and table nodes. */
         private boolean emitListOrTable(Node node) {
-            if (node instanceof BulletList bl) {
-                emitBulletList(bl);
-            } else if (node instanceof OrderedList ol) {
-                emitOrderedList(ol);
-            } else if (node instanceof TableBlock tb) {
-                emitTable(tb);
-            } else {
-                return false;
-            }
-            return true;
+            return switch (node) {
+                case BulletList bl -> { emitBulletList(bl); yield true; }
+                case OrderedList ol -> { emitOrderedList(ol); yield true; }
+                case TableBlock tb -> { emitTable(tb); yield true; }
+                default -> false;
+            };
         }
 
         /** Markdown link / autolink. */

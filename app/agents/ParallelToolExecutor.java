@@ -161,7 +161,7 @@ public final class ParallelToolExecutor {
             dispatchMultiToolCalls(toolCalls, agent, results, onStatus, isCancelled);
         }
 
-        commitToolResults(toolCalls, results, agent, currentMessages, onToolCall, imageCollector, sink);
+        commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink);
     }
 
     /**
@@ -265,7 +265,7 @@ public final class ParallelToolExecutor {
      * original order, preserving LLM tool_result ordering invariants.
      */
     private static void commitToolResults(List<ToolCall> toolCalls, ToolRegistry.ToolResult[] results,
-                                          Agent agent, List<ChatMessage> currentMessages,
+                                          List<ChatMessage> currentMessages,
                                           Consumer<AgentRunner.ToolCallEvent> onToolCall,
                                           List<String> imageCollector, AgentExecutionSink sink) {
         for (int i = 0; i < toolCalls.size(); i++) {

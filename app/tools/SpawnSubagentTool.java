@@ -553,6 +553,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
      * carrier Thread — see services.SubagentRegistry's class comment for
      * the H2 FileChannel post-mortem.
      */
+    @SuppressWarnings("java:S1181")
     private static SyncRunOutcome runChildSynchronously(Long runId, Long childAgentId,
                                                         Long childConvId, String task,
                                                         int timeoutSeconds, boolean inlineMode) {
@@ -1157,6 +1158,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
      * {@code services.SubagentRegistry}'s class doc for the H2 FileChannel
      * post-mortem.
      */
+    @SuppressWarnings("java:S1181")
     private static CompletableFuture<AgentRunner.RunResult> startAsyncChild(
             Long runId, Long childAgentId, Long childConvId, String task) {
         var future = new CompletableFuture<AgentRunner.RunResult>();
@@ -1203,6 +1205,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
      * and the error reason otherwise — matches the synchronous path's
      * semantics.
      */
+    @SuppressWarnings("java:S1181")
     private static void persistAsyncTerminalRun(Long runId, SyncRunOutcome outcome) {
         final var finalStatus = outcome.terminalStatus();
         final var outcomeText = finalStatus == SubagentRun.Status.COMPLETED
@@ -1244,9 +1247,8 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                                                         Long parentConvId, String label,
                                                         SyncRunOutcome outcome) {
         var status = outcome.terminalStatus();
-        var announceBody = status == SubagentRun.Status.COMPLETED
-                ? outcome.reply()
-                : (outcome.errorReason() != null ? outcome.errorReason() : "");
+        var failureBody = outcome.errorReason() != null ? outcome.errorReason() : "";
+        var announceBody = status == SubagentRun.Status.COMPLETED ? outcome.reply() : failureBody;
         var displayTruncatedBody = truncateForAnnounce(announceBody);
         final var modelOutputTruncated = outcome.replyTruncated();
         try {

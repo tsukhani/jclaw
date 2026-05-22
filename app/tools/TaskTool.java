@@ -653,11 +653,10 @@ public class TaskTool implements ToolRegistry.Tool {
             // Prefer scheduleDisplay (operator's original input) so the agent
             // sees the same string the operator typed. Falls back to the
             // type-specific field for legacy rows pre-JCLAW-294.
-            String cadence = task.scheduleDisplay != null
-                    ? task.scheduleDisplay
-                    : (task.type == Task.Type.CRON
-                            ? "cron: " + task.cronExpression
-                            : "every " + task.intervalSeconds + "s");
+            String typedCadence = task.type == Task.Type.CRON
+                    ? "cron: " + task.cronExpression
+                    : "every " + task.intervalSeconds + "s";
+            String cadence = task.scheduleDisplay != null ? task.scheduleDisplay : typedCadence;
             sb.append("- %s (%s) — %s\n".formatted(
                     task.name, cadence,
                     task.description != null && task.description.length() > 100

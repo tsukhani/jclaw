@@ -564,7 +564,7 @@ public class SkillLoader {
         };
         var multiMatcher = multiPattern.matcher(yaml);
         if (multiMatcher.find()) {
-            return multiMatcher.group(1).replaceAll("(?m)^  ", "").strip();
+            return multiMatcher.group(1).replaceAll("(?m)^ {2}", "").strip();
         }
         return null;
     }

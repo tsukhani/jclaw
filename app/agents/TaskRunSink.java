@@ -43,7 +43,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class TaskRunSink implements AgentExecutionSink {
 
     private final Long taskRunId;
-    private final Instant startedAt;
     private final AtomicInteger turnIndex = new AtomicInteger(0);
 
     public TaskRunSink(TaskRun taskRun) {
@@ -52,7 +51,6 @@ public class TaskRunSink implements AgentExecutionSink {
                     "taskRun must be persisted before being wrapped in TaskRunSink");
         }
         this.taskRunId = taskRun.id;
-        this.startedAt = taskRun.startedAt;
     }
 
     public Long taskRunId() {
@@ -64,14 +62,14 @@ public class TaskRunSink implements AgentExecutionSink {
         // Attachments don't apply to task runs — there's no external upload
         // path that feeds a task fire. The parameter exists on the interface
         // for ConversationSink's benefit.
-        appendInTx(MessageRole.USER, content, null, null, null, null, null, false);
+        appendInTx(new MessageFields(MessageRole.USER, content, null, null, null, null, null, false));
     }
 
     @Override
     public void appendAssistantMessage(String content, String toolCalls, String usageJson,
                                        String reasoning, boolean truncated) {
-        appendInTx(MessageRole.ASSISTANT, content, toolCalls, null, null,
-                usageJson, reasoning, truncated);
+        appendInTx(new MessageFields(MessageRole.ASSISTANT, content, toolCalls, null, null,
+                usageJson, reasoning, truncated));
     }
 
     @Override
@@ -79,13 +77,16 @@ public class TaskRunSink implements AgentExecutionSink {
         // {@code toolCallId} identifies which assistant tool-call this row
         // answers; matches the data layout that ConversationService.appendToolResult
         // uses (the id goes into the tool_results column).
-        appendInTx(MessageRole.TOOL, result, null, toolCallId, structuredJson,
-                null, null, false);
+        appendInTx(new MessageFields(MessageRole.TOOL, result, null, toolCallId, structuredJson,
+                null, null, false));
     }
 
-    private void appendInTx(MessageRole role, String content, String toolCalls, String toolResults,
-                             String toolResultStructured, String usageJson, String reasoning,
-                             boolean truncated) {
+    /** Column-shaped bundle mirroring the {@link TaskRunMessage} write surface. */
+    private record MessageFields(MessageRole role, String content, String toolCalls, String toolResults,
+                                  String toolResultStructured, String usageJson, String reasoning,
+                                  boolean truncated) {}
+
+    private void appendInTx(MessageFields fields) {
         int idx = turnIndex.getAndIncrement();
         Tx.run(() -> {
             var taskRun = (TaskRun) TaskRun.findById(taskRunId);
@@ -93,14 +94,14 @@ public class TaskRunSink implements AgentExecutionSink {
             var msg = new TaskRunMessage();
             msg.taskRun = taskRun;
             msg.turnIndex = idx;
-            msg.role = role;
-            msg.content = content;
-            msg.toolCalls = toolCalls;
-            msg.toolResults = toolResults;
-            msg.toolResultStructured = toolResultStructured;
-            msg.usageJson = usageJson;
-            msg.reasoning = reasoning;
-            msg.truncated = truncated;
+            msg.role = fields.role();
+            msg.content = fields.content();
+            msg.toolCalls = fields.toolCalls();
+            msg.toolResults = fields.toolResults();
+            msg.toolResultStructured = fields.toolResultStructured();
+            msg.usageJson = fields.usageJson();
+            msg.reasoning = fields.reasoning();
+            msg.truncated = fields.truncated();
             msg.save();
             return null;
         });
