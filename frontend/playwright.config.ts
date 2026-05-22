@@ -3,13 +3,18 @@ import { defineConfig, devices } from '@playwright/test'
 /**
  * Playwright E2E configuration for JClaw.
  *
- * These tests assume a dev server is already running via `./jclaw.sh --dev start`
- * — they connect to http://localhost:3000 rather than spinning up their own Nuxt
- * instance. Keeping the runner decoupled from the server shaves ~15s off every run
- * and matches the local dev workflow where jclaw is usually running anyway.
+ * These tests assume a JClaw server is already running — they connect to it
+ * rather than spinning up their own. Keeping the runner decoupled from the
+ * server shaves ~15s off every run and matches the local workflow where jclaw
+ * is usually running anyway.
  *
- * This suite is intentionally excluded from Jenkins CI. It is a local UAT safety
- * net, not part of the merge gate.
+ * Defaults to http://localhost:3000 (the Nuxt port served by
+ * `./jclaw.sh --dev start`). For prod mode (`./jclaw.sh start`, which serves
+ * the built SPA from the Play JVM on :9000), set
+ * `JCLAW_E2E_BASE_URL=http://localhost:9000`.
+ *
+ * This suite is intentionally excluded from Jenkins CI. It is a local UAT
+ * safety net, not part of the merge gate.
  *
  * Run: cd frontend && pnpm test:e2e
  */
@@ -22,7 +27,7 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: process.env.JCLAW_E2E_BASE_URL || 'http://localhost:3000',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     // Auth bootstrap — global-setup.ts writes this file once per run.

@@ -61,7 +61,7 @@ test.describe('prompt caching UAT', () => {
   })
 
   test('turn 1 shows no cached badge, turn 2 shows 3,657 cached', async ({ page }) => {
-    const input = page.getByPlaceholder('Type a message...')
+    const input = page.getByPlaceholder('Send a message...')
 
     // Turn 1 — cache WRITE. Reply renders, cached badge must not appear anywhere.
     await input.fill('turn 1')

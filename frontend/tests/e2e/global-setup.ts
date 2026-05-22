@@ -13,7 +13,7 @@ import { dirname } from 'node:path'
  * environment variables if your local config differs.
  */
 export default async function globalSetup(_config: FullConfig) {
-  const baseURL = 'http://localhost:3000'
+  const baseURL = process.env.JCLAW_E2E_BASE_URL || 'http://localhost:3000'
   const username = process.env.JCLAW_ADMIN_USERNAME || 'admin'
   const password = process.env.JCLAW_ADMIN_PASSWORD || 'changeme'
   const statePath = './tests/e2e/.auth/admin.json'
