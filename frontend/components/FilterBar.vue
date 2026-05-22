@@ -198,7 +198,7 @@ function handleInputKeydown(e: KeyboardEvent) {
         >
           No saved views
         </div>
-        <!-- NOSONAR(Web:S6819) — row contains a nested <button> for delete, so wrapping in <button> would nest interactive controls; role="button" on the div exposes the row click target to assistive tech without violating button-nesting rules. -->
+        <!-- Row uses ARIA button semantics on a div because it contains a nested delete button; wrapping the row in an actual button would nest interactive controls, which is invalid. The div exposes a button click target to assistive tech while keeping the inner delete button valid. -->
         <div
           v-for="(view, i) in savedViews"
           :key="view.name"

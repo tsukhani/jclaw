@@ -1,6 +1,53 @@
 // Module-level lock so concurrent navigations don't fire parallel checkAuth requests
 let checkInProgress: Promise<boolean> | null = null
 
+/**
+ * Whether the admin password has been set in the DB. Drives the routing
+ * between /login (password set) and /setup-password (fresh install or
+ * deliberately cleared password). Unauthenticated endpoint — safe to
+ * call from the login and setup pages.
+ *
+ * Stateless (no closure over useAuth refs), so it lives at module scope.
+ */
+async function checkPasswordSet(): Promise<boolean> {
+  try {
+    const r = await $fetch<{ passwordSet: boolean }>('/api/auth/status')
+    return !!r?.passwordSet
+  }
+  catch {
+    // On network error, assume password is set — safer than routing to
+    // the setup screen and letting an attacker mid-MITM claim "it's a
+    // fresh install, set the password please."
+    return true
+  }
+}
+
+/** Submit the first-time password. Server rejects with 409 if a password
+ *  is already configured, which the caller handles as "go back to /login."
+ *
+ *  Stateless (no closure over useAuth refs), so it lives at module scope.
+ */
+async function setupPassword(pass: string): Promise<{ ok: boolean, error?: string }> {
+  try {
+    await $fetch('/api/auth/setup', {
+      method: 'POST',
+      body: { password: pass },
+    })
+    return { ok: true }
+  }
+  catch (e: unknown) {
+    const err = e as { data?: { code?: string, message?: string }, status?: number }
+    const code = err?.data?.code
+    if (err?.status === 409 || code === 'already_set') {
+      return { ok: false, error: 'already_set' }
+    }
+    if (code === 'password_too_short') {
+      return { ok: false, error: 'password_too_short' }
+    }
+    return { ok: false, error: 'network' }
+  }
+}
+
 export function useAuth() {
   const authenticated = useState('auth:authenticated', () => false)
   const username = useState<string | null>('auth:username', () => null)
@@ -46,52 +93,6 @@ export function useAuth() {
       }
     })().finally(() => { checkInProgress = null })
     return checkInProgress
-  }
-
-  /**
-   * Whether the admin password has been set in the DB. Drives the routing
-   * between /login (password set) and /setup-password (fresh install or
-   * deliberately cleared password). Unauthenticated endpoint — safe to
-   * call from the login and setup pages.
-   */
-  // NOSONAR(typescript:S7721) — composable returns this function as part of
-  // its public API; hoisting it to module scope would split the surface area.
-  async function checkPasswordSet(): Promise<boolean> {
-    try {
-      const r = await $fetch<{ passwordSet: boolean }>('/api/auth/status')
-      return !!r?.passwordSet
-    }
-    catch {
-      // On network error, assume password is set — safer than routing to
-      // the setup screen and letting an attacker mid-MITM claim "it's a
-      // fresh install, set the password please."
-      return true
-    }
-  }
-
-  /** Submit the first-time password. Server rejects with 409 if a password
-   *  is already configured, which the caller handles as "go back to /login." */
-  // NOSONAR(typescript:S7721) — composable returns this function as part of
-  // its public API; hoisting it to module scope would split the surface area.
-  async function setupPassword(pass: string): Promise<{ ok: boolean, error?: string }> {
-    try {
-      await $fetch('/api/auth/setup', {
-        method: 'POST',
-        body: { password: pass },
-      })
-      return { ok: true }
-    }
-    catch (e: unknown) {
-      const err = e as { data?: { code?: string, message?: string }, status?: number }
-      const code = err?.data?.code
-      if (err?.status === 409 || code === 'already_set') {
-        return { ok: false, error: 'already_set' }
-      }
-      if (code === 'password_too_short') {
-        return { ok: false, error: 'password_too_short' }
-      }
-      return { ok: false, error: 'network' }
-    }
   }
 
   /**

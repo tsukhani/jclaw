@@ -1136,7 +1136,9 @@ function pendingAsyncRunIdFromResultText(text: string | null | undefined): strin
     const parsed = JSON.parse(text) as { run_id?: unknown, status?: unknown }
     if (parsed?.status !== 'RUNNING') return null
     const runId = parsed.run_id
-    return typeof runId === 'string' ? runId : (typeof runId === 'number' ? String(runId) : null)
+    if (typeof runId === 'string') return runId
+    if (typeof runId === 'number') return String(runId)
+    return null
   }
   catch {
     return null
@@ -1323,9 +1325,13 @@ const subagentRunSlices = computed<Array<SubagentRunSlice | null>>(() => {
     const nextRunId = i < msgs.length - 1 ? (msgs[i + 1]?.subagentRunId ?? null) : null
     const isFirst = prevRunId !== runId
     const isLast = nextRunId !== runId
+    let position: 'first' | 'middle' | 'last'
+    if (isFirst) position = 'first'
+    else if (isLast) position = 'last'
+    else position = 'middle'
     out.push({
       runId,
-      position: isFirst ? 'first' : isLast ? 'last' : 'middle',
+      position,
       collapsed: collapsedSubagentRuns.value.has(runId),
     })
   }
@@ -3319,10 +3325,12 @@ function exportConversation() {
           ref="composerEl"
           class="px-4 py-3 relative mx-auto w-full max-w-3xl"
         >
-          <!-- JCLAW-114: /model NAME autocomplete popup, anchored above the
+          <!-- JCLAW-114: slash model NAME autocomplete popup, anchored above the
              form. Rendered outside the form so the form's overflow-hidden
-             (needed for rounded borders) doesn't clip the popup. -->
-          <!-- NOSONAR(Web:S6819) — role="listbox" has no native HTML equivalent; the WAI-ARIA combobox/listbox pattern is the standard for typeahead pickers. aria-label is provided. -->
+             needed for rounded borders does not clip the popup. The wrapper
+             uses ARIA listbox semantics because no native HTML element covers
+             the WAI ARIA combobox plus listbox pattern for typeahead pickers;
+             aria-label is provided for screen readers. -->
           <div
             v-if="modelAutocomplete.open.value"
             class="absolute left-4 right-4 bottom-full mb-1 z-10
@@ -3331,7 +3339,7 @@ function exportConversation() {
             role="listbox"
             aria-label="Model completion options"
           >
-            <!-- NOSONAR(Web:S6819,Web:S6807) — role="option" inside role="listbox" is the WAI-ARIA listbox-item pattern; native HTML <option> only works inside <select>. aria-selected is bound dynamically (:aria-selected). -->
+            <!-- Each row uses ARIA option semantics inside the parent listbox; the native HTML option element only works inside select. aria-selected is dynamically bound via the Vue colon shorthand, which Sonar's static analyser does not resolve. -->
             <button
               v-for="(opt, idx) in modelAutocomplete.options.value"
               :key="opt"
@@ -3733,20 +3741,46 @@ function exportConversation() {
   padding-left: 1.5em;
 }
 .prose-chat li { margin: 0.25em 0; }
-.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 0.75em 0 0.25em; }
+
+/* Headings, code blocks, links, blockquote, hr, img: structural + light-mode
+   palette are merged here. Dark-mode overrides further below restate only the
+   colours that change. */
+.prose-chat h1, .prose-chat h2, .prose-chat h3 {
+  font-weight: 600;
+  margin: 0.75em 0 0.25em;
+  color: #171717;
+}
 .prose-chat h1 { font-size: 1.1em; }
 .prose-chat h2 { font-size: 1em; }
 .prose-chat h3 { font-size: 0.95em; }
-.prose-chat pre { padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
+
+.prose-chat pre {
+  padding: 0.75em 1em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  background: rgb(0,0,0,4%);
+  border: 1px solid rgb(0,0,0,8%);
+}
 .prose-chat pre code { background: none; padding: 0; }
 
 .prose-chat code {
   padding: 0.15em 0.35em;
   font-size: 0.875em;
   font-family: ui-monospace, monospace;
+  background: rgb(0,0,0,6%);
+  color: #171717;
 }
-.prose-chat a { text-decoration: underline; }
 
+.prose-chat a {
+  text-decoration: underline;
+  color: #525252;
+}
+
+/* Effective background here is approximately #e8f6f0 (emerald 8% over a white
+   surface); emerald-700 (#047857) on that background measures around 6.3 to 1
+   (WCAG AA pass for normal text) per the WebAIM contrast checker. Sonar
+   reports a false low-contrast reading because it cannot resolve the alpha
+   against the surrounding surface. */
 .prose-chat a.workspace-file {
   display: inline-flex;
   align-items: center;
@@ -3757,14 +3791,24 @@ function exportConversation() {
   text-decoration: none;
   font-size: 0.9em;
   transition: background 0.15s, border-color 0.15s;
+  background: rgb(16, 185, 129, 8%);
+  border: 1px solid rgb(16, 185, 129, 35%);
+  color: #047857;
 }
 .prose-chat a.workspace-file::before { content: "⬇"; font-size: 0.85em; opacity: 0.75; }
 
 .prose-chat blockquote {
   padding-left: 0.75em;
   margin: 0.5em 0;
+  border-left: 2px solid rgb(0,0,0,12%);
+  color: #525252;
 }
-.prose-chat hr { border: none; margin: 0.75em 0; }
+
+.prose-chat hr {
+  border: none;
+  margin: 0.75em 0;
+  border-top: 1px solid rgb(0,0,0,10%);
+}
 
 .prose-chat img {
   max-width: 100%;
@@ -3772,6 +3816,7 @@ function exportConversation() {
   border-radius: 0.5em;
   margin: 0.5em 0;
   cursor: pointer;
+  border: 1px solid rgb(0,0,0,8%);
 }
 
 .prose-chat audio, .prose-chat video {
@@ -3811,43 +3856,16 @@ function exportConversation() {
   overflow-wrap: break-word;
 }
 
-/* Light-mode palette (default).
- *
- * NOSONAR(css:S4666) — the selectors below intentionally duplicate the
- * structural rules above (h1/h2/h3, code, pre, a, blockquote, hr, img). The
- * file is organised as three sections — structure, light palette, dark
- * overrides — so a theme-only colour change touches a single line in one
- * section instead of editing a multi-line structural rule. Merging the
- * palette declarations back into the structural rules would either bury the
- * theme tokens inside a long property list (hurting scanability) or force
- * every dark override to repeat the structural properties just to inherit
- * cleanly. The cascade order means the second rule wins, which is exactly
- * what the design intends.
- */
-.prose-chat strong { color: #171717; font-weight: 600; } /* NOSONAR */
-.prose-chat em { color: #404040; } /* NOSONAR */
-.prose-chat h1, .prose-chat h2, .prose-chat h3 { color: #171717; } /* NOSONAR */
-.prose-chat code { background: rgb(0,0,0,6%); color: #171717; } /* NOSONAR */
-.prose-chat pre { background: rgb(0,0,0,4%); border: 1px solid rgb(0,0,0,8%); } /* NOSONAR */
-.prose-chat a { color: #525252; } /* NOSONAR */
-
-/* NOSONAR(css:S7924) — Sonar cannot resolve the 8% alpha against the
- * surrounding surface (white in light mode) and reports a false low-contrast
- * reading. Effective bg is ≈#e8f6f0; emerald-700 (#047857) on that surface
- * tests at ~6.3:1 (WebAIM contrast checker, WCAG AA pass for normal text). */
-.prose-chat a.workspace-file {
-  background: rgb(16, 185, 129, 8%);
-  border: 1px solid rgb(16, 185, 129, 35%);
-  color: #047857;
-}
+/* Light-mode-only rules: strong and em palette, plus interaction states and
+   table cells that don't have a structural counterpart above. Dark-mode
+   overrides further below restate only the colours that change. */
+.prose-chat strong { color: #171717; font-weight: 600; }
+.prose-chat em { color: #404040; }
 
 .prose-chat a.workspace-file:hover {
   background: rgb(16, 185, 129, 18%);
   border-color: rgb(16, 185, 129, 60%);
 }
-.prose-chat blockquote { border-left: 2px solid rgb(0,0,0,12%); color: #525252; } /* NOSONAR */
-.prose-chat hr { border-top: 1px solid rgb(0,0,0,10%); } /* NOSONAR */
-.prose-chat img { border: 1px solid rgb(0,0,0,8%); } /* NOSONAR */
 .prose-chat img:hover { border-color: rgb(0,0,0,20%); }
 .prose-chat th { color: #171717; border-bottom: 1px solid rgb(0,0,0,15%); font-weight: 600; }
 .prose-chat td { border-bottom: 1px solid rgb(0,0,0,6%); }
@@ -3863,10 +3881,11 @@ html.dark .prose-chat code { background: rgb(255,255,255,6%); color: inherit; }
 html.dark .prose-chat pre { background: rgb(255,255,255,4%); border-color: rgb(255,255,255,8%); }
 html.dark .prose-chat a { color: #a3a3a3; }
 
-/* NOSONAR(css:S7924) — Sonar cannot resolve the 10% alpha against the
- * surrounding dark surface and reports a false low-contrast reading.
- * Effective bg is ≈#1d2a25; emerald-300 (#6ee7b7) on that surface tests
- * at ~10:1 (WebAIM contrast checker, WCAG AAA pass). */
+/* Effective background here is approximately #1d2a25 (emerald 10% over the
+   dark surface); emerald-300 (#6ee7b7) on that background measures around
+   10 to 1 (WCAG AAA pass) per the WebAIM contrast checker. Sonar reports a
+   false low-contrast reading because it cannot resolve the alpha against the
+   surrounding dark surface. */
 html.dark .prose-chat a.workspace-file {
   background: rgb(16, 185, 129, 10%);
   border-color: rgb(16, 185, 129, 30%);

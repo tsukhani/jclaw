@@ -82,6 +82,21 @@ let driverInstance: Driver | null = null
 let advanceObserver: MutationObserver | null = null
 
 /**
+ * Tear down any active driver.js popover and pending mutation observer.
+ * Stateless (only touches module-level handles), so it lives at module scope.
+ */
+function destroy() {
+  if (driverInstance) {
+    driverInstance.destroy()
+    driverInstance = null
+  }
+  if (advanceObserver) {
+    advanceObserver.disconnect()
+    advanceObserver = null
+  }
+}
+
+/**
  * Poll the DOM for an element matching the selector. driver.js fails noisily
  * if the element isn't rendered yet; router.push() resolves before the new
  * page's elements mount, so we bridge with a short retry loop.
@@ -111,21 +126,6 @@ export function useGuidedTour() {
   // (default layout) and the first-login auto-show (also default layout,
   // on mount) can both toggle it, and so components can v-bind to it.
   const introOpen = useState<boolean>('jclaw-guided-tour-intro', () => false)
-
-  // NOSONAR(typescript:S7721) — kept inside the composable so all sibling
-  // helpers (advance, back, complete, end) share a single closure and the
-  // public API surfaces as a unit; hoisting would require re-exporting the
-  // module-level state piecemeal.
-  function destroy() {
-    if (driverInstance) {
-      driverInstance.destroy()
-      driverInstance = null
-    }
-    if (advanceObserver) {
-      advanceObserver.disconnect()
-      advanceObserver = null
-    }
-  }
 
   function installAdvanceObserver(selector: string) {
     // If the target is somehow already present (shouldn't happen in our flow

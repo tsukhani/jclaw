@@ -1082,14 +1082,14 @@ defineExpose({ refresh })
                 >
                   <span class="inline-flex items-center justify-end gap-1">
                     <span>Cost</span>
-                    <!-- Tooltip rendered via <Teleport to="body"> below
-                         (so it escapes the table wrapper's overflow-x-auto
-                         clip, which implicitly clips Y too in CSS).
+                    <!-- Tooltip rendered via a teleport to body below
+                         so it escapes the table wrapper's overflow-x-auto
+                         clip, which implicitly clips Y too in CSS.
                          The native title-attribute fallback is unreliable
-                         on SVG in Chrome; the project's group/tip popover
-                         pattern works for non-clipped contexts but not
-                         here. mouseenter computes coords from the icon's
-                         bounding rect; mouseleave hides. -->
+                         on SVG in Chrome; the project's group plus tip
+                         popover pattern works for non-clipped contexts
+                         but not here. mouseenter computes coords from the
+                         icon's bounding rect; mouseleave hides. -->
                     <!-- A button (not a span) so keyboard users can
                          focus + read the tooltip via Tab; the focus/blur
                          handlers mirror the mouseenter/leave pair. The

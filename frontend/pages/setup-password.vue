@@ -128,7 +128,7 @@ const confirmPasswordId = useId()
         >
           <span class="block text-sm font-medium text-fg-strong mb-2">New password</span>
           <div class="relative">
-            <!-- NOSONAR(Web:S6840) — autocomplete="new-password" is a valid WHATWG token; the type attribute is bound dynamically (:type) to toggle visibility between 'password' and 'text', which Sonar's static analyzer cannot resolve. -->
+            <!-- The autocomplete token new-password is the valid WHATWG value here. The type attribute is bound dynamically to toggle visibility between password and text, which Sonar's static analyser cannot resolve. -->
             <input
               :id="newPasswordId"
               v-model="newPassword"
@@ -162,7 +162,7 @@ const confirmPasswordId = useId()
         >
           <span class="block text-sm font-medium text-fg-strong mb-2">Confirm password</span>
           <div class="relative">
-            <!-- NOSONAR(Web:S6840) — autocomplete="new-password" is a valid WHATWG token; the type attribute is bound dynamically (:type) to toggle visibility between 'password' and 'text', which Sonar's static analyzer cannot resolve. -->
+            <!-- The autocomplete token new-password is the valid WHATWG value here. The type attribute is bound dynamically to toggle visibility between password and text, which Sonar's static analyser cannot resolve. -->
             <input
               :id="confirmPasswordId"
               v-model="confirmPassword"

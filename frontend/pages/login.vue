@@ -120,7 +120,7 @@ const passwordId = useId()
         >
           <span class="block text-sm font-medium text-fg-strong mb-2">Password</span>
           <div class="relative">
-            <!-- NOSONAR(Web:S6840) — autocomplete="current-password" is a valid WHATWG token; the type attribute is bound dynamically (:type) to toggle visibility between 'password' and 'text', which Sonar's static analyzer cannot resolve. -->
+            <!-- The autocomplete token current-password is the valid WHATWG value here. The type attribute is bound dynamically to toggle visibility between password and text, which Sonar's static analyser cannot resolve. -->
             <input
               :id="passwordId"
               v-model="password"
