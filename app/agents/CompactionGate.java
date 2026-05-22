@@ -88,7 +88,8 @@ public final class CompactionGate {
         });
         if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
         var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current, tools);
-        int estimatedTokens = ContextWindowManager.adjustedPromptTokens(estimate);
+        var providerName = primary != null && primary.config() != null ? primary.config().name() : null;
+        int estimatedTokens = ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(), estimate);
         if (!SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) return current;
 
         final var modelId = snapshot.modelId();

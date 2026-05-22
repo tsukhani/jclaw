@@ -58,7 +58,9 @@ public final class TruncationDiagnostics {
                                              String finishReason, List<ChatMessage> messages,
                                              List<ToolDef> tools) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, provider).orElse(null);
-        int promptTokens = ContextWindowManager.adjustedPromptTokens(
+        var providerName = provider != null && provider.config() != null ? provider.config().name() : null;
+        var modelId = ModelResolver.effectiveModelId(agent, conversation);
+        int promptTokens = ContextWindowManager.adjustedPromptTokens(providerName, modelId,
                 ContextWindowManager.estimateProviderPromptTokens(
                         agent, conversation, provider, messages, tools));
         int configured = modelInfo != null ? modelInfo.maxTokens() : -1;

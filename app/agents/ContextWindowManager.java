@@ -67,52 +67,106 @@ public final class ContextWindowManager {
     static final int RESERVED_OUTPUT_TOKENS = 4096;
 
     /**
-     * Config key for the safety multiplier applied to jtokkit-estimated
-     * prompt tokens when the encoding does not match the model family
-     * (cl100k_base fallback for Kimi/DeepSeek/Gemma/Qwen/GLM/Mistral/Llama).
-     * The empirical Kimi-on-Ollama-Cloud measurement showed cl100k_base
-     * under-counting plain-English-heavy prompts by up to 25%, which let
-     * JClaw ship over-window payloads that the provider then rejected with
-     * HTTP 400. Bumping the estimate by this factor before comparison to
-     * trim/compact thresholds keeps JClaw on the safe side of that gap.
+     * Global fallback safety-multiplier config key. Empirical Kimi-on-
+     * Ollama-Cloud measurement showed cl100k_base under-counting plain-English
+     * prompts by up to 25%, which let JClaw ship over-window payloads the
+     * provider rejected with HTTP 400. Bumping the estimate before comparing
+     * to trim/compact thresholds keeps JClaw on the safe side of that gap.
      * Override via {@code ConfigService.set("jtokkit.safetyMultiplier.unmatched", "1.5")}.
+     *
+     * <p>Per-provider and per-model overrides win over this global value;
+     * see {@link #resolveSafetyMultiplier(String, String)}. The
+     * {@code TokenizerCalibrationJob} writes per-(provider, model) entries
+     * automatically from observed provider-vs-jtokkit deltas, so this global
+     * acts as the cold-start default rather than the day-to-day setting.
      */
-    static final String SAFETY_MULTIPLIER_KEY = "jtokkit.safetyMultiplier.unmatched";
-    static final double DEFAULT_SAFETY_MULTIPLIER = 1.4;
+    public static final String SAFETY_MULTIPLIER_KEY = "jtokkit.safetyMultiplier.unmatched";
+    public static final String SAFETY_MULTIPLIER_PREFIX = "jtokkit.safetyMultiplier.";
+    public static final double DEFAULT_SAFETY_MULTIPLIER = 1.4;
+    /** Clamp range so a misbehaving calibration can't starve the conversation entirely. */
+    public static final double MIN_SAFETY_MULTIPLIER = 1.0;
+    public static final double MAX_SAFETY_MULTIPLIER = 2.5;
 
     private ContextWindowManager() {}
 
     /**
      * Return the prompt-token estimate adjusted for known tokenizer-mismatch
-     * bias. When jtokkit's encoding matches the model family, returns the
-     * raw estimate. When it does not (cl100k_base fallback for non-OpenAI
-     * models), multiplies by {@link #SAFETY_MULTIPLIER_KEY} (default
-     * {@value #DEFAULT_SAFETY_MULTIPLIER}) to bias toward earlier
-     * trim / compaction and avoid provider-side context-length rejections.
+     * bias. When jtokkit's encoding matches the model family
+     * ({@link TokenUsageEstimator.ChatRequestTokens#modelMatched()} = true,
+     * OpenAI-family models on the o200k_base / cl100k_base shipping encodings),
+     * returns the raw estimate. When it does not (cl100k_base fallback for
+     * non-OpenAI providers), multiplies by the resolved per-provider /
+     * per-model safety multiplier — see {@link #resolveSafetyMultiplier}.
      */
-    public static int adjustedPromptTokens(TokenUsageEstimator.ChatRequestTokens estimate) {
+    public static int adjustedPromptTokens(String providerName, String modelId,
+                                            TokenUsageEstimator.ChatRequestTokens estimate) {
         if (estimate.modelMatched()) return estimate.promptTokens();
-        return (int) Math.ceil(estimate.promptTokens() * safetyMultiplier());
+        return (int) Math.ceil(estimate.promptTokens() * resolveSafetyMultiplier(providerName, modelId));
     }
 
     /**
-     * Apply the same per-call safety multiplier to a per-message estimate
-     * so the trim loop's accumulator stays consistent with the budget
-     * check produced by {@link #adjustedPromptTokens}.
+     * Backwards-compatible overload for callers that don't have provider /
+     * model identity handy. Resolves the global multiplier only, missing the
+     * per-(provider, model) and per-provider tiers. Prefer the 3-arg form for
+     * the hot path; this overload exists for diagnostic-only call sites.
      */
-    public static int adjustedMessageTokens(int rawTokens, boolean modelMatched) {
-        if (modelMatched) return rawTokens;
-        return (int) Math.ceil(rawTokens * safetyMultiplier());
+    public static int adjustedPromptTokens(TokenUsageEstimator.ChatRequestTokens estimate) {
+        return adjustedPromptTokens(null, null, estimate);
     }
 
-    private static double safetyMultiplier() {
-        var raw = ConfigService.get(SAFETY_MULTIPLIER_KEY, null);
-        if (raw == null || raw.isBlank()) return DEFAULT_SAFETY_MULTIPLIER;
+    /**
+     * Apply the same per-call safety multiplier to a per-message estimate so
+     * the trim loop's accumulator stays consistent with the budget check
+     * produced by {@link #adjustedPromptTokens}.
+     */
+    public static int adjustedMessageTokens(int rawTokens, boolean modelMatched,
+                                             String providerName, String modelId) {
+        if (modelMatched) return rawTokens;
+        return (int) Math.ceil(rawTokens * resolveSafetyMultiplier(providerName, modelId));
+    }
+
+    /**
+     * Three-tier safety-multiplier lookup. First match wins, all reads go
+     * through ConfigService's Caffeine cache so the hot path stays O(1) after
+     * warmup. Each value parsed defensively and clamped to
+     * [{@link #MIN_SAFETY_MULTIPLIER}, {@link #MAX_SAFETY_MULTIPLIER}].
+     *
+     * <ol>
+     *   <li>{@code jtokkit.safetyMultiplier.<provider>.<modelId>} — written by
+     *       {@code TokenizerCalibrationJob} from observed provider-vs-jtokkit
+     *       deltas; updated only when the change crosses a small threshold so
+     *       Config writes are infrequent.</li>
+     *   <li>{@code jtokkit.safetyMultiplier.<provider>} — operator-supplied
+     *       per-provider override for fleets where every model in a provider
+     *       shares the same tokenizer family (e.g. all of Anthropic on the
+     *       Claude tokenizer).</li>
+     *   <li>{@code jtokkit.safetyMultiplier.unmatched} — global default; falls
+     *       back to {@value #DEFAULT_SAFETY_MULTIPLIER} when unset.</li>
+     * </ol>
+     */
+    public static double resolveSafetyMultiplier(String providerName, String modelId) {
+        if (providerName != null && modelId != null) {
+            var specific = parseMultiplier(ConfigService.get(
+                    SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId, null));
+            if (specific != null) return specific;
+        }
+        if (providerName != null) {
+            var perProvider = parseMultiplier(ConfigService.get(
+                    SAFETY_MULTIPLIER_PREFIX + providerName, null));
+            if (perProvider != null) return perProvider;
+        }
+        var global = parseMultiplier(ConfigService.get(SAFETY_MULTIPLIER_KEY, null));
+        return global != null ? global : DEFAULT_SAFETY_MULTIPLIER;
+    }
+
+    private static Double parseMultiplier(String raw) {
+        if (raw == null || raw.isBlank()) return null;
         try {
-            return Double.parseDouble(raw);
+            var value = Double.parseDouble(raw);
+            return Math.min(MAX_SAFETY_MULTIPLIER, Math.max(MIN_SAFETY_MULTIPLIER, value));
         }
         catch (NumberFormatException e) {
-            return DEFAULT_SAFETY_MULTIPLIER;
+            return null;
         }
     }
 
@@ -144,7 +198,8 @@ public final class ContextWindowManager {
         int configured = modelInfo.maxTokens();
         if (modelInfo.contextWindow() <= 0) return configured;
 
-        int promptTokens = adjustedPromptTokens(estimateProviderPromptTokens(agent, conv, provider, messages, tools));
+        int promptTokens = adjustedPromptTokens(providerNameFor(provider), modelIdFor(agent, conv, provider),
+                estimateProviderPromptTokens(agent, conv, provider, messages, tools));
         int headroom = modelInfo.contextWindow() - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS;
         // NB: not Math.clamp — when configured < MIN_OUTPUT_TOKENS (small / mis-configured model) we still want MIN_OUTPUT_TOKENS, which clamp would reject as min>max.
         @SuppressWarnings("java:S6885")
@@ -191,8 +246,9 @@ public final class ContextWindowManager {
 
         int contextWindow = modelInfo.contextWindow();
         var modelId = modelIdFor(agent, conv, provider);
+        var providerName = providerNameFor(provider);
         var rawEstimate = estimateProviderPromptTokens(agent, conv, provider, messages, tools);
-        int estimatedTokens = adjustedPromptTokens(rawEstimate);
+        int estimatedTokens = adjustedPromptTokens(providerName, modelId, rawEstimate);
         boolean modelMatched = rawEstimate.modelMatched();
         // JCLAW-291: trim target reserves RESERVED_OUTPUT_TOKENS so the reply has
         // a real budget — without this, headroom in effectiveMaxTokens collapses
@@ -212,7 +268,7 @@ public final class ContextWindowManager {
         int dropCount = 0;
         for (int i = 1; i < messages.size() - 1 && total > trimTarget; i++) {
             int rawMsgTokens = TokenUsageEstimator.estimateMessage(modelId, messages.get(i)).tokens();
-            total -= adjustedMessageTokens(rawMsgTokens, modelMatched);
+            total -= adjustedMessageTokens(rawMsgTokens, modelMatched, providerName, modelId);
             dropCount++;
         }
         if (dropCount > 0) {
@@ -240,6 +296,10 @@ public final class ContextWindowManager {
         var models = provider != null && provider.config() != null ? provider.config().models() : null;
         if (models != null && models.size() == 1) return models.getFirst().id();
         return null;
+    }
+
+    private static String providerNameFor(LlmProvider provider) {
+        return provider != null && provider.config() != null ? provider.config().name() : null;
     }
 
     /**
