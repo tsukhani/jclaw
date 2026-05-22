@@ -11,6 +11,10 @@ public class CheckListTool implements ToolRegistry.Tool {
 
     private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
 
+    private static final String FIELD_CONTENT = "content";
+    private static final String FIELD_STATUS = "status";
+    private static final String FIELD_ACTIVE_FORM = "activeForm";
+
     public record CheckListItem(String content, String status, String activeForm) {}
 
     @Override
@@ -55,12 +59,12 @@ public class CheckListTool implements ToolRegistry.Tool {
                                 SchemaKeys.ITEMS, Map.of(
                                         SchemaKeys.TYPE, SchemaKeys.OBJECT,
                                         SchemaKeys.PROPERTIES, Map.of(
-                                                "content", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
-                                                "status", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                                FIELD_CONTENT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
+                                                FIELD_STATUS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                                         SchemaKeys.ENUM, List.of("pending", "in_progress", "completed")),
-                                                "activeForm", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING)
+                                                FIELD_ACTIVE_FORM, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING)
                                         ),
-                                        SchemaKeys.REQUIRED, List.of("content", "status", "activeForm")
+                                        SchemaKeys.REQUIRED, List.of(FIELD_CONTENT, FIELD_STATUS, FIELD_ACTIVE_FORM)
                                 )
                         )
                 ),
@@ -105,11 +109,11 @@ public class CheckListTool implements ToolRegistry.Tool {
             return ItemValidation.fail("Error: Item %d must be an object.".formatted(i));
         }
         var item = el.getAsJsonObject();
-        String content = optString(item, "content");
+        String content = optString(item, FIELD_CONTENT);
         if (content == null) return ItemValidation.fail("Error: Item %d is missing required field `content`.".formatted(i));
-        String status = optString(item, "status");
+        String status = optString(item, FIELD_STATUS);
         if (status == null) return ItemValidation.fail("Error: Item %d is missing required field `status`.".formatted(i));
-        String activeForm = optString(item, "activeForm");
+        String activeForm = optString(item, FIELD_ACTIVE_FORM);
         if (activeForm == null) return ItemValidation.fail("Error: Item %d is missing required field `activeForm`.".formatted(i));
 
         if (content.isBlank()) return ItemValidation.fail("Error: All items must have non-blank content.");

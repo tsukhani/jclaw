@@ -89,6 +89,10 @@ public class TelegramChannel implements Channel {
 
     private static final ObjectMapper JACKSON = new ObjectMapper();
 
+    private static final String LOG_CATEGORY = "channel";
+    /** Channel identifier used as logging source and returned by {@link #channelName()}. */
+    private static final String CHANNEL_NAME = "telegram";
+
     /** Per-token instances. OkHttpTelegramClient owns a dispatcher thread pool, so
      *  we reuse one instance per token across the lifetime of that token. */
     private static final ConcurrentHashMap<String, TelegramChannel> INSTANCES = new ConcurrentHashMap<>();
@@ -251,7 +255,7 @@ public class TelegramChannel implements Channel {
                             .commands(commands)
                             .build());
         } catch (Exception e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "setMyCommands failed: %s".formatted(e.getMessage()));
         }
     }
@@ -283,14 +287,14 @@ public class TelegramChannel implements Channel {
                             .action("typing")
                             .build());
         } catch (Exception e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "sendChatAction(typing) failed for chat %s: %s"
                             .formatted(chatId, e.getMessage()));
         }
     }
 
     @Override
-    public String channelName() { return "telegram"; }
+    public String channelName() { return CHANNEL_NAME; }
 
     // ── Outbound sends ──
 
@@ -314,7 +318,7 @@ public class TelegramChannel implements Channel {
      */
     public static boolean sendMessage(String botToken, String chatId, String text, Agent agent) {
         if (botToken == null || chatId == null || text == null) {
-            EventLogger.error("channel", null, "telegram",
+            EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
                     "sendMessage called with null argument");
             return false;
         }
@@ -364,12 +368,12 @@ public class TelegramChannel implements Channel {
                                             TelegramOutboundPlanner.FileSegment fs) {
         try {
             if (!sendFileSegment(channel, chatId, fs)) {
-                EventLogger.warn("channel", null, "telegram",
+                EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                         "Background file send failed (non-blocking): %s"
                                 .formatted(fs.displayName()));
             }
         } catch (Throwable t) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Background file send threw (non-blocking) for %s: %s"
                             .formatted(fs.displayName(), t.getMessage()));
         }
@@ -401,7 +405,7 @@ public class TelegramChannel implements Channel {
             }
             return channel.trySendDocument(chatId, fs.file(), fs.displayName());
         } catch (Exception e) {
-            EventLogger.error("channel", null, "telegram",
+            EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
                     "File send failed for %s: %s".formatted(fs.displayName(), e.getMessage()));
             return false;
         }
@@ -439,11 +443,11 @@ public class TelegramChannel implements Channel {
         if (binding.webhookSecret != null) builder.secretToken(binding.webhookSecret);
         try {
             forToken(binding.botToken).client.execute(builder.build());
-            EventLogger.info("channel", null, "telegram",
+            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Webhook registered for binding %d: %s".formatted(binding.id, binding.webhookUrl));
             return true;
         } catch (TelegramApiException e) {
-            EventLogger.error("channel", null, "telegram",
+            EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Webhook registration failed for binding %d: %s".formatted(binding.id, e.getMessage()));
             return false;
         }
@@ -477,7 +481,7 @@ public class TelegramChannel implements Channel {
         if (hasImage && !services.AgentService.supportsVision(sendAgent)) {
             sendMessage(sendToken, sendChatId,
                     "I can't handle images with the current model. Try a vision-capable model.");
-            EventLogger.warn("channel", sendAgent.name, "telegram",
+            EventLogger.warn(LOG_CATEGORY, sendAgent.name, CHANNEL_NAME,
                     "Rejected image upload: model does not support vision");
             return null;
         }
@@ -495,13 +499,13 @@ public class TelegramChannel implements Channel {
                 sendMessage(sendToken, sendChatId,
                         "That file is too large — Telegram bots can only accept up to %d MB.".formatted(
                                 TelegramFileDownloader.MAX_FILE_BYTES / (1024 * 1024)));
-                EventLogger.warn("channel", sendAgent.name, "telegram",
+                EventLogger.warn(LOG_CATEGORY, sendAgent.name, CHANNEL_NAME,
                         "Rejected upload: %d bytes exceeds %d limit".formatted(actualBytes, limit));
                 return null;
             } else if (result instanceof TelegramFileDownloader.DownloadFailed(var reason)) {
                 sendMessage(sendToken, sendChatId,
                         "Sorry, I couldn't download your file from Telegram.");
-                EventLogger.warn("channel", sendAgent.name, "telegram",
+                EventLogger.warn(LOG_CATEGORY, sendAgent.name, CHANNEL_NAME,
                         "Download failed: %s".formatted(reason));
                 return null;
             }
@@ -515,7 +519,7 @@ public class TelegramChannel implements Channel {
             Update sdk = JACKSON.readValue(update.toString(), Update.class);
             return parseUpdate(sdk);
         } catch (Exception e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Update parse error: %s".formatted(e.getMessage()));
             return null;
         }
@@ -677,7 +681,7 @@ public class TelegramChannel implements Channel {
             Update sdk = JACKSON.readValue(update.toString(), Update.class);
             return parseCallback(sdk);
         } catch (Exception e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Callback parse error: %s".formatted(e.getMessage()));
             return null;
         }
@@ -707,13 +711,13 @@ public class TelegramChannel implements Channel {
             // timeouts.
             uploadClient.execute(request);
             long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            EventLogger.info("channel", null, "telegram",
+            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Photo sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
                             .formatted(peerId, displayName, elapsedMs, fileSize));
             return true;
         } catch (TelegramApiException e) {
             long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Photo send failed for %s after %dms: %s"
                             .formatted(displayName, elapsedMs, e.getMessage()));
             return false;
@@ -737,13 +741,13 @@ public class TelegramChannel implements Channel {
             // are often larger than photos (PDFs, reports, zips).
             uploadClient.execute(request);
             long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            EventLogger.info("channel", null, "telegram",
+            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Document sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
                             .formatted(peerId, displayName, elapsedMs, fileSize));
             return true;
         } catch (TelegramApiException e) {
             long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Document send failed for %s after %dms: %s"
                             .formatted(displayName, elapsedMs, e.getMessage()));
             return false;
@@ -759,22 +763,22 @@ public class TelegramChannel implements Channel {
                 .build();
         try {
             client.execute(request);
-            EventLogger.info("channel", null, "telegram",
+            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Message sent to chat %s".formatted(peerId));
             return SendResult.OK;
         } catch (TelegramApiRequestException e) {
             var params = e.getParameters();
             if (params != null && params.getRetryAfter() != null && params.getRetryAfter() > 0) {
                 int retryAfter = params.getRetryAfter();
-                EventLogger.warn("channel", null, "telegram",
+                EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                         "Rate-limited; retry_after=%ds".formatted(retryAfter));
                 return SendResult.rateLimited(retryAfter * 1000L);
             }
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Telegram API error: %s".formatted(e.getMessage()));
             return SendResult.FAILED;
         } catch (TelegramApiException e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Send failed: %s".formatted(e.getMessage()));
             return SendResult.FAILED;
         }
@@ -802,7 +806,7 @@ public class TelegramChannel implements Channel {
             var msg = channel.client.execute(request);
             return msg.getMessageId();
         } catch (TelegramApiException e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "sendMessageWithKeyboard failed: %s".formatted(e.getMessage()));
             return null;
         }
@@ -827,7 +831,7 @@ public class TelegramChannel implements Channel {
             channel.client.execute(builder.build());
             return true;
         } catch (TelegramApiException e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "editMessageText failed: %s".formatted(e.getMessage()));
             return false;
         }
@@ -851,7 +855,7 @@ public class TelegramChannel implements Channel {
             channel.client.execute(builder.build());
             return true;
         } catch (TelegramApiException e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "answerCallbackQuery failed: %s".formatted(e.getMessage()));
             return false;
         }

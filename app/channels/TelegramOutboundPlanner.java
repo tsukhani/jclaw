@@ -28,6 +28,9 @@ import java.util.regex.Pattern;
  */
 public final class TelegramOutboundPlanner {
 
+    private static final String LOG_CATEGORY = "channel";
+    private static final String LOG_SOURCE = "telegram";
+
     /** Set of file extensions that Telegram renders as an inline photo. */
     private static final List<String> IMAGE_EXTS = List.of(
             ".png", ".jpg", ".jpeg", ".webp", ".gif");
@@ -207,17 +210,17 @@ public final class TelegramOutboundPlanner {
             var path = AgentService.acquireWorkspacePath(agentName, relativePath);
             var file = path.toFile();
             if (!file.exists() || !file.isFile()) {
-                EventLogger.warn("channel", agentName, "telegram",
+                EventLogger.warn(LOG_CATEGORY, agentName, LOG_SOURCE,
                         "File delivery: workspace path does not exist: %s".formatted(relativePath));
                 return null;
             }
             return file;
         } catch (SecurityException e) {
-            EventLogger.warn("channel", agentName, "telegram",
+            EventLogger.warn(LOG_CATEGORY, agentName, LOG_SOURCE,
                     "File delivery rejected (path traversal): %s".formatted(relativePath));
             return null;
         } catch (Exception e) {
-            EventLogger.warn("channel", agentName, "telegram",
+            EventLogger.warn(LOG_CATEGORY, agentName, LOG_SOURCE,
                     "File delivery resolution error for %s: %s".formatted(relativePath, e.getMessage()));
             return null;
         }

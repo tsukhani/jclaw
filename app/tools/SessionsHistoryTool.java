@@ -54,6 +54,8 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "sessions_history";
 
+    private static final String PARAM_RUN_ID = "runId";
+
     /** Default number of messages returned per call. */
     static final int DEFAULT_LIMIT = 100;
 
@@ -105,7 +107,7 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         var props = new LinkedHashMap<String, Object>();
-        props.put("runId", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+        props.put(PARAM_RUN_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Run id returned by a prior spawn_subagent call (required)."));
         props.put("limit", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
@@ -118,7 +120,7 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,
-                SchemaKeys.REQUIRED, List.of("runId")
+                SchemaKeys.REQUIRED, List.of(PARAM_RUN_ID)
         );
     }
 
@@ -165,7 +167,7 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
     }
 
     private static ParsedArgs parseArgs(JsonObject args) {
-        var runIdStr = optString(args, "runId");
+        var runIdStr = optString(args, PARAM_RUN_ID);
         if (runIdStr == null || runIdStr.isBlank()) {
             return ParsedArgs.fail("Error: 'runId' is required.");
         }

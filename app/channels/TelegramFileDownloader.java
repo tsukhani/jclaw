@@ -43,6 +43,10 @@ public final class TelegramFileDownloader {
     private static final Duration GETFILE_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(90);
 
+    // Bot API getFile response JSON keys.
+    private static final String FIELD_FILE_PATH = "file_path";
+    private static final String FIELD_FILE_SIZE = "file_size";
+
     public sealed interface Result permits Ok, SizeExceeded, DownloadFailed {}
 
     public record Ok(AttachmentService.Input input) implements Result {}
@@ -146,13 +150,13 @@ public final class TelegramFileDownloader {
             return new MetaFailed("getFile error: " + Strings.truncate(getFileResp.toString(), 200));
         }
         var result = getFileResp.getAsJsonObject("result");
-        String filePath = result.has("file_path") && !result.get("file_path").isJsonNull()
-                ? result.get("file_path").getAsString() : null;
+        String filePath = result.has(FIELD_FILE_PATH) && !result.get(FIELD_FILE_PATH).isJsonNull()
+                ? result.get(FIELD_FILE_PATH).getAsString() : null;
         if (filePath == null || filePath.isBlank()) {
             return new MetaFailed("getFile response missing file_path");
         }
-        long reportedSize = result.has("file_size") && !result.get("file_size").isJsonNull()
-                ? result.get("file_size").getAsLong() : pending.sizeBytes();
+        long reportedSize = result.has(FIELD_FILE_SIZE) && !result.get(FIELD_FILE_SIZE).isJsonNull()
+                ? result.get(FIELD_FILE_SIZE).getAsLong() : pending.sizeBytes();
         if (reportedSize > MAX_FILE_BYTES) {
             return new MetaSize(reportedSize, MAX_FILE_BYTES);
         }

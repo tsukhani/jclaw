@@ -62,6 +62,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
     public static final String DEFAULT_ALLOWLIST = "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip,test,pwd,which,whoami,uname,date,file,stat,env,printenv,awk,sed,tr,cut,tee,xargs,touch,cmp,sleep";
 
+    private static final String PARAM_COMMAND = "command";
+    private static final String PARAM_WORKDIR = "workdir";
+    private static final String PARAM_TIMEOUT = "timeout";
+
     /** Atomically cached parsed allowlist: invalidated when the raw config string changes. */
     private record AllowlistCache(String raw, Set<String> set) {}
     private static final java.util.concurrent.atomic.AtomicReference<AllowlistCache> cachedAllowlist =
@@ -120,17 +124,17 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
-                        "command", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                        PARAM_COMMAND, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "Shell command to execute"),
-                        "workdir", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                        PARAM_WORKDIR, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "Working directory (relative to workspace, or absolute if global paths enabled)"),
-                        "timeout", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                        PARAM_TIMEOUT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                                 SchemaKeys.DESCRIPTION, "Timeout in seconds (default: 30, max: 300)"),
                         "env", Map.of(SchemaKeys.TYPE, SchemaKeys.OBJECT,
                                 SchemaKeys.DESCRIPTION, "Additional environment variables as key-value pairs",
                                 SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING))
                 ),
-                SchemaKeys.REQUIRED, List.of("command")
+                SchemaKeys.REQUIRED, List.of(PARAM_COMMAND)
         );
     }
 
@@ -139,7 +143,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         long startTime = System.currentTimeMillis();
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
 
-        var command = args.has("command") ? args.get("command").getAsString().strip() : "";
+        var command = args.has(PARAM_COMMAND) ? args.get(PARAM_COMMAND).getAsString().strip() : "";
         if (command.isEmpty()) {
             return "Error: command is required and must not be empty.";
         }
@@ -167,8 +171,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         var defaultTimeout = ConfigService.getInt("shell.defaultTimeoutSeconds", 30);
         var maxTimeout = ConfigService.getInt("shell.maxTimeoutSeconds", 300);
         var timeout = defaultTimeout;
-        if (args.has("timeout")) {
-            timeout = Math.min(args.get("timeout").getAsInt(), maxTimeout);
+        if (args.has(PARAM_TIMEOUT)) {
+            timeout = Math.min(args.get(PARAM_TIMEOUT).getAsInt(), maxTimeout);
             if (timeout <= 0) timeout = defaultTimeout;
         }
 
@@ -300,14 +304,14 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
     public Path resolveWorkdir(JsonObject args, Path workspace, boolean allowGlobal, String agentName) {
 
-        if (!args.has("workdir") || args.get("workdir").getAsString().strip().isEmpty()) {
+        if (!args.has(PARAM_WORKDIR) || args.get(PARAM_WORKDIR).getAsString().strip().isEmpty()) {
             if (!Files.isDirectory(workspace)) {
                 try { Files.createDirectories(workspace); } catch (IOException _) {}
             }
             return workspace;
         }
 
-        var workdirStr = args.get("workdir").getAsString().strip();
+        var workdirStr = args.get(PARAM_WORKDIR).getAsString().strip();
         var workdirPath = Path.of(workdirStr);
 
         if (workdirPath.isAbsolute()) {

@@ -98,6 +98,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
      *  and the row exists purely as the child's audit-trail container. */
     public static final String SUBAGENT_CHANNEL = "subagent";
 
+    private static final String FIELD_STATUS = "status";
+    private static final String FIELD_LABEL = "label";
+
     /** Default wall-clock budget for a synchronous spawn, per AC. */
     static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
@@ -201,7 +204,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var props = new LinkedHashMap<String, Object>();
         props.put("task", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Instruction for the child subagent (required)"));
-        props.put("label", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+        props.put(FIELD_LABEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Optional short display name for the spawn"));
         props.put("agentId", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
@@ -358,7 +361,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         payload.put("run_id", runIdStr);
         payload.put("conversation_id", String.valueOf(childConvId));
         payload.put("reply", runOutcome.reply());
-        payload.put("status", runOutcome.terminalStatus().name());
+        payload.put(FIELD_STATUS, runOutcome.terminalStatus().name());
         // JCLAW-291: hint to the parent LLM that the child's reply was cut
         // off — useful when the parent decides whether to re-summarize or
         // to surface the truncation to the user.
@@ -396,7 +399,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         if (task == null || task.isBlank()) {
             return SpawnArgs.fail("Error: 'task' is required.");
         }
-        var label = optString(args, "label");
+        var label = optString(args, FIELD_LABEL);
         var requestedAgentId = optLong(args, "agentId");
         var modelProviderOverride = optString(args, "modelProvider");
         var modelIdOverride = optString(args, "modelId");
@@ -528,7 +531,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var asyncPayload = new LinkedHashMap<String, Object>();
         asyncPayload.put("run_id", runIdStr);
         asyncPayload.put("conversation_id", String.valueOf(childConvId));
-        asyncPayload.put("status", SubagentRun.Status.RUNNING.name());
+        asyncPayload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
         return utils.GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
     }
 
@@ -1140,7 +1143,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             try {
                 resumeParentAfterYield(parentConvId, runId);
             } catch (Throwable t) {
-                EventLogger.warn("subagent",
+                EventLogger.warn(SUBAGENT_CHANNEL,
                         "Failed to resume parent for yielded run " + runId
                                 + ": " + t.getMessage());
             }
@@ -1216,7 +1219,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 }
             });
         } catch (Throwable t) {
-            EventLogger.warn("subagent",
+            EventLogger.warn(SUBAGENT_CHANNEL,
                     "Failed to persist terminal SubagentRun update for run " + runId
                             + ": " + t.getMessage());
         }
@@ -1255,7 +1258,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 return isYielded;
             });
         } catch (Throwable t) {
-            EventLogger.warn("subagent",
+            EventLogger.warn(SUBAGENT_CHANNEL,
                     "Failed to post announce Message for run " + runId
                             + ": " + t.getMessage());
             return Boolean.FALSE;
@@ -1281,7 +1284,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     private static void resumeParentAfterYield(Long parentConvId, Long runId) {
         var conv = Tx.run(() -> (Conversation) Conversation.findById(parentConvId));
         if (conv == null) {
-            EventLogger.warn("subagent",
+            EventLogger.warn(SUBAGENT_CHANNEL,
                     "Yielded resume skipped: parent conversation " + parentConvId
                             + " not found for run " + runId);
             return;
@@ -1291,7 +1294,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             return c != null ? c.agent : null;
         });
         if (parentAgent == null) {
-            EventLogger.warn("subagent",
+            EventLogger.warn(SUBAGENT_CHANNEL,
                     "Yielded resume skipped: no agent on parent conversation " + parentConvId
                             + " for run " + runId);
             return;
@@ -1340,8 +1343,8 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
 
         var payload = new LinkedHashMap<String, Object>();
         payload.put("runId", runId);
-        payload.put("label", label != null ? label : "");
-        payload.put("status", status.name());
+        payload.put(FIELD_LABEL, label != null ? label : "");
+        payload.put(FIELD_STATUS, status.name());
         payload.put("reply", truncatedReply != null ? truncatedReply : "");
         payload.put("childConversationId", childConvId);
         payload.put("yielded", yielded);

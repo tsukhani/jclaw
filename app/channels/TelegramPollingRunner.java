@@ -33,6 +33,9 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class TelegramPollingRunner {
 
+    private static final String LOG_CATEGORY = "channel";
+    private static final String LOG_SOURCE = "telegram";
+
     private static final AtomicReference<TelegramBotsLongPollingApplication> APP = new AtomicReference<>();
 
     /** bindingId → active bot token. Used to detect token rotation on reconcile. */
@@ -110,10 +113,10 @@ public final class TelegramPollingRunner {
         if (!ACTIVE.isEmpty() && !app.isRunning()) {
             try {
                 app.start();
-                EventLogger.info("channel", null, "telegram",
+                EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                         "Long-polling app started (%d binding(s) registered)".formatted(ACTIVE.size()));
             } catch (Exception e) {
-                EventLogger.error("channel", null, "telegram",
+                EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
                         "Failed to start polling app: %s".formatted(e.getMessage()));
             }
         }
@@ -128,9 +131,9 @@ public final class TelegramPollingRunner {
             }
             try {
                 app.close();
-                EventLogger.info("channel", null, "telegram", "Long-polling app closed");
+                EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE, "Long-polling app closed");
             } catch (Exception e) {
-                EventLogger.warn("channel", null, "telegram",
+                EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
                         "Polling app shutdown error: %s".formatted(e.getMessage()));
             }
         }
@@ -192,7 +195,7 @@ public final class TelegramPollingRunner {
         // without a manual retry.
         long remaining = cooldownRemainingMs(token);
         if (remaining > 0) {
-            EventLogger.info("channel", null, "telegram",
+            EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                     "Deferring register for binding %d — token in cooldown for %d ms".formatted(
                             bindingId, remaining));
             return;
@@ -203,10 +206,10 @@ public final class TelegramPollingRunner {
             LongPollingSingleThreadUpdateConsumer consumer = update -> dispatch(bindingId, update);
             app.registerBot(token, consumer);
             ACTIVE.put(bindingId, token);
-            EventLogger.info("channel", null, "telegram",
+            EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                     "Registered polling session for binding %d".formatted(bindingId));
         } catch (Exception e) {
-            EventLogger.error("channel", null, "telegram",
+            EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
                     "Failed to register binding %d: %s".formatted(bindingId, e.getMessage()));
         }
     }
@@ -216,7 +219,7 @@ public final class TelegramPollingRunner {
         try {
             if (token != null) app.unregisterBot(token);
         } catch (Exception e) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
                     "Unregister failed for binding %d: %s".formatted(bindingId, e.getMessage()));
         }
         ACTIVE.remove(bindingId);
@@ -227,7 +230,7 @@ public final class TelegramPollingRunner {
             // registered during the window gets picked up automatically.
             SCHEDULER.schedule(TelegramPollingRunner::reconcile, COOLDOWN_MS + 500, TimeUnit.MILLISECONDS);
         }
-        EventLogger.info("channel", null, "telegram",
+        EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                 "Unregistered polling session for binding %d".formatted(bindingId));
     }
 
@@ -277,7 +280,7 @@ public final class TelegramPollingRunner {
 
             Ctx ctx = loadCtx(bindingId);
             if (ctx == null || !ctx.enabled() || ctx.agent() == null) {
-                EventLogger.warn("channel", null, "telegram",
+                EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
                         "Dropping update for missing/disabled binding %d".formatted(bindingId));
                 return;
             }
@@ -289,7 +292,7 @@ public final class TelegramPollingRunner {
 
             handleMessage(bindingId, ctx, msg);
         } catch (Exception e) {
-            EventLogger.error("channel", null, "telegram",
+            EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
                     "Polling update processing error for binding %d: %s".formatted(
                             bindingId, e.getMessage()));
         }
@@ -314,7 +317,7 @@ public final class TelegramPollingRunner {
 
     private static void handleCallback(Long bindingId, Ctx ctx, TelegramChannel.InboundCallback callback) {
         if (!ctx.telegramUserId().equals(callback.fromId())) {
-            EventLogger.warn("channel", ctx.agent().name, "telegram",
+            EventLogger.warn(LOG_CATEGORY, ctx.agent().name, LOG_SOURCE,
                     "Rejected callback from user %s: binding %d is bound to user %s".formatted(
                             callback.fromId(), bindingId, ctx.telegramUserId()));
             return;
@@ -324,14 +327,14 @@ public final class TelegramPollingRunner {
 
     private static void handleMessage(Long bindingId, Ctx ctx, TelegramChannel.InboundMessage msg) {
         if (!ctx.telegramUserId().equals(msg.fromId())) {
-            EventLogger.warn("channel", ctx.agent().name, "telegram",
+            EventLogger.warn(LOG_CATEGORY, ctx.agent().name, LOG_SOURCE,
                     "Rejected inbound from %s (id=%s): binding %d is bound to user %s".formatted(
                             msg.fromUsername() != null ? msg.fromUsername() : "?",
                             msg.fromId(), bindingId, ctx.telegramUserId()));
             return;
         }
 
-        EventLogger.info("channel", ctx.agent().name, "telegram",
+        EventLogger.info(LOG_CATEGORY, ctx.agent().name, LOG_SOURCE,
                 "Polling received from %s: %s".formatted(
                         msg.fromUsername() != null ? msg.fromUsername() : msg.fromId(),
                         utils.Strings.truncate(msg.text(), 50)));
@@ -370,13 +373,13 @@ public final class TelegramPollingRunner {
                 // factory defers construction until the conversation id is known.
                 final String sendChatType = merged.chatType();
                 AgentRunner.processInboundForAgentStreaming(
-                        sendAgent, "telegram", userId, merged.text(),
+                        sendAgent, LOG_SOURCE, userId, merged.text(),
                         convId -> new TelegramStreamingSink(
                                 sendToken, sendChatId, sendAgent, convId, sendChatType),
                         inputs);
             } catch (Exception e) {
-                EventLogger.error("channel", sendAgent != null ? sendAgent.name : null,
-                        "telegram", "Polling dispatch error: %s".formatted(e.getMessage()));
+                EventLogger.error(LOG_CATEGORY, sendAgent != null ? sendAgent.name : null,
+                        LOG_SOURCE, "Polling dispatch error: %s".formatted(e.getMessage()));
             }
         });
     }

@@ -47,6 +47,7 @@ public final class TelegramMarkdownFormatter {
     public enum TableMode { OFF, BULLETS, CODE }
 
     /** Default tag stack reset at chunk boundaries inside oversized fenced code blocks. */
+    private static final String PRE_OPEN = "<pre>";
     private static final String PRE_CODE_OPEN = "<pre><code>";
     private static final String PRE_CODE_CLOSE = "</code></pre>";
 
@@ -248,7 +249,7 @@ public final class TelegramMarkdownFormatter {
 
         private void emitFencedCodeBlock(FencedCodeBlock fcb) {
             String lang = fcb.getInfo().toString().trim();
-            out.append("<pre>");
+            out.append(PRE_OPEN);
             if (!lang.isEmpty()) {
                 out.append("<code class=\"language-").append(escapeAttr(lang)).append("\">");
             } else {
@@ -536,8 +537,8 @@ public final class TelegramMarkdownFormatter {
      * if {@code block} starts with one, else -1.
      */
     private static int preOpenTagEnd(String block) {
-        if (!block.startsWith("<pre>")) return -1;
-        int i = "<pre>".length();
+        if (!block.startsWith(PRE_OPEN)) return -1;
+        int i = PRE_OPEN.length();
         if (i < block.length() && block.startsWith("<code", i)) {
             int gt = block.indexOf('>', i);
             if (gt > 0) return gt + 1;

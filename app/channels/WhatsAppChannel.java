@@ -22,9 +22,12 @@ public class WhatsAppChannel implements Channel {
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
     private static final okhttp3.MediaType JSON_MEDIA_TYPE = okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON);
 
+    private static final String WHATSAPP = "whatsapp";
+    private static final String CHANNEL = "channel";
+
     public record WhatsAppConfig(String phoneNumberId, String accessToken, String appSecret, String verifyToken) {
         public static WhatsAppConfig load() {
-            var cc = ChannelConfig.findByType("whatsapp");
+            var cc = ChannelConfig.findByType(WHATSAPP);
             if (cc == null || !cc.enabled) return null;
             var json = JsonParser.parseString(cc.configJson).getAsJsonObject();
             return new WhatsAppConfig(
@@ -37,12 +40,12 @@ public class WhatsAppChannel implements Channel {
     }
 
     @Override
-    public String channelName() { return "whatsapp"; }
+    public String channelName() { return WHATSAPP; }
 
     public static boolean sendMessage(String to, String text) {
         var config = WhatsAppConfig.load();
         if (config == null) {
-            EventLogger.error("channel", null, "whatsapp", "WhatsApp not configured");
+            EventLogger.error(CHANNEL, null, WHATSAPP, "WhatsApp not configured");
             return false;
         }
         return new WhatsAppChannel().sendWithRetry(to, text);
@@ -54,7 +57,7 @@ public class WhatsAppChannel implements Channel {
         if (config == null) return SendResult.FAILED;
         var url = API_BASE + config.phoneNumberId() + "/messages";
         var body = gson.toJson(Map.of(
-                "messaging_product", "whatsapp",
+                "messaging_product", WHATSAPP,
                 "to", peerId,
                 "type", "text",
                 "text", Map.of("body", text)
@@ -66,17 +69,17 @@ public class WhatsAppChannel implements Channel {
                 .build();
         try (var response = utils.HttpFactories.general().newCall(request).execute()) {
             if (response.code() == 200) {
-                EventLogger.info("channel", null, "whatsapp",
+                EventLogger.info(CHANNEL, null, WHATSAPP,
                         "Message sent to %s".formatted(peerId));
                 return SendResult.OK;
             }
 
             var responseBody = response.body().string();
-            EventLogger.warn("channel", null, "whatsapp",
+            EventLogger.warn(CHANNEL, null, WHATSAPP,
                     "WhatsApp API error (HTTP %d): %s".formatted(response.code(), responseBody));
             return SendResult.FAILED;
         } catch (Exception e) {
-            EventLogger.warn("channel", null, "whatsapp",
+            EventLogger.warn(CHANNEL, null, WHATSAPP,
                     "Send failed: %s".formatted(e.getMessage()));
             return SendResult.FAILED;
         }
@@ -85,7 +88,7 @@ public class WhatsAppChannel implements Channel {
     public static void markAsRead(WhatsAppConfig config, String messageId) {
         var url = API_BASE + config.phoneNumberId() + "/messages";
         var body = gson.toJson(Map.of(
-                "messaging_product", "whatsapp",
+                "messaging_product", WHATSAPP,
                 "status", "read",
                 "message_id", messageId
         ));

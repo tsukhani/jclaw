@@ -72,6 +72,9 @@ import java.util.regex.Pattern;
  */
 public final class TelegramStreamingSink {
 
+    private static final String LOG_CATEGORY = "channel";
+    private static final String LOG_SOURCE = "telegram";
+
     /**
      * Adaptive edit cadence for streaming previews (JCLAW-100).
      *
@@ -244,7 +247,7 @@ public final class TelegramStreamingSink {
         // JCLAW-105: one-time breadcrumb so operators can attribute streaming
         // activity to chat categories. category=channel matches the existing
         // convention in TelegramChannel.
-        EventLogger.info("channel", agentName(), "telegram",
+        EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
                 "Streaming start (chat.type=%s)"
                         .formatted(chatType != null ? chatType : "unknown"));
     }
@@ -346,7 +349,7 @@ public final class TelegramStreamingSink {
             // message is already correct on screen; logging this as a
             // warning confuses operators into thinking delivery failed.
             if (!isMessageNotModified(e)) {
-                EventLogger.warn("channel", agentName(), "telegram",
+                EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                         "Streaming seal edit failed (plain text remains visible): "
                                 + e.getMessage());
             }
@@ -414,7 +417,7 @@ public final class TelegramStreamingSink {
         TelegramChannel.sendMessage(botToken, chatId,
                 "Sorry, an error occurred processing your message.", agent);
         clearStreamCheckpoint();
-        EventLogger.error("channel", agentName(), "telegram",
+        EventLogger.error(LOG_CATEGORY, agentName(), LOG_SOURCE,
                 "Streaming error: " + (e != null ? e.getMessage() : "(null)"));
     }
 
@@ -589,7 +592,7 @@ public final class TelegramStreamingSink {
             if (previous < THROTTLE_MAX_MS) {
                 currentThrottleMs = Math.min(previous + THROTTLE_STEP_MS, THROTTLE_MAX_MS);
             }
-            EventLogger.warn("channel", agentName(), "telegram",
+            EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Telegram 429 (retry_after=%ds); cadence %d → %d ms"
                             .formatted(tare.getParameters().getRetryAfter(),
                                     previous, currentThrottleMs));
@@ -600,7 +603,7 @@ public final class TelegramStreamingSink {
         // grew then shrank between schedule and execute can still produce
         // a byte-identical edit. Not worth warning on.
         if (isMessageNotModified(e)) return;
-        EventLogger.warn("channel", agentName(), "telegram",
+        EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                 "Streaming flush failed (will retry): " + e.getMessage());
     }
 
@@ -680,7 +683,7 @@ public final class TelegramStreamingSink {
      */
     private void notifyDeliveryFailure() {
         if (!tryFireNotifier(conversationId)) {
-            EventLogger.info("channel", agentName(), "telegram",
+            EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Delivery failure (rate-limited — notification suppressed for chat "
                             + chatId + ")");
             return;
@@ -691,11 +694,11 @@ public final class TelegramStreamingSink {
                     "I finished generating a response but couldn't deliver it to this chat. "
                             + "Please try again.");
         } catch (Exception e) {
-            EventLogger.warn("channel", agentName(), "telegram",
+            EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Delivery-failure notifier itself failed: " + e.getMessage());
         }
         if (sent) {
-            EventLogger.info("channel", agentName(), "telegram",
+            EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Delivery failure notification sent to chat " + chatId);
         }
     }
@@ -741,7 +744,7 @@ public final class TelegramStreamingSink {
                     .build());
             messageId = null;
         } catch (Exception e) {
-            EventLogger.warn("channel", agentName(), "telegram",
+            EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Placeholder delete failed: " + e.getMessage());
         }
     }
@@ -781,7 +784,7 @@ public final class TelegramStreamingSink {
         } catch (Exception e) {
             // Non-fatal — we lose crash recovery for this stream but the
             // live session keeps working. Log and proceed.
-            EventLogger.warn("channel", agentName(), "telegram",
+            EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Failed to persist stream checkpoint: " + e.getMessage());
         }
     }
@@ -803,7 +806,7 @@ public final class TelegramStreamingSink {
                 }
             });
         } catch (Exception e) {
-            EventLogger.warn("channel", agentName(), "telegram",
+            EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Failed to clear stream checkpoint: " + e.getMessage());
         }
     }

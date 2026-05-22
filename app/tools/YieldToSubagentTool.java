@@ -55,6 +55,8 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "yield_to_subagent";
 
+    private static final String PARAM_RUN_ID = "runId";
+
     /** Marker that {@link agents.AgentRunner} scans for on tool-result text
      *  to recognise a successful yield call and break out of its tool-call
      *  loop without persisting a final assistant reply. */
@@ -101,13 +103,13 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         var props = new LinkedHashMap<String, Object>();
-        props.put("runId", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+        props.put(PARAM_RUN_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Run id returned by a prior spawn_subagent call with async=true (required)."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,
-                SchemaKeys.REQUIRED, List.of("runId")
+                SchemaKeys.REQUIRED, List.of(PARAM_RUN_ID)
         );
     }
 
@@ -129,7 +131,7 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var runIdStr = optString(args, "runId");
+        var runIdStr = optString(args, PARAM_RUN_ID);
         if (runIdStr == null || runIdStr.isBlank()) {
             return "Error: 'runId' is required.";
         }
@@ -155,7 +157,7 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         // the persisted message log and easy to reason about post-hoc.
         var payload = new LinkedHashMap<String, Object>();
         payload.put("action", "yielded");
-        payload.put("runId", String.valueOf(runId));
+        payload.put(PARAM_RUN_ID, String.valueOf(runId));
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
@@ -199,7 +201,7 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
     private static String alreadyTerminalEnvelope(SubagentRun run, long runId) {
         var alreadyDone = new LinkedHashMap<String, Object>();
         alreadyDone.put("action", "already_terminal");
-        alreadyDone.put("runId", String.valueOf(runId));
+        alreadyDone.put(PARAM_RUN_ID, String.valueOf(runId));
         alreadyDone.put("status", run.status.name());
         alreadyDone.put("reply", run.outcome != null ? run.outcome : "");
         if (run.childConversation != null) {
