@@ -461,10 +461,22 @@ public class ApiTasksController extends Controller {
      * @return true if any field was touched.
      */
     private static boolean applyOptionalFieldUpdates(Task task, com.google.gson.JsonObject body) {
-        boolean changed = false;
+        // Split per-field-kind so each helper stays well under the cognitive-
+        // complexity bar; the boolean OR reduction below preserves "any field
+        // touched" semantics without short-circuiting.
+        boolean changed = applyOptionalStringFields(task, body);
+        changed |= applyOptionalBooleanFields(task, body);
+        changed |= applyOptionalIntegerFields(task, body);
+        return changed;
+    }
 
-        // Optional-string fields: present-and-null clears, present-and-blank
-        // also clears (readOptionalString collapses both to null).
+    /**
+     * Optional-string fields: present-and-null clears, present-and-blank
+     * also clears (readOptionalString collapses both to null). Description
+     * uniquely coerces null → "" instead of leaving it null.
+     */
+    private static boolean applyOptionalStringFields(Task task, com.google.gson.JsonObject body) {
+        boolean changed = false;
         if (body.has(KEY_DESCRIPTION)) {
             var v = readOptionalString(body, KEY_DESCRIPTION);
             task.description = v != null ? v : "";
@@ -479,9 +491,15 @@ public class ApiTasksController extends Controller {
         if (body.has(KEY_PRE_CHECK))           { task.preCheck          = readOptionalString(body, KEY_PRE_CHECK);           changed = true; }
         if (body.has(KEY_SCRIPT))              { task.script            = readOptionalString(body, KEY_SCRIPT);              changed = true; }
         if (body.has(KEY_CONTEXT_FROM_TASK_IDS)){ task.contextFromTaskIds= readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);changed = true; }
+        return changed;
+    }
 
-        // Boolean fields. Explicit null is rejected (no meaningful semantic)
-        // — callers should omit instead.
+    /**
+     * Boolean fields. Explicit null is rejected (no meaningful semantic) —
+     * callers should omit instead.
+     */
+    private static boolean applyOptionalBooleanFields(Task task, com.google.gson.JsonObject body) {
+        boolean changed = false;
         if (body.has(KEY_PAUSED) && !body.get(KEY_PAUSED).isJsonNull()) {
             task.paused = body.get(KEY_PAUSED).getAsBoolean();
             changed = true;
@@ -490,15 +508,15 @@ public class ApiTasksController extends Controller {
             task.noAgent = body.get(KEY_NO_AGENT).getAsBoolean();
             changed = true;
         }
-
-        // Integer fields. Explicit null clears (sets back to unlimited).
-        if (body.has(KEY_REPEAT_LIMIT)) {
-            var el = body.get(KEY_REPEAT_LIMIT);
-            task.repeatLimit = el.isJsonNull() ? null : el.getAsInt();
-            changed = true;
-        }
-
         return changed;
+    }
+
+    /** Integer fields. Explicit null clears (sets back to unlimited). */
+    private static boolean applyOptionalIntegerFields(Task task, com.google.gson.JsonObject body) {
+        if (!body.has(KEY_REPEAT_LIMIT)) return false;
+        var el = body.get(KEY_REPEAT_LIMIT);
+        task.repeatLimit = el.isJsonNull() ? null : el.getAsInt();
+        return true;
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))

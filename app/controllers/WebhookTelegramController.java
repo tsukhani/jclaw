@@ -23,6 +23,9 @@ import java.security.MessageDigest;
  */
 public class WebhookTelegramController extends Controller {
 
+    private static final String CHANNEL_TELEGRAM = "telegram";
+    private static final String CATEGORY_CHANNEL = "channel";
+
     /** Snapshot of the fields {@link #webhook} needs off the request thread. */
     private record BindingCtx(Long bindingId, String botToken, String telegramUserId,
                               Agent agent, String webhookSecret, boolean enabled) {}
@@ -30,13 +33,13 @@ public class WebhookTelegramController extends Controller {
     public static void webhook(Long bindingId, String secret) {
         BindingCtx ctx = loadBindingCtx(bindingId);
         if (ctx == null) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Webhook for unknown binding id=%s".formatted(bindingId));
             notFound();
             return;
         }
         if (!ctx.enabled()) {
-            EventLogger.warn("channel", null, "telegram",
+            EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Webhook for disabled binding %d".formatted(bindingId));
             ok();
             return;
@@ -51,7 +54,7 @@ public class WebhookTelegramController extends Controller {
             var update = JsonParser.parseString(WebhookUtil.readRawBody()).getAsJsonObject();
             dispatchUpdate(ctx, update, bindingId);
         } catch (Exception e) {
-            EventLogger.error("channel", null, "telegram",
+            EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Webhook parse error for binding %d: %s".formatted(bindingId, e.getMessage()));
         }
 
@@ -83,7 +86,7 @@ public class WebhookTelegramController extends Controller {
                 || !MessageDigest.isEqual(
                         ctx.webhookSecret().getBytes(StandardCharsets.UTF_8),
                         secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8))) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, agentName, "telegram",
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, agentName, CHANNEL_TELEGRAM,
                     "Invalid webhook secret for binding %d".formatted(bindingId));
             return false;
         }
@@ -92,7 +95,7 @@ public class WebhookTelegramController extends Controller {
                 || !MessageDigest.isEqual(
                         ctx.webhookSecret().getBytes(StandardCharsets.UTF_8),
                         secretHeader.value().getBytes(StandardCharsets.UTF_8))) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, agentName, "telegram",
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, agentName, CHANNEL_TELEGRAM,
                     "Missing or invalid secret-token header for binding %d".formatted(bindingId));
             return false;
         }
@@ -118,8 +121,8 @@ public class WebhookTelegramController extends Controller {
 
     private static void handleCallback(BindingCtx ctx, TelegramChannel.InboundCallback callback, Long bindingId) {
         if (!ctx.telegramUserId().equals(callback.fromId())) {
-            EventLogger.warn("channel",
-                    ctx.agent() != null ? ctx.agent().name : null, "telegram",
+            EventLogger.warn(CATEGORY_CHANNEL,
+                    ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                     "Rejected callback from user %s: binding %d is bound to user %s".formatted(
                             callback.fromId(), bindingId, ctx.telegramUserId()));
             return;
@@ -132,16 +135,16 @@ public class WebhookTelegramController extends Controller {
     private static void handleInboundMessage(BindingCtx ctx, TelegramChannel.InboundMessage message, Long bindingId) {
         // Peer-level authorization: only the bound user may reach this bot.
         if (!ctx.telegramUserId().equals(message.fromId())) {
-            EventLogger.warn("channel",
-                    ctx.agent() != null ? ctx.agent().name : null, "telegram",
+            EventLogger.warn(CATEGORY_CHANNEL,
+                    ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                     "Rejected inbound from %s (id=%s): binding %d is bound to user %s".formatted(
                             message.fromUsername() != null ? message.fromUsername() : "?",
                             message.fromId(), bindingId, ctx.telegramUserId()));
             return;
         }
 
-        EventLogger.info("channel",
-                ctx.agent() != null ? ctx.agent().name : null, "telegram",
+        EventLogger.info(CATEGORY_CHANNEL,
+                ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                 "Webhook received from %s: %s".formatted(
                         message.fromUsername() != null ? message.fromUsername() : message.fromId(),
                         utils.Strings.truncate(message.text(), 50)));
@@ -176,12 +179,12 @@ public class WebhookTelegramController extends Controller {
             // conversation id so the sink can persist its checkpoint.
             final String sendChatType = message.chatType();
             AgentRunner.processInboundForAgentStreaming(
-                    sendAgent, "telegram", ctx.telegramUserId(), message.text(),
+                    sendAgent, CHANNEL_TELEGRAM, ctx.telegramUserId(), message.text(),
                     convId -> new channels.TelegramStreamingSink(
                             sendToken, sendChatId, sendAgent, convId, sendChatType),
                     inputs);
         } catch (Exception e) {
-            EventLogger.error("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
+            EventLogger.error(CATEGORY_CHANNEL, ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                     "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));
             TelegramChannel.sendMessage(sendToken, sendChatId,
                     "Sorry, an error occurred processing your message.");

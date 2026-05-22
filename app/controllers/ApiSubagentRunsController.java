@@ -40,6 +40,9 @@ public class ApiSubagentRunsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    private static final String KEY_REASON = "reason";
+    private static final String KEY_RUN_ID = "run_id";
+
     @SuppressWarnings("java:S107") // each query param is its own filter axis; bundling into a DTO would hide them from OpenAPI generation
     public record SubagentRunView(Long id, Long parentAgentId, String parentAgentName,
                                   Long childAgentId, String childAgentName,
@@ -217,8 +220,8 @@ public class ApiSubagentRunsController extends Controller {
         }
         String reason = "Killed by operator via admin page";
         var body = JsonBodyReader.readJsonBody();
-        if (body != null && body.has("reason") && !body.get("reason").isJsonNull()) {
-            var supplied = body.get("reason").getAsString();
+        if (body != null && body.has(KEY_REASON) && !body.get(KEY_REASON).isJsonNull()) {
+            var supplied = body.get(KEY_REASON).getAsString();
             if (supplied != null && !supplied.isBlank()) reason = supplied;
         }
         var result = SubagentRegistry.kill(id, reason);
@@ -269,10 +272,10 @@ public class ApiSubagentRunsController extends Controller {
         if (ev.details == null) return;
         try {
             var obj = JsonParser.parseString(ev.details).getAsJsonObject();
-            if (!obj.has("run_id") || obj.get("run_id").isJsonNull()) return;
+            if (!obj.has(KEY_RUN_ID) || obj.get(KEY_RUN_ID).isJsonNull()) return;
             Long parsedId;
             try {
-                parsedId = Long.parseLong(obj.get("run_id").getAsString());
+                parsedId = Long.parseLong(obj.get(KEY_RUN_ID).getAsString());
             } catch (NumberFormatException _) { return; }
             if (!idSet.contains(parsedId)) return;
             if (result.containsKey(parsedId)) return; // keep first (most recent due to ORDER BY)

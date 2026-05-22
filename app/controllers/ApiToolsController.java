@@ -23,6 +23,8 @@ public class ApiToolsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    private static final String KEY_ENABLED = "enabled";
+
     // JCLAW-281: the `system` boolean is gone — there are no system tools
     // any more (list_mcp_tools deleted, loadtest_sleep gated by conditional
     // registration). The field is removed from every entry record.
@@ -121,8 +123,8 @@ public class ApiToolsController extends Controller {
         if (agent == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("enabled")) badRequest();
-        var enabled = body.get("enabled").getAsBoolean();
+        if (body == null || !body.has(KEY_ENABLED)) badRequest();
+        var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         // Reject per-action MCP toggles. A non-null group on a non-server-
         // level tool is the signature of an MCP per-action adapter. The
@@ -183,8 +185,8 @@ public class ApiToolsController extends Controller {
         if (agent == null) { notFound(); return; }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("enabled")) { badRequest(); return; }
-        var enabled = body.get("enabled").getAsBoolean();
+        if (body == null || !body.has(KEY_ENABLED)) { badRequest(); return; }
+        var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         // Find the server-level handle for this group. Every MCP server
         // registers exactly one isServerLevel()=true tool with group()

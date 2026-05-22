@@ -32,6 +32,9 @@ public class ApiConversationsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // OpenAI-shaped tool-call element key (the wrapping "function" object).
+    private static final String KEY_FUNCTION = "function";
+
     public record ConversationView(Long id, Long agentId, String agentName, String channelType,
                                    String peerId, String createdAt, String updatedAt,
                                    long messageCount, String preview,
@@ -507,8 +510,8 @@ public class ApiConversationsController extends Controller {
                 if (!el.isJsonObject()) continue;
                 var obj = el.getAsJsonObject();
                 String name = null;
-                if (obj.has("function") && obj.get("function").isJsonObject()) {
-                    var fn = obj.getAsJsonObject("function");
+                if (obj.has(KEY_FUNCTION) && obj.get(KEY_FUNCTION).isJsonObject()) {
+                    var fn = obj.getAsJsonObject(KEY_FUNCTION);
                     if (fn.has("name")) name = fn.get("name").getAsString();
                 }
                 obj.addProperty("icon", agents.ToolRegistry.iconFor(name));

@@ -40,6 +40,8 @@ import static utils.GsonHolder.INSTANCE;
  */
 public class ApiMetricsController extends Controller {
 
+    private static final String KEY_PROMPTS = "prompts";
+
     @Before(only = {"latency", "resetLatency", "cost"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
@@ -313,10 +315,10 @@ public class ApiMetricsController extends Controller {
      * strategies.
      */
     private static java.util.List<String> parsePromptsField(JsonObject body, String userMessage) {
-        if (body == null || !body.has("prompts") || body.get("prompts").isJsonNull()) return null;
+        if (body == null || !body.has(KEY_PROMPTS) || body.get(KEY_PROMPTS).isJsonNull()) return null;
         java.util.List<String> prompts;
         try {
-            var arr = body.getAsJsonArray("prompts");
+            var arr = body.getAsJsonArray(KEY_PROMPTS);
             prompts = new java.util.ArrayList<>(arr.size());
             for (var el : arr) prompts.add(el.getAsString());
         } catch (Exception _) {

@@ -10,6 +10,9 @@ import utils.WebhookUtil;
 
 public class WebhookWhatsAppController extends Controller {
 
+    private static final String CHANNEL_WHATSAPP = "whatsapp";
+    private static final String CATEGORY_CHANNEL = "channel";
+
     /**
      * GET — Hub verification challenge from Meta.
      */
@@ -26,12 +29,12 @@ public class WebhookWhatsAppController extends Controller {
         var config = WhatsAppChannel.WhatsAppConfig.load();
         if (!"subscribe".equals(mode) || config == null
                 || config.verifyToken() == null || !config.verifyToken().equals(verifyToken)) {
-            EventLogger.warn("channel", null, "whatsapp", "Webhook verification failed");
+            EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP, "Webhook verification failed");
             forbidden();
             return;
         }
 
-        EventLogger.info("channel", null, "whatsapp", "Webhook verified");
+        EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP, "Webhook verified");
         renderText(challenge);
     }
 
@@ -45,7 +48,7 @@ public class WebhookWhatsAppController extends Controller {
         // app is unconfigured — an absent appSecret previously became a silent
         // bypass path, which is exactly what FR33/NFR12 forbids.
         if (config == null || config.appSecret() == null) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, "whatsapp",
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
                     "Webhook rejected: WhatsApp appSecret not configured");
             unauthorized("Invalid signature");
             return;
@@ -55,7 +58,7 @@ public class WebhookWhatsAppController extends Controller {
         try {
             rawBody = WebhookUtil.readRawBody();
         } catch (Exception e) {
-            EventLogger.error("channel", null, "whatsapp", "Failed to read request body");
+            EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP, "Failed to read request body");
             error();
             return;
         }
@@ -63,7 +66,7 @@ public class WebhookWhatsAppController extends Controller {
         var signatureHeader = Http.Request.current().headers.get("x-hub-signature-256");
         if (signatureHeader == null || !WhatsAppChannel.verifySignature(
                 config.appSecret(), rawBody, signatureHeader.value())) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, "whatsapp",
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
                     "Invalid webhook signature");
             unauthorized("Invalid signature");
             return;
@@ -77,7 +80,7 @@ public class WebhookWhatsAppController extends Controller {
             return;
         }
 
-        EventLogger.info("channel", null, "whatsapp",
+        EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
                 "Message received from %s".formatted(message.from()));
 
         // Mark as read and process async
@@ -94,11 +97,11 @@ public class WebhookWhatsAppController extends Controller {
 
     private static void processMessage(WhatsAppChannel.InboundMessage message) {
         try {
-            AgentRunner.processWebhookMessage("whatsapp", message.from(), message.text(),
+            AgentRunner.processWebhookMessage(CHANNEL_WHATSAPP, message.from(), message.text(),
                     (peerId, response) -> WhatsAppChannel.sendMessage(peerId, response),
                     peerId -> WhatsAppChannel.sendMessage(peerId, "No agent configured for this number."));
         } catch (Exception e) {
-            EventLogger.error("channel", null, "whatsapp",
+            EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
                     "Error processing message: %s".formatted(e.getMessage()));
         }
     }

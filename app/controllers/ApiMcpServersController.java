@@ -42,6 +42,10 @@ public class ApiMcpServersController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // JSON body keys reused across create/update parsers.
+    private static final String KEY_ENABLED = "enabled";
+    private static final String KEY_TRANSPORT = "transport";
+
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
     public static void list() {
         renderJSON(gson.toJson(McpServerService.listAll()));
@@ -66,8 +70,8 @@ public class ApiMcpServersController extends Controller {
         var transport = readTransport(body);
         var row = new McpServer();
         row.name = name;
-        row.enabled = body.has("enabled") && !body.get("enabled").isJsonNull()
-                ? body.get("enabled").getAsBoolean() : true;
+        row.enabled = body.has(KEY_ENABLED) && !body.get(KEY_ENABLED).isJsonNull()
+                ? body.get(KEY_ENABLED).getAsBoolean() : true;
         row.transport = transport;
         row.configJson = McpServerService.composeConfigJson(transport, body);
         try {
@@ -93,10 +97,10 @@ public class ApiMcpServersController extends Controller {
         // McpConnectionManager would carry a stale entry forever.
         var priorName = row.name;
         applyRenameIfPresent(row, body);
-        if (body.has("enabled") && !body.get("enabled").isJsonNull()) {
-            row.enabled = body.get("enabled").getAsBoolean();
+        if (body.has(KEY_ENABLED) && !body.get(KEY_ENABLED).isJsonNull()) {
+            row.enabled = body.get(KEY_ENABLED).getAsBoolean();
         }
-        if (body.has("transport") && !body.get("transport").isJsonNull()) {
+        if (body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()) {
             row.transport = readTransport(body);
         }
         // configJson rebuild: any of (transport, command, args, env, url, headers)
@@ -167,7 +171,7 @@ public class ApiMcpServersController extends Controller {
     }
 
     private static McpServer.Transport readTransport(com.google.gson.JsonObject body) {
-        var raw = readRequiredString(body, "transport");
+        var raw = readRequiredString(body, KEY_TRANSPORT);
         try {
             return McpServer.Transport.valueOf(raw.toUpperCase());
         } catch (IllegalArgumentException e) {
@@ -177,7 +181,7 @@ public class ApiMcpServersController extends Controller {
     }
 
     private static boolean touchesTransportConfig(com.google.gson.JsonObject body) {
-        return body.has("transport") || body.has("command") || body.has("args")
+        return body.has(KEY_TRANSPORT) || body.has("command") || body.has("args")
                 || body.has("env") || body.has("url") || body.has("headers");
     }
 }

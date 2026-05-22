@@ -10,15 +10,19 @@ import utils.WebhookUtil;
 
 public class WebhookSlackController extends Controller {
 
+    private static final String CHANNEL_SLACK = "slack";
+    private static final String INVALID_SIGNATURE = "Invalid signature";
+    private static final String CATEGORY_CHANNEL = "channel";
+
     public static void webhook() {
         // JCLAW-16: signature verification happens BEFORE body parsing /
         // challenge handling so an unconfigured Slack app cannot be used as a
         // bypass path. Previously `config == null` returned 200 silently.
         var config = SlackChannel.SlackConfig.load();
         if (config == null || config.signingSecret() == null) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, "slack",
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Webhook rejected: Slack signingSecret not configured");
-            unauthorized("Invalid signature");
+            unauthorized(INVALID_SIGNATURE);
             return;
         }
 
@@ -27,7 +31,7 @@ public class WebhookSlackController extends Controller {
         try {
             rawBody = WebhookUtil.readRawBody();
         } catch (Exception e) {
-            EventLogger.error("channel", null, "slack", "Failed to read request body");
+            EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK, "Failed to read request body");
             error();
             return;
         }
@@ -39,7 +43,7 @@ public class WebhookSlackController extends Controller {
         var signature = Http.Request.current().headers.get("x-slack-signature");
 
         if (timestamp == null || signature == null) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, "slack",
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Missing signature headers");
             unauthorized("Missing signature");
             return;
@@ -47,9 +51,9 @@ public class WebhookSlackController extends Controller {
 
         if (!SlackChannel.verifySignature(config.signingSecret(),
                 timestamp.value(), rawBody, signature.value())) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, "slack",
-                    "Invalid signature");
-            unauthorized("Invalid signature");
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
+                    INVALID_SIGNATURE);
+            unauthorized(INVALID_SIGNATURE);
             return;
         }
 
@@ -70,7 +74,7 @@ public class WebhookSlackController extends Controller {
             return;
         }
 
-        EventLogger.info("channel", null, "slack",
+        EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                 "Message received from %s in %s".formatted(message.userId(), message.channelId()));
 
         // Process async
@@ -81,11 +85,11 @@ public class WebhookSlackController extends Controller {
 
     private static void processMessage(SlackChannel.InboundMessage message) {
         try {
-            AgentRunner.processWebhookMessage("slack", message.channelId(), message.text(),
+            AgentRunner.processWebhookMessage(CHANNEL_SLACK, message.channelId(), message.text(),
                     (peerId, response) -> SlackChannel.sendMessage(peerId, response),
                     peerId -> SlackChannel.sendMessage(peerId, "No agent configured for this channel."));
         } catch (Exception e) {
-            EventLogger.error("channel", null, "slack",
+            EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "Error processing message: %s".formatted(e.getMessage()));
         }
     }

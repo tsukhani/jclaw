@@ -21,6 +21,12 @@ public class ApiBindingsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // JSON body keys for AgentBinding fields.
+    private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_CHANNEL_TYPE = "channelType";
+    private static final String KEY_PEER_ID = "peerId";
+    private static final String KEY_PRIORITY = "priority";
+
     private record BindingView(Long id, Long agentId, String agentName,
                                String channelType, String peerId, int priority) {
         static BindingView of(AgentBinding b) {
@@ -46,16 +52,16 @@ public class ApiBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        var agentId = body.get("agentId").getAsLong();
+        var agentId = body.get(KEY_AGENT_ID).getAsLong();
         var agent = (Agent) Agent.findById(agentId);
         if (agent == null) notFound();
 
         var binding = new AgentBinding();
         binding.agent = agent;
-        binding.channelType = body.get("channelType").getAsString();
-        binding.peerId = body.has("peerId") && !body.get("peerId").isJsonNull()
-                ? body.get("peerId").getAsString() : null;
-        binding.priority = body.has("priority") ? body.get("priority").getAsInt() : 0;
+        binding.channelType = body.get(KEY_CHANNEL_TYPE).getAsString();
+        binding.peerId = body.has(KEY_PEER_ID) && !body.get(KEY_PEER_ID).isJsonNull()
+                ? body.get(KEY_PEER_ID).getAsString() : null;
+        binding.priority = body.has(KEY_PRIORITY) ? body.get(KEY_PRIORITY).getAsInt() : 0;
         binding.save();
 
         renderJSON(gson.toJson(BindingView.of(binding)));
@@ -70,14 +76,14 @@ public class ApiBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        if (body.has("agentId")) {
-            var agent = (Agent) Agent.findById(body.get("agentId").getAsLong());
+        if (body.has(KEY_AGENT_ID)) {
+            var agent = (Agent) Agent.findById(body.get(KEY_AGENT_ID).getAsLong());
             if (agent == null) notFound();
             binding.agent = agent;
         }
-        if (body.has("channelType")) binding.channelType = body.get("channelType").getAsString();
-        if (body.has("peerId")) binding.peerId = body.get("peerId").isJsonNull() ? null : body.get("peerId").getAsString();
-        if (body.has("priority")) binding.priority = body.get("priority").getAsInt();
+        if (body.has(KEY_CHANNEL_TYPE)) binding.channelType = body.get(KEY_CHANNEL_TYPE).getAsString();
+        if (body.has(KEY_PEER_ID)) binding.peerId = body.get(KEY_PEER_ID).isJsonNull() ? null : body.get(KEY_PEER_ID).getAsString();
+        if (body.has(KEY_PRIORITY)) binding.priority = body.get(KEY_PRIORITY).getAsInt();
         binding.save();
 
         renderJSON(gson.toJson(BindingView.of(binding)));

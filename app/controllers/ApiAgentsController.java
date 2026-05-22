@@ -22,6 +22,13 @@ public class ApiAgentsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // JSON body keys reused across create/update/serve paths.
+    private static final String KEY_MODEL_PROVIDER = "modelProvider";
+    private static final String KEY_MODEL_ID = "modelId";
+    private static final String KEY_THINKING_MODE = "thinkingMode";
+    private static final String KEY_DESCRIPTION = "description";
+    private static final String KEY_CONTENT = "content";
+
     /**
      * Slug regex enforced on every {@code name} received from the public
      * API (JCLAW-115). Must begin with an alphanumeric character or
@@ -213,10 +220,10 @@ public class ApiAgentsController extends Controller {
         if (Agent.findByName(name) != null) {
             error(409, "An agent named '" + name + "' already exists");
         }
-        var modelProvider = body.get("modelProvider").getAsString();
-        var modelId = body.get("modelId").getAsString();
-        var thinkingMode = readOptionalString(body, "thinkingMode");
-        var description = readOptionalString(body, "description");
+        var modelProvider = body.get(KEY_MODEL_PROVIDER).getAsString();
+        var modelId = body.get(KEY_MODEL_ID).getAsString();
+        var thinkingMode = readOptionalString(body, KEY_THINKING_MODE);
+        var description = readOptionalString(body, KEY_DESCRIPTION);
 
         var agent = AgentService.create(name, modelProvider, modelId, thinkingMode, description);
         renderJSON(gson.toJson(AgentView.of(agent)));
@@ -246,8 +253,8 @@ public class ApiAgentsController extends Controller {
         var name = body.has("name") ? body.get("name").getAsString() : agent.name;
         validateRenameRules(agent, name);
 
-        var modelProvider = body.has("modelProvider") ? body.get("modelProvider").getAsString() : agent.modelProvider;
-        var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;
+        var modelProvider = body.has(KEY_MODEL_PROVIDER) ? body.get(KEY_MODEL_PROVIDER).getAsString() : agent.modelProvider;
+        var modelId = body.has(KEY_MODEL_ID) ? body.get(KEY_MODEL_ID).getAsString() : agent.modelId;
         var enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : agent.enabled;
         // The main agent cannot be disabled. Service-layer enforcement would also
         // catch this, but we reject at the API boundary so the operator sees an
@@ -259,14 +266,14 @@ public class ApiAgentsController extends Controller {
         // thinkingMode is optional on update: absent key leaves the stored value
         // untouched, explicit null/blank clears it, any other string is validated
         // downstream against the model's advertised levels.
-        var thinkingMode = body.has("thinkingMode")
-                ? readOptionalString(body, "thinkingMode")
+        var thinkingMode = body.has(KEY_THINKING_MODE)
+                ? readOptionalString(body, KEY_THINKING_MODE)
                 : agent.thinkingMode;
 
         // description follows the same absent-leaves-untouched convention; an
         // explicit null or blank clears the field.
-        var description = body.has("description")
-                ? readOptionalString(body, "description")
+        var description = body.has(KEY_DESCRIPTION)
+                ? readOptionalString(body, KEY_DESCRIPTION)
                 : agent.description;
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
@@ -361,14 +368,14 @@ public class ApiAgentsController extends Controller {
         var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
         if (content == null) notFound();
-        renderJSON(gson.toJson(java.util.Map.of("filename", filename, "content", content)));
+        renderJSON(gson.toJson(java.util.Map.of("filename", filename, KEY_CONTENT, content)));
     }
 
     public static void saveWorkspaceFile(Long id, String filename) {
         var agent = requireAgent(id);
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("content")) badRequest();
-        AgentService.writeWorkspaceFile(agent.name, filename, body.get("content").getAsString());
+        if (body == null || !body.has(KEY_CONTENT)) badRequest();
+        AgentService.writeWorkspaceFile(agent.name, filename, body.get(KEY_CONTENT).getAsString());
         renderJSON(gson.toJson(java.util.Map.of("status", "ok", "filename", filename)));
     }
 
