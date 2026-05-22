@@ -17,6 +17,11 @@ public final class SkillVersionManager {
 
     private SkillVersionManager() {}
 
+    /** Semver returned when a SKILL.md has no parseable {@code version:} frontmatter entry. */
+    private static final String DEFAULT_VERSION = "0.0.0";
+    /** Initial version stamped onto a fresh SKILL.md whose frontmatter omits {@code version:}. */
+    private static final String INITIAL_VERSION = "1.0.0";
+
     private static final Pattern FRONTMATTER_PATTERN = Pattern.compile(
             "^---\\s*\\n(.*?)\\n---", Pattern.DOTALL);
     private static final Pattern VERSION_LINE = Pattern.compile("(?m)^version:.*$");
@@ -110,7 +115,7 @@ public final class SkillVersionManager {
             var llmVersion = extractExplicitVersion(newContent);
 
             if (!Files.exists(targetPath)) {
-                var resolved = resolveVersion(llmVersion, "1.0.0");
+                var resolved = resolveVersion(llmVersion, INITIAL_VERSION);
                 return ensureVersionInFrontmatter(newContent, resolved);
             }
 
@@ -150,14 +155,14 @@ public final class SkillVersionManager {
     }
 
     static String[] parseFrontmatterStringForVersion(String content) {
-        if (content == null) return new String[]{"0.0.0"};
+        if (content == null) return new String[]{DEFAULT_VERSION};
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (matcher.find() && matcher.start() == 0) {
             var frontmatter = matcher.group(1);
             var version = SkillLoader.extractYamlValue(frontmatter, "version");
-            return new String[]{version != null ? version : "0.0.0"};
+            return new String[]{version != null ? version : DEFAULT_VERSION};
         }
-        return new String[]{"0.0.0"};
+        return new String[]{DEFAULT_VERSION};
     }
 
     /**
@@ -181,7 +186,7 @@ public final class SkillVersionManager {
         if (content == null) content = "";
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (!matcher.find() || matcher.start() != 0) {
-            var v = targetVersion != null ? targetVersion : "1.0.0";
+            var v = targetVersion != null ? targetVersion : INITIAL_VERSION;
             return "---\nversion: %s\n---\n\n%s".formatted(v, content);
         }
         var frontmatter = matcher.group(1);
@@ -196,7 +201,7 @@ public final class SkillVersionManager {
                 newFrontmatter = frontmatter;
             }
         } else {
-            var v = targetVersion != null ? targetVersion : "1.0.0";
+            var v = targetVersion != null ? targetVersion : INITIAL_VERSION;
             if (frontmatter.contains("description:")) {
                 newFrontmatter = frontmatter.replaceFirst("(?m)(^description:.*$)", "$1\nversion: " + v);
             } else {

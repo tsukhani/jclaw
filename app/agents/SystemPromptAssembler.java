@@ -37,6 +37,12 @@ public class SystemPromptAssembler {
      */
     public static final String CACHE_BOUNDARY_MARKER = "<!-- JCLAW_CACHE_BOUNDARY -->";
 
+    /**
+     * Fallback string used for environment fields whose source (the {@code application.version}
+     * config key, {@code os.name} / {@code os.arch} system properties) is missing at assembly time.
+     */
+    private static final String UNKNOWN = "unknown";
+
     public record AssembledPrompt(String systemPrompt, List<SkillLoader.SkillInfo> skills) {}
 
     /**
@@ -426,12 +432,12 @@ public class SystemPromptAssembler {
         sb.append("- Agent ID: %d\n".formatted(agent.id));
         sb.append("- Model: %s\n".formatted(agent.modelId));
         sb.append("- JClaw version: %s\n".formatted(
-                Play.configuration != null ? Play.configuration.getProperty("application.version", "unknown") : "unknown"));
+                Play.configuration != null ? Play.configuration.getProperty("application.version", UNKNOWN) : UNKNOWN));
         sb.append("- Current date: %s\n".formatted(LocalDate.now(ZoneId.systemDefault())));
         sb.append("- Timezone: %s\n".formatted(ZoneId.systemDefault().getId()));
         sb.append("- Platform: %s (%s)\n".formatted(
-                System.getProperty("os.name", "unknown").toLowerCase(),
-                System.getProperty("os.arch", "unknown")));
+                System.getProperty("os.name", UNKNOWN).toLowerCase(),
+                System.getProperty("os.arch", UNKNOWN)));
         sb.append("- Runtime: Java %s\n".formatted(Runtime.version().feature()));
     }
 

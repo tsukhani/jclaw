@@ -120,22 +120,15 @@ public final class ToolCallLoopRunner {
             // never check inside a streaming chunk handler (too chatty)
             // or mid-tool-call (would orphan partial side effects).
             AgentRunner.checkSubagentCancel(conversation);
-            // Recompute per-round so the clamp tracks the growing history.
-            var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, currentMessages, tools);
-            ChatResponse response;
-            try {
-                response = (secondary != null)
-                        ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType)
-                        : primary.chat(effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType);
-            } catch (Exception e) {
-                var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, audioState, currentMessages);
-                if (retryOutcome.retry()) {
-                    currentMessages = retryOutcome.rewrittenMessages();
-                    round--;  // JCLAW-165: re-issue this round with the rewritten messages (gated by audioRetryAttempted)
-                    continue;
-                }
-                return retryOutcome.outcome();
+            var attempt = invokeOneRound(agent, conversation, primary, secondary, effectiveModelId, thinkingMode,
+                    currentMessages, tools, audioBearers, audioState);
+            if (attempt.retry()) {
+                currentMessages = attempt.rewrittenMessages();
+                round--;  // JCLAW-165: re-issue this round with the rewritten messages (gated by audioRetryAttempted)
+                continue;
             }
+            if (attempt.terminal() != null) return attempt.terminal();
+
             // Successful response. Fire AUDIO_PASSTHROUGH_OUTCOME log when the
             // request carried audio so the field-data set we'll later use to
             // grow a known-good provider/format matrix has full coverage.
@@ -145,16 +138,58 @@ public final class ToolCallLoopRunner {
                         null, audioState.transcriptAwaited);
             }
 
-            if (response.choices() == null || response.choices().isEmpty()) {
-                return new LoopOutcome("No response received from the AI provider.");
-            }
-
-            var roundOutcome = handleSyncRoundResponse(response, agent, conversation, conversationId, primary,
+            var roundOutcome = handleSyncRoundResponse(attempt.response(), agent, conversation, conversationId, primary,
                     currentMessages, tools, sink, round);
             if (roundOutcome != null) return roundOutcome;
         }
 
         return new LoopOutcome("I reached the maximum number of tool execution rounds. Please try a simpler request.");
+    }
+
+    /**
+     * Outcome of a single LLM-round attempt. Exactly one of {@code response},
+     * {@code terminal}, or {@code retry} is meaningful:
+     * <ul>
+     *   <li>{@code response != null} — round completed; caller processes the response.</li>
+     *   <li>{@code terminal != null} — terminal failure (or empty-choices guard); caller returns it.</li>
+     *   <li>{@code retry == true} — JCLAW-165 audio-format retry; caller rewrites messages and re-issues the round.</li>
+     * </ul>
+     */
+    private record RoundAttempt(ChatResponse response, LoopOutcome terminal, boolean retry,
+                                 ArrayList<ChatMessage> rewrittenMessages) {
+        static RoundAttempt ok(ChatResponse r) { return new RoundAttempt(r, null, false, null); }
+        static RoundAttempt terminal(LoopOutcome o) { return new RoundAttempt(null, o, false, null); }
+        static RoundAttempt retry(ArrayList<ChatMessage> rewritten) { return new RoundAttempt(null, null, true, rewritten); }
+    }
+
+    /**
+     * Issue one LLM round (with optional failover to a secondary provider), translating
+     * exceptions into either a single-shot audio-format retry or a terminal
+     * {@link LoopOutcome}. Also enforces the empty-choices guard.
+     */
+    @SuppressWarnings("java:S107") // Round invocation surface mirrors the loop's per-round state
+    private static RoundAttempt invokeOneRound(Agent agent, Conversation conversation, LlmProvider primary,
+                                                LlmProvider secondary, String effectiveModelId, String thinkingMode,
+                                                ArrayList<ChatMessage> currentMessages, List<ToolDef> tools,
+                                                List<VisionAudioAssembler.AudioBearer> audioBearers,
+                                                AudioRetryState audioState) {
+        // Recompute per-round so the clamp tracks the growing history.
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, currentMessages, tools);
+        ChatResponse response;
+        try {
+            response = (secondary != null)
+                    ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType)
+                    : primary.chat(effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType);
+        } catch (Exception e) {
+            var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, audioState, currentMessages);
+            return retryOutcome.retry()
+                    ? RoundAttempt.retry(retryOutcome.rewrittenMessages())
+                    : RoundAttempt.terminal(retryOutcome.outcome());
+        }
+        if (response.choices() == null || response.choices().isEmpty()) {
+            return RoundAttempt.terminal(new LoopOutcome("No response received from the AI provider."));
+        }
+        return RoundAttempt.ok(response);
     }
 
     /**

@@ -54,7 +54,7 @@ public class SkillLoader {
                             List<String> commands, String author, String icon,
                             List<String> mcpServers) {
         public SkillInfo(String name, String description, Path location) {
-            this(name, description, location, List.of(), false, "0.0.0", List.of(), "", "", List.of());
+            this(name, description, location, List.of(), false, DEFAULT_SKILL_VERSION, List.of(), "", "", List.of());
         }
 
         /** Backwards-compatible 6-arg constructor predating the {@code commands}/{@code author}/{@code icon}/{@code mcpServers} fields. */
@@ -88,6 +88,19 @@ public class SkillLoader {
     /** Emoji substituted in user-visible skill listings when a SKILL.md omits the {@code icon:} frontmatter key. */
     public static final String DEFAULT_SKILL_ICON = "🎯";
 
+    /** Per-skill markdown manifest filename — the metadata + instructions file at the root of each skill directory. */
+    private static final String SKILL_MD_FILENAME = "SKILL.md";
+    /** Default semver returned for a skill that omits the {@code version:} frontmatter key. */
+    private static final String DEFAULT_SKILL_VERSION = "0.0.0";
+    /** Shared value for the skills cache name, the EventLogger category, the workspace/global subdirectory name, and the config-property default. */
+    private static final String SKILLS = "skills";
+    /** YAML key (also used as the {@code <tools>} XML wrapper) listing JClaw tools a skill consumes. */
+    private static final String KEY_TOOLS = "tools";
+    /** YAML key holding the skill's human-readable description. */
+    private static final String KEY_DESCRIPTION = "description";
+    /** YAML key holding the skill's semver version. */
+    private static final String KEY_VERSION = "version";
+
     /** Compare two semver strings. Delegates to {@link SkillVersionManager}. */
     public static int compareVersions(String a, String b) {
         return SkillVersionManager.compareVersions(a, b);
@@ -104,7 +117,7 @@ public class SkillLoader {
     }
 
     private static final play.cache.Cache<String, List<SkillInfo>> skillCache = Caches.named(
-            "skills",
+            SKILLS,
             CacheConfig.newBuilder()
                     .expireAfterWrite(Duration.ofSeconds(30))
                     .maximumSize(100)
@@ -140,14 +153,14 @@ public class SkillLoader {
         if (!Files.isDirectory(dir)) return;
         try (var dirs = Files.list(dir)) {
             dirs.filter(Files::isDirectory).forEach(d -> {
-                var skillFile = d.resolve("SKILL.md");
+                var skillFile = d.resolve(SKILL_MD_FILENAME);
                 if (Files.exists(skillFile)) {
                     var info = parseSkillFile(skillFile);
                     if (info != null) out.add(info.name());
                 }
             });
         } catch (IOException e) {
-            EventLogger.warn("skills", "Failed to scan skills directory %s: %s"
+            EventLogger.warn(SKILLS, "Failed to scan skills directory %s: %s"
                     .formatted(dir, e.getMessage()));
         }
     }
@@ -160,9 +173,9 @@ public class SkillLoader {
         if (!Files.isDirectory(workspaceRoot)) return;
         try (var agents = Files.list(workspaceRoot)) {
             agents.filter(Files::isDirectory).forEach(agentDir ->
-                    collectSkillNamesUnder(agentDir.resolve("skills"), out));
+                    collectSkillNamesUnder(agentDir.resolve(SKILLS), out));
         } catch (IOException e) {
-            EventLogger.warn("skills", "Failed to scan workspace root %s: %s"
+            EventLogger.warn(SKILLS, "Failed to scan workspace root %s: %s"
                     .formatted(workspaceRoot, e.getMessage()));
         }
     }
@@ -179,7 +192,7 @@ public class SkillLoader {
                 }
             }
             if (removed > 0) {
-                EventLogger.info("skills", "Removed %d orphaned skill config(s) for deleted skills".formatted(removed));
+                EventLogger.info(SKILLS, "Removed %d orphaned skill config(s) for deleted skills".formatted(removed));
             }
         });
     }
@@ -193,7 +206,7 @@ public class SkillLoader {
 
         // Only scan agent workspace skills — global skills must be explicitly copied to agents
         var workspaceDir = AgentService.workspacePath(agentName);
-        var agentDir = workspaceDir.resolve("skills");
+        var agentDir = workspaceDir.resolve(SKILLS);
         scanSkillsDirectory(agentDir, allSkills);
 
         relativizeSkillLocations(allSkills, workspaceDir);
@@ -264,7 +277,7 @@ public class SkillLoader {
         if (s.tools() == null || s.tools().isEmpty()) return false;
         var result = ToolCatalog.validateSkillTools(disabledTools, s.tools());
         if (!result.isOk()) {
-            EventLogger.warn("skills", "Excluding skill '%s' from agent '%s': missing tools %s"
+            EventLogger.warn(SKILLS, "Excluding skill '%s' from agent '%s': missing tools %s"
                     .formatted(s.name(), agentName, result.missing()));
             return true;
         }
@@ -280,7 +293,7 @@ public class SkillLoader {
      * registry onto the agent card.
      */
     private static void filterOutdatedSkillCreator(List<SkillInfo> allSkills, String agentName) {
-        var globalSkillCreatorPath = globalSkillsPath().resolve("skill-creator").resolve("SKILL.md");
+        var globalSkillCreatorPath = globalSkillsPath().resolve("skill-creator").resolve(SKILL_MD_FILENAME);
         if (!Files.exists(globalSkillCreatorPath)) return;
         var globalSkillCreator = parseSkillFile(globalSkillCreatorPath);
         if (globalSkillCreator == null) return;
@@ -288,7 +301,7 @@ public class SkillLoader {
         allSkills.removeIf(s -> {
             if (!"skill-creator".equals(s.name())) return false;
             if (compareVersions(s.version(), globalVersion) < 0) {
-                EventLogger.warn("skills",
+                EventLogger.warn(SKILLS,
                         "Excluding out-of-date skill-creator for agent '%s': workspace v%s < global v%s (drag skill-creator from global to update)"
                                 .formatted(agentName, s.version(), globalVersion));
                 return true;
@@ -301,7 +314,7 @@ public class SkillLoader {
         if (!Files.isDirectory(skillsDir)) return;
         try (var dirs = Files.list(skillsDir)) {
             dirs.filter(Files::isDirectory).forEach(dir -> {
-                var skillFile = dir.resolve("SKILL.md");
+                var skillFile = dir.resolve(SKILL_MD_FILENAME);
                 if (Files.exists(skillFile)) {
                     var info = parseSkillFile(skillFile);
                     if (info != null) {
@@ -316,7 +329,7 @@ public class SkillLoader {
     }
 
     public static Path globalSkillsPath() {
-        return Path.of(Play.configuration.getProperty("jclaw.skills.path", "skills"));
+        return Path.of(Play.configuration.getProperty("jclaw.skills.path", SKILLS));
     }
 
     /**
@@ -397,7 +410,7 @@ public class SkillLoader {
             var info = parseSkillContent(content, path);
             if (info != null) return info;
             // Fallback: use directory name
-            return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of(), false, "0.0.0");
+            return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of(), false, DEFAULT_SKILL_VERSION);
         } catch (IOException e) {
             return null;
         }
@@ -414,8 +427,8 @@ public class SkillLoader {
         var frontmatter = matcher.group(1);
         var name = extractYamlValue(frontmatter, "name");
         if (name == null) return null;
-        var description = extractYamlValue(frontmatter, "description");
-        var version = extractYamlValue(frontmatter, "version");
+        var description = extractYamlValue(frontmatter, KEY_DESCRIPTION);
+        var version = extractYamlValue(frontmatter, KEY_VERSION);
         var author = extractYamlValue(frontmatter, "author");
         var icon = extractYamlValue(frontmatter, "icon");
         // JCLAW-281: MCP server dependencies (sibling to tools:). Empty
@@ -424,9 +437,9 @@ public class SkillLoader {
         return new SkillInfo(name,
                 description != null ? description : "",
                 locationHint,
-                extractYamlList(frontmatter, "tools"),
+                extractYamlList(frontmatter, KEY_TOOLS),
                 TOOLS_KEY_PRESENT.matcher(frontmatter).find(),
-                version != null ? version : "0.0.0",
+                version != null ? version : DEFAULT_SKILL_VERSION,
                 extractYamlList(frontmatter, "commands"),
                 author != null ? author : "",
                 icon != null ? icon : "",
@@ -444,13 +457,13 @@ public class SkillLoader {
      */
     public static List<String> extractYamlList(String yaml, String key) {
         // Inline form: key: [a, b, c]
-        var inlinePattern = "tools".equals(key) ? TOOLS_INLINE_LIST
+        var inlinePattern = KEY_TOOLS.equals(key) ? TOOLS_INLINE_LIST
                 : Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
         var inlineMatcher = inlinePattern.matcher(yaml);
         if (inlineMatcher.find()) return parseInlineYamlList(inlineMatcher.group(1));
 
         // Block form: key:\n  - a\n  - b
-        var blockPattern = "tools".equals(key) ? TOOLS_BLOCK_LIST
+        var blockPattern = KEY_TOOLS.equals(key) ? TOOLS_BLOCK_LIST
                 : Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\n((?:\\s*-\\s*.*\\n?)+)", Pattern.MULTILINE);
         var blockMatcher = blockPattern.matcher(yaml);
         if (blockMatcher.find()) return parseBlockYamlList(blockMatcher.group(1));
@@ -532,9 +545,9 @@ public class SkillLoader {
     public static String extractYamlValue(String yaml, String key) {
         var valuePattern = switch (key) {
             case "name" -> NAME_VALUE;
-            case "description" -> DESCRIPTION_VALUE;
-            case "tools" -> TOOLS_VALUE;
-            case "version" -> VERSION_VALUE;
+            case KEY_DESCRIPTION -> DESCRIPTION_VALUE;
+            case KEY_TOOLS -> TOOLS_VALUE;
+            case KEY_VERSION -> VERSION_VALUE;
             default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
         };
         var matcher = valuePattern.matcher(yaml);
@@ -544,9 +557,9 @@ public class SkillLoader {
         }
         var multiPattern = switch (key) {
             case "name" -> NAME_MULTI;
-            case "description" -> DESCRIPTION_MULTI;
-            case "tools" -> TOOLS_MULTI;
-            case "version" -> VERSION_MULTI;
+            case KEY_DESCRIPTION -> DESCRIPTION_MULTI;
+            case KEY_TOOLS -> TOOLS_MULTI;
+            case KEY_VERSION -> VERSION_MULTI;
             default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[|>]\\s*\\n((?: {2}.*\\n?)+)", Pattern.MULTILINE);
         };
         var multiMatcher = multiPattern.matcher(yaml);

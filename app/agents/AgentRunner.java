@@ -38,6 +38,17 @@ public class AgentRunner {
      */
     public static final int DEFAULT_MAX_TOOL_ROUNDS = 100;
 
+    /** EventLogger category for agent-lifecycle events (turn suspend, resume, yield). Also doubles as the NPE message for the {@code agent} parameter. */
+    private static final String EVT_CATEGORY_AGENT = "agent";
+
+    /** Standard error surfaced when no LLM provider is configured for an agent — covers Settings.UI, EventLogger, and runtime exception messages. */
+    private static final String NO_LLM_PROVIDER_ERROR =
+            "No LLM provider configured. Add provider config via Settings.";
+
+    /** Canned response returned when an inbound message can't acquire the conversation queue. */
+    private static final String QUEUED_MESSAGE_RESPONSE =
+            "Your message has been queued and will be processed shortly.";
+
     // Package-private so ToolCallLoopRunner (JCLAW-299) can read the
     // operator-configurable per-turn round cap.
     static int maxToolRounds() {
@@ -181,7 +192,7 @@ public class AgentRunner {
         var queueMsg = new services.ConversationQueue.QueuedMessage(
                 userMessage, conversation.channelType, conversation.peerId, agent);
         if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
-            return new RunResult("Your message has been queued and will be processed shortly.", conversation);
+            return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
         return runAfterAcquire(agent, conversation, userMessage, attachments);
     }
@@ -225,7 +236,7 @@ public class AgentRunner {
         var queueMsg = new services.ConversationQueue.QueuedMessage(
                 "", conversation.channelType, conversation.peerId, agent);
         if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
-            return new RunResult("Your message has been queued and will be processed shortly.", conversation);
+            return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
         return runAfterAcquire(agent, conversation, "", null, true);
     }
@@ -290,7 +301,7 @@ public class AgentRunner {
      */
     public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
                                                              AgentExecutionSink sink) {
-        java.util.Objects.requireNonNull(agent, "agent");
+        java.util.Objects.requireNonNull(agent, EVT_CATEGORY_AGENT);
         java.util.Objects.requireNonNull(userPrompt, "userPrompt");
         java.util.Objects.requireNonNull(sink, "sink");
 
@@ -322,7 +333,7 @@ public class AgentRunner {
         var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, stubConv));
         var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
         if (primary == null) {
-            var error = "No LLM provider configured. Add provider config via Settings.";
+            var error = NO_LLM_PROVIDER_ERROR;
             EventLogger.error("llm", agent.name, null, error);
             services.Tx.run(() -> sink.appendAssistantMessage(error, null));
             return new ToolCallLoopRunner.LoopOutcome(error);
@@ -404,7 +415,7 @@ public class AgentRunner {
                 var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conv));
                 var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
                 if (primary == null) {
-                    var error = "No LLM provider configured. Add provider config via Settings.";
+                    var error = NO_LLM_PROVIDER_ERROR;
                     EventLogger.error("llm", agent.name, null, error);
                     sink.appendAssistantMessage(error, null);
                     return null;
@@ -423,7 +434,7 @@ public class AgentRunner {
             });
 
             if (prepared == null) {
-                var error = "No LLM provider configured. Add provider config via Settings.";
+                var error = NO_LLM_PROVIDER_ERROR;
                 return new RunResult(error,
                         services.Tx.run(() -> ConversationService.findById(conversationId)));
             }
@@ -464,7 +475,7 @@ public class AgentRunner {
             // the child terminates. Return immediately so the caller sees
             // YIELDED_RESPONSE on the RunResult.
             if (YIELDED_RESPONSE.equals(response)) {
-                EventLogger.info("agent", agent.name, conversation.channelType,
+                EventLogger.info(EVT_CATEGORY_AGENT, agent.name, conversation.channelType,
                         "Parent turn suspended via yield_to_subagent");
                 var updatedConv = services.Tx.run(() -> ConversationService.findById(conversationId));
                 return new RunResult(response, updatedConv);
@@ -664,7 +675,7 @@ public class AgentRunner {
                 userMessage, channelType, peerId, agent);
         if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
             cb.onInit().accept(conversation);
-            cb.onComplete().accept("Your message has been queued and will be processed shortly.");
+            cb.onComplete().accept(QUEUED_MESSAGE_RESPONSE);
             return null;
         }
 
@@ -701,62 +712,17 @@ public class AgentRunner {
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: assembling prompt for conversation id: %d".formatted(conversation.id));
 
-        // Provider resolution first — no JPA tx needed. ProviderRegistry.refresh()
-        // self-wraps its own tx when the 60s cache is stale, so callers don't need to.
-        // JCLAW-108: use the effective provider (conversation override when set,
-        // agent default otherwise) so /model NAME actually routes turns to the
-        // overridden provider rather than the agent's original.
-        var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conversation));
-        var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
-        if (primary == null) {
-            EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
-            cb.onError().accept(new RuntimeException("No LLM provider configured"));
-            return;
-        }
+        var primary = resolveStreamingProvider(agent, conversation, channelType, cb);
+        if (primary == null) return;
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
-        // Fold the remaining DB reads into ONE transaction. Tx.run short-circuits
-        // nested calls, so inner helpers that also call Tx.run (e.g. loadRecentMessages
-        // via buildMessages, any SystemPromptAssembler internals) don't pay twice.
-        // `loadDisabledTools` is computed once and threaded into both the system prompt
-        // assembler (tool catalog) and the tool-defs for the LLM request, eliminating
-        // the redundant DB query that used to happen in each path.
-        final LlmProvider primaryRef = primary;
-        var prepared = services.Tx.run(() -> {
-            var disabledTools = ToolRegistry.loadDisabledTools(agent);
-            var convo = ConversationService.findById(conversation.id);
-            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, convo.channelType);
-            // JCLAW-38: re-inject latest compaction summary (if any)
-            var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
-            // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
-            sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
-            var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
-            var msgs = MessageHydrator.buildMessages(sysPrompt, convo, audioBearers);
-            // Conversation-aware overload: applies the loadtest-agent
-            // short-circuit AND the lazy MCP discovery gate (only ship
-            // schemas for servers the model has called list_mcp_tools on).
-            var toolDefs = ToolRegistry.getToolDefsForAgent(agent, convo);
-            return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools, audioBearers);
-        });
+        var prepared = buildStreamingPrologue(agent, conversation, userMessage, primary);
 
-        // JCLAW-38: if the just-built context exceeds the compaction budget,
-        // summarize older turns (LLM call, outside Tx) and rebuild.
-        // trimToContextWindow below stays as a drop-oldest fallback for
-        // when compaction is skipped or fails.
-        var compactedMessages = CompactionGate.maybeCompactAndRebuild(
-                agent, conversation.id, userMessage, prepared.disabledTools(),
-                primaryRef, prepared.messages(), prepared.tools());
-        var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
-                primaryRef, prepared.tools());
-        // JCLAW-165: rewrite audio messages to text-with-transcript when the
-        // active model lacks supportsAudio. Audio-capable happy path is a no-op.
-        var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primaryRef).orElse(null);
+        var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
-        trimmedMessages = VisionAudioAssembler.applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(), supportsAudioForStream);
-
-        var assembled = prepared.assembled();
-        var messages = trimmedMessages;
+        var messages = applyAudioCapabilityRewrite(agent, conversation, userMessage, primary, prepared,
+                supportsAudioForStream);
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
@@ -767,7 +733,7 @@ public class AgentRunner {
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: calling %s / %s (%d messages, %d tools, %d skills%s)"
                         .formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conversation),
-                                messages.size(), tools.size(), assembled.skills().size(),
+                                messages.size(), tools.size(), prepared.assembled().skills().size(),
                                 thinkingMode != null ? ", thinking=" + thinkingMode : ""));
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, messages, tools);
         var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
@@ -785,21 +751,9 @@ public class AgentRunner {
         // so conversation overrides take effect on the wire. Failover (line 706)
         // and tool-loop continuations (line 781) use the same effective id.
         var effectiveModelIdForCall = ModelResolver.effectiveModelId(agent, conversation);
-        var accumulator = primary.chatStreamAccumulate(
-                effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
-                maxTokens, thinkingMode, channelType);
-
-        if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
-
-        // Retry once on transient 5xx errors
-        if (accumulator.error != null && accumulator.error.getMessage() != null
-                && accumulator.error.getMessage().contains("HTTP 5")) {
-            EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
-            accumulator = primary.chatStreamAccumulate(
-                    effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
-                    maxTokens, thinkingMode, channelType);
-            if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
-        }
+        var accumulator = streamFirstRoundWithRetry(primary, effectiveModelIdForCall, messages, tools,
+                cb, maxTokens, thinkingMode, channelType, isCancelled, agent);
+        if (accumulator == null) return;
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
@@ -820,21 +774,153 @@ public class AgentRunner {
         // turn-level reasoningDurationMs spans first-reasoning → first-content
         // across every round (matches the frontend's live measurement).
         turnUsage.addRound(accumulator);
-        var content = accumulator.content;
 
         // Check for truncated response (max tokens hit mid-tool-call)
         if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
-            persistAndCompleteTruncatedToolCall(content, agent, channelType, trace, sink, cb);
+            persistAndCompleteTruncatedToolCall(accumulator.content, agent, channelType, trace, sink, cb);
             return;
         }
 
+        var post = runPostAccumulatorToolLoop(accumulator, agent, conversation, primary, channelType, messages, tools,
+                cb, thinkingMode, isCancelled, trace, turnUsage, sink);
+        if (post == null) return;
+
+        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
+
+        // JCLAW-273: parent agent yielded into an async subagent. No final
+        // assistant message to persist or emit; the parent's logical turn
+        // resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce
+        // once the child terminates.
+        if (YIELDED_RESPONSE.equals(post.content())) {
+            handleStreamingYield(agent, channelType, trace, cb);
+            return;
+        }
+
+        trace.mark(LatencyTrace.STREAM_BODY_END);
+        finalizeStreamingTurn(post.content(), post.replyTruncated(), turnUsage, modelInfo, streamStartMs,
+                agent, conversation, channelType, trace, sink, cb);
+    }
+
+    /**
+     * Resolve the streaming LLM provider for an agent+conversation. Fires
+     * {@code cb.onError} and returns {@code null} when no provider is configured.
+     */
+    private static LlmProvider resolveStreamingProvider(Agent agent, Conversation conversation,
+                                                         String channelType, StreamingCallbacks cb) {
+        var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conversation));
+        var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+        if (primary == null) {
+            EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
+            cb.onError().accept(new RuntimeException("No LLM provider configured"));
+            return null;
+        }
+        return primary;
+    }
+
+    /**
+     * Run the prologue Tx: load disabled tools, fetch the managed conversation, assemble
+     * the system prompt + compaction summary + parent-context, hydrate messages and
+     * tool definitions. Fold everything into ONE transaction so nested Tx.run calls
+     * inside helpers don't open additional connections.
+     */
+    private static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
+                                                            String userMessage, LlmProvider primary) {
+        return services.Tx.run(() -> {
+            var disabledTools = ToolRegistry.loadDisabledTools(agent);
+            var convo = ConversationService.findById(conversation.id);
+            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, convo.channelType);
+            // JCLAW-38: re-inject latest compaction summary (if any)
+            var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
+            // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
+            sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
+            var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
+            var msgs = MessageHydrator.buildMessages(sysPrompt, convo, audioBearers);
+            // Conversation-aware overload: applies the loadtest-agent
+            // short-circuit AND the lazy MCP discovery gate (only ship
+            // schemas for servers the model has called list_mcp_tools on).
+            var toolDefs = ToolRegistry.getToolDefsForAgent(agent, convo);
+            return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools, audioBearers);
+        });
+    }
+
+    /**
+     * Compaction + context-window trim + audio-capability rewrite. JCLAW-165: when the
+     * active model lacks {@code supportsAudio}, rewrite audio messages to
+     * text-with-transcript before the LLM call (no-op on audio-capable models).
+     */
+    private static List<ChatMessage> applyAudioCapabilityRewrite(Agent agent, Conversation conversation,
+                                                                  String userMessage, LlmProvider primary,
+                                                                  PreparedPrologue prepared,
+                                                                  boolean supportsAudioForStream) {
+        // JCLAW-38: if the just-built context exceeds the compaction budget,
+        // summarize older turns (LLM call, outside Tx) and rebuild.
+        // trimToContextWindow below stays as a drop-oldest fallback for
+        // when compaction is skipped or fails.
+        var compactedMessages = CompactionGate.maybeCompactAndRebuild(
+                agent, conversation.id, userMessage, prepared.disabledTools(),
+                primary, prepared.messages(), prepared.tools());
+        var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
+                primary, prepared.tools());
+        return VisionAudioAssembler.applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(),
+                supportsAudioForStream);
+    }
+
+    /**
+     * Run the round-1 streaming call and retry once on transient HTTP 5xx errors.
+     * Returns {@code null} when cancellation fired during either await.
+     */
+    @SuppressWarnings("java:S107") // Streaming first-round invocation needs the full call surface
+    private static LlmProvider.StreamAccumulator streamFirstRoundWithRetry(
+            LlmProvider primary, String effectiveModelIdForCall, List<ChatMessage> messages, List<ToolDef> tools,
+            StreamingCallbacks cb, int maxTokens, String thinkingMode, String channelType,
+            AtomicBoolean isCancelled, Agent agent) throws InterruptedException {
+        var accumulator = primary.chatStreamAccumulate(
+                effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
+                maxTokens, thinkingMode, channelType);
+
+        if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return null;
+
+        // Retry once on transient 5xx errors
+        if (accumulator.error != null && accumulator.error.getMessage() != null
+                && accumulator.error.getMessage().contains("HTTP 5")) {
+            EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
+            accumulator = primary.chatStreamAccumulate(
+                    effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
+                    maxTokens, thinkingMode, channelType);
+            if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return null;
+        }
+        return accumulator;
+    }
+
+    /**
+     * Outcome of {@link #runPostAccumulatorToolLoop}: the (possibly tool-loop-extended)
+     * content, plus the round-1 reply-truncation flag that rides through to the persist
+     * site so the chat UI can render a "Reply was truncated" marker (JCLAW-291).
+     */
+    private record StreamingPostAccumulator(String content, boolean replyTruncated) {}
+
+    /**
+     * Post round-1 processing: detect the empty-toolCalls truncation case, then drive
+     * the tool-call loop if the model produced tool calls. Returns {@code null} when
+     * cancellation fired inside the loop.
+     */
+    @SuppressWarnings("java:S107") // mirrors the orchestration state of streamLlmLoop
+    private static StreamingPostAccumulator runPostAccumulatorToolLoop(LlmProvider.StreamAccumulator accumulator,
+                                                                        Agent agent, Conversation conversation,
+                                                                        LlmProvider primary, String channelType,
+                                                                        List<ChatMessage> messages, List<ToolDef> tools,
+                                                                        StreamingCallbacks cb, String thinkingMode,
+                                                                        AtomicBoolean isCancelled, LatencyTrace trace,
+                                                                        LlmProvider.TurnUsage turnUsage,
+                                                                        AgentExecutionSink sink)
+            throws InterruptedException {
+        var content = accumulator.content;
+
         // JCLAW-291: detect the empty-toolCalls truncation case — a plain
         // assistant reply that hit max_tokens. Sibling to the tool-call
-        // truncation guard above; that one fires only when toolCalls is
+        // truncation guard in the caller; that one fires only when toolCalls is
         // non-empty (incomplete JSON args), this one fires when toolCalls
         // is empty (the model just ran out of output budget mid-reply).
-        // The flag rides through to the persist site so the chat UI can
-        // render a "Reply was truncated" marker.
         boolean replyTruncated = TruncationDiagnostics.isTruncationFinish(accumulator.finishReason)
                 && accumulator.toolCalls.isEmpty();
         if (replyTruncated) {
@@ -845,71 +931,47 @@ public class AgentRunner {
         // Handle tool calls if present. JCLAW-104: the image collector lives
         // at turn scope (not per recursion level) so a screenshot captured
         // mid-chain — say in round 1 — still reaches buildImagePrefix when
-        // the final synthesis happens in round N. Pre-fix the list was
-        // reset at every recursion depth, which silently dropped images
-        // from intermediate rounds when the LLM chose not to re-embed.
+        // the final synthesis happens in round N.
         var turnImages = new ArrayList<String>();
         if (!accumulator.toolCalls.isEmpty()) {
             content = ToolCallLoopRunner.handleToolCallsStreaming(agent, conversation, conversation.id, messages, tools,
                     accumulator.toolCalls, content, primary, cb, thinkingMode, 0,
                     isCancelled, trace, turnUsage, turnImages, channelType, sink);
         }
+        return new StreamingPostAccumulator(content, replyTruncated);
+    }
 
-        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
-
-        // JCLAW-273: parent agent yielded into an async subagent. No final
-        // assistant message to persist or emit; the parent's logical turn
-        // resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce
-        // once the child terminates. Fire cb.onComplete with empty content
-        // so transports release their per-turn resources cleanly (the SSE
-        // wrapper's onComplete drains the conversation queue + closes the
-        // terminal frame; without it, web turns would dangle waiting for a
-        // completion that's coming from a different VT in a different turn).
-        if (YIELDED_RESPONSE.equals(content)) {
-            EventLogger.info("agent", agent.name, channelType,
-                    "Streaming parent turn suspended via yield_to_subagent");
-            trace.mark(LatencyTrace.STREAM_BODY_END);
-            cb.onComplete().accept("");
-            return;
-        }
-
+    /**
+     * JCLAW-273: parent agent yielded into an async subagent. Fire {@code cb.onComplete}
+     * with empty content so transports release their per-turn resources cleanly.
+     */
+    private static void handleStreamingYield(Agent agent, String channelType, LatencyTrace trace,
+                                              StreamingCallbacks cb) {
+        EventLogger.info(EVT_CATEGORY_AGENT, agent.name, channelType,
+                "Streaming parent turn suspended via yield_to_subagent");
         trace.mark(LatencyTrace.STREAM_BODY_END);
+        cb.onComplete().accept("");
+    }
 
+    /**
+     * Persist the final assistant message and emit the terminal usage frame. Persist
+     * BEFORE the terminal frame so the assistant message is committed by the time
+     * {@code emitUsageAndComplete} fires {@code cb.onComplete}.
+     */
+    @SuppressWarnings("java:S107") // Final persist receives every piece of turn state by design
+    private static void finalizeStreamingTurn(String content, boolean replyTruncated, LlmProvider.TurnUsage turnUsage,
+                                               ModelInfo modelInfo, long streamStartMs,
+                                               Agent agent, Conversation conversation, String channelType,
+                                               LatencyTrace trace, AgentExecutionSink sink, StreamingCallbacks cb) {
         // Build usage JSON before persisting so it can be stored alongside the message.
         // JCLAW-108: pass the conversation so resolved (override-aware) model identity
-        // goes into usageJson rather than the agent's underlying fields.
-        // streamBodyMs (FIRST_TOKEN → STREAM_BODY_END) is the denominator for
-        // realized generation rate — see the buildUsageJson 6-arg overload doc.
+        // goes into usageJson. streamBodyMs (FIRST_TOKEN → STREAM_BODY_END) is the
+        // denominator for realized generation rate.
         var usageJson = UsageMetricsBuilder.buildUsageJson(turnUsage, modelInfo, streamStartMs, agent, conversation,
                 trace.streamBodyMs());
 
-        // Persist BEFORE the terminal frame so the assistant message is
-        // committed by the time emitUsageAndComplete fires cb.onComplete
-        // (which closes the SSE on web and triggers the Telegram bot-API
-        // call on telegram). Either path can have an external observer —
-        // a loadtest cleanup, a UI poll, a queued follow-up turn — that
-        // checks DB state right after the user-visible "done" signal;
-        // putting persist before that signal makes the contract honest.
-        //
-        // Pre-fix: JCLAW-100 spawned persist on a parallel virtual thread
-        // and joined AFTER emitUsageAndComplete, hiding the ~8 ms persist
-        // behind telegram's ~500 ms bot-API call. On web, cb.onComplete
-        // is sub-millisecond (sse.send + sse.close), so the parallel
-        // arrangement saved nothing AND let the HTTP response complete
-        // before persist finished — observable as FK-violation log noise
-        // when any concurrent endpoint deleted the conversation in that
-        // window. The 8 ms regression on telegram is a tiny price to pay
-        // for a correct happens-before contract on every channel.
-        //
-        // The defensive null-check stays as belt-and-suspenders against
-        // any future re-introduction of an out-of-order delete.
         var finalContent = content;
         var finalReasoning = turnUsage.reasoningText();
-        // JCLAW-291: replyTruncated is captured from the round-1 accumulator;
-        // a tool-call recursion that lands on a clean final reply WON'T flip
-        // this — by design, since the final reply itself is what the user
-        // reads. The recursive truncation case is covered by the
-        // handleToolCallsStreaming guard at the existing tool-call site.
         var finalTruncated = replyTruncated;
         long persistStartNs = System.nanoTime();
         services.Tx.run(() ->

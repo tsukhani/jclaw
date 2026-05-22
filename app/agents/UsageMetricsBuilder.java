@@ -193,27 +193,41 @@ public final class UsageMetricsBuilder {
                                       long streamStartMs, String usageJson,
                                       AgentRunner.StreamingCallbacks cb) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
-        if (turnUsage.hasProviderUsage || turnUsage.hasJtokkitUsage) {
-            var prompt = turnUsage.hasProviderUsage ? turnUsage.promptTokens : turnUsage.jtokkitPromptTokens;
-            var completion = turnUsage.hasProviderUsage ? turnUsage.completionTokens : turnUsage.jtokkitCompletionTokens;
-            var total = turnUsage.hasProviderUsage ? turnUsage.totalTokens : turnUsage.jtokkitTotalTokens;
-            var reasoningCount = effectiveReasoningTokens(turnUsage);
-            var extras = new StringBuilder();
-            if (reasoningCount > 0) extras.append(", %s reasoning".formatted(reasoningCount));
-            if (turnUsage.cachedTokens > 0) extras.append(", %d cached".formatted(turnUsage.cachedTokens));
-            if (turnUsage.cacheCreationTokens > 0) extras.append(", %d cache-write".formatted(turnUsage.cacheCreationTokens));
-            if (!turnUsage.hasProviderUsage) extras.append(", estimated by jtokkit");
-            var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
-                    prompt, completion, total,
-                    extras.toString(),
-                    durationMs / 1000.0);
-            EventLogger.info("llm", agent.name, channelType,
-                    "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary));
-        } else {
-            EventLogger.info("llm", agent.name, channelType,
-                    "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0));
-        }
+        var logMessage = (turnUsage.hasProviderUsage || turnUsage.hasJtokkitUsage)
+                ? buildUsageLogLine(content, turnUsage, durationMs)
+                : "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0);
+        EventLogger.info("llm", agent.name, channelType, logMessage);
         cb.onStatus().accept("{\"usage\":%s}".formatted(usageJson));
         cb.onComplete().accept(content);
+    }
+
+    /**
+     * Render the "Streaming complete" log line carrying the per-token usage breakdown.
+     * Pulled out of {@link #emitUsageAndComplete} so the conditional appends to
+     * {@code extras} live in their own method (S3776).
+     */
+    private static String buildUsageLogLine(String content, LlmProvider.TurnUsage turnUsage, long durationMs) {
+        var prompt = turnUsage.hasProviderUsage ? turnUsage.promptTokens : turnUsage.jtokkitPromptTokens;
+        var completion = turnUsage.hasProviderUsage ? turnUsage.completionTokens : turnUsage.jtokkitCompletionTokens;
+        var total = turnUsage.hasProviderUsage ? turnUsage.totalTokens : turnUsage.jtokkitTotalTokens;
+        var extras = buildUsageLogExtras(turnUsage);
+        var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
+                prompt, completion, total, extras, durationMs / 1000.0);
+        return "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary);
+    }
+
+    /**
+     * Build the comma-prefixed addendum string ({@code ", N reasoning, N cached, ..."})
+     * that follows the prompt/completion/total triple in the usage log line. Returns
+     * the empty string when no extras apply.
+     */
+    private static String buildUsageLogExtras(LlmProvider.TurnUsage turnUsage) {
+        var reasoningCount = effectiveReasoningTokens(turnUsage);
+        var extras = new StringBuilder();
+        if (reasoningCount > 0) extras.append(", %s reasoning".formatted(reasoningCount));
+        if (turnUsage.cachedTokens > 0) extras.append(", %d cached".formatted(turnUsage.cachedTokens));
+        if (turnUsage.cacheCreationTokens > 0) extras.append(", %d cache-write".formatted(turnUsage.cacheCreationTokens));
+        if (!turnUsage.hasProviderUsage) extras.append(", estimated by jtokkit");
+        return extras.toString();
     }
 }
