@@ -36,6 +36,20 @@ export interface MessageUsage {
   modelId?: string
   /** JCLAW-107: the model's contextWindow at the time this turn ran (tokens). */
   contextWindow?: number
+  /** Source of primary token counts: provider usage block, or jtokkit fallback. */
+  usageSource?: 'provider' | 'jtokkit'
+  /** True when primary token counts came from local tokenizer measurement. */
+  estimated?: boolean
+  /** Local tokenizer measurement kept for provider-vs-client diagnostics. */
+  jtokkitPrompt?: number
+  jtokkitCompletion?: number
+  jtokkitReasoning?: number
+  jtokkitTotal?: number
+  jtokkitEncoding?: string
+  jtokkitModelMatched?: boolean
+  jtokkitPromptDelta?: number
+  jtokkitCompletionDelta?: number
+  jtokkitTotalDelta?: number
 }
 
 export interface UsageCostBreakdown {

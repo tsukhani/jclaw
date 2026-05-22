@@ -329,6 +329,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                                                    Integer maxTokens, String thinkingMode,
                                                    String channel) {
         var accumulator = new StreamAccumulator();
+        accumulator.promptTokenEstimate = TokenUsageEstimator.estimateChatRequest(model, messages, tools);
         var contentBuilder = new StringBuilder();
         var toolCallAccumulator = new java.util.HashMap<Integer, ToolCallBuilder>();
 
@@ -339,6 +340,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                     accumulator.content = contentBuilder.toString();
                     accumulator.toolCalls = toolCallAccumulator.values().stream()
                             .map(ToolCallBuilder::build).toList();
+                    accumulator.completionTokenEstimate = TokenUsageEstimator.estimateCompletion(
+                            model, accumulator.content, accumulator.toolCalls, accumulator.reasoningText());
+                    accumulator.reasoningTokenEstimate = TokenUsageEstimator.estimateReasoning(
+                            model, accumulator.reasoningText());
                     accumulator.markComplete();
                 },
                 e -> {
@@ -689,6 +694,12 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         private final java.util.concurrent.locks.ReentrantLock reasoningLock =
                 new java.util.concurrent.locks.ReentrantLock();
         public volatile Usage usage;
+        /** JTokkit-measured prompt tokens for this provider request, available even when provider usage is absent. */
+        public volatile TokenUsageEstimator.ChatRequestTokens promptTokenEstimate;
+        /** JTokkit-measured completion tokens for streamed content/tool calls/reasoning. */
+        public volatile TokenUsageEstimator.TokenCount completionTokenEstimate;
+        /** JTokkit-measured reasoning-token subset for streamed reasoning text. */
+        public volatile TokenUsageEstimator.TokenCount reasoningTokenEstimate;
         // Wall-clock nanoTime at first and latest reasoning chunk. Both remain 0
         // when the model emitted no reasoning. reasoningEndNanos is updated on
         // every append so it naturally captures "end of reasoning phase" — the
@@ -825,6 +836,14 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         public boolean reasoningDetected;
         /** True once any round returned a non-null {@link Usage}. Gates the zero-usage JSON path. */
         public boolean hasProviderUsage;
+        /** True once any round has a JTokkit request/response measurement. */
+        public boolean hasJtokkitUsage;
+        public int jtokkitPromptTokens;
+        public int jtokkitCompletionTokens;
+        public int jtokkitReasoningTokens;
+        public int jtokkitTotalTokens;
+        public String jtokkitEncoding;
+        public boolean jtokkitModelMatched = true;
         /**
          * Wall-clock nanoTime at the first reasoning chunk anywhere in this
          * turn (any round). Set on the first {@code addRound} that sees a
@@ -861,6 +880,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                 cachedTokens += u.cachedTokens();
                 cacheCreationTokens += u.cacheCreationTokens();
             }
+            addJtokkitRound(acc);
             if (acc.reasoningDetected) reasoningDetected = true;
             reasoningChars += acc.reasoningChars();
             reasoningText.append(acc.reasoningText());
@@ -870,6 +890,29 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             if (acc.firstContentNanos != 0L && turnFirstContentNanos == 0L) {
                 turnFirstContentNanos = acc.firstContentNanos;
             }
+        }
+
+        private void addJtokkitRound(StreamAccumulator acc) {
+            if (acc.promptTokenEstimate == null && acc.completionTokenEstimate == null) return;
+            hasJtokkitUsage = true;
+            if (acc.promptTokenEstimate != null) {
+                jtokkitPromptTokens += acc.promptTokenEstimate.promptTokens();
+                noteJtokkitEncoding(acc.promptTokenEstimate.encodingName(), acc.promptTokenEstimate.modelMatched());
+            }
+            if (acc.completionTokenEstimate != null) {
+                jtokkitCompletionTokens += acc.completionTokenEstimate.tokens();
+                noteJtokkitEncoding(acc.completionTokenEstimate.encodingName(), acc.completionTokenEstimate.modelMatched());
+            }
+            if (acc.reasoningTokenEstimate != null) {
+                jtokkitReasoningTokens += acc.reasoningTokenEstimate.tokens();
+                noteJtokkitEncoding(acc.reasoningTokenEstimate.encodingName(), acc.reasoningTokenEstimate.modelMatched());
+            }
+            jtokkitTotalTokens = jtokkitPromptTokens + jtokkitCompletionTokens;
+        }
+
+        private void noteJtokkitEncoding(String encoding, boolean modelMatched) {
+            if (encoding != null && jtokkitEncoding == null) jtokkitEncoding = encoding;
+            jtokkitModelMatched &= modelMatched;
         }
 
         /** Returns the aggregated reasoning text, or {@code null} if nothing was streamed. */

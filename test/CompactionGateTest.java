@@ -321,9 +321,19 @@ class CompactionGateTest extends UnitTest {
         }
         commitAndReopen();
 
+        // Varied English content: cl100k_base tokenizes ~1 token / 4 chars
+        // for natural language, so this produces ~2000+ tokens — well over
+        // the 1500-token budget (2000 window - 500 reserve). Avoids a
+        // jtokkit BPE collapse trap where "a".repeat(N) shrinks to a few
+        // dozen tokens because the encoder merges long runs of identical
+        // chars aggressively. Lorem-ipsum-style content keeps token-per-char
+        // close to the natural-language ratio JCLAW provider usage tracks.
+        var bigContent = ("Lorem ipsum dolor sit amet consectetur adipiscing "
+                + "elit sed do eiusmod tempor incididunt ut labore et dolore "
+                + "magna aliqua. ").repeat(80);
         var current = List.of(
                 ChatMessage.system("SP"),
-                ChatMessage.user("a".repeat(8000)));
+                ChatMessage.user(bigContent));
         var result = CompactionGate.maybeCompactAndRebuild(
                 agent, conv.id, "next user", Set.of(), primary, current);
 

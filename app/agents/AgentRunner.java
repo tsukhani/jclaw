@@ -435,8 +435,9 @@ public class AgentRunner {
             // fails.
             var compactedMessages = CompactionGate.maybeCompactAndRebuild(
                     agent, conversationId, userMessage, null,
-                    prepared.primary(), prepared.messages());
-            var finalMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation, prepared.primary());
+                    prepared.primary(), prepared.messages(), prepared.tools());
+            var finalMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
+                    prepared.primary(), prepared.tools());
             // JCLAW-165: when the active model lacks supportsAudio, await
             // any in-flight transcription futures and rewrite the user
             // messages as text-with-transcript before the LLM call. The
@@ -745,8 +746,9 @@ public class AgentRunner {
         // when compaction is skipped or fails.
         var compactedMessages = CompactionGate.maybeCompactAndRebuild(
                 agent, conversation.id, userMessage, prepared.disabledTools(),
-                primaryRef, prepared.messages());
-        var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation, primaryRef);
+                primaryRef, prepared.messages(), prepared.tools());
+        var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
+                primaryRef, prepared.tools());
         // JCLAW-165: rewrite audio messages to text-with-transcript when the
         // active model lacks supportsAudio. Audio-capable happy path is a no-op.
         var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primaryRef).orElse(null);

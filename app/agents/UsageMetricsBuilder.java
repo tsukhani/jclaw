@@ -51,6 +51,7 @@ public final class UsageMetricsBuilder {
      */
     static int effectiveReasoningTokens(LlmProvider.TurnUsage turnUsage) {
         if (turnUsage.reasoningTokens > 0) return turnUsage.reasoningTokens;
+        if (turnUsage.jtokkitReasoningTokens > 0) return turnUsage.jtokkitReasoningTokens;
         if (!turnUsage.reasoningDetected) return 0;
         var chars = turnUsage.reasoningChars;
         if (chars <= 0) return 0;
@@ -92,24 +93,53 @@ public final class UsageMetricsBuilder {
                                         Conversation conversation, long streamBodyMs) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
         var reasoningMs = turnUsage.reasoningDurationMs(System.nanoTime());
-        if (!turnUsage.hasProviderUsage) {
+        if (!turnUsage.hasProviderUsage && !turnUsage.hasJtokkitUsage) {
             return buildNoProviderUsageJson(durationMs, reasoningMs, streamBodyMs);
         }
 
+        var providerUsage = turnUsage.hasProviderUsage;
         var usageMap = new com.google.gson.JsonObject();
-        usageMap.addProperty("prompt", turnUsage.promptTokens);
-        usageMap.addProperty("completion", turnUsage.completionTokens);
-        usageMap.addProperty("total", turnUsage.totalTokens);
+        usageMap.addProperty("prompt", providerUsage ? turnUsage.promptTokens : turnUsage.jtokkitPromptTokens);
+        usageMap.addProperty("completion", providerUsage ? turnUsage.completionTokens : turnUsage.jtokkitCompletionTokens);
+        usageMap.addProperty("total", providerUsage ? turnUsage.totalTokens : turnUsage.jtokkitTotalTokens);
         usageMap.addProperty("reasoning", effectiveReasoningTokens(turnUsage));
-        usageMap.addProperty("cached", turnUsage.cachedTokens);
-        usageMap.addProperty("cacheCreation", turnUsage.cacheCreationTokens);
+        usageMap.addProperty("cached", providerUsage ? turnUsage.cachedTokens : 0);
+        usageMap.addProperty("cacheCreation", providerUsage ? turnUsage.cacheCreationTokens : 0);
+        usageMap.addProperty("usageSource", providerUsage ? "provider" : "jtokkit");
+        if (!providerUsage) usageMap.addProperty("estimated", true);
         usageMap.addProperty("durationMs", durationMs);
         if (reasoningMs > 0L) usageMap.addProperty("reasoningDurationMs", reasoningMs);
         if (streamBodyMs > 0L) usageMap.addProperty("streamBodyMs", streamBodyMs);
+        addJtokkitFields(usageMap, turnUsage, providerUsage);
 
         addModelInfoFields(usageMap, modelInfo);
         addResolvedModelIdentity(usageMap, agent, conversation);
         return gson.toJson(usageMap);
+    }
+
+    /**
+     * Preserve the local tokenizer measurement alongside provider-reported
+     * usage so operators can compare the two. When the provider omits usage,
+     * these fields also document where the primary token counts came from.
+     */
+    private static void addJtokkitFields(com.google.gson.JsonObject usageMap,
+                                         LlmProvider.TurnUsage turnUsage,
+                                         boolean providerUsage) {
+        if (!turnUsage.hasJtokkitUsage) return;
+        usageMap.addProperty("jtokkitPrompt", turnUsage.jtokkitPromptTokens);
+        usageMap.addProperty("jtokkitCompletion", turnUsage.jtokkitCompletionTokens);
+        usageMap.addProperty("jtokkitTotal", turnUsage.jtokkitTotalTokens);
+        usageMap.addProperty("jtokkitReasoning", turnUsage.jtokkitReasoningTokens);
+        if (turnUsage.jtokkitEncoding != null) {
+            usageMap.addProperty("jtokkitEncoding", turnUsage.jtokkitEncoding);
+        }
+        usageMap.addProperty("jtokkitModelMatched", turnUsage.jtokkitModelMatched);
+        if (providerUsage) {
+            usageMap.addProperty("jtokkitPromptDelta", turnUsage.promptTokens - turnUsage.jtokkitPromptTokens);
+            usageMap.addProperty("jtokkitCompletionDelta",
+                    turnUsage.completionTokens - turnUsage.jtokkitCompletionTokens);
+            usageMap.addProperty("jtokkitTotalDelta", turnUsage.totalTokens - turnUsage.jtokkitTotalTokens);
+        }
     }
 
     /**
@@ -163,14 +193,18 @@ public final class UsageMetricsBuilder {
                                       long streamStartMs, String usageJson,
                                       AgentRunner.StreamingCallbacks cb) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
-        if (turnUsage.hasProviderUsage) {
+        if (turnUsage.hasProviderUsage || turnUsage.hasJtokkitUsage) {
+            var prompt = turnUsage.hasProviderUsage ? turnUsage.promptTokens : turnUsage.jtokkitPromptTokens;
+            var completion = turnUsage.hasProviderUsage ? turnUsage.completionTokens : turnUsage.jtokkitCompletionTokens;
+            var total = turnUsage.hasProviderUsage ? turnUsage.totalTokens : turnUsage.jtokkitTotalTokens;
             var reasoningCount = effectiveReasoningTokens(turnUsage);
             var extras = new StringBuilder();
             if (reasoningCount > 0) extras.append(", %s reasoning".formatted(reasoningCount));
             if (turnUsage.cachedTokens > 0) extras.append(", %d cached".formatted(turnUsage.cachedTokens));
             if (turnUsage.cacheCreationTokens > 0) extras.append(", %d cache-write".formatted(turnUsage.cacheCreationTokens));
+            if (!turnUsage.hasProviderUsage) extras.append(", estimated by jtokkit");
             var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
-                    turnUsage.promptTokens, turnUsage.completionTokens, turnUsage.totalTokens,
+                    prompt, completion, total,
                     extras.toString(),
                     durationMs / 1000.0);
             EventLogger.info("llm", agent.name, channelType,

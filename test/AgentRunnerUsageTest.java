@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.Usage;
+import llm.TokenUsageEstimator;
 
 /**
  * JCLAW-76 — verifies that {@code UsageMetricsBuilder.buildUsageJson} surfaces
@@ -42,6 +43,25 @@ class AgentRunnerUsageTest extends UnitTest {
         assertFalse(t.hasProviderUsage);
         assertEquals(0, t.promptTokens);
         assertEquals(0, t.completionTokens);
+    }
+
+    @Test
+    void turnUsageTracksJtokkitMeasurementsSeparatelyFromProviderUsage() {
+        var t = new LlmProvider.TurnUsage();
+        var round = roundWithUsage(new Usage(100, 10, 110, 0, 0, 0));
+        round.promptTokenEstimate = new TokenUsageEstimator.ChatRequestTokens(
+                40, 5, 45, "cl100k_base", false);
+        round.completionTokenEstimate = new TokenUsageEstimator.TokenCount(
+                12, "cl100k_base", false);
+
+        t.addRound(round);
+
+        assertTrue(t.hasProviderUsage);
+        assertTrue(t.hasJtokkitUsage);
+        assertEquals(100, t.promptTokens, "provider usage remains authoritative");
+        assertEquals(45, t.jtokkitPromptTokens);
+        assertEquals(12, t.jtokkitCompletionTokens);
+        assertEquals(57, t.jtokkitTotalTokens);
     }
 
     @Test
@@ -113,6 +133,34 @@ class AgentRunnerUsageTest extends UnitTest {
         assertFalse(json.contains("\"prompt\""), "no prompt field when zero usage: " + json);
         assertFalse(json.contains("\"completion\""), "no completion field when zero usage: " + json);
         assertTrue(json.contains("\"durationMs\""), "durationMs always present: " + json);
+    }
+
+    @Test
+    void buildUsageJsonFallsBackToJtokkitWhenProviderUsageMissing() {
+        var round = new LlmProvider.StreamAccumulator();
+        round.promptTokenEstimate = new TokenUsageEstimator.ChatRequestTokens(
+                20, 4, 24, "cl100k_base", false);
+        round.completionTokenEstimate = new TokenUsageEstimator.TokenCount(
+                8, "cl100k_base", false);
+        round.reasoningTokenEstimate = new TokenUsageEstimator.TokenCount(
+                3, "cl100k_base", false);
+        round.reasoningDetected = true;
+        round.appendReasoningText("reasoning");
+
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(round);
+
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+
+        assertEquals(24, obj.get("prompt").getAsInt());
+        assertEquals(8, obj.get("completion").getAsInt());
+        assertEquals(32, obj.get("total").getAsInt());
+        assertEquals(3, obj.get("reasoning").getAsInt());
+        assertEquals("jtokkit", obj.get("usageSource").getAsString());
+        assertTrue(obj.get("estimated").getAsBoolean());
+        assertEquals(24, obj.get("jtokkitPrompt").getAsInt());
+        assertEquals("cl100k_base", obj.get("jtokkitEncoding").getAsString());
     }
 
     @Test

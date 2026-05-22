@@ -6,6 +6,8 @@ import java.util.Set;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
+import llm.LlmTypes.ToolDef;
+import llm.TokenUsageEstimator;
 import models.Agent;
 import services.ConfigService;
 import services.ConversationService;
@@ -58,6 +60,22 @@ public final class CompactionGate {
             Agent agent, Long conversationId, String userMessage,
             Set<String> disabledTools, LlmProvider primary,
             List<ChatMessage> current) {
+        return maybeCompactAndRebuild(agent, conversationId, userMessage, disabledTools,
+                primary, current, List.of());
+    }
+
+    /**
+     * Overload taking the request's tool schemas so the compaction trigger
+     * measures the same payload {@link ContextWindowManager#trimToContextWindow}
+     * sees — tool JSON contributes to the provider's prompt_tokens count and
+     * was previously absent from the chars/4 estimate, letting large
+     * tool-heavy turns slip past the compaction threshold and get truncated
+     * by the trim drop-oldest fallback instead of summarized.
+     */
+    public static List<ChatMessage> maybeCompactAndRebuild(
+            Agent agent, Long conversationId, String userMessage,
+            Set<String> disabledTools, LlmProvider primary,
+            List<ChatMessage> current, List<ToolDef> tools) {
         // Cheap snapshot: model info + effective model id + channel type.
         // resolveModelInfo reads only in-memory provider config, so this
         // Tx is bounded by one findById.
@@ -69,7 +87,9 @@ public final class CompactionGate {
             return new CompactionDecision(mi, modelId, conv.channelType);
         });
         if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
-        if (!SessionCompactor.shouldCompact(ContextWindowManager.estimateTokens(current), snapshot.modelInfo())) return current;
+        int estimatedTokens = TokenUsageEstimator.estimateChatRequest(
+                snapshot.modelId(), current, tools).promptTokens();
+        if (!SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) return current;
 
         final var modelId = snapshot.modelId();
         final var compactionChannel = snapshot.channelType();

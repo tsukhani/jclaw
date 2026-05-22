@@ -14,17 +14,20 @@ import services.EventLogger;
 /**
  * Token-estimation and context-window arithmetic for the agent loop.
  * Extracted from {@link AgentRunner} as part of JCLAW-299; the cluster
- * here is the chars/4 heuristic plus the JCLAW-291 reservation policy
- * that keeps the assistant reply from collapsing into
+ * here is provider-facing token measurement plus the JCLAW-291 reservation
+ * policy that keeps the assistant reply from collapsing into
  * {@code finish_reason=length}.
  *
- * <h3>The chars/4 heuristic</h3>
- * {@link #estimateTokens} and {@link #estimateToolTokens} both sum
- * relevant characters and divide by 4 — a rough approximation for
- * English tokenizers. The {@link #OUTPUT_SAFETY_MARGIN_TOKENS} fudge
- * absorbs the slack between this heuristic and the provider's real
- * tokenizer (plus role-tag and JSON-framing overhead the char count
- * doesn't see).
+ * <h3>Token measurement</h3>
+ * Runtime context-window arithmetic ({@link #effectiveMaxTokens},
+ * {@link #trimToContextWindow}, {@link CompactionGate}, and
+ * {@link TruncationDiagnostics}) routes through
+ * {@link llm.TokenUsageEstimator} so prompt headroom is measured with
+ * the same tokenizer family as the provider request. The legacy
+ * {@link #estimateTokens} and {@link #estimateToolTokens} helpers are
+ * retained solely as references for {@code AgentRunnerContextWindowTest}'s
+ * regression coverage of the chars/4 baseline; no production code path
+ * still consumes them.
  *
  * <h3>Reply-budget reservation (JCLAW-291)</h3>
  * {@link #trimToContextWindow} drops oldest non-system history until
@@ -91,7 +94,7 @@ public final class ContextWindowManager {
         int configured = modelInfo.maxTokens();
         if (modelInfo.contextWindow() <= 0) return configured;
 
-        int promptTokens = estimateTokens(messages) + estimateToolTokens(tools);
+        int promptTokens = estimateProviderPromptTokens(agent, conv, provider, messages, tools).promptTokens();
         int headroom = modelInfo.contextWindow() - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS;
         // NB: not Math.clamp — when configured < MIN_OUTPUT_TOKENS (small / mis-configured model) we still want MIN_OUTPUT_TOKENS, which clamp would reject as min>max.
         @SuppressWarnings("java:S6885")
@@ -128,11 +131,17 @@ public final class ContextWindowManager {
      * fits.
      */
     static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv, LlmProvider provider) {
+        return trimToContextWindow(messages, agent, conv, provider, null);
+    }
+
+    static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv,
+                                                  LlmProvider provider, List<ToolDef> tools) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
 
         int contextWindow = modelInfo.contextWindow();
-        int estimatedTokens = estimateTokens(messages);
+        var modelId = modelIdFor(agent, conv, provider);
+        int estimatedTokens = estimateProviderPromptTokens(agent, conv, provider, messages, tools).promptTokens();
         // JCLAW-291: trim target reserves RESERVED_OUTPUT_TOKENS so the reply has
         // a real budget — without this, headroom in effectiveMaxTokens collapses
         // and the model truncates with finish_reason=length on plain replies.
@@ -148,7 +157,7 @@ public final class ContextWindowManager {
         int total = estimatedTokens;
         int dropCount = 0;
         for (int i = 1; i < messages.size() - 1 && total > trimTarget; i++) {
-            total -= estimateTokens(List.of(messages.get(i)));
+            total -= llm.TokenUsageEstimator.estimateMessage(modelId, messages.get(i)).tokens();
             dropCount++;
         }
         if (dropCount > 0) {
@@ -162,6 +171,20 @@ public final class ContextWindowManager {
             return trimmed;
         }
         return messages;
+    }
+
+    static llm.TokenUsageEstimator.ChatRequestTokens estimateProviderPromptTokens(
+            Agent agent, Conversation conv, LlmProvider provider,
+            List<ChatMessage> messages, List<ToolDef> tools) {
+        return llm.TokenUsageEstimator.estimateChatRequest(modelIdFor(agent, conv, provider), messages, tools);
+    }
+
+    private static String modelIdFor(Agent agent, Conversation conv, LlmProvider provider) {
+        var modelId = ModelResolver.effectiveModelId(agent, conv);
+        if (modelId != null) return modelId;
+        var models = provider != null && provider.config() != null ? provider.config().models() : null;
+        if (models != null && models.size() == 1) return models.getFirst().id();
+        return null;
     }
 
     /**

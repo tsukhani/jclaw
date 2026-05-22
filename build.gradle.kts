@@ -294,6 +294,11 @@ dependencies {
 
     implementation("org.hdrhistogram:HdrHistogram:2.2.2")
 
+    // JCLAW-307: OpenAI/tiktoken-compatible tokenizer used for provider-facing
+    // prompt measurement and fallback usage accounting when a provider omits
+    // usage blocks. The registry is created lazily in TokenUsageEstimator.
+    implementation("com.knuddels:jtokkit:1.1.0")
+
     // JCLAW-205: Caffeine JSR-107 (JCache) provider for Hibernate L2 cache.
     // Co-versioned with the caffeine-3.2.3 the fork ships.
     implementation("com.github.ben-manes.caffeine:jcache:3.2.4") {
