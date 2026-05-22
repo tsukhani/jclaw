@@ -378,11 +378,14 @@ class AgentSystemTest extends UnitTest {
 
     @Test
     void parseSkillContentHandlesToolsInlineList() {
-        var content = "---\n"
-                + "name: with-tools\n"
-                + "description: Has explicit tools\n"
-                + "tools: [filesystem, exec]\n"
-                + "---\n# body\n";
+        var content = """
+                ---
+                name: with-tools
+                description: Has explicit tools
+                tools: [filesystem, exec]
+                ---
+                # body
+                """;
         var info = SkillLoader.parseSkillContent(content, java.nio.file.Path.of("/tmp/tools.md"));
         assertNotNull(info);
         assertEquals("with-tools", info.name());

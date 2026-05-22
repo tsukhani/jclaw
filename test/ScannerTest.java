@@ -1,5 +1,7 @@
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.scanners.MalwareBazaarScanner;
@@ -156,36 +158,21 @@ class ScannerTest extends UnitTest {
                 "malicious==0 must produce clean verdict");
     }
 
-    @Test
-    void virusTotal_404TreatedAsClean() {
+    /**
+     * VirusTotal scanner fails open (clean verdict) on every non-200 status
+     * code we model: 404 hash-not-seen, 401 auth, 429 quota, 5xx upstream.
+     */
+    @ParameterizedTest(name = "virusTotal_failsOpenOn[{1}]")
+    @CsvSource({
+            "404, 404TreatedAsClean,        404 (hash never seen) must fail-open to clean",
+            "401, Unauthorized,             401 must fail-open to clean",
+            "429, RateLimit,                429 (quota) must fail-open to clean",
+            "500, ServerError,              5xx must fail-open to clean"
+    })
+    void virusTotal_failsOpenOnNon200(int status, String label, String message) {
         wireVirusTotal();
-        respondEmpty(404);
-        assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
-                "404 (hash never seen) must fail-open to clean");
-    }
-
-    @Test
-    void virusTotal_failsOpenOnUnauthorized() {
-        wireVirusTotal();
-        respondEmpty(401);
-        assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
-                "401 must fail-open to clean");
-    }
-
-    @Test
-    void virusTotal_failsOpenOnRateLimit() {
-        wireVirusTotal();
-        respondEmpty(429);
-        assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
-                "429 (quota) must fail-open to clean");
-    }
-
-    @Test
-    void virusTotal_failsOpenOnServerError() {
-        wireVirusTotal();
-        respondEmpty(500);
-        assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
-                "5xx must fail-open to clean");
+        respondEmpty(status);
+        assertFalse(new VirusTotalScanner().lookup(SHA).malicious(), message);
     }
 
     @Test

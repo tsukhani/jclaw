@@ -4,6 +4,8 @@ import channels.TelegramPollingRunnerTestHooks;
 import models.Agent;
 import models.TelegramBinding;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.Tx;
 
@@ -336,23 +338,20 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
                 "update should reflect enabled=false: " + getContent(response));
     }
 
-    @Test
-    void updateRejectsNonNumericTelegramUserId() {
+    /**
+     * Two body-validation rejections that share the seed + PUT + 400
+     * skeleton: non-numeric telegramUserId and reference to an unknown
+     * agentId.
+     */
+    @ParameterizedTest(name = "updateRejects[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "NonNumericTelegramUserId | {\"telegramUserId\": \"abc\"}",
+            "UnknownAgentId           | {\"agentId\": 9999999}"
+    })
+    void updateRejectsInvalidPayload(String label, String body) {
         var agentId = seedAgent("tg-agent");
         var bindingId = seedBinding(agentId, "111:tok", "42");
         login();
-        var body = "{\"telegramUserId\": \"abc\"}";
-        var response = PUT("/api/channels/telegram/bindings/" + bindingId,
-                "application/json", body);
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void updateRejectsUnknownAgentId() {
-        var agentId = seedAgent("tg-agent");
-        var bindingId = seedBinding(agentId, "111:tok", "42");
-        login();
-        var body = "{\"agentId\": 9999999}";
         var response = PUT("/api/channels/telegram/bindings/" + bindingId,
                 "application/json", body);
         assertEquals(400, response.status.intValue());

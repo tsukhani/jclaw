@@ -122,7 +122,6 @@ class TaskRetryRoundtripTest extends UnitTest {
 
         var beforeReschedule = Instant.now();
         new JClawFailureHandler().onFailure(executionComplete, ops);
-        var afterReschedule = Instant.now();
 
         // The Reschedule path ran, not the Stop path.
         assertEquals(1, ops.reschedules.size(),

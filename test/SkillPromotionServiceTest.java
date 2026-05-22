@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.SkillPromotionService;
 
@@ -138,22 +140,19 @@ class SkillPromotionServiceTest extends UnitTest {
         assertTrue(result.contains("baseUrl"));
     }
 
-    @Test
-    void stripCredentialsEmptyObjectReturnsEmpty() {
-        var result = SkillPromotionService.stripCredentialsJson("{}");
-        assertEquals("{}", result);
-    }
-
-    @Test
-    void stripCredentialsInvalidJsonReturnsFallback() {
-        var result = SkillPromotionService.stripCredentialsJson("not json at all");
-        assertEquals("{}", result);
-    }
-
-    @Test
-    void stripCredentialsArrayFallsBackToEmpty() {
-        // Arrays are not JsonObjects, so getAsJsonObject() throws
-        var result = SkillPromotionService.stripCredentialsJson("[1, 2, 3]");
+    /**
+     * Every "not a populated JsonObject" input — empty object, invalid JSON,
+     * top-level array — strips down to "{}". Pinned to guard the
+     * getAsJsonObject() throw path.
+     */
+    @ParameterizedTest(name = "stripCredentials[{0}]ReturnsEmptyJson")
+    @CsvSource(delimiter = '|', value = {
+            "EmptyObject  | {}",
+            "InvalidJson  | not json at all",
+            "Array        | [1, 2, 3]"
+    })
+    void stripCredentialsReturnsEmptyJsonForNonObject(String label, String input) {
+        var result = SkillPromotionService.stripCredentialsJson(input);
         assertEquals("{}", result);
     }
 

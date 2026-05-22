@@ -72,18 +72,18 @@ class AttachmentServiceTest extends UnitTest {
 
     @Test
     void finalizeRejectsBlankAttachmentId() {
+        var input = new AttachmentService.Input("", "f.png", "image/png", 1L, "IMAGE");
         var ex = assertThrows(IllegalArgumentException.class,
-                () -> AttachmentService.finalizeAttachment(agent, message,
-                        new AttachmentService.Input("", "f.png", "image/png", 1L, "IMAGE")));
+                () -> AttachmentService.finalizeAttachment(agent, message, input));
         assertTrue(ex.getMessage().toLowerCase().contains("attachmentid"),
                 "error must mention attachmentId: " + ex.getMessage());
     }
 
     @Test
     void finalizeRejectsNullAttachmentId() {
+        var input = new AttachmentService.Input(null, "f.png", "image/png", 1L, "IMAGE");
         var ex = assertThrows(IllegalArgumentException.class,
-                () -> AttachmentService.finalizeAttachment(agent, message,
-                        new AttachmentService.Input(null, "f.png", "image/png", 1L, "IMAGE")));
+                () -> AttachmentService.finalizeAttachment(agent, message, input));
         assertTrue(ex.getMessage().toLowerCase().contains("attachmentid"));
     }
 
@@ -91,9 +91,9 @@ class AttachmentServiceTest extends UnitTest {
     void finalizeRejectsMissingStagedFile() {
         // Valid id, but nothing in staging matches it.
         var uuid = UUID.randomUUID().toString();
+        var input = new AttachmentService.Input(uuid, "f.png", "image/png", 1L, "IMAGE");
         var ex = assertThrows(IllegalStateException.class,
-                () -> AttachmentService.finalizeAttachment(agent, message,
-                        new AttachmentService.Input(uuid, "f.png", "image/png", 1L, "IMAGE")));
+                () -> AttachmentService.finalizeAttachment(agent, message, input));
         assertTrue(ex.getMessage().contains(uuid),
                 "error must include the missing uuid: " + ex.getMessage());
         assertTrue(ex.getMessage().toLowerCase().contains("staged"),
@@ -293,10 +293,12 @@ class AttachmentServiceTest extends UnitTest {
 
     /** Minimal valid PDF: header + EOF marker is enough for Tika. */
     private static byte[] pdfBytes() {
-        return ("%PDF-1.4\n"
-                + "1 0 obj<</Type/Catalog>>endobj\n"
-                + "trailer<</Root 1 0 R>>\n"
-                + "%%EOF\n").getBytes();
+        return """
+                %PDF-1.4
+                1 0 obj<</Type/Catalog>>endobj
+                trailer<</Root 1 0 R>>
+                %%EOF
+                """.getBytes();
     }
 
     /** Minimal MP3: an MPEG-1 Layer 3 frame header is enough for Tika to

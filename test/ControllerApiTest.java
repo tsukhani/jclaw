@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 import play.mvc.Http.*;
 
@@ -154,66 +156,28 @@ class ControllerApiTest extends FunctionalTest {
     }
 
     // JCLAW-115: agent-name slug validation rejects traversal-shaped input.
+    // The full rejection matrix lives in {@link #agentsCreateRejectsInvalidSlug}.
 
-    @Test
-    void agentsCreateRejectsPathTraversalName() {
+    /**
+     * Every invalid-name shape the slug regex rejects: path traversal,
+     * absolute path, embedded slash, empty, lone dot, double dot,
+     * embedded whitespace, and overlong (65 chars = limit+1).
+     */
+    @ParameterizedTest(name = "agentsCreateRejects[{0}]")
+    @ValueSource(strings = {
+            "../etc",
+            "/etc/passwd",
+            "foo/bar",
+            "",
+            ".",
+            "..",
+            "has space"
+    })
+    void agentsCreateRejectsInvalidSlug(String name) {
         login();
         var body = """
-                {"name": "../etc", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
-        var response = POST("/api/agents", "application/json", body);
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void agentsCreateRejectsAbsolutePathName() {
-        login();
-        var body = """
-                {"name": "/etc/passwd", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
-        var response = POST("/api/agents", "application/json", body);
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void agentsCreateRejectsSlashedName() {
-        login();
-        var body = """
-                {"name": "foo/bar", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
-        var response = POST("/api/agents", "application/json", body);
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void agentsCreateRejectsEmptyName() {
-        login();
-        var body = """
-                {"name": "", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
-        var response = POST("/api/agents", "application/json", body);
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void agentsCreateRejectsDotNames() {
-        login();
-        var dotBody = """
-                {"name": ".", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
-        assertEquals(400, POST("/api/agents", "application/json", dotBody).status.intValue());
-        var dotDotBody = """
-                {"name": "..", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
-        assertEquals(400, POST("/api/agents", "application/json", dotDotBody).status.intValue());
-    }
-
-    @Test
-    void agentsCreateRejectsWhitespaceInName() {
-        login();
-        var body = """
-                {"name": "has space", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
+                {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """.formatted(name);
         var response = POST("/api/agents", "application/json", body);
         assertEquals(400, response.status.intValue());
     }
@@ -221,7 +185,8 @@ class ControllerApiTest extends FunctionalTest {
     @Test
     void agentsCreateRejectsOverlongName() {
         login();
-        // 65 chars — one over the limit.
+        // 65 chars — one over the limit. Kept separate so the limit constant
+        // stays explicit in the test source rather than buried in a ValueSource.
         var longName = "a".repeat(65);
         var body = """
                 {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}

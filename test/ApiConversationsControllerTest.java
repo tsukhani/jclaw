@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import play.db.jpa.JPA;
 import models.Agent;
@@ -630,32 +632,21 @@ class ApiConversationsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
-    @Test
-    void setModelOverrideReturns400ForMissingFields() {
+    /**
+     * Three model-override validation rejections that share the seed +
+     * PUT + 400 skeleton: missing both fields, blank provider, blank modelId.
+     */
+    @ParameterizedTest(name = "setModelOverrideReturns400For[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "MissingFields  | override-400-missing         | {}",
+            "BlankProvider  | override-400-blank-provider  | {\"modelProvider\":\"\",\"modelId\":\"gpt-4.1\"}",
+            "BlankModelId   | override-400-blank-model     | {\"modelProvider\":\"openrouter\",\"modelId\":\"\"}"
+    })
+    void setModelOverrideReturns400ForInvalidBody(String label, String convoTag, String body) {
         login();
-        Long convoId = createConversationForOverride("override-400-missing");
+        Long convoId = createConversationForOverride(convoTag);
         var resp = PUT("/api/conversations/" + convoId + "/model-override",
-                "application/json", "{}");
-        assertEquals(400, resp.status.intValue());
-    }
-
-    @Test
-    void setModelOverrideReturns400ForBlankProvider() {
-        login();
-        Long convoId = createConversationForOverride("override-400-blank-provider");
-        var resp = PUT("/api/conversations/" + convoId + "/model-override",
-                "application/json",
-                "{\"modelProvider\":\"\",\"modelId\":\"gpt-4.1\"}");
-        assertEquals(400, resp.status.intValue());
-    }
-
-    @Test
-    void setModelOverrideReturns400ForBlankModelId() {
-        login();
-        Long convoId = createConversationForOverride("override-400-blank-model");
-        var resp = PUT("/api/conversations/" + convoId + "/model-override",
-                "application/json",
-                "{\"modelProvider\":\"openrouter\",\"modelId\":\"\"}");
+                "application/json", body);
         assertEquals(400, resp.status.intValue());
     }
 

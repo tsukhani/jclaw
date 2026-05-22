@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import models.Agent;
 import services.AgentService;
@@ -32,9 +34,19 @@ class ShellExecToolTest extends UnitTest {
 
     // ==================== Allowlist Validation ====================
 
-    @Test
-    void allowedCommandPasses() {
-        var error = tool.validateAllowlist("echo hello");
+    /**
+     * Allowlist-accepting shapes: bare allowed cmd, pipe chain (first cmd
+     * checked), leading-whitespace tolerance, single-word command.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = ';', value = {
+            "allowedCommandPasses               ; echo hello",
+            "pipeChainValidatesFirstCommandOnly ; git log | head -20",
+            "commandWithLeadingWhitespace       ; '  echo hello'",
+            "singleWordCommand                  ; ls"
+    })
+    void validateAllowlistAcceptsAllowedShape(String label, String cmd) {
+        var error = tool.validateAllowlist(cmd);
         assertNull(error);
     }
 
@@ -47,27 +59,9 @@ class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    void pipeChainValidatesFirstCommandOnly() {
-        var error = tool.validateAllowlist("git log | head -20");
-        assertNull(error);
-    }
-
-    @Test
     void emptyCommandRejected() {
         var error = tool.validateAllowlist("   ");
         assertNotNull(error);
-    }
-
-    @Test
-    void commandWithLeadingWhitespace() {
-        var error = tool.validateAllowlist("  echo hello");
-        assertNull(error);
-    }
-
-    @Test
-    void singleWordCommand() {
-        var error = tool.validateAllowlist("ls");
-        assertNull(error);
     }
 
     @Test

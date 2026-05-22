@@ -126,13 +126,11 @@ class LlmProviderFailoverTest extends UnitTest {
 
         var primary = openAiPointingAt(primaryServer, "primary");
 
-        try {
-            LlmProvider.chatWithFailover(
-                    primary, null, "test-model", List.of(), List.of(), null, null, "web");
-            fail("chatWithFailover must rethrow LlmException when secondary is null");
-        } catch (LlmProvider.LlmException expected) {
-            assertTrue(primaryServer.getRequestCount() >= 1, "primary contacted before rethrow");
-        }
+        assertThrows(LlmProvider.LlmException.class, () ->
+                LlmProvider.chatWithFailover(
+                        primary, null, "test-model", List.of(), List.of(), null, null, "web"),
+                "chatWithFailover must rethrow LlmException when secondary is null");
+        assertTrue(primaryServer.getRequestCount() >= 1, "primary contacted before rethrow");
     }
 
     // === Helpers ===

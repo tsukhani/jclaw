@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import agents.ToolRegistry;
 import models.Agent;
@@ -216,6 +218,11 @@ class ToolSystemTest extends UnitTest {
 
     // pause/resume/cancelTask/runNow — required-name + not-found branches.
 
+    /**
+     * Every name-keyed task_manager action errors out when name is absent.
+     * The pause path is asserted with an extra "'name' is required" snippet
+     * to pin the user-visible message; the others share the "Error" prefix.
+     */
     @Test
     void taskToolPauseRequiresName() {
         var result = ToolRegistry.execute("task_manager",
@@ -224,52 +231,23 @@ class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("'name' is required"));
     }
 
-    @Test
-    void taskToolPauseUnknownNameReportsNotFound() {
+    @ParameterizedTest(name = "taskToolRequiresName.{0}")
+    @CsvSource({"resume", "cancelTask", "runNow"})
+    void taskToolRequiresName(String action) {
         var result = ToolRegistry.execute("task_manager",
-                "{\"action\":\"pause\",\"name\":\"never-existed\"}", agent);
-        assertTrue(result.contains("No task found"));
-    }
-
-    @Test
-    void taskToolResumeRequiresName() {
-        var result = ToolRegistry.execute("task_manager",
-                "{\"action\":\"resume\"}", agent);
+                "{\"action\":\"" + action + "\"}", agent);
         assertTrue(result.startsWith("Error"));
     }
 
-    @Test
-    void taskToolResumeUnknownNameReportsNotFound() {
+    /**
+     * Every name-keyed task_manager action reports "No task found" when the
+     * named task doesn't exist. Covers pause, resume, cancelTask, runNow.
+     */
+    @ParameterizedTest(name = "taskToolUnknownName.{0}")
+    @CsvSource({"pause", "resume", "cancelTask", "runNow"})
+    void taskToolUnknownNameReportsNotFound(String action) {
         var result = ToolRegistry.execute("task_manager",
-                "{\"action\":\"resume\",\"name\":\"missing\"}", agent);
-        assertTrue(result.contains("No task found"));
-    }
-
-    @Test
-    void taskToolCancelRequiresName() {
-        var result = ToolRegistry.execute("task_manager",
-                "{\"action\":\"cancelTask\"}", agent);
-        assertTrue(result.startsWith("Error"));
-    }
-
-    @Test
-    void taskToolCancelUnknownNameReportsNotFound() {
-        var result = ToolRegistry.execute("task_manager",
-                "{\"action\":\"cancelTask\",\"name\":\"missing\"}", agent);
-        assertTrue(result.contains("No task found"));
-    }
-
-    @Test
-    void taskToolRunNowRequiresName() {
-        var result = ToolRegistry.execute("task_manager",
-                "{\"action\":\"runNow\"}", agent);
-        assertTrue(result.startsWith("Error"));
-    }
-
-    @Test
-    void taskToolRunNowUnknownNameReportsNotFound() {
-        var result = ToolRegistry.execute("task_manager",
-                "{\"action\":\"runNow\",\"name\":\"missing\"}", agent);
+                "{\"action\":\"" + action + "\",\"name\":\"missing\"}", agent);
         assertTrue(result.contains("No task found"));
     }
 
@@ -330,42 +308,23 @@ class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("successfully"), "got: " + result);
     }
 
-    @Test
-    void checklistRejectsMissingContent() {
-        // Regression: models occasionally omit `content` and send only activeForm+status.
-        // Must return a clean validation error rather than NPE on JsonObject.get(null).
+    /**
+     * Each checklist item field must be present; omitting any one must yield
+     * a clean validation error mentioning the missing field by name. Pinned
+     * because models occasionally omit a field and previously NPE'd on
+     * JsonObject.get(null).
+     */
+    @ParameterizedTest(name = "checklistRejectsMissing[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "content    | {\"activeForm\": \"Doing the thing\", \"status\": \"in_progress\"}",
+            "status     | {\"content\": \"Step 1\", \"activeForm\": \"Doing 1\"}",
+            "activeForm | {\"content\": \"Step 1\", \"status\": \"pending\"}"
+    })
+    void checklistRejectsMissingField(String missingField, String itemJson) {
         var result = ToolRegistry.execute("checklist",
-                """
-                {"items": [
-                    {"activeForm": "Doing the thing", "status": "in_progress"}
-                ]}
-                """, agent);
+                "{\"items\": [" + itemJson + "]}", agent);
         assertTrue(result.startsWith("Error:"), "got: " + result);
-        assertTrue(result.contains("content"), "got: " + result);
-    }
-
-    @Test
-    void checklistRejectsMissingStatus() {
-        var result = ToolRegistry.execute("checklist",
-                """
-                {"items": [
-                    {"content": "Step 1", "activeForm": "Doing 1"}
-                ]}
-                """, agent);
-        assertTrue(result.startsWith("Error:"), "got: " + result);
-        assertTrue(result.contains("status"), "got: " + result);
-    }
-
-    @Test
-    void checklistRejectsMissingActiveForm() {
-        var result = ToolRegistry.execute("checklist",
-                """
-                {"items": [
-                    {"content": "Step 1", "status": "pending"}
-                ]}
-                """, agent);
-        assertTrue(result.startsWith("Error:"), "got: " + result);
-        assertTrue(result.contains("activeForm"), "got: " + result);
+        assertTrue(result.contains(missingField), "got: " + result);
     }
 
     @Test

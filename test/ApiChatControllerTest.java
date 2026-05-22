@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 
 import java.io.File;
@@ -65,9 +67,14 @@ class ApiChatControllerTest extends FunctionalTest {
     // POST /api/chat/send
     // =====================
 
-    @Test
-    void sendRequiresAuth() {
-        var response = POST("/api/chat/send", "application/json", "{}");
+    /**
+     * Every chat endpoint must require auth — covered by a single matrix to
+     * keep the auth gate uniform across send / stream / upload.
+     */
+    @ParameterizedTest(name = "{0} requires auth")
+    @ValueSource(strings = {"/api/chat/send", "/api/chat/stream", "/api/chat/upload"})
+    void chatEndpointsRequireAuth(String endpoint) {
+        var response = POST(endpoint, "application/json", "{}");
         assertEquals(401, response.status.intValue());
     }
 
@@ -150,12 +157,6 @@ class ApiChatControllerTest extends FunctionalTest {
     // =====================
 
     @Test
-    void streamRequiresAuth() {
-        var response = POST("/api/chat/stream", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
-    }
-
-    @Test
     void streamRejectsEmptyBody() {
         login();
         var response = POST("/api/chat/stream", "application/json", "{}");
@@ -201,12 +202,6 @@ class ApiChatControllerTest extends FunctionalTest {
     // =====================
     // POST /api/chat/upload — multipart attachment intake
     // =====================
-
-    @Test
-    void uploadRequiresAuth() {
-        var response = POST("/api/chat/upload", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
-    }
 
     @Test
     void uploadRejectsMissingAgentId() {

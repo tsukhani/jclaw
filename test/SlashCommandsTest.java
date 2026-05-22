@@ -3,6 +3,8 @@ import models.Conversation;
 import models.Message;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
@@ -899,32 +901,24 @@ class SlashCommandsTest extends UnitTest {
                 "got: " + result.get().responseText());
     }
 
-    @Test
-    void modelSwitchWithEmptyProviderRejected() {
-        // arg "/gpt-4.1" → slash at 0 → fails the "slash <= 0" guard.
+    /**
+     * Three /model argument shapes that all fall into the format-validation
+     * guard and should produce "Unrecognized model format":
+     * <ul>
+     *   <li>"/gpt-4.1" — slash at 0, fails the "slash &lt;= 0" guard</li>
+     *   <li>"openrouter/" — slash at end, fails the "slash == length-1" guard</li>
+     *   <li>"  /  " — both components whitespace, second-tier guard</li>
+     * </ul>
+     */
+    @ParameterizedTest(name = "modelSwitch rejects arg=[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "/gpt-4.1",
+            "openrouter/",
+            "  /  "
+    })
+    void modelSwitchWithMalformedArgRejected(String arg) {
         var conv = ConversationService.findOrCreate(agent, "web", "admin");
-        var result = Commands.handle("/model /gpt-4.1", agent, "web", "admin", conv);
-        assertTrue(result.isPresent());
-        assertTrue(result.get().responseText().contains("Unrecognized model format"),
-                "got: " + result.get().responseText());
-    }
-
-    @Test
-    void modelSwitchWithEmptyModelIdRejected() {
-        // arg "openrouter/" → slash at end → fails the "slash == length-1" guard.
-        var conv = ConversationService.findOrCreate(agent, "web", "admin");
-        var result = Commands.handle("/model openrouter/", agent, "web", "admin", conv);
-        assertTrue(result.isPresent());
-        assertTrue(result.get().responseText().contains("Unrecognized model format"),
-                "got: " + result.get().responseText());
-    }
-
-    @Test
-    void modelSwitchWithWhitespaceOnlyComponentRejected() {
-        // "  /  " — slash is not at edges but the strip()'d components are
-        // both empty → second-tier guard.
-        var conv = ConversationService.findOrCreate(agent, "web", "admin");
-        var result = Commands.handle("/model   /  ", agent, "web", "admin", conv);
+        var result = Commands.handle("/model " + arg, agent, "web", "admin", conv);
         assertTrue(result.isPresent());
         assertTrue(result.get().responseText().contains("Unrecognized model format"),
                 "got: " + result.get().responseText());
@@ -1158,7 +1152,7 @@ class SlashCommandsTest extends UnitTest {
         var m = modelWithPrices(0, 0, 0, 0);
         var result = formatPricing(m);
         assertTrue(result.contains("free"));
-        assertFalse(result.equals("unknown"),
+        assertNotEquals("unknown", result,
                 "zero is a known price, not unknown: " + result);
     }
 
@@ -1210,12 +1204,24 @@ class SlashCommandsTest extends UnitTest {
         return (String) m.invoke(null, result, args);
     }
 
-    @Test
-    void buildCompactResponseTextNoSafeBoundary() throws Exception {
-        var result = services.SessionCompactor.CompactionResult.skipped(
-                "no safe boundary or below min-turns");
+    /**
+     * Three skip-reason branches of buildCompactResponseText that share the
+     * single-contains shape: no-safe-boundary → "Nothing to compact",
+     * empty-summary → "empty response", null-reason → "unknown reason".
+     * The two-assertion branches (LlmError, GenericSkipReason) stay separate
+     * so the "Compaction failed" + "LLM call" / "Compaction skipped" +
+     * "some other reason" pairings remain explicit.
+     */
+    @ParameterizedTest(name = "skip reason [{0}] surfaces [{1}]")
+    @CsvSource(nullValues = "NULL", value = {
+            "no safe boundary or below min-turns, Nothing to compact",
+            "empty summary,                       empty response",
+            "NULL,                                unknown reason"
+    })
+    void buildCompactResponseTextSkipReasonRenders(String skipReason, String expectedSnippet) throws Exception {
+        var result = services.SessionCompactor.CompactionResult.skipped(skipReason);
         var text = callBuildCompactResponseText(result, null);
-        assertTrue(text.contains("Nothing to compact"), "got: " + text);
+        assertTrue(text.contains(expectedSnippet), "got: " + text);
     }
 
     @Test
@@ -1227,25 +1233,11 @@ class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    void buildCompactResponseTextEmptySummary() throws Exception {
-        var result = services.SessionCompactor.CompactionResult.skipped("empty summary");
-        var text = callBuildCompactResponseText(result, null);
-        assertTrue(text.contains("empty response"), "got: " + text);
-    }
-
-    @Test
     void buildCompactResponseTextGenericSkipReason() throws Exception {
         var result = services.SessionCompactor.CompactionResult.skipped("some other reason");
         var text = callBuildCompactResponseText(result, null);
         assertTrue(text.contains("Compaction skipped"), "got: " + text);
         assertTrue(text.contains("some other reason"), "got: " + text);
-    }
-
-    @Test
-    void buildCompactResponseTextNullSkipReason() throws Exception {
-        var result = services.SessionCompactor.CompactionResult.skipped(null);
-        var text = callBuildCompactResponseText(result, null);
-        assertTrue(text.contains("unknown reason"), "got: " + text);
     }
 
     @Test

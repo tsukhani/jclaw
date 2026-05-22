@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import models.Agent;
 import models.Task;
@@ -64,7 +66,6 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
                  "schedule": "now"}
                 """.formatted(agentId));
         assertIsOk(resp);
-        var body = getContent(resp);
         assertContentMatch("\"type\":\"IMMEDIATE\"", resp);
         assertContentMatch("\"name\":\"immediate-task\"", resp);
         assertContentMatch("\"scheduleDisplay\":\"now\"", resp);
@@ -159,30 +160,21 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
         assertStatus(400, resp);
     }
 
-    @Test
-    void rejectsMissingName() {
+    /**
+     * Four validation rejections that share the same seedAgent + POST + 400
+     * skeleton: missing name, blank name, missing schedule, garbage schedule
+     * (the last is the @Test below).
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "rejectsMissingName     | {\"agentId\": %d, \"schedule\": \"now\"}",
+            "rejectsBlankName       | {\"agentId\": %d, \"name\": \"   \", \"schedule\": \"now\"}",
+            "rejectsMissingSchedule | {\"agentId\": %d, \"name\": \"x\"}",
+            "rejectsGarbageSchedule | {\"agentId\": %d, \"name\": \"x\", \"schedule\": \"tomorrow\"}"
+    })
+    void rejectsInvalidTaskBody(String label, String bodyTemplate) {
         var agentId = seedAgent();
-        var resp = POST("/api/tasks", "application/json", """
-                {"agentId": %d, "schedule": "now"}
-                """.formatted(agentId));
-        assertStatus(400, resp);
-    }
-
-    @Test
-    void rejectsBlankName() {
-        var agentId = seedAgent();
-        var resp = POST("/api/tasks", "application/json", """
-                {"agentId": %d, "name": "   ", "schedule": "now"}
-                """.formatted(agentId));
-        assertStatus(400, resp);
-    }
-
-    @Test
-    void rejectsMissingSchedule() {
-        var agentId = seedAgent();
-        var resp = POST("/api/tasks", "application/json", """
-                {"agentId": %d, "name": "x"}
-                """.formatted(agentId));
+        var resp = POST("/api/tasks", "application/json", bodyTemplate.formatted(agentId));
         assertStatus(400, resp);
     }
 
@@ -197,15 +189,6 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
         // Hint should surface the 5-field count and the prepend-0 fix.
         assertTrue(body.contains("5 fields"),
                 "400 body should call out 5-field count; got: " + body);
-    }
-
-    @Test
-    void rejectsGarbageSchedule() {
-        var agentId = seedAgent();
-        var resp = POST("/api/tasks", "application/json", """
-                {"agentId": %d, "name": "x", "schedule": "tomorrow"}
-                """.formatted(agentId));
-        assertStatus(400, resp);
     }
 
     // --- 409 conflict (recurring duplicate) ---

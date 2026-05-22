@@ -143,12 +143,10 @@ class SessionsHistoryToolTest extends UnitTest {
     @Test
     void paginationViaBeforeMessageIdWalksBack() throws Exception {
         var run = seedRun();
-        // Seed five messages, capture their ids in chronological order.
-        var ids = new java.util.ArrayList<Long>();
+        // Seed five messages in chronological order — turn-0 .. turn-4.
         for (int i = 0; i < 5; i++) {
             var role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
-            var msg = seedMessage(childConv, role, "turn-" + i, null);
-            ids.add(msg.id);
+            seedMessage(childConv, role, "turn-" + i, null);
         }
 
         // First page: limit=3 returns the OLDEST 3 (oldest-first chronological

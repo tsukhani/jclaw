@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 import models.Task;
 import services.EventLogger;
@@ -56,13 +58,34 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
         return m.group(1);
     }
 
-    // --- cancel ---
-
-    @Test
-    void cancelReturns404ForUnknownTask() {
-        var resp = POST("/api/tasks/999999/cancel", "application/json", "");
+    /**
+     * Every lifecycle action (cancel/pause/resume/run) returns 404 when the
+     * task id doesn't exist. Single matrix covers all four endpoints.
+     */
+    @ParameterizedTest(name = "{0}Returns404ForUnknownTask")
+    @ValueSource(strings = {"cancel", "pause", "resume", "run"})
+    void lifecycleActionReturns404ForUnknownTask(String action) {
+        var resp = POST("/api/tasks/999999/" + action, "application/json", "");
         assertEquals(404, resp.status.intValue());
     }
+
+    /**
+     * Cancel, pause, and resume all reject with 400 when invoked on a task
+     * that's already in a terminal state (CANCELLED). The setup pattern
+     * (seed agent + task + initial cancel) and the assertion shape are
+     * identical across the three.
+     */
+    @ParameterizedTest(name = "{0}RejectsNonPendingTaskWith400")
+    @ValueSource(strings = {"cancel", "pause", "resume"})
+    void lifecycleActionRejectsNonPendingTaskWith400(String action) {
+        var agentId = seedAgent();
+        var taskId = seedTask(agentId, action + "-after-cancel", "every 1h");
+        assertIsOk(POST("/api/tasks/" + taskId + "/cancel", "application/json", ""));
+        var resp = POST("/api/tasks/" + taskId + "/" + action, "application/json", "");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    // --- cancel ---
 
     @Test
     void cancelTransitionsPendingToCancelled() {
@@ -75,24 +98,7 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
                 "task must report CANCELLED: " + getContent(resp));
     }
 
-    @Test
-    void cancelRejectsNonPendingTaskWith400() {
-        var agentId = seedAgent();
-        var taskId = seedTask(agentId, "double-cancel", "every 1h");
-        // First cancel moves to CANCELLED.
-        assertIsOk(POST("/api/tasks/" + taskId + "/cancel", "application/json", ""));
-        // Second cancel must reject since task is no longer PENDING.
-        var resp = POST("/api/tasks/" + taskId + "/cancel", "application/json", "");
-        assertEquals(400, resp.status.intValue());
-    }
-
     // --- pause ---
-
-    @Test
-    void pauseReturns404ForUnknownTask() {
-        var resp = POST("/api/tasks/999999/pause", "application/json", "");
-        assertEquals(404, resp.status.intValue());
-    }
 
     @Test
     void pauseSucceedsForPendingTask() {
@@ -102,22 +108,7 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
         assertIsOk(resp);
     }
 
-    @Test
-    void pauseRejectsNonPendingTaskWith400() {
-        var agentId = seedAgent();
-        var taskId = seedTask(agentId, "pause-after-cancel", "every 1h");
-        assertIsOk(POST("/api/tasks/" + taskId + "/cancel", "application/json", ""));
-        var resp = POST("/api/tasks/" + taskId + "/pause", "application/json", "");
-        assertEquals(400, resp.status.intValue());
-    }
-
     // --- resume ---
-
-    @Test
-    void resumeReturns404ForUnknownTask() {
-        var resp = POST("/api/tasks/999999/resume", "application/json", "");
-        assertEquals(404, resp.status.intValue());
-    }
 
     @Test
     void resumeSucceedsForPendingTask() {
@@ -127,22 +118,5 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
         assertIsOk(POST("/api/tasks/" + taskId + "/pause", "application/json", ""));
         var resp = POST("/api/tasks/" + taskId + "/resume", "application/json", "");
         assertIsOk(resp);
-    }
-
-    @Test
-    void resumeRejectsNonPendingTaskWith400() {
-        var agentId = seedAgent();
-        var taskId = seedTask(agentId, "resume-after-cancel", "every 1h");
-        assertIsOk(POST("/api/tasks/" + taskId + "/cancel", "application/json", ""));
-        var resp = POST("/api/tasks/" + taskId + "/resume", "application/json", "");
-        assertEquals(400, resp.status.intValue());
-    }
-
-    // --- run (operator-initiated immediate fire) ---
-
-    @Test
-    void runReturns404ForUnknownTask() {
-        var resp = POST("/api/tasks/999999/run", "application/json", "");
-        assertEquals(404, resp.status.intValue());
     }
 }

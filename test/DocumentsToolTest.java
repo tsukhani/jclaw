@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.ConfigService;
 import services.OcrHealthProbe;
@@ -43,12 +45,24 @@ class DocumentsToolTest extends UnitTest {
         assertEquals(desired, out);
     }
 
-    @Test
-    void existingFile_picksFirstFreeSuffix() throws Exception {
-        var desired = tmp.resolve("report.docx");
+    /**
+     * Single-collision suffix resolution across the filename shapes the
+     * helper has to handle: regular extension, spaces-and-hyphens, no
+     * extension, and the dot-file edge case (leading dot is part of the
+     * base name, not an extension separator).
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "existingFile_picksFirstFreeSuffix             | report.docx                          | report-1.docx",
+            "nameWithSpacesAndHyphens_suffixesBeforeExt    | Shiva Play - ENHANCED VERSION.docx   | Shiva Play - ENHANCED VERSION-1.docx",
+            "noExtension_suffixesAtEnd                     | README                               | README-1",
+            "hiddenDotFile_treatsLeadingDotAsPartOfBase    | .hidden                              | .hidden-1"
+    })
+    void resolveNonConflicting_singleCollisionShapes(String label, String fileName, String expected) throws Exception {
+        var desired = tmp.resolve(fileName);
         Files.writeString(desired, "x");
         var out = DocumentsTool.resolveNonConflicting(desired);
-        assertEquals(tmp.resolve("report-1.docx"), out);
+        assertEquals(tmp.resolve(expected), out);
     }
 
     @Test
@@ -58,32 +72,6 @@ class DocumentsToolTest extends UnitTest {
         Files.writeString(tmp.resolve("report-2.docx"), "x");
         var out = DocumentsTool.resolveNonConflicting(tmp.resolve("report.docx"));
         assertEquals(tmp.resolve("report-3.docx"), out);
-    }
-
-    @Test
-    void nameWithSpacesAndHyphens_suffixesBeforeExtension() throws Exception {
-        var desired = tmp.resolve("Shiva Play - ENHANCED VERSION.docx");
-        Files.writeString(desired, "x");
-        var out = DocumentsTool.resolveNonConflicting(desired);
-        assertEquals(tmp.resolve("Shiva Play - ENHANCED VERSION-1.docx"), out);
-    }
-
-    @Test
-    void noExtension_suffixesAtEnd() throws Exception {
-        var desired = tmp.resolve("README");
-        Files.writeString(desired, "x");
-        var out = DocumentsTool.resolveNonConflicting(desired);
-        assertEquals(tmp.resolve("README-1"), out);
-    }
-
-    @Test
-    void hiddenDotFile_treatsLeadingDotAsPartOfBase() throws Exception {
-        // ".hidden" has no extension; the leading dot belongs to the base name.
-        // A naive lastIndexOf('.') would produce " (1).hidden" — wrong.
-        var desired = tmp.resolve(".hidden");
-        Files.writeString(desired, "x");
-        var out = DocumentsTool.resolveNonConflicting(desired);
-        assertEquals(tmp.resolve(".hidden-1"), out);
     }
 
     // ----- JCLAW-177: Tika TesseractOCRParser integration ---------------------

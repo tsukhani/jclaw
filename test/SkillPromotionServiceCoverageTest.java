@@ -145,13 +145,15 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         var agent = createAgent("vtool-unknown");
         var dir = globalSkillsDir.resolve("needs-fake");
         Files.createDirectories(dir);
-        Files.writeString(dir.resolve("SKILL.md"),
-                "---\n"
-              + "name: needs-fake\n"
-              + "description: depends on a tool that does not exist\n"
-              + "version: 1.0.0\n"
-              + "tools: [definitely_not_a_real_tool_name_xyz]\n"
-              + "---\n# body\n");
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: needs-fake
+                description: depends on a tool that does not exist
+                version: 1.0.0
+                tools: [definitely_not_a_real_tool_name_xyz]
+                ---
+                # body
+                """);
 
         var result = SkillPromotionService.validateToolRequirements(agent, "needs-fake");
         assertFalse(result.ok(), "unknown tool dependency must fail validation");
@@ -606,13 +608,15 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         var agent = createAgent("vtool-disabled");
         var dir = globalSkillsDir.resolve("needs-disabled");
         Files.createDirectories(dir);
-        Files.writeString(dir.resolve("SKILL.md"),
-                "---\n"
-              + "name: needs-disabled\n"
-              + "description: depends on a tool the agent has disabled\n"
-              + "version: 1.0.0\n"
-              + "tools: [filesystem]\n"
-              + "---\n# body\n");
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: needs-disabled
+                description: depends on a tool the agent has disabled
+                version: 1.0.0
+                tools: [filesystem]
+                ---
+                # body
+                """);
         agents.SkillLoader.clearCache();
 
         services.Tx.run(() -> {

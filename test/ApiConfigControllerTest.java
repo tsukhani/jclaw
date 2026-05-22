@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.ConfigService;
 
@@ -78,19 +80,20 @@ class ApiConfigControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"value\":\"compact\""));
     }
 
-    @Test
-    void saveReturns400OnMissingFields() {
+    /**
+     * Three POST validation branches share the login + POST + assertEquals
+     * shape: missing-fields (400), blank-key (400), reserved-key-prefix (409).
+     */
+    @ParameterizedTest(name = "save[{0}]Returns[{1}]")
+    @CsvSource(delimiter = '|', value = {
+            "MissingFields       | 400 | {}",
+            "BlankKey            | 400 | {\"key\":\"\",\"value\":\"v\"}",
+            "ReservedKeyPrefix   | 409 | {\"key\":\"auth.internal.something\",\"value\":\"v\"}"
+    })
+    void saveReturnsExpectedStatus(String label, int expectedStatus, String body) {
         login();
-        var resp = POST("/api/config", "application/json", "{}");
-        assertEquals(400, resp.status.intValue());
-    }
-
-    @Test
-    void saveReturns400OnBlankKey() {
-        login();
-        var resp = POST("/api/config", "application/json",
-                "{\"key\":\"\",\"value\":\"v\"}");
-        assertEquals(400, resp.status.intValue());
+        var resp = POST("/api/config", "application/json", body);
+        assertEquals(expectedStatus, resp.status.intValue());
     }
 
     @Test
@@ -100,15 +103,6 @@ class ApiConfigControllerTest extends FunctionalTest {
                 "{\"key\":\"ui.locale\",\"value\":\"en\"}");
         assertIsOk(resp);
         assertTrue(getContent(resp).contains("\"status\":\"ok\""));
-    }
-
-    @Test
-    void saveRejectsReservedKeyPrefix() {
-        // Reserved prefix (internal.*) — controller answers 409.
-        login();
-        var resp = POST("/api/config", "application/json",
-                "{\"key\":\"auth.internal.something\",\"value\":\"v\"}");
-        assertEquals(409, resp.status.intValue());
     }
 
     @Test

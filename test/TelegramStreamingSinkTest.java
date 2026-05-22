@@ -1,5 +1,7 @@
 import channels.TelegramStreamingSink;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 
 /**
@@ -33,20 +35,19 @@ class TelegramStreamingSinkTest extends UnitTest {
                 TelegramStreamingSink.stripImageRefs(input));
     }
 
-    @Test
-    void stripImageRefsLeavesRegularLinksAlone() {
-        // Plain markdown links ([text](url)) — not images — must pass through
-        // so the seal-time planner can see them.
-        var input = "See [the docs](https://example.com/docs) for more.";
-        assertEquals(input, TelegramStreamingSink.stripImageRefs(input));
-    }
-
-    @Test
-    void stripImageRefsLeavesFileReferencesAlone() {
-        // JClaw workspace-file convention is [label](<path>) — the angle
-        // brackets mean this isn't an image and must survive streaming so
-        // the seal path's TelegramOutboundPlanner can still handle it.
-        var input = "Check [report.pdf](<workspace/report.pdf>) for details.";
+    /**
+     * Three "no images present" inputs all pass through stripImageRefs
+     * unchanged: a plain markdown link, the workspace-file
+     * [label](&lt;path&gt;) convention, and a string with bold/italic/code
+     * but no image markup.
+     */
+    @ParameterizedTest(name = "stripImageRefsLeaves[{0}]Alone")
+    @CsvSource(delimiter = '|', value = {
+            "RegularLink      | See [the docs](https://example.com/docs) for more.",
+            "FileReference    | Check [report.pdf](<workspace/report.pdf>) for details.",
+            "NoImagesContent  | Plain text with **bold** and _italic_ and a `code` block."
+    })
+    void stripImageRefsLeavesNonImageContentAlone(String label, String input) {
         assertEquals(input, TelegramStreamingSink.stripImageRefs(input));
     }
 
@@ -54,12 +55,6 @@ class TelegramStreamingSinkTest extends UnitTest {
     void stripImageRefsHandlesNullAndEmpty() {
         assertEquals("", TelegramStreamingSink.stripImageRefs(null));
         assertEquals("", TelegramStreamingSink.stripImageRefs(""));
-    }
-
-    @Test
-    void stripImageRefsPreservesContentWithoutImages() {
-        var input = "Plain text with **bold** and _italic_ and a `code` block.";
-        assertEquals(input, TelegramStreamingSink.stripImageRefs(input));
     }
 
     // === update / state transitions ===

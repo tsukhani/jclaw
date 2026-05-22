@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import agents.MessageDeduplicator;
 
@@ -225,34 +227,23 @@ class AgentRunnerDedupTest extends UnitTest {
                 "blank channel should also skip");
     }
 
-    @Test
-    void buildDownloadSuffixSkipsWhenLlmAlreadyIncludedLink() {
+    /**
+     * Three "LLM already mentioned the file" shapes that all suppress the
+     * download suffix on web: a markdown link, a re-embedded image, and an
+     * HTML anchor.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "markdownLink | Here's the page [screenshot](/api/agents/1/files/screenshot-A.png).",
+            "imageReembed | ![Here you go](/api/agents/1/files/screenshot-A.png)",
+            "htmlAnchor   | <a href=\"/api/agents/1/files/screenshot-A.png\">here</a>"
+    })
+    void buildDownloadSuffixSkipsWhenLlmAlreadyReferencedFile(String label, String content) {
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-A.png)");
-        var content = "Here's the page [screenshot](/api/agents/1/files/screenshot-A.png).";
         var suffix = MessageDeduplicator.buildDownloadSuffix(collected, content, "web");
         assertEquals("", suffix,
-                "LLM already linked the file — suffix must be empty to avoid duplicate links");
-    }
-
-    @Test
-    void buildDownloadSuffixSkipsWhenLlmReembeddedAsImage() {
-        List<String> collected = List.of(
-                "![Screenshot](/api/agents/1/files/screenshot-A.png)");
-        var content = "![Here you go](/api/agents/1/files/screenshot-A.png)";
-        var suffix = MessageDeduplicator.buildDownloadSuffix(collected, content, "web");
-        assertEquals("", suffix,
-                "re-embed counts as a link for filename dedup — no suffix needed");
-    }
-
-    @Test
-    void buildDownloadSuffixSkipsWhenLlmUsedHtmlAnchor() {
-        List<String> collected = List.of(
-                "![Screenshot](/api/agents/1/files/screenshot-A.png)");
-        var content = "<a href=\"/api/agents/1/files/screenshot-A.png\">here</a>";
-        var suffix = MessageDeduplicator.buildDownloadSuffix(collected, content, "web");
-        assertEquals("", suffix,
-                "<a href=...> counts as a link for filename dedup");
+                label + " counts as a link for filename dedup — no suffix needed");
     }
 
     @Test

@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 import models.Agent;
 
@@ -249,29 +251,12 @@ class ApiAgentsControllerTest extends FunctionalTest {
     // Prompt breakdown — non-web channels
     // =====================
 
-    @Test
-    void promptBreakdownAcceptsTelegramChannel() {
+    @ParameterizedTest(name = "promptBreakdownAccepts{0}Channel")
+    @ValueSource(strings = {"telegram", "slack", "whatsapp"})
+    void promptBreakdownAcceptsNonWebChannel(String channelType) {
         login();
-        var id = createAgent("prompt-telegram");
-        var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=telegram");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-    }
-
-    @Test
-    void promptBreakdownAcceptsSlackChannel() {
-        login();
-        var id = createAgent("prompt-slack");
-        var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=slack");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-    }
-
-    @Test
-    void promptBreakdownAcceptsWhatsAppChannel() {
-        login();
-        var id = createAgent("prompt-whatsapp");
-        var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=whatsapp");
+        var id = createAgent("prompt-" + channelType);
+        var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=" + channelType);
         assertIsOk(response);
         assertContentType("application/json", response);
     }

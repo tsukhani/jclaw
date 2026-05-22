@@ -4,6 +4,8 @@ import models.McpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 
@@ -104,30 +106,19 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         assertEquals(409, resp.status.intValue());
     }
 
-    @Test
-    void createRejectsBadName() {
+    /**
+     * Three create-rejection shapes that share the login + POST + 400 skeleton:
+     * bad slug, HTTP transport with no url, STDIO transport with no command.
+     */
+    @ParameterizedTest(name = "createRejects[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "BadName              | {\"name\":\"bad name\",\"enabled\":false,\"transport\":\"HTTP\",\"url\":\"http://x/mcp\"}",
+            "HttpWithoutUrl       | {\"name\":\"noUrl\",\"enabled\":false,\"transport\":\"HTTP\"}",
+            "StdioWithoutCommand  | {\"name\":\"noCmd\",\"enabled\":false,\"transport\":\"STDIO\"}"
+    })
+    void createRejectsInvalidPayload(String label, String body) {
         login();
-        var resp = POST("/api/mcp-servers", "application/json", """
-                {"name":"bad name","enabled":false,"transport":"HTTP","url":"http://x/mcp"}
-                """);
-        assertEquals(400, resp.status.intValue());
-    }
-
-    @Test
-    void createRejectsHttpWithoutUrl() {
-        login();
-        var resp = POST("/api/mcp-servers", "application/json", """
-                {"name":"noUrl","enabled":false,"transport":"HTTP"}
-                """);
-        assertEquals(400, resp.status.intValue());
-    }
-
-    @Test
-    void createRejectsStdioWithoutCommand() {
-        login();
-        var resp = POST("/api/mcp-servers", "application/json", """
-                {"name":"noCmd","enabled":false,"transport":"STDIO"}
-                """);
+        var resp = POST("/api/mcp-servers", "application/json", body);
         assertEquals(400, resp.status.intValue());
     }
 

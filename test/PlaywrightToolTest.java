@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import agents.ToolRegistry;
 import tools.PlaywrightBrowserTool;
@@ -117,29 +119,20 @@ class PlaywrightToolTest extends UnitTest {
                 "error message names the SSRF guard: " + result);
     }
 
-    @Test
-    void navigateRejectsLoopbackAddress() {
+    /**
+     * SSRF + scheme guards: loopback, RFC1918 private network, and the
+     * file:// scheme all must be rejected before Playwright is invoked.
+     */
+    @ParameterizedTest(name = "navigateRejects[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "LoopbackAddress       | http://127.0.0.1:9000/admin",
+            "PrivateNetworkAddress | http://10.0.0.5/",
+            "FileScheme            | file:///etc/passwd"
+    })
+    void navigateRejectsUnsafeUrl(String label, String url) {
         var tool = new PlaywrightBrowserTool();
         var result = tool.execute(
-                "{\"action\":\"navigate\",\"url\":\"http://127.0.0.1:9000/admin\"}",
-                agent);
-        assertTrue(result.startsWith("Error"));
-    }
-
-    @Test
-    void navigateRejectsPrivateNetworkAddress() {
-        var tool = new PlaywrightBrowserTool();
-        var result = tool.execute(
-                "{\"action\":\"navigate\",\"url\":\"http://10.0.0.5/\"}",
-                agent);
-        assertTrue(result.startsWith("Error"));
-    }
-
-    @Test
-    void navigateRejectsFileScheme() {
-        var tool = new PlaywrightBrowserTool();
-        var result = tool.execute(
-                "{\"action\":\"navigate\",\"url\":\"file:///etc/passwd\"}",
+                "{\"action\":\"navigate\",\"url\":\"" + url + "\"}",
                 agent);
         assertTrue(result.startsWith("Error"));
     }

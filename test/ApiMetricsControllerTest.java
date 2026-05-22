@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.Play;
 import play.mvc.Http;
 import play.test.*;
@@ -313,42 +315,29 @@ class ApiMetricsControllerTest extends FunctionalTest {
         assertEquals(403, response.status.intValue());
     }
 
-    @Test
-    void loadtestRejectsInvalidConcurrency() {
-        // With auth gate satisfied, body validation runs and returns 400.
-        // This test doubly proves the guard accepts a valid request — if the
-        // guard wrongly rejected, we'd see 403 not 400.
+    /**
+     * Loadtest body-validation rejections — every one of these payloads must
+     * fail validation with 400 once the auth gate is satisfied. Body
+     * branches: invalid concurrency, invalid turns, prompts-shorter-than-
+     * turns, conflicting prompts+userMessage, provider/model XOR, helper
+     * type-coercion paths (non-int concurrency, non-bool compress, non-array
+     * prompts).
+     */
+    @ParameterizedTest(name = "loadtestRejects[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "InvalidConcurrency             | {\"concurrency\":0,\"turns\":1}",
+            "InvalidTurns                   | {\"concurrency\":1,\"turns\":9999}",
+            "PromptsShorterThanTurns        | {\"concurrency\":1,\"turns\":3,\"prompts\":[\"q1\",\"q2\"]}",
+            "PromptsAndUserMessageTogether  | {\"concurrency\":1,\"turns\":1,\"prompts\":[\"q\"],\"userMessage\":\"hi\"}",
+            "ProviderWithoutModel           | {\"concurrency\":1,\"turns\":1,\"provider\":\"openrouter\"}",
+            "ModelWithoutProvider           | {\"concurrency\":1,\"turns\":1,\"model\":\"gpt-4.1\"}",
+            "NonIntegerConcurrency          | {\"concurrency\":\"abc\",\"turns\":1}",
+            "NonBoolCompress                | {\"concurrency\":1,\"turns\":1,\"compress\":[1,2,3]}",
+            "NonArrayPrompts                | {\"concurrency\":1,\"turns\":1,\"prompts\":\"not-an-array\"}"
+    })
+    void loadtestRejectsInvalidBody(String label, String body) {
         var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":0,\"turns\":1}");
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void loadtestRejectsInvalidTurns() {
-        var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":1,\"turns\":9999}");
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void loadtestRejectsPromptsShorterThanTurns() {
-        // Three turns requested but only two prompts supplied — workers would
-        // index out of bounds on turn 3 if this slipped through validation.
-        var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":1,\"turns\":3,\"prompts\":[\"q1\",\"q2\"]}");
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void loadtestRejectsPromptsAndUserMessageTogether() {
-        // The two carry conflicting per-turn message strategies; allowing both
-        // would silently let one win and confuse operators about which fired.
-        var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":1,\"turns\":1,\"prompts\":[\"q\"],\"userMessage\":\"hi\"}");
+                "/api/metrics/loadtest", "application/json", body);
         assertEquals(400, response.status.intValue());
     }
 
@@ -620,49 +609,6 @@ class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     // --- loadtest body-validation branches (provider/model XOR + helper catch paths) ---
-
-    @Test
-    void loadtestRejectsProviderWithoutModel() {
-        var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":1,\"turns\":1,\"provider\":\"openrouter\"}");
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void loadtestRejectsModelWithoutProvider() {
-        var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":1,\"turns\":1,\"model\":\"gpt-4.1\"}");
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void loadtestRejectsNonIntegerConcurrency() {
-        // readInt's catch path: getAsInt throws on a non-numeric JSON string.
-        var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":\"abc\",\"turns\":1}");
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void loadtestRejectsNonBoolCompress() {
-        // readBool's catch path: getAsBoolean throws on a non-bool-coercible value.
-        var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":1,\"turns\":1,\"compress\":[1,2,3]}");
-        assertEquals(400, response.status.intValue());
-    }
-
-    @Test
-    void loadtestRejectsNonArrayPrompts() {
-        // prompts must be an array; a string here trips the JsonArray cast.
-        var response = POST(authedLoadtestRequest(),
-                "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":1,\"turns\":1,\"prompts\":\"not-an-array\"}");
-        assertEquals(400, response.status.intValue());
-    }
 
     @Test
     void loadtestAcceptsNullValuedOptionalField() {

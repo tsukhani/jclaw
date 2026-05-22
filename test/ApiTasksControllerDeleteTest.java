@@ -77,37 +77,12 @@ class ApiTasksControllerDeleteTest extends FunctionalTest {
     }
 
     /**
-     * Mutate the entity on a fresh virtual thread + Tx so the change
-     * commits before the next HTTP request runs through the
-     * FunctionalTest carrier's ambient transaction. Same pattern the
-     * Retry/Run tests use.
-     */
-    private static void mutateAndCommit(Long taskId, java.util.function.Consumer<Task> mutator) {
-        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var t = Thread.ofVirtual().start(() -> {
-            try {
-                Tx.run(() -> {
-                    var task = (Task) Task.findById(taskId);
-                    mutator.accept(task);
-                    task.save();
-                });
-            } catch (Throwable ex) {
-                err.set(ex);
-            }
-        });
-        try {
-            t.join();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        }
-        if (err.get() != null) throw new RuntimeException(err.get());
-    }
-
-    /**
      * Insert a synthetic TaskRun row referencing the given task so we
      * can assert the cascade. Done outside the FunctionalTest carrier
-     * tx for the same commit-visibility reason as mutateAndCommit.
+     * tx for the same commit-visibility reason as the other helpers in
+     * this file — fresh virtual thread + Tx commits before the next
+     * HTTP request runs through the FunctionalTest carrier's ambient
+     * transaction.
      */
     private static void persistTaskRun(Long taskId) {
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();

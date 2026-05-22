@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.ModelDiscoveryService;
 import com.google.gson.JsonObject;
@@ -407,30 +409,19 @@ class ModelDiscoveryServiceTest extends UnitTest {
         assertEquals(3.0, price, 0.001);
     }
 
-    @Test
-    void inferPriceWithMissingField() {
-        var obj = JsonParser.parseString("""
-                {"pricing": {"prompt": "0.000003"}}
-                """).getAsJsonObject();
-        double price = ModelDiscoveryService.inferPrice(obj, "completion");
-        assertEquals(-1, price, 0.001);
-    }
-
-    @Test
-    void inferPriceWithNoPricingObject() {
-        var obj = JsonParser.parseString("""
-                {"id": "some-model"}
-                """).getAsJsonObject();
-        double price = ModelDiscoveryService.inferPrice(obj, "prompt");
-        assertEquals(-1, price, 0.001);
-    }
-
-    @Test
-    void inferPriceWithNullField() {
-        var obj = JsonParser.parseString("""
-                {"pricing": {"prompt": null}}
-                """).getAsJsonObject();
-        double price = ModelDiscoveryService.inferPrice(obj, "prompt");
+    /**
+     * Three "absent price" inference paths all return -1: field missing
+     * from pricing, no pricing object at all, and explicit null field.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "MissingField    | {\"pricing\": {\"prompt\": \"0.000003\"}} | completion",
+            "NoPricingObject | {\"id\": \"some-model\"}                  | prompt",
+            "NullField       | {\"pricing\": {\"prompt\": null}}         | prompt"
+    })
+    void inferPriceReturnsMinusOneForAbsentPrice(String label, String json, String field) {
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+        double price = ModelDiscoveryService.inferPrice(obj, field);
         assertEquals(-1, price, 0.001);
     }
 

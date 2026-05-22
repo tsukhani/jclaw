@@ -117,8 +117,19 @@ class TaskFireFunctionalTest extends UnitTest {
 
         JPA.em().clear();
 
-        // === TaskRun lifecycle ===
-        var runs = listRunsForTask(task.id);
+        var run = assertSingleCompletedRun(task.id);
+        assertTaskRunTranscript(run.id);
+
+        EventLogger.flush();
+        assertLifecycleEvents(agent.name, task.id, run.id);
+    }
+
+    /**
+     * Verifies the TaskRun row closed COMPLETED with all lifecycle fields
+     * populated. Returns the run for downstream id-based checks.
+     */
+    private TaskRun assertSingleCompletedRun(Long taskId) {
+        var runs = listRunsForTask(taskId);
         assertEquals(1, runs.size(), "exactly one TaskRun for this fire");
         var run = runs.getFirst();
         assertEquals(TaskRun.Status.COMPLETED, run.status,
@@ -130,17 +141,28 @@ class TaskFireFunctionalTest extends UnitTest {
         assertEquals("Daily summary: nothing happened yesterday.", run.outputSummary,
                 "outputSummary carries the model's final reply");
         assertNull(run.error, "no error on a clean fire");
+        return run;
+    }
 
-        // === task_run_message transcript ===
-        var msgs = loadMessages(run.id);
+    /**
+     * Verifies the task_run_message transcript captured both turns of the
+     * conversation in order.
+     */
+    private void assertTaskRunTranscript(Long runId) {
+        var msgs = loadMessages(runId);
         assertEquals(2, msgs.size(), "user + assistant turns persisted");
         assertEquals(MessageRole.USER, msgs.get(0).role);
         assertEquals("Summarise yesterday's activity.", msgs.get(0).content);
         assertEquals(MessageRole.ASSISTANT, msgs.get(1).role);
         assertEquals("Daily summary: nothing happened yesterday.", msgs.get(1).content);
+    }
 
-        // === Lifecycle event_log ===
-        EventLogger.flush();
+    /**
+     * Verifies the TASK_STARTED + TASK_COMPLETED lifecycle events fired
+     * exactly once each, carry the expected ids, and that no TASK_FAILED
+     * event leaked from the happy path.
+     */
+    private void assertLifecycleEvents(String agentName, Long taskId, Long runId) {
         var startedEvents = loadEventsByCategory("TASK_STARTED");
         var completedEvents = loadEventsByCategory("TASK_COMPLETED");
         assertEquals(1, startedEvents.size(), "exactly one TASK_STARTED for this fire");
@@ -148,27 +170,26 @@ class TaskFireFunctionalTest extends UnitTest {
 
         var started = startedEvents.getFirst();
         assertEquals("INFO", started.level);
-        assertEquals(agent.name, started.agentId,
+        assertEquals(agentName, started.agentId,
                 "TASK_STARTED carries the executing agent's name");
         assertTrue(started.message.contains("Daily summary"),
                 "TASK_STARTED message references the task name");
-        assertTrue(started.details != null && started.details.contains("\"task_id\":" + task.id),
+        assertTrue(started.details != null && started.details.contains("\"task_id\":" + taskId),
                 "TASK_STARTED details carry task_id");
-        assertTrue(started.details.contains("\"run_id\":" + run.id),
+        assertTrue(started.details.contains("\"run_id\":" + runId),
                 "TASK_STARTED details carry run_id");
         assertTrue(started.details.contains("\"type\":\"IMMEDIATE\""),
                 "TASK_STARTED details carry the Task.Type");
 
         var completed = completedEvents.getFirst();
         assertEquals("INFO", completed.level);
-        assertTrue(completed.details.contains("\"task_id\":" + task.id),
+        assertTrue(completed.details.contains("\"task_id\":" + taskId),
                 "TASK_COMPLETED carries task_id");
-        assertTrue(completed.details.contains("\"run_id\":" + run.id),
+        assertTrue(completed.details.contains("\"run_id\":" + runId),
                 "TASK_COMPLETED carries run_id");
         assertTrue(completed.details.contains("\"duration_ms\":"),
                 "TASK_COMPLETED carries duration_ms");
 
-        // Sanity: no TASK_FAILED on a clean fire.
         assertTrue(loadEventsByCategory("TASK_FAILED").isEmpty(),
                 "TASK_FAILED must not fire on a successful run");
     }

@@ -713,14 +713,15 @@ class ApiSkillsControllerTest extends FunctionalTest {
         // and the controller responds 400 with the validator's message.
         var dir = globalSkillsDir.resolve("needs-fake-tool");
         Files.createDirectories(dir);
-        Files.writeString(dir.resolve("SKILL.md"),
-                "---\n"
-              + "name: needs-fake-tool\n"
-              + "description: depends on a tool that does not exist\n"
-              + "version: 1.0.0\n"
-              + "tools: [definitely_not_a_real_tool_xyz]\n"
-              + "---\n"
-              + "# body\n");
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: needs-fake-tool
+                description: depends on a tool that does not exist
+                version: 1.0.0
+                tools: [definitely_not_a_real_tool_xyz]
+                ---
+                # body
+                """);
         SkillLoader.clearCache();
 
         var resp = POST("/api/agents/" + idStr + "/skills/needs-fake-tool/copy",
@@ -780,16 +781,17 @@ class ApiSkillsControllerTest extends FunctionalTest {
         var dir = globalSkillsDir.resolve("declared-tools");
         Files.createDirectories(dir);
         // 'exec' is a known canonical tool name in ToolRegistry
-        Files.writeString(dir.resolve("SKILL.md"),
-                "---\n"
-              + "name: declared-tools\n"
-              + "description: declared tools test\n"
-              + "version: 1.0.0\n"
-              + "tools: [exec]\n"
-              + "author: tester\n"
-              + "commands: [echo, ls]\n"
-              + "---\n"
-              + "# body with no other tool names\n");
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: declared-tools
+                description: declared tools test
+                version: 1.0.0
+                tools: [exec]
+                author: tester
+                commands: [echo, ls]
+                ---
+                # body with no other tool names
+                """);
         SkillLoader.clearCache();
 
         var resp = GET("/api/skills/declared-tools/files");
@@ -813,14 +815,18 @@ class ApiSkillsControllerTest extends FunctionalTest {
         login();
         var dir = globalSkillsDir.resolve("bash-fence");
         Files.createDirectories(dir);
-        Files.writeString(dir.resolve("SKILL.md"),
-                "---\n"
-              + "name: bash-fence\n"
-              + "description: legacy skill, no tools declaration\n"
-              + "version: 1.0.0\n"
-              + "---\n"
-              + "# Howto\n\n"
-              + "```bash\necho hello\n```\n");
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: bash-fence
+                description: legacy skill, no tools declaration
+                version: 1.0.0
+                ---
+                # Howto
+
+                ```bash
+                echo hello
+                ```
+                """);
         SkillLoader.clearCache();
 
         var resp = GET("/api/skills/bash-fence/files");
@@ -840,13 +846,16 @@ class ApiSkillsControllerTest extends FunctionalTest {
         login();
         var dir = globalSkillsDir.resolve("alias-skill");
         Files.createDirectories(dir);
-        Files.writeString(dir.resolve("SKILL.md"),
-                "---\n"
-              + "name: alias-skill\n"
-              + "description: legacy skill with alias mention\n"
-              + "version: 1.0.0\n"
-              + "---\n"
-              + "# Body\n\nUse readFile to load data.\n");
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: alias-skill
+                description: legacy skill with alias mention
+                version: 1.0.0
+                ---
+                # Body
+
+                Use readFile to load data.
+                """);
         SkillLoader.clearCache();
 
         var resp = GET("/api/skills/alias-skill/files");
