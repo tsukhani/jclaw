@@ -5,6 +5,8 @@ import java.util.function.Function;
 
 public final class ScannerRegistry {
 
+    private static final String DISABLED_DEFAULT = "false";
+
     public record ConfigDefault(String key, String value) {}
 
     public record Registration(
@@ -29,19 +31,19 @@ public final class ScannerRegistry {
     // this flag). Operators flip the flag on after pasting a key.
     private static final List<Registration> REGISTRATIONS = List.of(
             new Registration("malwarebazaar", MalwareBazaarScanner::new, List.of(
-                    new ConfigDefault("scanner.malwarebazaar.enabled", "false"),
+                    new ConfigDefault("scanner.malwarebazaar.enabled", DISABLED_DEFAULT),
                     new ConfigDefault("scanner.malwarebazaar.authKey", ""),
                     new ConfigDefault("scanner.malwarebazaar.url", "https://mb-api.abuse.ch/api/v1/"),
                     new ConfigDefault("scanner.malwarebazaar.timeoutMs", "5000")
             )),
             new Registration("metadefender", MetaDefenderCloudScanner::new, List.of(
-                    new ConfigDefault("scanner.metadefender.enabled", "false"),
+                    new ConfigDefault("scanner.metadefender.enabled", DISABLED_DEFAULT),
                     new ConfigDefault("scanner.metadefender.apiKey", ""),
                     new ConfigDefault("scanner.metadefender.url", "https://api.metadefender.com/v4/"),
                     new ConfigDefault("scanner.metadefender.timeoutMs", "5000")
             )),
             new Registration("virustotal", VirusTotalScanner::new, List.of(
-                    new ConfigDefault("scanner.virustotal.enabled", "false"),
+                    new ConfigDefault("scanner.virustotal.enabled", DISABLED_DEFAULT),
                     new ConfigDefault("scanner.virustotal.apiKey", ""),
                     new ConfigDefault("scanner.virustotal.url", "https://www.virustotal.com/api/v3/"),
                     new ConfigDefault("scanner.virustotal.timeoutMs", "5000")

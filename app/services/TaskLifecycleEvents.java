@@ -48,6 +48,9 @@ import java.time.Instant;
  */
 public final class TaskLifecycleEvents {
 
+    private static final String KEY_TASK_ID = "task_id";
+    private static final String KEY_RUN_ID = "run_id";
+
     public static final String STARTED = "TASK_STARTED";
     public static final String COMPLETED = "TASK_COMPLETED";
     public static final String FAILED = "TASK_FAILED";
@@ -76,8 +79,8 @@ public final class TaskLifecycleEvents {
         var agentName = task.agent != null ? task.agent.name : null;
         var message = "Task '%s' fire started (run=%d)".formatted(task.name, run.id);
         var details = detailsJson(
-                "task_id", task.id,
-                "run_id", run.id,
+                KEY_TASK_ID, task.id,
+                KEY_RUN_ID, run.id,
                 "type", task.type != null ? task.type.name() : null);
         EventLogger.record("INFO", STARTED, agentName, null, message, details);
     }
@@ -93,8 +96,8 @@ public final class TaskLifecycleEvents {
         var message = "Task '%s' completed in %dms (run=%d)".formatted(
                 task.name, durationMs, run.id);
         var details = detailsJson(
-                "task_id", task.id,
-                "run_id", run.id,
+                KEY_TASK_ID, task.id,
+                KEY_RUN_ID, run.id,
                 "duration_ms", durationMs);
         EventLogger.record("INFO", COMPLETED, agentName, null, message, details);
     }
@@ -124,8 +127,8 @@ public final class TaskLifecycleEvents {
         var message = "Task '%s' failed (%s): %s".formatted(
                 task.name, classification, errorMessage);
         var details = detailsJson(
-                "task_id", task.id,
-                "run_id", run != null ? run.id : null,
+                KEY_TASK_ID, task.id,
+                KEY_RUN_ID, run != null ? run.id : null,
                 "duration_ms", durationMs,
                 "classification", classification,
                 "error_message", errorMessage);
@@ -144,7 +147,7 @@ public final class TaskLifecycleEvents {
         var message = "Task '%s' marked LOST after %ds of stale heartbeat"
                 .formatted(task.name, staleSeconds);
         var details = detailsJson(
-                "task_id", task.id,
+                KEY_TASK_ID, task.id,
                 "stale_seconds", staleSeconds);
         EventLogger.record("WARN", LOST, agentName, null, message, details);
     }

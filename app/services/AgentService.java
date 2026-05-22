@@ -27,6 +27,9 @@ import java.util.stream.Stream;
 
 public class AgentService {
 
+    private static final String LOG_CATEGORY = "agent";
+    private static final String PARAM_AGENT_ID = "agentId";
+
     private AgentService() {}
 
     /**
@@ -143,7 +146,7 @@ public class AgentService {
                             .formatted(name, e.getMessage()));
         }
 
-        EventLogger.info("agent", name, null, "Agent '%s' created (provider: %s, model: %s)"
+        EventLogger.info(LOG_CATEGORY, name, null, "Agent '%s' created (provider: %s, model: %s)"
                 .formatted(name, modelProvider, modelId));
         return agent;
     }
@@ -301,10 +304,10 @@ public class AgentService {
         // MessageAttachment first — FK has no ON DELETE CASCADE (see ConversationService.deleteByIds).
         em.createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation.id IN " +
                         "(SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN " +
                         "(SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         // SubagentRun rows reference Agent (parent + child) and Conversation
         // (parent + child) via four NOT NULL FKs. Any run where this agent
         // is either side, or where any of its conversations is either side,
@@ -317,19 +320,19 @@ public class AgentService {
                         + "OR r.childAgent.id = :agentId "
                         + "OR r.parentConversation.id IN (SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId) "
                         + "OR r.childConversation.id IN (SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM Conversation c WHERE c.agent.id = :agentId")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentToolConfig t WHERE t.agent.id = :agentId")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentSkillConfig s WHERE s.agent.id = :agentId")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentSkillAllowedTool a WHERE a.agent.id = :agentId")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentBinding b WHERE b.agent.id = :agentId")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM Task t WHERE t.agent.id = :agentId")
-                .setParameter("agentId", agentId).executeUpdate();
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.flush();
         em.clear();
 
@@ -347,7 +350,7 @@ public class AgentService {
 
         agent.delete();
         deleteWorkspaceDirectory(agentName);
-        EventLogger.info("agent", agentName, null, "Agent deleted");
+        EventLogger.info(LOG_CATEGORY, agentName, null, "Agent deleted");
     }
 
     private static void deleteWorkspaceDirectory(String agentName) {
@@ -358,7 +361,7 @@ public class AgentService {
                 try { Files.delete(p); } catch (IOException _) { /* best-effort */ }
             });
         } catch (IOException e) {
-            EventLogger.warn("agent", "Failed to remove workspace for deleted agent %s: %s"
+            EventLogger.warn(LOG_CATEGORY, "Failed to remove workspace for deleted agent %s: %s"
                     .formatted(agentName, e.getMessage()));
         }
     }
@@ -655,7 +658,7 @@ public class AgentService {
                     """, overwrite);
 
         } catch (IOException e) {
-            EventLogger.error("agent", "Failed to create workspace for agent %s: %s"
+            EventLogger.error(LOG_CATEGORY, "Failed to create workspace for agent %s: %s"
                     .formatted(agentName, e.getMessage()));
         }
     }
@@ -683,10 +686,10 @@ public class AgentService {
                 return content;
             }
         } catch (SecurityException e) {
-            EventLogger.warn("agent", "Path traversal blocked for %s/%s: %s"
+            EventLogger.warn(LOG_CATEGORY, "Path traversal blocked for %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));
         } catch (IOException e) {
-            EventLogger.warn("agent", "Failed to read workspace file %s/%s: %s"
+            EventLogger.warn(LOG_CATEGORY, "Failed to read workspace file %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));
         }
         return null;
@@ -699,10 +702,10 @@ public class AgentService {
             Files.writeString(path, content);
             fileCache.invalidate(agentName + "/" + filename);
         } catch (SecurityException e) {
-            EventLogger.warn("agent", "Path traversal blocked for %s/%s: %s"
+            EventLogger.warn(LOG_CATEGORY, "Path traversal blocked for %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));
         } catch (IOException e) {
-            EventLogger.error("agent", "Failed to write workspace file %s/%s: %s"
+            EventLogger.error(LOG_CATEGORY, "Failed to write workspace file %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));
         }
     }

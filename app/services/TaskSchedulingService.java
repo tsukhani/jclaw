@@ -71,6 +71,8 @@ import java.util.function.Supplier;
  */
 public final class TaskSchedulingService {
 
+    private static final String PARAM_TASK_ID = "taskId";
+
     /**
      * Indirection over {@code DbSchedulerBootstrapJob.scheduler()} so
      * tests can swap in a recording {@link SchedulerClient} stub
@@ -166,7 +168,7 @@ public final class TaskSchedulingService {
      * is the canonical caller and does that revive itself.
      */
     public static void runNow(Long taskId) {
-        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(taskId, PARAM_TASK_ID);
         SchedulerClient client = client();
         if (client == null) return;
         var instanceId = TaskInstanceId.of(TaskExecutionHandler.TASK_NAME, taskId.toString());
@@ -209,7 +211,7 @@ public final class TaskSchedulingService {
      * cancel is idempotent and harmless if the row isn't present.
      */
     public static void cancel(Long taskId) {
-        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(taskId, PARAM_TASK_ID);
         cancelSchedulerRow(taskId);
     }
 
@@ -287,7 +289,7 @@ public final class TaskSchedulingService {
      * Task would have fired anyway.
      */
     public static void pause(Long taskId) {
-        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(taskId, PARAM_TASK_ID);
         Tx.run(() -> {
             var task = (Task) Task.findById(taskId);
             if (task == null) return null;
@@ -307,7 +309,7 @@ public final class TaskSchedulingService {
      * skipping the body once the flag clears.
      */
     public static void resume(Long taskId) {
-        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(taskId, PARAM_TASK_ID);
         Tx.run(() -> {
             var task = (Task) Task.findById(taskId);
             if (task == null) return null;
@@ -354,7 +356,7 @@ public final class TaskSchedulingService {
      * repository, which we cannot reach through the public surface.
      */
     public static void forceRemoveStaleRow(Long taskId) {
-        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(taskId, PARAM_TASK_ID);
         var ds = DB.datasource;
         if (ds == null) return;
         var sql = "DELETE FROM scheduled_tasks WHERE task_name = ? AND task_instance = ?";

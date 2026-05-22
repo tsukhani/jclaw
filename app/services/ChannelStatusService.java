@@ -33,6 +33,8 @@ import java.util.Set;
  */
 public final class ChannelStatusService {
 
+    private static final String ENABLED_TRUE = "enabled = true";
+
     private ChannelStatusService() {}
 
     /**
@@ -48,14 +50,14 @@ public final class ChannelStatusService {
             // for any enabled agent without needing a per-channel row;
             // counting it here matches the operator's mental model that
             // "I have agents I can talk to in the browser."
-            if (Agent.count("enabled = true") > 0) {
+            if (Agent.count(ENABLED_TRUE) > 0) {
                 active.add("web");
             }
 
             // Telegram: per-binding source of truth. The polling runner
             // iterates TelegramBinding rows; ChannelConfig is never
             // consulted on the Telegram path.
-            if (TelegramBinding.count("enabled = true") > 0) {
+            if (TelegramBinding.count(ENABLED_TRUE) > 0) {
                 active.add("telegram");
             }
 
@@ -65,7 +67,7 @@ public final class ChannelStatusService {
             // rather than enumerating known kinds — adding a new
             // single-tenant channel just needs to write a ChannelConfig
             // row, no code change here.
-            List<ChannelConfig> configs = ChannelConfig.find("enabled = true").fetch();
+            List<ChannelConfig> configs = ChannelConfig.find(ENABLED_TRUE).fetch();
             for (var c : configs) {
                 if (c.channelType != null && !c.channelType.isBlank()) {
                     active.add(c.channelType);

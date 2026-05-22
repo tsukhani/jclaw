@@ -30,6 +30,11 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
 
     private static final String NAME = "MetaDefender";
 
+    private static final String FIELD_SCAN_RESULTS = "scan_results";
+    private static final String FIELD_SCAN_ALL_RESULT_I = "scan_all_result_i";
+    private static final String FIELD_SCAN_DETAILS = "scan_details";
+    private static final String FIELD_THREAT_FOUND = "threat_found";
+
     private static final OneShotWarning MISSING_KEY_WARNING = new OneShotWarning();
 
     public MetaDefenderCloudScanner() {
@@ -91,12 +96,12 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
      * operators can see which engines flagged the sample.
      */
     private Verdict parseVerdict(JsonObject json) {
-        if (!json.has("scan_results") || !json.get("scan_results").isJsonObject()) {
+        if (!json.has(FIELD_SCAN_RESULTS) || !json.get(FIELD_SCAN_RESULTS).isJsonObject()) {
             // MetaDefender sometimes returns a sparse record with no scan_results
             // when a hash has been indexed but never actually scanned. Treat as clean.
             return Verdict.clean();
         }
-        var scanResults = json.getAsJsonObject("scan_results");
+        var scanResults = json.getAsJsonObject(FIELD_SCAN_RESULTS);
 
         int resultCode = extractResultCode(scanResults);
         if (resultCode != 1) {
@@ -110,19 +115,19 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
     }
 
     private static int extractResultCode(JsonObject scanResults) {
-        if (!scanResults.has("scan_all_result_i") || scanResults.get("scan_all_result_i").isJsonNull()) {
+        if (!scanResults.has(FIELD_SCAN_ALL_RESULT_I) || scanResults.get(FIELD_SCAN_ALL_RESULT_I).isJsonNull()) {
             return -1;
         }
-        return scanResults.get("scan_all_result_i").getAsInt();
+        return scanResults.get(FIELD_SCAN_ALL_RESULT_I).getAsInt();
     }
 
     /** Walk scan_details, collecting up to 3 "engine: threat" labels for the reason string. */
     private static ArrayList<String> collectThreats(JsonObject scanResults) {
         var threats = new ArrayList<String>();
-        if (!scanResults.has("scan_details") || !scanResults.get("scan_details").isJsonObject()) {
+        if (!scanResults.has(FIELD_SCAN_DETAILS) || !scanResults.get(FIELD_SCAN_DETAILS).isJsonObject()) {
             return threats;
         }
-        var scanDetails = scanResults.getAsJsonObject("scan_details");
+        var scanDetails = scanResults.getAsJsonObject(FIELD_SCAN_DETAILS);
         for (var engineEntry : scanDetails.entrySet()) {
             var threat = extractThreatLabel(engineEntry.getKey(), engineEntry.getValue());
             if (threat != null) {
@@ -137,8 +142,8 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
     private static String extractThreatLabel(String engineName, com.google.gson.JsonElement engineResult) {
         if (!engineResult.isJsonObject()) return null;
         var engineObj = engineResult.getAsJsonObject();
-        if (!engineObj.has("threat_found") || engineObj.get("threat_found").isJsonNull()) return null;
-        var threat = engineObj.get("threat_found").getAsString();
+        if (!engineObj.has(FIELD_THREAT_FOUND) || engineObj.get(FIELD_THREAT_FOUND).isJsonNull()) return null;
+        var threat = engineObj.get(FIELD_THREAT_FOUND).getAsString();
         if (threat.isBlank()) return null;
         return engineName + ": " + threat;
     }

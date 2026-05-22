@@ -29,6 +29,12 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
 
     private static final String NAME = "VirusTotal";
 
+    private static final String FIELD_ATTRIBUTES = "attributes";
+    private static final String FIELD_LAST_ANALYSIS_STATS = "last_analysis_stats";
+    private static final String FIELD_LAST_ANALYSIS_RESULTS = "last_analysis_results";
+    private static final String FIELD_CATEGORY = "category";
+    private static final String FIELD_RESULT = "result";
+
     private static final OneShotWarning MISSING_KEY_WARNING = new OneShotWarning();
 
     public VirusTotalScanner() {
@@ -112,17 +118,17 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
     private static JsonObject extractAttributes(JsonObject json) {
         if (!json.has("data") || !json.get("data").isJsonObject()) return null;
         var data = json.getAsJsonObject("data");
-        if (!data.has("attributes") || !data.get("attributes").isJsonObject()) return null;
-        return data.getAsJsonObject("attributes");
+        if (!data.has(FIELD_ATTRIBUTES) || !data.get(FIELD_ATTRIBUTES).isJsonObject()) return null;
+        return data.getAsJsonObject(FIELD_ATTRIBUTES);
     }
 
     private static AnalysisCounts countAnalysisStats(JsonObject attributes) {
         int malicious = 0;
         int total = 0;
-        if (!attributes.has("last_analysis_stats") || !attributes.get("last_analysis_stats").isJsonObject()) {
+        if (!attributes.has(FIELD_LAST_ANALYSIS_STATS) || !attributes.get(FIELD_LAST_ANALYSIS_STATS).isJsonObject()) {
             return new AnalysisCounts(0, 0);
         }
-        var stats = attributes.getAsJsonObject("last_analysis_stats");
+        var stats = attributes.getAsJsonObject(FIELD_LAST_ANALYSIS_STATS);
         for (var statEntry : stats.entrySet()) {
             if (!statEntry.getValue().isJsonPrimitive() || !statEntry.getValue().getAsJsonPrimitive().isNumber()) {
                 continue;
@@ -139,10 +145,10 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
     /** Walk last_analysis_results, collecting up to 3 "engine: threat" labels for the reason string. */
     private static ArrayList<String> collectMaliciousThreats(JsonObject attributes) {
         var threats = new ArrayList<String>();
-        if (!attributes.has("last_analysis_results") || !attributes.get("last_analysis_results").isJsonObject()) {
+        if (!attributes.has(FIELD_LAST_ANALYSIS_RESULTS) || !attributes.get(FIELD_LAST_ANALYSIS_RESULTS).isJsonObject()) {
             return threats;
         }
-        var results = attributes.getAsJsonObject("last_analysis_results");
+        var results = attributes.getAsJsonObject(FIELD_LAST_ANALYSIS_RESULTS);
         for (var engineEntry : results.entrySet()) {
             var label = extractMaliciousLabel(engineEntry.getKey(), engineEntry.getValue());
             if (label != null) {
@@ -157,11 +163,11 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
     private static String extractMaliciousLabel(String engineName, com.google.gson.JsonElement engineResult) {
         if (!engineResult.isJsonObject()) return null;
         var engineObj = engineResult.getAsJsonObject();
-        var category = engineObj.has("category") && !engineObj.get("category").isJsonNull()
-                ? engineObj.get("category").getAsString() : "";
+        var category = engineObj.has(FIELD_CATEGORY) && !engineObj.get(FIELD_CATEGORY).isJsonNull()
+                ? engineObj.get(FIELD_CATEGORY).getAsString() : "";
         if (!"malicious".equals(category)) return null;
-        var threat = engineObj.has("result") && !engineObj.get("result").isJsonNull()
-                ? engineObj.get("result").getAsString() : "";
+        var threat = engineObj.has(FIELD_RESULT) && !engineObj.get(FIELD_RESULT).isJsonNull()
+                ? engineObj.get(FIELD_RESULT).getAsString() : "";
         if (threat.isBlank()) return null;
         return engineName + ": " + threat;
     }

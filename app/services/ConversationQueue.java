@@ -19,6 +19,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class ConversationQueue {
 
+    /** Default queue mode and the event-log category tag for queue events. */
+    private static final String QUEUE = "queue";
+
     private static final ConcurrentHashMap<Long, QueueState> queues = new ConcurrentHashMap<>();
     private static final int MAX_QUEUE_SIZE = 20;
 
@@ -27,7 +30,7 @@ public class ConversationQueue {
     static class QueueState {
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();
         boolean processing = false; // all reads/writes guarded by synchronized(this)
-        String mode = "queue";
+        String mode = QUEUE;
         /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain. */
         final AtomicBoolean cancelled = new AtomicBoolean(false);
         /**
@@ -63,7 +66,7 @@ public class ConversationQueue {
 
         // Read config BEFORE entering the synchronized block — ConfigService.get()
         // may hit the DB, and we don't want to hold the state lock during I/O.
-        var mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", "queue");
+        var mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", QUEUE);
 
         // All mode-read + processing-flag + queue decisions must be atomic to prevent
         // TOCTOU races where two threads both believe they acquired the conversation.
@@ -83,7 +86,7 @@ public class ConversationQueue {
                 state.cancelled.set(true);
                 state.pending.clear();
                 state.pending.addLast(message);
-                EventLogger.info("queue", message.agent().name, message.channelType(),
+                EventLogger.info(QUEUE, message.agent().name, message.channelType(),
                         "Interrupt mode: signalled cancellation for conversation %d, queued new message"
                                 .formatted(conversationId));
                 return false;
@@ -92,13 +95,13 @@ public class ConversationQueue {
             // Queue the message (queue and collect modes)
             if (state.pending.size() >= MAX_QUEUE_SIZE) {
                 state.pending.pollFirst(); // Drop oldest
-                EventLogger.warn("queue", message.agent().name, message.channelType(),
+                EventLogger.warn(QUEUE, message.agent().name, message.channelType(),
                         "Queue overflow for conversation %d, dropped oldest message".formatted(conversationId));
             }
             state.pending.addLast(message);
         }
 
-        EventLogger.info("queue", message.agent().name, message.channelType(),
+        EventLogger.info(QUEUE, message.agent().name, message.channelType(),
                 "Message queued for conversation %d (position: %d)"
                         .formatted(conversationId, getQueueSize(conversationId)));
 

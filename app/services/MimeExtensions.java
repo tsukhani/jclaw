@@ -20,6 +20,8 @@ import java.util.Map;
  */
 public final class MimeExtensions {
 
+    private static final String AUDIO_WAV = "audio/wav";
+
     private MimeExtensions() {}
 
     /**
@@ -32,9 +34,9 @@ public final class MimeExtensions {
      * and would otherwise produce an empty format hint on the wire.
      */
     private static final Map<String, String> MIME_ALIASES = Map.of(
-            "audio/vnd.wave", "audio/wav",
-            "audio/x-wav", "audio/wav",
-            "audio/wave", "audio/wav"
+            "audio/vnd.wave", AUDIO_WAV,
+            "audio/x-wav", AUDIO_WAV,
+            "audio/wave", AUDIO_WAV
     );
 
     /**

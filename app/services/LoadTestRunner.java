@@ -23,6 +23,11 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class LoadTestRunner {
 
+    private static final String DEFAULT_DB = "default";
+    private static final String PARAM_AGENT = "agent";
+    private static final String FIELD_CONVERSATION_ID = "conversationId";
+    private static final String PROVIDER_PREFIX = "provider.";
+
     /**
      * Reserved agent name. The API layer hides this agent from every list and
      * by-id endpoint and rejects user attempts to create or rename to this
@@ -278,7 +283,7 @@ public final class LoadTestRunner {
         var realProviderName = (req.provider() == null || req.provider().isBlank())
                 ? DEFAULT_REAL_PROVIDER : req.provider();
         try {
-            return JPA.withTransaction("default", false,
+            return JPA.withTransaction(DEFAULT_DB, false,
                     (play.libs.F.Function0<Long>) () -> req.realProvider()
                             ? ensureLoadtestAgentRealInner(realProviderName, req.model())
                             : ensureLoadtestAgentInner(mockPort));
@@ -432,7 +437,7 @@ public final class LoadTestRunner {
         turnBodyObj.addProperty("agentId", agentId);
         turnBodyObj.addProperty("message", messageFor.apply(t));
         if (conversationId != null) {
-            turnBodyObj.addProperty("conversationId", conversationId);
+            turnBodyObj.addProperty(FIELD_CONVERSATION_ID, conversationId);
         }
         String turnBody = turnBodyObj.toString();
         long t0 = System.nanoTime();
@@ -538,8 +543,8 @@ public final class LoadTestRunner {
     private static Long tryParseConversationId(String jsonStr) {
         try {
             var json = com.google.gson.JsonParser.parseString(jsonStr).getAsJsonObject();
-            if (json.has("conversationId")) {
-                return json.get("conversationId").getAsLong();
+            if (json.has(FIELD_CONVERSATION_ID)) {
+                return json.get(FIELD_CONVERSATION_ID).getAsLong();
             }
         } catch (Exception _) { /* malformed init — skip, keep draining */ }
         return null;
@@ -659,7 +664,7 @@ public final class LoadTestRunner {
      */
     private static TokenStats perRequestTokenStats(long agentId, long sinceMillis) {
         try {
-            return JPA.withTransaction("default", true, () -> aggregateTokenStats(agentId, sinceMillis));
+            return JPA.withTransaction(DEFAULT_DB, true, () -> aggregateTokenStats(agentId, sinceMillis));
         } catch (Throwable _) {
             return new TokenStats(0L, 0L, 0.0);
         }
@@ -773,10 +778,10 @@ public final class LoadTestRunner {
     }
 
     private static long ensureLoadtestAgentInner(int mockPort) {
-        ConfigService.set("provider." + LOADTEST_PROVIDER + ".baseUrl",
+        ConfigService.set(PROVIDER_PREFIX + LOADTEST_PROVIDER + ".baseUrl",
                 "http://127.0.0.1:" + mockPort + "/v1");
-        ConfigService.set("provider." + LOADTEST_PROVIDER + ".apiKey", "mock");
-        ConfigService.set("provider." + LOADTEST_PROVIDER + ".models",
+        ConfigService.set(PROVIDER_PREFIX + LOADTEST_PROVIDER + ".apiKey", "mock");
+        ConfigService.set(PROVIDER_PREFIX + LOADTEST_PROVIDER + ".models",
                 "[{\"id\":\"" + LOADTEST_MODEL + "\",\"name\":\"Load Test Mock\","
                 + "\"maxTokens\":0,\"contextWindow\":128000,"
                 + "\"promptPrice\":0,\"completionPrice\":0,"
@@ -866,7 +871,7 @@ public final class LoadTestRunner {
      */
     public static void disable() {
         try {
-            JPA.withTransaction("default", false, (play.libs.F.Function0<Void>) () -> {
+            JPA.withTransaction(DEFAULT_DB, false, (play.libs.F.Function0<Void>) () -> {
                 ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "false");
                 return null;
             });
@@ -882,20 +887,20 @@ public final class LoadTestRunner {
      */
     public static void cleanupConversations() {
         try {
-            JPA.withTransaction("default", false, (play.libs.F.Function0<Void>) () -> {
+            JPA.withTransaction(DEFAULT_DB, false, (play.libs.F.Function0<Void>) () -> {
                 var agent = Agent.findByName(LOADTEST_AGENT_NAME);
                 if (agent != null) {
                     // MessageAttachment first — FK has no ON DELETE CASCADE (see ConversationService.deleteByIds).
                     JPA.em().createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation IN " +
                             "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
-                            .setParameter("agent", agent)
+                            .setParameter(PARAM_AGENT, agent)
                             .executeUpdate();
                     JPA.em().createQuery("DELETE FROM Message m WHERE m.conversation IN " +
                             "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
-                            .setParameter("agent", agent)
+                            .setParameter(PARAM_AGENT, agent)
                             .executeUpdate();
                     JPA.em().createQuery("DELETE FROM Conversation c WHERE c.agent = :agent")
-                            .setParameter("agent", agent)
+                            .setParameter(PARAM_AGENT, agent)
                             .executeUpdate();
                     JPA.em().createQuery("DELETE FROM EventLog e WHERE e.agentId = :name")
                             .setParameter("name", LOADTEST_AGENT_NAME)

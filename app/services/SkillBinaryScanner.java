@@ -37,6 +37,8 @@ import java.util.List;
  */
 public class SkillBinaryScanner {
 
+    private static final String LOG_CATEGORY = "scanner";
+
     public record Violation(String relativePath, String sha256, String scanner, String reason) {
         /** Short, user-facing description suitable for error messages. */
         public String describe() {
@@ -70,7 +72,7 @@ public class SkillBinaryScanner {
         int scanned = walkAndScan(skillDir, skillName, activeScanners, violations);
 
         if (scanned > 0 && violations.isEmpty()) {
-            EventLogger.info("scanner",
+            EventLogger.info(LOG_CATEGORY,
                     "Skill '%s' scan complete: %d binary file(s) clean".formatted(skillName, scanned));
         }
         return violations;
@@ -95,7 +97,7 @@ public class SkillBinaryScanner {
                 }
             }
         } catch (IOException e) {
-            EventLogger.warn("scanner",
+            EventLogger.warn(LOG_CATEGORY,
                     "Walk failed for skill '%s': %s — failing open".formatted(skillName, e.getMessage()));
         }
         return scanned;
@@ -109,7 +111,7 @@ public class SkillBinaryScanner {
         try {
             sha256 = sha256Of(file);
         } catch (IOException | NoSuchAlgorithmException e) {
-            EventLogger.warn("scanner",
+            EventLogger.warn(LOG_CATEGORY,
                     "Skipping '%s' in skill '%s': hash failed (%s) — failing open"
                             .formatted(relName, skillName, e.getMessage()));
             return false;
@@ -120,7 +122,7 @@ public class SkillBinaryScanner {
             var verdict = scanner.lookup(sha256);
             if (verdict.malicious()) {
                 flagged = true;
-                EventLogger.warn("scanner",
+                EventLogger.warn(LOG_CATEGORY,
                         "Malware detected in skill '%s': %s (%s, %s)".formatted(
                                 skillName, relName, verdict.reason(), scanner.name()));
                 violations.add(new Violation(
@@ -128,7 +130,7 @@ public class SkillBinaryScanner {
             }
         }
         if (!flagged) {
-            EventLogger.info("scanner",
+            EventLogger.info(LOG_CATEGORY,
                     "Scanned '%s' in skill '%s': clean (%d scanner(s), sha256=%s)".formatted(
                             relName, skillName, activeScanners.size(), sha256.substring(0, 12)));
         }

@@ -13,6 +13,8 @@ public class EventLogger {
 
     private EventLogger() {}
 
+    private static final String LEVEL_ERROR = "ERROR";
+
     /** Category for rejected webhooks that failed platform signature verification (JCLAW-16). */
     public static final String WEBHOOK_SIGNATURE_FAILURE = "WEBHOOK_SIGNATURE_FAILURE";
 
@@ -41,7 +43,7 @@ public class EventLogger {
         // Log to SLF4J first (always safe)
         var logMessage = "[%s/%s] %s".formatted(category, level, message);
         switch (level) {
-            case "ERROR" -> Logger.error(logMessage);
+            case LEVEL_ERROR -> Logger.error(logMessage);
             case "WARN" -> Logger.warn(logMessage);
             default -> Logger.info(logMessage);
         }
@@ -113,19 +115,19 @@ public class EventLogger {
     }
 
     public static void error(String category, String message) {
-        record("ERROR", category, message, null);
+        record(LEVEL_ERROR, category, message, null);
     }
 
     public static void error(String category, String message, String details) {
-        record("ERROR", category, message, details);
+        record(LEVEL_ERROR, category, message, details);
     }
 
     public static void error(String category, String agentId, String channel, String message) {
-        record("ERROR", category, agentId, channel, message, null);
+        record(LEVEL_ERROR, category, agentId, channel, message, null);
     }
 
     public static void error(String category, String message, Throwable t) {
-        record("ERROR", category, message, t.toString());
+        record(LEVEL_ERROR, category, message, t.toString());
     }
 
     // ----- JCLAW-272: typed subagent lifecycle helpers ---------------------
@@ -159,7 +161,7 @@ public class EventLogger {
     public static void recordSubagentError(String parentAgentId, String childAgentId,
                                            String runId, String mode, String context,
                                            String reason) {
-        record("ERROR", SUBAGENT_ERROR, parentAgentId, null,
+        record(LEVEL_ERROR, SUBAGENT_ERROR, parentAgentId, null,
                 "Subagent error",
                 subagentDetails(parentAgentId, childAgentId, runId, mode, context, null, reason));
     }
