@@ -36,6 +36,9 @@ import java.util.List;
 @OnApplicationStart
 public class TelegramStreamingRecoveryJob extends Job<Void> {
 
+    private static final String EVENT_CATEGORY_CHANNEL = "channel";
+    private static final String CHANNEL_TELEGRAM = "telegram";
+
     /** User-facing text edited into each orphaned placeholder. */
     static final String INTERRUPT_NOTE =
             "This response was interrupted — please send your message again.";
@@ -54,7 +57,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
                 "activeStreamMessageId IS NOT NULL").fetch());
         if (orphans.isEmpty()) return;
 
-        EventLogger.info("channel", null, "telegram",
+        EventLogger.info(EVENT_CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                 "Recovery: %d orphaned streaming placeholder(s) found".formatted(orphans.size()));
 
         for (var orphan : orphans) {
@@ -63,8 +66,8 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
             } catch (Exception e) {
                 // Per-row failures must not stop the batch. Most commonly the
                 // user deleted the chat / message and Telegram 400s us.
-                EventLogger.warn("channel",
-                        orphan.agent != null ? orphan.agent.name : null, "telegram",
+                EventLogger.warn(EVENT_CATEGORY_CHANNEL,
+                        orphan.agent != null ? orphan.agent.name : null, CHANNEL_TELEGRAM,
                         "Recovery failed for conversation %d (messageId=%s): %s"
                                 .formatted(orphan.id, orphan.activeStreamMessageId, e.getMessage()));
             }
@@ -98,7 +101,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         // help (messageId is long gone).
         var binding = Tx.run(() -> TelegramBinding.findByAgent(agent));
         if (binding == null || !binding.enabled) {
-            EventLogger.info("channel", agent.name, "telegram",
+            EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                     "Recovery: skipping orphan for conversation %d — no enabled binding"
                             .formatted(convId));
             return;
@@ -106,7 +109,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
 
         TelegramChannel.editMessageText(binding.botToken, chatId, messageId, INTERRUPT_NOTE);
 
-        EventLogger.info("channel", agent.name, "telegram",
+        EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                 "Recovery: interrupted-note written to orphan messageId=%d for conversation %d"
                         .formatted(messageId, convId));
     }

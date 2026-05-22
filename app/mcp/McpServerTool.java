@@ -39,6 +39,8 @@ public final class McpServerTool implements ToolRegistry.Tool {
 
     private static final Gson GSON = GsonHolder.INSTANCE;
 
+    private static final String FIELD_DESCRIPTION = "description";
+
     private final String serverName;
 
     public McpServerTool(String serverName) {
@@ -66,10 +68,10 @@ public final class McpServerTool implements ToolRegistry.Tool {
                 "properties", Map.of(
                         "tool", Map.of(
                                 "type", "string",
-                                "description", "The action to execute. Omit to enumerate available actions."),
+                                FIELD_DESCRIPTION, "The action to execute. Omit to enumerate available actions."),
                         "args", Map.of(
                                 "type", "object",
-                                "description", "Arguments for the action, matching its input schema.",
+                                FIELD_DESCRIPTION, "Arguments for the action, matching its input schema.",
                                 "additionalProperties", true)
                 ),
                 "required", List.of());
@@ -185,7 +187,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
         for (var def : defs) {
             catalog.add(Map.of(
                     "name", def.name(),
-                    "description", def.description() == null ? "" : def.description(),
+                    FIELD_DESCRIPTION, def.description() == null ? "" : def.description(),
                     "inputSchema", def.parametersAsMap()
             ));
         }

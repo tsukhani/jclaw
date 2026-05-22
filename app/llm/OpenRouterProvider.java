@@ -16,6 +16,9 @@ import models.MessageRole;
  */
 public final class OpenRouterProvider extends LlmProvider {
 
+    private static final String FIELD_CONTENT = "content";
+    private static final String FIELD_MESSAGES = "messages";
+
     public OpenRouterProvider(ProviderConfig config) {
         super(config);
     }
@@ -108,7 +111,7 @@ public final class OpenRouterProvider extends LlmProvider {
     private static void splitSystemMessageAtCacheBoundary(JsonObject request) {
         var systemMsg = findFirstSystemMessage(request);
         if (systemMsg == null) return;
-        var content = systemMsg.get("content");
+        var content = systemMsg.get(FIELD_CONTENT);
         if (content == null || content.isJsonNull()) return;
 
         // Only handle string content here — block-array content means an
@@ -146,7 +149,7 @@ public final class OpenRouterProvider extends LlmProvider {
                 blocks.add(textBlock(suffix));
             }
         }
-        systemMsg.add("content", blocks);
+        systemMsg.add(FIELD_CONTENT, blocks);
     }
 
     /**
@@ -162,8 +165,8 @@ public final class OpenRouterProvider extends LlmProvider {
      * a cache read.
      */
     private static void injectTrailingUserMessageCacheBreakpoint(JsonObject request) {
-        if (!request.has("messages") || !request.get("messages").isJsonArray()) return;
-        var messages = request.getAsJsonArray("messages");
+        if (!request.has(FIELD_MESSAGES) || !request.get(FIELD_MESSAGES).isJsonArray()) return;
+        var messages = request.getAsJsonArray(FIELD_MESSAGES);
         if (messages.isEmpty()) return;
         var last = messages.get(messages.size() - 1);
         if (!last.isJsonObject()) return;
@@ -186,11 +189,11 @@ public final class OpenRouterProvider extends LlmProvider {
     private static void stripCacheBoundaryMarker(JsonObject request) {
         var systemMsg = findFirstSystemMessage(request);
         if (systemMsg == null) return;
-        var content = systemMsg.get("content");
+        var content = systemMsg.get(FIELD_CONTENT);
         if (content == null || !content.isJsonPrimitive()) return;
         var text = content.getAsString();
         if (!text.contains(SystemPromptAssembler.CACHE_BOUNDARY_MARKER)) return;
-        systemMsg.addProperty("content", text.replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, ""));
+        systemMsg.addProperty(FIELD_CONTENT, text.replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, ""));
     }
 
     /**
@@ -201,20 +204,20 @@ public final class OpenRouterProvider extends LlmProvider {
      * last block and have the change persist.
      */
     private static JsonArray ensureBlockArrayContent(JsonObject msg) {
-        var content = msg.get("content");
+        var content = msg.get(FIELD_CONTENT);
         if (content == null || content.isJsonNull()) return null;
         if (content.isJsonArray()) return content.getAsJsonArray();
         if (!content.isJsonPrimitive()) return null;
 
         var blocks = new JsonArray();
         blocks.add(textBlock(content.getAsString()));
-        msg.add("content", blocks);
+        msg.add(FIELD_CONTENT, blocks);
         return blocks;
     }
 
     private static JsonObject findFirstSystemMessage(JsonObject request) {
-        if (!request.has("messages") || !request.get("messages").isJsonArray()) return null;
-        for (var el : request.getAsJsonArray("messages")) {
+        if (!request.has(FIELD_MESSAGES) || !request.get(FIELD_MESSAGES).isJsonArray()) return null;
+        for (var el : request.getAsJsonArray(FIELD_MESSAGES)) {
             if (!el.isJsonObject()) continue;
             var msg = el.getAsJsonObject();
             if (msg.has("role") && MessageRole.SYSTEM.value.equals(msg.get("role").getAsString())) {

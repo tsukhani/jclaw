@@ -17,6 +17,9 @@ import services.scanners.ScannerRegistry;
 @OnApplicationStart
 public class DefaultConfigJob extends Job<Void> {
 
+    private static final String EVENT_CATEGORY_AGENT = "agent";
+    private static final String CONFIG_VALUE_FALSE = "false";
+
     @Override
     public void doJob() {
         applySchemaAdditions();
@@ -233,15 +236,15 @@ public class DefaultConfigJob extends Job<Void> {
         // Settings UI, and the first enabled+keyed provider in priority order wins.
         // seedIfAbsent only writes when the key is absent, so this change is a
         // no-op against existing installations — operator-tuned values are preserved.
-        seedIfAbsent("search.ollama.enabled", "false");
+        seedIfAbsent("search.ollama.enabled", CONFIG_VALUE_FALSE);
         seedIfAbsent("search.ollama.apiKey", "");
         seedIfAbsent("search.ollama.baseUrl", "https://ollama.com/api/web_search");
         seedIfAbsent("search.ollama.priority", "0");
-        seedIfAbsent("search.exa.enabled", "false");
+        seedIfAbsent("search.exa.enabled", CONFIG_VALUE_FALSE);
         seedIfAbsent("search.exa.apiKey", "");
         seedIfAbsent("search.exa.baseUrl", "https://api.exa.ai/search");
         seedIfAbsent("search.exa.priority", "1");
-        seedIfAbsent("search.perplexity.enabled", "false");
+        seedIfAbsent("search.perplexity.enabled", CONFIG_VALUE_FALSE);
         seedIfAbsent("search.perplexity.apiKey", "");
         seedIfAbsent("search.perplexity.baseUrl", "https://api.perplexity.ai/search");
         seedIfAbsent("search.perplexity.priority", "2");
@@ -250,15 +253,15 @@ public class DefaultConfigJob extends Job<Void> {
         // so "latest X" queries don't return year-old snippets — the LLM will
         // not reliably add year/month keywords on its own.
         seedIfAbsent("search.perplexity.recencyFilter", "month");
-        seedIfAbsent("search.brave.enabled", "false");
+        seedIfAbsent("search.brave.enabled", CONFIG_VALUE_FALSE);
         seedIfAbsent("search.brave.apiKey", "");
         seedIfAbsent("search.brave.baseUrl", "https://api.search.brave.com/res/v1/web/search");
         seedIfAbsent("search.brave.priority", "3");
-        seedIfAbsent("search.tavily.enabled", "false");
+        seedIfAbsent("search.tavily.enabled", CONFIG_VALUE_FALSE);
         seedIfAbsent("search.tavily.apiKey", "");
         seedIfAbsent("search.tavily.baseUrl", "https://api.tavily.com/search");
         seedIfAbsent("search.tavily.priority", "4");
-        seedIfAbsent("search.felo.enabled", "false");
+        seedIfAbsent("search.felo.enabled", CONFIG_VALUE_FALSE);
         seedIfAbsent("search.felo.apiKey", "");
         seedIfAbsent("search.felo.baseUrl", "https://openapi.felo.ai/v2/chat");
         seedIfAbsent("search.felo.priority", "5");
@@ -287,7 +290,7 @@ public class DefaultConfigJob extends Job<Void> {
     private void seedDefaultAgent() {
         if (Agent.findByName("main") == null) {
             AgentService.create("main", "ollama-cloud", "kimi-k2.5");
-            EventLogger.info("agent", "main", null, "Default agent 'main' created");
+            EventLogger.info(EVENT_CATEGORY_AGENT, "main", null, "Default agent 'main' created");
         }
         // Non-destructive workspace fill-in: creates any missing workspace files
         // from the Java-literal defaults without touching existing content.
@@ -355,7 +358,7 @@ public class DefaultConfigJob extends Job<Void> {
         if (main == null) return;
         try {
             services.SkillPromotionService.copyToAgentWorkspace(main, skillName);
-            EventLogger.info("agent", "main", null,
+            EventLogger.info(EVENT_CATEGORY_AGENT, "main", null,
                     "jclaw-api skill installed for main agent (in-process API access seeded)");
         } catch (java.io.IOException e) {
             play.Logger.warn("Failed to bootstrap jclaw-api skill for main: %s", e.getMessage());
@@ -374,7 +377,7 @@ public class DefaultConfigJob extends Job<Void> {
         if (main == null) return;
         try {
             services.SkillPromotionService.copyToAgentWorkspace(main, skillName);
-            EventLogger.info("agent", "main", null,
+            EventLogger.info(EVENT_CATEGORY_AGENT, "main", null,
                     "Skill-creator installed for main agent (promotion capability seeded)");
         } catch (java.io.IOException e) {
             play.Logger.warn("Failed to bootstrap skill-creator for main: %s", e.getMessage());

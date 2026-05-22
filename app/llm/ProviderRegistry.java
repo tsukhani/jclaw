@@ -31,6 +31,8 @@ public final class ProviderRegistry {
 
     private ProviderRegistry() { /* static-only utility */ }
 
+    private static final String CONFIG_KEY_PREFIX = "provider.";
+
     private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static volatile Map<String, LlmProvider> cache = Map.of();
     private static volatile long lastRefresh;
@@ -88,8 +90,8 @@ public final class ProviderRegistry {
         for (var c : allConfigs) configMap.put(c.key, c.value);
 
         var providerNames = configMap.keySet().stream()
-                .filter(k -> k.startsWith("provider.") && k.endsWith(".baseUrl"))
-                .map(k -> k.substring("provider.".length(), k.lastIndexOf(".")))
+                .filter(k -> k.startsWith(CONFIG_KEY_PREFIX) && k.endsWith(".baseUrl"))
+                .map(k -> k.substring(CONFIG_KEY_PREFIX.length(), k.lastIndexOf(".")))
                 .distinct()
                 .toList();
 
@@ -112,11 +114,11 @@ public final class ProviderRegistry {
      * or return {@code null} when required credentials are missing.
      */
     private static ProviderConfig buildProviderConfig(String name, HashMap<String, String> configMap) {
-        var baseUrl = configMap.get("provider." + name + ".baseUrl");
-        var apiKey = configMap.get("provider." + name + ".apiKey");
+        var baseUrl = configMap.get(CONFIG_KEY_PREFIX + name + ".baseUrl");
+        var apiKey = configMap.get(CONFIG_KEY_PREFIX + name + ".apiKey");
         if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) return null;
 
-        var models = parseModels(configMap.get("provider." + name + ".models"));
+        var models = parseModels(configMap.get(CONFIG_KEY_PREFIX + name + ".models"));
 
         // JCLAW-280: payment modality + monthly subscription price.
         // Defaults derive from the provider's supported-modality set,
@@ -126,10 +128,10 @@ public final class ProviderRegistry {
         // get an empty supported set so the registry leaves modality
         // at its safe PER_TOKEN default — the cost path treats them
         // as free-tier regardless.
-        var modalityRaw = configMap.get("provider." + name + ".paymentModality");
+        var modalityRaw = configMap.get(CONFIG_KEY_PREFIX + name + ".paymentModality");
         var modality = PaymentModality.parseOrDefault(modalityRaw, name);
         var subscriptionMonthly = parseSubscriptionMonthly(
-                configMap.get("provider." + name + ".subscriptionMonthlyUsd"));
+                configMap.get(CONFIG_KEY_PREFIX + name + ".subscriptionMonthlyUsd"));
 
         return new ProviderConfig(name, baseUrl, apiKey, models, modality, subscriptionMonthly);
     }

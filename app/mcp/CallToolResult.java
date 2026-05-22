@@ -14,11 +14,14 @@ import com.google.gson.JsonObject;
  */
 public record CallToolResult(String content, boolean isError) {
 
+    private static final String FIELD_CONTENT = "content";
+    private static final String FIELD_RESOURCE = "resource";
+
     public static CallToolResult fromResultObject(JsonObject obj) {
         boolean isError = obj.has("isError") && obj.get("isError").getAsBoolean();
         var sb = new StringBuilder();
-        if (obj.has("content") && obj.get("content").isJsonArray()) {
-            JsonArray parts = obj.getAsJsonArray("content");
+        if (obj.has(FIELD_CONTENT) && obj.get(FIELD_CONTENT).isJsonArray()) {
+            JsonArray parts = obj.getAsJsonArray(FIELD_CONTENT);
             for (var part : parts) {
                 if (!part.isJsonObject()) continue;
                 appendPart(sb, part.getAsJsonObject());
@@ -34,14 +37,14 @@ public record CallToolResult(String content, boolean isError) {
             case "image" -> sb.append("[image: ")
                     .append(p.has("mimeType") ? p.get("mimeType").getAsString() : "unknown")
                     .append("]");
-            case "resource" -> appendResource(sb, p);
+            case FIELD_RESOURCE -> appendResource(sb, p);
             default -> sb.append(p.toString());
         }
     }
 
     private static void appendResource(StringBuilder sb, JsonObject p) {
-        var res = p.has("resource") && p.get("resource").isJsonObject()
-                ? p.getAsJsonObject("resource") : null;
+        var res = p.has(FIELD_RESOURCE) && p.get(FIELD_RESOURCE).isJsonObject()
+                ? p.getAsJsonObject(FIELD_RESOURCE) : null;
         sb.append("[resource: ")
                 .append(res != null && res.has("uri") ? res.get("uri").getAsString() : "?")
                 .append("]");

@@ -16,6 +16,8 @@ import java.util.List;
  */
 public class JpaMemoryStore implements MemoryStore {
 
+    private static final String EVENT_CATEGORY_MEMORY = "memory";
+
     private final boolean vectorEnabled;
     private final boolean isPostgres;
     private final String vectorModel;
@@ -31,7 +33,7 @@ public class JpaMemoryStore implements MemoryStore {
                 Play.configuration.getProperty("memory.jpa.vector.dimensions", "1536"));
 
         if (vectorEnabled) {
-            EventLogger.info("memory", "JPA memory store with pgvector enabled (model: %s, dims: %d)"
+            EventLogger.info(EVENT_CATEGORY_MEMORY, "JPA memory store with pgvector enabled (model: %s, dims: %d)"
                     .formatted(vectorModel, vectorDimensions));
         }
     }
@@ -124,7 +126,7 @@ public class JpaMemoryStore implements MemoryStore {
                     .getResultList();
             return memories.stream().map(this::toEntry).toList();
         } catch (Exception e) {
-            EventLogger.warn("memory", "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
+            EventLogger.warn(EVENT_CATEGORY_MEMORY, "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
             return likeSearch(agentId, query, limit);
         }
     }
@@ -155,7 +157,7 @@ public class JpaMemoryStore implements MemoryStore {
                     .getResultList();
             return memories.stream().map(this::toEntry).toList();
         } catch (Exception e) {
-            EventLogger.warn("memory", "Hybrid search failed, falling back to FTS: %s".formatted(e.getMessage()));
+            EventLogger.warn(EVENT_CATEGORY_MEMORY, "Hybrid search failed, falling back to FTS: %s".formatted(e.getMessage()));
             return fullTextSearch(agentId, query, limit);
         }
     }
@@ -176,7 +178,7 @@ public class JpaMemoryStore implements MemoryStore {
                 }
             }
         } catch (Exception e) {
-            EventLogger.warn("memory", "Failed to generate embedding: %s".formatted(e.getMessage()));
+            EventLogger.warn(EVENT_CATEGORY_MEMORY, "Failed to generate embedding: %s".formatted(e.getMessage()));
         }
     }
 
@@ -216,7 +218,7 @@ public class JpaMemoryStore implements MemoryStore {
                 // provider endpoint than chat and are typically cheap.
                 return provider.embeddings(k.model(), k.text(), null);
             } catch (Exception e) {
-                EventLogger.warn("memory", "Embedding generation failed: %s".formatted(e.getMessage()));
+                EventLogger.warn(EVENT_CATEGORY_MEMORY, "Embedding generation failed: %s".formatted(e.getMessage()));
                 return null;
             }
         });

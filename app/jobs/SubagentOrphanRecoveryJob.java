@@ -37,6 +37,8 @@ import java.util.List;
 @OnApplicationStart
 public class SubagentOrphanRecoveryJob extends Job<Void> {
 
+    private static final String EVENT_CATEGORY_SUBAGENT = "subagent";
+
     /**
      * Minimum age before a {@code RUNNING} row is considered orphaned.
      * Larger than the typical bootstrap-to-startup window for fresh spawns,
@@ -53,7 +55,7 @@ public class SubagentOrphanRecoveryJob extends Job<Void> {
                     "status = ?1 AND startedAt < ?2",
                     SubagentRun.Status.RUNNING, cutoff).fetch());
         } catch (RuntimeException e) {
-            EventLogger.warn("subagent",
+            EventLogger.warn(EVENT_CATEGORY_SUBAGENT,
                     "SubagentOrphanRecoveryJob query failed: " + e.getMessage());
             return;
         }
@@ -70,10 +72,10 @@ public class SubagentOrphanRecoveryJob extends Job<Void> {
                     fresh.outcome = "Subagent VT did not survive JVM restart";
                     fresh.save();
                 });
-                EventLogger.warn("subagent",
+                EventLogger.warn(EVENT_CATEGORY_SUBAGENT,
                         "Marked orphaned SubagentRun " + orphanId + " FAILED at boot");
             } catch (RuntimeException e) {
-                EventLogger.warn("subagent",
+                EventLogger.warn(EVENT_CATEGORY_SUBAGENT,
                         "Failed to recover orphaned SubagentRun " + orphanId
                                 + ": " + e.getMessage());
             }

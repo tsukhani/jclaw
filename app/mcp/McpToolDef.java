@@ -18,12 +18,15 @@ import java.util.Map;
  */
 public record McpToolDef(String name, String description, JsonObject inputSchema) {
 
+    private static final String FIELD_DESCRIPTION = "description";
+    private static final String FIELD_INPUT_SCHEMA = "inputSchema";
+
     public static McpToolDef fromJson(JsonObject obj) {
         var name = obj.get("name").getAsString();
-        var description = obj.has("description") && !obj.get("description").isJsonNull()
-                ? obj.get("description").getAsString() : "";
-        JsonObject schema = obj.has("inputSchema") && obj.get("inputSchema").isJsonObject()
-                ? obj.getAsJsonObject("inputSchema") : new JsonObject();
+        var description = obj.has(FIELD_DESCRIPTION) && !obj.get(FIELD_DESCRIPTION).isJsonNull()
+                ? obj.get(FIELD_DESCRIPTION).getAsString() : "";
+        JsonObject schema = obj.has(FIELD_INPUT_SCHEMA) && obj.get(FIELD_INPUT_SCHEMA).isJsonObject()
+                ? obj.getAsJsonObject(FIELD_INPUT_SCHEMA) : new JsonObject();
         return new McpToolDef(name, description, schema);
     }
 
