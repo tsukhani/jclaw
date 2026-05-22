@@ -277,7 +277,7 @@ public final class LoadTestRunner {
      * agent + provider config in a committed transaction so HTTP request
      * threads can read them. Returns the agent id used by all workers.
      */
-    private static long setupLoadtestAgent(Request req) throws Exception {
+    private static long setupLoadtestAgent(Request req) throws java.io.IOException {
         var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
         if (!req.realProvider()) LoadTestHarness.setScenario(req.scenario());
         var realProviderName = (req.provider() == null || req.provider().isBlank())
@@ -288,7 +288,11 @@ public final class LoadTestRunner {
                             ? ensureLoadtestAgentRealInner(realProviderName, req.model())
                             : ensureLoadtestAgentInner(mockPort));
         } catch (Throwable t) {
-            throw t instanceof Exception e ? e : new RuntimeException(t);
+            // JPA.withTransaction wraps callee throws as Throwable; surface IOException
+            // unwrapped (harness start can throw it) so the caller's narrower throws clause holds.
+            if (t instanceof java.io.IOException io) throw io;
+            if (t instanceof RuntimeException re) throw re;
+            throw new IllegalStateException("Loadtest agent setup failed", t);
         }
     }
 
@@ -389,33 +393,41 @@ public final class LoadTestRunner {
         }
     }
 
+    /**
+     * Per-run worker context. Bundles the wire-level inputs and shared
+     * collaborators (request shape, target URL/cookie, agent id, message
+     * resolver, HTTP client, metrics aggregator) so the worker / turn
+     * methods stay readable. Created once per run() and passed to every
+     * worker; immutable references throughout.
+     */
+    private record WorkerCtx(Request req, String baseUrl, String sessionCookie,
+                              long agentId, java.util.function.IntFunction<String> messageFor,
+                              okhttp3.OkHttpClient client, RunMetrics metrics) {}
+
     private static void runConcurrentWorkers(Request req, String baseUrl, String sessionCookie,
                                               long agentId, java.util.function.IntFunction<String> messageFor,
                                               okhttp3.OkHttpClient client, RunMetrics metrics)
             throws InterruptedException {
+        var ctx = new WorkerCtx(req, baseUrl, sessionCookie, agentId, messageFor, client, metrics);
         var latch = new CountDownLatch(req.concurrency());
         try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
             for (int w = 0; w < req.concurrency(); w++) {
                 final int workerIdx = w;
-                exec.submit(() -> runWorker(workerIdx, req, baseUrl, sessionCookie,
-                        agentId, messageFor, client, metrics, latch));
+                exec.submit(() -> runWorker(workerIdx, ctx, latch));
             }
             latch.await();
         }
     }
 
-    private static void runWorker(int workerIdx, Request req, String baseUrl, String sessionCookie,
-                                   long agentId, java.util.function.IntFunction<String> messageFor,
-                                   okhttp3.OkHttpClient client, RunMetrics metrics, CountDownLatch latch) {
+    private static void runWorker(int workerIdx, WorkerCtx ctx, CountDownLatch latch) {
         // Captured from turn 1's SSE init event; subsequent turns
         // POST it back so the server resumes the same conversation
         // (loading prior messages, growing the assembled prompt,
         // hitting any provider-side prompt cache).
         Long conversationId = null;
         try {
-            for (int t = 0; t < req.turns(); t++) {
-                conversationId = runTurn(workerIdx, t, req, baseUrl, sessionCookie,
-                        agentId, messageFor, client, metrics, conversationId);
+            for (int t = 0; t < ctx.req().turns(); t++) {
+                conversationId = runTurn(workerIdx, t, ctx, conversationId);
             }
         } finally {
             latch.countDown();
@@ -426,24 +438,24 @@ public final class LoadTestRunner {
      * Send one turn for a worker; updates metrics + returns the (possibly
      * newly-discovered) conversationId for the next turn.
      */
-    private static Long runTurn(int workerIdx, int t, Request req, String baseUrl, String sessionCookie,
-                                 long agentId, java.util.function.IntFunction<String> messageFor,
-                                 okhttp3.OkHttpClient client, RunMetrics metrics, Long conversationId) {
+    private static Long runTurn(int workerIdx, int t, WorkerCtx ctx, Long conversationId) {
         // Build per-turn body: pull message from prompts[t] when in
         // varied-prompts mode, replay userMessage otherwise.
         // conversationId is set from turn 2 onward so the server
         // resumes the same row.
         var turnBodyObj = new com.google.gson.JsonObject();
-        turnBodyObj.addProperty("agentId", agentId);
-        turnBodyObj.addProperty("message", messageFor.apply(t));
+        turnBodyObj.addProperty("agentId", ctx.agentId());
+        turnBodyObj.addProperty("message", ctx.messageFor().apply(t));
         if (conversationId != null) {
             turnBodyObj.addProperty(FIELD_CONVERSATION_ID, conversationId);
         }
         String turnBody = turnBodyObj.toString();
         long t0 = System.nanoTime();
         Long newConversationId = conversationId;
+        var metrics = ctx.metrics();
         try {
-            var resolved = executeChatRequest(client, baseUrl, sessionCookie, turnBody, req.compress(), t0);
+            var resolved = executeChatRequest(ctx.client(), ctx.baseUrl(), ctx.sessionCookie(),
+                    turnBody, ctx.req().compress(), t0);
             if (resolved != null) {
                 if (newConversationId == null && resolved.conversationId() != null) {
                     newConversationId = resolved.conversationId();
@@ -482,13 +494,13 @@ public final class LoadTestRunner {
         var call = client.newCall(builder.build());
         call.timeout().timeout(120, java.util.concurrent.TimeUnit.SECONDS);
         try (var resp = call.execute()) {
-            if (resp.code() == 200 && resp.body() != null) {
+            if (resp.code() == 200) {
                 // Stream-parse the SSE body to capture the server-assigned
                 // conversationId (init event) and client-side TTFT (first
                 // token frame). Drain to end so timing covers full round-trip.
                 return consumeSseStream(resp.body(), t0);
             }
-            if (resp.body() != null) resp.body().bytes();
+            resp.body().bytes();
             return null;
         }
     }

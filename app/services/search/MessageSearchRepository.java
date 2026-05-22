@@ -2,6 +2,7 @@ package services.search;
 
 import models.TaskRunMessage;
 
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -57,7 +58,7 @@ public interface MessageSearchRepository {
      * left to operator-side migration when the Postgres dialect is
      * first deployed.
      */
-    void init() throws Exception;
+    void init() throws IOException;
 
     /**
      * Return matching {@link TaskRunMessage} rows, ordered by
@@ -71,7 +72,7 @@ public interface MessageSearchRepository {
      * @param limit     hard cap on result count
      * @return matching rows ordered by relevance
      */
-    List<TaskRunMessage> search(String query, int limit) throws Exception;
+    List<TaskRunMessage> search(String query, int limit) throws IOException;
 
     /**
      * Short identifier for log lines. {@code "h2"} or {@code "postgres"}.

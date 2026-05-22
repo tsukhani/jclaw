@@ -273,10 +273,8 @@ public class ApiSubagentRunsController extends Controller {
         try {
             var obj = JsonParser.parseString(ev.details).getAsJsonObject();
             if (!obj.has(KEY_RUN_ID) || obj.get(KEY_RUN_ID).isJsonNull()) return;
-            Long parsedId;
-            try {
-                parsedId = Long.parseLong(obj.get(KEY_RUN_ID).getAsString());
-            } catch (NumberFormatException _) { return; }
+            Long parsedId = parseLongOrNull(obj.get(KEY_RUN_ID).getAsString());
+            if (parsedId == null) return;
             if (!idSet.contains(parsedId)) return;
             if (result.containsKey(parsedId)) return; // keep first (most recent due to ORDER BY)
             if (obj.has("mode") && !obj.get("mode").isJsonNull()) {
@@ -284,6 +282,15 @@ public class ApiSubagentRunsController extends Controller {
             }
         } catch (Exception _) {
             // Malformed details — skip, the row simply won't carry a mode.
+        }
+    }
+
+    /** Long.parseLong wrapped to return null on malformed input — keeps applySpawnEventMode free of nested try blocks. */
+    private static Long parseLongOrNull(String raw) {
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException _) {
+            return null;
         }
     }
 }

@@ -3,6 +3,7 @@ package jobs;
 import channels.TelegramChannel;
 import models.Conversation;
 import models.TelegramBinding;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
@@ -74,7 +75,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         }
     }
 
-    private static void recoverOne(Conversation orphan) throws Exception {
+    private static void recoverOne(Conversation orphan) throws TelegramApiException {
         // Clear the checkpoint first in a separate transaction. If the
         // editMessageText below fails, we still want the column cleared so
         // the next boot doesn't re-try indefinitely on a placeholder

@@ -134,6 +134,23 @@ public final class LostTaskDetector {
         return flipped;
     }
 
+    /**
+     * Decode one {@code scheduled_tasks.task_instance} value to a JClaw
+     * Task id. Hand-tampered rows carrying a non-numeric value are logged
+     * and skipped (return null) so one bad row doesn't blow up the whole
+     * detector pass.
+     */
+    private static Long parseTaskInstance(String raw) {
+        try {
+            return Long.parseLong(raw.trim());
+        } catch (NumberFormatException _) {
+            EventLogger.warn("task", null, null,
+                    "LostTaskDetector: undecodable task_instance '%s'; skipping"
+                            .formatted(raw));
+            return null;
+        }
+    }
+
     private static List<StaleRow> readStale(Instant staleBefore) {
         var ds = DB.datasource;
         if (ds == null) return List.of();
@@ -148,18 +165,8 @@ public final class LostTaskDetector {
                 while (rs.next()) {
                     var raw = rs.getString(1);
                     if (raw == null) continue;
-                    Long taskId;
-                    try {
-                        taskId = Long.parseLong(raw.trim());
-                    } catch (NumberFormatException _) {
-                        // Hand-tampered scheduled_tasks row carrying a
-                        // non-numeric task_instance — log and skip rather
-                        // than blowing up the detector for one row.
-                        EventLogger.warn("task", null, null,
-                                "LostTaskDetector: undecodable task_instance '%s'; skipping"
-                                        .formatted(raw));
-                        continue;
-                    }
+                    Long taskId = parseTaskInstance(raw);
+                    if (taskId == null) continue;
                     var ts = rs.getTimestamp(2);
                     rows.add(new StaleRow(taskId, ts != null ? ts.toInstant() : null));
                 }

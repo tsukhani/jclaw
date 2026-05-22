@@ -805,6 +805,7 @@ public class ModelDiscoveryService {
      * virtual threads so a provider with dozens of models discovers in
      * one round-trip's worth of wall time rather than N.
      */
+    @SuppressWarnings("java:S1193") // Catches Exception broadly; instanceof InterruptedException restores interrupt status defensively
     static DiscoveryResult discoverOllamaNative(String providerName, String baseUrl, String apiKey) {
         try {
             var nativeBase = stripV1Suffix(baseUrl);

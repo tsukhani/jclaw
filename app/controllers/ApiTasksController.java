@@ -190,6 +190,7 @@ public class ApiTasksController extends Controller {
      * an empty results panel before the operator types.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TranscriptSearchHit.class))))
+    @SuppressWarnings("java:S1181") // Throwable is required: Lucene API removals surface as NoClassDefFoundError / LinkageError / AbstractMethodError
     public static void searchTranscripts(String q, Integer limit) {
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         if (q == null || q.isBlank()) {

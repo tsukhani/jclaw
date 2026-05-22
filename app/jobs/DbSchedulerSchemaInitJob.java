@@ -8,9 +8,11 @@ import play.jobs.OnApplicationStart;
 import services.EventLogger;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.stream.Collectors;
 
@@ -43,10 +45,10 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
     public void doJob() {
         try {
             ensureSchema();
-        } catch (Exception e) {
+        } catch (SQLException | IOException e) {
             EventLogger.error("system",
                     "db-scheduler schema init failed: " + e.getMessage());
-            throw new RuntimeException("db-scheduler schema init failed", e);
+            throw new IllegalStateException("db-scheduler schema init failed", e);
         }
     }
 
@@ -55,7 +57,7 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
      * exposed publicly so the bootstrap job (subsequent JCLAW-21 commit) can
      * call it directly without depending on Play's job ordering.
      */
-    public static void ensureSchema() throws Exception {
+    public static void ensureSchema() throws SQLException, IOException {
         try (Connection conn = DB.datasource.getConnection()) {
             String productName = conn.getMetaData().getDatabaseProductName().toLowerCase();
             String dialect = productName.contains("postgresql") ? "postgres" : "h2";
@@ -66,7 +68,7 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
         }
     }
 
-    private static String readDdl(String dialect) throws Exception {
+    private static String readDdl(String dialect) throws IOException {
         File path = Play.getFile("conf/db/db_scheduler_" + dialect + ".sql");
         if (!path.isFile()) {
             throw new IllegalStateException("Missing DDL file: " + path);
@@ -83,7 +85,7 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
      * keyword. Stripping whole lines that start with {@code --} after trim
      * is safe — our DDL has no inline trailing comments to preserve.
      */
-    private static void executeStatements(Connection conn, String ddl) throws Exception {
+    private static void executeStatements(Connection conn, String ddl) throws SQLException {
         String stripped = ddl.lines()
                 .filter(line -> !line.trim().startsWith("--"))
                 .collect(Collectors.joining("\n"));

@@ -95,11 +95,17 @@ public final class TransientErrorClassifier {
                     + "(?:overload|capacity|high[_ ]demand).{0,40}service[_ ]unavailable",
                     Pattern.CASE_INSENSITIVE),
 
-            // Timeout / network — message-level
+            // Timeout / network — message-level (core wording)
             Pattern.compile("timeout|timed out|deadline exceeded|context deadline exceeded|"
                     + "connection (?:error|reset|refused|aborted|closed)|network (?:error|request failed)|"
-                    + "fetch failed|socket hang up|^terminated$|"
-                    + "without sending (?:any )?chunks?|stop reason:\\s*(?:abort|error|malformed_response|network_error)|"
+                    + "fetch failed|socket hang up|^terminated$",
+                    Pattern.CASE_INSENSITIVE),
+
+            // Streaming / provider stop-reason variants — split out so the
+            // core network-message pattern stays under Sonar's regex
+            // complexity ceiling without losing coverage.
+            Pattern.compile("without sending (?:any )?chunks?|"
+                    + "stop reason:\\s*(?:abort|error|malformed_response|network_error)|"
                     + "request failed after repeated internal retries",
                     Pattern.CASE_INSENSITIVE),
 

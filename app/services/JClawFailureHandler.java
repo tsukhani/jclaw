@@ -111,10 +111,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
         }
 
         boolean isTransient = TransientErrorClassifier.isTransient(throwable);
-        String errorMessage = throwable != null
-                ? (throwable.getMessage() != null
-                        ? throwable.getMessage() : throwable.getClass().getSimpleName())
-                : "Unknown error";
+        String errorMessage = describeError(throwable);
         int currentRetry = task.retryCount;
         int budget = Math.min(task.maxRetries, BACKOFF_SECONDS.length);
 
@@ -171,6 +168,17 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
         TaskLifecycleEvents.recordFailed(task, runForLifecycle, reason, errorMessage);
 
         return new Decision.Fail(reason);
+    }
+
+    /**
+     * Best-effort human message for a failure: prefer the throwable's
+     * own message, fall back to its simple class name, and finally
+     * "Unknown error" when there is no throwable at all.
+     */
+    private static String describeError(Throwable throwable) {
+        if (throwable == null) return "Unknown error";
+        var msg = throwable.getMessage();
+        return msg != null ? msg : throwable.getClass().getSimpleName();
     }
 
     /**

@@ -326,7 +326,7 @@ public class ApiMetricsController extends Controller {
             for (var el : arr) prompts.add(el.getAsString());
         } catch (Exception _) {
             error(400, "Invalid 'prompts' — must be an array of strings");
-            return null; // unreachable — error() throws
+            return java.util.List.of(); // unreachable — error() throws
         }
         if (userMessage != null && !userMessage.isBlank()) {
             error(400, "userMessage and prompts are mutually exclusive");

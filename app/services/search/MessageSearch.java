@@ -4,6 +4,7 @@ import models.TaskRunMessage;
 import play.db.DB;
 import services.EventLogger;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
@@ -60,7 +61,7 @@ public final class MessageSearch {
      * <p>Called from {@link jobs.FullTextSearchInitJob} at
      * {@code @OnApplicationStart}.
      */
-    public static synchronized void init() throws Exception {
+    public static synchronized void init() throws IOException {
         if (repo == null) {
             repo = chooseRepository();
         }
@@ -74,7 +75,7 @@ public final class MessageSearch {
      * init means "no index ready, nothing to find" rather than a
      * bug to surface.
      */
-    public static List<TaskRunMessage> search(String query, int limit) throws Exception {
+    public static List<TaskRunMessage> search(String query, int limit) throws IOException {
         var current = repo;
         if (current == null) return List.of();
         return current.search(query, limit);

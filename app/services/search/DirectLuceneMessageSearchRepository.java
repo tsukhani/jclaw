@@ -46,7 +46,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
 
     /** {@inheritDoc} */
     @Override
-    public void init() throws Exception {
+    public void init() throws IOException {
         LuceneIndexer.open();
         // Pre-v1 wipe path: an empty index after open() means either
         // first boot OR an operator wiped data/jclaw-lucene/ explicitly.
@@ -79,7 +79,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
 
     /** {@inheritDoc} */
     @Override
-    public List<TaskRunMessage> search(String query, int limit) throws Exception {
+    public List<TaskRunMessage> search(String query, int limit) throws IOException {
         if (query == null || query.isBlank()) return List.of();
 
         var sm = LuceneIndexer.searcherManager();

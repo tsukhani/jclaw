@@ -87,7 +87,7 @@ public final class TaskExecutor {
 
         var sink = new TaskRunSink(run);
         sink.onStart();
-        if (!driveAgentLoop(task, run, sink)) {
+        if (!driveAgentLoop(task, sink)) {
             return run;
         }
 
@@ -119,7 +119,7 @@ public final class TaskExecutor {
      * deleted mid-execution (in which case the sink has already been failed).
      * Rethrows on RuntimeException so JClawFailureHandler can classify.
      */
-    private static boolean driveAgentLoop(Task task, TaskRun run, TaskRunSink sink) {
+    private static boolean driveAgentLoop(Task task, TaskRunSink sink) {
         try {
             // Resolve the executing agent + user prompt inside a short Tx.
             // task.agent is @ManyToOne (EAGER by default), so the captured
