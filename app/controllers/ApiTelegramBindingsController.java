@@ -81,7 +81,7 @@ public class ApiTelegramBindingsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) { badRequest(); return; }
 
         String botToken = readRequiredString(body, KEY_BOT_TOKEN);
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
@@ -90,6 +90,7 @@ public class ApiTelegramBindingsController extends Controller {
 
         if (botToken == null || agentId == null || telegramUserId == null) {
             error(400, "botToken, agentId, and telegramUserId are required");
+            throw new AssertionError("unreachable: error() throws");
         }
         if (!telegramUserId.matches("\\d+")) {
             error(400, "telegramUserId must be numeric");
@@ -98,6 +99,7 @@ public class ApiTelegramBindingsController extends Controller {
         Agent agent = AgentService.findById(agentId);
         if (agent == null || !agent.enabled) {
             error(400, "agentId must reference an enabled agent");
+            throw new AssertionError("unreachable: error() throws");
         }
         if (TelegramBinding.findByBotToken(botToken) != null) {
             error(409, "A binding with this bot token already exists");

@@ -249,7 +249,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
 
         var agentDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
         var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
@@ -284,10 +284,10 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillToggleResponse.class)))
     public static void updateForAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_ENABLED)) badRequest();
+        if (body == null || !body.has(KEY_ENABLED)) { badRequest(); return; }
         var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
@@ -306,7 +306,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCopyResponse.class)))
     public static void copyToAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
 
         var globalDir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(globalDir)) {
@@ -360,7 +360,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
     public static void listAgentSkillFiles(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
         listSkillFilesFrom(dir);
@@ -370,7 +370,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFileContentResponse.class)))
     public static void readAgentSkillFile(Long id, String name, String filePath) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         readSkillFileFrom(dir, filePath);
     }
@@ -379,7 +379,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
     public static void deleteAgentSkill(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
         // Revoke the skill's shell-allowlist grants for this agent BEFORE deleting
@@ -435,7 +435,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillRenameResponse.class)))
     public static void rename(String name) {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_NEW_NAME)) badRequest();
+        if (body == null || !body.has(KEY_NEW_NAME)) { badRequest(); return; }
 
         var newName = body.get(KEY_NEW_NAME).getAsString().strip();
         if (newName.isEmpty()) badRequest();
@@ -569,6 +569,7 @@ public class ApiSkillsController extends Controller {
         var resolved = AgentService.resolveContained(root, name);
         if (resolved == null) {
             notFound();
+            throw new AssertionError("unreachable: notFound() throws");
         }
         return resolved;
     }

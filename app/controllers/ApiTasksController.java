@@ -303,12 +303,12 @@ public class ApiTasksController extends Controller {
     private static String requireTaskName(com.google.gson.JsonObject body) {
         if (!body.has("name") || body.get("name").isJsonNull()) {
             error(400, "name is required");
-            return null; // unreachable
+            throw new AssertionError("unreachable: error() throws");
         }
         var name = body.get("name").getAsString();
         if (name == null || name.isBlank()) {
             error(400, "name must be non-blank");
-            return null; // unreachable
+            throw new AssertionError("unreachable: error() throws");
         }
         return name;
     }
@@ -316,13 +316,13 @@ public class ApiTasksController extends Controller {
     private static ScheduleShorthandParser.ScheduleSpec requireScheduleSpec(com.google.gson.JsonObject body) {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) {
             error(400, "schedule is required");
-            return null; // unreachable
+            throw new AssertionError("unreachable: error() throws");
         }
         try {
             return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString());
         } catch (IllegalArgumentException e) {
             error(400, "Invalid schedule: " + e.getMessage());
-            return null; // unreachable
+            throw new AssertionError("unreachable: error() throws");
         }
     }
 

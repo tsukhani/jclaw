@@ -97,6 +97,7 @@ public class ApiChatController extends Controller {
     private static ChatContext resolveChatContext(JsonObject body) {
         if (body == null || !body.has("message") || !body.has(KEY_AGENT_ID)) {
             badRequest();
+            throw new AssertionError("unreachable: badRequest() throws");
         }
 
         var agentId = body.get(KEY_AGENT_ID).getAsLong();
@@ -105,7 +106,10 @@ public class ApiChatController extends Controller {
         // no lazy fields used downstream, so reading String columns on the
         // detached entity after the tx closes is safe.
         Agent agent = services.Tx.run(() -> Agent.findById(agentId));
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw new AssertionError("unreachable: notFound() throws");
+        }
 
         var messageText = body.get("message").getAsString();
         Long conversationId = (body.has(KEY_CONVERSATION_ID) && !body.get(KEY_CONVERSATION_ID).isJsonNull())
@@ -189,7 +193,7 @@ public class ApiChatController extends Controller {
         Conversation conversation;
         if (ctx.conversationId() != null) {
             conversation = ConversationService.findById(ctx.conversationId());
-            if (conversation == null) notFound();
+            if (conversation == null) { notFound(); return; }
         } else {
             conversation = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
         }
