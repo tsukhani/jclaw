@@ -137,6 +137,28 @@ async function resetLatency() {
 // that looked like the dashboard flashing on every refresh.
 const chatCostRef = ref<{ refresh: () => Promise<void> } | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
+/**
+ * Format the Recent Activity timestamp as "MMM D, YYYY · h:mm:ss AM/PM".
+ * Uses the browser's locale-resolved separators but pins the format to
+ * 12-hour clock so operators have a consistent AM/PM marker regardless
+ * of OS locale settings.
+ */
+function formatActivityTimestamp(iso: string): string {
+  const d = new Date(iso)
+  const date = d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+  const time = d.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })
+  return `${date} · ${time}`
+}
+
 onMounted(() => {
   pollTimer = setInterval(() => {
     refreshLatency()
@@ -415,28 +437,41 @@ onBeforeUnmount(() => {
       </div>
       <div
         v-if="logs?.events?.length"
-        class="divide-y divide-border"
       >
-        <div
-          v-for="event in logs.events"
-          :key="event.id"
-          class="px-4 py-2.5 flex items-start gap-3"
-        >
-          <span
-            :class="{
-              'text-red-400': event.level === 'ERROR',
-              'text-yellow-400': event.level === 'WARN',
-              'text-fg-muted': event.level === 'INFO',
-            }"
-            class="text-xs font-mono mt-0.5 shrink-0 w-10"
-          >{{ event.level }}</span>
-          <span class="text-xs text-fg-muted shrink-0 w-16 font-mono">{{ event.category }}</span>
-          <span
-            v-if="event.agentId"
-            class="text-xs text-fg-muted shrink-0 font-mono"
-          >{{ event.agentId }}</span>
-          <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
-          <span class="text-xs text-fg-muted ml-auto shrink-0">{{ new Date(event.timestamp).toLocaleTimeString() }}</span>
+        <!-- Column headers — same flex template as data rows so the columns
+             stay aligned to the same shrink-0 widths. -->
+        <div class="px-4 py-2 flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
+          <span class="shrink-0 w-10">Level</span>
+          <span class="shrink-0 w-44">Category</span>
+          <span class="shrink-0 w-16">Agent</span>
+          <span class="flex-1 min-w-0">Message</span>
+          <span class="ml-auto shrink-0 w-48 text-right">Timestamp</span>
+        </div>
+        <div class="divide-y divide-border">
+          <div
+            v-for="event in logs.events"
+            :key="event.id"
+            class="px-4 py-2.5 flex items-start gap-3"
+          >
+            <span
+              :class="{
+                'text-red-400': event.level === 'ERROR',
+                'text-yellow-400': event.level === 'WARN',
+                'text-fg-muted': event.level === 'INFO',
+              }"
+              class="text-xs font-mono mt-0.5 shrink-0 w-10"
+            >{{ event.level }}</span>
+            <span
+              :title="event.category"
+              class="text-xs text-fg-muted shrink-0 w-44 font-mono truncate mt-0.5"
+            >{{ event.category }}</span>
+            <span
+              :title="event.agentId || ''"
+              class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5"
+            >{{ event.agentId || '—' }}</span>
+            <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
+            <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5">{{ formatActivityTimestamp(event.timestamp) }}</span>
+          </div>
         </div>
       </div>
       <div
