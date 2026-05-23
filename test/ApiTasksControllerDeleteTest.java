@@ -175,7 +175,7 @@ class ApiTasksControllerDeleteTest extends FunctionalTest {
     }
 
     private void truncateScheduledTasks() throws Exception {
-        try (var conn = DB.datasource.getConnection()) {
+        try (var conn = DB.getDataSource().getConnection()) {
             conn.setAutoCommit(true);
             try (var ps = conn.prepareStatement(
                     "DELETE FROM scheduled_tasks WHERE task_name = ?")) {

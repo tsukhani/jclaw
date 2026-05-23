@@ -1,7 +1,6 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
 import models.Agent;
-import models.Conversation;
 import models.Message;
 import services.AgentService;
 import services.ConversationService;

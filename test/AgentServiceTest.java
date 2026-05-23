@@ -8,7 +8,6 @@ import models.Message;
 import models.Task;
 import services.AgentService;
 import services.ConfigService;
-import services.ConversationService;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -545,7 +544,7 @@ class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    void writeWorkspaceFileBlocksTraversalSilently() throws Exception {
+    void writeWorkspaceFileBlocksTraversalSilently() {
         AgentService.create("svc-write-trav", "openrouter", "gpt-4.1");
         // The SecurityException catch logs a warn and returns without
         // writing. We verify no file lands outside the workspace.
@@ -565,7 +564,7 @@ class AgentServiceTest extends UnitTest {
         // No agents that need flipping → the early-return short-circuit path.
         // No assertions on side effects; we just want the no-change branch
         // hit cleanly.
-        assertDoesNotThrow(() -> AgentService.syncEnabledStates());
+        assertDoesNotThrow(AgentService::syncEnabledStates);
     }
 
     @Test

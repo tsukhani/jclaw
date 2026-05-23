@@ -1,4 +1,3 @@
-import agents.AgentRunner;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -40,7 +39,7 @@ class SpawnSubagentToolTest extends UnitTest {
     private int port;
 
     @BeforeEach
-    void setup() throws Exception {
+    void setup() {
         Fixtures.deleteDatabase();
         EventLogger.clear();
         ConfigService.clearCache();
@@ -1237,7 +1236,7 @@ class SpawnSubagentToolTest extends UnitTest {
                 // Poll the cooperative flag instead of relying on interrupt.
                 while (!services.SubagentRegistry.isCancelled(run.id)) {
                     try { Thread.sleep(20); }
-                    catch (InterruptedException ie) {
+                    catch (InterruptedException _) {
                         observedInterrupt.set(true);
                         Thread.currentThread().interrupt();
                         break;
@@ -1440,7 +1439,7 @@ class SpawnSubagentToolTest extends UnitTest {
     }
 
     @Test
-    void asyncSpawnFailureUnchangedByKillFix() throws Exception {
+    void asyncSpawnFailureUnchangedByKillFix() {
         // JCLAW-291 regression check: the kill-fix must not affect the
         // normal failure path. A non-cancellation exception from the runner
         // VT still produces FAILED + announce + SUBAGENT_ERROR. This

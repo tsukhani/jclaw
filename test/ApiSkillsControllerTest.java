@@ -10,7 +10,6 @@ import services.SkillPromotionService;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
 
 /**
  * Functional HTTP tests for {@code ApiSkillsController} covering the

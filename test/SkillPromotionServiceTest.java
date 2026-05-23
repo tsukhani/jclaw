@@ -4,11 +4,8 @@ import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.SkillPromotionService;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
 
 class SkillPromotionServiceTest extends UnitTest {
 

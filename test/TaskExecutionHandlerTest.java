@@ -67,7 +67,7 @@ class TaskExecutionHandlerTest extends UnitTest {
     private RecordingSchedulerStub stub;
 
     @BeforeEach
-    void setup() throws Exception {
+    void setup() {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
@@ -517,7 +517,7 @@ class TaskExecutionHandlerTest extends UnitTest {
     // === Dead-execution recovery via BootConsistencyCheck ===
 
     @Test
-    void deadExecutionRecoveryReregistersOrphanPending() throws Exception {
+    void deadExecutionRecoveryReregistersOrphanPending() {
         // Simulate the "JVM crashed mid-fire, scheduled_tasks row gone,
         // Task row left PENDING" scenario. BootConsistencyCheck.sweep
         // should pick this up and register a fresh row.

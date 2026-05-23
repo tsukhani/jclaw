@@ -1,10 +1,8 @@
 import llm.LlmProvider;
 import llm.OpenAiProvider;
-import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
-import llm.LlmTypes.ToolDef;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
@@ -50,7 +48,7 @@ class LlmProviderFailoverTest extends UnitTest {
     private MockWebServer secondaryServer;
 
     @AfterEach
-    void teardown() throws Exception {
+    void teardown() {
         if (primaryServer != null) {
             primaryServer.close();
             primaryServer = null;

@@ -19,7 +19,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Verifies {@link WhisperModelManager} download semantics in isolation:
@@ -163,13 +162,13 @@ class WhisperModelManagerTest extends UnitTest {
 
         var t1 = Thread.ofVirtual().start(() -> {
             ready.countDown();
-            try { go.await(); } catch (InterruptedException ignored) {}
+            try { go.await(); } catch (InterruptedException _) {}
             var f = WhisperModelManager.ensureAvailable(MODEL, null);
             if (f == sentinel) hits.incrementAndGet();
         });
         var t2 = Thread.ofVirtual().start(() -> {
             ready.countDown();
-            try { go.await(); } catch (InterruptedException ignored) {}
+            try { go.await(); } catch (InterruptedException _) {}
             var f = WhisperModelManager.ensureAvailable(MODEL, null);
             if (f == sentinel) hits.incrementAndGet();
         });
@@ -214,7 +213,7 @@ class WhisperModelManagerTest extends UnitTest {
         if (!Files.exists(dir)) return;
         try (var stream = Files.walk(dir)) {
             stream.sorted(java.util.Comparator.reverseOrder())
-                    .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException ignored) {} });
+                    .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException _) {} });
         }
     }
 }

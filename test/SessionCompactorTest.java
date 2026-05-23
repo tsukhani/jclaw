@@ -14,7 +14,6 @@ import play.test.*;
 import services.ConfigService;
 import services.ConversationService;
 import services.SessionCompactor;
-import services.SessionCompactor.CompactionResult;
 import services.SessionCompactor.MessageSnapshot;
 
 import java.time.Instant;
@@ -128,7 +127,7 @@ class SessionCompactorTest extends UnitTest {
     // ─── compact() end-to-end ──────────────────────────────────────────
 
     @Test
-    void compact_persistsRowAndBumpsWatermark_onSuccess() throws Exception {
+    void compact_persistsRowAndBumpsWatermark_onSuccess() {
         var conv = ConversationService.create(agent, "web", "user1");
         // Seed 25 messages — enough to pass the default 10-turn minimum.
         seedMessages(conv, 25);
@@ -156,7 +155,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void compact_skipsWhenSummarizerReturnsEmpty() throws Exception {
+    void compact_skipsWhenSummarizerReturnsEmpty() {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
         commitAndReopen();
@@ -171,7 +170,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void compact_skipsWhenSummarizerThrows() throws Exception {
+    void compact_skipsWhenSummarizerThrows() {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
         commitAndReopen();
@@ -187,7 +186,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void compact_skipsWhenTooFewMessages() throws Exception {
+    void compact_skipsWhenTooFewMessages() {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 5); // below minCompactable
         commitAndReopen();
@@ -199,7 +198,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void compactForced_succeedsWhereAutoSkipsDueToLowTurnCount() throws Exception {
+    void compactForced_succeedsWhereAutoSkipsDueToLowTurnCount() {
         // 8 messages — well below auto-trigger's 10-turn minimum.
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 8);
@@ -219,7 +218,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void compact_additionalInstructions_threadedIntoSystemPrompt() throws Exception {
+    void compact_additionalInstructions_threadedIntoSystemPrompt() {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
         commitAndReopen();
@@ -240,7 +239,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void compact_keepsOriginalMessagesIntact_afterSuccess() throws Exception {
+    void compact_keepsOriginalMessagesIntact_afterSuccess() {
         // AC: original turns remain accessible in conversation history.
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
@@ -258,7 +257,7 @@ class SessionCompactorTest extends UnitTest {
     // ─── appendSummaryToPrompt ───────────────────────────────────────────
 
     @Test
-    void appendSummaryToPrompt_returnsUnchanged_whenNoCompactionRow() throws Exception {
+    void appendSummaryToPrompt_returnsUnchanged_whenNoCompactionRow() {
         var conv = ConversationService.create(agent, "web", "user1");
         commitAndReopen();
         var reloaded = Conversation.<Conversation>findById(conv.id);
@@ -268,7 +267,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void appendSummaryToPrompt_appendsHeaderAndSummary_whenRowPresent() throws Exception {
+    void appendSummaryToPrompt_appendsHeaderAndSummary_whenRowPresent() {
         var conv = ConversationService.create(agent, "web", "user1");
         var sc = new SessionCompaction();
         sc.conversation = conv;
@@ -288,7 +287,7 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    void appendSummaryToPrompt_picksMostRecentWhenMultiple() throws Exception {
+    void appendSummaryToPrompt_picksMostRecentWhenMultiple() {
         var conv = ConversationService.create(agent, "web", "user1");
         var older = new SessionCompaction();
         older.conversation = conv;

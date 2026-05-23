@@ -19,7 +19,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer;
 
 /**
  * Functional test for {@link BootConsistencyCheck#sweep}. Drives
@@ -174,7 +173,7 @@ class BootConsistencyCheckTest extends UnitTest {
     }
 
     private void insertScheduledTaskRow(Long taskId, Instant lastHeartbeat) throws Exception {
-        // DB.datasource returns Hikari-pooled connections with autoCommit=false
+        // DB.getDataSource() returns Hikari-pooled connections with autoCommit=false
         // (Hibernate-managed). Force autocommit on so the row lands before the
         // detector's separate-connection SELECT.
         try (var conn = DB.datasource.getConnection()) {

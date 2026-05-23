@@ -480,7 +480,7 @@ class ChannelTest extends UnitTest {
     }
 
     @Test
-    void channelSendWithRetryRunsRetryOnSchedulerThreadNotCaller() throws Exception {
+    void channelSendWithRetryRunsRetryOnSchedulerThreadNotCaller() {
         // Regression: the original implementation called Thread.sleep on the
         // caller's thread. Under virtual-thread dispatch, that pinned the
         // carrier per JDK-8373224. The fix routes the delay through a

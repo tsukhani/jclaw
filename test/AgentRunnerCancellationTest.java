@@ -9,7 +9,6 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Characterization tests for {@link CancellationManager}'s checkpoint

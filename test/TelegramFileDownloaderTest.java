@@ -1,7 +1,6 @@
 import channels.TelegramChannel;
 import channels.TelegramFileDownloader;
 import com.sun.net.httpserver.HttpServer;
-import models.Agent;
 import models.MessageAttachment;
 import org.junit.jupiter.api.*;
 import play.test.Fixtures;
@@ -82,7 +81,7 @@ class TelegramFileDownloaderTest extends UnitTest {
     }
 
     @Test
-    void rejectsOversizeFilePerReportedSize() throws Exception {
+    void rejectsOversizeFilePerReportedSize() {
         var agent = AgentService.create("tg-downloader-size", "openrouter", "gpt-4.1");
 
         server.createContext("/botTOKEN/getFile", exchange -> {
@@ -109,7 +108,7 @@ class TelegramFileDownloaderTest extends UnitTest {
     }
 
     @Test
-    void surfacesDownloadFailedWhenGetFileErrors() throws Exception {
+    void surfacesDownloadFailedWhenGetFileErrors() {
         var agent = AgentService.create("tg-downloader-err", "openrouter", "gpt-4.1");
 
         server.createContext("/botTOKEN/getFile", exchange -> {

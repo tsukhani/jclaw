@@ -68,7 +68,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @AfterEach
-    void tearDown() throws Exception {
+    void tearDown() {
         for (var k : ALL_KEYS) ConfigService.delete(k);
         ConfigService.clearCache();
         server.close();
@@ -153,7 +153,7 @@ class WebSearchToolHttpTest extends UnitTest {
     // ==================== Brave: empty results ====================
 
     @Test
-    void braveEmptyResultsYieldsNoResultsFoundEnvelope() throws Exception {
+    void braveEmptyResultsYieldsNoResultsFoundEnvelope() {
         // Per renderMarkdown: parsed.isEmpty() ⇒ "No results found."
         // The model needs this deterministic string so it can decide whether
         // to retry with a different query rather than parsing absence from
@@ -171,7 +171,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void braveMissingWebKeyAlsoYieldsNoResultsFound() throws Exception {
+    void braveMissingWebKeyAlsoYieldsNoResultsFound() {
         // Defensive: a Brave-shaped response with no `web` key at all (e.g.
         // a stripped error response that still 200s) must not NPE.
         enableBraveAtMock();
@@ -188,7 +188,7 @@ class WebSearchToolHttpTest extends UnitTest {
     // ==================== Brave: error envelopes ====================
 
     @Test
-    void brave401SurfacesAsToolError() throws Exception {
+    void brave401SurfacesAsToolError() {
         // Auth failure must NOT throw — the agent loop catches exceptions
         // and emits a generic envelope. Surfacing as a tool-error string
         // lets the model recognize the auth class and stop retrying.
@@ -208,7 +208,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void brave403SurfacesAsToolError() throws Exception {
+    void brave403SurfacesAsToolError() {
         enableBraveAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(403)
@@ -220,7 +220,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void brave429SurfacesAsToolError() throws Exception {
+    void brave429SurfacesAsToolError() {
         // Rate-limit: no retry/backoff in current production code; the
         // provider-fallback loop walks to the next enabled provider. With
         // Brave as the only candidate, the rate-limit becomes the final
@@ -237,7 +237,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void brave500ResponseBodyTruncatedAtTwoHundredChars() throws Exception {
+    void brave500ResponseBodyTruncatedAtTwoHundredChars() {
         // A pathological 5xx with a huge body shouldn't drag a multi-KB
         // payload into the LLM context. doSearch truncates to 200 chars.
         enableBraveAtMock();
@@ -257,7 +257,7 @@ class WebSearchToolHttpTest extends UnitTest {
     // ==================== Tavily: snippet truncation ====================
 
     @Test
-    void tavilyLongSnippetTruncatedAtFiveHundredCharsWithEllipsis() throws Exception {
+    void tavilyLongSnippetTruncatedAtFiveHundredCharsWithEllipsis() {
         // Tavily's `content` field goes through trimmedContentSnippet, which
         // caps at 500 chars + "...". This is the snippet cap the JIRA AC
         // names — verifying the long-body branch fires.
@@ -289,7 +289,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void tavilyShortSnippetPassedThroughVerbatim() throws Exception {
+    void tavilyShortSnippetPassedThroughVerbatim() {
         enableTavilyAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -363,7 +363,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void executeRichOnEmptyResultsHasNullStructuredJson() throws Exception {
+    void executeRichOnEmptyResultsHasNullStructuredJson() {
         // When parsed.isEmpty() the executeRich branch falls through to the
         // text-only path so the UI doesn't render a chip strip for "no
         // results". The structured payload must therefore be null.
@@ -381,7 +381,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void executeRichOnErrorPathHasNullStructuredJson() throws Exception {
+    void executeRichOnErrorPathHasNullStructuredJson() {
         enableBraveAtMock();
         server.enqueue(new MockResponse.Builder().code(401).body("nope").build());
 
@@ -420,7 +420,7 @@ class WebSearchToolHttpTest extends UnitTest {
     // ==================== fallback to next provider ====================
 
     @Test
-    void firstProviderFailureFallsBackToSecond() throws Exception {
+    void firstProviderFailureFallsBackToSecond() {
         // Two providers enabled and keyed; the first (Brave, default priority
         // higher than Tavily? — see priorities). Whichever runs first must
         // fail-over to the other when it returns non-200.
@@ -649,7 +649,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void exaEmptyResultsArrayYieldsNoResultsFound() throws Exception {
+    void exaEmptyResultsArrayYieldsNoResultsFound() {
         // topLevelArray returns null on empty-array, which routes through to
         // the empty-results envelope rather than NPE'ing on a missing key.
         enableExaAtMock();
@@ -664,7 +664,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void exaResultWithoutHighlightsRendersWithoutQuoteLines() throws Exception {
+    void exaResultWithoutHighlightsRendersWithoutQuoteLines() {
         // joinedHighlights returns null when no highlights array; the custom
         // formatResults must still emit title + URL but no `> ...` line.
         enableExaAtMock();
@@ -686,7 +686,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void exa500SurfacesAsToolError() throws Exception {
+    void exa500SurfacesAsToolError() {
         enableExaAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(500)
@@ -700,7 +700,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void exaMalformedJsonSurfacesAsToolError() throws Exception {
+    void exaMalformedJsonSurfacesAsToolError() {
         // A 200 with body that isn't valid JSON must be caught by the
         // outer try/catch and emitted as Error: rather than escape as
         // a JsonParseException.
@@ -756,7 +756,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void tavilyEmptyResultsYieldsNoResultsFound() throws Exception {
+    void tavilyEmptyResultsYieldsNoResultsFound() {
         enableTavilyAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -767,7 +767,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void tavily500SurfacesAsToolError() throws Exception {
+    void tavily500SurfacesAsToolError() {
         enableTavilyAtMock();
         server.enqueue(new MockResponse.Builder().code(500).body("boom").build());
         var result = tool.execute("{\"query\":\"x\"}", null);
@@ -777,7 +777,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void tavilyNullableContentBecomesNullSnippet() throws Exception {
+    void tavilyNullableContentBecomesNullSnippet() {
         // trimmedContentSnippet returns null when content is missing/JsonNull;
         // the markdown renderer's snippet-null guard skips the `> ...` line.
         enableTavilyAtMock();
@@ -887,7 +887,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void perplexityEmptyResultsYieldsNoResultsFound() throws Exception {
+    void perplexityEmptyResultsYieldsNoResultsFound() {
         enablePerplexityAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -898,7 +898,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void perplexity503SurfacesAsToolError() throws Exception {
+    void perplexity503SurfacesAsToolError() {
         enablePerplexityAtMock();
         server.enqueue(new MockResponse.Builder().code(503).body("upstream down").build());
         var result = tool.execute("{\"query\":\"x\"}", null);
@@ -908,7 +908,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void perplexityMalformedJsonSurfacesAsToolError() throws Exception {
+    void perplexityMalformedJsonSurfacesAsToolError() {
         enablePerplexityAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -979,7 +979,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void ollamaEmptyResultsYieldsNoResultsFound() throws Exception {
+    void ollamaEmptyResultsYieldsNoResultsFound() {
         enableOllamaAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -990,7 +990,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void ollama500SurfacesAsToolError() throws Exception {
+    void ollama500SurfacesAsToolError() {
         enableOllamaAtMock();
         server.enqueue(new MockResponse.Builder().code(500).body("fail").build());
         var result = tool.execute("{\"query\":\"x\"}", null);
@@ -1000,7 +1000,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void ollamaMalformedJsonSurfacesAsToolError() throws Exception {
+    void ollamaMalformedJsonSurfacesAsToolError() {
         enableOllamaAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -1084,7 +1084,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void feloMissingDataKeyYieldsNoResultsFound() throws Exception {
+    void feloMissingDataKeyYieldsNoResultsFound() {
         // Defensive: response with no `data` key at all must not NPE.
         enableFeloAtMock();
         server.enqueue(new MockResponse.Builder()
@@ -1096,7 +1096,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void feloNullDataYieldsNoResultsFound() throws Exception {
+    void feloNullDataYieldsNoResultsFound() {
         // JsonNull in `data` is the second guard branch — verify it doesn't
         // throw on getAsJsonObject.
         enableFeloAtMock();
@@ -1109,7 +1109,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void feloMissingResourcesArrayYieldsNoResultsFound() throws Exception {
+    void feloMissingResourcesArrayYieldsNoResultsFound() {
         // `data` present but no `resources` key → empty parsed list. With no
         // answer summary either, formatResults must still emit the canonical
         // "No results found." string.
@@ -1125,7 +1125,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void feloAnswerOnlyWithEmptyResourcesStillEmitsSummary() throws Exception {
+    void feloAnswerOnlyWithEmptyResourcesStillEmitsSummary() {
         // Empty resources[] but a populated answer — the custom formatResults
         // appends "No results found." after the summary so the LLM sees the
         // answer-only path.
@@ -1150,7 +1150,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void felo500SurfacesAsToolError() throws Exception {
+    void felo500SurfacesAsToolError() {
         enableFeloAtMock();
         server.enqueue(new MockResponse.Builder().code(500).body("err").build());
         var result = tool.execute("{\"query\":\"x\"}", null);
@@ -1160,7 +1160,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void feloMalformedJsonSurfacesAsToolError() throws Exception {
+    void feloMalformedJsonSurfacesAsToolError() {
         enableFeloAtMock();
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -1199,7 +1199,7 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
-    void priorityNonNumericFallsBackToDefault() throws Exception {
+    void priorityNonNumericFallsBackToDefault() {
         // parseInt(value, 99) handles non-numeric priority values without
         // throwing. With a single provider enabled, the comparator never
         // actually compares — but the resolveProvidersByPriority path still

@@ -2,7 +2,6 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
-import models.Task;
 import services.EventLogger;
 
 import java.util.regex.Pattern;

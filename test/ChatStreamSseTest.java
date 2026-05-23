@@ -44,7 +44,7 @@ class ChatStreamSseTest extends UnitTest {
     }
 
     @AfterEach
-    void tearDown() throws Exception {
+    void tearDown() {
         server.close();
     }
 
@@ -86,7 +86,7 @@ class ChatStreamSseTest extends UnitTest {
         var collected = new Collected();
         var latch = new CountDownLatch(1);
         provider.chatStream("x", List.of(ChatMessage.user("hi")), null,
-                chunk -> collected.chunks.add(chunk),
+                collected.chunks::add,
                 () -> { collected.completed.set(true); latch.countDown(); },
                 e -> { collected.error.set(e); latch.countDown(); },
                 null, null, null);

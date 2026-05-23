@@ -188,7 +188,7 @@ class LostTaskDetectorTest extends UnitTest {
     }
 
     private void insertRow(Long taskId, boolean picked, Instant lastHeartbeat) throws Exception {
-        // DB.datasource returns Hikari-pooled connections with autoCommit=false
+        // DB.getDataSource() returns Hikari-pooled connections with autoCommit=false
         // (Hibernate-managed). Force autocommit on so the row lands before the
         // detector's separate-connection SELECT runs in the same test method.
         try (var conn = DB.datasource.getConnection()) {
@@ -211,7 +211,7 @@ class LostTaskDetectorTest extends UnitTest {
     }
 
     private boolean scheduledTaskRowExists(Long taskId) throws Exception {
-        try (var conn = DB.datasource.getConnection();
+        try (var conn = DB.getDataSource().getConnection();
              var ps = conn.prepareStatement(
                      "SELECT COUNT(*) FROM scheduled_tasks "
                      + "WHERE task_name = ? AND task_instance = ?")) {
@@ -225,7 +225,7 @@ class LostTaskDetectorTest extends UnitTest {
     }
 
     private void truncateScheduledTasks() throws Exception {
-        try (var conn = DB.datasource.getConnection()) {
+        try (var conn = DB.getDataSource().getConnection()) {
             conn.setAutoCommit(true);
             try (var ps = conn.prepareStatement(
                     "DELETE FROM scheduled_tasks WHERE task_name = ?")) {

@@ -17,7 +17,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * End-to-end coverage for the three malware-scanner implementations
@@ -49,7 +48,7 @@ class ScannerTest extends UnitTest {
 
     @BeforeEach
     void setup() throws IOException {
-        handlerRef = new AtomicReference<>((exchange) -> {
+        handlerRef = new AtomicReference<>(exchange -> {
             exchange.sendResponseHeaders(200, -1);
             exchange.close();
         });
@@ -383,5 +382,5 @@ class ScannerTest extends UnitTest {
     }
 
     // silence unused-import on Consumer when tests evolve
-    @SuppressWarnings("unused") private Consumer<Object> _suppress;
+    @SuppressWarnings("unused") private Consumer<Object> suppress;
 }

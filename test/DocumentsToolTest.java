@@ -271,7 +271,7 @@ class DocumentsToolTest extends UnitTest {
     // ----- execute() dispatcher branches ------------------------------------
 
     @Test
-    void execute_unknownActionReturnsError() throws Exception {
+    void execute_unknownActionReturnsError() {
         var tool = new DocumentsTool();
         var agent = freshAgent("docs-unknown-action");
         var result = tool.execute(
@@ -281,7 +281,7 @@ class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    void execute_writeDocumentWithoutContentReturnsError() throws Exception {
+    void execute_writeDocumentWithoutContentReturnsError() {
         var tool = new DocumentsTool();
         var agent = freshAgent("docs-no-content");
         var result = tool.execute(
@@ -291,7 +291,7 @@ class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    void execute_writeDocumentUnknownFormatReturnsError() throws Exception {
+    void execute_writeDocumentUnknownFormatReturnsError() {
         var tool = new DocumentsTool();
         var agent = freshAgent("docs-bad-format");
         var result = tool.execute(
@@ -300,7 +300,7 @@ class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    void execute_writeDocumentExplicitUnsupportedFormatReturnsError() throws Exception {
+    void execute_writeDocumentExplicitUnsupportedFormatReturnsError() {
         var tool = new DocumentsTool();
         var agent = freshAgent("docs-unsupported-format");
         var result = tool.execute(
@@ -311,7 +311,7 @@ class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    void execute_renderDocumentRequiresSourcePath() throws Exception {
+    void execute_renderDocumentRequiresSourcePath() {
         var tool = new DocumentsTool();
         var agent = freshAgent("docs-render-no-src");
         var result = tool.execute(
@@ -321,7 +321,7 @@ class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    void execute_renderDocumentMissingSourceFileReturnsError() throws Exception {
+    void execute_renderDocumentMissingSourceFileReturnsError() {
         var tool = new DocumentsTool();
         var agent = freshAgent("docs-render-missing");
         var result = tool.execute(
@@ -334,7 +334,7 @@ class DocumentsToolTest extends UnitTest {
     // ----- appendDocument branches -------------------------------------------
 
     @Test
-    void execute_appendDocumentRequiresContent() throws Exception {
+    void execute_appendDocumentRequiresContent() {
         var tool = new DocumentsTool();
         var agent = freshAgent("docs-append-no-content");
         var result = tool.execute(

@@ -73,7 +73,7 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
     }
 
     private static void dropFtSafely() {
-        try (var conn = DB.datasource.getConnection()) {
+        try (var conn = DB.getDataSource().getConnection()) {
             FullTextLucene.dropAll(conn);
         } catch (Exception _) {
             // No FT state to drop — fine, defensive cleanup only.

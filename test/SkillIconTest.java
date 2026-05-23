@@ -1,7 +1,6 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
 import agents.SkillLoader;
-import models.Agent;
 import services.AgentService;
 
 import java.nio.file.Files;
@@ -98,7 +97,7 @@ class SkillIconTest extends UnitTest {
         var agentName = "icon-test-agent";
         var workspace = AgentService.workspacePath(agentName);
         try {
-            var agent = AgentService.create(agentName, "openrouter", "gpt-4.1");
+            AgentService.create(agentName, "openrouter", "gpt-4.1");
             var skillDir = workspace.resolve("skills/iconized");
             Files.createDirectories(skillDir);
             Files.writeString(skillDir.resolve("SKILL.md"), """

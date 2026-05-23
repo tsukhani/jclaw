@@ -8,7 +8,6 @@ import models.Agent;
 import models.EventLog;
 import models.Task;
 import models.TaskRun;
-import models.TaskRunMessage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -226,7 +225,7 @@ class TaskRetryRoundtripTest extends UnitTest {
     }
 
     @Test
-    void permanentFailureMarksFailedAndEmitsLifecycleEvent() throws Exception {
+    void permanentFailureMarksFailedAndEmitsLifecycleEvent() {
         var agent = createAgent("permanent-fail-agent", "test-provider", "test-model");
         var task = persistTask(agent, "Will fail permanently",
                 "Some bad request.", Task.Type.IMMEDIATE);

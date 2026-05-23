@@ -126,7 +126,7 @@ class AgentRunnerSubagentTest extends UnitTest {
     }
 
     @Test
-    void checkSubagentCancelThrowsRunCancelledExceptionWhenFlagIsSet() throws Exception {
+    void checkSubagentCancelThrowsRunCancelledExceptionWhenFlagIsSet() {
         // The load-bearing assertion: when the SubagentRegistry cancel
         // flag for the current conversation's run is set, the next
         // checkpoint throws {@link RunCancelledException} carrying the

@@ -168,7 +168,6 @@ public final class MockTelegramServer implements AutoCloseable {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
-            String httpMethod = exchange.getRequestMethod();
             byte[] bodyBytes = exchange.getRequestBody().readAllBytes();
             String body = new String(bodyBytes, StandardCharsets.UTF_8);
             String apiMethod = methodNameFromPath(path);
@@ -180,7 +179,7 @@ public final class MockTelegramServer implements AutoCloseable {
             if (delayMs > 0) {
                 try {
                     Thread.sleep(delayMs);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             }

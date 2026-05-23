@@ -2,7 +2,6 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
-import play.mvc.Http.*;
 
 /**
  * Functional HTTP tests for the 8 API controllers that previously had zero coverage:

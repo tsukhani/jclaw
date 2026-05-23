@@ -1,7 +1,6 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
 import llm.ProviderRegistry;
-import llm.LlmTypes.*;
 import services.ConfigService;
 
 import java.util.concurrent.CountDownLatch;

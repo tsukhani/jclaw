@@ -9,7 +9,6 @@ import java.nio.file.Files;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Tests for SSE streaming safety: latch timeout and callback exception handling.
@@ -44,7 +43,6 @@ class SseStreamTest extends UnitTest {
     @Test
     void latchReleasedWhenOnCompleteThrows() throws Exception {
         var latch = new CountDownLatch(1);
-        var completed = new AtomicBoolean(false);
 
         // Simulate onComplete callback that throws, but with finally guard
         Thread.ofVirtual().uncaughtExceptionHandler((_, _) -> {}).start(() -> {

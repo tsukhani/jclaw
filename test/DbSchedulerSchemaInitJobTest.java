@@ -14,9 +14,9 @@ class DbSchedulerSchemaInitJobTest extends UnitTest {
     }
 
     @Test
-    void ensureSchemaCanBeCalledDirectly() throws Exception {
+    void ensureSchemaCanBeCalledDirectly() {
         // ensureSchema is public for callers that need to apply the DDL
         // without going through the job lifecycle. Idempotent.
-        assertDoesNotThrow(() -> DbSchedulerSchemaInitJob.ensureSchema());
+        assertDoesNotThrow(DbSchedulerSchemaInitJob::ensureSchema);
     }
 }

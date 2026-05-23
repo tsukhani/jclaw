@@ -73,7 +73,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
     }
 
     @AfterEach
-    void teardown() throws Exception {
+    void teardown() {
         if (syncLlmServer != null) {
             syncLlmServer.stop(0);
             syncLlmServer = null;

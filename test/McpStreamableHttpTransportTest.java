@@ -38,7 +38,7 @@ class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @AfterEach
-    void tearDown() throws Exception {
+    void tearDown() {
         if (transport != null) transport.close();
         server.close();
     }

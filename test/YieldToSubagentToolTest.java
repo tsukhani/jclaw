@@ -2,7 +2,6 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
-import models.EventLog;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
@@ -509,7 +508,7 @@ class YieldToSubagentToolTest extends UnitTest {
     }
 
     @Test
-    void loadRecentMessagesIncludesUserRoleAnnounceAndExcludesSystemAnnounce() throws Exception {
+    void loadRecentMessagesIncludesUserRoleAnnounceAndExcludesSystemAnnounce() {
         // JCLAW-273 filter: USER-role announces (yield resumes) flow into LLM
         // context; SYSTEM-role announces (plain async fire-and-forget) do not.
         var parent = createAgent("p-filter", "test-provider", "test-model");

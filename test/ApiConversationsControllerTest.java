@@ -2,7 +2,6 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
-import play.db.jpa.JPA;
 import models.Agent;
 import models.Conversation;
 import models.Message;

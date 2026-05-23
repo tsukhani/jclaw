@@ -3,7 +3,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.ModelDiscoveryService;
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;

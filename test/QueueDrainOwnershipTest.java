@@ -5,10 +5,6 @@ import play.test.UnitTest;
 import services.ConversationQueue;
 import services.ConversationQueue.QueuedMessage;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Characterization tests for the JCLAW-117 queue-ownership transfer

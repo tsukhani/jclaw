@@ -2,7 +2,6 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import jobs.ToolRegistrationJob;
 import mcp.McpAllowlist;
-import mcp.McpClient;
 import mcp.McpConnectionManager;
 import models.Agent;
 import models.AgentSkillAllowedTool;
@@ -433,7 +432,7 @@ class McpConnectionManagerTest extends UnitTest {
         try {
             future.get(2, TimeUnit.SECONDS);
             fail("future must complete with cancellation, not normally");
-        } catch (CancellationException expected) {
+        } catch (CancellationException _) {
             // good
         }
     }
@@ -510,7 +509,7 @@ class McpConnectionManagerTest extends UnitTest {
             })); }
             catch (Throwable e) { err.set(e); }
         });
-        try { t.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try { t.join(); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
         if (err.get() != null) throw new RuntimeException(err.get());
         return holder.get();
     }

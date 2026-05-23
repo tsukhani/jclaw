@@ -334,7 +334,7 @@ class AttachmentServiceTest extends UnitTest {
         if (!Files.exists(p)) return;
         try (var stream = Files.walk(p)) {
             stream.sorted(java.util.Comparator.reverseOrder()).forEach(child -> {
-                try { Files.deleteIfExists(child); } catch (java.io.IOException ignored) { /* best-effort */ }
+                try { Files.deleteIfExists(child); } catch (java.io.IOException _) { /* best-effort */ }
             });
         }
     }

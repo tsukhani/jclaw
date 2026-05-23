@@ -10,7 +10,6 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Characterization tests for {@link ContextWindowManager}'s

@@ -2,7 +2,6 @@ import agents.AgentRunner;
 import agents.ToolRegistry;
 import llm.LlmTypes.*;
 import models.Agent;
-import models.Conversation;
 import org.junit.jupiter.api.*;
 import play.test.*;
 import services.ConversationService;

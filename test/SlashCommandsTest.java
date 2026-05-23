@@ -1,5 +1,4 @@
 import models.Agent;
-import models.Conversation;
 import models.Message;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

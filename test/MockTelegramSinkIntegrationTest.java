@@ -175,7 +175,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Gap 6: planner-dedupe sendPhoto count ====================
 
     @Test
-    void duplicateImageReferencesResultInOneSendPhoto() throws Exception {
+    void duplicateImageReferencesResultInOneSendPhoto() {
         // Seed a workspace file so TelegramOutboundPlanner can resolve the URL.
         services.AgentService.writeWorkspaceFile(agent.name, "screenshot-42.png", "png-bytes");
         String url = "/api/agents/" + agent.id + "/files/screenshot-42.png";
@@ -196,7 +196,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Gap 7: delivery-failure notifier (JCLAW-106) ====================
 
     @Test
-    void deliveryFailureTriggersFollowUpNotifier() throws Exception {
+    void deliveryFailureTriggersFollowUpNotifier() {
         // JCLAW-106 integration coverage: when the final sendMessage fails
         // through all retries, the sink fires a follow-up "please try
         // again" message. Mock returns 500 on sendMessage so Channel.sendWithRetry
@@ -226,7 +226,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     }
 
     @Test
-    void secondDeliveryFailureWithin60sDoesNotRefireNotifier() throws Exception {
+    void secondDeliveryFailureWithin60sDoesNotRefireNotifier() {
         // JCLAW-106 AC6 second half (wire-level): the rate limiter holds
         // across actual failed seal() calls, not just the unit-test
         // invocations of tryFireNotifier. Two seals back-to-back on the

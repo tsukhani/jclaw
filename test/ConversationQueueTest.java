@@ -256,7 +256,7 @@ class ConversationQueueTest extends UnitTest {
                         } else {
                             ConversationQueue.drain(convId);
                         }
-                    } catch (Exception e) {
+                    } catch (Exception _) {
                         corrupted.set(true);
                     } finally {
                         latch.countDown();
@@ -311,7 +311,7 @@ class ConversationQueueTest extends UnitTest {
                         sizeError.set(true);
                     }
                 }
-            } catch (Exception e) {
+            } catch (Exception _) {
                 sizeError.set(true);
             } finally {
                 latch.countDown();

@@ -5,9 +5,6 @@ import models.Task;
 import services.Tx;
 
 import java.time.Instant;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Tests that Tx.run() provides JPA transaction context on virtual threads.

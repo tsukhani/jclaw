@@ -313,7 +313,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
     // =========================================================
 
     @Test
-    void singleAndMultiCallDispatchProduceEquivalentToolResultHistory() throws Exception {
+    void singleAndMultiCallDispatchProduceEquivalentToolResultHistory() {
         long[] ids = seedAgentAndConversation();
         var agent = (Agent) Agent.findById(ids[0]);
 

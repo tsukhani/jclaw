@@ -76,7 +76,7 @@ class AgentRunnerWebhookDispatchTest extends UnitTest {
     }
 
     @Test
-    void processWebhookMessageRoutesToResolvedAgentAndDeliversResponse() throws Exception {
+    void processWebhookMessageRoutesToResolvedAgentAndDeliversResponse() {
         // Happy path: a peer binding routes the inbound to an agent, the
         // runner produces a canned envelope (no provider configured), and
         // sendResponse receives the (peerId, response) pair.
@@ -180,7 +180,7 @@ class AgentRunnerWebhookDispatchTest extends UnitTest {
     }
 
     @Test
-    void dispatchToChannelSwallowsExceptionsRaisedByTheChannelLookup() throws Exception {
+    void dispatchToChannelSwallowsExceptionsRaisedByTheChannelLookup() {
         // The outer try/catch around dispatchToChannel exists so a
         // channel-side failure (network, missing config, JPA glitch) on
         // queue-drain doesn't propagate up and break the orchestrator's

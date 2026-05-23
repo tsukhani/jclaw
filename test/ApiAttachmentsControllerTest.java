@@ -246,7 +246,7 @@ class ApiAttachmentsControllerTest extends FunctionalTest {
     // ===== Workspace-bounded SSRF guard =====
 
     @Test
-    void downloadReturns404WhenStoragePathHasNoAgentPrefix() throws Exception {
+    void downloadReturns404WhenStoragePathHasNoAgentPrefix() {
         login();
         // storagePath that doesn't start with "<agent.name>/" trips the
         // prefix check before the workspace resolver runs.
@@ -291,7 +291,7 @@ class ApiAttachmentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void downloadReturns403WhenStoragePathTraversesOutsideWorkspace() throws Exception {
+    void downloadReturns403WhenStoragePathTraversesOutsideWorkspace() {
         login();
         // storagePath that starts with the agent prefix but contains ".."
         // segments that escape the workspace. The prefix check passes; the

@@ -14,8 +14,8 @@ class BoundedPatternCacheTest extends UnitTest {
     @Test
     void memoizesRepeatedLookups() {
         var cache = new BoundedPatternCache(8);
-        var first = cache.computeIfAbsent("foo", k -> Pattern.compile(k));
-        var second = cache.computeIfAbsent("foo", k -> Pattern.compile(k));
+        var first = cache.computeIfAbsent("foo", Pattern::compile);
+        var second = cache.computeIfAbsent("foo", Pattern::compile);
         assertSame(first, second, "same key should return memoized pattern");
         assertEquals(1, cache.size());
     }
@@ -26,7 +26,7 @@ class BoundedPatternCacheTest extends UnitTest {
         var cache = new BoundedPatternCache(cap);
         for (int i = 0; i < cap + 10; i++) {
             final int n = i;
-            cache.computeIfAbsent("k" + n, k -> Pattern.compile(k));
+            cache.computeIfAbsent("k" + n, Pattern::compile);
         }
         assertEquals(cap, cache.size(), "cache size must not exceed cap");
     }
@@ -60,7 +60,7 @@ class BoundedPatternCacheTest extends UnitTest {
                             int observed = cache.size();
                             maxObservedSize.accumulateAndGet(observed, Math::max);
                         }
-                    } catch (Throwable t) {
+                    } catch (Throwable _) {
                         errors.incrementAndGet();
                     } finally {
                         done.countDown();

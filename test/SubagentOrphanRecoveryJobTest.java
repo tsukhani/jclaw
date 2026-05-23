@@ -25,7 +25,7 @@ class SubagentOrphanRecoveryJobTest extends UnitTest {
     }
 
     @Test
-    void doJobFlipsAgedRunningRowToFailed() throws Exception {
+    void doJobFlipsAgedRunningRowToFailed() {
         // Seed a RUNNING SubagentRun with startedAt older than the
         // ORPHAN_AGE_SECONDS cutoff so the recovery sweep picks it up.
         Long orphanId = Tx.run(() -> {
@@ -55,7 +55,7 @@ class SubagentOrphanRecoveryJobTest extends UnitTest {
     }
 
     @Test
-    void doJobLeavesYoungRunningRowAlone() throws Exception {
+    void doJobLeavesYoungRunningRowAlone() {
         // startedAt just now → still inside the ORPHAN_AGE_SECONDS window,
         // so the sweep ignores it.
         Long youngId = Tx.run(() -> {

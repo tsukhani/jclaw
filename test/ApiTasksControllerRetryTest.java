@@ -170,7 +170,7 @@ class ApiTasksControllerRetryTest extends FunctionalTest {
     // === Helpers ===
 
     private void insertStaleSchedulerRow(Long taskId) throws Exception {
-        // DB.datasource returns Hikari-pooled connections with autoCommit=false
+        // DB.getDataSource() returns Hikari-pooled connections with autoCommit=false
         // (Hibernate-managed). Force autocommit on so the row lands before
         // the controller's separate-connection SELECT.
         try (var conn = DB.datasource.getConnection()) {
@@ -193,7 +193,7 @@ class ApiTasksControllerRetryTest extends FunctionalTest {
     }
 
     private boolean scheduledTaskRowExists(Long taskId) throws Exception {
-        try (var conn = DB.datasource.getConnection()) {
+        try (var conn = DB.getDataSource().getConnection()) {
             conn.setAutoCommit(true);
             try (var ps = conn.prepareStatement(
                     "SELECT COUNT(*) FROM scheduled_tasks "
@@ -209,7 +209,7 @@ class ApiTasksControllerRetryTest extends FunctionalTest {
     }
 
     private void truncateScheduledTasks() throws Exception {
-        try (var conn = DB.datasource.getConnection()) {
+        try (var conn = DB.getDataSource().getConnection()) {
             conn.setAutoCommit(true);
             try (var ps = conn.prepareStatement(
                     "DELETE FROM scheduled_tasks WHERE task_name = ?")) {

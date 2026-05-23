@@ -1,6 +1,5 @@
 import mcp.McpConnectionManager;
 import models.AgentSkillAllowedTool;
-import models.McpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -257,7 +256,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             })); }
             catch (Throwable e) { err.set(e); }
         });
-        try { t.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try { t.join(); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
         if (err.get() != null) throw new RuntimeException(err.get());
         return holder.get();
     }

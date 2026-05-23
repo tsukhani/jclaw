@@ -27,7 +27,7 @@ class DbSchedulerBootstrapJobIsH2Test extends UnitTest {
     void isH2ReturnsTrueForTestDatasource() throws Exception {
         // Test JVM runs against H2 in-memory — the real datasource should
         // return true.
-        assertTrue(callIsH2(DB.datasource));
+        assertTrue(callIsH2(DB.getDataSource()));
     }
 
     @Test

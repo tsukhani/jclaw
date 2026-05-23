@@ -4,7 +4,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import play.Play;
 import play.mvc.Http;
 import play.test.*;
-import services.ConfigService;
 import utils.LatencyStats;
 import utils.LatencyTrace;
 
@@ -183,7 +182,7 @@ class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void queueWaitSegmentIsRecordedWhenAcceptedStampPresent() throws Exception {
+    void queueWaitSegmentIsRecordedWhenAcceptedStampPresent() {
         login();
         // Simulate the PlayHandler stamp by writing acceptedAtNanos to the
         // current request's args before building the trace from it.
@@ -204,7 +203,7 @@ class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void queueWaitAbsentWhenNoAcceptedStamp() throws Exception {
+    void queueWaitAbsentWhenNoAcceptedStamp() {
         login();
         play.mvc.Http.Request.current().args.remove("acceptedAtNanos");
 
@@ -255,7 +254,7 @@ class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void channelsStaySeparateInSnapshot() throws Exception {
+    void channelsStaySeparateInSnapshot() {
         // JCLAW-102: a web turn and a telegram turn should land in distinct
         // channel sections rather than averaging their distributions.
         login();

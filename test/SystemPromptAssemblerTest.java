@@ -106,7 +106,7 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    void cacheBoundarySitsBetweenEnvironmentAndMemoriesSections() throws Exception {
+    void cacheBoundarySitsBetweenEnvironmentAndMemoriesSections() {
         // Environment is the last section in the cacheable prefix; memories are
         // the only section after the boundary. This pin enforces the JCLAW-128
         // ordering invariant the prompt cache relies on.
@@ -321,7 +321,7 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    void loadtestAgentSkipsChannelGuidanceWhenChannelHasNone() throws Exception {
+    void loadtestAgentSkipsChannelGuidanceWhenChannelHasNone() {
         var agent = newAgent(services.LoadTestRunner.LOADTEST_AGENT_NAME);
         // Slack has no registered channel guidance → section silently absent.
         var assembled = SystemPromptAssembler.assemble(agent, "x", null, "slack");

@@ -540,7 +540,7 @@ class AgentSystemTest extends UnitTest {
     // --- Cascade delete ---
 
     @Test
-    void deleteAgentCascadesChildRows() throws Exception {
+    void deleteAgentCascadesChildRows() {
         // Seed an agent plus one row in every FK-constrained child table so the delete
         // path has to clear each one. Creation itself writes an AgentToolConfig (the
         // seeded "browser=disabled" for non-main agents), so that table is pre-populated.
@@ -743,7 +743,7 @@ class AgentSystemTest extends UnitTest {
 
         // Sum of section chars equals the real prompt length. If this drifts, the
         // build sequences have forked.
-        int sectionSum = breakdown.sections().stream().mapToInt(e -> e.chars()).sum();
+        int sectionSum = breakdown.sections().stream().mapToInt(SystemPromptAssembler.PromptBreakdown.Entry::chars).sum();
         assertEquals(assembled.length(), sectionSum,
                 "sum of per-section chars must equal the full prompt length");
 

@@ -4,7 +4,6 @@ import services.NotificationBus;
 
 import java.util.ArrayList;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Tests for the in-memory pub/sub NotificationBus.

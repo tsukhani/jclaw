@@ -1,6 +1,5 @@
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import mcp.CallToolResult;
 import mcp.McpClient;
 import mcp.McpException;
 import mcp.McpToolDef;
@@ -52,7 +51,7 @@ class McpClientTest extends UnitTest {
                 var listReq = transport.takeSent(JsonRpc.Request.class);
                 assertEquals("tools/list", listReq.method());
                 transport.deliver(new JsonRpc.Response(listReq.id(), toolsResult(), null));
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         });
@@ -65,7 +64,7 @@ class McpClientTest extends UnitTest {
     }
 
     @Test
-    void connectRejectsServerErrorOnInitialize() throws Exception {
+    void connectRejectsServerErrorOnInitialize() {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
 
@@ -74,7 +73,7 @@ class McpClientTest extends UnitTest {
                 var req = transport.takeSent(JsonRpc.Request.class);
                 transport.deliver(new JsonRpc.Response(req.id(), null,
                         new JsonRpc.Error(-32602, "Unsupported version")));
-            } catch (InterruptedException ignored) {}
+            } catch (InterruptedException _) {}
         });
 
         var ex = assertThrows(McpException.class, () -> client.connect());
@@ -111,7 +110,7 @@ class McpClientTest extends UnitTest {
                 content.add(part);
                 result.add("content", content);
                 transport.deliver(new JsonRpc.Response(call.id(), result, null));
-            } catch (InterruptedException ignored) {}
+            } catch (InterruptedException _) {}
         });
 
         var args = new JsonObject();
@@ -132,7 +131,7 @@ class McpClientTest extends UnitTest {
                 var call = transport.takeSent(JsonRpc.Request.class);
                 transport.deliver(new JsonRpc.Response(call.id(), null,
                         new JsonRpc.Error(-32000, "tool crashed")));
-            } catch (InterruptedException ignored) {}
+            } catch (InterruptedException _) {}
         });
 
         var args = new JsonObject();
@@ -222,7 +221,7 @@ class McpClientTest extends UnitTest {
             try {
                 client.callTool("echo", new JsonObject());
                 fail("callTool should have failed");
-            } catch (Exception expected) {
+            } catch (Exception _) {
                 // expected: future is completed exceptionally
             }
         });
@@ -239,7 +238,7 @@ class McpClientTest extends UnitTest {
     // ==================== close ====================
 
     @Test
-    void closeIsIdempotent() throws Exception {
+    void closeIsIdempotent() {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         client.close();
@@ -260,7 +259,7 @@ class McpClientTest extends UnitTest {
                 transport.takeSent(JsonRpc.Notification.class);  // initialized
                 var list = transport.takeSent(JsonRpc.Request.class);
                 transport.deliver(new JsonRpc.Response(list.id(), toolsResult(), null));
-            } catch (InterruptedException ignored) {}
+            } catch (InterruptedException _) {}
         });
         client.connect();
         driver.join(5000);

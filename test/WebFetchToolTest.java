@@ -10,7 +10,6 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Verifies {@link WebFetchTool}'s post-SsrfGuard HTTP path: the manual redirect

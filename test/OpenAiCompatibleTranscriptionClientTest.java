@@ -16,7 +16,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * JCLAW-162 coverage for the cloud transcription clients. Both

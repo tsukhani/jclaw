@@ -47,10 +47,10 @@ class JClawFailureHandlerTest extends UnitTest {
     @Test
     void transientWithBudgetLeftReschedules() {
         var task = persistTask(agent, 0, 3);
-        var transient_ = new SocketTimeoutException("read");
+        var transientErr = new SocketTimeoutException("read");
 
         var before = Instant.now();
-        var decision = JClawFailureHandler.decide(task.id, transient_);
+        var decision = JClawFailureHandler.decide(task.id, transientErr);
         var after = Instant.now();
 
         assertInstanceOf(Decision.Reschedule.class, decision);
@@ -106,9 +106,9 @@ class JClawFailureHandlerTest extends UnitTest {
         // maxRetries=2 means budget is min(2, 5) = 2. retryCount=2
         // is already at-budget; the next failure is permanent.
         var task = persistTask(agent, 2, 2);
-        var transient_ = new SocketTimeoutException("read");
+        var transientErr = new SocketTimeoutException("read");
 
-        var decision = JClawFailureHandler.decide(task.id, transient_);
+        var decision = JClawFailureHandler.decide(task.id, transientErr);
         assertInstanceOf(Decision.Fail.class, decision);
         var fresh = (Task) Tx.run(() -> Task.findById(task.id));
         assertEquals(Task.Status.FAILED, fresh.status,

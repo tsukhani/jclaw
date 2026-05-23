@@ -40,7 +40,7 @@ class VirtualThreadsTest extends UnitTest {
             try {
                 Thread.sleep(50);
                 ran.incrementAndGet();
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             } finally {
                 done.countDown();
@@ -60,7 +60,7 @@ class VirtualThreadsTest extends UnitTest {
         // may run after a test or hook has already shut an executor down.
         ScheduledExecutorService exec = VirtualThreads.newSingleThreadScheduledExecutor();
         exec.shutdown();
-        try { exec.awaitTermination(1, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try { exec.awaitTermination(1, TimeUnit.SECONDS); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
 
         VirtualThreads.gracefulShutdown(exec, "test-double-shutdown");
 
