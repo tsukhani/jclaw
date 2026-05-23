@@ -97,7 +97,7 @@ public final class LuceneIndexer {
             // leaks and blocks next-boot retry.
             writer = new IndexWriter(dir, iwc);
         } catch (IOException | RuntimeException e) {
-            try { dir.close(); } catch (IOException ignored) { /* surface original */ }
+            try { dir.close(); } catch (IOException _) { /* surface original */ }
             throw e;
         }
         WRITER.set(writer);

@@ -82,7 +82,7 @@ public final class TaskSchedulingService {
      */
     @SuppressWarnings("java:S5852") // Mutable static is the dependency-injection seam for tests
     private static Supplier<SchedulerClient> clientSupplier =
-            () -> DbSchedulerBootstrapJob.scheduler();
+            DbSchedulerBootstrapJob::scheduler;
 
     private TaskSchedulingService() {}
 
@@ -175,7 +175,7 @@ public final class TaskSchedulingService {
         boolean rescheduled = false;
         try {
             rescheduled = client.reschedule(instanceId, Instant.now());
-        } catch (com.github.kagkarlsson.scheduler.exceptions.TaskInstanceCurrentlyExecutingException e) {
+        } catch (com.github.kagkarlsson.scheduler.exceptions.TaskInstanceCurrentlyExecutingException _) {
             // Fire is already in progress — that IS the outcome the
             // operator wanted. Log and no-op rather than racing with
             // the executor.
@@ -183,7 +183,7 @@ public final class TaskSchedulingService {
                     "Task id %d run-now: fire already in progress; not rescheduling"
                             .formatted(taskId));
             return;
-        } catch (com.github.kagkarlsson.scheduler.exceptions.TaskInstanceNotFoundException e) {
+        } catch (com.github.kagkarlsson.scheduler.exceptions.TaskInstanceNotFoundException _) {
             // Row was removed (terminal one-shot completion, cancel, etc.)
             // — fall through to registration. Common after operators
             // re-run a COMPLETED or CANCELLED Task.
@@ -357,7 +357,7 @@ public final class TaskSchedulingService {
      */
     public static void forceRemoveStaleRow(Long taskId) {
         Objects.requireNonNull(taskId, PARAM_TASK_ID);
-        var ds = DB.datasource;
+        var ds = DB.getDataSource();
         if (ds == null) return;
         var sql = "DELETE FROM scheduled_tasks WHERE task_name = ? AND task_instance = ?";
         try (var conn = ds.getConnection()) {

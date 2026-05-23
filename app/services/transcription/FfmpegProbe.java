@@ -74,7 +74,7 @@ public final class FfmpegProbe {
             return new ProbeResult(true, "available");
         } catch (IOException e) {
             return new ProbeResult(false, "ffmpeg not found on PATH (" + e.getMessage() + ")");
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return new ProbeResult(false, "interrupted while probing ffmpeg");
         }

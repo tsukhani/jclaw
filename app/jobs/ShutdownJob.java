@@ -68,7 +68,7 @@ public class ShutdownJob extends Job<Void> {
                         "Shutdown components did not all finish within %ds — proceeding anyway"
                                 .formatted(OVERALL_TIMEOUT_SECONDS));
             }
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

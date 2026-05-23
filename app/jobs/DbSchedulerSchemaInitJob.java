@@ -58,7 +58,7 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
      * call it directly without depending on Play's job ordering.
      */
     public static void ensureSchema() throws SQLException, IOException {
-        try (Connection conn = DB.datasource.getConnection()) {
+        try (Connection conn = DB.getDataSource().getConnection()) {
             String productName = conn.getMetaData().getDatabaseProductName().toLowerCase();
             String dialect = productName.contains("postgresql") ? "postgres" : "h2";
             String ddl = readDdl(dialect);

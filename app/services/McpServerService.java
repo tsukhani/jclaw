@@ -190,7 +190,7 @@ public final class McpServerService {
         JsonObject cfg;
         try {
             cfg = JsonParser.parseString(configJson).getAsJsonObject();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             return TransportConfig.empty();
         }
         return switch (transport) {
@@ -238,7 +238,7 @@ public final class McpServerService {
             var future = McpConnectionManager.connectAndAwait(row);
             try {
                 future.get(syncRuntimeAwait.toMillis(), TimeUnit.MILLISECONDS);
-            } catch (TimeoutException te) {
+            } catch (TimeoutException _) {
                 // Should be unreachable under normal config — the manager's
                 // own first-attempt timeout fires first. Falls through so
                 // the response still reflects whatever transient state the
@@ -246,10 +246,10 @@ public final class McpServerService {
                 play.Logger.warn(
                         "MCP server '%s' first connect did not resolve within %s; live status: %s",
                         row.name, syncRuntimeAwait, McpConnectionManager.status(row.name));
-            } catch (InterruptedException ie) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             } catch (java.util.concurrent.CancellationException
-                    | java.util.concurrent.ExecutionException ignored) {
+                    | java.util.concurrent.ExecutionException _) {
                 // Cancellation: a concurrent stop()/connect() replaced our
                 // entry. Execution: the connect attempt failed at the JVM
                 // level — the manager already wrote the failure into the
@@ -311,7 +311,7 @@ public final class McpServerService {
      *  prefixed allowlist {@code skill_name} ("mcp:&lt;name&gt;") fits into
      *  the existing column and stays readable in event-log messages. */
     public static final java.util.regex.Pattern NAME_RE =
-            java.util.regex.Pattern.compile("^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$");
+            java.util.regex.Pattern.compile("^\\w[\\w-]{0,63}$");
 
     /** Throws {@link IllegalArgumentException} on any structural problem
      *  the form ought to have caught client-side. Server-side defense so
@@ -337,7 +337,7 @@ public final class McpServerService {
                     throw new IllegalArgumentException("HTTP transport requires url");
                 }
                 try { URI.create(cfg.url()); }
-                catch (IllegalArgumentException e) {
+                catch (IllegalArgumentException _) {
                     throw new IllegalArgumentException("HTTP transport url is not a valid URI");
                 }
             }

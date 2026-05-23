@@ -360,8 +360,7 @@ public class ModelDiscoveryService {
         if (id.contains(INSTRUCT_TYPE_DEEPSEEK_R1)) return true;
         // Qwen QwQ (Question with Question). No non-pure-reasoner variant
         // currently ships under this family name.
-        if (id.contains("qwq")) return true;
-        return false;
+        return id.contains("qwq");
     }
 
     public record ThinkingDetection(boolean confirmed, boolean fromProvider) {}
@@ -718,7 +717,7 @@ public class ModelDiscoveryService {
             models.sort(ModelDiscoveryService::compareByRankThenName);
 
             return new DiscoveryResult.Ok(models);
-        } catch (Exception e) {
+        } catch (Exception _) {
             return null;
         }
     }
@@ -828,7 +827,7 @@ public class ModelDiscoveryService {
 
             return new DiscoveryResult.Ok(results);
 
-        } catch (JsonSyntaxException e) {
+        } catch (JsonSyntaxException _) {
             return new DiscoveryResult.Error(502, "Invalid JSON response from provider");
         } catch (Exception e) {
             // Defensive interrupt-status restore: the broad catch is unavoidable (provider
@@ -909,7 +908,7 @@ public class ModelDiscoveryService {
         try {
             var model = future.get(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (model != null) out.add(model);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             play.Logger.warn("Ollama /api/show interrupted for %s", modelId);
         } catch (Exception e) {

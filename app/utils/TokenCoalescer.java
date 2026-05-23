@@ -51,7 +51,7 @@ public final class TokenCoalescer {
     public void drain() {
         String pending;
         synchronized (buf) {
-            if (buf.length() == 0) return;
+            if (buf.isEmpty()) return;
             pending = buf.toString();
             buf.setLength(0);
         }

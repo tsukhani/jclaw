@@ -5,7 +5,6 @@ import okhttp3.MediaType;
 import play.db.jpa.JPA;
 import utils.HttpKeys;
 
-import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -770,7 +769,7 @@ public final class LoadTestRunner {
         }
         // Give the LatencyStats recording path a beat to complete before the
         // real run starts, so the warmup sample doesn't race with the reset.
-        try { Thread.sleep(50); } catch (InterruptedException e) {
+        try { Thread.sleep(50); } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

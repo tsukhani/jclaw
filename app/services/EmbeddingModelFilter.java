@@ -58,8 +58,6 @@ public final class EmbeddingModelFilter {
         // (OpenAI hosts whisper/dall-e/tts under the same model catalog).
         if (lastSegment.startsWith("whisper-")) return true;
         if (lastSegment.startsWith("dall-e-")) return true;
-        if (lastSegment.startsWith("tts-")) return true;
-
-        return false;
+        return lastSegment.startsWith("tts-");
     }
 }

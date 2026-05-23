@@ -102,7 +102,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         // than depend on it.
         DbSchedulerSchemaInitJob.ensureSchema();
 
-        var datasource = DB.datasource;
+        var datasource = DB.getDataSource();
         if (datasource == null) {
             EventLogger.error("task", null, null,
                     "DbSchedulerBootstrap: no DataSource available — db-scheduler will not start");
@@ -224,7 +224,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         try (Connection conn = datasource.getConnection()) {
             return conn.getMetaData().getDatabaseProductName()
                     .toLowerCase().contains("h2");
-        } catch (SQLException e) {
+        } catch (SQLException _) {
             // Conservative fallback: if we can't read metadata, let
             // AutodetectJdbcCustomization run (and emit its warn) rather
             // than mis-pin the customization.

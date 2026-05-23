@@ -38,7 +38,7 @@ public final class VirtualThreads {
                 EventLogger.warn("shutdown", null, "executor",
                         "%s did not terminate within 5s; forced shutdown".formatted(name));
             }
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             executor.shutdownNow();
             Thread.currentThread().interrupt();
         }

@@ -3,13 +3,7 @@ package services;
 import llm.ProviderRegistry;
 import memory.MemoryStoreFactory;
 import models.Agent;
-import models.AgentBinding;
-import models.AgentSkillConfig;
-import models.AgentToolConfig;
 import models.Config;
-import models.Conversation;
-import models.Message;
-import models.Task;
 import play.Play;
 import play.cache.CacheConfig;
 import play.cache.Caches;
@@ -507,7 +501,7 @@ public class AgentService {
             for (var seg : missingSuffix) canonical = canonical.resolve(seg);
             canonical = canonical.normalize();
             return canonical.startsWith(rootReal) ? canonical : null;
-        } catch (IOException e) {
+        } catch (IOException _) {
             return null;
         }
     }
@@ -571,7 +565,7 @@ public class AgentService {
                                     .formatted(relativePath, n.intValue()));
                 }
             }
-        } catch (UnsupportedOperationException e) {
+        } catch (UnsupportedOperationException _) {
             // Non-POSIX filesystem (e.g. Windows / FAT). Lexical and canonical
             // layers still apply; just degrade the hardlink check.
         } catch (IOException e) {

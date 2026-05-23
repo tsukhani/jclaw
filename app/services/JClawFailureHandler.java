@@ -85,7 +85,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
         switch (decision) {
             case Decision.Reschedule r ->
                     executionOps.reschedule(executionComplete, r.nextRunAt());
-            case Decision.Fail f -> executionOps.stop();
+            case Decision.Fail _ -> executionOps.stop();
         }
     }
 

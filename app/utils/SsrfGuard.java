@@ -77,12 +77,7 @@ public final class SsrfGuard {
      * attacker-controlled DNS from mixing a safe and an unsafe IP.
      */
     public static final Dns SAFE_DNS = hostname -> {
-        InetAddress[] addrs;
-        try {
-            addrs = InetAddress.getAllByName(hostname);
-        } catch (UnknownHostException e) {
-            throw e;
-        }
+        InetAddress[] addrs = InetAddress.getAllByName(hostname);
         for (var addr : addrs) {
             if (isUnsafe(addr)) {
                 throw new UnknownHostException(

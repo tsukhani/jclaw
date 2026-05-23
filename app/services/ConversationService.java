@@ -1,7 +1,6 @@
 package services;
 
 import models.Agent;
-import models.ChannelType;
 import models.Conversation;
 import models.Message;
 import models.MessageAttachment;

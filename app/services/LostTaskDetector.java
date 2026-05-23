@@ -152,7 +152,7 @@ public final class LostTaskDetector {
     }
 
     private static List<StaleRow> readStale(Instant staleBefore) {
-        var ds = DB.datasource;
+        var ds = DB.getDataSource();
         if (ds == null) return List.of();
         var sql = "SELECT task_instance, last_heartbeat FROM scheduled_tasks "
                 + "WHERE task_name = ? AND picked = TRUE AND last_heartbeat < ?";

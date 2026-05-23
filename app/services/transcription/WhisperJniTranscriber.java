@@ -127,7 +127,7 @@ public final class WhisperJniTranscriber {
         // swap (potentially 1+ GB on medium models).
         if (activeContext != null) {
             // JNI close on model swap — native error must not abort the swap
-            try { activeContext.close(); } catch (@SuppressWarnings("java:S1181") Throwable ignored) {}
+            try { activeContext.close(); } catch (@SuppressWarnings("java:S1181") Throwable _) {}
             activeContext = null;
             activeModel = null;
         }
@@ -194,7 +194,7 @@ public final class WhisperJniTranscriber {
             }
         } catch (IOException e) {
             throw new TranscriptionException("ffmpeg invocation failed", e);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             throw new TranscriptionException("interrupted while running ffmpeg");
         }
@@ -205,7 +205,7 @@ public final class WhisperJniTranscriber {
         synchronized (inferenceLock) {
             if (activeContext != null) {
                 // Test reset — swallow native close errors to keep tests independent
-                try { activeContext.close(); } catch (@SuppressWarnings("java:S1181") Throwable ignored) {}
+                try { activeContext.close(); } catch (@SuppressWarnings("java:S1181") Throwable _) {}
             }
             jni = null;
             activeContext = null;

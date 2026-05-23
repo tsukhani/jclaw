@@ -75,6 +75,17 @@ public final class LoadTestHarness {
     private static volatile int port;
     private static volatile Scenario scenario = Scenario.defaults();
 
+    /** Closing SSE chunks for the tool-calls path. Hoisted out of
+     *  {@link #streamToolCalls}'s lambda to satisfy Sonar S6203 — a
+     *  text block inside a lambda body holds the parent scope alive
+     *  even when the value is invariant. */
+    private static final String TOOL_CALL_FINAL_CHUNK = """
+            data: {"id":"mock","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
+
+            data: [DONE]
+
+            """;
+
     private LoadTestHarness() {}
 
     public static int port() { return port; }
@@ -87,11 +98,11 @@ public final class LoadTestHarness {
             if (server.get() != null) return port;
             try {
                 return bindAndStart(requestedPort);
-            } catch (java.net.BindException e) {
+            } catch (java.net.BindException _) {
                 // Port may be held by a stale server from a previous run or
                 // class-reload cycle. Stop, wait for OS socket release, retry.
                 stop();
-                try { Thread.sleep(500); } catch (InterruptedException ie) {
+                try { Thread.sleep(500); } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
                 return bindAndStart(requestedPort);
@@ -159,7 +170,7 @@ public final class LoadTestHarness {
                     streamResponse(out, scn);
                 }
             }
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }
@@ -223,13 +234,7 @@ public final class LoadTestHarness {
                     out.write(chunk.getBytes(StandardCharsets.UTF_8));
                     out.flush();
                 }
-                var finalChunk = """
-                        data: {"id":"mock","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
-
-                        data: [DONE]
-
-                        """;
-                out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
+                out.write(TOOL_CALL_FINAL_CHUNK.getBytes(StandardCharsets.UTF_8));
                 out.flush();
                 done.complete(null);
             } catch (IOException e) {

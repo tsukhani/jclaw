@@ -110,7 +110,7 @@ public final class MessageSearch {
         // direct Lucene path.
         try {
             String productName;
-            try (var conn = DB.datasource.getConnection()) {
+            try (var conn = DB.getDataSource().getConnection()) {
                 productName = conn.getMetaData().getDatabaseProductName()
                         .toLowerCase(Locale.ROOT);
             }

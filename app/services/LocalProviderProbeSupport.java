@@ -42,11 +42,7 @@ final class LocalProviderProbeSupport {
             var json = JsonParser.parseString(bodyStr).getAsJsonObject();
             var data = json.has("data") ? json.getAsJsonArray("data") : null;
             return new Result(true, data == null ? 0 : data.size(), null, false);
-        } catch (ConnectException e) {
-            return new Result(false, 0,
-                    "%s not reachable (%s not running)".formatted(baseUrl, notRunningLabel),
-                    true);
-        } catch (SocketTimeoutException e) {
+        } catch (ConnectException | SocketTimeoutException _) {
             // Connect timeout vs read timeout — OkHttp surfaces both as
             // SocketTimeoutException. Connect timeout still means the
             // provider isn't running on that port; read timeout means the
