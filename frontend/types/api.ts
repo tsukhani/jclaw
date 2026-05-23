@@ -135,10 +135,9 @@ export interface SubagentAnnounceMetadata {
   runId: number
   /** Short display name the parent supplied at spawn time (may be empty). */
   label: string
-  /** Terminal status — one of COMPLETED, FAILED, TIMEOUT.
-   *  The `string & {}` keeps the literal autocompletes intact while still
-   *  permitting any forward-compat status the server might add. */
-  status: 'COMPLETED' | 'FAILED' | 'TIMEOUT' | (string & {})
+  /** Terminal status — one of COMPLETED, FAILED, TIMEOUT. Updates here when
+   *  the server adds a new terminal status. */
+  status: 'COMPLETED' | 'FAILED' | 'TIMEOUT'
   /** Child's final reply (or error message), truncated to 4000 chars
    *  with an ellipsis marker. Full reply available at
    *  /conversations/{childConversationId}. */

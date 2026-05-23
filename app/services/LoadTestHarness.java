@@ -101,8 +101,10 @@ public final class LoadTestHarness {
             } catch (java.net.BindException _) {
                 // Port may be held by a stale server from a previous run or
                 // class-reload cycle. Stop, wait for OS socket release, retry.
+                // Use lock.wait so the 500 ms backoff releases the lock —
+                // Thread.sleep would block any concurrent start()/stop() call.
                 stop();
-                try { Thread.sleep(500); } catch (InterruptedException _) {
+                try { lock.wait(500); } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
                 return bindAndStart(requestedPort);
