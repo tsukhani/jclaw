@@ -32,9 +32,18 @@ interface Props {
   sectionId: string
   /** Raw markdown content (typically a `?raw` import of a .md file). */
   content: string
+  /**
+   * When true, the markdown's first h1 is suppressed from the rendered
+   * output. Use when the parent page wants to render its own section
+   * header (e.g. with an icon alongside the title) rather than rely on
+   * the renderer's default h1 emission.
+   */
+  suppressFirstH1?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  suppressFirstH1: false,
+})
 const router = useRouter()
 
 /** Slugify a heading title into a URL-fragment-safe id. */
@@ -113,13 +122,21 @@ function escapeHtml(s: string): string {
  * Only h2/h3/h4 get anchors — h1 is the section title and lives on the
  * outer `<section data-section-id="...">` wrapper in pages/guide.vue.
  */
-function buildRenderer(sectionId: string) {
+function buildRenderer(sectionId: string, suppressFirstH1: boolean) {
   const renderer = new Renderer()
   // Track ids we've emitted in this body so repeated headings get -2, -3
   // suffixes rather than colliding.
   const seen = new Map<string, number>()
+  let firstH1Suppressed = false
 
   renderer.heading = function ({ tokens, depth, text }: Tokens.Heading) {
+    // Skip the first h1 entirely when the parent page renders its own
+    // section header. Subsequent h1s (rare; usually no section has more
+    // than one) still render normally so multi-h1 markdown isn't lost.
+    if (depth === 1 && suppressFirstH1 && !firstH1Suppressed) {
+      firstH1Suppressed = true
+      return ''
+    }
     // Pull an explicit `{#id}` out of the raw heading source if present.
     // We accept and strip it from the displayed text in both the slug
     // derivation and the rendered inline output.
@@ -149,7 +166,7 @@ function buildRenderer(sectionId: string) {
 const renderedHtml = computed(() => {
   if (!props.content) return ''
   const preprocessed = transformCallouts(props.content)
-  const renderer = buildRenderer(props.sectionId)
+  const renderer = buildRenderer(props.sectionId, props.suppressFirstH1)
   const html = marked.parse(preprocessed, {
     gfm: true,
     breaks: false, // GFM breaks make markdown line-wraps confusing here

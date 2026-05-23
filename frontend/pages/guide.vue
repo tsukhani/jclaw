@@ -197,9 +197,24 @@ const tocItems = computed(() => sections.map(s => ({
             :data-section-id="s.id"
             class="border border-border rounded-xl bg-surface-elevated p-6"
           >
+            <!-- Section header: icon + title. Mirrors the icon shown in the
+                 TOC so operators can scan the page and see the same visual
+                 anchor that brought them here. The markdown's leading h1 is
+                 suppressed (suppressFirstH1) so the title isn't duplicated. -->
+            <header class="flex items-center gap-3 mb-6">
+              <component
+                :is="s.icon"
+                class="w-7 h-7 shrink-0 text-emerald-500"
+                aria-hidden="true"
+              />
+              <h1 class="text-2xl font-bold text-fg-strong leading-tight m-0">
+                {{ s.title }}
+              </h1>
+            </header>
             <GuideRenderer
               :section-id="s.id"
               :content="s.content"
+              suppress-first-h1
             />
           </section>
         </div>
