@@ -67,7 +67,7 @@ function exportAllConversations() {
   const csv = [
     ['ID', 'Name', 'Channel', 'Agent', 'Peer', 'Messages', 'Created', 'Updated'].join(','),
     ...conversations.value.map(c =>
-      [c.id, `"${(c.preview || '').replace(/"/g, '""')}"`, c.channelType, c.agentName, c.peerId || '', c.messageCount, c.createdAt, c.updatedAt].join(','),
+      [c.id, `"${(c.preview || '').replaceAll(/"/g, '""')}"`, c.channelType, c.agentName, c.peerId || '', c.messageCount, c.createdAt, c.updatedAt].join(','),
     ),
   ].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })

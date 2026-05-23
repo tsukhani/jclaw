@@ -98,7 +98,7 @@ DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
 // spaces like `[file.docx](file.docx)`, which silently fall through as plain
 // text. Wrap such destinations in <...> so they parse into real anchors.
 function normalizeMarkdownLinks(text: string): string {
-  return text.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (match, label, dest) => {
+  return text.replaceAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (match, label, dest) => {
     const trimmed = dest.trim()
     if (trimmed.startsWith('<') && trimmed.endsWith('>')) return match
     if (!/\s/.test(trimmed)) return match
@@ -120,7 +120,7 @@ function renderMarkdownInner(text: string, agentId: number | null): string {
     ADD_TAGS: ['img', 'audio', 'video', 'source'],
     ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target'],
   })
-  return agentId != null ? rewriteWorkspaceLinks(sanitized, agentId) : sanitized
+  return agentId == null ? sanitized : rewriteWorkspaceLinks(sanitized, agentId)
 }
 
 function renderMarkdown(text: string, agentId: number | null = null): string {
@@ -2133,7 +2133,7 @@ watch(isEmptyChat, async () => {
   const before = el.getBoundingClientRect()
   await nextTick()
   if (!composerEl.value) return
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  if (globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches) return
   const after = composerEl.value.getBoundingClientRect()
   const dy = before.top - after.top
   if (Math.abs(dy) < 4) return
@@ -2457,7 +2457,7 @@ function exportConversation() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${title.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase()}.md`
+  a.download = `${title.replaceAll(/[^a-zA-Z0-9 ]/g, '').replaceAll(/\s+/g, '-').toLowerCase()}.md`
   document.body.appendChild(a)
   a.click()
   a.remove()

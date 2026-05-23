@@ -108,19 +108,17 @@ let fetchPromise: Promise<ToolApiMeta[]> | null = null
 
 async function ensureLoaded(): Promise<ToolApiMeta[]> {
   if (metaList.value.length > 0) return metaList.value
-  if (!fetchPromise) {
-    fetchPromise = $fetch<ToolApiMeta[]>('/api/tools/meta')
-      .then((data) => {
-        metaList.value = data ?? []
-        return metaList.value
-      })
-      .catch(() => {
-        // Network error — leave metaList empty so pages render a graceful
-        // empty grid. Reset the promise so a retry on next call is possible.
-        fetchPromise = null
-        return [] as ToolApiMeta[]
-      })
-  }
+  fetchPromise ??= $fetch<ToolApiMeta[]>('/api/tools/meta')
+    .then((data) => {
+      metaList.value = data ?? []
+      return metaList.value
+    })
+    .catch(() => {
+      // Network error — leave metaList empty so pages render a graceful
+      // empty grid. Reset the promise so a retry on next call is possible.
+      fetchPromise = null
+      return [] as ToolApiMeta[]
+    })
   return fetchPromise
 }
 

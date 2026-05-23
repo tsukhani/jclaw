@@ -21,9 +21,7 @@ const props = defineProps<{
   statusTone?: 'ok' | 'busy' | 'offline'
 }>()
 
-const emit = defineEmits<{
-  (e: 'update:modelKey', key: string): void
-}>()
+const emit = defineEmits<(e: 'update:modelKey', key: string) => void>()
 
 const open = ref(false)
 const query = ref('')

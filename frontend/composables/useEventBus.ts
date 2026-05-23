@@ -15,7 +15,7 @@ let connected = false
 let reconnectAttempts = 0
 
 function connect() {
-  if (connected || typeof window === 'undefined') return
+  if (connected || typeof globalThis.window === 'undefined') return
 
   // Guard: don't open SSE connection if not authenticated (prevents
   // infinite reconnect loop when the backend returns 401).

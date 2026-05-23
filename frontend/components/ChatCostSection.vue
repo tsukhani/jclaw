@@ -760,7 +760,7 @@ function exportCsv() {
   const a = document.createElement('a')
   a.href = url
   const filterTag = [
-    selectedAgentId.value !== null ? `agent-${selectedAgentId.value}` : 'all-agents',
+    selectedAgentId.value === null ? 'all-agents' : `agent-${selectedAgentId.value}`,
     selectedChannel.value ?? 'all-channels',
     selectedWindow.value,
   ].join('_')
@@ -778,7 +778,7 @@ function exportCsv() {
  */
 function csvCell(value: string): string {
   if (!/[",\n]/.test(value)) return value
-  return '"' + value.replace(/"/g, '""') + '"'
+  return '"' + value.replaceAll(/"/g, '""') + '"'
 }
 
 defineExpose({ refresh })

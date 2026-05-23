@@ -10,7 +10,7 @@ import {
 } from '~/components/ui/command'
 
 const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ (e: 'update:open', value: boolean): void }>()
+const emit = defineEmits<(e: 'update:open', value: boolean) => void>()
 
 const router = useRouter()
 

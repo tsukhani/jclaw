@@ -9,6 +9,6 @@ export default defineNuxtPlugin(() => {
   const mode = saved ?? 'system'
   const prefersDark
     = mode === 'dark'
-      || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      || (mode === 'system' && globalThis.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.classList.toggle('dark', prefersDark)
 })

@@ -18,9 +18,7 @@ defineProps<{
   depth?: number
 }>()
 
-const emit = defineEmits<{
-  (e: 'select', file: SkillFile): void
-}>()
+const emit = defineEmits<(e: 'select', file: SkillFile) => void>()
 
 const openDirs = ref<Record<string, boolean>>({})
 

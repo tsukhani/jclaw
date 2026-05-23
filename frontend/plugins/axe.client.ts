@@ -36,10 +36,10 @@ export default defineNuxtPlugin(async (nuxtApp) => {
     if (style.dataset.jclawVaxePatched === '1') return
     const txt = style.textContent
     if (!txt?.includes('.va-shadow-lg')) return
-    style.textContent = txt.replace(/\*\s*\{\s*--tw-[^}]*\}/g, '')
+    style.textContent = txt.replaceAll(/\*\s*\{\s*--tw-[^}]*\}/g, '')
     style.dataset.jclawVaxePatched = '1'
   }
-  document.querySelectorAll('style').forEach(s => sanitizeVueAxeStylesheet(s as HTMLStyleElement))
+  document.querySelectorAll('style').forEach(s => sanitizeVueAxeStylesheet(s))
   new MutationObserver((mutations) => {
     for (const m of mutations) {
       for (const node of Array.from(m.addedNodes)) {

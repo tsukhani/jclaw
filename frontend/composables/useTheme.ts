@@ -8,7 +8,7 @@ function applyTheme(mode: ThemeMode) {
   const root = document.documentElement
   const prefersDark
     = mode === 'dark'
-      || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      || (mode === 'system' && globalThis.matchMedia('(prefers-color-scheme: dark)').matches)
   root.classList.toggle('dark', prefersDark)
 }
 
@@ -18,7 +18,7 @@ type DocumentWithTransition = Document & {
 }
 
 function prefersReducedMotion() {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  return globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 async function runWithCircularReveal(
@@ -67,7 +67,7 @@ export function useTheme() {
     applyTheme(themeMode.value)
 
     // Listen for system theme changes when in system mode
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const mq = globalThis.matchMedia('(prefers-color-scheme: dark)')
     const handler = () => {
       if (themeMode.value === 'system') applyTheme('system')
     }

@@ -64,7 +64,7 @@ export function thinkingDurationMs(msg: ThinkingMessage): number | null {
 export function thinkingHeaderLabel(msg: ThinkingMessage): string {
   if (msg?._thinkingInProgress) return 'Thinking'
   const ms = thinkingDurationMs(msg)
-  return ms != null ? `Thought for ${(ms / 1000).toFixed(2)} seconds` : 'Thinking'
+  return ms == null ? 'Thinking' : `Thought for ${(ms / 1000).toFixed(2)} seconds`
 }
 
 /**

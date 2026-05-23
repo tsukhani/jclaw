@@ -42,9 +42,7 @@ const props = withDefaults(defineProps<{
   size: 'sm',
 })
 
-defineEmits<{
-  (e: 'toggle', capability: Capability): void
-}>()
+defineEmits<(e: 'toggle', capability: Capability) => void>()
 
 interface PillDef {
   capability: Capability | 'vision' | 'audio'

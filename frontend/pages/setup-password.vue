@@ -23,7 +23,7 @@ function resolveEffectiveTheme(saved: string | null, prefersDark: boolean): 'dar
 
 onMounted(() => {
   const saved = localStorage.getItem('jclaw-theme')
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  const prefersDark = globalThis.matchMedia('(prefers-color-scheme: dark)').matches
   const effective = resolveEffectiveTheme(saved, prefersDark)
   document.documentElement.classList.toggle('dark', effective === 'dark')
 })

@@ -16,9 +16,7 @@ withDefaults(defineProps<{
   description: '',
 })
 
-const emit = defineEmits<{
-  (e: 'update:open', value: boolean): void
-}>()
+const emit = defineEmits<(e: 'update:open', value: boolean) => void>()
 
 const MIN_WIDTH = 400
 const panelWidth = ref(Math.round(window.innerWidth * 0.45))

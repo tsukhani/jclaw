@@ -42,12 +42,12 @@ function slugify(input: string): string {
   return input
     .toLowerCase()
     // Strip backticks; we want `mode=session` → `mode-session`, not `mode=session-`.
-    .replace(/`/g, '')
-    .replace(/[^\w\s-]/g, ' ')
+    .replaceAll(/`/g, '')
+    .replaceAll(/[^\w\s-]/g, ' ')
     .trim()
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/(?:^-|-$)/g, '')
+    .replaceAll(/\s+/g, '-')
+    .replaceAll(/-+/g, '-')
+    .replaceAll(/(?:^-|-$)/g, '')
 }
 
 /**
@@ -75,7 +75,7 @@ function transformCallouts(md: string): string {
   // continuation of the callout's HTML block — rendering "## OCR" as
   // literal text instead of an <h2>. Keeping horizontal-only whitespace
   // preserves the original blank line in the surrounding source.
-  return md.replace(
+  return md.replaceAll(
     /^:::(tip|gotcha|note)([^\n]*)\n([\s\S]*?)^:::[ \t]*$/gm,
     (_match, variant: 'tip' | 'gotcha' | 'note', titleArg: string, body: string) => {
       const title = titleArg.trim() || VARIANT_LABEL[variant] || 'Note'
@@ -98,10 +98,10 @@ function transformCallouts(md: string): string {
 
 function escapeHtml(s: string): string {
   return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replaceAll(/&/g, '&amp;')
+    .replaceAll(/</g, '&lt;')
+    .replaceAll(/>/g, '&gt;')
+    .replaceAll(/"/g, '&quot;')
 }
 
 /**
