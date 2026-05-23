@@ -43,8 +43,6 @@ play1 {
         "Bump .play-version to match the fork, or check out v$declared in the fork."
     }
     frameworkVersion.set(declared)
-
-    modules("docviewer")
 }
 
 sonar {
