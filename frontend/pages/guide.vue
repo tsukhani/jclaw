@@ -204,7 +204,7 @@ const tocItems = computed(() => sections.map(s => ({
             <header class="flex items-center gap-3 mb-6">
               <component
                 :is="s.icon"
-                class="w-7 h-7 shrink-0 text-emerald-500"
+                class="w-7 h-7 shrink-0 text-fg-strong"
                 aria-hidden="true"
               />
               <h1 class="text-2xl font-bold text-fg-strong leading-tight m-0">
