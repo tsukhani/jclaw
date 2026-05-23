@@ -38,6 +38,41 @@ const testResultForId = ref<number | null>(null)
 const testing = ref(false)
 const saveError = ref<string | null>(null)
 
+/**
+ * Banner auto-dismiss for the inline test-result row. After this many ms
+ * the banner clears itself and the row collapses back to its normal
+ * shape — operators don't have to manually dismiss long stack-trace
+ * failure messages. Tracked as a ref-held timer ID so overlapping test
+ * invocations cancel the prior auto-clear (otherwise a second test
+ * scheduled at T+0 would be wiped by the first test's T+0+5s timer).
+ */
+const TEST_RESULT_DISMISS_MS = 6000
+let testResultDismissTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearTestResultDismissTimer() {
+  if (testResultDismissTimer !== null) {
+    clearTimeout(testResultDismissTimer)
+    testResultDismissTimer = null
+  }
+}
+
+function clearTestResult() {
+  clearTestResultDismissTimer()
+  testResult.value = null
+  testResultForId.value = null
+}
+
+function scheduleTestResultDismiss() {
+  clearTestResultDismissTimer()
+  testResultDismissTimer = setTimeout(() => {
+    testResult.value = null
+    testResultForId.value = null
+    testResultDismissTimer = null
+  }, TEST_RESULT_DISMISS_MS)
+}
+
+onBeforeUnmount(clearTestResultDismissTimer)
+
 // Stable ID prefix used to scope every form input — both add and edit
 // flows share one editing form so reusing one prefix across both is
 // fine. The IDs satisfy `vuejs-accessibility/label-has-for` which wants
@@ -79,24 +114,21 @@ function formFromServer(s: McpServer): FormState {
 function openAddForm() {
   editing.value = blankForm()
   expandedRowId.value = null
-  testResult.value = null
-  testResultForId.value = null
+  clearTestResult()
   saveError.value = null
 }
 
 function openEditForm(s: McpServer) {
   editing.value = formFromServer(s)
   expandedRowId.value = s.id
-  testResult.value = null
-  testResultForId.value = null
+  clearTestResult()
   saveError.value = null
 }
 
 function cancelEdit() {
   editing.value = null
   expandedRowId.value = null
-  testResult.value = null
-  testResultForId.value = null
+  clearTestResult()
   saveError.value = null
 }
 
@@ -190,6 +222,7 @@ async function deleteServer(s: McpServer) {
 }
 
 async function testServer(s: McpServer) {
+  clearTestResultDismissTimer()
   testResult.value = null
   testResultForId.value = s.id
   testing.value = true
@@ -199,6 +232,7 @@ async function testServer(s: McpServer) {
       body: {},
     })
     testResult.value = result
+    scheduleTestResultDismiss()
   }
   finally {
     testing.value = false
