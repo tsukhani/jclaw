@@ -44,7 +44,7 @@ final class OkHttpLlmHttpDriver {
      * as non-200 status codes in the result, not thrown.
      */
     static HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout, String channel)
-            throws IOException, InterruptedException {
+            throws IOException {
         var builder = new Request.Builder()
                 .url(uri.toString())
                 .header(HttpKeys.AUTHORIZATION, authHeader)

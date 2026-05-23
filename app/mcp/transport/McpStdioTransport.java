@@ -76,12 +76,12 @@ public final class McpStdioTransport implements McpTransport {
     @Override
     public void close() {
         closed = true;
-        try { if (stdin != null) stdin.close(); } catch (IOException ignored) { /* best effort */ }
+        try { if (stdin != null) stdin.close(); } catch (IOException _) { /* best effort */ }
         if (process != null) {
             process.destroy();
             try {
                 if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly();
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 process.destroyForcibly();
             }
@@ -122,6 +122,6 @@ public final class McpStdioTransport implements McpTransport {
                 // when diagnosing a misbehaving server.
                 Logger.debug("[mcp:%s:stderr] %s", name, line);
             }
-        } catch (IOException ignored) { /* process closed */ }
+        } catch (IOException _) { /* process closed */ }
     }
 }

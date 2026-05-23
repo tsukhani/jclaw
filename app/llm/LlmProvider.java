@@ -668,6 +668,12 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     // ─── Shared helper classes ───────────────────────────────────────────
 
+    // S1104: package-internal streaming accumulator with public mutable fields by design.
+    // Volatile field access from multiple agent/channel files is hotter than the
+    // accessor route would be; converting every read site across app/agents,
+    // app/channels, and the test suite would be churn far out of proportion to
+    // the warning's severity (LOW). Treat this class as a value carrier.
+    @SuppressWarnings("java:S1104")
     public static class StreamAccumulator {
         public volatile String content = "";
         public volatile List<ToolCall> toolCalls = List.of();
@@ -822,6 +828,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      *
      * <p>See JCLAW-76 for the accounting defect this class fixes.
      */
+    // S1104: cumulative-usage value carrier; see StreamAccumulator note above.
+    @SuppressWarnings("java:S1104")
     public static class TurnUsage {
         public int promptTokens;
         public int completionTokens;
@@ -917,7 +925,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
         /** Returns the aggregated reasoning text, or {@code null} if nothing was streamed. */
         public String reasoningText() {
-            return reasoningText.length() == 0 ? null : reasoningText.toString();
+            return reasoningText.isEmpty() ? null : reasoningText.toString();
         }
 
         /**
@@ -940,6 +948,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         }
     }
 
+    // S1104: tool-call builder; public mutable fields by design (see StreamAccumulator note).
+    @SuppressWarnings("java:S1104")
     public static class ToolCallBuilder {
         public String id;
         public String type = TYPE_FUNCTION;

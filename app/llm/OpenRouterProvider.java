@@ -249,7 +249,6 @@ public final class OpenRouterProvider extends LlmProvider {
         if (model == null) return false;
         if (model.startsWith("anthropic/")) return true;
         // Gemini 2.5 Pro/Flash cache implicitly; older Gemini variants need cache_control.
-        if (model.startsWith("google/gemini-") && !model.startsWith("google/gemini-2.5-")) return true;
-        return false;
+        return model.startsWith("google/gemini-") && !model.startsWith("google/gemini-2.5-");
     }
 }

@@ -62,7 +62,7 @@ public class McpClient implements AutoCloseable {
     private volatile String lastError;
     // Reassigned with a stateless Consumer; volatile-on-reference is sufficient.
     @SuppressWarnings("java:S3077")
-    private volatile Consumer<List<McpToolDef>> onToolsChanged = (tools) -> {};
+    private volatile Consumer<List<McpToolDef>> onToolsChanged = tools -> {};
 
     public McpClient(String name, McpTransport transport, String clientVersion) {
         this(name, transport, clientVersion, DEFAULT_REQUEST_TIMEOUT);
@@ -85,7 +85,7 @@ public class McpClient implements AutoCloseable {
 
     /** Set a callback fired when the server reports {@code tools/list_changed}. */
     public void onToolsChanged(Consumer<List<McpToolDef>> handler) {
-        this.onToolsChanged = handler != null ? handler : (tools) -> {};
+        this.onToolsChanged = handler != null ? handler : tools -> {};
     }
 
     /**
@@ -106,7 +106,7 @@ public class McpClient implements AutoCloseable {
         } catch (RuntimeException | IOException e) {
             lastError = e.getMessage();
             state.set(State.DISCONNECTED);
-            try { transport.close(); } catch (RuntimeException ignored) { /* best effort */ }
+            try { transport.close(); } catch (RuntimeException _) { /* best effort */ }
             throw e;
         }
     }
@@ -142,7 +142,7 @@ public class McpClient implements AutoCloseable {
             future.completeExceptionally(new McpException("Client closing"));
         }
         pending.clear();
-        try { transport.close(); } catch (RuntimeException ignored) { /* best effort */ }
+        try { transport.close(); } catch (RuntimeException _) { /* best effort */ }
         state.set(State.DISCONNECTED);
     }
 

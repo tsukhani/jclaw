@@ -138,7 +138,7 @@ public final class McpConnectionManager {
             if (entry.scheduledRetry != null) entry.scheduledRetry.cancel(false);
             var client = entry.client;
             if (client != null) {
-                try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
+                try { client.close(); } catch (RuntimeException _) { /* best effort */ }
             }
             // JCLAW-288: unblock any caller awaiting the first-attempt future
             // for this entry. Replacing the entry (via a subsequent connect)
@@ -159,7 +159,7 @@ public final class McpConnectionManager {
         if (sched != null) {
             sched.shutdownNow();
             try { sched.awaitTermination(5, TimeUnit.SECONDS); }
-            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             scheduler = null;
         }
     }
@@ -195,7 +195,7 @@ public final class McpConnectionManager {
 
     /** Close an MCP client, swallowing any runtime error — used in race-recovery paths. */
     private static void bestEffortClose(McpClient client) {
-        try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
+        try { client.close(); } catch (RuntimeException _) { /* best effort */ }
     }
 
     // ==================== test hooks ====================
@@ -297,7 +297,7 @@ public final class McpConnectionManager {
             startWatchdog(entry, server);
             signalFirstAttemptResolved(entry, attempt);
         } catch (Exception e) {
-            try { client.close(); } catch (RuntimeException ignored) {}
+            try { client.close(); } catch (RuntimeException _) {}
             handleFailure(entry, server, attempt, e.getMessage());
             signalFirstAttemptResolved(entry, attempt);
         }
@@ -321,7 +321,7 @@ public final class McpConnectionManager {
                         && connections.get(server.name) == entry) {
                     Thread.sleep(250);
                 }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 return;
             }
@@ -344,7 +344,7 @@ public final class McpConnectionManager {
     private static void handleFailure(Entry entry, McpServer server, int attempt, String error) {
         var hadConnection = entry.client != null;
         if (entry.client != null) {
-            try { entry.client.close(); } catch (RuntimeException ignored) {}
+            try { entry.client.close(); } catch (RuntimeException _) {}
             entry.client = null;
         }
         ToolRegistry.unpublishExternal(server.name);
@@ -474,42 +474,36 @@ public final class McpConnectionManager {
         if (serverId == null) return;
         var truncated = error != null && error.length() > 500 ? error.substring(0, 500) : error;
         try {
-            Tx.run(() -> {
-                play.db.jpa.JPA.em().createQuery(
+            Tx.run(() -> play.db.jpa.JPA.em().createQuery(
                         "UPDATE McpServer s SET s.status = :status, s.lastError = :err, s.updatedAt = :now WHERE s.id = :id")
                         .setParameter("status", status)
                         .setParameter("err", truncated)
                         .setParameter("now", Instant.now())
                         .setParameter("id", serverId)
-                        .executeUpdate();
-            });
-        } catch (RuntimeException ignored) { /* best effort persistence */ }
+                        .executeUpdate());
+        } catch (RuntimeException _) { /* best effort persistence */ }
     }
 
     private static void persistConnectedAt(Long serverId) {
         if (serverId == null) return;
         try {
-            Tx.run(() -> {
-                play.db.jpa.JPA.em().createQuery(
+            Tx.run(() -> play.db.jpa.JPA.em().createQuery(
                         "UPDATE McpServer s SET s.lastConnectedAt = :now, s.updatedAt = :now WHERE s.id = :id")
                         .setParameter("now", Instant.now())
                         .setParameter("id", serverId)
-                        .executeUpdate();
-            });
-        } catch (RuntimeException ignored) {}
+                        .executeUpdate());
+        } catch (RuntimeException _) {}
     }
 
     private static void persistDisconnectedAt(Long serverId) {
         if (serverId == null) return;
         try {
-            Tx.run(() -> {
-                play.db.jpa.JPA.em().createQuery(
+            Tx.run(() -> play.db.jpa.JPA.em().createQuery(
                         "UPDATE McpServer s SET s.lastDisconnectedAt = :now, s.updatedAt = :now WHERE s.id = :id")
                         .setParameter("now", Instant.now())
                         .setParameter("id", serverId)
-                        .executeUpdate();
-            });
-        } catch (RuntimeException ignored) {}
+                        .executeUpdate());
+        } catch (RuntimeException _) {}
     }
 
     private static synchronized void ensureScheduler() {
@@ -518,7 +512,7 @@ public final class McpConnectionManager {
             // platform deliberately (NOT virtual) to dodge JDK-8373224.
             scheduler = Executors.newScheduledThreadPool(2, r -> {
                 var t = new Thread(r);
-                t.setName("mcp-backoff-" + t.getId());
+                t.setName("mcp-backoff-" + t.threadId());
                 t.setDaemon(true);
                 return t;
             });
