@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Task } from '~/types/api'
-import { TrashIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, NoSymbolIcon, TrashIcon } from '@heroicons/vue/24/outline'
 
 const statusFilter = ref('')
 const typeFilter = ref('')
@@ -76,11 +76,127 @@ async function deleteTask(task: Task) {
 // communicates "needs attention but not yet a terminal failure".
 const statusColors: Record<string, string> = {
   PENDING: 'text-yellow-400',
+  ACTIVE: 'text-emerald-400',
   RUNNING: 'text-blue-400',
   LOST: 'text-orange-400',
   COMPLETED: 'text-green-400',
   FAILED: 'text-red-400',
   CANCELLED: 'text-neutral-600',
+}
+
+/**
+ * The Status column displays "ACTIVE" instead of "PENDING" for recurring
+ * tasks (CRON / INTERVAL) — these are ongoing schedules, not work that's
+ * waiting to start, so "PENDING" reads incorrectly. The backend enum stays
+ * Status.PENDING; this is a display-only rename keyed on Task.Type.
+ */
+function displayStatus(task: Task): string {
+  if (task.status === 'PENDING' && (task.type === 'CRON' || task.type === 'INTERVAL')) {
+    return 'ACTIVE'
+  }
+  return task.status
+}
+
+/**
+ * Humanize a Task's recurring schedule for display. Order of preference:
+ *   1. Recognized cron pattern (daily at 9 AM, every 30 min, weekdays at...)
+ *   2. INTERVAL duration humanized (every 30 min, every 2 hours, every 1 day)
+ *   3. Server's scheduleDisplay — the operator's raw input verbatim
+ *   4. em-dash if nothing applies (one-shot / unscheduled tasks)
+ */
+function humanSchedule(task: Task): string {
+  if (task.type === 'INTERVAL') {
+    const secs = task.intervalSeconds as number | null | undefined
+    if (typeof secs === 'number' && secs > 0) return `every ${humanDuration(secs)}`
+    return (task.scheduleDisplay as string | null) || '—'
+  }
+  if (task.type === 'CRON') {
+    const expr = task.cronExpression as string | null | undefined
+    if (expr) {
+      const h = humanCron(expr)
+      if (h) return h
+    }
+    return (task.scheduleDisplay as string | null) || expr || '—'
+  }
+  return (task.scheduleDisplay as string | null) || '—'
+}
+
+function humanDuration(secs: number): string {
+  if (secs % 86400 === 0) {
+    const d = secs / 86400
+    return d === 1 ? '1 day' : `${d} days`
+  }
+  if (secs % 3600 === 0) {
+    const h = secs / 3600
+    return h === 1 ? '1 hour' : `${h} hours`
+  }
+  if (secs % 60 === 0) {
+    const m = secs / 60
+    return m === 1 ? '1 min' : `${m} min`
+  }
+  return `${secs}s`
+}
+
+/**
+ * Recognize common cron patterns and return a natural-language equivalent.
+ * Returns null for patterns we don't know — caller falls back to the
+ * server's scheduleDisplay so the operator at least sees their raw input.
+ */
+function humanCron(expr: string): string | null {
+  const trimmed = expr.trim()
+  switch (trimmed) {
+    case '@hourly': return 'hourly'
+    case '@daily':
+    case '@midnight': return 'daily at midnight'
+    case '@weekly': return 'weekly on Sunday at midnight'
+    case '@monthly': return 'monthly on the 1st at midnight'
+    case '@yearly':
+    case '@annually': return 'yearly on Jan 1 at midnight'
+  }
+  const parts = trimmed.split(/\s+/)
+  let sec: string, min: string, hour: string, dom: string, mon: string, dow: string
+  if (parts.length === 6) {
+    // We know all six indexes exist after the length check.
+    sec = parts[0]!; min = parts[1]!; hour = parts[2]!
+    dom = parts[3]!; mon = parts[4]!; dow = parts[5]!
+  }
+  else if (parts.length === 5) {
+    min = parts[0]!; hour = parts[1]!; dom = parts[2]!; mon = parts[3]!; dow = parts[4]!
+    sec = '0'
+  }
+  else return null
+  const dailyWildcards = dom === '*' && mon === '*' && dow === '*'
+  if (sec === '0' && dailyWildcards) {
+    if (min.startsWith('*/') && hour === '*') {
+      const n = Number.parseInt(min.slice(2), 10)
+      if (!Number.isNaN(n)) return `every ${n} min`
+    }
+    if (min === '0' && hour.startsWith('*/')) {
+      const n = Number.parseInt(hour.slice(2), 10)
+      if (!Number.isNaN(n)) return `every ${n === 1 ? '1 hour' : `${n} hours`}`
+    }
+    if (/^\d+$/.test(min) && /^\d+$/.test(hour)) {
+      return `daily at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
+    }
+  }
+  if (sec === '0' && dom === '*' && mon === '*' && /^\d+$/.test(min) && /^\d+$/.test(hour)) {
+    if (dow === '1-5' || /^MON-FRI$/i.test(dow)) {
+      return `weekdays at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
+    }
+    const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    if (/^\d+$/.test(dow)) {
+      const d = Number.parseInt(dow, 10)
+      if (d >= 0 && d <= 6) return `weekly on ${dowNames[d]} at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
+    }
+  }
+  return null
+}
+
+function formatTime12h(hour: number, min: number): string {
+  const period = hour >= 12 ? 'PM' : 'AM'
+  const h12 = hour % 12 || 12
+  const mm = min === 0 ? '' : `:${min.toString().padStart(2, '0')}`
+  return `${h12}${mm} ${period}`
 }
 
 // A11y: stable ids for filter selects
@@ -191,6 +307,9 @@ const typeSelectId = useId()
               Type
             </th>
             <th class="px-4 py-2.5 font-medium">
+              Schedule
+            </th>
+            <th class="px-4 py-2.5 font-medium">
               Status
             </th>
             <th class="px-4 py-2.5 font-medium">
@@ -202,7 +321,7 @@ const typeSelectId = useId()
             <th class="px-4 py-2.5 font-medium">
               Retries
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium text-right">
               Actions
             </th>
           </tr>
@@ -231,11 +350,14 @@ const typeSelectId = useId()
             <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">
               {{ task.type }}
             </td>
+            <td class="px-4 py-2.5 text-fg-muted text-xs">
+              {{ humanSchedule(task) }}
+            </td>
             <td class="px-4 py-2.5">
               <span
-                :class="statusColors[task.status]"
+                :class="statusColors[displayStatus(task)]"
                 class="text-xs font-mono"
-              >{{ task.status }}</span>
+              >{{ displayStatus(task) }}</span>
             </td>
             <td class="px-4 py-2.5 text-fg-muted">
               {{ task.agentName || '—' }}
@@ -246,29 +368,50 @@ const typeSelectId = useId()
             <td class="px-4 py-2.5 text-fg-muted text-xs">
               {{ task.retryCount }}/{{ task.maxRetries }}
             </td>
-            <td class="px-4 py-2.5 space-x-2">
-              <button
-                v-if="!selectMode && task.status === 'PENDING'"
-                class="text-xs text-fg-muted hover:text-red-400 transition-colors"
-                @click.stop="cancelTask(task.id)"
-              >
-                Cancel
-              </button>
-              <button
-                v-if="!selectMode && (task.status === 'FAILED' || task.status === 'LOST')"
-                class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
-                @click.stop="retryTask(task.id)"
-              >
-                Retry
-              </button>
-              <button
-                v-if="!selectMode"
-                class="text-xs text-fg-muted hover:text-red-400 transition-colors"
-                :title="`Permanently delete “${task.name}” and its run history`"
-                @click.stop="deleteTask(task)"
-              >
-                Delete
-              </button>
+            <td class="px-4 py-2.5 text-right">
+              <div class="inline-flex items-center gap-1">
+                <button
+                  v-if="!selectMode && task.status === 'PENDING'"
+                  type="button"
+                  class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                  :title="task.type === 'CRON' || task.type === 'INTERVAL'
+                    ? `Stop recurring schedule for “${task.name}”`
+                    : `Cancel “${task.name}”`"
+                  :aria-label="`Cancel ${task.name}`"
+                  @click.stop="cancelTask(task.id)"
+                >
+                  <NoSymbolIcon
+                    class="w-4 h-4"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  v-if="!selectMode && (task.status === 'FAILED' || task.status === 'LOST')"
+                  type="button"
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  :title="`Retry “${task.name}”`"
+                  :aria-label="`Retry ${task.name}`"
+                  @click.stop="retryTask(task.id)"
+                >
+                  <ArrowPathIcon
+                    class="w-4 h-4"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  v-if="!selectMode"
+                  type="button"
+                  class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                  :title="`Permanently delete “${task.name}” and its run history`"
+                  :aria-label="`Delete ${task.name}`"
+                  @click.stop="deleteTask(task)"
+                >
+                  <TrashIcon
+                    class="w-4 h-4"
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
