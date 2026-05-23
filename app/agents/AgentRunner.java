@@ -870,7 +870,7 @@ public class AgentRunner {
     @SuppressWarnings("java:S107") // Streaming first-round invocation needs the full call surface
     private static LlmProvider.StreamAccumulator streamFirstRoundWithRetry(
             LlmProvider primary, String effectiveModelIdForCall, List<ChatMessage> messages, List<ToolDef> tools,
-            StreamingCallbacks cb, int maxTokens, String thinkingMode, String channelType,
+            StreamingCallbacks cb, Integer maxTokens, String thinkingMode, String channelType,
             AtomicBoolean isCancelled, Agent agent) throws InterruptedException {
         var accumulator = primary.chatStreamAccumulate(
                 effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
