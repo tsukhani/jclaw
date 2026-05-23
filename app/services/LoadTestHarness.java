@@ -94,21 +94,27 @@ public final class LoadTestHarness {
     public static Scenario scenario() { return scenario; }
 
     public static int start(int requestedPort) throws IOException {
+        // First attempt under the lock. If the port is busy (stale server from
+        // a previous run / class-reload cycle), stop and exit the synchronized
+        // block so the backoff doesn't hold the lock — Thread.sleep inside
+        // synchronized would block any concurrent start()/stop() (S2276), and
+        // lock.wait without a while-loop wakeup guard would trip S2274.
         synchronized (lock) {
             if (server.get() != null) return port;
             try {
                 return bindAndStart(requestedPort);
             } catch (java.net.BindException _) {
-                // Port may be held by a stale server from a previous run or
-                // class-reload cycle. Stop, wait for OS socket release, retry.
-                // Use lock.wait so the 500 ms backoff releases the lock —
-                // Thread.sleep would block any concurrent start()/stop() call.
                 stop();
-                try { lock.wait(500); } catch (InterruptedException _) {
-                    Thread.currentThread().interrupt();
-                }
-                return bindAndStart(requestedPort);
             }
+        }
+        try { Thread.sleep(500); } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
+        // Re-acquire the lock for the retry. Re-check server.get() because a
+        // racing start() could have bound during the unlocked sleep.
+        synchronized (lock) {
+            if (server.get() != null) return port;
+            return bindAndStart(requestedPort);
         }
     }
 
