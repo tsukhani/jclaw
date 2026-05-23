@@ -409,6 +409,7 @@ interface DayCell {
   date: Date
   inMonth: boolean
   isToday: boolean
+  isPast: boolean
   fires: ProjectedFire[]
 }
 
@@ -435,6 +436,7 @@ const calendarDays = computed<DayCell[]>(() => {
       date: d,
       inMonth: d >= monthStart && d < monthEnd,
       isToday: d.getTime() === today.getTime(),
+      isPast: d.getTime() < today.getTime(),
       fires: allFires
         .filter(f => f.fireAt.getTime() >= dayStart && f.fireAt.getTime() < dayEnd)
         .sort((a, b) => a.fireAt.getTime() - b.fireAt.getTime()),
@@ -865,7 +867,10 @@ const typeSelectId = useId()
           v-for="(cell, idx) in calendarDays"
           :key="idx"
           class="min-h-[100px] border-r border-b border-border last:border-r-0 px-2 py-1.5 flex flex-col gap-1"
-          :class="cell.inMonth ? '' : 'bg-muted/20'"
+          :class="[
+            cell.inMonth ? '' : 'bg-muted/20',
+            cell.isPast ? 'opacity-40' : '',
+          ]"
         >
           <div
             class="text-xs flex items-center gap-1"
