@@ -57,7 +57,7 @@ public class WebhookWhatsAppController extends Controller {
         String rawBody;
         try {
             rawBody = WebhookUtil.readRawBody();
-        } catch (Exception e) {
+        } catch (Exception _) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP, "Failed to read request body");
             error();
             return;
@@ -98,7 +98,7 @@ public class WebhookWhatsAppController extends Controller {
     private static void processMessage(WhatsAppChannel.InboundMessage message) {
         try {
             AgentRunner.processWebhookMessage(CHANNEL_WHATSAPP, message.from(), message.text(),
-                    (peerId, response) -> WhatsAppChannel.sendMessage(peerId, response),
+                    WhatsAppChannel::sendMessage,
                     peerId -> WhatsAppChannel.sendMessage(peerId, "No agent configured for this number."));
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,

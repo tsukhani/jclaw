@@ -336,10 +336,8 @@ public final class ToolCallLoopRunner {
     public static boolean yieldRequestedInLastRound(List<ChatMessage> currentMessages, int fromIndex) {
         for (int i = fromIndex; i < currentMessages.size(); i++) {
             var m = currentMessages.get(i);
-            if (m == null) continue;
-            if (!MessageRole.TOOL.value.equals(m.role())) continue;
-            var content = m.content();
-            if (content instanceof String s
+            if (m != null && MessageRole.TOOL.value.equals(m.role())
+                    && m.content() instanceof String s
                     && s.startsWith(tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX)) {
                 return true;
             }
@@ -416,7 +414,7 @@ public final class ToolCallLoopRunner {
         try {
             if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null, cb))
                 return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
         }
@@ -514,7 +512,7 @@ public final class ToolCallLoopRunner {
         try {
             if (!CancellationManager.awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb))
                 return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
         }

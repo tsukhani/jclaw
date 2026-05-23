@@ -41,7 +41,7 @@ public class ApiAgentsController extends Controller {
      * escape the workspace root.
      */
     private static final Pattern AGENT_NAME_RE =
-            Pattern.compile("^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$");
+            Pattern.compile("^\\w[\\w-]{0,63}$");
 
     /**
      * Reject any name that fails the slug regex with 400. Called from
@@ -343,7 +343,7 @@ public class ApiAgentsController extends Controller {
         java.nio.file.Path path;
         try {
             path = AgentService.acquireWorkspacePath(agent.name, filePath);
-        } catch (SecurityException e) {
+        } catch (SecurityException _) {
             forbidden();
             return;
         }

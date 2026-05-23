@@ -626,14 +626,13 @@ public final class TelegramStreamingSink {
             done.get(SEAL_INFLIGHT_WAIT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-        } catch (TimeoutException _) {
-            // Defensive cap — flush exceeded the p99 latency budget. Proceed
-            // anyway; the worst-case outcome is an out-of-order edit, which
-            // the retry path can recover. Logging would be noisy here.
-        } catch (ExecutionException _) {
-            // flush() itself swallows exceptions and always completes the
-            // future normally, so this branch is effectively unreachable —
-            // kept for API completeness in case future refactors propagate.
+        } catch (TimeoutException | ExecutionException _) {
+            // TimeoutException: defensive cap — flush exceeded the p99 latency
+            // budget; proceed anyway. Worst case is an out-of-order edit which
+            // the retry path can recover. Logging would be noisy.
+            // ExecutionException: flush() swallows exceptions and always
+            // completes normally, so this is effectively unreachable — kept
+            // for API completeness in case future refactors propagate.
         }
     }
 

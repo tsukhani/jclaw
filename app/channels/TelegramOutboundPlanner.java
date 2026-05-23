@@ -193,7 +193,7 @@ public final class TelegramOutboundPlanner {
     private static String canonicalPath(File resolved) {
         try {
             return resolved.getCanonicalPath();
-        } catch (java.io.IOException e) {
+        } catch (java.io.IOException _) {
             return resolved.getAbsolutePath();
         }
     }
@@ -215,7 +215,7 @@ public final class TelegramOutboundPlanner {
                 return null;
             }
             return file;
-        } catch (SecurityException e) {
+        } catch (SecurityException _) {
             EventLogger.warn(LOG_CATEGORY, agentName, LOG_SOURCE,
                     "File delivery rejected (path traversal): %s".formatted(relativePath));
             return null;

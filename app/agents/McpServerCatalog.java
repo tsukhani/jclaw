@@ -51,10 +51,9 @@ public final class McpServerCatalog {
         // hasn't yet been queried for its action list.
         var serverHandles = new LinkedHashMap<String, ToolRegistry.Tool>();
         for (var tool : ToolRegistry.listTools()) {
-            if (!tool.isServerLevel()) continue;
-            if (tool.group() == null) continue;
-            if (disabledForAgent.contains(tool.name())) continue;
-            serverHandles.put(tool.group(), tool);
+            if (tool.isServerLevel() && tool.group() != null && !disabledForAgent.contains(tool.name())) {
+                serverHandles.put(tool.group(), tool);
+            }
         }
         if (serverHandles.isEmpty()) return "";
 
@@ -121,10 +120,11 @@ public final class McpServerCatalog {
     public static List<String> serversForAgent(Set<String> disabledForAgent) {
         var out = new java.util.ArrayList<String>();
         for (var tool : ToolRegistry.listTools()) {
-            if (!tool.isServerLevel()) continue;
-            if (tool.group() == null) continue;
-            if (disabledForAgent.contains(tool.name())) continue;
-            if (!out.contains(tool.group())) out.add(tool.group());
+            if (tool.isServerLevel() && tool.group() != null
+                    && !disabledForAgent.contains(tool.name())
+                    && !out.contains(tool.group())) {
+                out.add(tool.group());
+            }
         }
         return out;
     }

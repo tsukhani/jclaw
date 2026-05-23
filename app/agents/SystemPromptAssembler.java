@@ -1,7 +1,6 @@
 package agents;
 
 import com.google.gson.Gson;
-import memory.MemoryStore;
 import memory.MemoryStoreFactory;
 import models.Agent;
 import play.Play;
@@ -231,7 +230,7 @@ public class SystemPromptAssembler {
         if (!skills.isEmpty()) {
             b.startSection("Skills");
             b.sb.append("\n");
-            b.sb.append(SkillLoader.skillMatchingInstructions());
+            b.sb.append(SkillLoader.SKILL_MATCHING_INSTRUCTIONS);
             b.sb.append("\n");
             b.sb.append(SkillLoader.formatSkillsXml(skills));
             b.sb.append("\n");

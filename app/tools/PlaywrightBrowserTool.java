@@ -4,7 +4,6 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.LoadState;
-import com.microsoft.playwright.options.WaitForSelectorState;
 import models.Agent;
 import services.AgentService;
 import services.EventLogger;
@@ -427,7 +426,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         try (var entries = Files.list(dir)) {
             return entries.anyMatch(p ->
                     p.getFileName().toString().startsWith("chromium") && Files.isDirectory(p));
-        } catch (Exception e) {
+        } catch (Exception _) {
             return false;
         }
     }

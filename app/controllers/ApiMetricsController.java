@@ -467,7 +467,7 @@ public class ApiMetricsController extends Controller {
         }
         try {
             return java.time.Instant.parse(sinceParam);
-        } catch (java.time.format.DateTimeParseException e) {
+        } catch (java.time.format.DateTimeParseException _) {
             error(400, "Invalid 'since' — must be ISO-8601 instant (e.g. 2026-04-10T00:00:00Z)");
             throw new AssertionError("unreachable: error() throws");
         }
@@ -477,7 +477,7 @@ public class ApiMetricsController extends Controller {
         if (agentIdParam == null || agentIdParam.isBlank()) return null;
         try {
             return Long.parseLong(agentIdParam);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             error(400, "Invalid 'agentId' — must be numeric");
             return null; // unreachable — error() throws
         }

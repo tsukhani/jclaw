@@ -288,11 +288,11 @@ public final class VisionAudioAssembler {
         if (future.isEmpty()) return true;
         try {
             future.get().get(TRANSCRIPT_AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (TimeoutException e) {
+        } catch (TimeoutException _) {
             EventLogger.warn("transcription",
                     "Transcript await timeout for attachment %d after %ds"
                             .formatted(attId, TRANSCRIPT_AWAIT_TIMEOUT_SECONDS));
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return false;
         } catch (Exception _) {

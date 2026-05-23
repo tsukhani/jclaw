@@ -92,7 +92,7 @@ public class ApiSkillsController extends Controller {
                         if (info != null) skills.add(info);
                     }
                 });
-            } catch (IOException e) {
+            } catch (IOException _) {
                 // ignore
             }
         }
@@ -531,7 +531,7 @@ public class ApiSkillsController extends Controller {
         Path target;
         try {
             target = AgentService.acquireContained(dir, filePath);
-        } catch (SecurityException e) {
+        } catch (SecurityException _) {
             error(403, "Path escapes skill directory");
             return;
         }

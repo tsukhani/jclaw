@@ -89,7 +89,7 @@ public class ApiAuthController extends Controller {
             EventLogger.info("auth", "Admin password set for the first time");
             renderJSON(gson.toJson(new SetupOkResponse("ok")));
         }
-        catch (Exception e) {
+        catch (Exception _) {
             badRequest();
         }
     }
@@ -130,7 +130,7 @@ public class ApiAuthController extends Controller {
                 renderJSON("{\"error\":\"Invalid credentials\"}");
             }
         }
-        catch (Exception e) {
+        catch (Exception _) {
             badRequest();
         }
     }

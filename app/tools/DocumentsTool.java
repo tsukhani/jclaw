@@ -124,7 +124,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
         Path target;
         try {
             target = AgentService.acquireWorkspacePath(agent.name, relativePath);
-        } catch (SecurityException e) {
+        } catch (SecurityException _) {
             return "Error: Path '%s' escapes the workspace directory.".formatted(relativePath);
         }
 
@@ -150,7 +150,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 Path source;
                 try {
                     source = AgentService.acquireWorkspacePath(agent.name, sourceRelative);
-                } catch (SecurityException e) {
+                } catch (SecurityException _) {
                     yield "Error: sourcePath '%s' escapes the workspace directory.".formatted(sourceRelative);
                 }
                 if (!Files.exists(source)) {

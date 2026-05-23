@@ -38,7 +38,7 @@ public class ApiAttachmentsController extends Controller {
         java.nio.file.Path path;
         try {
             path = AgentService.acquireWorkspacePath(agentName, relPath);
-        } catch (SecurityException e) {
+        } catch (SecurityException _) {
             forbidden();
             return;
         }

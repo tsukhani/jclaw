@@ -118,7 +118,7 @@ public class ApiTelegramBindingsController extends Controller {
         binding.transport = parseTransport(body, ChannelTransport.POLLING);
         binding.webhookSecret = readOptionalString(body, KEY_WEBHOOK_SECRET);
         binding.webhookUrl = readOptionalString(body, KEY_WEBHOOK_URL);
-        binding.enabled = body.has(KEY_ENABLED) ? body.get(KEY_ENABLED).getAsBoolean() : true;
+        binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
         binding.save();
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,

@@ -173,13 +173,12 @@ public class ApiConversationsController extends Controller {
 
         setPaginationHeaders(total);
 
-        var jsonParser = new com.google.gson.JsonParser();
-        var result = messages.stream().map(m -> messageToMap(m, jsonParser)).toList();
+        var result = messages.stream().map(ApiConversationsController::messageToMap).toList();
 
         renderJSON(gson.toJson(result));
     }
 
-    private static HashMap<String, Object> messageToMap(Message m, com.google.gson.JsonParser jsonParser) {
+    private static HashMap<String, Object> messageToMap(Message m) {
         var map = new HashMap<String, Object>();
         map.put("id", m.id);
         map.put("role", m.role);
@@ -189,10 +188,10 @@ public class ApiConversationsController extends Controller {
         // tool-call rows without maintaining a client-side name→icon
         // mapping. Parsed to a JsonArray so the enriched payload lands
         // as a real array in the response (not a stringified nested JSON).
-        map.put("toolCalls", enrichToolCallsWithIcons(m.toolCalls, jsonParser));
+        map.put("toolCalls", enrichToolCallsWithIcons(m.toolCalls));
         map.put("toolResults", m.toolResults);
         if (m.toolResultStructured != null) {
-            map.put("toolResultStructured", jsonParser.parse(m.toolResultStructured));
+            map.put("toolResultStructured", com.google.gson.JsonParser.parseString(m.toolResultStructured));
         }
         // Include reasoning text so the collapsible thinking bubble
         // re-renders identically after a conversation reload. Null for
@@ -200,7 +199,7 @@ public class ApiConversationsController extends Controller {
         if (m.reasoning != null) map.put("reasoning", m.reasoning);
         map.put("createdAt", m.createdAt.toString());
         if (m.usageJson != null) {
-            map.put("usage", jsonParser.parse(m.usageJson));
+            map.put("usage", com.google.gson.JsonParser.parseString(m.usageJson));
         }
         // JCLAW-267: marker for inline-mode subagent runs. The chat UI
         // folds consecutive messages sharing this id into a single
@@ -220,7 +219,7 @@ public class ApiConversationsController extends Controller {
         if (m.messageKind != null) {
             map.put("messageKind", m.messageKind);
             if (m.metadata != null) {
-                map.put("metadata", jsonParser.parse(m.metadata));
+                map.put("metadata", com.google.gson.JsonParser.parseString(m.metadata));
             }
         }
         // JCLAW-291: model-output truncation flag. Surfaced only when true
@@ -276,7 +275,7 @@ public class ApiConversationsController extends Controller {
         if (message.conversation == null || !message.conversation.id.equals(id)) {
             badRequest();
         }
-        services.Tx.run(() -> { message.delete(); });
+        services.Tx.run((Runnable) message::delete);
         renderJSON(gson.toJson(new StatusResponse("deleted")));
     }
 
@@ -490,11 +489,10 @@ public class ApiConversationsController extends Controller {
      * malformed JSON so the UI's guard on missing tool-call columns still
      * works.
      */
-    private static com.google.gson.JsonArray enrichToolCallsWithIcons(String toolCallsJson,
-                                                                       com.google.gson.JsonParser parser) {
+    private static com.google.gson.JsonArray enrichToolCallsWithIcons(String toolCallsJson) {
         if (toolCallsJson == null || toolCallsJson.isBlank()) return null;
         try {
-            var parsed = parser.parse(toolCallsJson);
+            var parsed = com.google.gson.JsonParser.parseString(toolCallsJson);
             com.google.gson.JsonArray arr;
             if (parsed.isJsonArray()) {
                 arr = parsed.getAsJsonArray();

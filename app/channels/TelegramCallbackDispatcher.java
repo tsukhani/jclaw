@@ -1,7 +1,6 @@
 package channels;
 
 import channels.TelegramChannel.InboundCallback;
-import channels.TelegramModelCallback.Kind;
 import channels.TelegramModelCallback.Payload;
 import models.Agent;
 import models.Conversation;
@@ -46,10 +45,7 @@ public final class TelegramCallbackDispatcher {
 
         // Conversation look-up + binding-scope check. Prevents a leaked
         // callback_data from one conversation from mutating another.
-        var conversation = Tx.run(() -> {
-            var c = (Conversation) Conversation.findById(payload.conversationId());
-            return c;
-        });
+        var conversation = Tx.run(() -> (Conversation) Conversation.findById(payload.conversationId()));
         if (conversation == null) {
             TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(),
                     "This conversation no longer exists.", true);

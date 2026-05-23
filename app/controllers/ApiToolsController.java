@@ -220,10 +220,10 @@ public class ApiToolsController extends Controller {
         // future refactor. One DELETE per group toggle keeps the table
         // tidy as the operator naturally cycles through their servers.
         for (var tool : ToolRegistry.listTools()) {
-            if (!group.equals(tool.group())) continue;
-            if (tool.isServerLevel()) continue;
-            AgentToolConfig.delete("agent = ?1 AND toolName = ?2",
-                    agent, tool.name());
+            if (group.equals(tool.group()) && !tool.isServerLevel()) {
+                AgentToolConfig.delete("agent = ?1 AND toolName = ?2",
+                        agent, tool.name());
+            }
         }
 
         SkillLoader.clearCache();

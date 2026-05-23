@@ -63,7 +63,7 @@ public final class TelegramPollingRunner {
      * {@link #stop} is one-shot at app shutdown.
      */
     @SuppressWarnings("java:S3077") // Volatile non-primitive is correct here: pure publish-then-read, no compound mutation
-    private static volatile ScheduledExecutorService SCHEDULER = newScheduler();
+    private static volatile ScheduledExecutorService scheduler = newScheduler();
 
     private static ScheduledExecutorService newScheduler() {
         return Executors.newSingleThreadScheduledExecutor(
@@ -138,8 +138,8 @@ public final class TelegramPollingRunner {
             }
         }
         // Time-bounded drain of the cooldown-reconcile scheduler. Without this
-        // the static SCHEDULER accumulates a thread per dev hot reload.
-        utils.VirtualThreads.gracefulShutdown(SCHEDULER, "telegram-cooldown-reconcile");
+        // the static scheduler accumulates a thread per dev hot reload.
+        utils.VirtualThreads.gracefulShutdown(scheduler, "telegram-cooldown-reconcile");
     }
 
     /** Test/admin introspection: set of binding ids with live polling sessions. */
@@ -169,18 +169,18 @@ public final class TelegramPollingRunner {
      * Test-only state reset (JCLAW-316). Clears {@link #ACTIVE} and
      * {@link #COOLDOWN_UNTIL} and nulls the {@link #APP} reference. If a
      * prior test (or {@link jobs.ShutdownJob} invoked directly from
-     * {@code JobLifecycleTest}) drained {@link #SCHEDULER} via
+     * {@code JobLifecycleTest}) drained {@link #scheduler} via
      * {@link #stop}, swap in a fresh executor so subsequent
      * {@link #reconcile} calls can schedule cooldown re-reconciles without
      * hitting {@code RejectedExecutionException}. Production never
-     * reassigns SCHEDULER: {@link #stop} is one-shot at app shutdown.
+     * reassigns scheduler: {@link #stop} is one-shot at app shutdown.
      */
     static void clearForTest() {
         ACTIVE.clear();
         COOLDOWN_UNTIL.clear();
         APP.set(null);
-        if (SCHEDULER.isShutdown()) {
-            SCHEDULER = newScheduler();
+        if (scheduler.isShutdown()) {
+            scheduler = newScheduler();
         }
     }
 
@@ -228,7 +228,7 @@ public final class TelegramPollingRunner {
             COOLDOWN_UNTIL.put(token, System.currentTimeMillis() + COOLDOWN_MS);
             // Self-reconcile once the cooldown drains so a re-enabled binding
             // registered during the window gets picked up automatically.
-            SCHEDULER.schedule(TelegramPollingRunner::reconcile, COOLDOWN_MS + 500, TimeUnit.MILLISECONDS);
+            scheduler.schedule(TelegramPollingRunner::reconcile, COOLDOWN_MS + 500, TimeUnit.MILLISECONDS);
         }
         EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                 "Unregistered polling session for binding %d".formatted(bindingId));

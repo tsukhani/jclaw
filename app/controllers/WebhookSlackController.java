@@ -30,7 +30,7 @@ public class WebhookSlackController extends Controller {
         String rawBody;
         try {
             rawBody = WebhookUtil.readRawBody();
-        } catch (Exception e) {
+        } catch (Exception _) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK, "Failed to read request body");
             error();
             return;
@@ -86,7 +86,7 @@ public class WebhookSlackController extends Controller {
     private static void processMessage(SlackChannel.InboundMessage message) {
         try {
             AgentRunner.processWebhookMessage(CHANNEL_SLACK, message.channelId(), message.text(),
-                    (peerId, response) -> SlackChannel.sendMessage(peerId, response),
+                    SlackChannel::sendMessage,
                     peerId -> SlackChannel.sendMessage(peerId, "No agent configured for this channel."));
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,

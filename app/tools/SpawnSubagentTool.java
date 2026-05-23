@@ -609,17 +609,17 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             var truncated = result != null && result.truncated();
             return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
                     reply, null, false, truncated);
-        } catch (TimeoutException te) {
+        } catch (TimeoutException _) {
             future.cancel(false);
             var reason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
             return new SyncRunOutcome("", SubagentRun.Status.TIMEOUT,
                     reason, reason, false, false);
-        } catch (InterruptedException ie) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             var reason = "Parent thread interrupted while awaiting subagent";
             return new SyncRunOutcome("", SubagentRun.Status.FAILED,
                     reason, reason, false, false);
-        } catch (java.util.concurrent.CancellationException ce) {
+        } catch (java.util.concurrent.CancellationException _) {
             // JCLAW-291: kill primitive cancelled our Future. The registry
             // already stamped KILLED; bail without overwriting.
             return new SyncRunOutcome("", SubagentRun.Status.KILLED,
@@ -975,18 +975,16 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var childRows = AgentToolConfig.findByAgent(childAgent);
         boolean anyFlipped = false;
         for (var row : childRows) {
-            if (row.enabled) continue;
-            if (parentDisabled.contains(row.toolName)) continue; // parent also has it off
-            // Sanity check: tool actually exists. If a stale row references a
-            // removed tool, we leave it alone — flipping it would be lying.
-            boolean stillRegistered = false;
-            for (var t : allRegistered) {
-                if (t.name().equals(row.toolName)) { stillRegistered = true; break; }
+            // Skip rows the parent doesn't grant, rows already enabled, or
+            // stale rows referencing a removed tool — flipping a stale row
+            // would be lying about the registry's current shape.
+            if (!row.enabled
+                    && !parentDisabled.contains(row.toolName)
+                    && isStillRegistered(allRegistered, row.toolName)) {
+                row.enabled = true;
+                row.save();
+                anyFlipped = true;
             }
-            if (!stillRegistered) continue;
-            row.enabled = true;
-            row.save();
-            anyFlipped = true;
         }
         if (anyFlipped) {
             // Mirror the existing {@link controllers.ApiToolsController} write
@@ -995,6 +993,13 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             // flipped grants.
             ToolRegistry.invalidateDisabledToolsCache(childAgent);
         }
+    }
+
+    private static boolean isStillRegistered(List<ToolRegistry.Tool> registered, String toolName) {
+        for (var t : registered) {
+            if (t.name().equals(toolName)) return true;
+        }
+        return false;
     }
 
     /**
@@ -1064,19 +1069,19 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     private static Long optLong(JsonObject obj, String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
-        try { return el.getAsLong(); } catch (RuntimeException e) { return null; }
+        try { return el.getAsLong(); } catch (RuntimeException _) { return null; }
     }
 
     private static int optInt(JsonObject obj, String key, int fallback) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (RuntimeException e) { return fallback; }
+        try { return el.getAsInt(); } catch (RuntimeException _) { return fallback; }
     }
 
     private static boolean optBool(JsonObject obj, String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return false;
-        try { return el.getAsBoolean(); } catch (RuntimeException e) { return false; }
+        try { return el.getAsBoolean(); } catch (RuntimeException _) { return false; }
     }
 
     /**

@@ -5,13 +5,11 @@ import com.google.gson.JsonParser;
 import models.Agent;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 
@@ -147,7 +145,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
             return "Converted: %s (%s) → %s (%s)".formatted(
                     DISPLAY_FMT.format(source), fromZone.getId(),
                     DISPLAY_FMT.format(target), toZone.getId());
-        } catch (DateTimeParseException e) {
+        } catch (DateTimeParseException _) {
             return ERR_INVALID_TIMESTAMP;
         }
     }
@@ -188,7 +186,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
 
             return "Result: %s %+d %s → %s".formatted(
                     DISPLAY_FMT.format(base), amount, unit, formatResult(result));
-        } catch (DateTimeParseException e) {
+        } catch (DateTimeParseException _) {
             return ERR_INVALID_TIMESTAMP;
         }
     }
@@ -210,7 +208,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
 
             return "Difference: %d days, %d hours, %d minutes (%d total hours)"
                     .formatted(days, hours, minutes, duration.toHours());
-        } catch (DateTimeParseException e) {
+        } catch (DateTimeParseException _) {
             return ERR_INVALID_TIMESTAMP;
         }
     }

@@ -115,7 +115,7 @@ public class ApiSubagentRunsController extends Controller {
         if (since == null || since.isBlank()) return null;
         try {
             return Instant.parse(since);
-        } catch (Exception e) {
+        } catch (Exception _) {
             response.status = 400;
             renderJSON(gson.toJson(new ErrorResponse(
                     "Invalid 'since' value '" + since + "' — expected ISO-8601 instant.")));
@@ -127,7 +127,7 @@ public class ApiSubagentRunsController extends Controller {
         if (status == null || status.isBlank()) return null;
         try {
             return SubagentRun.Status.valueOf(status.toUpperCase());
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             response.status = 400;
             renderJSON(gson.toJson(new ErrorResponse(
                     "Invalid 'status' value '" + status

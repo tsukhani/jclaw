@@ -535,7 +535,8 @@ public class FileSystemTools implements ToolRegistry.Tool {
 
     private static int countOccurrences(String haystack, String needle) {
         if (needle.isEmpty()) return 0;
-        int count = 0, idx = 0;
+        int count = 0;
+        int idx = 0;
         while ((idx = haystack.indexOf(needle, idx)) != -1) {
             count++;
             idx += needle.length();
@@ -689,7 +690,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
         int startLine;
         try {
             startLine = opObj.get(ARG_START_LINE).getAsInt();
-        } catch (NumberFormatException | UnsupportedOperationException e) {
+        } catch (NumberFormatException | UnsupportedOperationException _) {
             return ParsedOp.err("Error: operation #%d startLine must be an integer".formatted(index));
         }
         if (startLine < 1) {
@@ -796,7 +797,8 @@ public class FileSystemTools implements ToolRegistry.Tool {
 
     /** Detect the file's predominant newline sequence. Defaults to LF for empty or single-line files. */
     private static String detectLineEnding(String text) {
-        int crlf = 0, lf = 0;
+        int crlf = 0;
+        int lf = 0;
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c == '\n') {

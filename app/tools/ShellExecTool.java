@@ -10,12 +10,10 @@ import services.AgentService;
 import services.ConfigService;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 /**
  * Shell execution tool for agent-invoked commands.
@@ -330,7 +328,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         // is rejected here as well, not just textual `..` traversal.
         try {
             return AgentService.acquireContained(workspace, workdirStr);
-        } catch (SecurityException e) {
+        } catch (SecurityException _) {
             throw new IllegalArgumentException(
                     "Working directory must be within the agent workspace.");
         }
@@ -421,7 +419,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
         } catch (IOException e) {
             return "Error: Failed to execute command: " + e.getMessage();
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return "Error: Command execution interrupted.";
         }

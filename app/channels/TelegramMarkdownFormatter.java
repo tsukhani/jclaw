@@ -331,13 +331,16 @@ public final class TelegramMarkdownFormatter {
         private List<String> collectHeaderLabels(TableHead head) {
             List<String> labels = new ArrayList<>();
             if (head == null) return labels;
+            // Only the first TableRow matters.
             for (Node row = head.getFirstChild(); row != null; row = row.getNext()) {
-                if (!(row instanceof TableRow)) continue;
-                for (Node cell = row.getFirstChild(); cell != null; cell = cell.getNext()) {
-                    if (!(cell instanceof TableCell tc)) continue;
-                    labels.add(collectInlineText(tc));
+                if (row instanceof TableRow) {
+                    for (Node cell = row.getFirstChild(); cell != null; cell = cell.getNext()) {
+                        if (cell instanceof TableCell tc) {
+                            labels.add(collectInlineText(tc));
+                        }
+                    }
+                    return labels;
                 }
-                break; // Only the first row matters.
             }
             return labels;
         }
@@ -365,48 +368,48 @@ public final class TelegramMarkdownFormatter {
         }
 
         private void trimTrailingNewlines() {
-            while (out.length() > 0 && out.charAt(out.length() - 1) == '\n') {
+            while (!out.isEmpty() && out.charAt(out.length() - 1) == '\n') {
                 out.setLength(out.length() - 1);
             }
         }
-    }
 
-    @SuppressWarnings("unchecked")
-    private static <T extends Node> T findChild(Node parent, Class<T> type) {
-        for (Node child = parent.getFirstChild(); child != null; child = child.getNext()) {
-            if (type.isInstance(child)) return (T) child;
-        }
-        return null;
-    }
-
-    /**
-     * Flexmark's typographic extension returns HTML entity references
-     * (e.g. {@code &ndash;}) rather than Unicode code points for its
-     * replacements. Decode the handful we actually receive into their Unicode
-     * equivalents so the output HTML stream contains real characters, not
-     * entities we'd then have to preserve through {@link #escapeHtml}.
-     */
-    private static final Map<String, String> TYPOGRAPHIC_ENTITIES = Map.of(
-            "&ndash;", "\u2013",
-            "&mdash;", "\u2014",
-            "&hellip;", "\u2026",
-            "&ldquo;", "\u201C",
-            "&rdquo;", "\u201D",
-            "&lsquo;", "\u2018",
-            "&rsquo;", "\u2019",
-            "&laquo;", "\u00AB",
-            "&raquo;", "\u00BB");
-
-    private static String decodeTypographicEntities(String s) {
-        if (s == null || s.isEmpty()) return "";
-        // Only a handful of entities ever appear here; a linear scan with
-        // indexOf is cheaper than compiling a regex for every call.
-        for (var entry : TYPOGRAPHIC_ENTITIES.entrySet()) {
-            if (s.contains(entry.getKey())) {
-                s = s.replace(entry.getKey(), entry.getValue());
+        @SuppressWarnings("unchecked")
+        private static <T extends Node> T findChild(Node parent, Class<T> type) {
+            for (Node child = parent.getFirstChild(); child != null; child = child.getNext()) {
+                if (type.isInstance(child)) return (T) child;
             }
+            return null;
         }
-        return s;
+
+        /**
+         * Flexmark's typographic extension returns HTML entity references
+         * (e.g. {@code &ndash;}) rather than Unicode code points for its
+         * replacements. Decode the handful we actually receive into their Unicode
+         * equivalents so the output HTML stream contains real characters, not
+         * entities we'd then have to preserve through {@link #escapeHtml}.
+         */
+        private static final Map<String, String> TYPOGRAPHIC_ENTITIES = Map.of(
+                "&ndash;", "\u2013",
+                "&mdash;", "\u2014",
+                "&hellip;", "\u2026",
+                "&ldquo;", "\u201C",
+                "&rdquo;", "\u201D",
+                "&lsquo;", "\u2018",
+                "&rsquo;", "\u2019",
+                "&laquo;", "\u00AB",
+                "&raquo;", "\u00BB");
+
+        private static String decodeTypographicEntities(String s) {
+            if (s == null || s.isEmpty()) return "";
+            // Only a handful of entities ever appear here; a linear scan with
+            // indexOf is cheaper than compiling a regex for every call.
+            for (var entry : TYPOGRAPHIC_ENTITIES.entrySet()) {
+                if (s.contains(entry.getKey())) {
+                    s = s.replace(entry.getKey(), entry.getValue());
+                }
+            }
+            return s;
+        }
     }
 
     /**
@@ -471,7 +474,7 @@ public final class TelegramMarkdownFormatter {
             if (block.isEmpty()) continue;
             appendBlock(block, maxLen, current, chunks);
         }
-        if (current.length() > 0) chunks.add(current.toString());
+        if (!current.isEmpty()) chunks.add(current.toString());
         return chunks;
     }
 
@@ -483,19 +486,19 @@ public final class TelegramMarkdownFormatter {
      */
     private static void appendBlock(String block, int maxLen, StringBuilder current, List<String> chunks) {
         if (block.length() > maxLen) {
-            if (current.length() > 0) {
+            if (!current.isEmpty()) {
                 chunks.add(current.toString());
                 current.setLength(0);
             }
             chunks.addAll(splitOversizedBlock(block, maxLen));
             return;
         }
-        int added = current.length() == 0 ? block.length() : current.length() + 2 + block.length();
+        int added = current.isEmpty() ? block.length() : current.length() + 2 + block.length();
         if (added > maxLen) {
             chunks.add(current.toString());
             current.setLength(0);
         }
-        if (current.length() > 0) current.append("\n\n");
+        if (!current.isEmpty()) current.append("\n\n");
         current.append(block);
     }
 
@@ -555,14 +558,14 @@ public final class TelegramMarkdownFormatter {
         for (String line : lines) {
             appendLine(line, maxLen, current, chunks);
         }
-        if (current.length() > 0) chunks.add(current.toString());
+        if (!current.isEmpty()) chunks.add(current.toString());
         return chunks;
     }
 
     /** Append {@code line} to {@code current}, flushing when over {@code maxLen}; hard-cut single lines longer than {@code maxLen}. */
     private static void appendLine(String line, int maxLen, StringBuilder current, List<String> chunks) {
         if (line.length() > maxLen) {
-            if (current.length() > 0) {
+            if (!current.isEmpty()) {
                 chunks.add(current.toString());
                 current.setLength(0);
             }
@@ -571,12 +574,12 @@ public final class TelegramMarkdownFormatter {
             }
             return;
         }
-        int added = current.length() == 0 ? line.length() : current.length() + 1 + line.length();
+        int added = current.isEmpty() ? line.length() : current.length() + 1 + line.length();
         if (added > maxLen) {
             chunks.add(current.toString());
             current.setLength(0);
         }
-        if (current.length() > 0) current.append("\n");
+        if (!current.isEmpty()) current.append("\n");
         current.append(line);
     }
 }

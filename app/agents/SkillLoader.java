@@ -368,22 +368,20 @@ public class SkillLoader {
     /**
      * System prompt instructions for skill matching.
      */
-    public static String skillMatchingInstructions() {
-        return """
-                ## Skills (mandatory)
-                Before replying: scan <available_skills> <description> entries.
-                - If exactly one skill clearly applies: read its SKILL.md at <location> with the readFile tool, then follow it.
-                - If multiple could apply: choose the most specific one, then read/follow it.
-                - If platform-specific variants exist (e.g., mac vs linux): select the variant matching the current platform from the Environment section.
-                - If the user's request involves multiple skills: select the skill matching the user's primary action (the first or most important verb), not secondary follow-up actions.
-                - Match by intent, not exact wording. A skill applies when the user's goal falls within the skill's domain, even if the description includes details the user did not mention. Example: a user asking "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
-                - If none clearly apply: do not read any SKILL.md.
-                - **Skill authoring is always routed through skill-creator.** If the user asks to create, update, modify, edit, rename, refactor, fix, or change a skill (anything under `skills/<name>/`), the applicable skill is `skill-creator` — regardless of whether the user mentions it by name. Read `skill-creator`'s SKILL.md first and follow its workflow. Never edit files under `skills/<name>/` directly via the filesystem tool without going through skill-creator.
-                - **When the user asks what skills you have:** render a markdown table with header `| Skill | Description |`, one row per skill, where the Skill cell is `<icon> **<name>**` (icon from `<available_skills>` `<icon>` element) and the Description cell is the skill's `<description>`.
-                - **When the user asks what tools you have:** present them grouped by the `###` category headings in the Tool Catalog (System / Files / Web / Utilities), each category followed by its own `| Tool | Purpose |` markdown table. Do not mention tools that are not in the Tool Catalog — those are internal and should stay invisible to the user.
-                Constraints: never read more than one skill up front; only read after selecting.
-                """;
-    }
+    public static final String SKILL_MATCHING_INSTRUCTIONS = """
+            ## Skills (mandatory)
+            Before replying: scan <available_skills> <description> entries.
+            - If exactly one skill clearly applies: read its SKILL.md at <location> with the readFile tool, then follow it.
+            - If multiple could apply: choose the most specific one, then read/follow it.
+            - If platform-specific variants exist (e.g., mac vs linux): select the variant matching the current platform from the Environment section.
+            - If the user's request involves multiple skills: select the skill matching the user's primary action (the first or most important verb), not secondary follow-up actions.
+            - Match by intent, not exact wording. A skill applies when the user's goal falls within the skill's domain, even if the description includes details the user did not mention. Example: a user asking "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
+            - If none clearly apply: do not read any SKILL.md.
+            - **Skill authoring is always routed through skill-creator.** If the user asks to create, update, modify, edit, rename, refactor, fix, or change a skill (anything under `skills/<name>/`), the applicable skill is `skill-creator` — regardless of whether the user mentions it by name. Read `skill-creator`'s SKILL.md first and follow its workflow. Never edit files under `skills/<name>/` directly via the filesystem tool without going through skill-creator.
+            - **When the user asks what skills you have:** render a markdown table with header `| Skill | Description |`, one row per skill, where the Skill cell is `<icon> **<name>**` (icon from `<available_skills>` `<icon>` element) and the Description cell is the skill's `<description>`.
+            - **When the user asks what tools you have:** present them grouped by the `###` category headings in the Tool Catalog (System / Files / Web / Utilities), each category followed by its own `| Tool | Purpose |` markdown table. Do not mention tools that are not in the Tool Catalog — those are internal and should stay invisible to the user.
+            Constraints: never read more than one skill up front; only read after selecting.
+            """;
 
     // --- Internal ---
 
@@ -411,7 +409,7 @@ public class SkillLoader {
             if (info != null) return info;
             // Fallback: use directory name
             return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of(), false, DEFAULT_SKILL_VERSION);
-        } catch (IOException e) {
+        } catch (IOException _) {
             return null;
         }
     }

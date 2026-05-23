@@ -463,7 +463,7 @@ public class ToolRegistry {
 
         var disabled = new HashSet<String>();
         for (var entry : explicitState.entrySet()) {
-            if (!entry.getValue()) disabled.add(entry.getKey());
+            if (Boolean.FALSE.equals(entry.getValue())) disabled.add(entry.getKey());
         }
         if (!agent.isMain()) {
             addMcpDefaultDisabled(disabled, explicitState);
@@ -482,9 +482,9 @@ public class ToolRegistry {
      */
     private static void addMcpDefaultDisabled(HashSet<String> disabled, HashMap<String, Boolean> explicitState) {
         for (var tool : tools.values()) {
-            if (tool.group() == null) continue;
-            if (explicitState.containsKey(tool.name())) continue;
-            disabled.add(tool.name());
+            if (tool.group() != null && !explicitState.containsKey(tool.name())) {
+                disabled.add(tool.name());
+            }
         }
     }
 

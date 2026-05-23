@@ -6,7 +6,6 @@ import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
 import models.TelegramBinding;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;

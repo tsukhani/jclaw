@@ -176,7 +176,7 @@ public class ApiMcpServersController extends Controller {
         var raw = readRequiredString(body, KEY_TRANSPORT);
         try {
             return McpServer.Transport.valueOf(raw.toUpperCase());
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             error(400, "Unknown transport '%s' (expected STDIO or HTTP)".formatted(raw));
             return null;  // unreachable; error() throws
         }

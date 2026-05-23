@@ -258,7 +258,7 @@ public class ApiChatController extends Controller {
     private static java.nio.file.Path acquireStagingDir(Agent agent) {
         try {
             return AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
-        } catch (SecurityException e) {
+        } catch (SecurityException _) {
             error(400, "Invalid upload target");
             return null; // unreachable — error() throws
         }
@@ -332,7 +332,7 @@ public class ApiChatController extends Controller {
             java.nio.file.Path stagingDir, String leaf, String originalName) {
         try {
             return AgentService.acquireContained(stagingDir, leaf);
-        } catch (SecurityException e) {
+        } catch (SecurityException _) {
             error(400, "Invalid filename: " + originalName);
             return null; // unreachable — error() throws
         }
@@ -522,7 +522,7 @@ public class ApiChatController extends Controller {
                         tokenCoalescer.accept(token);
                     }
                 },
-                reasoning -> reasoningCoalescer.accept(reasoning),
+                reasoningCoalescer::accept,
                 status -> sse.send(Map.of("type", "status", KEY_CONTENT, status)),
                 ev -> sendToolCallFrame(sse, ev),
                 content -> {
@@ -559,7 +559,7 @@ public class ApiChatController extends Controller {
         if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
             var provider = llm.ProviderRegistry.get(agent.modelProvider);
             if (provider != null) {
-                var valid = provider.config().models().stream()
+                boolean valid = provider.config().models().stream()
                         .filter(m -> m.id().equals(agent.modelId))
                         .findFirst()
                         .filter(llm.LlmTypes.ModelInfo::supportsThinking)

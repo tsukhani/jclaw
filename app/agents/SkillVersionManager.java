@@ -45,7 +45,7 @@ public final class SkillVersionManager {
         if (v == null) return out;
         var parts = v.strip().split("\\.");
         for (int i = 0; i < Math.min(3, parts.length); i++) {
-            try { out[i] = Integer.parseInt(parts[i].replaceAll("[^0-9].*", "")); }
+            try { out[i] = Integer.parseInt(parts[i].replaceAll("\\D.*", "")); }
             catch (NumberFormatException _) {}
         }
         return out;
@@ -128,7 +128,7 @@ public final class SkillVersionManager {
                     : oldVersion;
             var resolved = resolveVersion(llmVersion, autoVersion);
             return ensureVersionInFrontmatter(newContent, resolved);
-        } catch (IOException e) {
+        } catch (IOException _) {
             return newContent;
         }
     }
