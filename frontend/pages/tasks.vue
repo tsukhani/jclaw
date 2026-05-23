@@ -1,9 +1,33 @@
 <script setup lang="ts">
 import type { Task } from '~/types/api'
-import { ArrowPathIcon, NoSymbolIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import {
+  ArrowPathIcon,
+  CalendarDaysIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  NoSymbolIcon,
+  Squares2X2Icon,
+  TableCellsIcon,
+  TrashIcon,
+} from '@heroicons/vue/24/outline'
 
 const statusFilter = ref('')
 const typeFilter = ref('')
+
+// Three layouts: dense table (default), card grid, month calendar. Persisted
+// to the URL so refresh / back-forward / shareable links keep the same view.
+type View = 'table' | 'cards' | 'calendar'
+const route = useRoute()
+const router = useRouter()
+const view = computed<View>({
+  get() {
+    const q = route.query.view
+    return q === 'cards' || q === 'calendar' ? q : 'table'
+  },
+  set(v: View) {
+    void router.replace({ query: { ...route.query, view: v === 'table' ? undefined : v } })
+  },
+})
 
 const url = computed(() => {
   const params = new URLSearchParams()
@@ -199,6 +223,226 @@ function formatTime12h(hour: number, min: number): string {
   return `${h12}${mm} ${period}`
 }
 
+// ─────────────────────────── Calendar projection ────────────────────────────
+//
+// Project every fire a task makes in a half-open window [from, to). Used by
+// the Calendar view to drop dots onto specific day cells. CRON tasks use a
+// limited cron expander that handles the patterns humanCron recognizes;
+// anything else falls back to just the task's nextRunAt (so the operator at
+// least sees the next fire even if we can't expand further). INTERVAL tasks
+// step forward from nextRunAt by intervalSeconds. SCHEDULED / IMMEDIATE tasks
+// have a single fire — show it on its day.
+
+interface ProjectedFire {
+  taskId: number
+  taskName: string
+  taskType: string
+  taskStatus: string
+  agentName: string | null
+  fireAt: Date
+}
+
+function projectFires(task: Task, from: Date, to: Date): ProjectedFire[] {
+  const out: ProjectedFire[] = []
+  const base = {
+    taskId: task.id,
+    taskName: task.name,
+    taskType: task.type,
+    taskStatus: task.status,
+    agentName: task.agentName,
+  }
+  if (task.type === 'INTERVAL') {
+    const secs = task.intervalSeconds as number | null | undefined
+    const start = task.nextRunAt as string | null | undefined
+    if (typeof secs === 'number' && secs > 0 && start) {
+      let cursor = new Date(start)
+      // Step backwards first if nextRunAt is past `to` (shouldn't happen but
+      // defends against clock skew + caching).
+      while (cursor.getTime() > to.getTime()) cursor = new Date(cursor.getTime() - secs * 1000)
+      // Then forward to fill the window. Cap at 500 iterations defensively
+      // (e.g. every-second interval over a year would explode otherwise).
+      for (let i = 0; i < 500 && cursor.getTime() < to.getTime(); i++) {
+        if (cursor.getTime() >= from.getTime()) out.push({ ...base, fireAt: new Date(cursor) })
+        cursor = new Date(cursor.getTime() + secs * 1000)
+      }
+    }
+    return out
+  }
+  if (task.type === 'CRON') {
+    const expr = task.cronExpression as string | null | undefined
+    if (expr) {
+      const fires = expandCron(expr, from, to)
+      for (const f of fires) out.push({ ...base, fireAt: f })
+    }
+    else if (task.nextRunAt) {
+      const d = new Date(task.nextRunAt as string)
+      if (d >= from && d < to) out.push({ ...base, fireAt: d })
+    }
+    return out
+  }
+  // SCHEDULED / IMMEDIATE / one-shot — single fire on nextRunAt.
+  if (task.nextRunAt) {
+    const d = new Date(task.nextRunAt as string)
+    if (d >= from && d < to) out.push({ ...base, fireAt: d })
+  }
+  return out
+}
+
+/**
+ * Lightweight cron expander covering the patterns humanCron recognizes.
+ * For each minute slot in [from, to), tests whether the cron expression's
+ * minute / hour / day-of-month / month / day-of-week fields match. Bounded
+ * to 31 days to keep the iteration cheap; calendar view shows one month at
+ * a time so that's plenty.
+ */
+function expandCron(expr: string, from: Date, to: Date): Date[] {
+  const out: Date[] = []
+  const trimmed = expr.trim()
+  // @-shortcuts: rewrite to equivalent 5-field cron and recurse.
+  const shortcut: Record<string, string> = {
+    '@hourly': '0 * * * *',
+    '@daily': '0 0 * * *',
+    '@midnight': '0 0 * * *',
+    '@weekly': '0 0 * * 0',
+    '@monthly': '0 0 1 * *',
+    '@yearly': '0 0 1 1 *',
+    '@annually': '0 0 1 1 *',
+  }
+  if (shortcut[trimmed]) return expandCron(shortcut[trimmed]!, from, to)
+
+  const parts = trimmed.split(/\s+/)
+  let min: string, hour: string, dom: string, mon: string, dow: string
+  if (parts.length === 6) {
+    // Spring 6-field: sec min hour dom mon dow — only sec=0 expansion is
+    // supported (the calendar grid is minute-resolution).
+    if (parts[0] !== '0') return []
+    min = parts[1]!; hour = parts[2]!; dom = parts[3]!; mon = parts[4]!; dow = parts[5]!
+  }
+  else if (parts.length === 5) {
+    [min, hour, dom, mon, dow] = parts as [string, string, string, string, string]
+  }
+  else return []
+
+  const cap = Math.min(to.getTime(), from.getTime() + 31 * 24 * 60 * 60 * 1000)
+  // Iterate by minute (cron resolution). Bounded ~44k iterations for a 31-day
+  // window — well under what a modern browser can do in a single tick.
+  const cursor = new Date(from)
+  cursor.setSeconds(0, 0)
+  while (cursor.getTime() < cap) {
+    if (matchCronField(min, cursor.getMinutes(), 0, 59)
+      && matchCronField(hour, cursor.getHours(), 0, 23)
+      && matchCronField(dom, cursor.getDate(), 1, 31)
+      && matchCronField(mon, cursor.getMonth() + 1, 1, 12)
+      && matchCronField(dow, cursor.getDay(), 0, 6)) {
+      out.push(new Date(cursor))
+    }
+    cursor.setMinutes(cursor.getMinutes() + 1)
+  }
+  return out
+}
+
+/** Test whether a cron-field value matches the current numeric clock value. */
+function matchCronField(field: string, value: number, min: number, max: number): boolean {
+  if (field === '*') return true
+  for (const part of field.split(',')) {
+    // step: */N or X-Y/N or X/N
+    const stepMatch = part.match(/^(.+)\/(\d+)$/)
+    if (stepMatch) {
+      const step = Number.parseInt(stepMatch[2]!, 10)
+      const base = stepMatch[1]!
+      const [lo, hi] = base === '*'
+        ? [min, max]
+        : base.includes('-')
+          ? base.split('-').map(n => Number.parseInt(n, 10)) as [number, number]
+          : [Number.parseInt(base, 10), max]
+      if (value >= lo && value <= hi && (value - lo) % step === 0) return true
+      continue
+    }
+    // range: X-Y
+    if (part.includes('-')) {
+      const [lo, hi] = part.split('-').map(n => Number.parseInt(n, 10)) as [number, number]
+      if (value >= lo && value <= hi) return true
+      continue
+    }
+    // single value
+    if (Number.parseInt(part, 10) === value) return true
+  }
+  return false
+}
+
+// ─────────────────────────── Calendar grid state ────────────────────────────
+
+const calendarMonth = ref(startOfMonth(new Date()))
+
+function startOfMonth(d: Date): Date {
+  const r = new Date(d)
+  r.setDate(1)
+  r.setHours(0, 0, 0, 0)
+  return r
+}
+
+function nextMonthFrom(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 1)
+}
+
+function prevMonth() {
+  calendarMonth.value = new Date(calendarMonth.value.getFullYear(), calendarMonth.value.getMonth() - 1, 1)
+}
+function nextMonth() {
+  calendarMonth.value = nextMonthFrom(calendarMonth.value)
+}
+function thisMonth() {
+  calendarMonth.value = startOfMonth(new Date())
+}
+
+const calendarTitle = computed(() =>
+  calendarMonth.value.toLocaleDateString(undefined, { year: 'numeric', month: 'long' }),
+)
+
+/**
+ * 6-row × 7-col grid covering the visible month, padded with leading days
+ * from the previous month and trailing days from the next month so every
+ * week starts on Sunday. Each cell carries its date plus the fires
+ * projected onto that day for the current task list.
+ */
+interface DayCell {
+  date: Date
+  inMonth: boolean
+  isToday: boolean
+  fires: ProjectedFire[]
+}
+
+const calendarDays = computed<DayCell[]>(() => {
+  const monthStart = calendarMonth.value
+  const monthEnd = nextMonthFrom(monthStart)
+  const gridStart = new Date(monthStart)
+  gridStart.setDate(monthStart.getDate() - monthStart.getDay())
+  const cells: DayCell[] = []
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  // Project once over the full visible window so we don't re-walk per cell.
+  const gridEnd = new Date(gridStart)
+  gridEnd.setDate(gridStart.getDate() + 42)
+  const allFires: ProjectedFire[] = []
+  for (const t of tasks.value ?? []) {
+    allFires.push(...projectFires(t, gridStart, gridEnd))
+  }
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(gridStart)
+    d.setDate(gridStart.getDate() + i)
+    const dayStart = d.getTime()
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000
+    cells.push({
+      date: d,
+      inMonth: d >= monthStart && d < monthEnd,
+      isToday: d.getTime() === today.getTime(),
+      fires: allFires
+        .filter(f => f.fireAt.getTime() >= dayStart && f.fireAt.getTime() < dayEnd)
+        .sort((a, b) => a.fireAt.getTime() - b.fireAt.getTime()),
+    })
+  }
+  return cells
+})
+
 // A11y: stable ids for filter selects
 const statusSelectId = useId()
 const typeSelectId = useId()
@@ -242,8 +486,8 @@ const typeSelectId = useId()
       </div>
     </div>
 
-    <!-- Filters -->
-    <div class="flex gap-3 mb-4">
+    <!-- Filters + view switcher -->
+    <div class="flex flex-wrap items-center gap-3 mb-4">
       <label :for="statusSelectId">
         <span class="sr-only">Status filter</span>
         <select
@@ -282,9 +526,44 @@ const typeSelectId = useId()
           </option>
         </select>
       </label>
+      <!-- View switcher: table / cards / calendar. State persists in URL
+           (?view=cards|calendar) so refresh and shareable links survive. -->
+      <div
+        class="ml-auto inline-flex border border-input divide-x divide-input"
+        role="tablist"
+        aria-label="Task view"
+      >
+        <button
+          v-for="opt in ([
+            { id: 'table', label: 'Table', icon: TableCellsIcon },
+            { id: 'cards', label: 'Cards', icon: Squares2X2Icon },
+            { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
+          ] as const)"
+          :key="opt.id"
+          type="button"
+          role="tab"
+          :aria-selected="view === opt.id"
+          :title="`${opt.label} view`"
+          class="px-3 py-1.5 inline-flex items-center gap-1.5 text-xs transition-colors"
+          :class="view === opt.id
+            ? 'bg-muted text-fg-strong'
+            : 'text-fg-muted hover:text-fg-strong'"
+          @click="view = opt.id"
+        >
+          <component
+            :is="opt.icon"
+            class="w-3.5 h-3.5"
+            aria-hidden="true"
+          />
+          {{ opt.label }}
+        </button>
+      </div>
     </div>
 
-    <div class="bg-surface-elevated border border-border">
+    <div
+      v-if="view === 'table'"
+      class="bg-surface-elevated border border-border"
+    >
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
@@ -421,6 +700,208 @@ const typeSelectId = useId()
         class="px-4 py-8 text-center text-sm text-fg-muted"
       >
         No tasks found
+      </div>
+    </div>
+
+    <!-- Cards view: one card per task. Same data shape as the table —
+         denser per-card layout, friendlier on wide screens. -->
+    <div
+      v-else-if="view === 'cards'"
+    >
+      <div
+        v-if="!tasks?.length"
+        class="bg-surface-elevated border border-border px-4 py-8 text-center text-sm text-fg-muted"
+      >
+        No tasks found
+      </div>
+      <div
+        v-else
+        class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+      >
+        <div
+          v-for="task in tasks"
+          :key="task.id"
+          class="bg-surface-elevated border border-border p-4 flex flex-col gap-3"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-fg-strong truncate">
+                {{ task.name }}
+              </div>
+              <div class="text-xs text-fg-muted font-mono mt-0.5">
+                {{ task.type }} · {{ humanSchedule(task) }}
+              </div>
+            </div>
+            <span
+              :class="statusColors[displayStatus(task)]"
+              class="text-[10px] font-mono shrink-0"
+            >{{ displayStatus(task) }}</span>
+          </div>
+          <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt class="text-fg-muted">
+              Agent
+            </dt>
+            <dd class="text-fg-primary truncate">
+              {{ task.agentName || '—' }}
+            </dd>
+            <dt class="text-fg-muted">
+              Next run
+            </dt>
+            <dd class="text-fg-primary">
+              {{ task.nextRunAt ? new Date(task.nextRunAt as string).toLocaleString() : '—' }}
+            </dd>
+            <dt class="text-fg-muted">
+              Retries
+            </dt>
+            <dd class="text-fg-primary">
+              {{ task.retryCount }}/{{ task.maxRetries }}
+            </dd>
+          </dl>
+          <div class="flex items-center justify-end gap-1 pt-1 border-t border-border">
+            <button
+              v-if="task.status === 'PENDING'"
+              type="button"
+              class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+              :title="task.type === 'CRON' || task.type === 'INTERVAL'
+                ? `Stop recurring schedule for “${task.name}”`
+                : `Cancel “${task.name}”`"
+              :aria-label="`Cancel ${task.name}`"
+              @click="cancelTask(task.id)"
+            >
+              <NoSymbolIcon
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              v-if="task.status === 'FAILED' || task.status === 'LOST'"
+              type="button"
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              :title="`Retry “${task.name}”`"
+              :aria-label="`Retry ${task.name}`"
+              @click="retryTask(task.id)"
+            >
+              <ArrowPathIcon
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              type="button"
+              class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+              :title="`Permanently delete “${task.name}” and its run history`"
+              :aria-label="`Delete ${task.name}`"
+              @click="deleteTask(task)"
+            >
+              <TrashIcon
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Calendar view: month grid with projected fires. CRON expansion
+         covers the patterns humanCron understands; INTERVAL steps from
+         nextRunAt; SCHEDULED / IMMEDIATE pin to their nextRunAt date.
+         Unrecognized cron expressions just show the next fire so the
+         operator at least knows something is scheduled. -->
+    <div
+      v-else
+      class="bg-surface-elevated border border-border"
+    >
+      <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div class="text-sm font-medium text-fg-strong">
+          {{ calendarTitle }}
+        </div>
+        <div class="inline-flex items-center gap-1">
+          <button
+            type="button"
+            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+            title="Previous month"
+            aria-label="Previous month"
+            @click="prevMonth"
+          >
+            <ChevronLeftIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            class="px-2 py-1 text-xs text-fg-muted hover:text-fg-strong transition-colors"
+            title="Jump to today"
+            @click="thisMonth"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+            title="Next month"
+            aria-label="Next month"
+            @click="nextMonth"
+          >
+            <ChevronRightIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      </div>
+      <div class="grid grid-cols-7 text-[10px] uppercase tracking-wider text-fg-muted border-b border-border">
+        <div
+          v-for="dn in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
+          :key="dn"
+          class="px-2 py-1.5"
+        >
+          {{ dn }}
+        </div>
+      </div>
+      <div class="grid grid-cols-7">
+        <div
+          v-for="(cell, idx) in calendarDays"
+          :key="idx"
+          class="min-h-[100px] border-r border-b border-border last:border-r-0 px-2 py-1.5 flex flex-col gap-1"
+          :class="cell.inMonth ? '' : 'bg-muted/20'"
+        >
+          <div
+            class="text-xs flex items-center gap-1"
+            :class="[
+              cell.inMonth ? 'text-fg-primary' : 'text-fg-muted',
+              cell.isToday ? 'font-semibold' : '',
+            ]"
+          >
+            <span
+              v-if="cell.isToday"
+              class="inline-block w-5 h-5 rounded-full bg-emerald-500 text-white text-center leading-5"
+            >{{ cell.date.getDate() }}</span>
+            <span v-else>{{ cell.date.getDate() }}</span>
+          </div>
+          <ul
+            v-if="cell.fires.length"
+            class="flex flex-col gap-0.5 overflow-hidden"
+          >
+            <li
+              v-for="(fire, i) in cell.fires.slice(0, 4)"
+              :key="i"
+              class="text-[10px] truncate"
+              :class="statusColors[fire.taskStatus === 'PENDING' && (fire.taskType === 'CRON' || fire.taskType === 'INTERVAL') ? 'ACTIVE' : fire.taskStatus] || 'text-fg-muted'"
+              :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}`"
+            >
+              <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>
+              <span class="ml-1">{{ fire.taskName }}</span>
+            </li>
+            <li
+              v-if="cell.fires.length > 4"
+              class="text-[10px] text-fg-muted"
+            >
+              +{{ cell.fires.length - 4 }} more
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   </div>
