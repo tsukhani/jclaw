@@ -117,6 +117,13 @@ const MANAGED_PREFIXES = [
   'onboarding.', // First-login guided tour flag — written by ApiOnboardingController, no UI surface
   'pricing.', // LiteLLM nightly price-refresh toggle (JCLAW-28 follow-up) — Settings (LLM Providers section)
   'subagent.', // JCLAW-266: subagent recursion caps — Settings (Subagents section)
+  'jtokkit.', // Token-count safety multipliers — `jtokkit.safetyMultiplier.unmatched`
+  // is the operator-tunable global in the Advanced subsection of Chat, and the
+  // per-(provider, model) `jtokkit.safetyMultiplier.<provider>.<modelId>`
+  // entries are written autonomously by TokenizerCalibrationJob every 30 min
+  // based on observed provider-vs-jtokkit deltas — operators don't manage
+  // these directly. Surfacing them in "Unmanaged keys" would imply they're
+  // stale or operator-actionable, neither of which is true.
 ]
 
 function isManagedKey(key: string): boolean {
