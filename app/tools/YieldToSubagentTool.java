@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.SubagentRun;
+import services.SubagentRegistry;
 import services.Tx;
 
 import java.util.LinkedHashMap;
@@ -13,13 +14,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * JCLAW-273: companion tool to {@link SpawnSubagentTool} for the
+ * JCLAW-273 / JCLAW-326: companion tool to {@link SpawnSubagentTool} for the
  * {@code sessions_yield} flow. The parent agent calls this tool with the
- * {@code run_id} returned from a prior {@code spawn_subagent} with
- * {@code async=true}; the tool flips {@link SubagentRun#yielded} to
- * {@code true} and returns a sentinel JSON payload that
- * {@link agents.AgentRunner} recognises to exit its tool-call loop without
- * emitting a final assistant reply.
+ * {@code run_id} (or alternatively {@code conversation_id}) returned from a
+ * prior {@code spawn_subagent} with {@code async=true}; the tool flips
+ * {@link SubagentRun#yielded} to {@code true} and returns a sentinel JSON
+ * payload that {@link agents.AgentRunner} recognises to exit its tool-call
+ * loop without emitting a final assistant reply.
  *
  * <p>The actual resume — the child's final reply landing as the parent's
  * next user-role message and the parent's loop re-invoking — happens later,
@@ -29,16 +30,35 @@ import java.util.Map;
  * which announce-shape (SYSTEM-role fire-and-forget vs USER-role resume) to
  * post.
  *
+ * <p>JCLAW-326 adds two parameters:
+ * <ul>
+ *   <li>{@code conversationId} — alternate lookup key. The most-recent
+ *       {@link SubagentRun} whose {@code childConversation} matches resolves
+ *       to the run. When both are provided, {@code runId} wins (explicit
+ *       beats inferred).</li>
+ *   <li>{@code timeoutSeconds} — caller-tightened resume budget. Persisted
+ *       on {@link SubagentRun#yieldTimeoutSeconds} and used by
+ *       {@link SubagentRegistry#scheduleYieldTimeout} to arm a watchdog VT
+ *       that fires a synthetic {@link java.util.concurrent.TimeoutException}
+ *       into the in-flight future after the window elapses. Lets a parent
+ *       with stricter wall-clock needs cut the spawn-time
+ *       {@code runTimeoutSeconds} short without re-issuing the spawn.</li>
+ * </ul>
+ *
  * <p>Validation:
  * <ul>
- *   <li>{@code runId} is required and must reference an existing
- *       {@link SubagentRun} row.</li>
+ *   <li>Exactly one of {@code runId} / {@code conversationId} must resolve a
+ *       run; both blank → error.</li>
  *   <li>The row's {@link SubagentRun#status} must be
  *       {@link SubagentRun.Status#RUNNING}; yielding into a terminal run is
- *       a no-op programming error and surfaces a clear error string.</li>
+ *       a no-op programming error and surfaces a structured
+ *       {@code already_terminal} envelope so the LLM still gets the recorded
+ *       outcome.</li>
  *   <li>The row's {@code parentAgent} must equal the calling agent — a
  *       parent can only yield into its own running children, not into a
  *       sibling or unrelated agent's run.</li>
+ *   <li>{@code timeoutSeconds}, when provided, must be in {@code [1, 3600]};
+ *       out-of-range values are clamped silently.</li>
  * </ul>
  * Invalid calls return a descriptive error string and do not mutate any
  * state, matching the {@link SpawnSubagentTool} validation idiom.
@@ -56,6 +76,16 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
     public static final String TOOL_NAME = "yield_to_subagent";
 
     private static final String PARAM_RUN_ID = "runId";
+    private static final String PARAM_CONVERSATION_ID = "conversationId";
+    private static final String PARAM_TIMEOUT_SECONDS = "timeoutSeconds";
+
+    /** Default resume budget when the caller does not supply
+     *  {@code timeoutSeconds}. Matches the JCLAW-326 AC. */
+    public static final int DEFAULT_TIMEOUT_SECONDS = 300;
+
+    /** Hard upper bound on {@code timeoutSeconds}. Anything larger is clamped
+     *  so a stray million-second value can't pin a watchdog VT indefinitely. */
+    public static final int MAX_TIMEOUT_SECONDS = 3600;
 
     /** Marker that {@link agents.AgentRunner} scans for on tool-result text
      *  to recognise a successful yield call and break out of its tool-call
@@ -92,7 +122,11 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
                 back as your next user-role message and your loop resumes from there. \
                 Use this after a `spawn_subagent` call with `async=true` when you want to block \
                 your logical turn on the child's result rather than continuing in parallel. \
-                Required: `runId` (the run id returned from the prior `spawn_subagent` call).""";
+                Provide EITHER `runId` (the run id returned from the prior `spawn_subagent` call) \
+                OR `conversationId` (the child conversation id from the same return payload); \
+                when both are provided, `runId` wins. \
+                Optional: `timeoutSeconds` (1-3600, default 300) — caller-tightened resume budget; \
+                a synthetic TIMEOUT outcome is delivered if the child has not finished by then.""";
     }
 
     @Override
@@ -105,11 +139,22 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         var props = new LinkedHashMap<String, Object>();
         props.put(PARAM_RUN_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "Run id returned by a prior spawn_subagent call with async=true (required)."));
+                "Run id returned by a prior spawn_subagent call with async=true. "
+                        + "Provide this OR conversationId (runId wins when both set)."));
+        props.put(PARAM_CONVERSATION_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "Child conversation id returned by the prior spawn_subagent call. "
+                        + "Resolves to the most-recent SubagentRun whose childConversation "
+                        + "matches; ignored when runId is provided."));
+        props.put(PARAM_TIMEOUT_SECONDS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                SchemaKeys.DESCRIPTION,
+                "Caller-tightened resume budget in seconds (1-" + MAX_TIMEOUT_SECONDS
+                        + ", default " + DEFAULT_TIMEOUT_SECONDS
+                        + "). If the child hasn't terminated by then a synthetic TIMEOUT "
+                        + "announce resumes your turn."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
-                SchemaKeys.PROPERTIES, props,
-                SchemaKeys.REQUIRED, List.of(PARAM_RUN_ID)
+                SchemaKeys.PROPERTIES, props
         );
     }
 
@@ -131,24 +176,28 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var runIdStr = optString(args, PARAM_RUN_ID);
-        if (runIdStr == null || runIdStr.isBlank()) {
-            return "Error: 'runId' is required.";
-        }
-        long runId;
-        try {
-            runId = Long.parseLong(runIdStr);
-        } catch (NumberFormatException _) {
-            return "Error: 'runId' must be a numeric run id (got '" + runIdStr + "').";
-        }
+        var parsed = parseYieldArgs(args);
+        if (parsed.error() != null) return parsed.error();
 
         final var parentAgentId = callingAgent.id;
         // Either an error string (returned verbatim to the LLM) OR an
         // already-terminal structured JSON envelope (when the child raced
         // ahead of yield's lookup). Both paths short-circuit the sentinel
-        // build below.
-        var shortCircuit = Tx.run(() -> installYield(runId, parentAgentId));
+        // build below. The resolved run id is returned via the holder so the
+        // watchdog scheduling below can use it without re-querying.
+        var holder = new long[1];
+        var shortCircuit = Tx.run(() -> installYield(parsed, parentAgentId, holder));
         if (shortCircuit != null) return shortCircuit;
+        var runId = holder[0];
+
+        // JCLAW-326: arm the yield-timeout watchdog now that the row is
+        // flipped. The watchdog fires a synthetic TimeoutException into the
+        // in-flight async future after timeoutSeconds elapse; the
+        // SpawnSubagentTool await translates that to a TIMEOUT outcome and
+        // the announce VT delivers the resume message. No-op when the run
+        // isn't in the registry (already terminal between installYield's
+        // commit and here — the announce VT will deliver whatever happened).
+        SubagentRegistry.scheduleYieldTimeout(runId, parsed.timeoutSeconds());
 
         // Sentinel payload — AgentRunner scans tool-result text for
         // YIELD_SENTINEL_PREFIX to recognise the yield and break out of the
@@ -161,28 +210,85 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
+    /** Parsed-args bundle. {@code error} non-null short-circuits execute.
+     *  Exactly one of {@code runId} / {@code conversationId} is populated; the
+     *  other is null. */
+    private record ParsedArgs(String error, Long runId, Long conversationId, int timeoutSeconds) {
+        static ParsedArgs fail(String msg) { return new ParsedArgs(msg, null, null, 0); }
+        static ParsedArgs ok(Long runId, Long convId, int timeoutSeconds) {
+            return new ParsedArgs(null, runId, convId, timeoutSeconds);
+        }
+    }
+
+    private static ParsedArgs parseYieldArgs(JsonObject args) {
+        var runIdStr = optString(args, PARAM_RUN_ID);
+        var convIdStr = optString(args, PARAM_CONVERSATION_ID);
+        if ((runIdStr == null || runIdStr.isBlank())
+                && (convIdStr == null || convIdStr.isBlank())) {
+            return ParsedArgs.fail("Error: one of 'runId' or 'conversationId' is required.");
+        }
+        Long runId = null;
+        if (runIdStr != null && !runIdStr.isBlank()) {
+            try {
+                runId = Long.parseLong(runIdStr);
+            } catch (NumberFormatException _) {
+                return ParsedArgs.fail("Error: 'runId' must be a numeric run id (got '" + runIdStr + "').");
+            }
+        }
+        Long convId = null;
+        if (runId == null && convIdStr != null && !convIdStr.isBlank()) {
+            try {
+                convId = Long.parseLong(convIdStr);
+            } catch (NumberFormatException _) {
+                return ParsedArgs.fail("Error: 'conversationId' must be numeric (got '" + convIdStr + "').");
+            }
+        }
+        var timeout = optInt(args, PARAM_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
+        if (timeout <= 0) timeout = DEFAULT_TIMEOUT_SECONDS;
+        if (timeout > MAX_TIMEOUT_SECONDS) timeout = MAX_TIMEOUT_SECONDS;
+        return ParsedArgs.ok(runId, convId, timeout);
+    }
+
     /**
-     * Look up the run, validate parent ownership, then either short-circuit
-     * (error / already-terminal envelope) or flip {@code yielded=true} and
-     * return null. Must be called inside an active Tx.
+     * Look up the run (by runId first, falling back to conversationId),
+     * validate parent ownership, then either short-circuit (error /
+     * already-terminal envelope) or flip {@code yielded=true} +
+     * {@code yieldTimeoutSeconds} and return null. {@code runIdOut[0]}
+     * receives the resolved run id on success so the caller can arm the
+     * watchdog without a re-query. Must be called inside an active Tx.
      */
-    private static String installYield(long runId, Long parentAgentId) {
-        var run = (SubagentRun) SubagentRun.findById(runId);
-        if (run == null) {
-            return "Error: no SubagentRun found for runId " + runId + ".";
+    private static String installYield(ParsedArgs parsed, Long parentAgentId, long[] runIdOut) {
+        SubagentRun run;
+        long resolvedRunId;
+        if (parsed.runId() != null) {
+            resolvedRunId = parsed.runId();
+            run = (SubagentRun) SubagentRun.findById(resolvedRunId);
+            if (run == null) {
+                return "Error: no SubagentRun found for runId " + resolvedRunId + ".";
+            }
+        } else {
+            run = SubagentRun.find(
+                    "childConversation.id = ?1 ORDER BY startedAt DESC",
+                    parsed.conversationId()).first();
+            if (run == null) {
+                return "Error: no SubagentRun found for conversationId " + parsed.conversationId() + ".";
+            }
+            resolvedRunId = run.id;
         }
         // Parent-ownership gate: a parent can only yield into its own
         // running children. Yielding into a sibling's or unrelated
         // agent's run would let one parent hijack another's suspension
         // semantics.
         if (run.parentAgent == null || !parentAgentId.equals(run.parentAgent.id)) {
-            return "Error: runId " + runId + " is not owned by the calling agent.";
+            return "Error: run " + resolvedRunId + " is not owned by the calling agent.";
         }
         if (run.status != SubagentRun.Status.RUNNING) {
-            return alreadyTerminalEnvelope(run, runId);
+            return alreadyTerminalEnvelope(run, resolvedRunId);
         }
         run.yielded = true;
+        run.yieldTimeoutSeconds = parsed.timeoutSeconds();
         run.save();
+        runIdOut[0] = resolvedRunId;
         return null;
     }
 
@@ -214,5 +320,11 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
         return el.getAsString();
+    }
+
+    private static int optInt(JsonObject obj, String key, int fallback) {
+        var el = obj.get(key);
+        if (el == null || el.isJsonNull()) return fallback;
+        try { return el.getAsInt(); } catch (RuntimeException _) { return fallback; }
     }
 }

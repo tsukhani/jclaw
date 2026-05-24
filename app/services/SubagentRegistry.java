@@ -3,10 +3,13 @@ package services;
 import models.Agent;
 import models.SubagentRun;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -263,6 +266,46 @@ public final class SubagentRegistry {
     @SuppressWarnings("unused")
     public static boolean isActive(Long runId) {
         return runId != null && ACTIVE.containsKey(runId);
+    }
+
+    /**
+     * JCLAW-326: arm a watchdog VT that fires a synthetic
+     * {@link TimeoutException} into the in-flight future after
+     * {@code timeoutSeconds} elapse, so the async-spawn await wakes up and
+     * the parent's logical turn resumes with a TIMEOUT announce instead of
+     * parking for the spawn-time budget. Called by
+     * {@code yield_to_subagent} after the yield is installed.
+     *
+     * <p>Only the {@link CompletableFuture} half of the registered Future is
+     * accepted as a target — the future must support
+     * {@code completeExceptionally}. The current spawn paths always register
+     * a {@link CompletableFuture}, so this is a soft assertion not a
+     * portability constraint.
+     *
+     * <p>No-op when: the run isn't registered (already terminal, or never
+     * ran), the future is already done, the registered future isn't a
+     * {@link CompletableFuture}, or {@code timeoutSeconds} is non-positive.
+     * Returns whether the watchdog was scheduled so the caller can log.
+     */
+    public static boolean scheduleYieldTimeout(Long runId, int timeoutSeconds) {
+        if (runId == null || timeoutSeconds <= 0) return false;
+        var entry = ACTIVE.get(runId);
+        if (entry == null) return false;
+        var future = entry.future();
+        if (!(future instanceof CompletableFuture<?> cf) || cf.isDone()) return false;
+        Thread.ofVirtual().name("yield-watchdog-" + runId).start(() -> {
+            try {
+                Thread.sleep(Duration.ofSeconds(timeoutSeconds));
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (!cf.isDone()) {
+                cf.completeExceptionally(new TimeoutException(
+                        "Yield timeout after " + timeoutSeconds + "s"));
+            }
+        });
+        return true;
     }
 
     /** Convenience for the {@code /subagent kill} return text: did the

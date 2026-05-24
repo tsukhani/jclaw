@@ -53,6 +53,15 @@ public class ToolRegistrationJob extends Job<Void> {
         // conversation transcript (role, content, tool calls/results,
         // timestamps). Parent-owned access only.
         toolList.add(new SessionsHistoryTool());
+        // JCLAW-326: sessions_send. Bidirectional parent↔child message
+        // delivery. Parent→child appends a USER message on the child's
+        // conversation; child→parent appends back to the parent's
+        // conversation. Fire-and-forget; does not block either side.
+        toolList.add(new SessionsSendTool());
+        // JCLAW-326: sessions_list. Paginated, parent-scoped list of this
+        // agent's SubagentRun rows with status / label-glob / agentId
+        // filters.
+        toolList.add(new SessionsListTool());
         // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by

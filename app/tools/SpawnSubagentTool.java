@@ -296,7 +296,8 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // its own short Tx so the row commits and is visible from any thread
         // we hand the run to.
         final var parentConvIdFinal = parentConv.id;
-        var runId = insertSubagentRun(parentAgentId, childAgentId, parentConvIdFinal, childConvId);
+        var runId = insertSubagentRun(parentAgentId, childAgentId, parentConvIdFinal, childConvId,
+                parsed.label());
         var runIdStr = String.valueOf(runId);
         EventLogger.recordSubagentSpawn(
                 parentAgent.name, lookupAgentName(childAgentId),
@@ -482,15 +483,18 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     }
 
     /** Insert the SubagentRun audit row in its own short Tx and return the
-     *  generated id. */
+     *  generated id. JCLAW-326: persist the spawn-time {@code label} on the
+     *  row so {@code sessions_list} can filter / display without re-parsing
+     *  per-run announce-message metadata JSON. */
     private static Long insertSubagentRun(Long parentAgentId, Long childAgentId,
-                                           Long parentConvId, Long childConvId) {
+                                           Long parentConvId, Long childConvId, String label) {
         return Tx.run(() -> {
             var run = new SubagentRun();
             run.parentAgent = Agent.findById(parentAgentId);
             run.childAgent = Agent.findById(childAgentId);
             run.parentConversation = Conversation.findById(parentConvId);
             run.childConversation = Conversation.findById(childConvId);
+            run.label = label != null && !label.isBlank() ? label : null;
             // status defaults to RUNNING, startedAt populated by @PrePersist.
             run.save();
             return run.id;
@@ -631,6 +635,15 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 // and threw. Registry already KILLED; do not touch the audit row.
                 return new SyncRunOutcome("", SubagentRun.Status.KILLED,
                         "Killed by operator", null, true, false);
+            }
+            if (cause instanceof TimeoutException) {
+                // JCLAW-326: yield watchdog completed the future exceptionally
+                // because the yield-tightened budget elapsed before the child
+                // finished. Surface as TIMEOUT (not FAILED) so the announce
+                // card + audit row carry the right terminal semantics.
+                var reason = cause.getMessage() != null ? cause.getMessage() : "yield timeout";
+                return new SyncRunOutcome("", SubagentRun.Status.TIMEOUT,
+                        reason, reason, false, false);
             }
             var reason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
             return new SyncRunOutcome("", SubagentRun.Status.FAILED,

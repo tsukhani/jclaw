@@ -115,10 +115,10 @@ class YieldToSubagentToolTest extends UnitTest {
         assertTrue(result.startsWith("Error: no SubagentRun found"),
                 "nonexistent runId must surface a clear error, got: " + result);
 
-        // Missing runId.
+        // Missing both runId and conversationId (JCLAW-326: either-or contract).
         result = invokeYieldOnVt(parent.id, "{}");
-        assertTrue(result.startsWith("Error: 'runId' is required"),
-                "missing runId must surface a required-field error, got: " + result);
+        assertTrue(result.startsWith("Error: one of 'runId' or 'conversationId' is required"),
+                "missing both ids must surface a clear error, got: " + result);
 
         // Non-numeric runId.
         result = invokeYieldOnVt(parent.id, "{\"runId\":\"not-a-number\"}");
@@ -139,7 +139,7 @@ class YieldToSubagentToolTest extends UnitTest {
         // Intruder tries to yield into owner's run — must be refused.
         var result = invokeYieldOnVt(intruder.id,
                 "{\"runId\":\"" + run.id + "\"}");
-        assertTrue(result.startsWith("Error: runId " + run.id + " is not owned by the calling agent"),
+        assertTrue(result.startsWith("Error: run " + run.id + " is not owned by the calling agent"),
                 "cross-parent yield must be refused, got: " + result);
 
         JPA.em().clear();
@@ -199,6 +199,94 @@ class YieldToSubagentToolTest extends UnitTest {
                         + "and flipping yielded post-hoc would create a "
                         + "rendering inconsistency between the column and "
                         + "the message row's role");
+    }
+
+    @Test
+    void yieldResolvesByConversationIdWhenRunIdMissing() throws Exception {
+        // JCLAW-326: conversationId alt-lookup. When runId is missing but
+        // conversationId is provided, yield resolves the most-recent
+        // SubagentRun whose childConversation matches.
+        var parent = createAgent("p-yield-byconv", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-yield-byconv");
+        var run = seedRunningSubagentRun(parent, parentConv);
+        var childConvId = run.childConversation.id;
+
+        commitAndReopen();
+
+        var result = invokeYieldOnVt(parent.id,
+                "{\"conversationId\":\"" + childConvId + "\"}");
+        assertTrue(result.startsWith(YieldToSubagentTool.YIELD_SENTINEL_PREFIX),
+                "conversationId lookup must succeed, got: " + result);
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals(String.valueOf(run.id), parsed.get("runId").getAsString(),
+                "resolved runId must echo back in the sentinel payload");
+
+        JPA.em().clear();
+        SubagentRun fresh = SubagentRun.findById(run.id);
+        assertTrue(fresh.yielded,
+                "conversationId-resolved yield must flip the yielded flag");
+    }
+
+    @Test
+    void yieldRunIdWinsWhenBothProvided() throws Exception {
+        // When both runId and conversationId are provided, runId wins
+        // (explicit beats inferred).
+        var parent = createAgent("p-yield-bothids", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-yield-bothids");
+        var primary = seedNamedSubagentRun(parent, parentConv, "bothids-primary");
+        var other = seedNamedSubagentRun(parent, parentConv, "bothids-other");
+
+        commitAndReopen();
+
+        // Provide primary's runId BUT other's child conversation id. runId
+        // should win and only primary should flip yielded.
+        var result = invokeYieldOnVt(parent.id,
+                "{\"runId\":\"" + primary.id + "\","
+                        + "\"conversationId\":\"" + other.childConversation.id + "\"}");
+        assertTrue(result.startsWith(YieldToSubagentTool.YIELD_SENTINEL_PREFIX),
+                "explicit runId must succeed even alongside an unrelated conversationId, got: " + result);
+
+        JPA.em().clear();
+        assertTrue(((SubagentRun) SubagentRun.findById(primary.id)).yielded,
+                "primary run (named via runId) must be flipped");
+        assertFalse(((SubagentRun) SubagentRun.findById(other.id)).yielded,
+                "other run (only its conv id passed) must NOT be flipped — runId wins");
+    }
+
+    @Test
+    void yieldTimeoutSecondsPersistsToRowAndClampsToMax() throws Exception {
+        // JCLAW-326: timeoutSeconds is persisted on SubagentRun for the
+        // watchdog to read. Values above MAX_TIMEOUT_SECONDS clamp silently;
+        // values <= 0 fall back to DEFAULT_TIMEOUT_SECONDS.
+        var parent = createAgent("p-yield-timeoutpersist", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-yield-timeoutpersist");
+        var runA = seedNamedSubagentRun(parent, parentConv, "to-a");
+        var runB = seedNamedSubagentRun(parent, parentConv, "to-b");
+        var runC = seedNamedSubagentRun(parent, parentConv, "to-c");
+
+        commitAndReopen();
+
+        // In-range value persists verbatim.
+        invokeYieldOnVt(parent.id,
+                "{\"runId\":\"" + runA.id + "\",\"timeoutSeconds\":42}");
+        // Above-max value clamps.
+        invokeYieldOnVt(parent.id,
+                "{\"runId\":\"" + runB.id + "\",\"timeoutSeconds\":99999}");
+        // Missing / non-positive falls back to DEFAULT.
+        invokeYieldOnVt(parent.id, "{\"runId\":\"" + runC.id + "\"}");
+
+        JPA.em().clear();
+        var freshA = (SubagentRun) SubagentRun.findById(runA.id);
+        var freshB = (SubagentRun) SubagentRun.findById(runB.id);
+        var freshC = (SubagentRun) SubagentRun.findById(runC.id);
+        assertEquals(Integer.valueOf(42), freshA.yieldTimeoutSeconds,
+                "in-range timeoutSeconds must persist verbatim");
+        assertEquals(Integer.valueOf(YieldToSubagentTool.MAX_TIMEOUT_SECONDS),
+                freshB.yieldTimeoutSeconds,
+                "above-max timeoutSeconds must clamp to MAX_TIMEOUT_SECONDS");
+        assertEquals(Integer.valueOf(YieldToSubagentTool.DEFAULT_TIMEOUT_SECONDS),
+                freshC.yieldTimeoutSeconds,
+                "missing timeoutSeconds must fall back to DEFAULT");
     }
 
     @Test
@@ -555,6 +643,27 @@ class YieldToSubagentToolTest extends UnitTest {
 
     private SubagentRun seedRunningSubagentRun(Agent parent, Conversation parentConv) {
         var childAgent = createAgent(parent.name + "-child", "test-provider", "test-model");
+        childAgent.parentAgent = parent;
+        childAgent.save();
+        var childConv = ConversationService.create(childAgent,
+                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        childConv.parentConversation = parentConv;
+        childConv.save();
+        var run = new SubagentRun();
+        run.parentAgent = parent;
+        run.childAgent = childAgent;
+        run.parentConversation = parentConv;
+        run.childConversation = childConv;
+        run.status = SubagentRun.Status.RUNNING;
+        run.save();
+        return run;
+    }
+
+    /** Variant of {@link #seedRunningSubagentRun} that takes a unique-name
+     *  suffix, so a single test can seed multiple runs under the same parent
+     *  without colliding on the Agent.name unique constraint. */
+    private SubagentRun seedNamedSubagentRun(Agent parent, Conversation parentConv, String suffix) {
+        var childAgent = createAgent(parent.name + "-" + suffix, "test-provider", "test-model");
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,

@@ -60,6 +60,17 @@ public class SubagentRun extends Model {
     public Status status = Status.RUNNING;
 
     /**
+     * JCLAW-326: operator-provided short display name passed to
+     * {@code spawn_subagent}'s {@code label} param, persisted here so
+     * {@code sessions_list} can filter (label-glob) and surface a stable
+     * display column without parsing the per-run announce-message metadata
+     * JSON. Null for pre-JCLAW-326 rows; treated as "unnamed" by the list
+     * tool.
+     */
+    @Column(length = 255)
+    public String label;
+
+    /**
      * The child's final reply when {@link #status} is {@link Status#COMPLETED},
      * or an error / interruption message for the terminal failure statuses.
      * Null while the run is still {@link Status#RUNNING}.
@@ -84,6 +95,24 @@ public class SubagentRun extends Model {
      */
     @Column(nullable = false)
     public boolean yielded = false;
+
+    /**
+     * JCLAW-326: optional caller-tightened resume timeout. When
+     * {@code yield_to_subagent} is invoked with an explicit
+     * {@code timeoutSeconds} smaller than the spawn-time
+     * {@code runTimeoutSeconds}, the value lands here and a watchdog VT
+     * (registered via {@link services.SubagentRegistry#scheduleYieldTimeout})
+     * fires a synthetic {@code TimeoutException} into the in-flight future
+     * once the window elapses, so the parent's logical turn resumes with a
+     * {@code TIMEOUT} announce instead of parking for the full spawn budget.
+     *
+     * <p>Null when no yield is in flight, or when the yield call accepted
+     * the spawn-time budget. The watchdog reads the row at scheduling time;
+     * later edits to this column do NOT retroactively rearm an already-armed
+     * watchdog (re-yielding the same run is rejected at the tool layer).
+     */
+    @Column(name = "yield_timeout_seconds")
+    public Integer yieldTimeoutSeconds;
 
     @PrePersist
     void onCreate() {

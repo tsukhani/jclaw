@@ -45,7 +45,8 @@ import java.util.Map;
  * bounds the visible reply, and tool results are bounded by their own
  * tools' return sizes). What matters for THIS tool is bounding the message
  * <em>count</em> so a 10,000-turn child doesn't return a single 200 MB
- * JSON blob to the LLM. The default {@link #DEFAULT_LIMIT} is 100 with a
+ * JSON blob to the LLM. The default {@link #DEFAULT_LIMIT} is 50 (the
+ * JCLAW-326 AC value) with a
  * hard cap of {@link #MAX_LIMIT}; pagination via {@code beforeMessageId}
  * lets the caller walk back through history a page at a time if it really
  * needs all of it.
@@ -56,8 +57,8 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
 
     private static final String PARAM_RUN_ID = "runId";
 
-    /** Default number of messages returned per call. */
-    static final int DEFAULT_LIMIT = 100;
+    /** Default number of messages returned per call. JCLAW-326: 50 per AC. */
+    static final int DEFAULT_LIMIT = 50;
 
     /** Hard ceiling on the messages-per-call parameter. A caller that
      *  explicitly asks for more will be clamped silently — the LLM has no
@@ -94,7 +95,7 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
                 (multi-turn reasoning, tool invocations, intermediate replies) after a \
                 spawn_subagent or yield_to_subagent call has terminated. \
                 Required: `runId` (the run id returned from spawn_subagent). \
-                Optional: `limit` (1-200, default 100), `beforeMessageId` (cursor — return only \
+                Optional: `limit` (1-200, default 50), `beforeMessageId` (cursor — return only \
                 messages with id < this value; use to page back through long transcripts). \
                 Permission: the calling agent must be the run's parent agent.""";
     }
