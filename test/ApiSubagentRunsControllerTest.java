@@ -102,6 +102,31 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void listFilteredByParentConversationExcludesOtherConversations() {
+        login();
+        var data = commitInFreshTx(() -> {
+            var p = AgentService.create("api-pc-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-pc-c", "openrouter", "gpt-4.1");
+            // Two separate parent conversations under the same parent agent —
+            // the filter must narrow to one and exclude the other.
+            var pc1 = ConversationService.create(p, "web", "u-pc1");
+            var pc2 = ConversationService.create(p, "web", "u-pc2");
+            var cc = ConversationService.create(c, "subagent", null);
+            var keepId = persistRun(p, c, pc1, cc, SubagentRun.Status.RUNNING);
+            var dropId = persistRun(p, c, pc2, cc, SubagentRun.Status.RUNNING);
+            return new long[]{pc1.id, keepId, dropId};
+        });
+
+        var resp = GET("/api/subagent-runs?parentConversationId=" + data[0]);
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"id\":" + data[1]),
+                "matching run is present: " + body);
+        assertFalse(body.contains("\"id\":" + data[2]),
+                "run from another conversation is filtered out: " + body);
+    }
+
+    @Test
     void listFilteredByStatusReturnsOnlyMatchingRows() {
         login();
         var data = commitInFreshTx(() -> {

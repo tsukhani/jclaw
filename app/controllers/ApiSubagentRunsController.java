@@ -71,7 +71,8 @@ public class ApiSubagentRunsController extends Controller {
      * client-side range display.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubagentRunView.class))))
-    public static void list(Long parentAgentId, String status, String since,
+    public static void list(Long parentAgentId, Long parentConversationId,
+                            String status, String since,
                             Integer limit, Integer offset) {
         Instant sinceInstant = parseSinceFilter(since);
         if (sinceInstant == null && since != null && !since.isBlank()) return;
@@ -81,6 +82,7 @@ public class ApiSubagentRunsController extends Controller {
 
         var filter = new JpqlFilter()
                 .eq("parentAgent.id", parentAgentId)
+                .eq("parentConversation.id", parentConversationId)
                 .eq("status", statusEnum)
                 .gte("startedAt", sinceInstant);
 

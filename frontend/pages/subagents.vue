@@ -29,12 +29,22 @@ interface SubagentRun {
 const parentAgentFilter = ref<string>('')
 const statusFilter = ref<string>('')
 const sinceFilter = ref<string>('')
+// JCLAW-326: URL-driven filter so chat (or any deep-link) can scope the
+// list to subagents spawned within a specific parent conversation. There's
+// no visible input — operators typically reach this filter via a link, not
+// by typing a conversation id. A clearable chip surfaces the active filter
+// and lets the user back out.
+const route = useRoute()
+const parentConversationFilter = ref<string>(
+  typeof route.query.parentConversationId === 'string' ? route.query.parentConversationId : ''
+)
 
 const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: () => [] })
 
 const url = computed(() => {
   const params = new URLSearchParams()
   if (parentAgentFilter.value) params.set('parentAgentId', parentAgentFilter.value)
+  if (parentConversationFilter.value) params.set('parentConversationId', parentConversationFilter.value)
   if (statusFilter.value) params.set('status', statusFilter.value)
   if (sinceFilter.value) {
     // Datetime-local inputs return "YYYY-MM-DDTHH:MM"; the backend wants
@@ -252,6 +262,29 @@ const sinceInputId = useId()
           class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
         >
       </label>
+      <!--
+        JCLAW-326: parent-conversation filter chip. Surfaces the URL-driven
+        parentConversationId filter when active so the operator can see
+        what's narrowing the list and clear it without editing the URL.
+        Hidden when no filter is set; no visible input form because
+        operators don't type conversation ids — they arrive here via a
+        deep-link.
+      -->
+      <div
+        v-if="parentConversationFilter"
+        class="inline-flex items-center gap-2 bg-muted border border-input text-sm text-fg-strong px-2 py-1"
+      >
+        <span class="text-xs text-fg-muted">Conversation</span>
+        <span class="font-mono">#{{ parentConversationFilter }}</span>
+        <button
+          type="button"
+          class="text-fg-muted hover:text-fg-strong text-xs leading-none"
+          aria-label="Clear conversation filter"
+          @click="parentConversationFilter = ''"
+        >
+          ×
+        </button>
+      </div>
     </div>
 
     <!-- Table -->

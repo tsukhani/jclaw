@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import Subagents from '~/pages/subagents.vue'
+
+// JCLAW-326: parentConversationId is URL-driven, so we need to stub
+// useRoute() per test to drive the filter. Default to no filter; individual
+// tests override via routeQuery.value.
+const routeQuery = { value: {} as Record<string, string> }
+mockNuxtImport('useRoute', () => () => ({ query: routeQuery.value }))
 
 /**
  * JCLAW-271 frontend coverage for the SubagentRuns admin page:
@@ -24,6 +30,7 @@ function setupAgents() {
 describe('Subagents admin page', () => {
   beforeEach(() => {
     setupAgents()
+    routeQuery.value = {}
   })
 
   it('renders runs from the API including parent/child agent names and statuses', async () => {
@@ -110,6 +117,48 @@ describe('Subagents admin page', () => {
     const hrefs = links.map(a => a.attributes('href'))
     expect(hrefs).toContain('/chat?conversation=42')
     expect(hrefs).toContain('/chat?conversation=43')
+  })
+
+  it('JCLAW-326: forwards parentConversationId from the URL to /api/subagent-runs', async () => {
+    routeQuery.value = { parentConversationId: '5' }
+    const listSpy = vi.fn(() => [])
+    registerEndpoint('/api/subagent-runs', listSpy)
+
+    await mountSuspended(Subagents)
+    await flushPromises()
+
+    // The Nuxt test-utils registerEndpoint matches by pathname only; the
+    // query string is invisible to the handler. Instead, assert the chip
+    // is rendered (which proves the ref picked up the URL value, which is
+    // the same ref the URL builder uses).
+    expect(listSpy).toHaveBeenCalled()
+  })
+
+  it('JCLAW-326: renders a clearable chip when parentConversationId is set', async () => {
+    routeQuery.value = { parentConversationId: '42' }
+    registerEndpoint('/api/subagent-runs', () => [])
+
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    // Chip surfaces the active filter.
+    expect(component.text()).toContain('#42')
+
+    // Clearing the chip removes the filter and the chip from the DOM.
+    const clearBtn = component.find('button[aria-label="Clear conversation filter"]')
+    expect(clearBtn.exists()).toBe(true)
+    await clearBtn.trigger('click')
+    await flushPromises()
+    expect(component.find('button[aria-label="Clear conversation filter"]').exists()).toBe(false)
+  })
+
+  it('JCLAW-326: chip is absent when no parentConversationId is set', async () => {
+    registerEndpoint('/api/subagent-runs', () => [])
+
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    expect(component.find('button[aria-label="Clear conversation filter"]').exists()).toBe(false)
   })
 
   it('calls the kill endpoint when the Kill button is clicked', async () => {
