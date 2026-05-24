@@ -156,6 +156,14 @@ public class ConversationSendTool implements ToolRegistry.Tool {
     @Override
     public boolean parallelSafe() { return false; }
 
+    /** Subagent-lifecycle group: shared with {@link SubagentSpawnTool} so a
+     *  same-turn {@code subagent_spawn} + {@code conversation_send} pair
+     *  serializes. Without this, send's SubagentRun lookup races spawn's
+     *  INSERT commit — surfacing as "no SubagentRun found for runId X" or a
+     *  "no active child run" error for a row the same turn just created. */
+    @Override
+    public String serializationGroup() { return "subagent_lifecycle"; }
+
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();

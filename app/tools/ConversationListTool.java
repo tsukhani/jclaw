@@ -120,6 +120,15 @@ public class ConversationListTool implements ToolRegistry.Tool {
     @Override
     public boolean parallelSafe() { return true; }
 
+    /** Subagent-lifecycle group: shared with {@link SubagentSpawnTool} so a
+     *  same-turn {@code subagent_spawn} + {@code conversation_list} pair
+     *  serializes inside {@link agents.ParallelToolExecutor}. Without this,
+     *  the model can emit both tool calls in one assistant message and
+     *  list's query races spawn's SubagentRun INSERT commit — surfacing as
+     *  {@code count: 0} for a row the same turn just created. */
+    @Override
+    public String serializationGroup() { return "subagent_lifecycle"; }
+
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();

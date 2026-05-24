@@ -129,6 +129,17 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
     @Override
     public boolean parallelSafe() { return true; }
 
+    /** Subagent-lifecycle group: shared with {@link SubagentSpawnTool} and
+     *  {@link SubagentYieldTool} so a same-turn {@code subagent_spawn} +
+     *  {@code conversation_history} pair serializes. Without this, the model
+     *  can emit both tool calls in one assistant message and history's
+     *  findById would race spawn's SubagentRun INSERT commit — surfacing as
+     *  "no SubagentRun found for runId X" for a row the same turn just
+     *  created. {@link #parallelSafe()} stays {@code true} (this tool only
+     *  reads); the group constraint is what serializes against the writers. */
+    @Override
+    public String serializationGroup() { return "subagent_lifecycle"; }
+
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();

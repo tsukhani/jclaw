@@ -67,6 +67,17 @@ class ConversationSendToolTest extends UnitTest {
     }
 
     @Test
+    void joinsSubagentLifecycleSerializationGroup() {
+        // JCLAW-326 race fix: same-turn subagent_spawn + conversation_send
+        // must serialize. Without the shared group, send's SubagentRun
+        // lookup races spawn's INSERT commit and surfaces as "no
+        // SubagentRun found for runId X" for a row the same turn created.
+        var tool = ToolRegistry.lookupTool(ConversationSendTool.TOOL_NAME);
+        assertEquals("subagent_lifecycle", tool.serializationGroup(),
+                "conversation_send must share the subagent_lifecycle group");
+    }
+
+    @Test
     void parentToChildAppendsUserMessageOnChildConversation() throws Exception {
         var run = seedRun(SubagentRun.Status.RUNNING);
         var json = invokeTool(parentAgent.id,

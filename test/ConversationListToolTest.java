@@ -64,6 +64,18 @@ class ConversationListToolTest extends UnitTest {
     }
 
     @Test
+    void joinsSubagentLifecycleSerializationGroup() {
+        // JCLAW-326 race fix: a model that emits subagent_spawn + a
+        // follow-up conversation_list in the same assistant message must
+        // see the just-spawned row in the list. Without the shared group,
+        // list races spawn's SubagentRun INSERT commit and returns
+        // count=0 — observed in the JCLAW-326 smoke test.
+        var tool = ToolRegistry.lookupTool(ConversationListTool.TOOL_NAME);
+        assertEquals("subagent_lifecycle", tool.serializationGroup(),
+                "conversation_list must share the subagent_lifecycle group");
+    }
+
+    @Test
     void listReturnsParentOwnedRunsOnly() throws Exception {
         seedRun(parentAgent, childAgentA, "mine-1", SubagentRun.Status.RUNNING);
         seedRun(parentAgent, childAgentA, "mine-2", SubagentRun.Status.COMPLETED);
