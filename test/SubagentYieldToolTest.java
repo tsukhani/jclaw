@@ -257,12 +257,16 @@ class SubagentYieldToolTest extends UnitTest {
     void yieldTimeoutSecondsPersistsToRowAndClampsToMax() throws Exception {
         // JCLAW-326: timeoutSeconds is persisted on SubagentRun for the
         // watchdog to read. Values above MAX_TIMEOUT_SECONDS clamp silently;
-        // values <= 0 fall back to DEFAULT_TIMEOUT_SECONDS.
+        // negative values fall back to DEFAULT_TIMEOUT_SECONDS; missing
+        // value also falls back to DEFAULT. Explicit 0 is the "no yield
+        // timeout" sentinel — see yieldTimeoutSecondsZeroPersistsAsNoTimeout
+        // for that path.
         var parent = createAgent("p-yield-timeoutpersist", "test-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-yield-timeoutpersist");
         var runA = seedNamedSubagentRun(parent, parentConv, "to-a");
         var runB = seedNamedSubagentRun(parent, parentConv, "to-b");
         var runC = seedNamedSubagentRun(parent, parentConv, "to-c");
+        var runD = seedNamedSubagentRun(parent, parentConv, "to-d");
 
         commitAndReopen();
 
@@ -272,13 +276,17 @@ class SubagentYieldToolTest extends UnitTest {
         // Above-max value clamps.
         invokeYieldOnVt(parent.id,
                 "{\"runId\":\"" + runB.id + "\",\"timeoutSeconds\":99999}");
-        // Missing / non-positive falls back to DEFAULT.
+        // Missing timeoutSeconds falls back to DEFAULT.
         invokeYieldOnVt(parent.id, "{\"runId\":\"" + runC.id + "\"}");
+        // Negative value is nonsense — coerced to DEFAULT (defensive).
+        invokeYieldOnVt(parent.id,
+                "{\"runId\":\"" + runD.id + "\",\"timeoutSeconds\":-5}");
 
         JPA.em().clear();
         var freshA = (SubagentRun) SubagentRun.findById(runA.id);
         var freshB = (SubagentRun) SubagentRun.findById(runB.id);
         var freshC = (SubagentRun) SubagentRun.findById(runC.id);
+        var freshD = (SubagentRun) SubagentRun.findById(runD.id);
         assertEquals(Integer.valueOf(42), freshA.yieldTimeoutSeconds,
                 "in-range timeoutSeconds must persist verbatim");
         assertEquals(Integer.valueOf(SubagentYieldTool.MAX_TIMEOUT_SECONDS),
@@ -287,6 +295,33 @@ class SubagentYieldToolTest extends UnitTest {
         assertEquals(Integer.valueOf(SubagentYieldTool.DEFAULT_TIMEOUT_SECONDS),
                 freshC.yieldTimeoutSeconds,
                 "missing timeoutSeconds must fall back to DEFAULT");
+        assertEquals(Integer.valueOf(SubagentYieldTool.DEFAULT_TIMEOUT_SECONDS),
+                freshD.yieldTimeoutSeconds,
+                "negative timeoutSeconds must fall back to DEFAULT");
+    }
+
+    @Test
+    void yieldTimeoutSecondsZeroPersistsAsNoTimeout() throws Exception {
+        // 0 is the explicit "no separate yield timeout" sentinel. It must
+        // persist verbatim (NOT be coerced to DEFAULT) so
+        // SubagentRegistry.scheduleYieldTimeout's `timeoutSeconds <= 0`
+        // no-op branch is hit and no watchdog VT is armed. The child is
+        // still bounded by its own spawn-time runTimeoutSeconds, so the
+        // parent doesn't park indefinitely — it just waits for the child
+        // to terminate naturally without a separate yield clock racing it.
+        var parent = createAgent("p-yield-timeout-zero", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-yield-timeout-zero");
+        var run = seedNamedSubagentRun(parent, parentConv, "to-zero");
+        commitAndReopen();
+
+        invokeYieldOnVt(parent.id,
+                "{\"runId\":\"" + run.id + "\",\"timeoutSeconds\":0}");
+
+        JPA.em().clear();
+        var fresh = (SubagentRun) SubagentRun.findById(run.id);
+        assertEquals(Integer.valueOf(0), fresh.yieldTimeoutSeconds,
+                "explicit timeoutSeconds=0 must persist as 0 (no-watchdog sentinel)");
+        assertTrue(fresh.yielded, "yield must still install — only the watchdog is skipped");
     }
 
     @Test

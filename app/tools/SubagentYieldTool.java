@@ -125,8 +125,13 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 Provide EITHER `runId` (the run id returned from the prior `subagent_spawn` call) \
                 OR `conversationId` (the child conversation id from the same return payload); \
                 when both are provided, `runId` wins. \
-                Optional: `timeoutSeconds` (1-3600, default 300) — caller-tightened resume budget; \
-                a synthetic TIMEOUT outcome is delivered if the child has not finished by then.""";
+                Optional: `timeoutSeconds` (0-3600, default 300) — caller-tightened resume budget; \
+                a synthetic TIMEOUT outcome is delivered if the child has not finished by then. \
+                Pass `0` to disable the yield timeout entirely; the child is still bounded by \
+                its own `runTimeoutSeconds` from the spawn call, so you don't park forever — \
+                the parent simply waits until the child terminates naturally. Useful for \
+                genuinely long-running async work (downloads, batch jobs) where any explicit \
+                yield budget would be guessing.""";
     }
 
     @Override
@@ -148,10 +153,12 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                         + "matches; ignored when runId is provided."));
         props.put(PARAM_TIMEOUT_SECONDS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
-                "Caller-tightened resume budget in seconds (1-" + MAX_TIMEOUT_SECONDS
+                "Caller-tightened resume budget in seconds (0-" + MAX_TIMEOUT_SECONDS
                         + ", default " + DEFAULT_TIMEOUT_SECONDS
                         + "). If the child hasn't terminated by then a synthetic TIMEOUT "
-                        + "announce resumes your turn."));
+                        + "announce resumes your turn. Pass 0 to disable the yield timeout — "
+                        + "the parent waits until the child terminates via its own spawn-time "
+                        + "runTimeoutSeconds."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props
@@ -244,7 +251,13 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
             }
         }
         var timeout = optInt(args, PARAM_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
-        if (timeout <= 0) timeout = DEFAULT_TIMEOUT_SECONDS;
+        // 0 is a load-bearing sentinel: explicitly disables the yield watchdog
+        // so the parent parks until the child terminates naturally via its own
+        // runTimeoutSeconds. Negative values are nonsense — coerce to DEFAULT.
+        // SubagentRegistry.scheduleYieldTimeout already no-ops for non-positive
+        // inputs, so storing 0 on the row + handing it to the scheduler is the
+        // entire "no timeout" implementation.
+        if (timeout < 0) timeout = DEFAULT_TIMEOUT_SECONDS;
         if (timeout > MAX_TIMEOUT_SECONDS) timeout = MAX_TIMEOUT_SECONDS;
         return ParsedArgs.ok(runId, convId, timeout);
     }
