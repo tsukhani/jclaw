@@ -97,9 +97,9 @@ class ApiTasksControllerRunTest extends FunctionalTest {
 
         var resp = POST("/api/tasks/" + taskId + "/run", "application/json", "");
         assertIsOk(resp);
-        // PENDING tasks stay PENDING after run — the entity state doesn't
-        // change, only the scheduled_tasks fire time does.
-        assertContentMatch("\"status\":\"PENDING\"", resp);
+        // Alive recurring tasks stay ACTIVE after run — the entity state
+        // doesn't change, only the scheduled_tasks fire time does.
+        assertContentMatch("\"status\":\"ACTIVE\"", resp);
     }
 
     @Test
@@ -149,9 +149,11 @@ class ApiTasksControllerRunTest extends FunctionalTest {
 
         var resp = POST("/api/tasks/" + taskId + "/run", "application/json", "");
         assertIsOk(resp);
-        // CANCELLED must flip to PENDING — otherwise TaskExecutionHandler
-        // swallows the fire at the CANCELLED-skip branch.
-        assertContentMatch("\"status\":\"PENDING\"", resp);
+        // CANCELLED must flip back to the alive-state for the task's type —
+        // ACTIVE for INTERVAL recurring (this case), PENDING for one-shot —
+        // otherwise TaskExecutionHandler swallows the fire at the
+        // CANCELLED-skip branch.
+        assertContentMatch("\"status\":\"ACTIVE\"", resp);
 
         // The audit message should call out the revival so operators can
         // grep for unusual flips.

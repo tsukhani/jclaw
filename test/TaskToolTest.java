@@ -548,7 +548,9 @@ class TaskToolTest extends UnitTest {
         assertTrue(reply.contains("No task found"),
                 "cross-agent cancel must surface not-found; got: " + reply);
         var original = findTaskByName("shielded");
-        assertEquals(Task.Status.PENDING, original.status,
+        // ACTIVE because this is an INTERVAL recurring task; the
+        // cross-agent guard kept it from flipping to CANCELLED.
+        assertEquals(Task.Status.ACTIVE, original.status,
                 "cross-agent cancel must not mutate the row");
     }
 

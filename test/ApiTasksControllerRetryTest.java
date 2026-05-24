@@ -111,8 +111,10 @@ class ApiTasksControllerRetryTest extends FunctionalTest {
 
         var resp = POST("/api/tasks/" + taskId + "/retry", "application/json", "");
         assertIsOk(resp);
-        // LOST flips to PENDING, retryCount resets, lastError cleared.
-        assertContentMatch("\"status\":\"PENDING\"", resp);
+        // LOST flips back to the task's alive-state for its type — ACTIVE
+        // here because this is an INTERVAL recurring task. retryCount resets,
+        // lastError cleared.
+        assertContentMatch("\"status\":\"ACTIVE\"", resp);
         assertContentMatch("\"retryCount\":0", resp);
         // lastError serialized as null (not present as a non-null string).
         assertFalse(getContent(resp).contains("\"lastError\":\"heartbeat stale\""),
@@ -136,7 +138,8 @@ class ApiTasksControllerRetryTest extends FunctionalTest {
 
         var resp = POST("/api/tasks/" + taskId + "/retry", "application/json", "");
         assertIsOk(resp);
-        assertContentMatch("\"status\":\"PENDING\"", resp);
+        // Recurring INTERVAL → returns to ACTIVE (alive-state for its type).
+        assertContentMatch("\"status\":\"ACTIVE\"", resp);
         assertContentMatch("\"retryCount\":0", resp);
     }
 

@@ -302,6 +302,9 @@ public class TaskTool implements ToolRegistry.Tool {
         task.name = name;
         task.description = description;
         task.type = spec.type();
+        // CRON / INTERVAL start ACTIVE (ongoing), IMMEDIATE / SCHEDULED start
+        // PENDING (waiting to fire). Override the entity default.
+        task.status = Task.initialStatusFor(spec.type());
         task.scheduledAt = spec.scheduledAt();
         task.cronExpression = spec.cronExpression();
         task.intervalSeconds = spec.intervalSeconds();
@@ -411,6 +414,12 @@ public class TaskTool implements ToolRegistry.Tool {
     /** Copy a parsed ScheduleSpec onto a Task (5 derived fields + nextRunAt). */
     private static void applyScheduleSpec(Task task, ScheduleShorthandParser.ScheduleSpec spec) {
         task.type = spec.type();
+        // Re-derive status from the (possibly new) type, but ONLY when the
+        // task is still alive — terminal states (COMPLETED, FAILED, CANCELLED,
+        // LOST) must not get resurrected to PENDING/ACTIVE by a schedule edit.
+        if (task.status == Task.Status.PENDING || task.status == Task.Status.ACTIVE) {
+            task.status = Task.initialStatusFor(spec.type());
+        }
         task.scheduledAt = spec.scheduledAt();
         task.cronExpression = spec.cronExpression();
         task.intervalSeconds = spec.intervalSeconds();
@@ -537,16 +546,17 @@ public class TaskTool implements ToolRegistry.Tool {
             var task = (Task) row;
             if (task.status == Task.Status.CANCELLED) {
                 // Revive — otherwise TaskExecutionHandler skips the fire body.
-                task.status = Task.Status.PENDING;
+                // Recurring tasks get ACTIVE; one-shot tasks get PENDING.
+                task.status = Task.initialStatusFor(task.type);
                 task.save();
                 revivedRef[0]++;
             } else if (task.status == Task.Status.LOST) {
                 // JCLAW-258: operator pre-empts db-scheduler's
-                // auto-recovery. Flip to PENDING and remember the id
-                // so we can force-remove the picked-but-stale
-                // scheduled_tasks row outside the Tx before registering
-                // a fresh fire below.
-                task.status = Task.Status.PENDING;
+                // auto-recovery. Flip back to the type-appropriate "alive"
+                // state and remember the id so we can force-remove the
+                // picked-but-stale scheduled_tasks row outside the Tx
+                // before registering a fresh fire below.
+                task.status = Task.initialStatusFor(task.type);
                 task.save();
                 lostIds.add(task.id);
             }

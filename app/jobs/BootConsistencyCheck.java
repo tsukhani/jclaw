@@ -119,12 +119,19 @@ public class BootConsistencyCheck extends Job<Void> {
             alreadyScheduled.add(row.getTaskInstance().getId());
         }
 
-        // Scan PENDING Tasks. Run inside Tx because Play's enhancer needs
-        // an open EntityManager for the finder.
-        var pending = Tx.run(() -> Task.findByStatus(Task.Status.PENDING));
+        // Scan both PENDING (one-shot waiting) and ACTIVE (recurring
+        // ongoing). Both need their scheduled_tasks rows reconstructed
+        // after a clean-shutdown wipe. Run inside Tx because Play's
+        // enhancer needs an open EntityManager for the finder.
+        var alive = Tx.run(() -> {
+            var combined = new java.util.ArrayList<Task>();
+            combined.addAll(Task.findByStatus(Task.Status.PENDING));
+            combined.addAll(Task.findByStatus(Task.Status.ACTIVE));
+            return combined;
+        });
         int registered = 0;
         int skippedAlreadyScheduled = 0;
-        for (var task : pending) {
+        for (var task : alive) {
             if (alreadyScheduled.contains(task.id.toString())) {
                 skippedAlreadyScheduled++;
                 continue;

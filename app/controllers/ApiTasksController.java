@@ -100,7 +100,10 @@ public class ApiTasksController extends Controller {
          * stored value because no further fire is expected.
          */
         private static String nextRunAtForDisplay(Task t) {
-            if (t.status != Task.Status.PENDING) {
+            // Only live tasks (PENDING one-shot / ACTIVE recurring) have a
+            // meaningful "next fire" — terminal-state tasks fall through
+            // to the stored value since no further fire is expected.
+            if (t.status != Task.Status.PENDING && t.status != Task.Status.ACTIVE) {
                 return t.nextRunAt != null ? t.nextRunAt.toString() : null;
             }
             try {
@@ -357,6 +360,10 @@ public class ApiTasksController extends Controller {
         if (t.description == null) t.description = "";
 
         t.type = spec.type();
+        // Status depends on type: CRON / INTERVAL start ACTIVE (ongoing
+        // recurrence), IMMEDIATE / SCHEDULED start PENDING (waiting to fire).
+        // The Task entity's default is PENDING; override here for recurring.
+        t.status = Task.initialStatusFor(spec.type());
         t.scheduledAt = spec.scheduledAt();
         t.cronExpression = spec.cronExpression();
         t.intervalSeconds = spec.intervalSeconds();
@@ -524,7 +531,9 @@ public class ApiTasksController extends Controller {
     public static void cancel(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
-        if (task.status != Task.Status.PENDING) {
+        // Both PENDING (one-shot waiting) and ACTIVE (recurring ongoing)
+        // are cancellable; other states (RUNNING, terminal) are not.
+        if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
         task.status = Task.Status.CANCELLED;
@@ -582,10 +591,10 @@ public class ApiTasksController extends Controller {
     public static void pause(Long id) {
         Task task = Task.findById(id);
         if (task == null) { notFound(); return; }
-        if (task.status != Task.Status.PENDING) {
-            // Pause only applies to live (PENDING/recurring) tasks — pausing a
-            // terminal Task would have no effect since the scheduler row is
-            // already gone.
+        // Pause only applies to live tasks (PENDING one-shot waiting / ACTIVE
+        // recurring ongoing); pausing a terminal Task has no effect since the
+        // scheduler row is already gone.
+        if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
         services.TaskSchedulingService.pause(task.id);
@@ -600,7 +609,8 @@ public class ApiTasksController extends Controller {
     public static void resume(Long id) {
         Task task = Task.findById(id);
         if (task == null) { notFound(); return; }
-        if (task.status != Task.Status.PENDING) {
+        // Resume mirrors pause — accept PENDING or ACTIVE alive states.
+        if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
         services.TaskSchedulingService.resume(task.id);
@@ -627,7 +637,8 @@ public class ApiTasksController extends Controller {
 
         boolean revivedFromCancel = false;
         if (task.status == Task.Status.CANCELLED) {
-            task.status = Task.Status.PENDING;
+            // Recurring tasks resume as ACTIVE, one-shot as PENDING.
+            task.status = Task.initialStatusFor(task.type);
             task.save();
             revivedFromCancel = true;
         }
@@ -663,7 +674,8 @@ public class ApiTasksController extends Controller {
             badRequest();
         }
         task.retryCount = 0;
-        task.status = Task.Status.PENDING;
+        // Recurring tasks return to ACTIVE, one-shot to PENDING.
+        task.status = Task.initialStatusFor(task.type);
         task.nextRunAt = Instant.now();
         task.lastError = null;
         task.save();

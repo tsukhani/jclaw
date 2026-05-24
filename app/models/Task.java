@@ -22,18 +22,46 @@ public class Task extends Model {
     public enum Type { IMMEDIATE, SCHEDULED, INTERVAL, CRON }
 
     /**
-     * Task lifecycle state. JCLAW-258 introduced {@code LOST} between
-     * {@code RUNNING} and {@code FAILED}: a Task observed as
-     * {@code RUNNING} whose db-scheduler {@code scheduled_tasks.last_heartbeat}
-     * has gone stale (older than {@link services.LostTaskDetector#STALE_THRESHOLD})
-     * is reconciled to LOST for operator visibility. db-scheduler's own
+     * Task lifecycle state.
+     *
+     * <p>Two non-running "alive" states distinguish one-shot vs recurring:
+     * <ul>
+     *   <li>{@code PENDING} — one-shot ({@code IMMEDIATE} / {@code SCHEDULED})
+     *       waiting to fire. Terminal-bound: transitions {@code PENDING →
+     *       RUNNING → COMPLETED} (or {@code FAILED}). Once a one-shot fires
+     *       successfully it stops being PENDING forever.</li>
+     *   <li>{@code ACTIVE} — recurring ({@code CRON} / {@code INTERVAL})
+     *       in its steady-state. Cycle: {@code ACTIVE → RUNNING → ACTIVE}.
+     *       The Task row is the recurrence config; the {@code scheduled_tasks}
+     *       row carries the next fire time. Recurring tasks never reach
+     *       {@code COMPLETED} unless explicitly cancelled.</li>
+     * </ul>
+     *
+     * <p>JCLAW-258 introduced {@code LOST} between {@code RUNNING} and
+     * {@code FAILED}: a Task observed as {@code RUNNING} whose
+     * db-scheduler {@code scheduled_tasks.last_heartbeat} has gone stale
+     * (older than {@link services.LostTaskDetector#STALE_THRESHOLD}) is
+     * reconciled to LOST for operator visibility. db-scheduler's own
      * dead-execution detection (at the longer heartbeat-misses threshold)
      * subsequently re-fires the row, transitioning LOST → RUNNING →
      * COMPLETED/FAILED. LOST is therefore visibility-only, not terminal —
-     * Design A in the ticket. Position between RUNNING and FAILED keeps
-     * status-pill rendering on a natural heat-axis (blue → orange → red).
+     * Design A in the ticket. Enum ordering keeps status-pill rendering
+     * on a natural progression (idle → ongoing → mid-fire → trouble →
+     * terminal).
      */
-    public enum Status { PENDING, RUNNING, LOST, COMPLETED, FAILED, CANCELLED }
+    public enum Status { PENDING, ACTIVE, RUNNING, LOST, COMPLETED, FAILED, CANCELLED }
+
+    /**
+     * Initial status for a freshly-created Task. Recurring types
+     * ({@code CRON} / {@code INTERVAL}) start at {@link Status#ACTIVE};
+     * one-shot types ({@code IMMEDIATE} / {@code SCHEDULED}) start at
+     * {@link Status#PENDING}. Used by every code path that constructs
+     * new Tasks (and by {@code retry} / un-cancel paths to put a
+     * resumed task back into its "alive" state).
+     */
+    public static Status initialStatusFor(Type type) {
+        return (type == Type.CRON || type == Type.INTERVAL) ? Status.ACTIVE : Status.PENDING;
+    }
 
     @ManyToOne
     @JoinColumn(name = "agent_id")

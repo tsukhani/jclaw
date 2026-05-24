@@ -108,18 +108,11 @@ const statusColors: Record<string, string> = {
   CANCELLED: 'text-neutral-600',
 }
 
-/**
- * The Status column displays "ACTIVE" instead of "PENDING" for recurring
- * tasks (CRON / INTERVAL) — these are ongoing schedules, not work that's
- * waiting to start, so "PENDING" reads incorrectly. The backend enum stays
- * Status.PENDING; this is a display-only rename keyed on Task.Type.
- */
-function displayStatus(task: Task): string {
-  if (task.status === 'PENDING' && (task.type === 'CRON' || task.type === 'INTERVAL')) {
-    return 'ACTIVE'
-  }
-  return task.status
-}
+// v0.12.38: ACTIVE was promoted from a frontend display-only alias to a
+// real Task.Status enum value. Recurring tasks now arrive with status =
+// "ACTIVE" directly from the API, so we no longer need a per-row mapping
+// helper. statusColors[task.status] resolves correctly for both PENDING
+// (one-shot waiting) and ACTIVE (recurring ongoing).
 
 /**
  * Humanize a Task's recurring schedule for display. Order of preference:
@@ -523,7 +516,7 @@ const typeSelectId = useId()
             All statuses
           </option>
           <option
-            v-for="s in ['PENDING', 'RUNNING', 'LOST', 'COMPLETED', 'FAILED', 'CANCELLED']"
+            v-for="s in ['PENDING', 'ACTIVE', 'RUNNING', 'LOST', 'COMPLETED', 'FAILED', 'CANCELLED']"
             :key="s"
             :value="s"
           >
@@ -658,9 +651,9 @@ const typeSelectId = useId()
             </td>
             <td class="px-4 py-2.5">
               <span
-                :class="statusColors[displayStatus(task)]"
+                :class="statusColors[task.status]"
                 class="text-xs font-mono"
-              >{{ displayStatus(task) }}</span>
+              >{{ task.status }}</span>
             </td>
             <td class="px-4 py-2.5 text-fg-muted">
               {{ task.agentName || '—' }}
@@ -674,7 +667,7 @@ const typeSelectId = useId()
             <td class="px-4 py-2.5 text-right">
               <div class="inline-flex items-center gap-1">
                 <button
-                  v-if="!selectMode && task.status === 'PENDING'"
+                  v-if="!selectMode && (task.status === 'PENDING' || task.status === 'ACTIVE')"
                   type="button"
                   class="p-1 text-fg-muted hover:text-red-400 transition-colors"
                   :title="task.type === 'CRON' || task.type === 'INTERVAL'
@@ -757,9 +750,9 @@ const typeSelectId = useId()
               </div>
             </div>
             <span
-              :class="statusColors[displayStatus(task)]"
+              :class="statusColors[task.status]"
               class="text-[10px] font-mono shrink-0"
-            >{{ displayStatus(task) }}</span>
+            >{{ task.status }}</span>
           </div>
           <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
             <dt class="text-fg-muted">
@@ -783,7 +776,7 @@ const typeSelectId = useId()
           </dl>
           <div class="flex items-center justify-end gap-1 pt-1 border-t border-border">
             <button
-              v-if="task.status === 'PENDING'"
+              v-if="task.status === 'PENDING' || task.status === 'ACTIVE'"
               type="button"
               class="p-1 text-fg-muted hover:text-red-400 transition-colors"
               :title="task.type === 'CRON' || task.type === 'INTERVAL'
@@ -915,7 +908,7 @@ const typeSelectId = useId()
               v-for="(fire, i) in cell.fires.slice(0, 4)"
               :key="i"
               class="text-[10px] truncate"
-              :class="statusColors[fire.taskStatus === 'PENDING' && (fire.taskType === 'CRON' || fire.taskType === 'INTERVAL') ? 'ACTIVE' : fire.taskStatus] || 'text-fg-muted'"
+              :class="statusColors[fire.taskStatus] || 'text-fg-muted'"
               :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}`"
             >
               <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>
