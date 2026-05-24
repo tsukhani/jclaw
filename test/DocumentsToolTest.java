@@ -392,6 +392,30 @@ class DocumentsToolTest extends UnitTest {
 
     private models.Agent freshAgent(String name) {
         play.test.Fixtures.deleteDatabase();
+        // Reset the on-disk workspace too so files (drafts, rendered outputs,
+        // appended chunks) from a prior run can't leak into this one.
+        // Fixtures.deleteDatabase() only wipes the JPA tables; the workspace
+        // root sits on disk and was persisting across runs, producing
+        // flakes like execute_appendDocumentCreatesDraftWhenMissing failing
+        // on a re-run because new-draft.md already existed from the first
+        // run and appendDocument took the "already exists" branch.
+        java.nio.file.Path workspaceDir = services.AgentService.workspacePath(name);
+        if (java.nio.file.Files.exists(workspaceDir)) {
+            try (var paths = java.nio.file.Files.walk(workspaceDir)) {
+                paths.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> {
+                            try {
+                                java.nio.file.Files.delete(p);
+                            } catch (java.io.IOException e) {
+                                throw new RuntimeException(
+                                        "Could not clean workspace dir " + p + ": " + e.getMessage(), e);
+                            }
+                        });
+            } catch (java.io.IOException e) {
+                throw new RuntimeException(
+                        "Could not walk workspace dir " + workspaceDir + ": " + e.getMessage(), e);
+            }
+        }
         return services.AgentService.create(name, "openrouter", "gpt-4.1");
     }
 }
