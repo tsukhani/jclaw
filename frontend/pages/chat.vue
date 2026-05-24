@@ -2930,7 +2930,23 @@ function exportConversation() {
                         <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
                       </a>
                     </div>
+                    <!-- JCLAW-327: USER-role rows with messageKind=subagent_send
+                         are agent-authored (the `message` tool persists as USER
+                         so the LLM sees it via loadRecentMessages, but the
+                         content is markdown the agent wrote — render it
+                         through the same markdown pipeline the assistant
+                         bubble uses). True user-typed content stays on the
+                         plain-text path so a literal `<script>` in user input
+                         can't inject HTML. -->
+                    <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
                     <div
+                      v-if="msg.messageKind === 'subagent_send'"
+                      class="prose-chat inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base break-words"
+                      v-html="renderMarkdown(msg.content ?? '', effectiveDisplayAgentId)"
+                    />
+                    <!-- eslint-enable vue/no-v-html -->
+                    <div
+                      v-else
                       class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
                     >
                       {{ msg.content }}
