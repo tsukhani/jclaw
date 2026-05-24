@@ -62,6 +62,12 @@ public class ToolRegistrationJob extends Job<Void> {
         // agent's SubagentRun rows with status / label-glob / agentId
         // filters.
         toolList.add(new ConversationListTool());
+        // JCLAW-327: message. Push a text message to an external chat
+        // channel (Telegram / Slack / WhatsApp) mid-turn. Defaults channel
+        // and target from the calling agent's active conversation, so
+        // subagents spawned inside a channel-bound thread can reply
+        // upstream without hardcoding credentials.
+        toolList.add(new MessageTool());
         // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by

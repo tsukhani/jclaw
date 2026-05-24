@@ -917,7 +917,20 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (inlineMode) {
             return parentConv;
         }
-        var childConv = ConversationService.create(childAgent, SUBAGENT_CHANNEL, null);
+        // JCLAW-327 AC-5: the child Conversation inherits the parent's
+        // channelType + peerId. Two reasons. (a) The new {@link MessageTool}
+        // infers its default delivery channel + target from the calling
+        // agent's active Conversation; without inheritance, a subagent
+        // spawned inside a Telegram thread would default to
+        // channelType="subagent" and have nowhere to push progress
+        // updates. (b) The /conversations + /subagents UIs filter by
+        // {@code parentConversation IS NULL}, so subagent children stay
+        // hidden from the main listings regardless of channelType — no UI
+        // regression. The {@code SUBAGENT_CHANNEL} constant survives as
+        // an EventLogger category tag (see warn() sites below); it's no
+        // longer used as a Conversation column value.
+        var childConv = ConversationService.create(childAgent,
+                parentConv.channelType, parentConv.peerId);
         childConv.parentConversation = parentConv;
         // JCLAW-269: persist the per-spawn override on the child Conversation so
         // AgentRunner's ModelOverrideResolver picks it up for this run, and so

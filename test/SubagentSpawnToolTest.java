@@ -108,7 +108,15 @@ class SubagentSpawnToolTest extends UnitTest {
         Conversation childConv = Conversation.findById(run.childConversation.id);
         assertNotNull(childConv.parentConversation);
         assertEquals(parentConv.id, childConv.parentConversation.id);
-        assertEquals(SubagentSpawnTool.SUBAGENT_CHANNEL, childConv.channelType);
+        // JCLAW-327 AC-5: child Conversation inherits parent channelType + peerId
+        // so the new MessageTool can default the delivery target from the
+        // active conversation. The old behaviour (channelType="subagent",
+        // peerId=null) prevented a subagent spawned in a Telegram thread
+        // from pushing progress back to that thread without hardcoding ids.
+        assertEquals(parentConv.channelType, childConv.channelType,
+                "child must inherit parent.channelType (JCLAW-327 AC-5)");
+        assertEquals(parentConv.peerId, childConv.peerId,
+                "child must inherit parent.peerId (JCLAW-327 AC-5)");
 
         // Event lifecycle: SPAWN + COMPLETE, no ERROR.
         java.util.List<EventLog> spawnEvents = EventLog.find(
