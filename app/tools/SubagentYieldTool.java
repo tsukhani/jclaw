@@ -14,17 +14,17 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * JCLAW-273 / JCLAW-326: companion tool to {@link SpawnSubagentTool} for the
+ * JCLAW-273 / JCLAW-326: companion tool to {@link SubagentSpawnTool} for the
  * {@code sessions_yield} flow. The parent agent calls this tool with the
  * {@code run_id} (or alternatively {@code conversation_id}) returned from a
- * prior {@code spawn_subagent} with {@code async=true}; the tool flips
+ * prior {@code subagent_spawn} with {@code async=true}; the tool flips
  * {@link SubagentRun#yielded} to {@code true} and returns a sentinel JSON
  * payload that {@link agents.AgentRunner} recognises to exit its tool-call
  * loop without emitting a final assistant reply.
  *
  * <p>The actual resume — the child's final reply landing as the parent's
  * next user-role message and the parent's loop re-invoking — happens later,
- * inside {@link SpawnSubagentTool#runAsyncAndAnnounce} when the async child
+ * inside {@link SubagentSpawnTool#runAsyncAndAnnounce} when the async child
  * VT reaches its terminal state. This tool just records the parent's intent
  * to suspend; the announce VT reads {@link SubagentRun#yielded} to decide
  * which announce-shape (SYSTEM-role fire-and-forget vs USER-role resume) to
@@ -61,19 +61,19 @@ import java.util.Map;
  *       out-of-range values are clamped silently.</li>
  * </ul>
  * Invalid calls return a descriptive error string and do not mutate any
- * state, matching the {@link SpawnSubagentTool} validation idiom.
+ * state, matching the {@link SubagentSpawnTool} validation idiom.
  *
- * <p>Two-step shape (vs combining yield into {@code spawn_subagent}): the
+ * <p>Two-step shape (vs combining yield into {@code subagent_spawn}): the
  * AC explicitly references a separate companion tool, and the two-step
  * shape composes cleanly with the JCLAW-270 async flow — the parent gets
- * the {@code run_id} from {@code spawn_subagent}, can optionally do other
+ * the {@code run_id} from {@code subagent_spawn}, can optionally do other
  * work in the same turn, then yields on a later tool call when it wants to
- * suspend. A combined {@code spawn_subagent {async:true, yield:true}}
+ * suspend. A combined {@code subagent_spawn {async:true, yield:true}}
  * would forfeit that intermediate-work window.
  */
-public class YieldToSubagentTool implements ToolRegistry.Tool {
+public class SubagentYieldTool implements ToolRegistry.Tool {
 
-    public static final String TOOL_NAME = "yield_to_subagent";
+    public static final String TOOL_NAME = "subagent_yield";
 
     private static final String PARAM_RUN_ID = "runId";
     private static final String PARAM_CONVERSATION_ID = "conversationId";
@@ -120,9 +120,9 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
                 your AgentRunner loop exits without emitting a final assistant reply; once the \
                 child terminates (completion, failure, or timeout), its final output is delivered \
                 back as your next user-role message and your loop resumes from there. \
-                Use this after a `spawn_subagent` call with `async=true` when you want to block \
+                Use this after a `subagent_spawn` call with `async=true` when you want to block \
                 your logical turn on the child's result rather than continuing in parallel. \
-                Provide EITHER `runId` (the run id returned from the prior `spawn_subagent` call) \
+                Provide EITHER `runId` (the run id returned from the prior `subagent_spawn` call) \
                 OR `conversationId` (the child conversation id from the same return payload); \
                 when both are provided, `runId` wins. \
                 Optional: `timeoutSeconds` (1-3600, default 300) — caller-tightened resume budget; \
@@ -139,11 +139,11 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         var props = new LinkedHashMap<String, Object>();
         props.put(PARAM_RUN_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "Run id returned by a prior spawn_subagent call with async=true. "
+                "Run id returned by a prior subagent_spawn call with async=true. "
                         + "Provide this OR conversationId (runId wins when both set)."));
         props.put(PARAM_CONVERSATION_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "Child conversation id returned by the prior spawn_subagent call. "
+                "Child conversation id returned by the prior subagent_spawn call. "
                         + "Resolves to the most-recent SubagentRun whose childConversation "
                         + "matches; ignored when runId is provided."));
         props.put(PARAM_TIMEOUT_SECONDS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
@@ -158,14 +158,14 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         );
     }
 
-    /** Mutates a {@link SubagentRun} row; share with {@link SpawnSubagentTool}'s
+    /** Mutates a {@link SubagentRun} row; share with {@link SubagentSpawnTool}'s
      *  parallel-safe stance (false) so two concurrent yields against the same
      *  run never race. */
     @Override
     public boolean parallelSafe() { return false; }
 
-    /** Subagent-lifecycle group: shared with {@link SpawnSubagentTool} so a
-     *  same-message {@code spawn_subagent} + {@code yield_to_subagent} pair
+    /** Subagent-lifecycle group: shared with {@link SubagentSpawnTool} so a
+     *  same-message {@code subagent_spawn} + {@code subagent_yield} pair
      *  serializes inside the {@link agents.ParallelToolExecutor}. Yield reads
      *  the SubagentRun row spawn just inserted; the default name-keyed group
      *  would put each tool in its own VT and yield's findById could race
@@ -193,7 +193,7 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         // JCLAW-326: arm the yield-timeout watchdog now that the row is
         // flipped. The watchdog fires a synthetic TimeoutException into the
         // in-flight async future after timeoutSeconds elapse; the
-        // SpawnSubagentTool await translates that to a TIMEOUT outcome and
+        // SubagentSpawnTool await translates that to a TIMEOUT outcome and
         // the announce VT delivers the resume message. No-op when the run
         // isn't in the registry (already terminal between installYield's
         // commit and here — the announce VT will deliver whatever happened).

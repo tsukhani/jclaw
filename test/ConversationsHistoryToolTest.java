@@ -16,20 +16,20 @@ import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
-import tools.SessionsHistoryTool;
+import tools.ConversationsHistoryTool;
 
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JCLAW-274 tests: {@code sessions_history} tool.
+ * JCLAW-274 tests: {@code conversations_history} tool.
  *
  * <p>Each test seeds a parent + child Agent, a parent + child Conversation,
  * a SubagentRun row linking them, and a small number of messages on the
  * child conversation. The tool is then invoked directly to verify shape,
  * ordering, permission gating, and pagination.
  */
-class SessionsHistoryToolTest extends UnitTest {
+class ConversationsHistoryToolTest extends UnitTest {
 
     private Agent parentAgent;
     private Agent childAgent;
@@ -59,9 +59,9 @@ class SessionsHistoryToolTest extends UnitTest {
 
     @Test
     void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(SessionsHistoryTool.TOOL_NAME);
-        assertNotNull(tool, "sessions_history must be registered by ToolRegistrationJob");
-        assertEquals(SessionsHistoryTool.TOOL_NAME, tool.name());
+        var tool = ToolRegistry.lookupTool(ConversationsHistoryTool.TOOL_NAME);
+        assertNotNull(tool, "conversations_history must be registered by ToolRegistrationJob");
+        assertEquals(ConversationsHistoryTool.TOOL_NAME, tool.name());
         assertEquals("System", tool.category());
     }
 
@@ -265,21 +265,21 @@ class SessionsHistoryToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
-                var tool = (SessionsHistoryTool) ToolRegistry.lookupTool(SessionsHistoryTool.TOOL_NAME);
+                var tool = (ConversationsHistoryTool) ToolRegistry.lookupTool(ConversationsHistoryTool.TOOL_NAME);
                 resultRef.set(tool.execute(argsJson, caller));
             } catch (Exception e) {
                 errorRef.set(e);
             }
         });
         thread.join(10_000);
-        assertFalse(thread.isAlive(), "sessions_history must complete within 10s");
+        assertFalse(thread.isAlive(), "conversations_history must complete within 10s");
         if (errorRef.get() != null) throw errorRef.get();
         return resultRef.get();
     }
 
     /** Commit pending parent setup rows so the VT-dispatched tool call can
      *  observe them through its own transaction. Mirrors the helper in
-     *  SpawnSubagentToolTest. */
+     *  SubagentSpawnToolTest. */
     private static void commitAndReopen() {
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();

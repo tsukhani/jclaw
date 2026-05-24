@@ -213,7 +213,7 @@ async function savePerfField(configKey: string, value: string) {
 
 // JCLAW-266: subagent recursion caps. DB-backed via ConfigService so the
 // Settings page can edit them at runtime without a restart. Defaults
-// mirror the Java-side fallbacks in SpawnSubagentTool.
+// mirror the Java-side fallbacks in SubagentSpawnTool.
 const subagentMaxDepth = computed(() => {
   const entries = configData.value?.entries ?? []
   return entries.find(e => e.key === 'subagent.maxDepth')?.value ?? '1'
@@ -3373,7 +3373,7 @@ async function handleResetPassword() {
         Subagents
       </h2>
       <p class="text-xs text-fg-muted">
-        Recursion caps for the <span class="font-mono">spawn_subagent</span> tool.
+        Recursion caps for the <span class="font-mono">subagent_spawn</span> tool.
         <span class="font-mono">maxDepth</span> bounds how deep the parent-child
         chain may go (1 = top-level agents may spawn, grandchildren refused);
         <span class="font-mono">maxChildrenPerParent</span> bounds how many
@@ -3393,7 +3393,7 @@ async function handleResetPassword() {
                   aria-hidden="true"
                 />
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                  Max recursion depth for spawn_subagent. 1 = only top-level agents may spawn; a child trying to spawn its own subagent is refused.
+                  Max recursion depth for subagent_spawn. 1 = only top-level agents may spawn; a child trying to spawn its own subagent is refused.
                 </span>
               </span>
             </span>

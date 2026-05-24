@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * JCLAW-274: read a subagent run's child conversation transcript.
  *
- * <p>Companion to {@link SpawnSubagentTool} / {@link YieldToSubagentTool}.
+ * <p>Companion to {@link SubagentSpawnTool} / {@link SubagentYieldTool}.
  * The parent agent (or an operator using the slash command — see
  * {@code /subagent history} in {@link slash.Commands}) calls this tool with
  * a {@code runId} returned from a prior spawn; the tool validates the
@@ -41,7 +41,7 @@ import java.util.Map;
  * runaway child can't blow up the tool's return string. Per-message content
  * is left untruncated (the AC says "truncate per-message content" but in
  * practice the child's own messages already obey JClaw's other size caps:
- * the announce truncation in {@link SpawnSubagentTool#ANNOUNCE_REPLY_MAX_CHARS}
+ * the announce truncation in {@link SubagentSpawnTool#ANNOUNCE_REPLY_MAX_CHARS}
  * bounds the visible reply, and tool results are bounded by their own
  * tools' return sizes). What matters for THIS tool is bounding the message
  * <em>count</em> so a 10,000-turn child doesn't return a single 200 MB
@@ -51,9 +51,9 @@ import java.util.Map;
  * lets the caller walk back through history a page at a time if it really
  * needs all of it.
  */
-public class SessionsHistoryTool implements ToolRegistry.Tool {
+public class ConversationsHistoryTool implements ToolRegistry.Tool {
 
-    public static final String TOOL_NAME = "sessions_history";
+    public static final String TOOL_NAME = "conversations_history";
 
     private static final String PARAM_RUN_ID = "runId";
 
@@ -93,8 +93,8 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
                 subagent run. Returns role, content, tool calls/results, message kind/metadata, \
                 and timestamps for each message. Use this to inspect what the child actually did \
                 (multi-turn reasoning, tool invocations, intermediate replies) after a \
-                spawn_subagent or yield_to_subagent call has terminated. \
-                Required: `runId` (the run id returned from spawn_subagent). \
+                subagent_spawn or subagent_yield call has terminated. \
+                Required: `runId` (the run id returned from subagent_spawn). \
                 Optional: `limit` (1-200, default 50), `beforeMessageId` (cursor — return only \
                 messages with id < this value; use to page back through long transcripts). \
                 Permission: the calling agent must be the run's parent agent.""";
@@ -110,7 +110,7 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
         var props = new LinkedHashMap<String, Object>();
         props.put(PARAM_RUN_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "Run id returned by a prior spawn_subagent call (required)."));
+                "Run id returned by a prior subagent_spawn call (required)."));
         props.put("limit", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
                 "Maximum messages to return (1-" + MAX_LIMIT + ", default " + DEFAULT_LIMIT + ")."));

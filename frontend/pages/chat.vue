@@ -1378,7 +1378,7 @@ function toggleSubagentRun(runId: number): void {
 
 /**
  * Build the header label for an inline-subagent collapsible block. Derived
- * from the boundary-start marker's content (set by SpawnSubagentTool); falls
+ * from the boundary-start marker's content (set by SubagentSpawnTool); falls
  * back to a neutral "Subagent run" label when the marker is absent (shouldn't
  * happen in practice but defensive).
  */
@@ -1436,7 +1436,7 @@ function subagentAnnounceChildId(m: Message): number | null {
 }
 /**
  * JCLAW-291: child's underlying reply was cut off by max_tokens. Reads from
- * the announce metadata payload first (set by SpawnSubagentTool when the
+ * the announce metadata payload first (set by SubagentSpawnTool when the
  * child's RunResult.truncated was true) and falls back to the row-level
  * column for older announces written before the column existed. The card
  * renders a "Reply was truncated by the model" marker when this is true.
@@ -2674,7 +2674,7 @@ function exportConversation() {
                 FIRST message of each collapsible nested-turn block; clicking
                 it toggles the run's collapsed state. The header label is
                 derived from the boundary-start marker's content (set by
-                SpawnSubagentTool); the status pill comes from the boundary-
+                SubagentSpawnTool); the status pill comes from the boundary-
                 end marker.
               -->
               <div

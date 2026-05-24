@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@link agents.AgentRunner} checks at safe points, then transition the
  * audit row to {@link SubagentRun.Status#KILLED}.
  *
- * <p>Both spawn paths in {@link tools.SpawnSubagentTool} register their
+ * <p>Both spawn paths in {@link tools.SubagentSpawnTool} register their
  * Future here at start and unregister when the run terminates (success,
  * failure, timeout, or kill). The registry is JVM-local — a restart loses
  * every entry, which is fine because the still-RUNNING DB rows are recovered
@@ -274,7 +274,7 @@ public final class SubagentRegistry {
      * {@code timeoutSeconds} elapse, so the async-spawn await wakes up and
      * the parent's logical turn resumes with a TIMEOUT announce instead of
      * parking for the spawn-time budget. Called by
-     * {@code yield_to_subagent} after the yield is installed.
+     * {@code subagent_yield} after the yield is installed.
      *
      * <p>Only the {@link CompletableFuture} half of the registered Future is
      * accepted as a target — the future must support

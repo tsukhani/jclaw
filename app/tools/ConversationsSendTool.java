@@ -19,7 +19,7 @@ import java.util.Set;
 
 /**
  * JCLAW-326: bidirectional parent↔child message send for the
- * {@code sessions_send} AC. One tool, two directions, dispatched by the
+ * {@code conversations_send} AC. One tool, two directions, dispatched by the
  * {@code target} param (and inferred from the caller's role when omitted).
  *
  * <p><b>Direction.</b> The calling agent's relationship to any active
@@ -49,7 +49,7 @@ import java.util.Set;
  * {@link ConversationService#loadRecentMessages} hides every
  * {@code messageKind != null} row from the LLM unless its role is USER —
  * the announce-flow's SYSTEM-vs-USER toggle for fire-and-forget vs
- * yield-resume rests on that filter. For sessions_send the calling agent's
+ * yield-resume rests on that filter. For conversations_send the calling agent's
  * intent is to deliver content the other side should see, so USER is the
  * right role for both legs.
  *
@@ -59,12 +59,12 @@ import java.util.Set;
  * rendering; future stories may render JSON / markdown payloads
  * differently in the chat UI.
  */
-public class SessionsSendTool implements ToolRegistry.Tool {
+public class ConversationsSendTool implements ToolRegistry.Tool {
 
-    public static final String TOOL_NAME = "sessions_send";
+    public static final String TOOL_NAME = "conversations_send";
 
     /** {@link Message#messageKind} discriminator the chat UI keys off to
-     *  render sessions_send rows distinctly from organic user input. */
+     *  render conversations_send rows distinctly from organic user input. */
     public static final String MESSAGE_KIND = "subagent_send";
 
     private static final String PARAM_TARGET = "target";
@@ -105,7 +105,7 @@ public class SessionsSendTool implements ToolRegistry.Tool {
         return """
                 Send a message between this agent and a related subagent run, without blocking. \
                 Use this from a PARENT to nudge a running child (target="child" + the runId from \
-                spawn_subagent) — the message is appended to the child's conversation as user input \
+                subagent_spawn) — the message is appended to the child's conversation as user input \
                 and the child sees it on its next turn. Use this from a CHILD to push a status \
                 update back to its parent (target="parent" — the runId is inferred from the active \
                 SubagentRun where this agent is the child). The parent sees the message on its \

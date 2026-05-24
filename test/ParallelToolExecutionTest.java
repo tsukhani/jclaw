@@ -68,7 +68,7 @@ class ParallelToolExecutionTest extends UnitTest {
     }
 
     /** Variant that lets a test pin the {@link ToolRegistry.Tool#serializationGroup()}
-     *  key, mirroring how {@code SpawnSubagentTool}/{@code YieldToSubagentTool}
+     *  key, mirroring how {@code SubagentSpawnTool}/{@code SubagentYieldTool}
      *  override the default to opt into a shared serial queue. {@code null}
      *  preserves the default behavior (group = name when unsafe, no group when
      *  parallel-safe). */
@@ -341,7 +341,7 @@ class ParallelToolExecutionTest extends UnitTest {
 
     @Test
     void differentlyNamedToolsWithSharedSerializationGroupRunSequentially() throws Exception {
-        // Regression for the spawn_subagent + yield_to_subagent race:
+        // Regression for the subagent_spawn + subagent_yield race:
         // two distinct unsafe tools that share state (e.g. one inserts the
         // SubagentRun row, the other reads it) must serialize even when
         // their names differ. Both opt into the shared "subagent_lifecycle"

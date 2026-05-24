@@ -86,7 +86,7 @@ describe('Chat page — inline-subagent rendering (JCLAW-267)', () => {
 
     // The block header pill renders with the run's label (derived from the
     // boundary-start marker's content). "investigate-x — investigate X" is
-    // what SpawnSubagentTool stamps for label+task.
+    // what SubagentSpawnTool stamps for label+task.
     const text = component.text()
     expect(text).toContain('Subagent:')
     expect(text).toContain('investigate-x')

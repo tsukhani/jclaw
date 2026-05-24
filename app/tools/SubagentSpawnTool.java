@@ -80,9 +80,9 @@ import java.util.concurrent.TimeoutException;
  * in-flight LLM HTTP call or tool execution may continue to completion in the
  * background. Tight cancellation semantics are JCLAW-270 (async path) territory.
  */
-public class SpawnSubagentTool implements ToolRegistry.Tool {
+public class SubagentSpawnTool implements ToolRegistry.Tool {
 
-    public static final String TOOL_NAME = "spawn_subagent";
+    public static final String TOOL_NAME = "subagent_spawn";
 
     static final String DEFAULT_MODE = "session";
     static final String MODE_SESSION = "session";
@@ -246,12 +246,12 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     @Override
     public boolean parallelSafe() { return false; }
 
-    /** Subagent-lifecycle group: shared with {@link YieldToSubagentTool} so
+    /** Subagent-lifecycle group: shared with {@link SubagentYieldTool} so
      *  the {@link ParallelToolExecutor} cannot dispatch yield's findById
      *  before spawn's SubagentRun INSERT commits. Without this, a model that
      *  emits both tool calls in one assistant message (guessing the runId
      *  from prior history) races on the row visibility — the symptom is
-     *  yield_to_subagent returning "no SubagentRun found for runId X" for a
+     *  subagent_yield returning "no SubagentRun found for runId X" for a
      *  freshly-spawned async run. */
     @Override
     public String serializationGroup() { return "subagent_lifecycle"; }
@@ -484,7 +484,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
 
     /** Insert the SubagentRun audit row in its own short Tx and return the
      *  generated id. JCLAW-326: persist the spawn-time {@code label} on the
-     *  row so {@code sessions_list} can filter / display without re-parsing
+     *  row so {@code conversations_list} can filter / display without re-parsing
      *  per-run announce-message metadata JSON. */
     private static Long insertSubagentRun(Long parentAgentId, Long childAgentId,
                                            Long parentConvId, Long childConvId, String label) {
@@ -1250,7 +1250,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
      * JCLAW-273: read the yield flag inside the same Tx that persists the
      * announce so the role-decision and the message insert see a consistent
      * snapshot of {@link SubagentRun#yielded}. A parent that called
-     * yield_to_subagent expects USER-role delivery (the announce IS its next
+     * subagent_yield expects USER-role delivery (the announce IS its next
      * user message); a fire-and-forget async caller expects SYSTEM-role
      * (the JCLAW-270 semantics — visible card, never feeds back into LLM
      * context).

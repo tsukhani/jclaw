@@ -54,11 +54,11 @@ import utils.LatencyTrace;
  *
  * <h3>The yield handshake (JCLAW-273)</h3>
  * Both loops scan tool-result entries from the just-appended round
- * for {@link tools.YieldToSubagentTool#YIELD_SENTINEL_PREFIX}. When
+ * for {@link tools.SubagentYieldTool#YIELD_SENTINEL_PREFIX}. When
  * the marker appears, the loop returns {@link AgentRunner#YIELDED_RESPONSE}
  * so the caller skips the final-assistant-message persist; the
  * parent's logical turn resumes later via
- * {@code SpawnSubagentTool.runAsyncAndAnnounce} once the child
+ * {@code SubagentSpawnTool.runAsyncAndAnnounce} once the child
  * terminates.
  */
 public final class ToolCallLoopRunner {
@@ -304,15 +304,15 @@ public final class ToolCallLoopRunner {
         // round on the now-stale plan.
         AgentRunner.checkSubagentCancel(conversation);
 
-        // JCLAW-273: detect a successful yield_to_subagent call and bail
+        // JCLAW-273: detect a successful subagent_yield call and bail
         // out of the tool-call loop without continuing to the next LLM
         // round. The runner returns YIELDED_RESPONSE so the caller skips
         // its final-assistant-message persist; the parent's logical
-        // turn resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce
+        // turn resumes later from tools.SubagentSpawnTool#runAsyncAndAnnounce
         // once the child terminates.
         if (yieldRequestedInLastRound(currentMessages, toolResultsAnchor)) {
             EventLogger.info("tool", agent.name, null,
-                    "Round %d: yield_to_subagent invoked — suspending parent turn".formatted(round + 1));
+                    "Round %d: subagent_yield invoked — suspending parent turn".formatted(round + 1));
             return new LoopOutcome(AgentRunner.YIELDED_RESPONSE);
         }
         return null;
@@ -321,7 +321,7 @@ public final class ToolCallLoopRunner {
     /**
      * JCLAW-273: scan the just-appended tool-result entries (those at
      * index {@code >= fromIndex}) for the
-     * {@link tools.YieldToSubagentTool#YIELD_SENTINEL_PREFIX} marker
+     * {@link tools.SubagentYieldTool#YIELD_SENTINEL_PREFIX} marker
      * that the yield companion tool returns on success. Returns
      * {@code true} if any tool-result content starts with the marker,
      * meaning the parent's loop should exit without emitting a final
@@ -338,7 +338,7 @@ public final class ToolCallLoopRunner {
             var m = currentMessages.get(i);
             if (m != null && MessageRole.TOOL.value.equals(m.role())
                     && m.content() instanceof String s
-                    && s.startsWith(tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX)) {
+                    && s.startsWith(tools.SubagentYieldTool.YIELD_SENTINEL_PREFIX)) {
                 return true;
             }
         }
@@ -384,15 +384,15 @@ public final class ToolCallLoopRunner {
         // round-loops symmetric.
         AgentRunner.checkSubagentCancel(conversation);
 
-        // JCLAW-273: yield_to_subagent detected in this round — exit the
+        // JCLAW-273: subagent_yield detected in this round — exit the
         // streaming loop without continuing to the next LLM round and
         // without emitting a final assistant payload. Returning the
         // YIELDED_RESPONSE sentinel lets streamLlmLoop short-circuit its
         // persistence + terminal-callback path; the parent's logical turn
-        // resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce.
+        // resumes later from tools.SubagentSpawnTool#runAsyncAndAnnounce.
         if (yieldRequestedInLastRound(currentMessages, streamingToolResultsAnchor)) {
             EventLogger.info("tool", agent.name, null,
-                    "Streaming round %d: yield_to_subagent invoked — suspending parent turn"
+                    "Streaming round %d: subagent_yield invoked — suspending parent turn"
                             .formatted(round + 1));
             return AgentRunner.YIELDED_RESPONSE;
         }

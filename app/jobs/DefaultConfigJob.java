@@ -280,11 +280,11 @@ public class DefaultConfigJob extends Job<Void> {
         // parent can't saturate the executor with concurrent children. Both
         // keys are editable from the Settings page's Subagents section
         // (DB-backed so changes take effect without a restart). Read path
-        // lives in tools.SpawnSubagentTool#enforceRecursionLimits.
-        seedIfAbsent(tools.SpawnSubagentTool.DEPTH_LIMIT_KEY,
-                String.valueOf(tools.SpawnSubagentTool.DEFAULT_DEPTH_LIMIT));
-        seedIfAbsent(tools.SpawnSubagentTool.BREADTH_LIMIT_KEY,
-                String.valueOf(tools.SpawnSubagentTool.DEFAULT_BREADTH_LIMIT));
+        // lives in tools.SubagentSpawnTool#enforceRecursionLimits.
+        seedIfAbsent(tools.SubagentSpawnTool.DEPTH_LIMIT_KEY,
+                String.valueOf(tools.SubagentSpawnTool.DEFAULT_DEPTH_LIMIT));
+        seedIfAbsent(tools.SubagentSpawnTool.BREADTH_LIMIT_KEY,
+                String.valueOf(tools.SubagentSpawnTool.DEFAULT_BREADTH_LIMIT));
     }
 
     private void seedDefaultAgent() {

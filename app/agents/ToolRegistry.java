@@ -124,8 +124,8 @@ public class ToolRegistry {
          *  to the same tool serialize, calls to different tools parallelize).
          *
          *  <p>Override when two distinct tools share state that races at the
-         *  DB or in-memory layer. The {@code spawn_subagent} + {@code
-         *  yield_to_subagent} pair is the motivating case: yield reads the
+         *  DB or in-memory layer. The {@code subagent_spawn} + {@code
+         *  subagent_yield} pair is the motivating case: yield reads the
          *  SubagentRun row that spawn just inserted, so they must serialize
          *  even when the LLM emits both in one assistant message. Both
          *  return the same {@code "subagent_lifecycle"} key from this
@@ -259,7 +259,7 @@ public class ToolRegistry {
      *  {@code null} for unknown names AND for tools whose own
      *  {@code serializationGroup()} is {@code null} (the parallel-safe case);
      *  used by {@link agents.ParallelToolExecutor} to merge cross-name serial
-     *  queues for the {@code spawn_subagent}/{@code yield_to_subagent} pair
+     *  queues for the {@code subagent_spawn}/{@code subagent_yield} pair
      *  and similar future cases. For unknown tools we fall back to the tool
      *  name as the group key so a typo can't accidentally unlock parallelism. */
     public static String serializationGroupFor(String toolName) {

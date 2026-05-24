@@ -16,14 +16,14 @@ import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
-import tools.SpawnSubagentTool;
-import tools.YieldToSubagentTool;
+import tools.SubagentSpawnTool;
+import tools.SubagentYieldTool;
 
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JCLAW-273 tests: companion {@code yield_to_subagent} tool plus the
- * yield-resume branch in {@code SpawnSubagentTool.runAsyncAndAnnounce}.
+ * JCLAW-273 tests: companion {@code subagent_yield} tool plus the
+ * yield-resume branch in {@code SubagentSpawnTool.runAsyncAndAnnounce}.
  *
  * <p>The two halves of the flow are exercised independently:
  * <ul>
@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * and the full chain is exercised by the resume-from-yielded-flag tests
  * below.
  */
-class YieldToSubagentToolTest extends UnitTest {
+class SubagentYieldToolTest extends UnitTest {
 
     private com.sun.net.httpserver.HttpServer llmServer;
     private int port;
@@ -68,9 +68,9 @@ class YieldToSubagentToolTest extends UnitTest {
 
     @Test
     void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(YieldToSubagentTool.TOOL_NAME);
-        assertNotNull(tool, "yield_to_subagent must be registered by ToolRegistrationJob");
-        assertEquals(YieldToSubagentTool.TOOL_NAME, tool.name());
+        var tool = ToolRegistry.lookupTool(SubagentYieldTool.TOOL_NAME);
+        assertNotNull(tool, "subagent_yield must be registered by ToolRegistrationJob");
+        assertEquals(SubagentYieldTool.TOOL_NAME, tool.name());
         assertEquals("System", tool.category());
     }
 
@@ -86,7 +86,7 @@ class YieldToSubagentToolTest extends UnitTest {
                 "{\"runId\":\"" + run.id + "\"}");
 
         // Sentinel: AgentRunner scans tool-result text for this exact prefix.
-        assertTrue(result.startsWith(YieldToSubagentTool.YIELD_SENTINEL_PREFIX),
+        assertTrue(result.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX),
                 "yield tool must return the YIELD_SENTINEL_PREFIX, got: " + result);
         var parsed = JsonParser.parseString(result).getAsJsonObject();
         assertEquals("yielded", parsed.get("action").getAsString());
@@ -215,7 +215,7 @@ class YieldToSubagentToolTest extends UnitTest {
 
         var result = invokeYieldOnVt(parent.id,
                 "{\"conversationId\":\"" + childConvId + "\"}");
-        assertTrue(result.startsWith(YieldToSubagentTool.YIELD_SENTINEL_PREFIX),
+        assertTrue(result.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX),
                 "conversationId lookup must succeed, got: " + result);
         var parsed = JsonParser.parseString(result).getAsJsonObject();
         assertEquals(String.valueOf(run.id), parsed.get("runId").getAsString(),
@@ -243,7 +243,7 @@ class YieldToSubagentToolTest extends UnitTest {
         var result = invokeYieldOnVt(parent.id,
                 "{\"runId\":\"" + primary.id + "\","
                         + "\"conversationId\":\"" + other.childConversation.id + "\"}");
-        assertTrue(result.startsWith(YieldToSubagentTool.YIELD_SENTINEL_PREFIX),
+        assertTrue(result.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX),
                 "explicit runId must succeed even alongside an unrelated conversationId, got: " + result);
 
         JPA.em().clear();
@@ -281,10 +281,10 @@ class YieldToSubagentToolTest extends UnitTest {
         var freshC = (SubagentRun) SubagentRun.findById(runC.id);
         assertEquals(Integer.valueOf(42), freshA.yieldTimeoutSeconds,
                 "in-range timeoutSeconds must persist verbatim");
-        assertEquals(Integer.valueOf(YieldToSubagentTool.MAX_TIMEOUT_SECONDS),
+        assertEquals(Integer.valueOf(SubagentYieldTool.MAX_TIMEOUT_SECONDS),
                 freshB.yieldTimeoutSeconds,
                 "above-max timeoutSeconds must clamp to MAX_TIMEOUT_SECONDS");
-        assertEquals(Integer.valueOf(YieldToSubagentTool.DEFAULT_TIMEOUT_SECONDS),
+        assertEquals(Integer.valueOf(SubagentYieldTool.DEFAULT_TIMEOUT_SECONDS),
                 freshC.yieldTimeoutSeconds,
                 "missing timeoutSeconds must fall back to DEFAULT");
     }
@@ -293,7 +293,7 @@ class YieldToSubagentToolTest extends UnitTest {
     void yieldOnAlreadyTerminalFailedRunSurfacesFailureReasonAsReply() throws Exception {
         // Cousin to the COMPLETED test: when the child terminated FAILED,
         // SubagentRun.outcome carries the failure reason (see
-        // SpawnSubagentTool.runAsyncAndAnnounce). The already_terminal
+        // SubagentSpawnTool.runAsyncAndAnnounce). The already_terminal
         // envelope must surface that reason in the reply field too, not
         // just for the COMPLETED case — otherwise an LLM yielding into a
         // crashed child gets an empty reply with no signal about why.
@@ -332,7 +332,7 @@ class YieldToSubagentToolTest extends UnitTest {
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
-                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
         var run = new SubagentRun();
@@ -341,7 +341,7 @@ class YieldToSubagentToolTest extends UnitTest {
         run.parentConversation = parentConv;
         run.childConversation = childConv;
         run.status = SubagentRun.Status.RUNNING;
-        run.yielded = true; // simulate yield_to_subagent having flipped this
+        run.yielded = true; // simulate subagent_yield having flipped this
         run.save();
 
         var runId = run.id;
@@ -351,7 +351,7 @@ class YieldToSubagentToolTest extends UnitTest {
 
         commitAndReopen();
 
-        SpawnSubagentTool.runAsyncAndAnnounce(
+        SubagentSpawnTool.runAsyncAndAnnounce(
                 runId, childAgent.id, childConvId, parentConvId,
                 parentName, "session", "fresh", "yield-label",
                 30, "do the thing");
@@ -366,7 +366,7 @@ class YieldToSubagentToolTest extends UnitTest {
         java.util.List<Message> announces = Message.find(
                 "conversation = ?1 AND messageKind = ?2 ORDER BY createdAt ASC",
                 Conversation.findById(parentConvId),
-                SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
         assertEquals(1, announces.size(),
                 "yield resume must post exactly one announce");
         var announce = announces.getFirst();
@@ -408,7 +408,7 @@ class YieldToSubagentToolTest extends UnitTest {
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
-                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
         var run = new SubagentRun();
@@ -427,7 +427,7 @@ class YieldToSubagentToolTest extends UnitTest {
         commitAndReopen();
 
         // Bogus childAgentId: triggers the "Subagent rows vanished" branch.
-        SpawnSubagentTool.runAsyncAndAnnounce(
+        SubagentSpawnTool.runAsyncAndAnnounce(
                 runId, 999_999_999L, childConvId, parentConvId,
                 parent.name, "session", "fresh", "fail-label",
                 30, "task");
@@ -440,7 +440,7 @@ class YieldToSubagentToolTest extends UnitTest {
         java.util.List<Message> announces = Message.find(
                 "conversation = ?1 AND messageKind = ?2",
                 Conversation.findById(parentConvId),
-                SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
         assertEquals(1, announces.size());
         assertEquals(MessageRole.USER.value, ((Message) announces.getFirst()).role,
                 "yielded FAILED announce must still post USER-role so the parent's resume sees it");
@@ -489,7 +489,7 @@ class YieldToSubagentToolTest extends UnitTest {
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
-                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
         var run = new SubagentRun();
@@ -510,7 +510,7 @@ class YieldToSubagentToolTest extends UnitTest {
 
         try {
             // 1-second budget; the gate blocks past it so the child times out.
-            SpawnSubagentTool.runAsyncAndAnnounce(
+            SubagentSpawnTool.runAsyncAndAnnounce(
                     runId, childAgentId, childConvId, parentConvId,
                     parent.name, "session", "fresh", "timeout-label",
                     1, "long task");
@@ -523,7 +523,7 @@ class YieldToSubagentToolTest extends UnitTest {
             java.util.List<Message> announces = Message.find(
                     "conversation = ?1 AND messageKind = ?2",
                     Conversation.findById(parentConvId),
-                    SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                    SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
             assertEquals(1, announces.size());
             assertEquals(MessageRole.USER.value, ((Message) announces.getFirst()).role,
                     "yielded TIMEOUT announce must still post USER-role");
@@ -550,7 +550,7 @@ class YieldToSubagentToolTest extends UnitTest {
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
-                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
         var run = new SubagentRun();
@@ -568,7 +568,7 @@ class YieldToSubagentToolTest extends UnitTest {
 
         commitAndReopen();
 
-        SpawnSubagentTool.runAsyncAndAnnounce(
+        SubagentSpawnTool.runAsyncAndAnnounce(
                 runId, childAgent.id, childConvId, parentConvId,
                 parent.name, "session", "fresh", "regression",
                 30, "task");
@@ -581,7 +581,7 @@ class YieldToSubagentToolTest extends UnitTest {
         java.util.List<Message> announces = Message.find(
                 "conversation = ?1 AND messageKind = ?2",
                 Conversation.findById(parentConvId),
-                SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
         assertEquals(1, announces.size());
         assertEquals(MessageRole.SYSTEM.value, ((Message) announces.getFirst()).role,
                 "plain async (yielded=false) must keep the JCLAW-270 SYSTEM-role announce shape");
@@ -607,7 +607,7 @@ class YieldToSubagentToolTest extends UnitTest {
         sysAnnounce.conversation = parentConv;
         sysAnnounce.role = MessageRole.SYSTEM.value;
         sysAnnounce.content = "Subagent completed";
-        sysAnnounce.messageKind = SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE;
+        sysAnnounce.messageKind = SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE;
         sysAnnounce.save();
 
         // User-role announce (kept in LLM context).
@@ -615,7 +615,7 @@ class YieldToSubagentToolTest extends UnitTest {
         userAnnounce.conversation = parentConv;
         userAnnounce.role = MessageRole.USER.value;
         userAnnounce.content = "Subagent completed (yield)";
-        userAnnounce.messageKind = SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE;
+        userAnnounce.messageKind = SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE;
         userAnnounce.save();
 
         commitAndReopen();
@@ -624,11 +624,11 @@ class YieldToSubagentToolTest extends UnitTest {
                 Conversation.findById(parentConv.id)));
         assertTrue(loaded.stream().anyMatch(m ->
                         MessageRole.USER.value.equals(m.role)
-                                && SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
+                                && SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
                 "USER-role yield announce must appear in LLM context");
         assertTrue(loaded.stream().noneMatch(m ->
                         MessageRole.SYSTEM.value.equals(m.role)
-                                && SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
+                                && SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
                 "SYSTEM-role plain-async announce must remain filtered out");
     }
 
@@ -646,7 +646,7 @@ class YieldToSubagentToolTest extends UnitTest {
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
-                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
         var run = new SubagentRun();
@@ -667,7 +667,7 @@ class YieldToSubagentToolTest extends UnitTest {
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
-                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
         var run = new SubagentRun();
@@ -718,23 +718,23 @@ class YieldToSubagentToolTest extends UnitTest {
         JPA.em().getTransaction().begin();
     }
 
-    /** Invoke YieldToSubagentTool.execute on a VT so the body sees committed
+    /** Invoke SubagentYieldTool.execute on a VT so the body sees committed
      *  rows through a fresh persistence context — matches the
-     *  SpawnSubagentToolTest pattern. */
+     *  SubagentSpawnToolTest pattern. */
     private String invokeYieldOnVt(Long parentAgentId, String argsJson) throws Exception {
         var resultRef = new AtomicReference<String>();
         var errorRef = new AtomicReference<Exception>();
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
-                var tool = (YieldToSubagentTool) ToolRegistry.lookupTool(YieldToSubagentTool.TOOL_NAME);
+                var tool = (SubagentYieldTool) ToolRegistry.lookupTool(SubagentYieldTool.TOOL_NAME);
                 resultRef.set(tool.execute(argsJson, parent));
             } catch (Exception e) {
                 errorRef.set(e);
             }
         });
         thread.join(30_000);
-        assertFalse(thread.isAlive(), "yield_to_subagent must complete within 30s");
+        assertFalse(thread.isAlive(), "subagent_yield must complete within 30s");
         if (errorRef.get() != null) throw errorRef.get();
         return resultRef.get();
     }

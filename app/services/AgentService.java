@@ -81,7 +81,7 @@ public class AgentService {
 
     /**
      * Six-argument variant with explicit control over workspace folder
-     * materialisation. {@link tools.SpawnSubagentTool#bootstrapChild} passes
+     * materialisation. {@link tools.SubagentSpawnTool#bootstrapChild} passes
      * {@code createWorkspace=false} because subagents are delegates of their
      * parent agent — they inherit the parent's workspace via
      * {@link #workspacePath(String)}'s parent-chain walk and never need
@@ -417,7 +417,7 @@ public class AgentService {
 
     /**
      * Resolve an agent name to the on-disk workspace owner. Subagents
-     * (spawned via {@link tools.SpawnSubagentTool}) inherit their parent's
+     * (spawned via {@link tools.SubagentSpawnTool}) inherit their parent's
      * workspace because they're delegates of the parent — anything they
      * read or write should land in the parent's tree, and they have no
      * on-disk identity of their own ({@link #create} skips workspace

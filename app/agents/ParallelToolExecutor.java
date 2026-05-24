@@ -38,7 +38,7 @@ import static utils.GsonHolder.INSTANCE;
  *   is the tool's own name, so multiple calls to the same tool serialize.
  *   Tools that share DB or in-memory state with another tool override
  *   {@code serializationGroup()} to return a shared key — for instance
- *   {@code spawn_subagent} and {@code yield_to_subagent} both return
+ *   {@code subagent_spawn} and {@code subagent_yield} both return
  *   {@code "subagent_lifecycle"} so yield can't read before spawn has
  *   committed its SubagentRun row. The JCLAW-80 fix in spirit: the LLM's
  *   declared call order is the authoritative contract for stateful tools.</li>
@@ -175,7 +175,7 @@ public final class ParallelToolExecutor {
      * </ul>
      * Default group key is the tool's own name, so distinct tools still
      * parallelize. Tools that share state across names (e.g.
-     * {@code spawn_subagent} + {@code yield_to_subagent} both return
+     * {@code subagent_spawn} + {@code subagent_yield} both return
      * {@code "subagent_lifecycle"}) merge into one serial queue.
      * LinkedHashMap preserves first-occurrence order so the unsafe groups,
      * like the safe singletons, see their declared positions.

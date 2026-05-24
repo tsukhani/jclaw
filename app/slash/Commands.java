@@ -1036,7 +1036,7 @@ public final class Commands {
     /**
      * JCLAW-274: {@code /subagent history <id>} — render the child
      * conversation's transcript inline as plain text. Permission mirrors
-     * the {@link tools.SessionsHistoryTool} tool path: the calling agent
+     * the {@link tools.ConversationsHistoryTool} tool path: the calling agent
      * must own the run. JClaw is single-tenant Personal Edition (no
      * operator-role concept in the codebase), so the AC's "operators can
      * read any" is documented as a future enhancement once auth lands —
@@ -1052,7 +1052,7 @@ public final class Commands {
         if (runId == null) return MISSING_RUN_ID_MSG;
         var run = (models.SubagentRun) models.SubagentRun.findById(runId);
         if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
-        // Same parent-owned gate as SessionsHistoryTool.
+        // Same parent-owned gate as ConversationsHistoryTool.
         if (agent == null
                 || run.parentAgent == null
                 || !agent.id.equals(run.parentAgent.id)) {

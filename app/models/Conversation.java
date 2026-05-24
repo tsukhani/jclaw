@@ -117,7 +117,7 @@ public class Conversation extends Model {
 
     /**
      * Inherited parent-conversation summary stamped at spawn time when the
-     * parent calls {@code spawn_subagent} with {@code context="inherit"}
+     * parent calls {@code subagent_spawn} with {@code context="inherit"}
      * (JCLAW-268). Hard-capped at 8000 characters by the spawn path.
      * Re-injected into the child's system prompt on every turn by
      * {@link services.SessionCompactor#appendParentContextToPrompt} so the

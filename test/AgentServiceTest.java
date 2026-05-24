@@ -76,7 +76,7 @@ class AgentServiceTest extends UnitTest {
     @Test
     void createWithCreateWorkspaceFalseDoesNotMaterializeDirectory() {
         // The 6-arg overload's createWorkspace=false branch is the seam
-        // SpawnSubagentTool uses to skip the SOUL/IDENTITY/etc. skeleton
+        // SubagentSpawnTool uses to skip the SOUL/IDENTITY/etc. skeleton
         // for spawned subagents. Verify that no on-disk artefacts land
         // for that path even though the Agent row itself persists.
         var agent = AgentService.create("svc-no-workspace", "openrouter", "gpt-4.1",
@@ -115,7 +115,7 @@ class AgentServiceTest extends UnitTest {
 
     @Test
     void workspacePathWalksMultiHopParentChainToRoot() {
-        // Defence in depth: the depthLimit=1 cap in SpawnSubagentTool
+        // Defence in depth: the depthLimit=1 cap in SubagentSpawnTool
         // prevents grandchildren in practice, but the walk must handle
         // the case anyway — a future change to the limit shouldn't
         // require touching workspacePath.

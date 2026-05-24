@@ -61,8 +61,8 @@ public class SubagentRun extends Model {
 
     /**
      * JCLAW-326: operator-provided short display name passed to
-     * {@code spawn_subagent}'s {@code label} param, persisted here so
-     * {@code sessions_list} can filter (label-glob) and surface a stable
+     * {@code subagent_spawn}'s {@code label} param, persisted here so
+     * {@code conversations_list} can filter (label-glob) and surface a stable
      * display column without parsing the per-run announce-message metadata
      * JSON. Null for pre-JCLAW-326 rows; treated as "unnamed" by the list
      * tool.
@@ -80,7 +80,7 @@ public class SubagentRun extends Model {
 
     /**
      * JCLAW-273: yield-resume flag for async spawns. When the parent agent
-     * invokes {@code yield_to_subagent} mid-turn with this run id, the tool
+     * invokes {@code subagent_yield} mid-turn with this run id, the tool
      * flips this column to {@code true} and the parent's {@code AgentRunner}
      * loop exits without emitting a final assistant reply. The async-spawn
      * announce VT reads this column after the child terminates and switches
@@ -98,7 +98,7 @@ public class SubagentRun extends Model {
 
     /**
      * JCLAW-326: optional caller-tightened resume timeout. When
-     * {@code yield_to_subagent} is invoked with an explicit
+     * {@code subagent_yield} is invoked with an explicit
      * {@code timeoutSeconds} smaller than the spawn-time
      * {@code runTimeoutSeconds}, the value lands here and a watchdog VT
      * (registered via {@link services.SubagentRegistry#scheduleYieldTimeout})

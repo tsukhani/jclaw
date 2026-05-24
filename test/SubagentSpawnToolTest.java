@@ -18,22 +18,22 @@ import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
 import services.Tx;
-import tools.SpawnSubagentTool;
+import tools.SubagentSpawnTool;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JCLAW-265 tests: spawn_subagent tool.
+ * JCLAW-265 tests: subagent_spawn tool.
  *
  * <p>Each test stands up an in-process HTTP mock as the LLM, points a
  * test-provider at it via ConfigService, registers the tools, then drives
- * SpawnSubagentTool.execute directly on a virtual thread. The VT pattern
+ * SubagentSpawnTool.execute directly on a virtual thread. The VT pattern
  * mirrors AgentRunnerCoreTest — the tool spawns the child run on its own
  * VT and awaits a Future, which requires that parent + child rows be
  * visible from a fresh persistence context.
  */
-class SpawnSubagentToolTest extends UnitTest {
+class SubagentSpawnToolTest extends UnitTest {
 
     private com.sun.net.httpserver.HttpServer llmServer;
     private int port;
@@ -58,9 +58,9 @@ class SpawnSubagentToolTest extends UnitTest {
 
     @Test
     void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(SpawnSubagentTool.TOOL_NAME);
-        assertNotNull(tool, "spawn_subagent must be registered by ToolRegistrationJob");
-        assertEquals(SpawnSubagentTool.TOOL_NAME, tool.name());
+        var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+        assertNotNull(tool, "subagent_spawn must be registered by ToolRegistrationJob");
+        assertEquals(SubagentSpawnTool.TOOL_NAME, tool.name());
         assertEquals("System", tool.category());
     }
 
@@ -108,7 +108,7 @@ class SpawnSubagentToolTest extends UnitTest {
         Conversation childConv = Conversation.findById(run.childConversation.id);
         assertNotNull(childConv.parentConversation);
         assertEquals(parentConv.id, childConv.parentConversation.id);
-        assertEquals(SpawnSubagentTool.SUBAGENT_CHANNEL, childConv.channelType);
+        assertEquals(SubagentSpawnTool.SUBAGENT_CHANNEL, childConv.channelType);
 
         // Event lifecycle: SPAWN + COMPLETE, no ERROR.
         java.util.List<EventLog> spawnEvents = EventLog.find(
@@ -236,7 +236,7 @@ class SpawnSubagentToolTest extends UnitTest {
         // is at depth 0 and may spawn; its child is at depth 1 and may not.
         // We set the Config row explicitly so the test exercises the
         // DB-backed read path rather than relying on the in-code fallback.
-        ConfigService.set(SpawnSubagentTool.DEPTH_LIMIT_KEY, "1");
+        ConfigService.set(SubagentSpawnTool.DEPTH_LIMIT_KEY, "1");
         var root = createAgent("p-depth-root", "test-provider", "test-model");
         var child = createAgent("p-depth-child", "test-provider", "test-model");
         child.parentAgent = root;
@@ -273,7 +273,7 @@ class SpawnSubagentToolTest extends UnitTest {
         // Seed five RUNNING SubagentRun rows for the parent and verify the
         // sixth spawn attempt is refused. Sets the Config row explicitly so
         // the test exercises the DB-backed read path.
-        ConfigService.set(SpawnSubagentTool.BREADTH_LIMIT_KEY, "5");
+        ConfigService.set(SubagentSpawnTool.BREADTH_LIMIT_KEY, "5");
         var parent = createAgent("p-breadth", "test-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-breadth");
         // Seed RUNNING rows. Each needs a distinct child Agent + Conversation
@@ -283,7 +283,7 @@ class SpawnSubagentToolTest extends UnitTest {
             childAgent.parentAgent = parent;
             childAgent.save();
             var childConv = ConversationService.create(childAgent,
-                    SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                    SubagentSpawnTool.SUBAGENT_CHANNEL, null);
             childConv.parentConversation = parentConv;
             childConv.save();
             var run = new SubagentRun();
@@ -885,7 +885,7 @@ class SpawnSubagentToolTest extends UnitTest {
         // discriminator + payload.
         java.util.List<Message> announces = Message.find(
                 "conversation = ?1 AND messageKind = ?2 ORDER BY createdAt ASC",
-                Conversation.findById(parentConv.id), SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                Conversation.findById(parentConv.id), SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
         assertEquals(1, announces.size(),
                 "exactly one announce Message must land in the parent conversation");
         var announce = announces.getFirst();
@@ -934,7 +934,7 @@ class SpawnSubagentToolTest extends UnitTest {
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
-                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
         var run = new SubagentRun();
@@ -957,7 +957,7 @@ class SpawnSubagentToolTest extends UnitTest {
         // bogus id bypasses the Hibernate cascade that previously fired
         // TransientPropertyValueException on AgentToolConfig flushes.
         long bogusChildAgentId = 999_999_999L;
-        SpawnSubagentTool.runAsyncAndAnnounce(
+        SubagentSpawnTool.runAsyncAndAnnounce(
                 runId, bogusChildAgentId, childConvId, parentConvId,
                 parentName, "session", "fresh", "will-fail",
                 30, "async-fail-task");
@@ -973,7 +973,7 @@ class SpawnSubagentToolTest extends UnitTest {
         java.util.List<Message> announces = Message.find(
                 "conversation = ?1 AND messageKind = ?2",
                 Conversation.findById(parentConvId),
-                SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
         assertEquals(1, announces.size(),
                 "FAILED async spawn must post an announce Message");
         var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
@@ -1027,7 +1027,7 @@ class SpawnSubagentToolTest extends UnitTest {
             java.util.List<Message> announces = Message.find(
                     "conversation = ?1 AND messageKind = ?2",
                     Conversation.findById(parentConv.id),
-                    SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                    SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
             assertEquals(1, announces.size(),
                     "TIMEOUT path must still post an announce");
             var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
@@ -1093,7 +1093,7 @@ class SpawnSubagentToolTest extends UnitTest {
         java.util.List<Message> announces = Message.find(
                 "conversation = ?1 AND messageKind = ?2",
                 Conversation.findById(parentConv.id),
-                SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
         assertEquals(1, announces.size());
         var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
         var announceReply = payload.get("reply").getAsString();
@@ -1137,7 +1137,7 @@ class SpawnSubagentToolTest extends UnitTest {
         JPA.em().clear();
         var conv = (Conversation) Conversation.findById(parentConv.id);
         var llmHistory = Tx.run(() -> ConversationService.loadRecentMessages(conv));
-        assertTrue(llmHistory.stream().noneMatch(m -> SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
+        assertTrue(llmHistory.stream().noneMatch(m -> SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
                 "announce-kind messages must be filtered out of LLM context assembly");
     }
 
@@ -1155,7 +1155,7 @@ class SpawnSubagentToolTest extends UnitTest {
         var parent = createAgent("p-kill-flag", "test-provider", "test-model");
         var child = createAgent("c-kill-flag", "test-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-kill-flag");
-        var childConv = ConversationService.create(child, SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = Tx.run(() -> {
             var r = new SubagentRun();
             r.parentAgent = parent;
@@ -1211,7 +1211,7 @@ class SpawnSubagentToolTest extends UnitTest {
         var parent = createAgent("p-no-int", "test-provider", "test-model");
         var child = createAgent("c-no-int", "test-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-no-int");
-        var childConv = ConversationService.create(child, SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = Tx.run(() -> {
             var r = new SubagentRun();
             r.parentAgent = parent;
@@ -1273,7 +1273,7 @@ class SpawnSubagentToolTest extends UnitTest {
         // the run id.
         var parent = createAgent("p-ckpt", "test-provider", "test-model");
         var child = createAgent("c-ckpt", "test-provider", "test-model");
-        var childConv = ConversationService.create(child, SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var parentConvForRun = ConversationService.create(parent, "web", "u-ckpt-parent");
         var run = Tx.run(() -> {
             var r = new SubagentRun();
@@ -1387,7 +1387,7 @@ class SpawnSubagentToolTest extends UnitTest {
         var child = createAgent("c-cancel-clean", "test-provider", "test-model");
         child.parentAgent = parent;
         child.save();
-        var childConv = ConversationService.create(child, SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
 
@@ -1424,7 +1424,7 @@ class SpawnSubagentToolTest extends UnitTest {
         // CancellationException branch, exercised by a real kill in the
         // killFlipsCancelFlagAndStatusToKilled fixture.)
         long bogusChildAgentId = 999_999_999L;
-        SpawnSubagentTool.runAsyncAndAnnounce(
+        SubagentSpawnTool.runAsyncAndAnnounce(
                 run.id, bogusChildAgentId, childConv.id, parentConv.id,
                 parent.name, "session", "fresh", "cancel-test",
                 30, "task");
@@ -1452,7 +1452,7 @@ class SpawnSubagentToolTest extends UnitTest {
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
-                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+                SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         childConv.save();
         var run = new SubagentRun();
@@ -1470,7 +1470,7 @@ class SpawnSubagentToolTest extends UnitTest {
         commitAndReopen();
 
         long bogusChildAgentId = 999_999_999L;
-        SpawnSubagentTool.runAsyncAndAnnounce(
+        SubagentSpawnTool.runAsyncAndAnnounce(
                 runId, bogusChildAgentId, childConvId, parentConvId,
                 parentName, "session", "fresh", "regression",
                 30, "regression-task");
@@ -1484,7 +1484,7 @@ class SpawnSubagentToolTest extends UnitTest {
         java.util.List<Message> announces = Message.find(
                 "conversation = ?1 AND messageKind = ?2",
                 Conversation.findById(parentConvId),
-                SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
         assertEquals(1, announces.size(),
                 "non-cancellation failure still posts announce");
         java.util.List<EventLog> errorEvents = EventLog.find(
@@ -1574,7 +1574,7 @@ class SpawnSubagentToolTest extends UnitTest {
         JPA.em().getTransaction().begin();
     }
 
-    /** Invoke SpawnSubagentTool.execute on a VT so AgentRunner.run inside the
+    /** Invoke SubagentSpawnTool.execute on a VT so AgentRunner.run inside the
      *  tool sees committed rows (the synchronous spawn re-enters a VT of its
      *  own for the child; that's fine — the outer VT exists only to give the
      *  whole tool body a fresh persistence context). */
@@ -1584,14 +1584,14 @@ class SpawnSubagentToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
-                var tool = (SpawnSubagentTool) ToolRegistry.lookupTool(SpawnSubagentTool.TOOL_NAME);
+                var tool = (SubagentSpawnTool) ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
                 resultRef.set(tool.execute(argsJson, parent));
             } catch (Exception e) {
                 errorRef.set(e);
             }
         });
         thread.join(30_000);
-        assertFalse(thread.isAlive(), "spawn_subagent must complete within 30s");
+        assertFalse(thread.isAlive(), "subagent_spawn must complete within 30s");
         if (errorRef.get() != null) throw errorRef.get();
         return resultRef.get();
     }

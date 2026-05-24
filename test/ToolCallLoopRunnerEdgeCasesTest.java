@@ -489,10 +489,10 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
 
     @Test
     void yieldRequestedInLastRoundReturnsTrueOnSentinelPrefix() {
-        var sentinel = tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX + "child-reply";
+        var sentinel = tools.SubagentYieldTool.YIELD_SENTINEL_PREFIX + "child-reply";
         var messages = List.of(
                 ChatMessage.user("user msg"),
-                ChatMessage.toolResult("tc1", "yield_to_subagent", sentinel));
+                ChatMessage.toolResult("tc1", "subagent_yield", sentinel));
         assertTrue(ToolCallLoopRunner.yieldRequestedInLastRound(messages, 1),
                 "yield sentinel in a TOOL-role result must return true");
     }
@@ -501,7 +501,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
     void yieldRequestedInLastRoundIgnoresNonToolRoleAndNonSentinel() {
         var nonToolSentinel = List.of(
                 ChatMessage.assistant(
-                        tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX + "looks-like-yield",
+                        tools.SubagentYieldTool.YIELD_SENTINEL_PREFIX + "looks-like-yield",
                         null));
         assertFalse(ToolCallLoopRunner.yieldRequestedInLastRound(nonToolSentinel, 0),
                 "sentinel text in assistant role must NOT trigger yield");
@@ -521,9 +521,9 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
         // The fromIndex argument scopes the scan to messages appended in
         // the just-finished round. A sentinel BEFORE fromIndex must NOT
         // trigger.
-        var sentinel = tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX + "prior-round";
+        var sentinel = tools.SubagentYieldTool.YIELD_SENTINEL_PREFIX + "prior-round";
         var messages = List.of(
-                ChatMessage.toolResult("old", "yield_to_subagent", sentinel),
+                ChatMessage.toolResult("old", "subagent_yield", sentinel),
                 ChatMessage.user("subsequent user msg"));
 
         assertFalse(ToolCallLoopRunner.yieldRequestedInLastRound(messages, 1),

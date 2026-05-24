@@ -67,7 +67,7 @@ public class AgentRunner {
      * and {@link #runYieldResume} check {@code response.equals(YIELDED_RESPONSE)}
      * to skip the final-assistant-message persist (no reply to emit;
      * the resume re-invocation comes from
-     * {@link tools.SpawnSubagentTool#runAsyncAndAnnounce} once the child
+     * {@link tools.SubagentSpawnTool#runAsyncAndAnnounce} once the child
      * terminates).
      */
     public static final String YIELDED_RESPONSE = "__JCLAW_273_YIELDED__";
@@ -210,7 +210,7 @@ public class AgentRunner {
 
     /**
      * JCLAW-273: resume entrypoint used by
-     * {@link tools.SpawnSubagentTool#runAsyncAndAnnounce} after a yielded
+     * {@link tools.SubagentSpawnTool#runAsyncAndAnnounce} after a yielded
      * async child terminates. The yield-resume announce Message has already
      * been persisted into the parent conversation as a USER-role row (with
      * {@code messageKind=subagent_announce}); this entrypoint acquires the
@@ -469,13 +469,13 @@ public class AgentRunner {
 
             // JCLAW-273: yielded response — no final assistant message to
             // persist. The parent agent's turn ended cleanly after the
-            // yield_to_subagent tool call; the resume re-invocation will
-            // arrive from tools.SpawnSubagentTool#runAsyncAndAnnounce once
+            // subagent_yield tool call; the resume re-invocation will
+            // arrive from tools.SubagentSpawnTool#runAsyncAndAnnounce once
             // the child terminates. Return immediately so the caller sees
             // YIELDED_RESPONSE on the RunResult.
             if (YIELDED_RESPONSE.equals(response)) {
                 EventLogger.info(EVT_CATEGORY_AGENT, agent.name, conversation.channelType,
-                        "Parent turn suspended via yield_to_subagent");
+                        "Parent turn suspended via subagent_yield");
                 var updatedConv = services.Tx.run(() -> ConversationService.findById(conversationId));
                 return new RunResult(response, updatedConv);
             }
@@ -787,7 +787,7 @@ public class AgentRunner {
 
         // JCLAW-273: parent agent yielded into an async subagent. No final
         // assistant message to persist or emit; the parent's logical turn
-        // resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce
+        // resumes later from tools.SubagentSpawnTool#runAsyncAndAnnounce
         // once the child terminates.
         if (YIELDED_RESPONSE.equals(post.content())) {
             handleStreamingYield(agent, channelType, trace, cb);
@@ -945,7 +945,7 @@ public class AgentRunner {
     private static void handleStreamingYield(Agent agent, String channelType, LatencyTrace trace,
                                               StreamingCallbacks cb) {
         EventLogger.info(EVT_CATEGORY_AGENT, agent.name, channelType,
-                "Streaming parent turn suspended via yield_to_subagent");
+                "Streaming parent turn suspended via subagent_yield");
         trace.mark(LatencyTrace.STREAM_BODY_END);
         cb.onComplete().accept("");
     }

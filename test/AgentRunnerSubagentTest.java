@@ -15,15 +15,15 @@ import services.ConfigService;
 import services.ConversationService;
 import services.SubagentRegistry;
 import services.Tx;
-import tools.SpawnSubagentTool;
+import tools.SubagentSpawnTool;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-308: AgentRunner-level subagent integration branches NOT already
- * pinned by {@link tools.SpawnSubagentTool}'s own test file
- * (SpawnSubagentToolTest covers the spawn-tool surface — child Agent + FK,
+ * pinned by {@link tools.SubagentSpawnTool}'s own test file
+ * (SubagentSpawnToolTest covers the spawn-tool surface — child Agent + FK,
  * inherit-mode parent-context, tool union grant, async announce, etc.).
  *
  * <p>This file pins the runner-side hooks the tool relies on:
@@ -36,14 +36,14 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>{@link AgentRunner#runYieldResume} — async-yield resume entrypoint
  *       that runs the standard pipeline WITHOUT re-appending a user
  *       message (the announce row was already persisted by
- *       {@code SpawnSubagentTool#postAnnounceMessage}).</li>
+ *       {@code SubagentSpawnTool#postAnnounceMessage}).</li>
  * </ul>
  *
  * <p>The AC "cancellation mid-tool-call stops the loop at the next safe
  * checkpoint and surfaces a cancelled status" is pinned at the lowest
  * layer here: the checkpoint itself. The integration between the
- * checkpoint and {@code SpawnSubagentTool}'s outer catch (which marks the
- * SubagentRun KILLED) is already covered in SpawnSubagentToolTest's
+ * checkpoint and {@code SubagentSpawnTool}'s outer catch (which marks the
+ * SubagentRun KILLED) is already covered in SubagentSpawnToolTest's
  * cancellation tests.
  */
 class AgentRunnerSubagentTest extends UnitTest {
@@ -106,7 +106,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         var parentAgent = createAgent("ck-flag-parent", "test-provider", "test-model");
         var childAgent = createAgent("ck-flag-child", "test-provider", "test-model");
         var parentConv = ConversationService.create(parentAgent, "web", "u-flag-parent");
-        var childConv = ConversationService.create(childAgent, SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        var childConv = ConversationService.create(childAgent, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = Tx.run(() -> {
             var r = new SubagentRun();
             r.parentAgent = parentAgent;
@@ -130,7 +130,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         // The load-bearing assertion: when the SubagentRegistry cancel
         // flag for the current conversation's run is set, the next
         // checkpoint throws {@link RunCancelledException} carrying the
-        // run id. SpawnSubagentTool's outer catch then leaves the
+        // run id. SubagentSpawnTool's outer catch then leaves the
         // already-stamped KILLED audit row intact (vs marking it FAILED).
         //
         // Production calls {@link SubagentRegistry#kill} which both flips
@@ -145,7 +145,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         var parentAgent = createAgent("ck-throw-parent", "test-provider", "test-model");
         var childAgent = createAgent("ck-throw-child", "test-provider", "test-model");
         var parentConv = ConversationService.create(parentAgent, "web", "u-throw-parent");
-        var childConv = ConversationService.create(childAgent, SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        var childConv = ConversationService.create(childAgent, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = Tx.run(() -> {
             var r = new SubagentRun();
             r.parentAgent = parentAgent;
@@ -187,7 +187,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         var parentAgent = createAgent("ck-terminal-parent", "test-provider", "test-model");
         var childAgent = createAgent("ck-terminal-child", "test-provider", "test-model");
         var parentConv = ConversationService.create(parentAgent, "web", "u-terminal-parent");
-        var childConv = ConversationService.create(childAgent, SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        var childConv = ConversationService.create(childAgent, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = Tx.run(() -> {
             var r = new SubagentRun();
             r.parentAgent = parentAgent;
@@ -249,7 +249,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         var parentAgent = createAgent("run-cancel-parent", "test-provider", "test-model");
         var childAgent = createAgent("run-cancel-child", "test-provider", "test-model");
         var parentConv = ConversationService.create(parentAgent, "web", "u-run-cancel-parent");
-        var childConv = ConversationService.create(childAgent, SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        var childConv = ConversationService.create(childAgent, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = Tx.run(() -> {
             var r = new SubagentRun();
             r.parentAgent = parentAgent;
@@ -303,7 +303,7 @@ class AgentRunnerSubagentTest extends UnitTest {
      * message routes back to parent's tool-result message."
      *
      * <p>At the AgentRunner layer this AC includes the {@code runYieldResume}
-     * entrypoint, which {@code SpawnSubagentTool.runAsyncAndAnnounce}
+     * entrypoint, which {@code SubagentSpawnTool.runAsyncAndAnnounce}
      * invokes after a yielded async child terminates. The resume must NOT
      * re-append a user message (the announce was already persisted as a
      * USER-role row); it must run the standard pipeline against the
@@ -329,7 +329,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         ConversationService.appendAssistantMessage(parentConv,
                 "I'll yield to a subagent for that.", null);
 
-        // Simulate what SpawnSubagentTool#postAnnounceMessage already did
+        // Simulate what SubagentSpawnTool#postAnnounceMessage already did
         // BEFORE runAsyncAndAnnounce calls runYieldResume: persist a
         // USER-role announce row carrying the child's final reply.
         Tx.run(() -> {

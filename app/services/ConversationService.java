@@ -21,7 +21,7 @@ public class ConversationService {
      * Message persisted via {@link #appendMessage} on the current (virtual)
      * thread is stamped with this id so the chat UI can fold the nested-turn
      * trace into a collapsible block. Set by
-     * {@link tools.SpawnSubagentTool} around its inline branch's
+     * {@link tools.SubagentSpawnTool} around its inline branch's
      * {@code AgentRunner.run} call; cleared in a finally so unrelated traffic
      * on the same carrier thread never inherits a stale marker.
      *

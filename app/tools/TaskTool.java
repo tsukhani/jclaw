@@ -112,7 +112,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 Manage background tasks — the abstraction for ANY scheduled or \
                 recurring work. If the operator asks for "a subagent that runs \
                 every X" or "something that fires every X minutes", they mean a \
-                Task: subagents (spawn_subagent) fire ONCE and have no schedule \
+                Task: subagents (subagent_spawn) fire ONCE and have no schedule \
                 parameter. Single tool, multiple actions selected via the \
                 'action' parameter. Use createTask with a 'schedule' string: \
                 'now' (IMMEDIATE), '30m'/'2h'/'1d' (SCHEDULED at now+duration), \

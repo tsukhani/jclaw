@@ -41,27 +41,27 @@ public class ToolRegistrationJob extends Job<Void> {
         // every non-main agent so only main can actually invoke it
         // (defense in depth alongside the skill-not-installed gate).
         toolList.add(new JClawApiTool());
-        // JCLAW-265: spawn_subagent. Recursion limits and async path land
+        // JCLAW-265: subagent_spawn. Recursion limits and async path land
         // later (JCLAW-266, JCLAW-270) — this is the synchronous primitive.
-        toolList.add(new SpawnSubagentTool());
-        // JCLAW-273: yield_to_subagent. Companion tool to async spawn —
+        toolList.add(new SubagentSpawnTool());
+        // JCLAW-273: subagent_yield. Companion tool to async spawn —
         // flips SubagentRun.yielded so the announce VT posts a USER-role
         // resume Message and re-invokes AgentRunner.run on the parent
         // conversation when the child terminates.
-        toolList.add(new YieldToSubagentTool());
-        // JCLAW-274: sessions_history. Read a subagent run's child
+        toolList.add(new SubagentYieldTool());
+        // JCLAW-274: conversations_history. Read a subagent run's child
         // conversation transcript (role, content, tool calls/results,
         // timestamps). Parent-owned access only.
-        toolList.add(new SessionsHistoryTool());
-        // JCLAW-326: sessions_send. Bidirectional parent↔child message
+        toolList.add(new ConversationsHistoryTool());
+        // JCLAW-326: conversations_send. Bidirectional parent↔child message
         // delivery. Parent→child appends a USER message on the child's
         // conversation; child→parent appends back to the parent's
         // conversation. Fire-and-forget; does not block either side.
-        toolList.add(new SessionsSendTool());
-        // JCLAW-326: sessions_list. Paginated, parent-scoped list of this
+        toolList.add(new ConversationsSendTool());
+        // JCLAW-326: conversations_list. Paginated, parent-scoped list of this
         // agent's SubagentRun rows with status / label-glob / agentId
         // filters.
-        toolList.add(new SessionsListTool());
+        toolList.add(new ConversationsListTool());
         // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by

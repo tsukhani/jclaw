@@ -499,7 +499,7 @@ describe('Chat page — async subagent announce polling', () => {
         { id: 701, role: 'assistant', content: 'Spawned! Run id is 2.',
           toolCalls: [
             { id: 'call_x', type: 'function', icon: 'users',
-              function: { name: 'spawn_subagent', arguments: '{}' } },
+              function: { name: 'subagent_spawn', arguments: '{}' } },
           ],
           createdAt: '2026-05-14T10:00:01Z' },
         { id: 702, role: 'tool',
@@ -688,7 +688,7 @@ describe('Chat page — async subagent announce polling', () => {
     // what the chat page's tool_call SSE handler does live.
     const assistant = vm.messages.find(m => m.role === 'assistant')!
     assistant.toolCalls = [{
-      id: 'call_async', name: 'spawn_subagent', icon: 'users', arguments: '{}',
+      id: 'call_async', name: 'subagent_spawn', icon: 'users', arguments: '{}',
       resultText: '{"run_id":"7","conversation_id":"40020","status":"RUNNING"}',
     }]
 
@@ -722,7 +722,7 @@ describe('Chat page — async subagent announce polling', () => {
         { id: 1101, role: 'assistant', content: '',
           toolCalls: [
             { id: 'call_x', type: 'function', icon: 'users',
-              function: { name: 'spawn_subagent', arguments: '{}' } },
+              function: { name: 'subagent_spawn', arguments: '{}' } },
           ],
           createdAt: '2026-05-14T10:00:01Z' },
         { id: 1102, role: 'tool',
@@ -778,7 +778,7 @@ describe('Chat page — async subagent announce polling', () => {
       { id: null, role: 'user', content: 'spawn async, please' },
       { id: null, role: 'assistant', content: 'Run id is 9. Will let you know.',
         toolCalls: [{
-          id: 'call_x', name: 'spawn_subagent', icon: 'users', arguments: '{}',
+          id: 'call_x', name: 'subagent_spawn', icon: 'users', arguments: '{}',
           resultText: '{"run_id":"9","conversation_id":"40030","status":"RUNNING"}',
         }] },
     )

@@ -470,7 +470,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                 return Map.of("type", "object", "properties", Map.of());
             }
             @Override public String execute(String argsJson, Agent agent) {
-                return tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX + ",\"runId\":42}";
+                return tools.SubagentYieldTool.YIELD_SENTINEL_PREFIX + ",\"runId\":42}";
             }
         });
         ToolRegistry.publish(newTools);
