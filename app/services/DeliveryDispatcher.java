@@ -6,7 +6,13 @@ import channels.TelegramChannel;
 import channels.WhatsAppChannel;
 import models.Agent;
 import models.ChannelType;
+import models.Conversation;
+import models.Message;
+import models.MessageRole;
 import models.TelegramBinding;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * JCLAW-327 / JCLAW-295: dispatch a text message to an external chat channel.
@@ -59,7 +65,7 @@ public final class DeliveryDispatcher {
         public static DispatchResult unsupported(String channelType) {
             return new DispatchResult(false, Status.CHANNEL_UNSUPPORTED,
                     "Channel '" + channelType + "' is not a deliverable channel "
-                            + "(supported: telegram, slack, whatsapp).");
+                            + "(supported: telegram, slack, whatsapp, web).");
         }
         public static DispatchResult noConfig(String channelType, String hint) {
             return new DispatchResult(false, Status.FAILED_NO_CONFIG,
@@ -100,6 +106,7 @@ public final class DeliveryDispatcher {
             case "telegram" -> dispatchTelegram(agent, target, text);
             case "slack" -> dispatchSlack(target, text);
             case "whatsapp" -> dispatchWhatsApp(target, text);
+            case "web" -> dispatchWeb(agent, text);
             default -> DispatchResult.unsupported(channelType);
         };
     }
@@ -167,12 +174,67 @@ public final class DeliveryDispatcher {
                         "WhatsApp Cloud API rejected the message (see logs for details).");
     }
 
+    /**
+     * Route a web-channel send by walking the calling agent's most-recent
+     * conversation up the {@link Conversation#parentConversation} chain to
+     * the root (the user-facing row the chat UI is polling), then appending
+     * a USER-role message stamped with {@code messageKind="subagent_send"}.
+     *
+     * <p>Same shape JCLAW-326's {@link tools.ConversationSendTool} writes,
+     * so the chat UI renders it through the existing "agent-initiated
+     * message" path with no special-case in the frontend. Source is
+     * distinguished from conversation_send via metadata
+     * ({@code source="message_tool"}) for analytics/debug, but the UI
+     * treatment is the same.
+     *
+     * <p>Target is ignored for web — the destination is the parent-chain
+     * root of the calling agent's active conversation. A future
+     * "send to specific conversation id" use case could pass a conversation
+     * id as target, but the Radarr-monitor pattern doesn't need it.
+     */
+    private static DispatchResult dispatchWeb(Agent agent, String text) {
+        if (agent == null) {
+            return DispatchResult.failedDelivery(
+                    "Web dispatch requires an agent context to resolve the active conversation.");
+        }
+        var conv = (Conversation) Conversation.find(
+                "agent = ?1 ORDER BY updatedAt DESC", agent).first();
+        if (conv == null) {
+            return DispatchResult.failedDelivery(
+                    "No active conversation for agent '" + agent.name + "' to deliver to. "
+                            + "Web dispatch routes to the calling agent's most-recent conversation; "
+                            + "spawn the agent inside a chat first.");
+        }
+        // Walk up to the user-facing root. A subagent's child Conversation
+        // has parentConversation set; the chat UI is watching the row at
+        // the top of the chain. Safety cap prevents an unbounded walk if
+        // the parent FK is ever corrupted (single-parent in current schema,
+        // but defensive).
+        int hops = 0;
+        while (conv.parentConversation != null && hops++ < 64) {
+            conv = conv.parentConversation;
+        }
+        var metadata = new LinkedHashMap<String, Object>();
+        metadata.put("source", "message_tool");
+        metadata.put("agentId", agent.id);
+        metadata.put("agentName", agent.name);
+        var msg = ConversationService.appendMessage(conv, MessageRole.USER, text,
+                null, null, null);
+        msg.messageKind = "subagent_send";
+        msg.metadata = utils.GsonHolder.INSTANCE.toJson(metadata, Map.class);
+        msg.save();
+        return DispatchResult.delivered();
+    }
+
     /** Helper for callers (UI / docs / tool schemas): is {@code channelType}
-     *  a deliverable channel via this dispatcher? */
+     *  a deliverable channel via this dispatcher? Includes {@code web} —
+     *  routes to the calling agent's parent-chain root conversation so the
+     *  chat UI's poller picks the message up live, even for agents that
+     *  don't talk to an external chat platform. */
     public static boolean isSupported(String channelType) {
         if (channelType == null) return false;
         return switch (channelType.toLowerCase()) {
-            case "telegram", "slack", "whatsapp" -> true;
+            case "telegram", "slack", "whatsapp", "web" -> true;
             default -> false;
         };
     }

@@ -112,11 +112,14 @@ public class MessageTool implements ToolRegistry.Tool {
         props.put(PARAM_MESSAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "The message body to deliver (required)."));
         props.put(PARAM_CHANNEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                SchemaKeys.ENUM, List.of("telegram", "slack", "whatsapp"),
+                SchemaKeys.ENUM, List.of("telegram", "slack", "whatsapp", "web"),
                 SchemaKeys.DESCRIPTION,
                 "Channel to deliver on. Defaults to the calling agent's active "
                         + "conversation channel — e.g. a subagent spawned from a Telegram "
-                        + "thread inherits \"telegram\" and doesn't need to pass this."));
+                        + "thread inherits \"telegram\" and doesn't need to pass this. "
+                        + "\"web\" routes to the in-app chat (the JClaw conversation the "
+                        + "user is viewing); use this for users who started the chat "
+                        + "from the web UI rather than an external messenger."));
         props.put(PARAM_TARGET, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Channel-specific peer id (Telegram chat id, Slack channel id, "
@@ -186,16 +189,20 @@ public class MessageTool implements ToolRegistry.Tool {
             if (channel == null || channel.isBlank()) channel = conv.channelType;
             if (target == null || target.isBlank()) target = conv.peerId;
         }
-        if (target == null || target.isBlank()) {
+        // Target is required for external channels (telegram/slack/whatsapp)
+        // because it's the platform-specific peer id (chat id / channel id /
+        // phone number). Web is routed by the dispatcher to the calling
+        // agent's parent-chain root conversation, so target is unused there
+        // and we don't require it.
+        var needsTarget = channel != null && !"web".equalsIgnoreCase(channel);
+        if (needsTarget && (target == null || target.isBlank())) {
             return "Error: no 'target' inferred from the active conversation "
                     + "(channel '" + channel + "' has no peerId on the current conversation row) "
                     + "and none was passed. Provide 'target' explicitly.";
         }
         if (!DeliveryDispatcher.isSupported(channel)) {
             return "Error: channel '" + channel + "' is not a deliverable channel "
-                    + "(supported: telegram, slack, whatsapp). The active conversation may be "
-                    + "a web chat (channel='web') with no external delivery target — pass "
-                    + "explicit 'channel' and 'target' if you want to reach a different chat.";
+                    + "(supported: telegram, slack, whatsapp, web).";
         }
         var result = DeliveryDispatcher.dispatch(agent, channel, target, message);
         if (result.ok()) {

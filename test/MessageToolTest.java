@@ -73,12 +73,41 @@ class MessageToolTest extends UnitTest {
 
     @Test
     void unsupportedChannelOnExplicitOverrideReturnsClearError() throws Exception {
-        // Explicit channel="web" — not a deliverable channel via the dispatcher.
+        // Explicit channel="discord" — not in the dispatcher's supported set.
+        // Web IS supported now (routes to the parent-chain root conversation),
+        // so use discord as the genuinely-unsupported channel for this test.
         var result = invokeTool(agent.id,
-                "{\"action\":\"send\",\"message\":\"hi\",\"channel\":\"web\",\"target\":\"u-1\"}");
-        assertTrue(result.startsWith("Error: channel 'web' is not a deliverable"), result);
-        assertTrue(result.contains("telegram") && result.contains("slack") && result.contains("whatsapp"),
+                "{\"action\":\"send\",\"message\":\"hi\",\"channel\":\"discord\",\"target\":\"u-1\"}");
+        assertTrue(result.startsWith("Error: channel 'discord' is not a deliverable"), result);
+        assertTrue(result.contains("telegram") && result.contains("slack") && result.contains("whatsapp")
+                        && result.contains("web"),
                 "unsupported error should hint at the supported channel set: " + result);
+    }
+
+    @Test
+    void webChannelExplicitDispatchSucceeds() throws Exception {
+        // Web routing requires an active conversation to walk up to.
+        Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+        var result = invokeTool(agent.id,
+                "{\"action\":\"send\",\"message\":\"hi from agent\",\"channel\":\"web\"}");
+        // Web dispatch doesn't need an explicit target — the dispatcher walks
+        // to the agent's parent-chain root conversation.
+        var parsed = com.google.gson.JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("sent", parsed.get("action").getAsString(), "web dispatch must succeed: " + result);
+        assertEquals("web", parsed.get("channel").getAsString());
+    }
+
+    @Test
+    void webChannelInferenceFromWebChatSucceeds() throws Exception {
+        // Inference: an active web conversation should resolve channel="web"
+        // and dispatch successfully (no longer the 'not deliverable' error
+        // that the v0.12.40 build returned for the same shape).
+        Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+        var result = invokeTool(agent.id, "{\"action\":\"send\",\"message\":\"radarr 45%\"}");
+        var parsed = com.google.gson.JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("sent", parsed.get("action").getAsString(), result);
+        assertEquals("web", parsed.get("channel").getAsString(),
+                "channel must be inferred from the active web conversation");
     }
 
     @Test
@@ -107,16 +136,15 @@ class MessageToolTest extends UnitTest {
     }
 
     @Test
-    void inferenceErrorsWhenActiveConversationLacksPeerId() throws Exception {
-        // Web conversation typically has peerId="admin" or similar; create
-        // one with null peerId to exercise the "no target inferred" branch.
-        Tx.run(() -> ConversationService.create(agent, "web", null));
+    void inferenceFromTelegramConversationWithoutPeerErrorsOnMissingTarget() throws Exception {
+        // Inference picks channelType from the active conversation; if that
+        // conversation has no peerId AND the channel is external (target is
+        // required), the missing-target guard fires. Web wouldn't trip this
+        // because target is ignored for web routing.
+        Tx.run(() -> ConversationService.create(agent, "telegram", null));
         var result = invokeTool(agent.id, "{\"action\":\"send\",\"message\":\"hi\"}");
-        assertTrue(result.startsWith("Error: "), result);
-        // Either the unsupported-channel branch (web) or the missing-target
-        // branch fires first — both are correct error envelopes per AC-6.
-        assertTrue(result.contains("web") || result.contains("target"),
-                "error should be either unsupported-channel or missing-target: " + result);
+        assertTrue(result.startsWith("Error: no 'target' inferred"),
+                "missing-peerId on an external channel should surface the missing-target error: " + result);
     }
 
     @Test
