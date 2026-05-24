@@ -1119,6 +1119,20 @@ onMounted(() => {
  * regardless, so within one cadence of stream end the loop kicks in.
  */
 const ANNOUNCE_POLL_INTERVAL_MS = 5000
+
+/**
+ * Keep polling for this long after the most recent subagent_announce row
+ * lands, even though {@link hasPendingAsyncAnnounce} flips false. Covers
+ * the gap where {@link AgentRunner#runYieldResume} runs the parent's
+ * resumed turn on the backend with no SSE stream to the chat tab — any
+ * `message` tool calls or sync sub-agent activity inside the resumed
+ * turn would otherwise sit in the DB until the user reloads. Three
+ * minutes accommodates a typical Phase 4 import (Radarr scan + verify
+ * + transmission cleanup, ~30-180s) plus headroom; long enough that
+ * the user sees the full workflow inline, short enough that idle
+ * conversations don't poll forever.
+ */
+const POST_ANNOUNCE_GRACE_MS = 180_000
 let announcePollTimer: ReturnType<typeof setInterval> | undefined
 
 /**
@@ -1220,6 +1234,28 @@ function hasPendingAsyncAnnounce(): boolean {
 }
 
 /**
+ * True when the most recent {@code subagent_announce} row arrived within
+ * {@link POST_ANNOUNCE_GRACE_MS}. Drives a grace-window poll after an
+ * announce lands so messages persisted by the subsequent yield-resumed
+ * turn (which has no SSE channel to this tab) surface inline rather
+ * than only on manual reload.
+ */
+function isWithinPostAnnounceGrace(): boolean {
+  const msgs = messages.value
+  if (!msgs.length) return false
+  let latest = 0
+  for (const m of msgs) {
+    if (m.messageKind !== 'subagent_announce') continue
+    if (!m.createdAt) continue
+    const t = Date.parse(m.createdAt)
+    if (!Number.isFinite(t)) continue
+    if (t > latest) latest = t
+  }
+  if (latest === 0) return false
+  return Date.now() - latest < POST_ANNOUNCE_GRACE_MS
+}
+
+/**
  * Refetch the open conversation's messages and append any rows whose server
  * id isn't already present locally. Preserves client-only state on existing
  * rows (toolCallsCollapsed, _key on optimistic placeholders, etc.) by
@@ -1273,7 +1309,12 @@ function announcePollTick() {
   // reactive during the parent's own turn. Resume on the next tick after
   // streaming ends.
   if (streaming.value) return
-  if (!hasPendingAsyncAnnounce()) return
+  // Two reasons to poll:
+  //   1. An async-spawn is in flight, awaiting its announce row.
+  //   2. An announce row arrived within POST_ANNOUNCE_GRACE_MS — the
+  //      backend's yield-resume may still be writing follow-up messages
+  //      (Phase 4 "import starting", Phase 5 "ready to watch", etc.).
+  if (!hasPendingAsyncAnnounce() && !isWithinPostAnnounceGrace()) return
   void pollForAnnounce()
 }
 
