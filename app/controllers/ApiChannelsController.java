@@ -56,6 +56,7 @@ public class ApiChannelsController extends Controller {
         )));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
     public static void get(String channelType) {
         var config = ChannelConfig.findByType(channelType);
@@ -63,6 +64,7 @@ public class ApiChannelsController extends Controller {
         renderJSON(gson.toJson(ChannelView.of(config)));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ChannelConfig.class)))
     public static void save(String channelType) {

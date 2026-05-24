@@ -46,6 +46,7 @@ public class ApiBindingsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
     public static void create() {
@@ -73,6 +74,7 @@ public class ApiBindingsController extends Controller {
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
     public static void update(Long id) {
@@ -104,6 +106,7 @@ public class ApiBindingsController extends Controller {
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
+    @SuppressWarnings("java:S2259")
     public static void delete(Long id) {
         var binding = (AgentBinding) AgentBinding.findById(id);
         if (binding == null) {

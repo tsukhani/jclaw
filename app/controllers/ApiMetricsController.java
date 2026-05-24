@@ -224,6 +224,7 @@ public class ApiMetricsController extends Controller {
                                  boolean compress, String provider, String model, boolean real,
                                  String userMessage, java.util.List<String> prompts) {}
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoadtestResponse.class)))
     public static void loadtest() {
         var input = parseLoadtestInput();
@@ -420,6 +421,7 @@ public class ApiMetricsController extends Controller {
     }
 
     /** DELETE /api/metrics/loadtest/data — delete loadtest conversations, messages, and events. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void cleanLoadtest() {
         LoadTestRunner.cleanupConversations();

@@ -26,6 +26,7 @@ public class Application extends Controller {
      * otherwise falls back to index.html for client-side routing.
      * Production build lives in public/spa/ (output of: nuxi generate).
      */
+    @SuppressWarnings("java:S2259")
     public static void spa(String path) {
         File spaRoot = Play.getFile("public/spa");
 

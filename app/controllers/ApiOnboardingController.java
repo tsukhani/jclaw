@@ -54,6 +54,7 @@ public class ApiOnboardingController extends Controller {
     /** POST /api/onboarding/tour-progress — body {@code {"step":N}}.
      *  Upserts {@code Math.max(existing, step)} so out-of-order writes can
      *  never lower the recorded max. Validates step is in [1, TOTAL_STEPS]. */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TourProgressRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TourProgressResponse.class)))
     public static void recordProgress() {
@@ -65,7 +66,7 @@ public class ApiOnboardingController extends Controller {
         }
         catch (Exception _) {
             badRequest();
-            return;
+            return;  // javac definite-assignment: step is unassigned on this catch path
         }
         if (step < 1 || step > TOTAL_STEPS) badRequest();
         var existing = ConfigService.getInt(CONFIG_KEY, 0);

@@ -77,11 +77,12 @@ public class ApiTelegramBindingsController extends Controller {
         renderJSON(gson.toJson(items));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) { badRequest(); return; }
+        if (body == null) badRequest();
 
         String botToken = readRequiredString(body, KEY_BOT_TOKEN);
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
@@ -128,14 +129,15 @@ public class ApiTelegramBindingsController extends Controller {
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
     public static void update(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
-        if (binding == null) { notFound(); return; }
+        if (binding == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) { badRequest(); return; }
+        if (body == null) badRequest();
 
         applyBotTokenUpdate(binding, body);
         applyAgentUpdate(binding, body);
@@ -201,6 +203,7 @@ public class ApiTelegramBindingsController extends Controller {
         }
     }
 
+    @SuppressWarnings("java:S2259")
     public static void delete(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();

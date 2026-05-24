@@ -30,24 +30,22 @@ public class WebhookTelegramController extends Controller {
     private record BindingCtx(Long bindingId, String botToken, String telegramUserId,
                               Agent agent, String webhookSecret, boolean enabled) {}
 
+    @SuppressWarnings("java:S2259")
     public static void webhook(Long bindingId, String secret) {
         BindingCtx ctx = loadBindingCtx(bindingId);
         if (ctx == null) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Webhook for unknown binding id=%s".formatted(bindingId));
             notFound();
-            return;
         }
         if (!ctx.enabled()) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Webhook for disabled binding %d".formatted(bindingId));
             ok();
-            return;
         }
 
         if (!verifySecret(ctx, secret, bindingId)) {
             unauthorized("Invalid signature");
-            return;
         }
 
         try {

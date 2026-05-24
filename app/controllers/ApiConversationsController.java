@@ -149,6 +149,7 @@ public class ApiConversationsController extends Controller {
      * (which the list endpoint silently ignores, returning the most-recently-
      * updated row regardless of the requested id).
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConversationView.class)))
     public static void getConversation(Long id) {
         Conversation conversation = Conversation.findById(id);
@@ -159,6 +160,7 @@ public class ApiConversationsController extends Controller {
     /**
      * GET /api/conversations/{id}/messages
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageView.class))))
     public static void getMessages(Long id, Integer limit, Integer offset) {
         Conversation conversation = Conversation.findById(id);
@@ -266,6 +268,7 @@ public class ApiConversationsController extends Controller {
      * (prevents a spoofed path from deleting a foreign message even if the
      * mid were somehow known).
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void deleteMessage(Long id, Long mid) {
         Conversation conversation = Conversation.findById(id);
@@ -282,6 +285,7 @@ public class ApiConversationsController extends Controller {
     /**
      * DELETE /api/conversations/{id}
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void deleteConversation(Long id) {
         Conversation conversation = Conversation.findById(id);
@@ -307,6 +311,7 @@ public class ApiConversationsController extends Controller {
      * accidental empty-body DELETE wiping the entire table without an
      * explicit "filter" intent from the caller.
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
     public static void deleteConversations() {
         var body = JsonBodyReader.readJsonBody();
@@ -375,6 +380,7 @@ public class ApiConversationsController extends Controller {
      * and to the {@code /model NAME} slash command (which shares validation
      * logic via {@link slash.Commands#performModelSwitch}).
      */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelOverrideRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ModelOverrideResponse.class)))
     public static void setModelOverride(Long id) {
@@ -415,6 +421,7 @@ public class ApiConversationsController extends Controller {
      * <p>Clear the conversation-scoped override, reverting to the agent's
      * default. Idempotent — returns 200 whether or not an override was set.
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void clearModelOverride(Long id) {
         Conversation conversation = Conversation.findById(id);

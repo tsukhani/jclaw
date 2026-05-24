@@ -22,9 +22,10 @@ public class ApiAttachmentsController extends Controller {
 
     /** GET /api/attachments/{uuid} — Serve the raw bytes for a persisted
      *  attachment. */
+    @SuppressWarnings("java:S2259")
     public static void download(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
-        if (att == null) { notFound(); return; }
+        if (att == null) notFound();
 
         // storagePath is workspace-relative and looks like
         // "<agentName>/attachments/<conversationId>/<uuid>.<ext>". Strip the
@@ -40,7 +41,7 @@ public class ApiAttachmentsController extends Controller {
             path = AgentService.acquireWorkspacePath(agentName, relPath);
         } catch (SecurityException _) {
             forbidden();
-            return;
+            return;  // javac definite-assignment: path is unassigned on this catch path
         }
         var file = path.toFile();
         if (!file.exists() || !file.isFile()) notFound();

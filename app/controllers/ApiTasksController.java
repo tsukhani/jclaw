@@ -192,8 +192,10 @@ public class ApiTasksController extends Controller {
      * intentionally non-exceptional on empty input so the UI can render
      * an empty results panel before the operator types.
      */
+    // S1181: Throwable is required — Lucene API removals surface as NoClassDefFoundError / LinkageError / AbstractMethodError.
+    // S2259: Play 1.x halt methods (badRequest, notFound, etc.) throw a Result that Sonar can't see across the framework boundary.
+    @SuppressWarnings({"java:S2259", "java:S1181"})
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TranscriptSearchHit.class))))
-    @SuppressWarnings("java:S1181") // Throwable is required: Lucene API removals surface as NoClassDefFoundError / LinkageError / AbstractMethodError
     public static void searchTranscripts(String q, Integer limit) {
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         if (q == null || q.isBlank()) {
@@ -218,6 +220,7 @@ public class ApiTasksController extends Controller {
      * (startedAt DESC). Returns {@code []} for a task that exists but
      * has no runs yet. Returns 404 only if the Task itself is missing.
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunView.class))))
     public static void runs(Long id, Integer limit, Integer offset) {
         Task task = Task.findById(id);
@@ -260,10 +263,11 @@ public class ApiTasksController extends Controller {
         renderJSON(gson.toJson(tasks.stream().map(TaskView::of).toList()));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) { badRequest(); return; }
+        if (body == null) badRequest();
 
         var agent = requireAgentFromBody(body);
         var name = requireTaskName(body);
@@ -402,13 +406,14 @@ public class ApiTasksController extends Controller {
         return (s == null || s.isBlank()) ? null : s;
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void update(Long id) {
         Task task = Task.findById(id);
-        if (task == null) { notFound(); return; }
+        if (task == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) { badRequest(); return; }
+        if (body == null) badRequest();
 
         boolean scheduleChanged = applyScheduleUpdate(task, body);
         boolean fieldsChanged = applyOptionalFieldUpdates(task, body);
@@ -416,7 +421,6 @@ public class ApiTasksController extends Controller {
 
         if (!anyChange) {
             error(400, "No patchable fields in body");
-            return;
         }
 
         task.save();
@@ -527,6 +531,7 @@ public class ApiTasksController extends Controller {
         return true;
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void cancel(Long id) {
         Task task = Task.findById(id);
@@ -561,10 +566,11 @@ public class ApiTasksController extends Controller {
      * then the scheduler row is dropped (idempotent), then the Task
      * row itself.
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200")
     public static void delete(Long id) {
         Task task = Task.findById(id);
-        if (task == null) { notFound(); return; }
+        if (task == null) notFound();
 
         var agentName = task.agent != null ? task.agent.name : null;
         var taskName = task.name;
@@ -587,10 +593,11 @@ public class ApiTasksController extends Controller {
         renderJSON("{\"status\":\"deleted\",\"id\":" + taskId + "}");
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void pause(Long id) {
         Task task = Task.findById(id);
-        if (task == null) { notFound(); return; }
+        if (task == null) notFound();
         // Pause only applies to live tasks (PENDING one-shot waiting / ACTIVE
         // recurring ongoing); pausing a terminal Task has no effect since the
         // scheduler row is already gone.
@@ -605,10 +612,11 @@ public class ApiTasksController extends Controller {
         renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void resume(Long id) {
         Task task = Task.findById(id);
-        if (task == null) { notFound(); return; }
+        if (task == null) notFound();
         // Resume mirrors pause — accept PENDING or ACTIVE alive states.
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
@@ -630,10 +638,11 @@ public class ApiTasksController extends Controller {
      * COMPLETED task is a deliberate operator action and the audit-log
      * record alone is the trail.
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void run(Long id) {
         Task task = Task.findById(id);
-        if (task == null) { notFound(); return; }
+        if (task == null) notFound();
 
         boolean revivedFromCancel = false;
         if (task.status == Task.Status.CANCELLED) {
@@ -653,15 +662,11 @@ public class ApiTasksController extends Controller {
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void retry(Long id) {
         Task task = Task.findById(id);
-        // Explicit return after notFound() so Sonar's flow analysis
-        // narrows `task` to non-null on the following line (Play's
-        // notFound() throws a Result internally, but Sonar can't see
-        // that). Matches the pattern used by update/run/pause/resume
-        // in this file.
-        if (task == null) { notFound(); return; }
+        if (task == null) notFound();
         // JCLAW-258 extends retry to accept LOST in addition to FAILED.
         // FAILED: no scheduled_tasks row (it was removed when the failure
         // terminated the previous fire) — register() inserts a fresh row.

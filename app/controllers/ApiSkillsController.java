@@ -101,6 +101,7 @@ public class ApiSkillsController extends Controller {
     }
 
     /** GET /api/skills/{name} — Get a global skill with full content. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillDetailView.class)))
     public static void get(String name) {
         var path = resolveSkillName(SkillLoader.globalSkillsPath(), name).resolve(SKILL_MD);
@@ -125,6 +126,7 @@ public class ApiSkillsController extends Controller {
     );
 
     /** GET /api/skills/{name}/files — List all files in a skill folder with metadata and detected tool dependencies. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
     public static void listFiles(String name) {
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
@@ -234,11 +236,11 @@ public class ApiSkillsController extends Controller {
     }
 
     /** DELETE /api/skills/{name} — Delete a global skill. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
     public static void delete(String name) {
         if ("skill-creator".equals(name)) {
             error(403, "The skill-creator skill is a built-in skill and cannot be deleted.");
-            return;
         }
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
@@ -246,10 +248,11 @@ public class ApiSkillsController extends Controller {
     }
 
     /** GET /api/agents/{id}/skills — List workspace skills for an agent with enabled status. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
 
         var agentDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
         var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
@@ -280,14 +283,15 @@ public class ApiSkillsController extends Controller {
     }
 
     /** PUT /api/agents/{id}/skills/{name} — Enable or disable a skill for an agent. */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillToggleResponse.class)))
     public static void updateForAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_ENABLED)) { badRequest(); return; }
+        if (body == null || !body.has(KEY_ENABLED)) badRequest();
         var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
@@ -303,10 +307,11 @@ public class ApiSkillsController extends Controller {
     }
 
     /** POST /api/agents/{id}/skills/{name}/copy — Copy a global skill into the agent's workspace. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCopyResponse.class)))
     public static void copyToAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
 
         var globalDir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(globalDir)) {
@@ -357,29 +362,32 @@ public class ApiSkillsController extends Controller {
     }
 
     /** GET /api/agents/{id}/skills/{name}/files — List files in an agent workspace skill folder. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
     public static void listAgentSkillFiles(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
         listSkillFilesFrom(dir);
     }
 
     /** GET /api/agents/{id}/skills/{name}/files/{filePath} — Read a text file from an agent skill. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFileContentResponse.class)))
     public static void readAgentSkillFile(Long id, String name, String filePath) {
         Agent agent = Agent.findById(id);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         readSkillFileFrom(dir, filePath);
     }
 
     /** DELETE /api/agents/{id}/skills/{name}/delete — Delete a skill from an agent's workspace. */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
     public static void deleteAgentSkill(Long id, String name) {
         Agent agent = Agent.findById(id);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
         // Revoke the skill's shell-allowlist grants for this agent BEFORE deleting
@@ -395,6 +403,7 @@ public class ApiSkillsController extends Controller {
      * Returns immediately and runs LLM sanitization asynchronously on a virtual thread.
      * The frontend polls the skills list to detect completion.
      */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillPromoteRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillPromoteResponse.class)))
     public static void promote() {
@@ -431,11 +440,12 @@ public class ApiSkillsController extends Controller {
     }
 
     /** PUT /api/skills/{name}/rename — Rename a global skill folder. */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillRenameRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillRenameResponse.class)))
     public static void rename(String name) {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_NEW_NAME)) { badRequest(); return; }
+        if (body == null || !body.has(KEY_NEW_NAME)) badRequest();
 
         var newName = body.get(KEY_NEW_NAME).getAsString().strip();
         if (newName.isEmpty()) badRequest();
@@ -533,7 +543,7 @@ public class ApiSkillsController extends Controller {
             target = AgentService.acquireContained(dir, filePath);
         } catch (SecurityException _) {
             error(403, "Path escapes skill directory");
-            return;
+            return;  // javac definite-assignment: target is unassigned on this catch path
         }
         if (!Files.exists(target)) notFound();
 

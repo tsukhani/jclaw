@@ -57,11 +57,12 @@ public class ApiMcpServersController extends Controller {
         renderJSON(gson.toJson(McpServerService.View.of(row)));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) { badRequest(); return; }
+        if (body == null) badRequest();
 
         var name = readRequiredString(body, "name");
         if (McpServer.findByName(name) != null) {
@@ -87,12 +88,13 @@ public class ApiMcpServersController extends Controller {
         renderJSON(gson.toJson(McpServerService.View.of(row)));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) { badRequest(); return; }
+        if (body == null) badRequest();
 
         // Renaming is allowed; if it happens we tear down the prior connection
         // (under the OLD name) before re-syncing under the new one. Otherwise
@@ -148,6 +150,7 @@ public class ApiMcpServersController extends Controller {
         renderJSON("{\"deleted\":true}");
     }
 
+    @SuppressWarnings("java:S2259")
     public static void test(Long id) {
         var row = requireServer(id);
         var result = McpServerService.testConnection(row);

@@ -131,6 +131,7 @@ public class ApiAgentsController extends Controller {
      * skipped (null user message) so the breakdown is deterministic for a given
      * agent state and doesn't depend on a hypothetical user query.
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptBreakdown.class)))
     public static void promptBreakdown(Long id) {
         var agent = requireAgent(id);
@@ -197,6 +198,7 @@ public class ApiAgentsController extends Controller {
         )));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
     public static void create() {
@@ -242,6 +244,7 @@ public class ApiAgentsController extends Controller {
         return (s == null || s.isBlank()) ? null : s;
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
     public static void update(Long id) {
@@ -316,6 +319,7 @@ public class ApiAgentsController extends Controller {
         }
     }
 
+    @SuppressWarnings("java:S2259")
     public static void delete(Long id) {
         var agent = requireAgent(id);
         if (agent.isMain()) {
@@ -331,6 +335,7 @@ public class ApiAgentsController extends Controller {
      * GET /api/agents/{id}/files/{filePath} — Serve a workspace file with proper content type.
      * Supports images, PDFs, and other binary files for inline rendering or download.
      */
+    @SuppressWarnings("java:S2259")
     public static void serveWorkspaceFile(Long id, String filePath) {
         var agent = requireAgent(id);
 
@@ -345,7 +350,7 @@ public class ApiAgentsController extends Controller {
             path = AgentService.acquireWorkspacePath(agent.name, filePath);
         } catch (SecurityException _) {
             forbidden();
-            return;
+            return;  // javac definite-assignment: path is unassigned on this catch path
         }
         var file = path.toFile();
         if (!file.exists() || !file.isFile()) notFound();
@@ -364,6 +369,7 @@ public class ApiAgentsController extends Controller {
         renderBinary(file);
     }
 
+    @SuppressWarnings("java:S2259")
     public static void getWorkspaceFile(Long id, String filename) {
         var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
@@ -371,6 +377,7 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(java.util.Map.of("filename", filename, KEY_CONTENT, content)));
     }
 
+    @SuppressWarnings("java:S2259")
     public static void saveWorkspaceFile(Long id, String filename) {
         var agent = requireAgent(id);
         var body = JsonBodyReader.readJsonBody();

@@ -16,6 +16,7 @@ public class WebhookWhatsAppController extends Controller {
     /**
      * GET — Hub verification challenge from Meta.
      */
+    @SuppressWarnings("java:S2259")
     public static void verify(String hub_mode, String hub_verify_token, String hub_challenge) {
         // Play maps hub.mode → hub_mode etc. via query params
         var mode = params.get("hub.mode");
@@ -31,7 +32,6 @@ public class WebhookWhatsAppController extends Controller {
                 || config.verifyToken() == null || !config.verifyToken().equals(verifyToken)) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP, "Webhook verification failed");
             forbidden();
-            return;
         }
 
         EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP, "Webhook verified");
@@ -41,6 +41,7 @@ public class WebhookWhatsAppController extends Controller {
     /**
      * POST — Inbound messages from Meta.
      */
+    @SuppressWarnings("java:S2259")
     public static void webhook() {
         var config = WhatsAppChannel.WhatsAppConfig.load();
 
@@ -51,7 +52,6 @@ public class WebhookWhatsAppController extends Controller {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
                     "Webhook rejected: WhatsApp appSecret not configured");
             unauthorized("Invalid signature");
-            return;
         }
 
         String rawBody;
@@ -60,7 +60,7 @@ public class WebhookWhatsAppController extends Controller {
         } catch (Exception _) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP, "Failed to read request body");
             error();
-            return;
+            return;  // javac definite-assignment: rawBody is unassigned on this catch path
         }
 
         var signatureHeader = Http.Request.current().headers.get("x-hub-signature-256");
@@ -69,7 +69,6 @@ public class WebhookWhatsAppController extends Controller {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
                     "Invalid webhook signature");
             unauthorized("Invalid signature");
-            return;
         }
 
         var payload = JsonParser.parseString(rawBody).getAsJsonObject();

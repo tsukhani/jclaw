@@ -155,6 +155,7 @@ public class ApiChatController extends Controller {
     /**
      * POST /api/chat/send — Send a message and get a synchronous response.
      */
+    @SuppressWarnings("java:S2259")
     public static void send() {
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
 
@@ -193,7 +194,7 @@ public class ApiChatController extends Controller {
         Conversation conversation;
         if (ctx.conversationId() != null) {
             conversation = ConversationService.findById(ctx.conversationId());
-            if (conversation == null) { notFound(); return; }
+            if (conversation == null) notFound();
         } else {
             conversation = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
         }
@@ -216,10 +217,11 @@ public class ApiChatController extends Controller {
      * conversation-keyed directory and {@code chat_message_attachment} row
      * insertion) happens in {@link AgentRunner} when the send lands.
      */
+    @SuppressWarnings("java:S2259")
     public static void uploadChatFiles(Long agentId, play.data.Upload[] files) {
-        if (agentId == null) { badRequest(); return; }
+        if (agentId == null) badRequest();
         Agent agent = Agent.findById(agentId);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
 
         validateUploads(files);
         java.nio.file.Path stagingDir = acquireStagingDir(agent);
@@ -244,7 +246,6 @@ public class ApiChatController extends Controller {
     private static void validateUploads(play.data.Upload[] files) {
         if (files == null || files.length == 0) {
             error(400, "No files uploaded");
-            return;
         }
         int maxFiles = services.UploadLimits.maxFiles();
         if (files.length > maxFiles) {
@@ -404,6 +405,7 @@ public class ApiChatController extends Controller {
      * which also wraps its DB hit in {@code Tx.run}, so the auth interceptor
      * still works without an outer tx.
      */
+    @SuppressWarnings("java:S2259")
     @NoTransaction
     public static void streamChat() {
         // Grab the Netty-set queue-accept stamp on the invocation thread so we can

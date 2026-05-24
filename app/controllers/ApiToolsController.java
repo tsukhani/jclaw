@@ -80,10 +80,11 @@ public class ApiToolsController extends Controller {
     /**
      * GET /api/agents/{id}/tools — List tools for an agent with enabled status.
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentToolEntry.class))))
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
 
         var allTools = ToolRegistry.listTools();
         var configs = AgentToolConfig.findByAgent(agent);
@@ -116,6 +117,7 @@ public class ApiToolsController extends Controller {
      * is no longer surfaced in the UI and the consolidated server-level
      * row is the single source of truth for MCP enablement.
      */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ToolToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolToggleResponse.class)))
     public static void updateForAgent(Long id, String name) {
@@ -184,14 +186,15 @@ public class ApiToolsController extends Controller {
      * MCP server consolidates any per-action rows for that server's
      * group into the single server-level row.
      */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ToolToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolGroupToggleResponse.class)))
     public static void updateGroupForAgent(Long id, String group) {
         Agent agent = Agent.findById(id);
-        if (agent == null) { notFound(); return; }
+        if (agent == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_ENABLED)) { badRequest(); return; }
+        if (body == null || !body.has(KEY_ENABLED)) badRequest();
         var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         // Find the server-level handle for this group. Every MCP server
@@ -201,7 +204,7 @@ public class ApiToolsController extends Controller {
                 .filter(t -> group.equals(t.group()) && t.isServerLevel())
                 .findFirst()
                 .orElse(null);
-        if (serverLevel == null) { notFound(); return; }
+        if (serverLevel == null) notFound();
 
         // Write the single server-level row.
         var config = AgentToolConfig.findByAgentAndTool(agent, serverLevel.name());

@@ -14,6 +14,7 @@ public class WebhookSlackController extends Controller {
     private static final String INVALID_SIGNATURE = "Invalid signature";
     private static final String CATEGORY_CHANNEL = "channel";
 
+    @SuppressWarnings("java:S2259")
     public static void webhook() {
         // JCLAW-16: signature verification happens BEFORE body parsing /
         // challenge handling so an unconfigured Slack app cannot be used as a
@@ -23,7 +24,6 @@ public class WebhookSlackController extends Controller {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Webhook rejected: Slack signingSecret not configured");
             unauthorized(INVALID_SIGNATURE);
-            return;
         }
 
         // Read raw body for signature verification
@@ -33,7 +33,7 @@ public class WebhookSlackController extends Controller {
         } catch (Exception _) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK, "Failed to read request body");
             error();
-            return;
+            return;  // javac definite-assignment: rawBody is unassigned on this catch path
         }
 
         // Verify signature before any payload parsing — url_verification
@@ -46,7 +46,6 @@ public class WebhookSlackController extends Controller {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Missing signature headers");
             unauthorized("Missing signature");
-            return;
         }
 
         if (!SlackChannel.verifySignature(config.signingSecret(),
@@ -54,7 +53,6 @@ public class WebhookSlackController extends Controller {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     INVALID_SIGNATURE);
             unauthorized(INVALID_SIGNATURE);
-            return;
         }
 
         var payload = JsonParser.parseString(rawBody).getAsJsonObject();

@@ -58,13 +58,13 @@ public class ApiConfigController extends Controller {
         renderJSON(gson.toJson(new ConfigListResponse(entries)));
     }
 
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigEntry.class)))
     public static void get(String key) {
         if (isReservedKey(key)) notFound();
         var config = models.Config.findByKey(key);
         if (config == null) {
             notFound();
-            return;
         }
         renderJSON(gson.toJson(new ConfigEntry(
                 config.key,
@@ -72,6 +72,7 @@ public class ApiConfigController extends Controller {
                 config.updatedAt.toString())));
     }
 
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ConfigSaveRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigSaveResponse.class)))
     public static void save() {
@@ -92,7 +93,6 @@ public class ApiConfigController extends Controller {
         var rejection = ConfigService.setWithSideEffects(key, value);
         if (rejection != null) {
             error(403, rejection);
-            return;
         }
 
         renderJSON(gson.toJson(new ConfigSaveResponse(

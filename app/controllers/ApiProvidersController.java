@@ -68,6 +68,7 @@ public class ApiProvidersController extends Controller {
      * Fetches the model catalog from the provider's /models endpoint.
      * Returns normalized model info including auto-detected capabilities.
      */
+    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
     public static void discoverModels(String name) {
         var baseUrl = ConfigService.get("provider." + name + ".baseUrl");

@@ -65,6 +65,7 @@ public class ApiAuthController extends Controller {
      *  password has been set yet. Body: {@code {"password":"..."}}.
      *  Returning 409 when a password already exists closes a race where a
      *  second actor could overwrite the first install's credentials. */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SetupRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SetupOkResponse.class)))
     public static void setup() {
@@ -94,6 +95,7 @@ public class ApiAuthController extends Controller {
         }
     }
 
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = LoginRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoginResponse.class)))
     public static void login() {
