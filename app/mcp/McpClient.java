@@ -266,6 +266,14 @@ public class McpClient implements AutoCloseable {
         if (state.get() == State.READY || state.get() == State.INITIALIZING) {
             state.set(State.DISCONNECTED);
         }
+        // Symmetric with close(): tear down the transport so the underlying
+        // host process exits and any docker `--rm` container is released.
+        // Without this the host-side `docker run` subprocess stays alive
+        // holding stdio open even after the MCP server inside the container
+        // has died — the watchdog observes state≠READY and reconnects, but
+        // the orphaned docker container persists. Idempotent in transport
+        // impls (McpStdioTransport sets `closed=true` and skips repeat work).
+        try { transport.close(); } catch (RuntimeException _) { /* best effort */ }
     }
 
     // visible for test

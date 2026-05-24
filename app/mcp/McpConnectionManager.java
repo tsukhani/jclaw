@@ -277,6 +277,14 @@ public final class McpConnectionManager {
                 bestEffortClose(client);
                 return;
             }
+            // Defensive: if a prior client is still attached (e.g. a watchdog-
+            // driven reconnect after onTransportError), close it before
+            // overwriting the reference. The transport close above on the
+            // McpClient.onTransportError path normally has this covered, but
+            // any future path that calls scheduleConnect without going
+            // through transport-error should still leave us leak-free.
+            var prior = entry.client;
+            if (prior != null && prior != client) bestEffortClose(prior);
             entry.client = client;
             // republishTools publishes the in-memory tool adapters AND syncs
             // the DB-authoritative allowlist (JCLAW-32). Both must complete

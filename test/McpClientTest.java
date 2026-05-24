@@ -235,6 +235,31 @@ class McpClientTest extends UnitTest {
         assertNotNull(client.lastError());
     }
 
+    /**
+     * Regression: a transport-level error must symmetrically close the
+     * transport. Without this, the underlying host process (e.g. a
+     * `docker run` subprocess wrapping an MCP server image) stays alive
+     * holding stdio open even after the inner server has died — the
+     * connection manager observes state≠READY and reconnects, but the
+     * orphaned host process persists. Repeated disconnect-reconnect
+     * cycles leak one process (and one docker --rm container) each.
+     */
+    @Test
+    void transportErrorTriggersTransportCloseSoUnderlyingProcessIsReleased() throws Exception {
+        transport = new FakeTransport();
+        client = new McpClient("test", transport, "0.0.1");
+        completeHandshake();
+
+        assertFalse(transport.closed, "precondition: transport open after handshake");
+        transport.tripError(new IOException("server died"));
+
+        assertEquals(McpClient.State.DISCONNECTED, client.state());
+        assertTrue(transport.closed,
+                "onTransportError must call transport.close() so the underlying "
+                        + "host process (e.g. docker run subprocess) exits and --rm "
+                        + "releases the container");
+    }
+
     // ==================== close ====================
 
     @Test
