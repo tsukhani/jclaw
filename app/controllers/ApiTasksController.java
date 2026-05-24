@@ -295,6 +295,7 @@ public class ApiTasksController extends Controller {
      * a non-existent task addressed in /api/tasks/{id} would be 404, but
      * a non-existent agent named in the request body is bad input.
      */
+    @SuppressWarnings("java:S2259")
     private static Agent requireAgentFromBody(com.google.gson.JsonObject body) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) {
             error(400, "agentId is required");
@@ -308,6 +309,7 @@ public class ApiTasksController extends Controller {
         return agent;
     }
 
+    @SuppressWarnings("java:S2259")
     private static String requireTaskName(com.google.gson.JsonObject body) {
         if (!body.has("name") || body.get("name").isJsonNull()) {
             error(400, "name is required");
@@ -321,6 +323,7 @@ public class ApiTasksController extends Controller {
         return name;
     }
 
+    @SuppressWarnings("java:S2259")
     private static ScheduleShorthandParser.ScheduleSpec requireScheduleSpec(com.google.gson.JsonObject body) {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) {
             error(400, "schedule is required");
@@ -446,6 +449,7 @@ public class ApiTasksController extends Controller {
      *
      * @return true if the schedule field was applied.
      */
+    @SuppressWarnings("java:S2259")
     private static boolean applyScheduleUpdate(Task task, com.google.gson.JsonObject body) {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) return false;
         final ScheduleShorthandParser.ScheduleSpec spec;

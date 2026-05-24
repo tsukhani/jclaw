@@ -275,6 +275,7 @@ public class ApiMetricsController extends Controller {
         }
     }
 
+    @SuppressWarnings("java:S2259")
     private static LoadtestInput parseLoadtestInput() {
         var body = JsonBodyReader.readJsonBody();
         int concurrency = readInt(body, "concurrency", 10);
@@ -315,6 +316,7 @@ public class ApiMetricsController extends Controller {
      * wire format never carries two conflicting per-turn message
      * strategies.
      */
+    @SuppressWarnings("java:S2259")
     private static java.util.List<String> parsePromptsField(JsonObject body, String userMessage) {
         // LoadTestRunner treats null and empty identically (`!= null && !isEmpty()` guard
         // at the consumer); returning an empty list rather than null keeps the contract
@@ -335,6 +337,7 @@ public class ApiMetricsController extends Controller {
         return prompts;
     }
 
+    @SuppressWarnings("java:S2259")
     private static void validateLoadtestInput(LoadtestInput input) {
         int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
         int maxTurns = ConfigService.getInt("provider.loadtest-mock.maxTurns", 50);
@@ -356,6 +359,7 @@ public class ApiMetricsController extends Controller {
      * Skip in real-provider mode — that path uses an existing registered
      * provider seeded by DefaultConfigJob or the operator at boot.
      */
+    @SuppressWarnings("java:S2259")
     private static void enableMockProviderIfNeeded(boolean real) {
         if (real) return;
         try {
@@ -428,6 +432,7 @@ public class ApiMetricsController extends Controller {
         renderJSON(INSTANCE.toJson(new StatusResponse("cleaned")));
     }
 
+    @SuppressWarnings("java:S2259")
     private static int readInt(com.google.gson.JsonObject body, String key, int defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
@@ -438,6 +443,7 @@ public class ApiMetricsController extends Controller {
         }
     }
 
+    @SuppressWarnings("java:S2259")
     private static boolean readBool(com.google.gson.JsonObject body, String key, boolean defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
@@ -448,6 +454,7 @@ public class ApiMetricsController extends Controller {
         }
     }
 
+    @SuppressWarnings("java:S2259")
     private static String readString(com.google.gson.JsonObject body, String key, String defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
@@ -463,6 +470,7 @@ public class ApiMetricsController extends Controller {
         return Math.round(v * 10.0) / 10.0;
     }
 
+    @SuppressWarnings("java:S2259")
     private static java.time.Instant parseSinceParam(String sinceParam) {
         if (sinceParam == null || sinceParam.isBlank()) {
             return java.time.Instant.now().minus(30, java.time.temporal.ChronoUnit.DAYS);
@@ -475,6 +483,7 @@ public class ApiMetricsController extends Controller {
         }
     }
 
+    @SuppressWarnings("java:S2259")
     private static Long parseAgentIdParam(String agentIdParam) {
         if (agentIdParam == null || agentIdParam.isBlank()) return null;
         try {

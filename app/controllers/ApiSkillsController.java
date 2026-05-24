@@ -479,6 +479,7 @@ public class ApiSkillsController extends Controller {
     }
 
     /** Walk a skill directory and render files + detected tools as JSON. */
+    @SuppressWarnings("java:S2259")
     private static void listSkillFilesFrom(Path dir) {
         try {
             var walked = walkSkillDir(dir);
@@ -537,6 +538,7 @@ public class ApiSkillsController extends Controller {
     }
 
     /** Read a single file from a skill directory, with path-traversal protection. */
+    @SuppressWarnings("java:S2259")
     private static void readSkillFileFrom(Path dir, String filePath) {
         Path target;
         try {
@@ -558,6 +560,7 @@ public class ApiSkillsController extends Controller {
     }
 
     /** Recursively delete a skill directory and clear the loader cache. */
+    @SuppressWarnings("java:S2259")
     private static void deleteSkillDir(Path dir) {
         try {
             SkillPromotionService.deleteRecursive(dir);
@@ -575,6 +578,7 @@ public class ApiSkillsController extends Controller {
      * any name that escapes (e.g. "../../../etc"). Calls {@code notFound()} on
      * escape so callers never see a null return.
      */
+    @SuppressWarnings("java:S2259")
     private static Path resolveSkillName(Path root, String name) {
         var resolved = AgentService.resolveContained(root, name);
         if (resolved == null) {

@@ -153,6 +153,7 @@ public class ApiTelegramBindingsController extends Controller {
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
+    @SuppressWarnings("java:S2259")
     private static void applyBotTokenUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
         if (!body.has(KEY_BOT_TOKEN)) return;
         String newToken = body.get(KEY_BOT_TOKEN).getAsString();
@@ -164,6 +165,7 @@ public class ApiTelegramBindingsController extends Controller {
         binding.botToken = newToken;
     }
 
+    @SuppressWarnings("java:S2259")
     private static void applyAgentUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
         Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
@@ -179,6 +181,7 @@ public class ApiTelegramBindingsController extends Controller {
         binding.agent = agent;
     }
 
+    @SuppressWarnings("java:S2259")
     private static void applyTelegramUserIdUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
         if (!body.has(KEY_TELEGRAM_USER_ID)) return;
         String uid = body.get(KEY_TELEGRAM_USER_ID).getAsString();

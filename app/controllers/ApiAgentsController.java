@@ -67,6 +67,7 @@ public class ApiAgentsController extends Controller {
                 && services.LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name);
     }
 
+    @SuppressWarnings("java:S2259")
     private static Agent requireAgent(Long id) {
         var agent = AgentService.findById(id);
         if (agent == null || isReservedName(agent.name)) {
@@ -290,6 +291,7 @@ public class ApiAgentsController extends Controller {
      * gate, and unique-name collision. Each rule short-circuits via
      * {@code error(...)} which throws a Result.
      */
+    @SuppressWarnings("java:S2259")
     private static void validateRenameRules(Agent agent, String name) {
         // JCLAW-115: only validate when the name actually changes. Existing
         // agents grandfathered in — rejecting their current name on an

@@ -90,16 +90,15 @@ public class ApiTranscriptionController extends Controller {
      *  download for the model with the given id. Returns 202-style
      *  {@code {"status":"downloading"}} immediately on success, 400 on
      *  unknown id. */
-    @SuppressWarnings("java:S2259")
+    // S3655 (Optional.get without isPresent): error(400) above halts via a
+    // Result that Sonar can't see across the framework boundary, so the
+    // analyzer thinks model.get() can be reached when model.isEmpty(). It
+    // can't. Same Play-1.x-vs-Sonar gap that S2259 papers over.
+    @SuppressWarnings({"java:S2259", "java:S3655"})
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
     public static void download(String id) {
         var model = WhisperModel.byId(id);
-        if (model.isEmpty()) {
-            // Play's error() throws a Result internally, but the static
-            // analyzer can't see that — explicit return makes the flow
-            // legible and lets the model.get() below be unambiguously safe.
-            error(400, "Unknown whisper model id: " + id);
-        }
+        if (model.isEmpty()) error(400, "Unknown whisper model id: " + id);
         // ensureAvailable is single-flight; concurrent calls from the
         // polling UI all attach to the same in-flight future, no harm done.
         WhisperModelManager.ensureAvailable(model.get(), null);

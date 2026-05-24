@@ -128,6 +128,7 @@ public class ApiMcpServersController extends Controller {
         renderJSON(gson.toJson(McpServerService.View.of(row)));
     }
 
+    @SuppressWarnings("java:S2259")
     private static void applyRenameIfPresent(McpServer row, com.google.gson.JsonObject body) {
         if (!body.has("name") || body.get("name").isJsonNull()) return;
         var newName = body.get("name").getAsString();
@@ -159,6 +160,7 @@ public class ApiMcpServersController extends Controller {
 
     // ==================== helpers ====================
 
+    @SuppressWarnings("java:S2259")
     private static McpServer requireServer(Long id) {
         var row = (McpServer) McpServer.findById(id);
         if (row != null) return row;
@@ -166,6 +168,7 @@ public class ApiMcpServersController extends Controller {
         throw new AssertionError("notFound() did not throw");
     }
 
+    @SuppressWarnings("java:S2259")
     private static String readRequiredString(com.google.gson.JsonObject body, String key) {
         if (!body.has(key) || body.get(key).isJsonNull()) {
             error(400, "Field '%s' is required".formatted(key));
@@ -175,6 +178,7 @@ public class ApiMcpServersController extends Controller {
         return s;
     }
 
+    @SuppressWarnings("java:S2259")
     private static McpServer.Transport readTransport(com.google.gson.JsonObject body) {
         var raw = readRequiredString(body, KEY_TRANSPORT);
         try {
