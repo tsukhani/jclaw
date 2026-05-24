@@ -223,6 +223,28 @@ function formatTime12h(hour: number, min: number): string {
   return `${h12}${mm} ${period}`
 }
 
+/**
+ * Mirror pages/index.vue's formatActivityTimestamp so the Next Run column
+ * reads "May 24, 2026 · 9:00:00 AM" instead of the locale-default
+ * "25/05/2026, 09:00:00". Pinned to 12-hour clock so AM/PM is consistent
+ * regardless of OS locale settings.
+ */
+function formatTaskTimestamp(iso: string): string {
+  const d = new Date(iso)
+  const date = d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+  const time = d.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })
+  return `${date} · ${time}`
+}
+
 // ─────────────────────────── Calendar projection ────────────────────────────
 //
 // Project every fire a task makes in a half-open window [from, to). Used by
@@ -644,7 +666,7 @@ const typeSelectId = useId()
               {{ task.agentName || '—' }}
             </td>
             <td class="px-4 py-2.5 text-fg-muted text-xs">
-              {{ task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : '—' }}
+              {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string) : '—' }}
             </td>
             <td class="px-4 py-2.5 text-fg-muted text-xs">
               {{ task.retryCount }}/{{ task.maxRetries }}
@@ -750,7 +772,7 @@ const typeSelectId = useId()
               Next run
             </dt>
             <dd class="text-fg-primary">
-              {{ task.nextRunAt ? new Date(task.nextRunAt as string).toLocaleString() : '—' }}
+              {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string) : '—' }}
             </dd>
             <dt class="text-fg-muted">
               Retries
