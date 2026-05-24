@@ -15,11 +15,11 @@ import java.util.Map;
 
 /**
  * JCLAW-326: paginated read tool that lists a parent agent's
- * {@link SubagentRun} rows for the {@code conversations_list} AC. The query
+ * {@link SubagentRun} rows for the {@code conversation_list} AC. The query
  * is always scoped to the calling agent's owned rows — there is no
  * cross-agent listing path on Personal Edition, mirroring the
  * parent-ownership gates on {@link SubagentYieldTool} and
- * {@link ConversationsHistoryTool}.
+ * {@link ConversationHistoryTool}.
  *
  * <p>Filters (all optional, AND-combined):
  * <ul>
@@ -32,13 +32,13 @@ import java.util.Map;
  *
  * <p>Pagination uses limit (default 20, max 100) + offset (default 0). Fetch
  * one row beyond {@code limit} to compute {@code has_more} without a second
- * count query (same shape as {@link ConversationsHistoryTool}). The
+ * count query (same shape as {@link ConversationHistoryTool}). The
  * {@code outcomePreview} field truncates the stored outcome at 200 characters
  * so a single list call can't return megabytes of child transcripts.
  */
-public class ConversationsListTool implements ToolRegistry.Tool {
+public class ConversationListTool implements ToolRegistry.Tool {
 
-    public static final String TOOL_NAME = "conversations_list";
+    public static final String TOOL_NAME = "conversation_list";
 
     private static final String PARAM_STATUS = "status";
     private static final String PARAM_LABEL_GLOB = "labelGlob";

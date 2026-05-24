@@ -62,7 +62,7 @@ public class SubagentRun extends Model {
     /**
      * JCLAW-326: operator-provided short display name passed to
      * {@code subagent_spawn}'s {@code label} param, persisted here so
-     * {@code conversations_list} can filter (label-glob) and surface a stable
+     * {@code conversation_list} can filter (label-glob) and surface a stable
      * display column without parsing the per-run announce-message metadata
      * JSON. Null for pre-JCLAW-326 rows; treated as "unnamed" by the list
      * tool.

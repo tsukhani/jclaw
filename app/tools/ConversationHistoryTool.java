@@ -51,9 +51,9 @@ import java.util.Map;
  * lets the caller walk back through history a page at a time if it really
  * needs all of it.
  */
-public class ConversationsHistoryTool implements ToolRegistry.Tool {
+public class ConversationHistoryTool implements ToolRegistry.Tool {
 
-    public static final String TOOL_NAME = "conversations_history";
+    public static final String TOOL_NAME = "conversation_history";
 
     private static final String PARAM_RUN_ID = "runId";
 

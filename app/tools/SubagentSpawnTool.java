@@ -484,7 +484,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** Insert the SubagentRun audit row in its own short Tx and return the
      *  generated id. JCLAW-326: persist the spawn-time {@code label} on the
-     *  row so {@code conversations_list} can filter / display without re-parsing
+     *  row so {@code conversation_list} can filter / display without re-parsing
      *  per-run announce-message metadata JSON. */
     private static Long insertSubagentRun(Long parentAgentId, Long childAgentId,
                                            Long parentConvId, Long childConvId, String label) {

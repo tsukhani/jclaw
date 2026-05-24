@@ -16,21 +16,21 @@ import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
-import tools.ConversationsSendTool;
+import tools.ConversationSendTool;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JCLAW-326 tests: {@code conversations_send} tool.
+ * JCLAW-326 tests: {@code conversation_send} tool.
  *
  * <p>Each test seeds the parent + child agent + conversation graph the tool
  * operates on. The tool is invoked directly from a fresh virtual thread so
  * the inner {@code Tx.run} opens its own JPA transaction and observes
  * setup-thread writes.
  */
-class ConversationsSendToolTest extends UnitTest {
+class ConversationSendToolTest extends UnitTest {
 
     private Agent parentAgent;
     private Agent childAgent;
@@ -60,9 +60,9 @@ class ConversationsSendToolTest extends UnitTest {
 
     @Test
     void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(ConversationsSendTool.TOOL_NAME);
-        assertNotNull(tool, "conversations_send must be registered by ToolRegistrationJob");
-        assertEquals(ConversationsSendTool.TOOL_NAME, tool.name());
+        var tool = ToolRegistry.lookupTool(ConversationSendTool.TOOL_NAME);
+        assertNotNull(tool, "conversation_send must be registered by ToolRegistrationJob");
+        assertEquals(ConversationSendTool.TOOL_NAME, tool.name());
         assertEquals("System", tool.category());
     }
 
@@ -87,7 +87,7 @@ class ConversationsSendToolTest extends UnitTest {
         var msg = msgs.get(0);
         assertEquals("user", msg.role, "parent→child rides as USER so child LLM sees it");
         assertEquals("check radarr", msg.content);
-        assertEquals(ConversationsSendTool.MESSAGE_KIND, msg.messageKind,
+        assertEquals(ConversationSendTool.MESSAGE_KIND, msg.messageKind,
                 "discriminator for chat UI rendering");
         assertNotNull(msg.metadata);
         assertTrue(msg.metadata.contains("\"source\":\"parent\""),
@@ -149,7 +149,7 @@ class ConversationsSendToolTest extends UnitTest {
         var msg = msgs.get(0);
         assertEquals("user", msg.role, "child→parent rides as USER so parent LLM sees it");
         assertEquals("status: scanning", msg.content);
-        assertEquals(ConversationsSendTool.MESSAGE_KIND, msg.messageKind);
+        assertEquals(ConversationSendTool.MESSAGE_KIND, msg.messageKind);
         assertTrue(msg.metadata.contains("\"source\":\"child\""),
                 "metadata must carry source=child, got: " + msg.metadata);
     }
@@ -215,14 +215,14 @@ class ConversationsSendToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
-                var tool = (ConversationsSendTool) ToolRegistry.lookupTool(ConversationsSendTool.TOOL_NAME);
+                var tool = (ConversationSendTool) ToolRegistry.lookupTool(ConversationSendTool.TOOL_NAME);
                 resultRef.set(tool.execute(argsJson, caller));
             } catch (Exception e) {
                 errorRef.set(e);
             }
         });
         thread.join(10_000);
-        assertFalse(thread.isAlive(), "conversations_send must complete within 10s");
+        assertFalse(thread.isAlive(), "conversation_send must complete within 10s");
         if (errorRef.get() != null) throw errorRef.get();
         return resultRef.get();
     }

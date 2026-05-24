@@ -14,20 +14,20 @@ import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
-import tools.ConversationsListTool;
+import tools.ConversationListTool;
 
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JCLAW-326 tests: {@code conversations_list} tool.
+ * JCLAW-326 tests: {@code conversation_list} tool.
  *
  * <p>Each test seeds a parent agent and a handful of {@link SubagentRun} rows
  * the tool reads back. Ownership scope is baked into the WHERE clause, so
  * the first test seeds runs across two parents and asserts only the caller's
  * rows surface.
  */
-class ConversationsListToolTest extends UnitTest {
+class ConversationListToolTest extends UnitTest {
 
     private Agent parentAgent;
     private Agent otherParent;
@@ -57,9 +57,9 @@ class ConversationsListToolTest extends UnitTest {
 
     @Test
     void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(ConversationsListTool.TOOL_NAME);
-        assertNotNull(tool, "conversations_list must be registered by ToolRegistrationJob");
-        assertEquals(ConversationsListTool.TOOL_NAME, tool.name());
+        var tool = ToolRegistry.lookupTool(ConversationListTool.TOOL_NAME);
+        assertNotNull(tool, "conversation_list must be registered by ToolRegistrationJob");
+        assertEquals(ConversationListTool.TOOL_NAME, tool.name());
         assertEquals("System", tool.category());
     }
 
@@ -179,7 +179,7 @@ class ConversationsListToolTest extends UnitTest {
         var parsed = JsonParser.parseString(json).getAsJsonObject();
         var preview = parsed.getAsJsonArray("runs").get(0).getAsJsonObject()
                 .get("outcomePreview").getAsString();
-        assertTrue(preview.length() <= ConversationsListTool.OUTCOME_PREVIEW_MAX_CHARS,
+        assertTrue(preview.length() <= ConversationListTool.OUTCOME_PREVIEW_MAX_CHARS,
                 "preview must be ≤ 200 chars, got len: " + preview.length());
         assertTrue(preview.endsWith("..."),
                 "truncated preview must carry the ellipsis marker, got: " + preview);
@@ -236,14 +236,14 @@ class ConversationsListToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
-                var tool = (ConversationsListTool) ToolRegistry.lookupTool(ConversationsListTool.TOOL_NAME);
+                var tool = (ConversationListTool) ToolRegistry.lookupTool(ConversationListTool.TOOL_NAME);
                 resultRef.set(tool.execute(argsJson, caller));
             } catch (Exception e) {
                 errorRef.set(e);
             }
         });
         thread.join(10_000);
-        assertFalse(thread.isAlive(), "conversations_list must complete within 10s");
+        assertFalse(thread.isAlive(), "conversation_list must complete within 10s");
         if (errorRef.get() != null) throw errorRef.get();
         return resultRef.get();
     }

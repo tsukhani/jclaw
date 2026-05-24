@@ -49,19 +49,19 @@ public class ToolRegistrationJob extends Job<Void> {
         // resume Message and re-invokes AgentRunner.run on the parent
         // conversation when the child terminates.
         toolList.add(new SubagentYieldTool());
-        // JCLAW-274: conversations_history. Read a subagent run's child
+        // JCLAW-274: conversation_history. Read a subagent run's child
         // conversation transcript (role, content, tool calls/results,
         // timestamps). Parent-owned access only.
-        toolList.add(new ConversationsHistoryTool());
-        // JCLAW-326: conversations_send. Bidirectional parent↔child message
+        toolList.add(new ConversationHistoryTool());
+        // JCLAW-326: conversation_send. Bidirectional parent↔child message
         // delivery. Parent→child appends a USER message on the child's
         // conversation; child→parent appends back to the parent's
         // conversation. Fire-and-forget; does not block either side.
-        toolList.add(new ConversationsSendTool());
-        // JCLAW-326: conversations_list. Paginated, parent-scoped list of this
+        toolList.add(new ConversationSendTool());
+        // JCLAW-326: conversation_list. Paginated, parent-scoped list of this
         // agent's SubagentRun rows with status / label-glob / agentId
         // filters.
-        toolList.add(new ConversationsListTool());
+        toolList.add(new ConversationListTool());
         // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by
