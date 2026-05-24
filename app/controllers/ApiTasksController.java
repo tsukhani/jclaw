@@ -221,10 +221,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunView.class))))
     public static void runs(Long id, Integer limit, Integer offset) {
         Task task = Task.findById(id);
-        // Explicit return after notFound() so Sonar's flow analysis narrows
-        // `task` to non-null on the following lines (see the retry action's
-        // matching comment for the Play-vs-Sonar rationale).
-        if (task == null) { notFound(); return; }
+        if (task == null) notFound();
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
@@ -533,11 +530,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void cancel(Long id) {
         Task task = Task.findById(id);
-        // Explicit return after notFound() so Sonar's flow analysis narrows
-        // `task` to non-null on the following line. Play's notFound() throws
-        // a Result internally, but Sonar can't see that. Matches the
-        // pattern used by update/run/pause/resume/retry in this file.
-        if (task == null) { notFound(); return; }
+        if (task == null) notFound();
         // Both PENDING (one-shot waiting) and ACTIVE (recurring ongoing)
         // are cancellable; other states (RUNNING, terminal) are not.
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
