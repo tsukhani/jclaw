@@ -15,6 +15,7 @@ import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -52,6 +53,9 @@ import java.util.function.Consumer;
 public final class McpStreamableHttpTransport implements McpTransport {
 
     private static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
+    /** Per MCP spec (2025-06-18) §2.5: clients must echo this header on every
+     *  request after the server assigns it on the initialize response. */
+    private static final String MCP_SESSION_ID = "Mcp-Session-Id";
 
     private final String name;
     private final URI endpoint;
@@ -63,6 +67,12 @@ public final class McpStreamableHttpTransport implements McpTransport {
 
     private final ConcurrentHashMap<Long, okhttp3.Call> inFlight = new ConcurrentHashMap<>();
     private final AtomicLong callSeq = new AtomicLong();
+    /** Session id assigned by the server on the initialize response (if any).
+     *  Atomic so the SSE-reader thread that observes it from one response
+     *  publishes to subsequent {@link #send} calls without a lock. Null until
+     *  the first response carries it; null forever if the server doesn't
+     *  participate in session tracking (legacy non-streamable HTTP servers). */
+    private final AtomicReference<String> sessionId = new AtomicReference<>();
 
     public McpStreamableHttpTransport(String name, URI endpoint, Map<String, String> headers) {
         if (endpoint == null) throw new IllegalArgumentException("endpoint required");
@@ -86,6 +96,13 @@ public final class McpStreamableHttpTransport implements McpTransport {
                 .header(HttpKeys.ACCEPT, "application/json, text/event-stream")
                 .post(body);
         for (var entry : headers.entrySet()) builder.header(entry.getKey(), entry.getValue());
+        // Echo the session id once the server has assigned one — required by
+        // streamable-HTTP servers (e.g. context7) that reject subsequent
+        // requests with HTTP 400 "No valid session ID provided" without it.
+        // Spec is case-insensitive on the header name; we send the canonical
+        // form to match the spec example.
+        var sid = sessionId.get();
+        if (sid != null) builder.header(MCP_SESSION_ID, sid);
         var call = HttpFactories.llmStreaming().newCall(builder.build());
         var token = callSeq.incrementAndGet();
         inFlight.put(token, call);
@@ -110,6 +127,15 @@ public final class McpStreamableHttpTransport implements McpTransport {
     }
 
     private void handleResponse(Response resp) throws IOException {
+        // Capture the session id assigned by the server (if present). Both
+        // canonical (Mcp-Session-Id) and lowercase forms are seen in the wild
+        // since header names are case-insensitive; OkHttp normalizes lookup
+        // so the canonical name covers both. First non-null wins — subsequent
+        // responses may omit the header and shouldn't clobber.
+        var sidFromHeader = resp.header(MCP_SESSION_ID);
+        if (sidFromHeader != null && !sidFromHeader.isBlank()) {
+            sessionId.compareAndSet(null, sidFromHeader);
+        }
         if (!resp.isSuccessful()) {
             String snippet = "";
             try { snippet = resp.peekBody(512).string(); }
