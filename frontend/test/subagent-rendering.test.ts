@@ -212,6 +212,103 @@ describe('Chat page — async-spawn announce card (JCLAW-270)', () => {
   })
 })
 
+describe('Chat page — conversation → /subagents banner (JCLAW-326)', () => {
+  it('renders the banner when a conversation has subagent announces, linking to filtered /subagents', async () => {
+    setupBaseAgents()
+    registerEndpoint('/api/conversations', () => [
+      { id: 60, agentId: 1, agentName: 'main-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 4, preview: 'multi spawn',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    // Two distinct subagent announces in the same parent conversation.
+    registerEndpoint('/api/conversations/60/messages', () => [
+      { id: 1, role: 'user', content: 'spawn two things',
+        createdAt: '2026-05-14T10:00:00Z' },
+      { id: 2, role: 'system',
+        content: 'Subagent completed (alpha)',
+        messageKind: 'subagent_announce',
+        metadata: { runId: 201, label: 'alpha', status: 'COMPLETED',
+          reply: 'ok', childConversationId: 301 },
+        createdAt: '2026-05-14T10:01:00Z' },
+      { id: 3, role: 'system',
+        content: 'Subagent completed (beta)',
+        messageKind: 'subagent_announce',
+        metadata: { runId: 202, label: 'beta', status: 'COMPLETED',
+          reply: 'ok', childConversationId: 302 },
+        createdAt: '2026-05-14T10:02:00Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(60)
+    await flushPromises()
+
+    const banner = component.find('[data-testid="conversation-subagents-banner"]')
+    expect(banner.exists()).toBe(true)
+    // Banner names the count and pluralizes correctly.
+    expect(banner.text()).toContain('2')
+    expect(banner.text()).toContain('subagents spawned')
+    // The link routes to the /subagents page with the current conversation
+    // as the parentConversationId filter.
+    const link = banner.find('a')
+    expect(link.attributes('href')).toBe('/subagents?parentConversationId=60')
+  })
+
+  it('uses singular wording when exactly one subagent has been spawned', async () => {
+    setupBaseAgents()
+    registerEndpoint('/api/conversations', () => [
+      { id: 61, agentId: 1, agentName: 'main-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'single spawn',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/61/messages', () => [
+      { id: 11, role: 'system',
+        content: 'Subagent completed (solo)',
+        messageKind: 'subagent_announce',
+        metadata: { runId: 401, label: 'solo', status: 'COMPLETED',
+          reply: 'done', childConversationId: 501 },
+        createdAt: '2026-05-14T10:01:00Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(61)
+    await flushPromises()
+
+    const banner = component.find('[data-testid="conversation-subagents-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('1 subagent spawned')
+    // Negative: must not pluralize when count is 1.
+    expect(banner.text()).not.toContain('subagents spawned')
+  })
+
+  it('is absent when the conversation has no subagent announces', async () => {
+    setupBaseAgents()
+    registerEndpoint('/api/conversations', () => [
+      { id: 62, agentId: 1, agentName: 'main-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'no spawn',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/62/messages', () => [
+      { id: 20, role: 'user', content: 'just chat',
+        createdAt: '2026-05-14T10:00:00Z' },
+      { id: 21, role: 'assistant', content: 'ok',
+        createdAt: '2026-05-14T10:00:01Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(62)
+    await flushPromises()
+
+    expect(component.find('[data-testid="conversation-subagents-banner"]').exists())
+      .toBe(false)
+  })
+})
+
 describe('Conversations sidebar — subagent badge (JCLAW-267)', () => {
   it('renders the subagent badge for rows with a parentConversationId', async () => {
     registerEndpoint('/api/agents', () => [

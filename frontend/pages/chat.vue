@@ -1186,6 +1186,15 @@ function collectAnnouncedRunIds(msgs: Message[]): Set<string> {
 }
 
 /**
+ * JCLAW-326: count of subagent runs that have produced an announce row in
+ * the current conversation. Drives the "View N subagents in this
+ * conversation" banner; 0 hides the banner. Counts unique run-ids rather
+ * than raw announce messages so a hypothetical duplicate (re-render race)
+ * doesn't inflate the figure.
+ */
+const announcedSubagentCount = computed(() => collectAnnouncedRunIds(messages.value).size)
+
+/**
  * Check whether {@code m}'s assistant toolCalls contain a pending async
  * spawn whose run-id has not yet been announced.
  */
@@ -2638,6 +2647,38 @@ function exportConversation() {
             <span class="font-mono uppercase tracking-wide">Read-only</span>
             <span>Subagent transcript for <strong>{{ subagentTranscript.agentName }}</strong></span>
           </div>
+        </div>
+
+        <!--
+          JCLAW-326: parent-conversation → /subagents deep-link banner.
+          Only renders for a real parent conversation that has at least one
+          subagent_announce in its message list; mutually exclusive with the
+          subagentTranscript banner above (you can't be both viewing a
+          child's transcript and the parent of a run at the same time).
+          Counts unique run-ids so the banner figure matches the count of
+          distinct rows the /subagents page will show under this filter.
+        -->
+        <div
+          v-if="!subagentTranscript && selectedConvoId && announcedSubagentCount > 0"
+          data-testid="conversation-subagents-banner"
+          class="mx-auto w-full max-w-3xl px-4 pt-3"
+        >
+          <NuxtLink
+            :to="`/subagents?parentConversationId=${selectedConvoId}`"
+            class="flex items-center gap-2 px-3 py-2 text-xs bg-muted/40 border border-input
+                   text-fg-muted hover:text-fg-strong hover:border-neutral-500 rounded transition-colors"
+          >
+            <UsersIcon
+              class="w-3.5 h-3.5 shrink-0"
+              aria-hidden="true"
+            />
+            <span>
+              <strong>{{ announcedSubagentCount }}</strong>
+              {{ announcedSubagentCount === 1 ? 'subagent' : 'subagents' }} spawned
+              in this conversation
+            </span>
+            <span class="ml-auto">View list →</span>
+          </NuxtLink>
         </div>
 
         <!--
