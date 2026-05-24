@@ -1016,7 +1016,6 @@ describe('Settings page — Skills Promotion', () => {
     expect(hit).toBeTruthy()
     expect(String(hit!.value)).toBe('250')
   })
-
 })
 
 describe('Settings page — Shell Execution', () => {

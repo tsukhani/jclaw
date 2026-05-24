@@ -68,7 +68,6 @@ describe('Chat page — streaming state machine', () => {
     expect(textarea.exists()).toBe(true)
     expect((textarea.element as HTMLTextAreaElement).disabled).toBe(false)
   })
-
 })
 
 describe('Chat page — tool call rendering', () => {
@@ -1538,4 +1537,3 @@ describe('Chat page — input handlers', () => {
     expect(textarea.element.style.height).toBeDefined()
   })
 })
-

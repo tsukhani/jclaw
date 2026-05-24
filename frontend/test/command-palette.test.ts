@@ -153,4 +153,3 @@ describe('CommandPalette', () => {
     expect(getDialogText()).toContain('Toggle theme')
   })
 })
-

@@ -174,11 +174,10 @@ function humanCron(expr: string): string | null {
   let sec: string, min: string, hour: string, dom: string, mon: string, dow: string
   if (parts.length === 6) {
     // We know all six indexes exist after the length check.
-    sec = parts[0]!; min = parts[1]!; hour = parts[2]!
-    dom = parts[3]!; mon = parts[4]!; dow = parts[5]!
+    [sec, min, hour, dom, mon, dow] = parts as [string, string, string, string, string, string]
   }
   else if (parts.length === 5) {
-    min = parts[0]!; hour = parts[1]!; dom = parts[2]!; mon = parts[3]!; dow = parts[4]!
+    [min, hour, dom, mon, dow] = parts as [string, string, string, string, string]
     sec = '0'
   }
   else return null
@@ -331,7 +330,7 @@ function expandCron(expr: string, from: Date, to: Date): Date[] {
     // Spring 6-field: sec min hour dom mon dow — only sec=0 expansion is
     // supported (the calendar grid is minute-resolution).
     if (parts[0] !== '0') return []
-    min = parts[1]!; hour = parts[2]!; dom = parts[3]!; mon = parts[4]!; dow = parts[5]!
+    ;[min, hour, dom, mon, dow] = parts.slice(1) as [string, string, string, string, string]
   }
   else if (parts.length === 5) {
     [min, hour, dom, mon, dow] = parts as [string, string, string, string, string]
@@ -434,7 +433,8 @@ const calendarDays = computed<DayCell[]>(() => {
   const gridStart = new Date(monthStart)
   gridStart.setDate(monthStart.getDate() - monthStart.getDay())
   const cells: DayCell[] = []
-  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
   // Project once over the full visible window so we don't re-walk per cell.
   const gridEnd = new Date(gridStart)
   gridEnd.setDate(gridStart.getDate() + 42)
@@ -870,7 +870,7 @@ const typeSelectId = useId()
       </div>
       <div class="grid grid-cols-7 text-[10px] uppercase tracking-wider text-fg-muted border-b border-border">
         <div
-          v-for="dn in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
+          v-for="dn in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']"
           :key="dn"
           class="px-2 py-1.5"
         >

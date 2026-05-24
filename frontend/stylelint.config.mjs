@@ -79,6 +79,7 @@ export default {
     'node_modules/**',
     'playwright-report/**',
     'test-results/**',
+    'coverage/**', // Vitest coverage reports — third-party generated CSS (prettify.css, base.css)
     'components/ui/**', // shadcn-vue vendored components
   ],
 }

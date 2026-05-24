@@ -36,7 +36,7 @@ const sinceFilter = ref<string>('')
 // and lets the user back out.
 const route = useRoute()
 const parentConversationFilter = ref<string>(
-  typeof route.query.parentConversationId === 'string' ? route.query.parentConversationId : ''
+  typeof route.query.parentConversationId === 'string' ? route.query.parentConversationId : '',
 )
 
 const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: () => [] })

@@ -231,7 +231,6 @@ describe('Agents page — edit flow opens form and pulls per-agent state', () =>
     expect(queueSelect, 'queue mode select should render').toBeTruthy()
     expect(queueSelect!.element.value).toBe('collect')
   })
-
 })
 
 describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
@@ -482,7 +481,6 @@ describe('Agents page — workspace file edit/save', () => {
     await flushPromises()
     await vi.waitFor(() => expect(textarea().element.value).toContain('helper soul'))
   })
-
 })
 
 describe('Agents page — Inspect prompt dialog', () => {
