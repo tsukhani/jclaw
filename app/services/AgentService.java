@@ -283,12 +283,33 @@ public class AgentService {
      * {@code agent.{name}.*} and Memory rows keyed by agent name are also
      * purged to avoid orphaned diagnostic data.
      *
+     * <p>Sub-agent descendants (Agent rows whose {@code parent_agent_id}
+     * points at this agent or any of its descendants) are recursively deleted
+     * first — each gets the same full cleanup sweep, depth-first — so the
+     * Agent self-FK is satisfied by the time this agent's own delete fires.
+     * Without this step the {@code parent_agent_id} constraint blocks the
+     * delete with H2 error code 23503 (referential integrity violation).
+     *
      * <p>The on-disk workspace directory is removed last, after DB state is
      * clean, so a failed delete leaves the filesystem in a recoverable state.
      */
     public static void delete(Agent agent) {
         var agentId = agent.id;
         var agentName = agent.name;
+
+        // Cascade-delete descendant agents first. Sub-agents created by
+        // subagent_spawn live in a tree via Agent.parent_agent_id; their
+        // workspace, Telegram binding, shell allowlist, etc. all resolve
+        // via parent-chain walk from the root. Deleting the root without
+        // first deleting the descendants leaves orphan Agent rows whose
+        // FK references the now-doomed parent, tripping
+        // ConstraintViolationException on the agent.delete() at the end
+        // of this method. Recurse depth-first so each descendant gets the
+        // same full cleanup sweep (its own conversations, tasks, configs,
+        // workspace dir) before its Agent row goes.
+        for (var child : findDirectChildren(agentId)) {
+            delete(child);
+        }
 
         // Bulk-delete messages and conversations (the high-volume tables) via JPQL,
         // then clear the Hibernate session to evict stale references. This replaces
@@ -345,6 +366,18 @@ public class AgentService {
         agent.delete();
         deleteWorkspaceDirectory(agentName);
         EventLogger.info(LOG_CATEGORY, agentName, null, "Agent deleted");
+    }
+
+    /**
+     * Direct children of {@code parentId} — Agent rows whose
+     * {@code parent_agent_id} equals it. Fetched eagerly into a typed list so
+     * {@link #delete} can mutate the underlying rows during iteration without
+     * tripping a ConcurrentModificationException from a live result-set cursor.
+     * Sub-agents typically have shallow fan-out (1–3 children per spawn round)
+     * so the per-call cost is bounded.
+     */
+    private static List<Agent> findDirectChildren(Long parentId) {
+        return Agent.<Agent>find("parentAgent.id = ?1", parentId).fetch();
     }
 
     private static void deleteWorkspaceDirectory(String agentName) {

@@ -319,6 +319,57 @@ class AgentServiceTest extends UnitTest {
     }
 
     @Test
+    void deleteCascadesToSubagentDescendants() {
+        // Repro for the H2 23503 referential-integrity violation observed
+        // when deleting a parent that has spawned sub-agents — the Agent
+        // self-FK (parent_agent_id) blocks the parent's delete unless the
+        // descendants are removed first. AgentService.delete must walk the
+        // tree depth-first and clean up every descendant's own data along
+        // the way (not just the Agent row).
+        var parent = AgentService.create("svc-delete-cascade-parent", "openrouter", "gpt-4.1");
+        var child = AgentService.create("svc-delete-cascade-child", "openrouter", "gpt-4.1");
+        child.parentAgent = parent;
+        child.save();
+        var grandchild = AgentService.create("svc-delete-cascade-grand", "openrouter", "gpt-4.1");
+        grandchild.parentAgent = child;
+        grandchild.save();
+
+        // Give the grandchild its own conversation so we can confirm the
+        // recursive sweep cleans descendant data, not just the Agent row.
+        var grandchildConvo = services.ConversationService.create(grandchild, "web", "u-cascade");
+        var grandchildConvoId = grandchildConvo.id;
+
+        var parentId = parent.id;
+        var childId = child.id;
+        var grandchildId = grandchild.id;
+
+        // Pre-condition: chain is wired.
+        assertEquals(parentId,
+                ((Agent) Agent.findById(childId)).parentAgent.id,
+                "child's parentAgent must point to parent before delete");
+        assertEquals(childId,
+                ((Agent) Agent.findById(grandchildId)).parentAgent.id,
+                "grandchild's parentAgent must point to child before delete");
+        assertTrue(Conversation.count("id = ?1", grandchildConvoId) > 0,
+                "grandchild conversation must exist before delete");
+
+        // The delete that previously threw ConstraintViolationException.
+        AgentService.delete(parent);
+
+        // Every agent in the tree must be gone.
+        assertNull(Agent.findById(parentId),
+                "parent Agent row must be deleted");
+        assertNull(Agent.findById(childId),
+                "child Agent row must be cascaded");
+        assertNull(Agent.findById(grandchildId),
+                "grandchild Agent row must be cascaded (depth-first walk)");
+        // Descendant's own data must be cleaned up too — proves the recursive
+        // call hits the full delete() body, not just an Agent row drop.
+        assertEquals(0L, Conversation.count("id = ?1", grandchildConvoId),
+                "descendant's conversations must cascade as part of recursive delete");
+    }
+
+    @Test
     void deletePurgesAgentScopedConfigKeysAndCache() {
         var agent = AgentService.create("svc-delete-config", "openrouter", "gpt-4.1");
         ConfigService.set("agent.svc-delete-config.shell.bypassAllowlist", "false");
