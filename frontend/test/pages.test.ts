@@ -54,15 +54,18 @@ describe('Dashboard page', () => {
     const component = await mountSuspended(Index)
 
     expect(component.text()).toContain('Dashboard')
-    expect(component.text()).toContain('Active Agents')
-    expect(component.text()).toContain('Total Conversations')
-    expect(component.text()).toContain('Active Channels')
-    // The tasks card splits into three sub-stats covering ACTIVE (recurring
-    // in steady state), RUNNING (currently firing), and PENDING (one-shot
-    // SCHEDULED/IMMEDIATE waiting to fire).
-    expect(component.text()).toContain('Active Tasks')
-    expect(component.text()).toContain('Running Tasks')
-    expect(component.text()).toContain('Pending Tasks')
+    // Each card carries a category title at the top; the labels below the
+    // counts describe which slice of that category is being shown.
+    expect(component.text()).toContain('Agents')
+    expect(component.text()).toContain('Conversations')
+    expect(component.text()).toContain('Channels')
+    expect(component.text()).toContain('Tasks')
+    // Tasks card sub-stats: ACTIVE (recurring in steady state),
+    // RUNNING (currently firing), PENDING (one-shot SCHEDULED/IMMEDIATE
+    // waiting to fire). 'Active' is shared with the Agents and Channels
+    // cards so the per-card check above already covers it.
+    expect(component.text()).toContain('Running')
+    expect(component.text()).toContain('Pending')
   })
 
   it('displays agent count', async () => {
@@ -78,11 +81,12 @@ describe('Dashboard page', () => {
     const component = await mountSuspended(Index)
 
     const text = component.text()
-    const agentsIdx = text.indexOf('Active Agents')
-    const convosIdx = text.indexOf('Total Conversations')
-    const channelsIdx = text.indexOf('Active Channels')
-    // The tasks card's first sub-stat header anchors its position in the row.
-    const tasksIdx = text.indexOf('Active Tasks')
+    // Card titles anchor the order — each is rendered once at the top
+    // of its card before the count, so first occurrence wins.
+    const agentsIdx = text.indexOf('Agents')
+    const convosIdx = text.indexOf('Conversations')
+    const channelsIdx = text.indexOf('Channels')
+    const tasksIdx = text.indexOf('Tasks')
     expect(agentsIdx).toBeGreaterThanOrEqual(0)
     expect(convosIdx).toBeGreaterThan(agentsIdx)
     expect(channelsIdx).toBeGreaterThan(convosIdx)

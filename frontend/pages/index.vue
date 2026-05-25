@@ -212,45 +212,59 @@ onBeforeUnmount(() => {
       Dashboard
     </h1>
 
-    <!-- Stats -->
+    <!-- Stats. Each card carries a small uppercase title at the top
+         that names the entity (Agents / Conversations / Channels /
+         Tasks); the big number + small label below it describe which
+         slice of that entity we're counting. The Tasks card splits its
+         body into three sub-stats — ACTIVE (recurring CRON/INTERVAL in
+         steady state), RUNNING (currently firing), PENDING (one-shot
+         SCHEDULED/IMMEDIATE waiting). The three values stay vertically
+         packed so the card height matches the other three in the grid. -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
       <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
+          Agents
+        </div>
         <div class="text-2xl font-semibold text-fg-strong">
           {{ enabledAgents }}/{{ agentCount }}
         </div>
         <div class="text-xs text-fg-muted mt-1">
-          Active Agents
+          Active
         </div>
       </div>
       <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
+          Conversations
+        </div>
         <div class="text-2xl font-semibold text-fg-strong">
           {{ totalConversations.toLocaleString() }}
         </div>
         <div class="text-xs text-fg-muted mt-1">
-          Total Conversations
+          Total
         </div>
       </div>
       <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
+          Channels
+        </div>
         <div class="text-2xl font-semibold text-fg-strong">
           {{ channelCount }}
         </div>
         <div class="text-xs text-fg-muted mt-1">
-          Active Channels
+          Active
         </div>
       </div>
-      <!-- Tasks card splits into three sub-stats. ACTIVE = recurring
-           (CRON/INTERVAL) in steady state; RUNNING = currently firing;
-           PENDING = one-shot (SCHEDULED/IMMEDIATE) waiting. The three
-           values stay vertically packed so the card height matches the
-           other three in the grid. -->
       <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
+          Tasks
+        </div>
         <div class="grid grid-cols-3 gap-3">
           <div>
             <div class="text-2xl font-semibold text-fg-strong leading-none">
               {{ activeTasks }}
             </div>
             <div class="text-xs text-fg-muted mt-1.5">
-              Active Tasks
+              Active
             </div>
           </div>
           <div>
@@ -258,7 +272,7 @@ onBeforeUnmount(() => {
               {{ runningTasks }}
             </div>
             <div class="text-xs text-fg-muted mt-1.5">
-              Running Tasks
+              Running
             </div>
           </div>
           <div>
@@ -266,7 +280,7 @@ onBeforeUnmount(() => {
               {{ pendingTasks }}
             </div>
             <div class="text-xs text-fg-muted mt-1.5">
-              Pending Tasks
+              Pending
             </div>
           </div>
         </div>
