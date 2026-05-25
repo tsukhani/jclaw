@@ -290,6 +290,21 @@ public class ApiTasksController extends Controller {
         List<Task> tasks = q.setFirstResult(effectiveOffset)
                 .setMaxResults(effectiveLimit).getResultList();
 
+        // X-Total-Count: mirror the convention used by /api/conversations
+        // (consumed by the dashboard's per-status task counts and any
+        // future paginated UI). Computed via a separate COUNT query
+        // applying the same WHERE clause but ignoring limit/offset, so
+        // the header reflects the true total irrespective of pagination.
+        String countJpql = where.isEmpty()
+                ? "SELECT COUNT(t) FROM Task t"
+                : "SELECT COUNT(t) FROM Task t WHERE " + where;
+        var countQ = JPA.em().createQuery(countJpql, Long.class);
+        for (int i = 0; i < params.size(); i++) {
+            countQ.setParameter(i + 1, params.get(i));
+        }
+        Long total = countQ.getSingleResult();
+        response.setHeader("X-Total-Count", String.valueOf(total));
+
         renderJSON(gson.toJson(tasks.stream().map(TaskView::of).toList()));
     }
 

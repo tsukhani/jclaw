@@ -54,10 +54,15 @@ describe('Dashboard page', () => {
     const component = await mountSuspended(Index)
 
     expect(component.text()).toContain('Dashboard')
-    expect(component.text()).toContain('Agents enabled')
-    expect(component.text()).toContain('Conversations had')
-    expect(component.text()).toContain('Channels active')
-    expect(component.text()).toContain('Tasks pending')
+    expect(component.text()).toContain('Active Agents')
+    expect(component.text()).toContain('Total Conversations')
+    expect(component.text()).toContain('Active Channels')
+    // The tasks card splits into three sub-stats covering ACTIVE (recurring
+    // in steady state), RUNNING (currently firing), and PENDING (one-shot
+    // SCHEDULED/IMMEDIATE waiting to fire).
+    expect(component.text()).toContain('Active Tasks')
+    expect(component.text()).toContain('Running Tasks')
+    expect(component.text()).toContain('Pending Tasks')
   })
 
   it('displays agent count', async () => {
@@ -73,10 +78,11 @@ describe('Dashboard page', () => {
     const component = await mountSuspended(Index)
 
     const text = component.text()
-    const agentsIdx = text.indexOf('Agents enabled')
-    const convosIdx = text.indexOf('Conversations had')
-    const channelsIdx = text.indexOf('Channels active')
-    const tasksIdx = text.indexOf('Tasks pending')
+    const agentsIdx = text.indexOf('Active Agents')
+    const convosIdx = text.indexOf('Total Conversations')
+    const channelsIdx = text.indexOf('Active Channels')
+    // The tasks card's first sub-stat header anchors its position in the row.
+    const tasksIdx = text.indexOf('Active Tasks')
     expect(agentsIdx).toBeGreaterThanOrEqual(0)
     expect(convosIdx).toBeGreaterThan(agentsIdx)
     expect(channelsIdx).toBeGreaterThan(convosIdx)

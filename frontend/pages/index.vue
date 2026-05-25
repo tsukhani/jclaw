@@ -17,10 +17,26 @@ interface ActiveChannelsResponse {
   channelTypes: string[]
 }
 
+/**
+ * Fetch a total-count via /api/tasks?status=X&limit=1 reading the
+ * X-Total-Count header. limit=1 keeps the payload tiny — we don't
+ * need the rows, only the count — and the header is set by the
+ * backend list endpoint regardless of pagination. Falls back to the
+ * response body's array length if the header is missing (test stubs
+ * via registerEndpoint don't simulate response headers).
+ */
+async function fetchTaskCount(status: string): Promise<number> {
+  const res = await $fetch.raw<unknown[]>(`/api/tasks?status=${status}&limit=1`)
+  const headerTotal = res.headers.get('x-total-count')
+  return headerTotal ? Number.parseInt(headerTotal, 10) : (res._data?.length ?? 0)
+}
+
 const [
   { data: agents },
   { data: activeChannels },
-  { data: tasks },
+  { data: activeTaskCount, refresh: refreshActiveTasks },
+  { data: runningTaskCount, refresh: refreshRunningTasks },
+  { data: pendingTaskCount, refresh: refreshPendingTasks },
   { data: logs, refresh: refreshLogs },
   { data: conversationCount },
 ] = await Promise.all([
@@ -34,7 +50,17 @@ const [
   // the per-channel logic.
   useFetch<ActiveChannelsResponse>('/api/channels/active',
     { default: () => ({ count: 0, channelTypes: [] }) }),
-  useFetch<unknown[]>('/api/tasks?status=PENDING&limit=5'),
+  // Three task-status buckets surfaced as separate sub-stats in the
+  // 4th dashboard card. ACTIVE = recurring (CRON / INTERVAL) in
+  // steady state; RUNNING = currently firing; PENDING = one-shot
+  // (SCHEDULED / IMMEDIATE) waiting to fire. Each call asks for one
+  // row of a single status and reads the true total off the
+  // X-Total-Count header — mirroring the conversation-count pattern
+  // below — so the displayed number is accurate regardless of how
+  // many task rows exist.
+  useAsyncData<number>('dashboard-active-task-count', () => fetchTaskCount('ACTIVE')),
+  useAsyncData<number>('dashboard-running-task-count', () => fetchTaskCount('RUNNING')),
+  useAsyncData<number>('dashboard-pending-task-count', () => fetchTaskCount('PENDING')),
   useFetch<{ events: LogEvent[] }>('/api/logs?limit=10'),
   // Total conversation count: ask the listing endpoint with a tiny limit
   // and read X-Total-Count from the response headers — same pattern the
@@ -51,7 +77,9 @@ const [
 const agentCount = computed(() => agents.value?.length ?? 0)
 const enabledAgents = computed(() => agents.value?.filter(a => a.enabled).length ?? 0)
 const channelCount = computed(() => activeChannels.value?.count ?? 0)
-const pendingTasks = computed(() => tasks.value?.length ?? 0)
+const activeTasks = computed(() => activeTaskCount.value ?? 0)
+const runningTasks = computed(() => runningTaskCount.value ?? 0)
+const pendingTasks = computed(() => pendingTaskCount.value ?? 0)
 const totalConversations = computed(() => conversationCount.value ?? 0)
 
 const { data: latency, refresh: refreshLatency } = useFetch<LatencyMetrics>(
@@ -164,6 +192,13 @@ onMounted(() => {
     refreshLatency()
     refreshLogs()
     chatCostRef.value?.refresh()
+    // Keep the per-status task counts in lockstep with the rest of the
+    // dashboard's 5 s tick. Mostly cheap (3 indexed COUNT queries),
+    // and an operator watching the dashboard during a task fire wants
+    // to see RUNNING tick up and back down without a manual reload.
+    refreshActiveTasks()
+    refreshRunningTasks()
+    refreshPendingTasks()
   }, 5000)
 })
 onBeforeUnmount(() => {
@@ -184,7 +219,7 @@ onBeforeUnmount(() => {
           {{ enabledAgents }}/{{ agentCount }}
         </div>
         <div class="text-xs text-fg-muted mt-1">
-          Agents enabled
+          Active Agents
         </div>
       </div>
       <div class="bg-surface-elevated border border-border p-4">
@@ -192,7 +227,7 @@ onBeforeUnmount(() => {
           {{ totalConversations.toLocaleString() }}
         </div>
         <div class="text-xs text-fg-muted mt-1">
-          Conversations had
+          Total Conversations
         </div>
       </div>
       <div class="bg-surface-elevated border border-border p-4">
@@ -200,15 +235,40 @@ onBeforeUnmount(() => {
           {{ channelCount }}
         </div>
         <div class="text-xs text-fg-muted mt-1">
-          Channels active
+          Active Channels
         </div>
       </div>
+      <!-- Tasks card splits into three sub-stats. ACTIVE = recurring
+           (CRON/INTERVAL) in steady state; RUNNING = currently firing;
+           PENDING = one-shot (SCHEDULED/IMMEDIATE) waiting. The three
+           values stay vertically packed so the card height matches the
+           other three in the grid. -->
       <div class="bg-surface-elevated border border-border p-4">
-        <div class="text-2xl font-semibold text-fg-strong">
-          {{ pendingTasks }}
-        </div>
-        <div class="text-xs text-fg-muted mt-1">
-          Tasks pending
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <div class="text-2xl font-semibold text-fg-strong leading-none">
+              {{ activeTasks }}
+            </div>
+            <div class="text-xs text-fg-muted mt-1.5">
+              Active Tasks
+            </div>
+          </div>
+          <div>
+            <div class="text-2xl font-semibold text-fg-strong leading-none">
+              {{ runningTasks }}
+            </div>
+            <div class="text-xs text-fg-muted mt-1.5">
+              Running Tasks
+            </div>
+          </div>
+          <div>
+            <div class="text-2xl font-semibold text-fg-strong leading-none">
+              {{ pendingTasks }}
+            </div>
+            <div class="text-xs text-fg-muted mt-1.5">
+              Pending Tasks
+            </div>
+          </div>
         </div>
       </div>
     </div>
