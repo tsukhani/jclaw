@@ -4,13 +4,13 @@ The radarr skill family (radarr, radarr-delete, radarr-library,
 radarr-recommend) reads runtime configuration from a single file at:
 
 ```
-workspace/main/skills/radarr/credentials/radarr.json
+workspace/<agent>/skills/radarr/credentials/radarr.json
 ```
 
+where `<agent>` is the agent that owns the workspace using the skill.
 This directory holds **only this README** — the actual `radarr.json` is
-operator-local and lives under the gitignored `workspace/main/skills/`
-copy, populated once by the operator after cloning. The skill is
-shared; the secrets are not.
+operator-local and lives under the gitignored per-agent workspace copy.
+The skill is shared across agents; the secrets are not.
 
 ## Expected `radarr.json` shape
 
@@ -63,21 +63,26 @@ shared; the secrets are not.
 
 ## Setup
 
-After `git clone` + `./jclaw.sh setup`:
+Two paths, depending on what your agent has access to:
 
-```bash
-mkdir -p workspace/main/skills/radarr/credentials
-$EDITOR workspace/main/skills/radarr/credentials/radarr.json
-```
+**With skill-creator access (easiest):**
+Ask the skill creator to populate `radarr.json` under the radarr
+skill's `credentials/` folder with values from the shape above. It
+will write the file into the correct workspace location for your
+agent.
 
-Paste the shape above, fill in your values, save. The skill reads from
-`skills/radarr/credentials/radarr.json` relative to the agent's workspace
-root, which `AgentService.workspacePath` resolves via parent-chain walk
-to `workspace/main/skills/radarr/credentials/radarr.json`.
+**Manual:**
+Create the file yourself at
+`workspace/<agent>/skills/radarr/credentials/radarr.json`, paste the
+shape above, fill in your values, save. The skill reads from
+`skills/radarr/credentials/radarr.json` relative to the calling
+agent's workspace root, which resolves to your agent's copy via the
+workspace parent-chain lookup.
 
 ## What this directory must NOT contain
 
-- The actual populated `radarr.json` — that goes under `workspace/main/`.
+- The actual populated `radarr.json` — that lives under the per-agent
+  workspace, never in the registry.
 - Any file with real API keys, bot tokens, or passwords.
 - Anything outside this README and (optionally) a sample template named
   `radarr.json.example` if you need an explicit shape file for tooling.
