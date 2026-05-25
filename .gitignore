@@ -175,13 +175,10 @@ _bmad-output/
 # rather than tracked in git. SKILL.md stays; the binary under tools/ does not.
 skills/whatsapp-wacli-mac/tools/wacli
 
-# Per-skill credentials directories — convention is `skills/<skill>/credentials/`
-# holds API keys / passwords / bot tokens scoped to that skill (e.g. radarr's
-# json with Radarr API key + Transmission + Synology creds). NEVER commit; the
-# SKILL.md instructions tell the agent to read from this path at runtime and
-# operators populate it locally. Per-skill keeps the blast radius small (a
-# leaked dir compromises one skill, not the whole project).
-skills/*/credentials/
+# Note: per-skill `credentials/` directories ARE tracked here, but only as
+# README templates that document the expected JSON shape. Real secret files
+# (radarr.json, etc.) live operator-local in workspace/main/skills/<skill>/
+# credentials/, which is gitignored via the workspace/* rule below.
 
 # Agent workspaces (only track the default main agent's core files)
 workspace/*
