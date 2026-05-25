@@ -150,8 +150,15 @@ public final class DeliveryDispatcher {
             return DispatchResult.noConfig("telegram",
                     "Telegram binding for agent '" + binding.agent.name + "' is disabled.");
         }
-        var channel = TelegramChannel.forToken(binding.botToken);
-        return channel.sendWithRetry(chatId, text)
+        // Use the static sendMessage path (not channel.sendWithRetry directly)
+        // so agent-emitted markdown like **bold** and # heading is rendered
+        // through TelegramMarkdownFormatter.toHtml before reaching the wire.
+        // The instance trySend uses parseMode="HTML" and would otherwise leave
+        // literal asterisks in the user's chat — Telegram's HTML parser finds
+        // no tags and renders the markup as plain text. The static path also
+        // chunks safely at 4000 chars with tag-aware splitting, matching the
+        // agent-reply flow's behavior.
+        return TelegramChannel.sendMessage(binding.botToken, chatId, text, agent)
                 ? DispatchResult.delivered()
                 : DispatchResult.failedDelivery(
                         "Telegram API rejected the message (see logs for details).");
