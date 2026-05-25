@@ -134,16 +134,21 @@ public final class DeliveryDispatcher {
             return DispatchResult.failedDelivery(
                     "Telegram dispatch requires an agent context for per-binding bot-token lookup.");
         }
-        var binding = TelegramBinding.findByAgent(agent);
+        // Walk the parentAgent chain: a sub-agent spawned by `main` (or any
+        // ancestor with a Telegram binding) should reach the user via that
+        // binding. Sub-agents don't have their own bot — only user-facing
+        // root agents do — so a strict findByAgent on the sub-agent always
+        // misses. Mirror's the workspace-path parent-walk pattern.
+        var binding = TelegramBinding.findByAgentOrAncestor(agent);
         if (binding == null) {
             return DispatchResult.noConfig("telegram",
                     "Connect a Telegram bot for agent '" + agent.name
-                            + "' in Settings → Channels → Telegram, or via "
-                            + "POST /api/telegram-bindings.");
+                            + "' (or any of its ancestors) in Settings → Channels → Telegram, "
+                            + "or via POST /api/telegram-bindings.");
         }
         if (!binding.enabled) {
             return DispatchResult.noConfig("telegram",
-                    "Telegram binding for agent '" + agent.name + "' is disabled.");
+                    "Telegram binding for agent '" + binding.agent.name + "' is disabled.");
         }
         var channel = TelegramChannel.forToken(binding.botToken);
         return channel.sendWithRetry(chatId, text)

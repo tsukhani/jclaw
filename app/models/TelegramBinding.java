@@ -101,6 +101,36 @@ public class TelegramBinding extends Model {
         return TelegramBinding.find("agent", agent).first();
     }
 
+    /**
+     * Resolve a Telegram binding by walking the {@link Agent#parentAgent}
+     * chain — returns the calling agent's own binding when present,
+     * otherwise the nearest ancestor's binding, otherwise null.
+     *
+     * <p>Sub-agents (created by {@code subagent_spawn}) are fresh
+     * {@link Agent} rows with no Telegram binding of their own — the
+     * operator only wires bots to user-facing agents like {@code main}.
+     * Delivery-side lookups must follow the same parent-chain inheritance
+     * that {@code AgentService.workspacePath} already uses, so a child's
+     * outbound {@code message(channel="telegram", ...)} reaches the bot
+     * its root ancestor owns.
+     *
+     * <p>Bounded walk (64 hops) guards against an unlikely cyclic
+     * {@code parent_agent_id} corruption. CRUD callers (admin add/remove
+     * binding) must keep using {@link #findByAgent} — they manage a
+     * specific row by exact identity and should not be confused by an
+     * inherited match.
+     */
+    public static TelegramBinding findByAgentOrAncestor(Agent agent) {
+        var cur = agent;
+        int hops = 0;
+        while (cur != null && hops++ < 64) {
+            var binding = findByAgent(cur);
+            if (binding != null) return binding;
+            cur = cur.parentAgent;
+        }
+        return null;
+    }
+
     public static TelegramBinding findEnabledByAgentAndUser(Agent agent, String telegramUserId) {
         return TelegramBinding.find(
                 "agent = ?1 AND telegramUserId = ?2 AND enabled = true",

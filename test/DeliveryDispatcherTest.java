@@ -191,6 +191,68 @@ class DeliveryDispatcherTest extends UnitTest {
     }
 
     @Test
+    void telegramDispatchFromSubagentInheritsParentBinding() {
+        // Sub-agents created by subagent_spawn are fresh Agent rows with no
+        // Telegram binding of their own — only the user-facing root agent
+        // (e.g. 'main') has a binding. Without parent-chain walk, a sub-agent's
+        // outbound message tool call fails with "Channel 'telegram' is not
+        // configured" even though the user IS reachable via the root's bot.
+        //
+        // Wire up: parent with a disabled binding, child whose parentAgent
+        // points at the parent. Dispatching from the child must resolve up to
+        // the parent's binding (so we see the "disabled" error from the
+        // parent's binding rather than the "not configured" error). The
+        // disabled-binding short-circuit lets us assert the walk happened
+        // without any HTTP traffic.
+        var parent = createAgent("ds-tg-parent-with-binding");
+        var child = Tx.run(() -> {
+            var c = AgentService.create("ds-tg-child-no-binding", "openrouter", "gpt-4.1");
+            c.parentAgent = parent;
+            c.save();
+            return c;
+        });
+        Tx.run(() -> {
+            var binding = new TelegramBinding();
+            binding.agent = parent;
+            binding.botToken = "fake-token-for-parent-binding-walk";
+            binding.telegramUserId = "12345";
+            binding.enabled = false;
+            binding.save();
+        });
+        var result = Tx.run(() -> DeliveryDispatcher.dispatch(child, "telegram", "12345", "hi"));
+        assertFalse(result.ok());
+        assertEquals(DispatchResult.Status.FAILED_NO_CONFIG, result.status());
+        assertTrue(result.reason().contains("disabled"),
+                "child dispatch should hit the parent's binding (disabled) rather than "
+                        + "the 'no binding' branch: " + result.reason());
+        // Cross-check: the error names the binding-owning agent (parent),
+        // not the calling agent (child) — so an operator following the hint
+        // toggles the right binding.
+        assertTrue(result.reason().contains(parent.name),
+                "disabled-binding error should name the binding's owning agent: " + result.reason());
+    }
+
+    @Test
+    void telegramDispatchFromSubagentWithNoBindingChainReturnsNoConfig() {
+        // Sub-agent whose ancestor chain has NO binding anywhere — the
+        // walk should still terminate cleanly and return NO_CONFIG with
+        // the helpful hint, not silently fail or loop.
+        var orphanParent = createAgent("ds-tg-orphan-parent");
+        var child = Tx.run(() -> {
+            var c = AgentService.create("ds-tg-orphan-child", "openrouter", "gpt-4.1");
+            c.parentAgent = orphanParent;
+            c.save();
+            return c;
+        });
+        var result = Tx.run(() -> DeliveryDispatcher.dispatch(child, "telegram", "12345", "hi"));
+        assertFalse(result.ok());
+        assertEquals(DispatchResult.Status.FAILED_NO_CONFIG, result.status());
+        assertTrue(result.reason().contains("ancestors"),
+                "no-binding-anywhere error should mention ancestors so the operator knows "
+                        + "binding the root agent will fix it: " + result.reason());
+    }
+
+    @Test
     void slackWithoutConfigReturnsNoConfig() {
         var parent = createAgent("ds-slack-nocfg");
         // No ChannelConfig row for 'slack' — dispatch should short-circuit

@@ -103,8 +103,10 @@ public final class TelegramModelSelector {
     // ── Binding / routing helpers ──────────────────────────────────────
 
     /**
-     * Resolve the agent's Telegram bot token via {@link TelegramBinding}.
-     * Returns null when the agent has no Telegram binding (e.g. a web-only
+     * Resolve the agent's Telegram bot token via {@link TelegramBinding},
+     * walking the parent-agent chain so sub-agents inherit the bot of
+     * their nearest binding-owning ancestor. Returns null when neither
+     * the agent nor any ancestor has a Telegram binding (e.g. a web-only
      * agent whose conversation happens to be on the web channel — in that
      * case {@link slash.Commands#executeModel} wouldn't route here at all,
      * but the guard makes the API robust to unexpected callers).
@@ -112,7 +114,7 @@ public final class TelegramModelSelector {
     public static String botTokenForAgent(Agent agent) {
         if (agent == null) return null;
         return Tx.run(() -> {
-            var binding = TelegramBinding.findByAgent(agent);
+            var binding = TelegramBinding.findByAgentOrAncestor(agent);
             return binding != null ? binding.botToken : null;
         });
     }
