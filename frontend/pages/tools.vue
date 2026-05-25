@@ -1,16 +1,23 @@
 <script setup lang="ts">
 import {
+  ArrowUturnLeftIcon,
+  ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
+  Cog6ToothIcon,
   CommandLineIcon,
   ComputerDesktopIcon,
   DocumentTextIcon,
   FolderIcon,
   GlobeAltIcon,
   MagnifyingGlassIcon,
+  PaperAirplaneIcon,
+  PauseIcon,
   PuzzlePieceIcon,
+  QueueListIcon,
+  UsersIcon,
 } from '@heroicons/vue/24/outline'
 import type { FunctionalComponent } from 'vue'
 import type { ToolAction, ToolCategory, ToolMeta } from '~/composables/useToolMeta'
@@ -18,21 +25,40 @@ import type { ToolAction, ToolCategory, ToolMeta } from '~/composables/useToolMe
 // Maps the backend-supplied icon name (a stable string contract — see
 // composables/useToolMeta.ts) to the concrete Heroicons component. Unknown
 // keys fall back to DocumentTextIcon so a new backend icon never breaks
-// the grid while we catch up on the frontend side.
+// the grid while we catch up on the frontend side. Keep in sync with
+// pages/agents.vue's TOOL_ICON_COMPONENTS — the two are intentionally
+// separate (this page is a read-only catalog with cards, agents.vue has
+// per-row toggles), but they consume the same backend icon-key vocabulary.
 const TOOL_ICONS: Record<string, FunctionalComponent> = {
-  terminal: CommandLineIcon,
-  folder: FolderIcon,
-  document: DocumentTextIcon,
-  globe: GlobeAltIcon,
-  search: MagnifyingGlassIcon,
-  browser: ComputerDesktopIcon,
-  clock: ClockIcon,
-  check: CheckCircleIcon,
-  tasks: ClipboardDocumentCheckIcon,
-  plug: PuzzlePieceIcon,
+  'terminal': CommandLineIcon,
+  'folder': FolderIcon,
+  'document': DocumentTextIcon,
+  'globe': GlobeAltIcon,
+  'search': MagnifyingGlassIcon,
+  'browser': ComputerDesktopIcon,
+  'clock': ClockIcon,
+  'check': CheckCircleIcon,
+  'tasks': ClipboardDocumentCheckIcon,
+  'plug': PuzzlePieceIcon,
+  'users': UsersIcon,
+  'pause': PauseIcon,
+  'history': ArrowUturnLeftIcon,
+  'cog': Cog6ToothIcon,
+  'send': PaperAirplaneIcon,
+  'list': QueueListIcon,
+  'chat-bubble': ChatBubbleLeftRightIcon,
+}
+// Per-icon-key class overrides. Heroicons' PaperAirplaneIcon points up-and-
+// right at ~45° by default; mirror chat.vue:3751's `-rotate-45` so the
+// `send` tool icon reads as the conventional horizontal "send" affordance.
+const TOOL_ICON_EXTRA_CLASS: Record<string, string> = {
+  send: '-rotate-45',
 }
 function iconFor(name: string): FunctionalComponent {
   return TOOL_ICONS[name] ?? DocumentTextIcon
+}
+function iconExtraClassFor(name: string): string {
+  return TOOL_ICON_EXTRA_CLASS[name] ?? ''
 }
 
 // JCLAW-173: this page is a read-only catalog. Per-tool enable/disable
@@ -208,7 +234,7 @@ const CATEGORY_PILL: Record<ToolCategory, string> = {
             <component
               :is="iconFor(card.iconKey)"
               class="w-5 h-5"
-              :class="card.iconColor"
+              :class="[card.iconColor, iconExtraClassFor(card.iconKey)]"
               aria-hidden="true"
             />
           </div>

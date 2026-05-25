@@ -86,7 +86,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
     public String category() { return "System"; }
 
     @Override
-    public String icon() { return "send"; }
+    public String icon() { return "chat-bubble"; }
 
     @Override
     public String shortDescription() {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowUturnLeftIcon,
+  ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -120,25 +121,38 @@ onMounted(() => {
 // Map the backend-supplied tool icon key (see useToolMeta) to a Heroicons
 // component. Returns null for unknown keys so the caller can suppress rendering.
 const TOOL_ICON_COMPONENTS = {
-  terminal: CommandLineIcon,
-  folder: FolderIcon,
-  document: DocumentTextIcon,
-  globe: GlobeAltIcon,
-  search: MagnifyingGlassIcon,
-  browser: ComputerDesktopIcon,
-  clock: ClockIcon,
-  check: CheckCircleIcon,
-  tasks: ClipboardDocumentCheckIcon,
-  users: UsersIcon,
-  pause: PauseIcon,
-  history: ArrowUturnLeftIcon,
-  cog: Cog6ToothIcon,
-  send: PaperAirplaneIcon,
-  list: QueueListIcon,
+  'terminal': CommandLineIcon,
+  'folder': FolderIcon,
+  'document': DocumentTextIcon,
+  'globe': GlobeAltIcon,
+  'search': MagnifyingGlassIcon,
+  'browser': ComputerDesktopIcon,
+  'clock': ClockIcon,
+  'check': CheckCircleIcon,
+  'tasks': ClipboardDocumentCheckIcon,
+  'users': UsersIcon,
+  'pause': PauseIcon,
+  'history': ArrowUturnLeftIcon,
+  'cog': Cog6ToothIcon,
+  'send': PaperAirplaneIcon,
+  'list': QueueListIcon,
+  'chat-bubble': ChatBubbleLeftRightIcon,
 } as const
+// Per-icon-key class overrides. Heroicons' PaperAirplaneIcon points up-and-
+// right at ~45° by default; the chat-input send button (chat.vue:3751)
+// applies `-rotate-45` to make it horizontal, the conventional "send"
+// affordance. Mirror that here so the `send` tool icon reads the same way
+// it does on the composer.
+const TOOL_ICON_EXTRA_CLASS: Record<string, string> = {
+  send: '-rotate-45',
+}
 function toolIconComponent(name: string) {
   const key = getToolMeta(name)?.icon as keyof typeof TOOL_ICON_COMPONENTS | undefined
   return key ? TOOL_ICON_COMPONENTS[key] ?? null : null
+}
+function toolIconExtraClass(name: string): string {
+  const key = getToolMeta(name)?.icon
+  return key ? TOOL_ICON_EXTRA_CLASS[key] ?? '' : ''
 }
 /**
  * One row in the agent's tools section. Either a single native tool with
@@ -1672,7 +1686,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                       :is="toolIconComponent(row.tool.name)"
                       v-if="toolIconComponent(row.tool.name)"
                       class="w-4 h-4"
-                      :class="getToolMeta(row.tool.name)?.iconColor ?? 'text-fg-muted'"
+                      :class="[getToolMeta(row.tool.name)?.iconColor ?? 'text-fg-muted', toolIconExtraClass(row.tool.name)]"
                       aria-hidden="true"
                     />
                   </div>
