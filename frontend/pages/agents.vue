@@ -14,9 +14,11 @@ import {
   FolderIcon,
   GlobeAltIcon,
   MagnifyingGlassIcon,
+  PaperAirplaneIcon,
   PauseIcon,
   PlusIcon,
   PuzzlePieceIcon,
+  QueueListIcon,
   TrashIcon,
   UsersIcon,
   XMarkIcon,
@@ -131,6 +133,8 @@ const TOOL_ICON_COMPONENTS = {
   pause: PauseIcon,
   history: ArrowUturnLeftIcon,
   cog: Cog6ToothIcon,
+  send: PaperAirplaneIcon,
+  list: QueueListIcon,
 } as const
 function toolIconComponent(name: string) {
   const key = getToolMeta(name)?.icon as keyof typeof TOOL_ICON_COMPONENTS | undefined
