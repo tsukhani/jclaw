@@ -66,7 +66,7 @@ function iconExtraClassFor(name: string): string {
 // itself is global, but binding a tool to a specific agent is the only
 // meaningful axis. The previous "global toggle" was a fan-out that wrote
 // to every agent's AgentToolConfig row, which was a leaky abstraction.
-const { TOOL_META, ORDERED_TOOLS, refresh: refreshTools } = useToolMeta()
+const { TOOL_META, ORDERED_TOOLS, getPillClass, refresh: refreshTools } = useToolMeta()
 
 // Force a refetch on every visit so the MCP tab reflects live server
 // state. Without this the module-level cache means an operator who
@@ -160,16 +160,6 @@ function toggleAllExpanded() {
     expandedSet.value = new Set(filteredCards.value.map(c => c.key))
   }
 }
-
-// Per-category styles need to be looked up by name since cards may share
-// a category. Re-derived from the same source useToolMeta exposes.
-const CATEGORY_PILL: Record<ToolCategory, string> = {
-  System: 'text-neutral-400 bg-neutral-800',
-  Files: 'text-amber-400 bg-amber-500/15',
-  Web: 'text-blue-400 bg-blue-500/15',
-  Utilities: 'text-emerald-400 bg-emerald-500/15',
-  MCP: 'text-violet-400 bg-violet-500/15',
-}
 </script>
 
 <template>
@@ -245,8 +235,8 @@ const CATEGORY_PILL: Record<ToolCategory, string> = {
               {{ card.displayName }}
             </span>
             <span
-              class="mt-1.5 inline-block text-[10px] font-medium px-1.5 py-px rounded-sm leading-tight"
-              :class="CATEGORY_PILL[card.category]"
+              class="mt-1.5 inline-block text-[10px] font-medium px-1.5 py-px rounded-sm leading-tight border"
+              :class="getPillClass(card.key)"
             >
               {{ card.category }}
             </span>

@@ -77,7 +77,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             List.of("GET", "POST", "PUT", "PATCH", "DELETE");
 
     @Override public String name() { return TOOL_NAME; }
-    @Override public String category() { return "JClaw"; }
+    @Override public String category() { return "System"; }
     @Override public String icon() { return "cog"; }
 
     @Override
