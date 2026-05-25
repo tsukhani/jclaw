@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.EventLog;
 import models.SubagentRun;
+import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.SubagentRegistry;
@@ -15,8 +16,10 @@ import utils.JpqlFilter;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -72,7 +75,7 @@ public class ApiSubagentRunsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubagentRunView.class))))
     public static void list(Long parentAgentId, Long parentConversationId,
-                            String status, String since,
+                            String status, String since, String q,
                             Integer limit, Integer offset) {
         Instant sinceInstant = parseSinceFilter(since);
         if (sinceInstant == null && since != null && !since.isBlank()) return;
@@ -86,20 +89,58 @@ public class ApiSubagentRunsController extends Controller {
                 .eq("status", statusEnum)
                 .gte("startedAt", sinceInstant);
 
+        // JCLAW-304: q resolves against TWO Lucene scopes and unions the
+        // resulting run-id sets — SUBAGENT_RUN directly (label + outcome
+        // virtual doc) plus CONVERSATION_MESSAGE → distinct child
+        // conversation ids → SubagentRun ids whose childConversation
+        // matches. Null when q is absent/blank (no FTS filter); empty
+        // list when q matched nothing across both scopes (caller short-
+        // circuits to zero rows); non-empty narrows via `r.id IN (:fts)`.
+        var ftsRunIds = ftsSubagentRunIds(q);
+
         var where = filter.toWhereClause();
-        var jpql = where.isEmpty()
-                ? "ORDER BY startedAt DESC"
-                : where + " ORDER BY startedAt DESC";
+        if (ftsRunIds != null) {
+            if (ftsRunIds.isEmpty()) {
+                response.setHeader("X-Total-Count", "0");
+                response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+                renderJSON("[]");
+            }
+            where = where.isEmpty() ? "id IN (:fts)" : where + " AND id IN (:fts)";
+        }
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 100;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        long total = where.isEmpty()
-                ? SubagentRun.count()
-                : SubagentRun.count(where, filter.params());
-        @SuppressWarnings("unchecked")
-        List<SubagentRun> runs = SubagentRun.find(jpql, filter.params())
-                .from(effectiveOffset).fetch(effectiveLimit);
+        // Switch to JPA.em().createQuery so we can bind the named :fts
+        // parameter alongside JpqlFilter's positional ?1..?N values. The
+        // legacy SubagentRun.find() shorthand only supports positional
+        // params and JCLAW-304's IN-list shape would have to expand to a
+        // variable number of positional placeholders — uglier, and the
+        // direct-JPA path matches what ApiConversationsController and
+        // ApiTasksController already do for the same q-intersection
+        // pattern.
+        var jpql = where.isEmpty()
+                ? "SELECT r FROM SubagentRun r ORDER BY r.startedAt DESC"
+                : "SELECT r FROM SubagentRun r WHERE " + where + " ORDER BY r.startedAt DESC";
+        var jpaQ = JPA.em().createQuery(jpql, SubagentRun.class);
+        var params = filter.paramList();
+        for (int i = 0; i < params.size(); i++) {
+            jpaQ.setParameter(i + 1, params.get(i));
+        }
+        if (ftsRunIds != null) jpaQ.setParameter("fts", ftsRunIds);
+
+        String countJpql = where.isEmpty()
+                ? "SELECT COUNT(r) FROM SubagentRun r"
+                : "SELECT COUNT(r) FROM SubagentRun r WHERE " + where;
+        var countQ = JPA.em().createQuery(countJpql, Long.class);
+        for (int i = 0; i < params.size(); i++) {
+            countQ.setParameter(i + 1, params.get(i));
+        }
+        if (ftsRunIds != null) countQ.setParameter("fts", ftsRunIds);
+        long total = countQ.getSingleResult();
+
+        List<SubagentRun> runs = jpaQ.setFirstResult(effectiveOffset)
+                .setMaxResults(effectiveLimit).getResultList();
 
         response.setHeader("X-Total-Count", String.valueOf(total));
         response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
@@ -111,6 +152,47 @@ public class ApiSubagentRunsController extends Controller {
 
         var result = runs.stream().map(r -> toView(r, modeByRunId)).toList();
         renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * JCLAW-304: union of (a) direct SUBAGENT_RUN scope hits on the
+     * label + outcome virtual document and (b) runs whose child
+     * conversation transcript matches via the CONVERSATION_MESSAGE
+     * scope. Returns null when q is null/blank (caller treats null as
+     * "no FTS filter"). Returns an empty list when the union was empty
+     * (caller short-circuits). Returns the union otherwise.
+     *
+     * <p>This double-scope union is the operationally useful shape
+     * because subagent runs are the one entity that carries BOTH its
+     * own narrative content AND a full transcript via the child
+     * conversation. Operators rarely remember the run label; they
+     * remember what went wrong inside the run.
+     */
+    private static List<Long> ftsSubagentRunIds(String q) {
+        if (q == null || q.isBlank()) return null;
+        try {
+            var directIds = services.search.MessageSearch.searchIds(
+                    services.search.LuceneIndexer.Scope.SUBAGENT_RUN, q, 500);
+            var messageIds = services.search.MessageSearch.searchIds(
+                    services.search.LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
+
+            Set<Long> union = new HashSet<>(directIds);
+            if (!messageIds.isEmpty()) {
+                @SuppressWarnings("unchecked")
+                var transcriptRunIds = (List<Long>) JPA.em()
+                        .createQuery("SELECT r.id FROM SubagentRun r WHERE r.childConversation.id IN "
+                                + "(SELECT m.conversation.id FROM Message m WHERE m.id IN :ids)")
+                        .setParameter("ids", messageIds)
+                        .getResultList();
+                union.addAll(transcriptRunIds);
+            }
+            return union.isEmpty() ? List.of() : List.copyOf(union);
+        } catch (java.io.IOException e) {
+            services.EventLogger.warn("search", null, null,
+                    "FTS lookup failed for subagent runs q='%s': %s"
+                            .formatted(q, e.getMessage()));
+            return null;
+        }
     }
 
     private static Instant parseSinceFilter(String since) {

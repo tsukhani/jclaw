@@ -34,7 +34,12 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
         // and our MessageSearch.init() below crashes with
         // LockObtainFailedException.
         testIndexParent = Files.createTempDirectory("jclaw-lucene-test-");
-        LuceneIndexer.setIndexPathForTest(testIndexParent.resolve("task_run_message"));
+        // JCLAW-304: setIndexPathForTest now takes the index root —
+        // each scope's subdirectory (e.g. task_run_message/) is appended
+        // by LuceneIndexer.indexPath(Scope) at open() time. Passing the
+        // scope subpath explicitly here would double-resolve to
+        // root/task_run_message/task_run_message/.
+        LuceneIndexer.setIndexPathForTest(testIndexParent);
     }
 
     @AfterAll

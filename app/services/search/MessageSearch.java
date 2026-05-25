@@ -82,6 +82,20 @@ public final class MessageSearch {
     }
 
     /**
+     * JCLAW-304: id-only multi-scope search facade.
+     * {@link MessageSearchRepository#searchIds} via the active backend,
+     * with the same pre-init no-throw contract as {@link #search}.
+     * Callers (controllers wiring {@code q} into list endpoints)
+     * intersect the returned id set with their existing JpqlFilter
+     * predicates.
+     */
+    public static List<Long> searchIds(LuceneIndexer.Scope scope, String query, int limit) throws IOException {
+        var current = repo;
+        if (current == null) return List.of();
+        return current.searchIds(scope, query, limit);
+    }
+
+    /**
      * Short name of the active backend: {@code "h2"}, {@code "postgres"},
      * or {@code "none"} when {@link #init} hasn't run.
      */

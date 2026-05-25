@@ -139,6 +139,31 @@ public class Message extends Model {
         createdAt = Instant.now();
     }
 
+    /**
+     * JCLAW-304: mirror this row into the Lucene full-text index under
+     * {@link services.search.LuceneIndexer.Scope#CONVERSATION_MESSAGE}.
+     * Same no-throw contract as the TaskRunMessage hook — the indexer
+     * catches and logs failures internally so a transient FS issue
+     * never aborts the parent JPA transaction.
+     */
+    @PostPersist
+    @PostUpdate
+    void onIndexUpsert() {
+        if (id != null) {
+            services.search.LuceneIndexer.upsert(
+                    services.search.LuceneIndexer.Scope.CONVERSATION_MESSAGE,
+                    id, content);
+        }
+    }
+
+    @PostRemove
+    void onIndexRemove() {
+        if (id != null) {
+            services.search.LuceneIndexer.remove(
+                    services.search.LuceneIndexer.Scope.CONVERSATION_MESSAGE, id);
+        }
+    }
+
     public static List<Message> findRecent(Conversation conversation, int limit) {
         return findRecent(conversation, limit, null);
     }

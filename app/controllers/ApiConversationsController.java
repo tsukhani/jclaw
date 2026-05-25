@@ -95,7 +95,8 @@ public class ApiConversationsController extends Controller {
      * not worth the unbounded fetch cost.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConversationView.class))))
-    public static void listConversations(String channel, Long agentId, String name, String peer, Integer limit, Integer offset) {
+    public static void listConversations(String channel, Long agentId, String name, String peer,
+                                          String q, Integer limit, Integer offset) {
         boolean hasNameFilter = name != null && !name.isBlank();
 
         var filter = new JpqlFilter()
@@ -103,6 +104,19 @@ public class ApiConversationsController extends Controller {
                 .eq("agent.id", agentId)
                 .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
                 .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null);
+
+        // JCLAW-304: when q is non-blank, resolve it against the
+        // CONVERSATION_MESSAGE Lucene scope, derive the distinct set of
+        // conversation ids whose messages matched, and add it as an
+        // additional `c.id IN (:fts)` predicate intersected with the
+        // existing equality filters. A blank q is a no-op so legacy
+        // callers without the parameter see identical behavior.
+        //
+        // Cap the FTS search at 500 matches — operators rarely scroll
+        // past the first page of hits, and the IN-list grows linearly
+        // with this cap, so an unbounded fetch would balloon the
+        // generated SQL for popular keywords.
+        var ftsConvIds = ftsConversationIds(q);
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 100) : 20;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
@@ -118,21 +132,34 @@ public class ApiConversationsController extends Controller {
         var fullWhere = dynamicWhere.isEmpty()
                 ? "c.parentConversation IS NULL"
                 : "c.parentConversation IS NULL AND " + dynamicWhere;
+        if (ftsConvIds != null) {
+            // Empty result set from FTS short-circuits to "no rows" —
+            // the JPQL `IN (:fts)` with an empty collection would throw,
+            // so we substitute an unsatisfiable predicate that returns
+            // zero rows cleanly. Pagination headers still emit total=0.
+            if (ftsConvIds.isEmpty()) {
+                setPaginationHeaders(0);
+                renderJSON("[]");
+            }
+            fullWhere = fullWhere + " AND c.id IN (:fts)";
+        }
         String jpql = "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE "
                 + fullWhere + " ORDER BY c.updatedAt DESC";
-        var q = JPA.em().createQuery(jpql, Conversation.class);
+        var jpaQ = JPA.em().createQuery(jpql, Conversation.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
-            q.setParameter(i + 1, params.get(i));
+            jpaQ.setParameter(i + 1, params.get(i));
         }
+        if (ftsConvIds != null) jpaQ.setParameter("fts", ftsConvIds);
 
         String countJpql = "SELECT COUNT(c) FROM Conversation c WHERE " + fullWhere;
         var countQ = JPA.em().createQuery(countJpql, Long.class);
         for (int i = 0; i < params.size(); i++) {
             countQ.setParameter(i + 1, params.get(i));
         }
+        if (ftsConvIds != null) countQ.setParameter("fts", ftsConvIds);
         long total = countQ.getSingleResult();
-        List<Conversation> convos = q.setFirstResult(effectiveOffset)
+        List<Conversation> convos = jpaQ.setFirstResult(effectiveOffset)
                 .setMaxResults(effectiveLimit).getResultList();
 
         setPaginationHeaders(total);
@@ -140,6 +167,42 @@ public class ApiConversationsController extends Controller {
         var result = convos.stream().map(ApiConversationsController::conversationToMap).toList();
 
         renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * JCLAW-304: resolve a {@code q} keyword to the distinct set of
+     * conversation ids whose messages match. Returns {@code null} when
+     * {@code q} is null/blank (caller treats null as "no FTS filter").
+     * Returns an empty list when the FTS index returned no matches
+     * (caller short-circuits to a zero-row response). Returns a
+     * non-empty list otherwise.
+     *
+     * <p>The intermediate hop through {@code Message.conversation.id} is
+     * a single JPQL distinct-projection — cheaper than fetching the
+     * full Message rows just to read their FK.
+     */
+    private static List<Long> ftsConversationIds(String q) {
+        if (q == null || q.isBlank()) return null;
+        try {
+            var messageIds = services.search.MessageSearch.searchIds(
+                    services.search.LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
+            if (messageIds.isEmpty()) return List.of();
+            @SuppressWarnings("unchecked")
+            var convIds = (List<Long>) JPA.em()
+                    .createQuery("SELECT DISTINCT m.conversation.id FROM Message m WHERE m.id IN :ids")
+                    .setParameter("ids", messageIds)
+                    .getResultList();
+            return convIds.isEmpty() ? List.of() : convIds;
+        } catch (java.io.IOException e) {
+            // FTS backend unreachable — surface as "no FTS filter" rather
+            // than fail the whole list. The operator sees the equality
+            // filters' result set and the absence of FTS-narrowed hits;
+            // less surprising than a 500 on a search bar.
+            services.EventLogger.warn("search", null, null,
+                    "FTS lookup failed for conversations q='%s': %s"
+                            .formatted(q, e.getMessage()));
+            return null;
+        }
     }
 
     /**

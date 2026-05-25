@@ -277,6 +277,34 @@ public class Task extends Model {
     }
 
     /**
+     * JCLAW-304: mirror this row into the Lucene full-text index under
+     * {@link services.search.LuceneIndexer.Scope#TASK} as a virtual
+     * document combining {@link #name} and {@link #description}. Same
+     * no-throw contract as the TaskRunMessage hook — the indexer
+     * catches and logs failures internally so a transient FS issue
+     * never aborts the parent JPA transaction.
+     */
+    @PostPersist
+    @PostUpdate
+    void onIndexUpsert() {
+        if (id != null) {
+            var n = name != null ? name : "";
+            var d = description != null ? description : "";
+            services.search.LuceneIndexer.upsert(
+                    services.search.LuceneIndexer.Scope.TASK,
+                    id, n + " " + d);
+        }
+    }
+
+    @PostRemove
+    void onIndexRemove() {
+        if (id != null) {
+            services.search.LuceneIndexer.remove(
+                    services.search.LuceneIndexer.Scope.TASK, id);
+        }
+    }
+
+    /**
      * Identify the Task entity to Hibernate by NAME rather than by class literal.
      * In Play 1.x the {@code ApplicationClassloader} can cycle (dev-mode source
      * reload, prod-mode init/teardown races between precompile and runtime),

@@ -269,25 +269,40 @@ public class ApiTasksController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))
-    public static void list(String status, String type, Long agentId, Integer limit, Integer offset) {
+    public static void list(String status, String type, Long agentId, String q,
+                             Integer limit, Integer offset) {
         var filter = new JpqlFilter()
                 .eq("status", status != null && !status.isBlank() ? Task.Status.valueOf(status.toUpperCase()) : null)
                 .eq("type", type != null && !type.isBlank() ? Task.Type.valueOf(type.toUpperCase()) : null)
                 .eq("agent.id", agentId);
 
+        // JCLAW-304: q resolves against the TASK Lucene scope (virtual
+        // doc of name + description). Null when q is absent/blank;
+        // empty list when q matched nothing — caller short-circuits to
+        // zero rows. Non-empty narrows the result set via `t.id IN (:fts)`.
+        var ftsTaskIds = ftsTaskIds(q);
+
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
         var where = filter.toWhereClause();
+        if (ftsTaskIds != null) {
+            if (ftsTaskIds.isEmpty()) {
+                response.setHeader("X-Total-Count", "0");
+                renderJSON("[]");
+            }
+            where = where.isEmpty() ? "t.id IN (:fts)" : where + " AND t.id IN (:fts)";
+        }
         String jpql = where.isEmpty()
                 ? "SELECT t FROM Task t LEFT JOIN FETCH t.agent ORDER BY t.createdAt DESC"
                 : "SELECT t FROM Task t LEFT JOIN FETCH t.agent WHERE " + where + " ORDER BY t.createdAt DESC";
-        var q = JPA.em().createQuery(jpql, Task.class);
+        var jpaQ = JPA.em().createQuery(jpql, Task.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
-            q.setParameter(i + 1, params.get(i));
+            jpaQ.setParameter(i + 1, params.get(i));
         }
-        List<Task> tasks = q.setFirstResult(effectiveOffset)
+        if (ftsTaskIds != null) jpaQ.setParameter("fts", ftsTaskIds);
+        List<Task> tasks = jpaQ.setFirstResult(effectiveOffset)
                 .setMaxResults(effectiveLimit).getResultList();
 
         // X-Total-Count: mirror the convention used by /api/conversations
@@ -302,10 +317,33 @@ public class ApiTasksController extends Controller {
         for (int i = 0; i < params.size(); i++) {
             countQ.setParameter(i + 1, params.get(i));
         }
+        if (ftsTaskIds != null) countQ.setParameter("fts", ftsTaskIds);
         Long total = countQ.getSingleResult();
         response.setHeader("X-Total-Count", String.valueOf(total));
 
         renderJSON(gson.toJson(tasks.stream().map(TaskView::of).toList()));
+    }
+
+    /**
+     * JCLAW-304: resolve a {@code q} keyword to the matching Task ids
+     * via the TASK Lucene scope. Same null / empty / non-empty contract
+     * as the conversation-list helper above — see
+     * {@code ApiConversationsController.ftsConversationIds} for the
+     * shared semantic. FTS backend errors fall through as "no FTS
+     * filter" so the operator sees equality-only results rather than a
+     * 500 on a stray Lucene IO hiccup.
+     */
+    private static List<Long> ftsTaskIds(String q) {
+        if (q == null || q.isBlank()) return null;
+        try {
+            var ids = services.search.MessageSearch.searchIds(
+                    services.search.LuceneIndexer.Scope.TASK, q, 500);
+            return ids.isEmpty() ? List.of() : ids;
+        } catch (java.io.IOException e) {
+            services.EventLogger.warn("search", null, null,
+                    "FTS lookup failed for tasks q='%s': %s".formatted(q, e.getMessage()));
+            return null;
+        }
     }
 
     @SuppressWarnings("java:S2259")

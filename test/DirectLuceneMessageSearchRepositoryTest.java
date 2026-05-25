@@ -53,7 +53,12 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         // write.lock — with a production JVM running against the same
         // checkout.
         testIndexParent = Files.createTempDirectory("jclaw-lucene-test-");
-        LuceneIndexer.setIndexPathForTest(testIndexParent.resolve("task_run_message"));
+        // JCLAW-304: setIndexPathForTest now takes the index root —
+        // each scope's subdirectory (e.g. task_run_message/) is appended
+        // by LuceneIndexer.indexPath(Scope) at open() time. Passing the
+        // scope subpath explicitly here would double-resolve to
+        // root/task_run_message/task_run_message/.
+        LuceneIndexer.setIndexPathForTest(testIndexParent);
     }
 
     @AfterAll
@@ -92,13 +97,15 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
     private static void wipeIndex() throws Exception {
         // Delete-all keeps the FSDirectory open but clears prior docs.
-        // Cheaper than close/delete/reopen between tests.
-        var fld = LuceneIndexer.class.getDeclaredField("WRITER");
+        // Cheaper than close/delete/reopen between tests. Post JCLAW-304
+        // the indexer holds a per-scope EnumMap<Scope, IndexWriter>; wipe
+        // every scope so leftover docs from a different test class can't
+        // contaminate.
+        var fld = LuceneIndexer.class.getDeclaredField("WRITERS");
         fld.setAccessible(true);
         @SuppressWarnings("unchecked")
-        var ref = (java.util.concurrent.atomic.AtomicReference<org.apache.lucene.index.IndexWriter>) fld.get(null);
-        var w = ref.get();
-        if (w != null) {
+        var writers = (java.util.Map<LuceneIndexer.Scope, org.apache.lucene.index.IndexWriter>) fld.get(null);
+        for (var w : writers.values()) {
             w.deleteAll();
             w.commit();
         }

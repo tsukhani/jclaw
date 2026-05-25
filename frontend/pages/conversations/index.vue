@@ -36,6 +36,10 @@ async function load() {
     const channel = getFilterValue('channel')
     const agent = getFilterValue('agent')
     const peer = getFilterValue('peer')
+    // JCLAW-304: q is the new FTS keyword key. Backend intersects the
+    // matching message conversation ids with the other equality filters.
+    const q = getFilterValue('q')
+    if (q) params.set('q', q)
     if (name) params.set('name', name)
     if (channel) params.set('channel', channel)
     if (agent) {
@@ -395,8 +399,8 @@ const columns: ColumnDef<Conversation, unknown>[] = [
     <div class="mb-3">
       <FilterBar
         storage-key="conversations"
-        placeholder="Filter... (e.g., agent:main channel:web peer:admin)"
-        :filter-keys="['name', 'channel', 'agent', 'peer']"
+        placeholder="Filter... (e.g., q:morning agent:main channel:web)"
+        :filter-keys="['q', 'name', 'channel', 'agent', 'peer']"
         @update:filters="onFiltersChanged"
         @export="exportAllConversations"
       />

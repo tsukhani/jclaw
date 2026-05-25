@@ -67,12 +67,37 @@ public interface MessageSearchRepository {
      * intentionally non-exceptional so caller code doesn't need a
      * guard for "operator typed nothing into the search box".
      *
+     * <p>Preserved for the legacy {@code /api/task-runs/search}
+     * endpoint that wants typed {@link TaskRunMessage} rows back
+     * directly. New list-endpoint callers should prefer
+     * {@link #searchIds} — taking just the ids lets the caller
+     * intersect them with other JpqlFilter predicates without
+     * round-tripping unused entity rows through JPA.
+     *
      * @param query     the search string; case-insensitive,
      *                  tokenised per the dialect's analyser
      * @param limit     hard cap on result count
      * @return matching rows ordered by relevance
      */
     List<TaskRunMessage> search(String query, int limit) throws IOException;
+
+    /**
+     * JCLAW-304: id-only search across an arbitrary scope. Returns the
+     * matching primary-key ids ordered by Lucene's relevance scoring,
+     * capped at {@code limit}. Empty / null query returns an empty
+     * list (same non-exceptional contract as {@link #search}).
+     *
+     * <p>Callers hydrate the entity rows themselves — usually by
+     * intersecting the returned id set with their existing JPQL
+     * equality predicates rather than fetching every match.
+     *
+     * @param scope     which on-disk index to query
+     * @param query     the search string; tokenised per the
+     *                  dialect's analyser
+     * @param limit     hard cap on result count
+     * @return matching ids ordered by relevance
+     */
+    List<Long> searchIds(LuceneIndexer.Scope scope, String query, int limit) throws IOException;
 
     /**
      * Short identifier for log lines. {@code "h2"} or {@code "postgres"}.

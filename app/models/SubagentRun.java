@@ -118,4 +118,36 @@ public class SubagentRun extends Model {
     void onCreate() {
         if (startedAt == null) startedAt = Instant.now();
     }
+
+    /**
+     * JCLAW-304: mirror this row into the Lucene full-text index under
+     * {@link services.search.LuceneIndexer.Scope#SUBAGENT_RUN} as a
+     * virtual document combining {@link #label} and {@link #outcome}.
+     * The hook fires on every persist and update; {@code outcome} is
+     * null while the run is RUNNING, but indexing it as an empty string
+     * is harmless — the row gets a fresh content document once the
+     * announce-VT writes the terminal outcome and the same hook fires
+     * again on that update. Same no-throw contract as the TaskRunMessage
+     * hook — the indexer catches and logs failures internally so a
+     * transient FS issue never aborts the parent JPA transaction.
+     */
+    @PostPersist
+    @PostUpdate
+    void onIndexUpsert() {
+        if (id != null) {
+            var l = label != null ? label : "";
+            var o = outcome != null ? outcome : "";
+            services.search.LuceneIndexer.upsert(
+                    services.search.LuceneIndexer.Scope.SUBAGENT_RUN,
+                    id, l + " " + o);
+        }
+    }
+
+    @PostRemove
+    void onIndexRemove() {
+        if (id != null) {
+            services.search.LuceneIndexer.remove(
+                    services.search.LuceneIndexer.Scope.SUBAGENT_RUN, id);
+        }
+    }
 }

@@ -15,9 +15,8 @@ import java.util.List;
 
 /**
  * Lucene 10 backed implementation of {@link MessageSearchRepository}.
- * Replaces {@code H2LuceneMessageSearchRepository} now that we own the
- * Lucene lifecycle directly (see {@link LuceneIndexer}) rather than
- * leaning on H2's bundled FullTextLucene.
+ * Owns the per-scope SearcherManager dispatch and backfill logic that
+ * sits behind {@link MessageSearch}.
  *
  * <h3>Why direct over H2.FullTextLucene</h3>
  * H2 2.3.232's {@code FullTextLucene} was compiled against Lucene 9.x
@@ -31,16 +30,15 @@ import java.util.List;
  * works against either dialect; only the disk location and crawl
  * source vary).
  *
- * <h3>Surface</h3>
- * <ul>
- *   <li>{@link #init()} — opens the {@link LuceneIndexer} and, if the
- *       on-disk index is empty, backfills every existing
- *       {@link TaskRunMessage} row. Subsequent boots skip the
- *       backfill (the index is durable across restarts).</li>
- *   <li>{@link #search(String, int)} — parses the query against the
- *       {@code content} field, returns matching rows ordered by
- *       relevance.</li>
- * </ul>
+ * <h3>Multi-scope (JCLAW-304)</h3>
+ * Each {@link LuceneIndexer.Scope} maintains its own on-disk index
+ * under {@code data/jclaw-lucene/<scope>/}. The id-only search path
+ * ({@link #searchIds}) takes a scope explicitly and returns a list
+ * of matching primary-key ids ordered by Lucene's relevance scoring;
+ * callers hydrate entity rows from JPA. The legacy entity-typed
+ * {@link #search(String, int)} path is preserved for the existing
+ * {@code /api/task-runs/search} endpoint, which still wants
+ * {@link TaskRunMessage} rows back directly.
  */
 public final class DirectLuceneMessageSearchRepository implements MessageSearchRepository {
 
@@ -53,41 +51,126 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         // Either way, the right move is to backfill from the JPA store
         // — slow on a huge transcript history, but JClaw at pre-v1 has
         // hundreds-to-low-thousands of rows.
-        if (LuceneIndexer.docCount() == 0) {
-            backfillFromDb();
+        if (LuceneIndexer.docCount(LuceneIndexer.Scope.TASK_RUN_MESSAGE) == 0) {
+            backfillTaskRunMessages();
+        }
+        if (LuceneIndexer.docCount(LuceneIndexer.Scope.CONVERSATION_MESSAGE) == 0) {
+            backfillConversationMessages();
+        }
+        if (LuceneIndexer.docCount(LuceneIndexer.Scope.TASK) == 0) {
+            backfillTasks();
+        }
+        if (LuceneIndexer.docCount(LuceneIndexer.Scope.SUBAGENT_RUN) == 0) {
+            backfillSubagentRuns();
         }
     }
 
-    private static void backfillFromDb() {
+    private static void backfillTaskRunMessages() {
+        backfill(LuceneIndexer.Scope.TASK_RUN_MESSAGE,
+                "SELECT m FROM TaskRunMessage m",
+                row -> {
+                    var m = (TaskRunMessage) row;
+                    if (m.id == null) return;
+                    LuceneIndexer.upsert(LuceneIndexer.Scope.TASK_RUN_MESSAGE, m.id, m.content);
+                });
+    }
+
+    private static void backfillConversationMessages() {
+        backfill(LuceneIndexer.Scope.CONVERSATION_MESSAGE,
+                "SELECT m FROM Message m",
+                row -> {
+                    var m = (models.Message) row;
+                    if (m.id == null) return;
+                    LuceneIndexer.upsert(LuceneIndexer.Scope.CONVERSATION_MESSAGE, m.id, m.content);
+                });
+    }
+
+    private static void backfillTasks() {
+        backfill(LuceneIndexer.Scope.TASK,
+                "SELECT t FROM Task t",
+                row -> {
+                    var t = (models.Task) row;
+                    if (t.id == null) return;
+                    LuceneIndexer.upsert(LuceneIndexer.Scope.TASK, t.id, taskContent(t));
+                });
+    }
+
+    private static void backfillSubagentRuns() {
+        backfill(LuceneIndexer.Scope.SUBAGENT_RUN,
+                "SELECT r FROM SubagentRun r",
+                row -> {
+                    var r = (models.SubagentRun) row;
+                    if (r.id == null) return;
+                    LuceneIndexer.upsert(LuceneIndexer.Scope.SUBAGENT_RUN, r.id, subagentRunContent(r));
+                });
+    }
+
+    /**
+     * Bulk indexing helper. Runs the JPQL inside a single Tx, iterates
+     * the result list calling the per-row indexer, and logs the count
+     * when it's positive. Empty JPA tables produce zero log lines so
+     * fresh installs stay quiet.
+     */
+    private static void backfill(LuceneIndexer.Scope scope, String jpql,
+                                  java.util.function.Consumer<Object> indexRow) {
         services.Tx.run(() -> {
             @SuppressWarnings("unchecked")
-            var raw = play.db.jpa.JPA.em()
-                    .createQuery("SELECT m FROM TaskRunMessage m")
-                    .getResultList();
+            var rows = play.db.jpa.JPA.em().createQuery(jpql).getResultList();
             int n = 0;
-            for (var r : raw) {
-                LuceneIndexer.upsert((TaskRunMessage) r);
+            for (var row : rows) {
+                indexRow.accept(row);
                 n++;
             }
             if (n > 0) {
                 EventLogger.info("search", null, null,
-                        "Lucene index backfilled from JPA: %d row(s)".formatted(n));
+                        "Lucene index backfilled: scope=%s rows=%d"
+                                .formatted(scope.name(), n));
             }
             return null;
         });
     }
 
+    /**
+     * Virtual-document content for {@link models.Task} — concatenates
+     * the two operator-facing free-text fields into one indexed string.
+     * Null fields contribute the empty string; the join uses a single
+     * space so adjacent words from different fields don't accidentally
+     * fuse into one stemmed token.
+     */
+    static String taskContent(models.Task t) {
+        var name = t.name != null ? t.name : "";
+        var desc = t.description != null ? t.description : "";
+        return name + " " + desc;
+    }
+
+    /**
+     * Virtual-document content for {@link models.SubagentRun} — same
+     * pattern as {@link #taskContent}: {@code label} + space +
+     * {@code outcome}. {@code outcome} is null while the run is RUNNING,
+     * which is fine — it gets indexed once when the announce-VT writes
+     * the terminal outcome and the entity's @PostUpdate hook fires.
+     */
+    static String subagentRunContent(models.SubagentRun r) {
+        var label = r.label != null ? r.label : "";
+        var outcome = r.outcome != null ? r.outcome : "";
+        return label + " " + outcome;
+    }
+
     /** {@inheritDoc} */
     @Override
     public List<TaskRunMessage> search(String query, int limit) throws IOException {
-        if (query == null || query.isBlank()) return List.of();
-
-        var sm = LuceneIndexer.searcherManager();
-        if (sm == null) return List.of();
-
-        var ids = collectMatchingIds(sm, query, limit);
+        var ids = searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, query, limit);
         if (ids.isEmpty()) return List.of();
-        return hydrateInOrder(ids);
+        return hydrateTaskRunMessagesInOrder(ids);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public List<Long> searchIds(LuceneIndexer.Scope scope, String query, int limit) throws IOException {
+        if (query == null || query.isBlank()) return List.of();
+        var sm = LuceneIndexer.searcherManager(scope);
+        if (sm == null) return List.of();
+        return collectMatchingIds(sm, query, limit);
     }
 
     private static List<Long> collectMatchingIds(SearcherManager sm, String query, int limit) throws IOException {
@@ -126,7 +209,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         return ids;
     }
 
-    private static List<TaskRunMessage> hydrateInOrder(List<Long> ids) {
+    private static List<TaskRunMessage> hydrateTaskRunMessagesInOrder(List<Long> ids) {
         // Bulk-fetch JPA rows, then re-order to match Lucene's relevance
         // ranking. Same pattern as the prior H2-backed impl.
         var rows = services.Tx.run(() -> {

@@ -29,6 +29,13 @@ interface SubagentRun {
 const parentAgentFilter = ref<string>('')
 const statusFilter = ref<string>('')
 const sinceFilter = ref<string>('')
+// JCLAW-304: FTS keyword bound to the FilterBar's `q:` key. Backend
+// resolves it against the SUBAGENT_RUN scope (label + outcome virtual
+// doc) UNIONED with hits on the CONVERSATION_MESSAGE scope mapped back
+// to runs via SubagentRun.childConversation — so a search matches when
+// the term appears anywhere in the run's narrative content OR anywhere
+// in its child transcript.
+const qFilter = ref<string>('')
 // JCLAW-326: URL-driven filter so chat (or any deep-link) can scope the
 // list to subagents spawned within a specific parent conversation. There's
 // no visible input — operators typically reach this filter via a link, not
@@ -39,17 +46,55 @@ const parentConversationFilter = ref<string>(
   typeof route.query.parentConversationId === 'string' ? route.query.parentConversationId : '',
 )
 
+interface Filter { key: string, value: string }
+function onFiltersChanged(filters: Filter[]) {
+  // Rehydrate watched refs from the bar's emitted state.
+  qFilter.value = filters.find(f => f.key === 'q')?.value ?? ''
+  parentAgentFilter.value = filters.find(f => f.key === 'parentAgent')?.value ?? ''
+  statusFilter.value = filters.find(f => f.key === 'status')?.value ?? ''
+  sinceFilter.value = filters.find(f => f.key === 'since')?.value ?? ''
+  // The parentConversation key on the bar mirrors the URL-driven chip
+  // for round-trip consistency; the chip's clear-button writes through
+  // here too so the URL state and the bar's chip stay in lockstep.
+  parentConversationFilter.value = filters.find(f => f.key === 'parentConversation')?.value ?? parentConversationFilter.value
+}
+
 const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: () => [] })
 
 const url = computed(() => {
   const params = new URLSearchParams()
-  if (parentAgentFilter.value) params.set('parentAgentId', parentAgentFilter.value)
+  // JCLAW-304: q goes first as the FTS keyword; backend unions
+  // SUBAGENT_RUN + child-transcript matches and intersects with the
+  // equality filters below.
+  if (qFilter.value) params.set('q', qFilter.value)
+  if (parentAgentFilter.value) {
+    // Operators type `parentAgent:main` (a name) or `parentAgent:42` (an
+    // id) — resolve names to ids client-side so the backend's typed
+    // Long parameter binds cleanly. Falls through verbatim when the
+    // value parses as a number or matches no agent (which the backend
+    // then treats as "no match", surfacing zero rows — clearer than a
+    // 400 on an unresolvable name).
+    const v = parentAgentFilter.value
+    const asNumber = Number(v)
+    if (Number.isFinite(asNumber) && Number.isInteger(asNumber)) {
+      params.set('parentAgentId', String(asNumber))
+    }
+    else {
+      const match = agentList.value?.find((a: Agent) => a.name.toLowerCase() === v.toLowerCase())
+      if (match) params.set('parentAgentId', String(match.id))
+    }
+  }
   if (parentConversationFilter.value) params.set('parentConversationId', parentConversationFilter.value)
   if (statusFilter.value) params.set('status', statusFilter.value)
   if (sinceFilter.value) {
     // Datetime-local inputs return "YYYY-MM-DDTHH:MM"; the backend wants
     // ISO-8601 with a timezone. Append :00Z so the value parses as UTC —
     // matching the timestamps the backend renders in the table.
+    //
+    // FilterBar emits the `since` token verbatim, so an operator typing
+    // `since:2026-05-01T09:00` flows directly through this same suffix.
+    // Less ideal than a typed picker but consistent with the other key
+    // shapes — and the typed picker can layer on later if needed.
     params.set('since', `${sinceFilter.value}:00Z`)
   }
   params.set('limit', '200')
@@ -169,10 +214,9 @@ const {
   }),
 })
 
-// A11y: stable ids for filter inputs.
-const parentSelectId = useId()
-const statusSelectId = useId()
-const sinceInputId = useId()
+// (JCLAW-304: select-input ids were retired when the three dropdowns
+// were replaced with FilterBar. FilterBar manages its own ARIA labels
+// on the underlying input.)
 </script>
 
 <template>
@@ -213,55 +257,25 @@ const sinceInputId = useId()
       </div>
     </div>
 
-    <!-- Filter bar -->
+    <!-- Filter bar. JCLAW-304 replaces the three select dropdowns
+         (parent agent, status, started-after) with a FilterBar
+         consistent with /conversations and /tasks. The bar's `q:`
+         keyword drives FTS via the SUBAGENT_RUN scope UNIONED with
+         child-transcript matches from the CONVERSATION_MESSAGE scope;
+         `parentAgent:`, `status:`, `since:` are equality keys the
+         backend intersects with the FTS hit set. The URL-driven
+         parentConversation chip below is preserved as a separate
+         visual element so deep links from chat still surface their
+         filter unambiguously. -->
     <div class="flex flex-wrap gap-3 mb-4">
-      <label :for="parentSelectId">
-        <span class="sr-only">Parent agent filter</span>
-        <select
-          :id="parentSelectId"
-          v-model="parentAgentFilter"
-          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
-        >
-          <option value="">
-            All parent agents
-          </option>
-          <option
-            v-for="a in agentList"
-            :key="a.id"
-            :value="a.id"
-          >
-            {{ a.name }}
-          </option>
-        </select>
-      </label>
-      <label :for="statusSelectId">
-        <span class="sr-only">Status filter</span>
-        <select
-          :id="statusSelectId"
-          v-model="statusFilter"
-          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
-        >
-          <option value="">
-            All statuses
-          </option>
-          <option
-            v-for="s in ['RUNNING', 'COMPLETED', 'FAILED', 'KILLED', 'TIMEOUT']"
-            :key="s"
-            :value="s"
-          >
-            {{ s }}
-          </option>
-        </select>
-      </label>
-      <label :for="sinceInputId">
-        <span class="sr-only">Started after</span>
-        <input
-          :id="sinceInputId"
-          v-model="sinceFilter"
-          type="datetime-local"
-          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
-        >
-      </label>
+      <div class="flex-1 min-w-[280px]">
+        <FilterBar
+          storage-key="subagents"
+          placeholder="Filter... (e.g., q:radarr status:COMPLETED parentAgent:42)"
+          :filter-keys="['q', 'parentAgent', 'status', 'since', 'parentConversation']"
+          @update:filters="onFiltersChanged"
+        />
+      </div>
       <!--
         JCLAW-326: parent-conversation filter chip. Surfaces the URL-driven
         parentConversationId filter when active so the operator can see

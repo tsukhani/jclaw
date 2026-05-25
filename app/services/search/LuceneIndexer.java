@@ -1,6 +1,5 @@
 package services.search;
 
-import models.TaskRunMessage;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -18,28 +17,36 @@ import services.EventLogger;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.EnumMap;
+import java.util.Map;
 
 /**
- * JVM-wide owner of the Lucene 10 IndexWriter + SearcherManager for the
- * {@code task_run_message.content} full-text index. Replaces H2's
- * {@code FullTextLucene} as the keeper of the on-disk Lucene index;
- * sync is driven by JPA lifecycle hooks on
- * {@link models.TaskRunMessage#onIndex} rather than DB triggers.
+ * JVM-wide owner of the Lucene 10 IndexWriter + SearcherManager instances
+ * for every on-disk full-text index JClaw maintains. Replaces H2's
+ * {@code FullTextLucene} as the keeper of the index files; sync is driven
+ * by JPA lifecycle hooks on each indexed entity rather than DB triggers.
+ *
+ * <h3>Multi-scope (JCLAW-304)</h3>
+ * One {@link Scope} per indexed entity. Each scope gets its own
+ * subdirectory under {@code data/jclaw-lucene/<scope>/}, its own
+ * {@link IndexWriter}, and its own {@link SearcherManager}. Callers pass
+ * the scope explicitly on every {@link #upsert}/{@link #remove}/
+ * {@link #searcherManager} call, so segments never cross-contaminate
+ * between e.g. TaskRunMessage transcripts and Task name/description
+ * documents.
  *
  * <h3>Lifecycle</h3>
  * <ul>
- *   <li>{@link #open()} — called once from
- *       {@code FullTextSearchInitJob} at {@code @OnApplicationStart}.
- *       Opens the FSDirectory under {@code data/jclaw-lucene/task_run_message/},
- *       builds the IndexWriter, and wraps it in a SearcherManager.</li>
- *   <li>{@link #close()} — called from
- *       {@code FullTextSearchShutdownJob} at {@code @OnApplicationStop}.
- *       Commits pending writes and releases the file lock so the next
- *       boot opens cleanly.</li>
- *   <li>{@link #upsert(TaskRunMessage)} / {@link #remove(long)} —
- *       called from the entity lifecycle hooks. Failures are caught and
- *       logged; the indexer never aborts the parent JPA transaction.</li>
+ *   <li>{@link #open()} — called once from {@code FullTextSearchInitJob}
+ *       at {@code @OnApplicationStart}. Opens an FSDirectory + writer +
+ *       SearcherManager per scope.</li>
+ *   <li>{@link #close()} — called from {@code FullTextSearchShutdownJob}
+ *       at {@code @OnApplicationStop}. Commits pending writes and
+ *       releases file locks for every scope so the next boot opens
+ *       cleanly.</li>
+ *   <li>{@link #upsert(Scope, long, String)} / {@link #remove(Scope, long)}
+ *       — called from each entity's lifecycle hooks. Failures are caught
+ *       and logged; the indexer never aborts the parent JPA transaction.</li>
  * </ul>
  *
  * <h3>Why a SearcherManager</h3>
@@ -51,6 +58,37 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class LuceneIndexer {
 
+    /**
+     * The set of indexed entities JClaw maintains. Adding a new scope
+     * requires (a) the corresponding entity's {@code @PostPersist} /
+     * {@code @PostUpdate} / {@code @PostRemove} hooks and (b) a backfill
+     * branch in {@code DirectLuceneMessageSearchRepository.init}.
+     */
+    public enum Scope {
+        /** TaskRunMessage.content — per-fire transcript turns. */
+        TASK_RUN_MESSAGE("task_run_message"),
+        /** Message.content — every chat / conversation message. */
+        CONVERSATION_MESSAGE("conversation_message"),
+        /** Task virtual doc: name + description for the operator-facing
+         *  task catalog search. */
+        TASK("task"),
+        /** SubagentRun virtual doc: label + outcome for the admin
+         *  subagent-runs search. */
+        SUBAGENT_RUN("subagent_run");
+
+        private final String dirName;
+
+        Scope(String dirName) {
+            this.dirName = dirName;
+        }
+
+        /** Subdirectory under {@code data/jclaw-lucene/} where this scope's
+         *  Lucene segments live. */
+        public String dirName() {
+            return dirName;
+        }
+    }
+
     /** Field names exposed in indexed Documents. */
     static final String ID_FIELD = "id";
     static final String CONTENT_FIELD = "content";
@@ -58,27 +96,41 @@ public final class LuceneIndexer {
     /** EventLogger category for all messages emitted from this indexer. */
     private static final String CATEGORY = "search";
 
-    // Writer and SearcherManager are written once at open() under the class
-    // monitor and read by every subsequent indexer/search call. Pure
-    // publish-once-read-many reference handoff — volatile reference is
-    // the textbook valid use of volatile, S3077 doesn't apply.
-    @SuppressWarnings("java:S3077")
-    private static final AtomicReference<IndexWriter> WRITER = new AtomicReference<>();
-    @SuppressWarnings("java:S3077")
-    private static final AtomicReference<SearcherManager> SEARCHER = new AtomicReference<>();
+    // Writer and SearcherManager maps are written once at open() under the
+    // class monitor and read by every subsequent indexer/search call.
+    // EnumMap keyed by Scope so per-scope lookups are O(1) array accesses
+    // without boxing or hash work. Reads are always after a synchronized
+    // open() write, so the JMM happens-before from the synchronized region
+    // is sufficient — no separate volatile needed on the map references
+    // themselves since the EnumMap is mutated only inside open()/close().
+    private static final Map<Scope, IndexWriter> WRITERS = new EnumMap<>(Scope.class);
+    private static final Map<Scope, SearcherManager> SEARCHERS = new EnumMap<>(Scope.class);
 
     private LuceneIndexer() {}
 
     /**
-     * Open the index. Idempotent across boot retries; a second call
-     * while the writer is alive is a no-op.
+     * Open every scope's index. Idempotent across boot retries; a second
+     * call while writers are alive is a no-op.
      */
     public static synchronized void open() throws IOException {
-        if (WRITER.get() != null) return;
+        if (!WRITERS.isEmpty()) return;
+        try {
+            for (var scope : Scope.values()) {
+                openScope(scope);
+            }
+        } catch (IOException | RuntimeException e) {
+            // Partial-open rollback: any scope opened before the failure
+            // is closed so the next retry starts clean. Without this, a
+            // mid-loop failure leaves writers holding FS locks and the
+            // next open() can't grab them.
+            closeQuietly();
+            throw e;
+        }
+    }
 
-        var indexDir = indexPath();
+    private static void openScope(Scope scope) throws IOException {
+        var indexDir = indexPath(scope);
         Files.createDirectories(indexDir);
-
         // Pre-v1 codec note: if the directory contains segments from an
         // older Lucene codec (e.g. data/jclaw-lucene/ left over from a
         // pre-Lucene-10 install), they read fine via the
@@ -100,100 +152,143 @@ public final class LuceneIndexer {
             try { dir.close(); } catch (IOException _) { /* surface original */ }
             throw e;
         }
-        WRITER.set(writer);
-        SEARCHER.set(new SearcherManager(writer, new SearcherFactory()));
-
+        WRITERS.put(scope, writer);
+        SEARCHERS.put(scope, new SearcherManager(writer, new SearcherFactory()));
         EventLogger.info(CATEGORY, null, null,
-                "Lucene index opened at %s (%d existing docs)"
-                        .formatted(indexDir, writer.getDocStats().numDocs));
+                "Lucene index opened: scope=%s at %s (%d existing docs)"
+                        .formatted(scope.name(), indexDir, writer.getDocStats().numDocs));
     }
 
-    /** Commit pending writes and close. Idempotent. */
+    /** Commit pending writes and close every scope. Idempotent. */
     public static synchronized void close() {
-        var sm = SEARCHER.getAndSet(null);
-        if (sm != null) {
+        closeQuietly();
+    }
+
+    private static void closeQuietly() {
+        for (var entry : SEARCHERS.entrySet()) {
             try {
-                sm.close();
+                entry.getValue().close();
             } catch (IOException e) {
                 EventLogger.warn(CATEGORY, null, null,
-                        "SearcherManager close: %s".formatted(e.getMessage()));
+                        "SearcherManager close (scope=%s): %s"
+                                .formatted(entry.getKey().name(), e.getMessage()));
             }
         }
-        var writer = WRITER.getAndSet(null);
-        if (writer != null) {
+        SEARCHERS.clear();
+        for (var entry : WRITERS.entrySet()) {
             try {
-                writer.close();
-                EventLogger.info(CATEGORY, null, null, "Lucene index closed");
+                entry.getValue().close();
+                EventLogger.info(CATEGORY, null, null,
+                        "Lucene index closed: scope=%s".formatted(entry.getKey().name()));
             } catch (IOException e) {
                 EventLogger.warn(CATEGORY, null, null,
-                        "IndexWriter close: %s".formatted(e.getMessage()));
+                        "IndexWriter close (scope=%s): %s"
+                                .formatted(entry.getKey().name(), e.getMessage()));
             }
         }
+        WRITERS.clear();
     }
 
     /**
-     * Add or update the index entry for {@code m}. Hibernate calls this
-     * from {@link TaskRunMessage}'s {@code @PostPersist}/{@code @PostUpdate}
-     * callbacks; failures must not propagate, or the calling Tx would
+     * Add or update the index entry for the given {@code (scope, id)}
+     * pair, storing {@code content} as the indexed text. Hibernate calls
+     * this from each entity's {@code @PostPersist}/{@code @PostUpdate}
+     * callback; failures must not propagate, or the calling Tx would
      * roll back over a transient FS issue.
+     *
+     * <p>{@code null} or blank content writes an empty content field —
+     * the doc still exists so a subsequent {@link #remove} can target it
+     * by id, but it matches no full-text queries until content arrives
+     * via a later update. This matches the pre-multi-scope behavior where
+     * empty TaskRunMessage rows were still indexed.
      */
-    public static void upsert(TaskRunMessage m) {
-        var writer = WRITER.get();
-        if (writer == null || m == null || m.id == null) return;
+    public static void upsert(Scope scope, long id, String content) {
+        var writer = WRITERS.get(scope);
+        if (writer == null) return;
         try {
             var doc = new Document();
-            doc.add(new StringField(ID_FIELD, String.valueOf(m.id), Field.Store.YES));
-            doc.add(new TextField(CONTENT_FIELD, m.content != null ? m.content : "", Field.Store.NO));
-            writer.updateDocument(new Term(ID_FIELD, String.valueOf(m.id)), doc);
+            doc.add(new StringField(ID_FIELD, String.valueOf(id), Field.Store.YES));
+            doc.add(new TextField(CONTENT_FIELD, content != null ? content : "", Field.Store.NO));
+            writer.updateDocument(new Term(ID_FIELD, String.valueOf(id)), doc);
             // Commit per-write keeps the index durable across crashes.
             // 50-conc, 50-turn loadtest @ ~9 req/s for real provider showed
             // no contention pressure on the writer's per-commit fsync.
             writer.commit();
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, null, null,
-                    "Lucene upsert failed for id=%d: %s".formatted(m.id, e.getMessage()));
+                    "Lucene upsert failed: scope=%s id=%d: %s"
+                            .formatted(scope.name(), id, e.getMessage()));
         }
     }
 
     /**
-     * Drop the index entry for the row with the given id. Hibernate calls
-     * this from {@link TaskRunMessage}'s {@code @PostRemove}; same no-throw
-     * contract as {@link #upsert}.
+     * Convenience overload for {@link Scope#TASK_RUN_MESSAGE} — the
+     * existing call-site shape from before JCLAW-304's multi-scope work.
+     * Reads {@link models.TaskRunMessage#content} and delegates to
+     * {@link #upsert(Scope, long, String)}.
      */
-    public static void remove(long id) {
-        var writer = WRITER.get();
+    public static void upsert(models.TaskRunMessage m) {
+        if (m == null || m.id == null) return;
+        upsert(Scope.TASK_RUN_MESSAGE, m.id, m.content);
+    }
+
+    /**
+     * Drop the index entry for the row with the given id. Hibernate calls
+     * this from each entity's {@code @PostRemove}; same no-throw contract
+     * as {@link #upsert}.
+     */
+    public static void remove(Scope scope, long id) {
+        var writer = WRITERS.get(scope);
         if (writer == null) return;
         try {
             writer.deleteDocuments(new Term(ID_FIELD, String.valueOf(id)));
             writer.commit();
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, null, null,
-                    "Lucene remove failed for id=%d: %s".formatted(id, e.getMessage()));
+                    "Lucene remove failed: scope=%s id=%d: %s"
+                            .formatted(scope.name(), id, e.getMessage()));
         }
     }
 
-    /** Internal accessor for the SearcherManager. */
-    static SearcherManager searcherManager() {
-        return SEARCHER.get();
+    /**
+     * Convenience overload for {@link Scope#TASK_RUN_MESSAGE} — preserves
+     * the pre-multi-scope call shape.
+     */
+    public static void remove(long id) {
+        remove(Scope.TASK_RUN_MESSAGE, id);
     }
 
-    /** Whether the index has been opened. */
+    /** Internal accessor for a scope's SearcherManager. */
+    static SearcherManager searcherManager(Scope scope) {
+        return SEARCHERS.get(scope);
+    }
+
+    /** Whether the indexes have been opened. */
     public static boolean isOpen() {
-        return WRITER.get() != null;
+        return !WRITERS.isEmpty();
     }
 
-    /** Number of indexed documents. Test/admin introspection. */
-    public static int docCount() {
-        var writer = WRITER.get();
+    /** Number of indexed documents in the given scope. Test/admin
+     *  introspection. */
+    public static int docCount(Scope scope) {
+        var writer = WRITERS.get(scope);
         if (writer == null) return 0;
         return writer.getDocStats().numDocs;
     }
 
-    /** System-property override for {@link #indexPath()}. Tests set this
-     *  in {@code @BeforeAll} to a freshly-created temp directory so the
-     *  autotest JVM doesn't fight a running production JVM for the
+    /** Backwards-compatible doc count for the TASK_RUN_MESSAGE scope —
+     *  preserved so legacy callers and tests don't need refactoring on
+     *  the JCLAW-304 cut. New code should call {@link #docCount(Scope)}. */
+    public static int docCount() {
+        return docCount(Scope.TASK_RUN_MESSAGE);
+    }
+
+    /** System-property override for {@link #indexPath(Scope)}. Tests set
+     *  this in {@code @BeforeAll} to a freshly-created temp directory so
+     *  the autotest JVM doesn't fight a running production JVM for the
      *  production index's {@code write.lock}. Unset (or blank) preserves
-     *  the production default at {@code data/jclaw-lucene/task_run_message}.
+     *  the production default at {@code data/jclaw-lucene/<scope>/}. Each
+     *  scope's subdirectory is created under whichever root resolves.
      *
      *  <p>Tests must {@link #close} before clearing the property, so the
      *  next test's {@link #open} re-resolves against either a fresh
@@ -203,12 +298,14 @@ public final class LuceneIndexer {
     public static final String INDEX_PATH_PROPERTY = "jclaw.search.lucenePath";
 
     /**
-     * Test-only seam: redirect {@link #indexPath} to {@code path} for the
-     * lifetime of the JVM (or until called again with {@code null} to
-     * clear). Tests that drive the real Lucene path must call this in
-     * {@code @BeforeAll} pointing at a per-class temp directory; without
-     * the redirect the index opens at {@code data/jclaw-lucene/...} and
-     * collides with any running production JVM holding the same lock.
+     * Test-only seam: redirect {@link #indexPath(Scope)} to use {@code path}
+     * as the parent directory (each scope gets its own subdirectory under
+     * it) for the lifetime of the JVM, or until called again with
+     * {@code null} to clear. Tests that drive the real Lucene path must
+     * call this in {@code @BeforeAll} pointing at a per-class temp
+     * directory; without the redirect the index opens at
+     * {@code data/jclaw-lucene/...} and collides with any running
+     * production JVM holding the same lock.
      *
      * <p>Idempotent. Safe to call before any {@link #open}; the resolved
      * path is read fresh on every {@code open}.
@@ -221,16 +318,19 @@ public final class LuceneIndexer {
         }
     }
 
-    private static Path indexPath() {
+    private static Path indexPath(Scope scope) {
         // Test override wins so autotest runs land their index in a
         // dedicated tmp directory, never the production default.
         var override = System.getProperty(INDEX_PATH_PROPERTY);
+        Path root;
         if (override != null && !override.isBlank()) {
-            return Path.of(override);
+            root = Path.of(override);
+        } else {
+            // Production default: resolve against the Play app root so the
+            // running JVM and any subprocess (cli admin, migration tool)
+            // all agree on the same path regardless of cwd.
+            root = Play.applicationPath.toPath().resolve("data/jclaw-lucene");
         }
-        // Production default: resolve against the Play app root so the
-        // running JVM and any subprocess (cli admin, migration tool) all
-        // agree on the same path regardless of cwd.
-        return Play.applicationPath.toPath().resolve("data/jclaw-lucene/task_run_message");
+        return root.resolve(scope.dirName());
     }
 }

@@ -11,8 +11,25 @@ import {
   TrashIcon,
 } from '@heroicons/vue/24/outline'
 
+// JCLAW-304: FilterBar-driven state. The legacy status/type select refs
+// stay as live refs so the table's existing computed paths (e.g. the
+// status-pill renderer and the calendar's per-fire projection) keep
+// working unchanged — onFiltersChanged keeps them in sync with the bar.
 const statusFilter = ref('')
 const typeFilter = ref('')
+const qFilter = ref('')
+const agentFilter = ref('')
+
+interface Filter { key: string, value: string }
+function onFiltersChanged(filters: Filter[]) {
+  // Rehydrate each watched filter ref from the bar's emitted state.
+  // Missing keys reset to empty string so removing a chip clears the
+  // backend predicate, not leaves it stale.
+  qFilter.value = filters.find(f => f.key === 'q')?.value ?? ''
+  statusFilter.value = filters.find(f => f.key === 'status')?.value ?? ''
+  typeFilter.value = filters.find(f => f.key === 'type')?.value ?? ''
+  agentFilter.value = filters.find(f => f.key === 'agent')?.value ?? ''
+}
 
 // Three layouts: dense table (default), card grid, month calendar. Persisted
 // to the URL so refresh / back-forward / shareable links keep the same view.
@@ -31,8 +48,13 @@ const view = computed<View>({
 
 const url = computed(() => {
   const params = new URLSearchParams()
+  // JCLAW-304: q is the FTS keyword; backend resolves it against the
+  // TASK Lucene scope (name + description virtual doc) and intersects
+  // with the equality predicates below.
+  if (qFilter.value) params.set('q', qFilter.value)
   if (statusFilter.value) params.set('status', statusFilter.value)
   if (typeFilter.value) params.set('type', typeFilter.value)
+  if (agentFilter.value) params.set('agent', agentFilter.value)
   params.set('limit', '50')
   return `/api/tasks?${params}`
 })
@@ -509,9 +531,8 @@ const calendarDays = computed<DayCell[]>(() => {
   return cells
 })
 
-// A11y: stable ids for filter selects
-const statusSelectId = useId()
-const typeSelectId = useId()
+// (JCLAW-304: status/type select ids were retired with their dropdowns.
+// FilterBar manages its own ARIA labels on the underlying input.)
 </script>
 
 <template>
@@ -565,46 +586,21 @@ const typeSelectId = useId()
       </div>
     </div>
 
-    <!-- Filters + view switcher -->
+    <!-- Filters + view switcher. JCLAW-304 replaces the legacy status/type
+         select dropdowns with a FilterBar consistent with /conversations
+         and /subagents. The bar's `q:KEYWORD` token drives FTS over the
+         TASK Lucene scope (task.name + task.description virtual doc);
+         `status:`, `type:`, and `agent:` are equality keys the backend
+         intersects with the FTS hit set. -->
     <div class="flex flex-wrap items-center gap-3 mb-4">
-      <label :for="statusSelectId">
-        <span class="sr-only">Status filter</span>
-        <select
-          :id="statusSelectId"
-          v-model="statusFilter"
-          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
-        >
-          <option value="">
-            All statuses
-          </option>
-          <option
-            v-for="s in ['PENDING', 'ACTIVE', 'RUNNING', 'LOST', 'COMPLETED', 'FAILED', 'CANCELLED']"
-            :key="s"
-            :value="s"
-          >
-            {{ s }}
-          </option>
-        </select>
-      </label>
-      <label :for="typeSelectId">
-        <span class="sr-only">Type filter</span>
-        <select
-          :id="typeSelectId"
-          v-model="typeFilter"
-          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
-        >
-          <option value="">
-            All types
-          </option>
-          <option
-            v-for="t in ['IMMEDIATE', 'SCHEDULED', 'INTERVAL', 'CRON']"
-            :key="t"
-            :value="t"
-          >
-            {{ t }}
-          </option>
-        </select>
-      </label>
+      <div class="flex-1 min-w-[280px]">
+        <FilterBar
+          storage-key="tasks"
+          placeholder="Filter... (e.g., q:summary status:PENDING type:CRON)"
+          :filter-keys="['q', 'status', 'type', 'agent']"
+          @update:filters="onFiltersChanged"
+        />
+      </div>
       <!-- View switcher: table / cards / calendar. State persists in URL
            (?view=cards|calendar) so refresh and shareable links survive. -->
       <div
