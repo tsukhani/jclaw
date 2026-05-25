@@ -41,6 +41,32 @@ const { data: tasks, refresh } = await useFetch<Task[]>(url)
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
 
+// JCLAW-259: surface the retention TTL in the page header so operators
+// know when terminal tasks will auto-delete. Read the single config key
+// rather than the whole /api/config list to keep the request cheap.
+// Reactive on visit only — the TaskCleanupJob runs daily off the chat
+// hot path so the value doesn't change mid-session; if the operator
+// updates it in Settings, navigating back here refreshes naturally.
+interface RetentionConfigEntry { value?: string }
+const retentionConfig = await useFetch<RetentionConfigEntry>('/api/config/tasks.retentionDays', {
+  // The endpoint returns 404 when the key is absent — that's the
+  // "use default" case, not an error. Suppress the throw so the page
+  // still renders.
+  default: (): RetentionConfigEntry => ({}),
+  // Don't propagate the 404 to the page-level error boundary; surface
+  // it as an empty payload so the computed below resolves to the
+  // default-days branch.
+  onResponseError: ({ response }) => { if (response.status === 404) response._data = {} },
+})
+
+const retentionDisplay = computed(() => {
+  const raw = retentionConfig.data.value?.value
+  const days = raw == null || raw === '' ? 30 : Number.parseInt(raw, 10)
+  if (!Number.isFinite(days)) return 'Retention: 30 days (default)'
+  if (days === 0) return 'Retention: disabled — terminal tasks kept forever'
+  return `Retention: ${days} day${days === 1 ? '' : 's'}`
+})
+
 /**
  * Bulk-select wiring shared with subagents.vue (and the seeded
  * agents.vue pattern). The composable owns selectMode, selectedIds,
@@ -468,9 +494,22 @@ const typeSelectId = useId()
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-lg font-semibold text-fg-strong">
-        Tasks
-      </h1>
+      <div class="flex items-baseline gap-3">
+        <h1 class="text-lg font-semibold text-fg-strong">
+          Tasks
+        </h1>
+        <!-- JCLAW-259: live retention TTL. Subtle muted text so it doesn't
+             compete with the page title but stays visible enough that
+             operators don't get surprised by auto-deletes. Sourced from
+             tasks.retentionDays (default 30, 0 = disabled). -->
+        <NuxtLink
+          to="/settings"
+          class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
+          title="Configure in Settings → Tasks"
+        >
+          {{ retentionDisplay }}
+        </NuxtLink>
+      </div>
       <div class="flex items-center gap-2">
         <template v-if="!selectMode">
           <button
