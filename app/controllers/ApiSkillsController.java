@@ -282,7 +282,11 @@ public class ApiSkillsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
-    /** PUT /api/agents/{id}/skills/{name} — Enable or disable a skill for an agent. */
+    /** PUT /api/agents/{id}/skills/{name} — Enable or disable a skill for an agent.
+     *  Toggle-only: the skill must already be installed in the agent's workspace
+     *  (SKILL.md present under {@code workspace/<agent>/skills/<name>/}). Use
+     *  {@code POST .../copy} first to install a global registry skill onto an
+     *  agent that doesn't yet have it. */
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillToggleResponse.class)))
@@ -293,6 +297,29 @@ public class ApiSkillsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_ENABLED)) badRequest();
         var enabled = body.get(KEY_ENABLED).getAsBoolean();
+
+        // Guard against the orphan-config failure mode: a caller (LLM,
+        // operator, script) calling PUT with enabled=true on a skill that
+        // isn't installed in this agent's workspace yet. The endpoint
+        // would silently create an AgentSkillConfig row that points at
+        // no SKILL.md, SkillLoader wouldn't inject anything, and
+        // AgentSkillAllowedTool rows would never be snapshotted — the
+        // skill is dead on this agent despite enabled=true in the DB.
+        // Only enforce on enable: turning a missing skill off is a no-op
+        // we shouldn't reject (lets callers clean up stale configs).
+        if (enabled) {
+            var agentSkillDir = AgentService.workspacePath(agent.name)
+                    .resolve(SKILLS_DIR).resolve(name);
+            if (!Files.exists(agentSkillDir.resolve(SKILL_MD))) {
+                response.status = 400;
+                renderText(("Skill '%s' is not installed on agent '%s'. "
+                        + "Install it first via POST /api/agents/%d/skills/%s/copy "
+                        + "(copies the global skill into the agent's workspace, "
+                        + "syncs the shell allowlist, and runs a malware scan); "
+                        + "then this toggle endpoint can flip it on/off.")
+                        .formatted(name, agent.name, id, name));
+            }
+        }
 
         var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
         if (config == null) {

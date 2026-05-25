@@ -49,7 +49,13 @@ The tool returns `HTTP <status>\n<body>` so you can read both. A 4xx response us
 ### Skills (per-agent gating)
 
 - **List skills** — `GET /api/skills`. Returns all skills available in the global registry.
-- **Enable/disable a skill on an agent** — `PUT /api/agents/{id}/skills/{name}` with `{ "enabled": <bool> }`. The skill must already exist either in the agent's workspace or in the global registry. If the user asks to add a skill that isn't there yet, route them to `skill-creator` instead of trying to create one through this API.
+- **Install a skill on an agent** — `POST /api/agents/{id}/skills/{name}/copy` with an empty body. Copies the global registry skill into `workspace/<agent>/skills/<name>/`, snapshots the skill's shell-allowlist contributions into `AgentSkillAllowedTool`, runs a malware scan on the source, and enables the resulting `AgentSkillConfig`. **This is the right call when the user asks to "add" a skill to an agent that doesn't have it yet** — including a freshly-created agent. The PUT endpoint below cannot install; it only toggles already-installed skills.
+- **Enable/disable an already-installed skill on an agent** — `PUT /api/agents/{id}/skills/{name}` with `{ "enabled": <bool> }`. The skill must already exist in the agent's workspace (i.e. `POST .../copy` was called previously, or the agent is `main` whose workspace ships with the skill). Calling this on a skill that's only in the global registry returns `400` with a pointer to `POST .../copy`. If the user asks to add a skill that isn't anywhere yet (not even in the global registry), route them to `skill-creator` instead of trying to create one through this API.
+
+**Common composition** — "create agent X with skill Y":
+1. `POST /api/agents` with the new agent's details → capture the returned `id`.
+2. `POST /api/agents/{id}/skills/Y/copy` with `{}` → installs Y into the new agent's workspace AND enables it.
+3. Skip the PUT — the copy step already enabled the skill. Only call PUT if the user later wants to disable Y without uninstalling it.
 
 ### Config
 

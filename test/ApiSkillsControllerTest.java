@@ -433,6 +433,56 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    @Test
+    void updateForAgentEnableSucceedsWhenSkillIsInstalledInWorkspace() throws Exception {
+        // Happy path for enable=true: the skill IS in the agent's workspace,
+        // so the guard passes and the AgentSkillConfig flips enabled=true.
+        login();
+        var id = createAgent("toggle-enable-installed");
+        seedAgentWorkspaceSkill("toggle-enable-installed", "alpha", "alpha");
+        var resp = PUT("/api/agents/" + id + "/skills/alpha", "application/json",
+                "{\"enabled\": true}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"enabled\":true"));
+        assertTrue(body.contains("\"status\":\"ok\""));
+    }
+
+    @Test
+    void updateForAgentEnableRejectsWhenSkillNotInstalledInWorkspace() {
+        // Repro for the orphan-AgentSkillConfig failure mode: a caller
+        // (e.g. an LLM via jclaw_api) calls PUT enabled=true on a skill
+        // that lives only in the global registry but isn't copied into the
+        // agent's workspace yet. The old behavior was a silent 200 that
+        // wrote a config row with no SKILL.md backing it — skill would
+        // appear "enabled" but SkillLoader couldn't find it and the
+        // shell allowlist would never see its commands. Now we 400 with
+        // a pointer to the install endpoint.
+        login();
+        var id = createAgent("toggle-enable-orphan");
+        var resp = PUT("/api/agents/" + id + "/skills/never-installed", "application/json",
+                "{\"enabled\": true}");
+        assertEquals(400, resp.status.intValue());
+        var body = getContent(resp);
+        assertTrue(body.contains("not installed"),
+                "error must explain the missing-workspace-file condition");
+        assertTrue(body.contains("/copy"),
+                "error must point to POST .../copy as the install path");
+    }
+
+    @Test
+    void updateForAgentDisableAllowedEvenWhenSkillNotInstalled() {
+        // Asymmetric: disabling a skill that doesn't exist in the workspace
+        // is a no-op-ish operation (lets callers clean up stale configs
+        // pointing at uninstalled skills). Only enable goes through the
+        // installation guard.
+        login();
+        var id = createAgent("toggle-disable-orphan");
+        var resp = PUT("/api/agents/" + id + "/skills/never-installed", "application/json",
+                "{\"enabled\": false}");
+        assertIsOk(resp);
+    }
+
     // ==================== POST /api/agents/{id}/skills/{name}/copy ====================
 
     @Test
