@@ -61,6 +61,7 @@ public class ApiTasksController extends Controller {
     private static final String KEY_CONTEXT_FROM_TASK_IDS = "contextFromTaskIds";
     private static final String KEY_REPEAT_LIMIT = "repeatLimit";
     private static final String KEY_PAUSED = "paused";
+    private static final String KEY_TIMEZONE = "timezone";
 
     private record TaskView(Long id, String name, String description, String type, String status,
                             String cronExpression, Long intervalSeconds, String scheduleDisplay,
@@ -71,7 +72,8 @@ public class ApiTasksController extends Controller {
                             String modelProvider, String modelId,
                             String enabledToolNames, String workdir,
                             String preCheck, String script, boolean noAgent,
-                            String contextFromTaskIds, Integer repeatLimit) {
+                            String contextFromTaskIds, Integer repeatLimit,
+                            String timezone, String effectiveTimezone) {
         static TaskView of(Task t) {
             return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
                     t.cronExpression, t.intervalSeconds, t.scheduleDisplay,
@@ -85,7 +87,14 @@ public class ApiTasksController extends Controller {
                     t.modelProvider, t.modelId,
                     t.enabledToolNames, t.workdir,
                     t.preCheck, t.script, t.noAgent,
-                    t.contextFromTaskIds, t.repeatLimit);
+                    t.contextFromTaskIds, t.repeatLimit,
+                    t.timezone,
+                    // JCLAW-261: precomputed effective zone so the UI can
+                    // render the actual fire-time zone for each task
+                    // without re-running the resolver client-side. Returns
+                    // a stable IANA id even when t.timezone is null
+                    // (falls back through Config / conf / JVM default).
+                    services.TimezoneResolver.resolve(t).getId());
         }
 
         /**
@@ -108,7 +117,11 @@ public class ApiTasksController extends Controller {
             }
             try {
                 if (t.type == Task.Type.CRON && t.cronExpression != null) {
-                    var next = services.JClawCronUtils.nextExecution(t.cronExpression);
+                    // JCLAW-261: render the next fire using the same
+                    // zone the scheduler will fire under, so the UI's
+                    // "Next Run" column matches the actual fire time.
+                    var zone = services.TimezoneResolver.resolve(t);
+                    var next = services.JClawCronUtils.nextExecution(t.cronExpression, zone);
                     if (next != null) return next.toString();
                 }
                 if (t.type == Task.Type.INTERVAL && t.intervalSeconds != null && t.intervalSeconds > 0) {
@@ -213,6 +226,23 @@ public class ApiTasksController extends Controller {
             play.Logger.error(e, "search-transcripts failed for q='%s'", q);
             error(500, "Search failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    /**
+     * JCLAW-261: returns the sorted IANA timezone list for the task
+     * create/edit form's dropdown. Also reports the currently-effective
+     * default (Config row → application.conf → JVM default) so the UI
+     * can highlight the operator's working zone without re-implementing
+     * the fallback chain client-side.
+     */
+    @SuppressWarnings("java:S2259")
+    public static void timezones() {
+        var ids = new java.util.ArrayList<>(java.time.ZoneId.getAvailableZoneIds());
+        ids.sort(String::compareTo);
+        var payload = new java.util.LinkedHashMap<String, Object>();
+        payload.put("timezones", ids);
+        payload.put("default", services.TimezoneResolver.currentDefault().getId());
+        renderJSON(gson.toJson(payload));
     }
 
     /**
@@ -395,6 +425,25 @@ public class ApiTasksController extends Controller {
         t.contextFromTaskIds = readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);
         if (body.has(KEY_REPEAT_LIMIT) && !body.get(KEY_REPEAT_LIMIT).isJsonNull()) {
             t.repeatLimit = body.get(KEY_REPEAT_LIMIT).getAsInt();
+        }
+        // JCLAW-261: optional per-task IANA timezone. Only meaningful for
+        // CRON / SCHEDULED — INTERVAL / IMMEDIATE ignore it at fire time
+        // — but we accept and persist for all types since the column is
+        // cheap and the UI may surface it. Validation here is strict:
+        // an invalid value short-circuits the request with 400 rather
+        // than silently falling through at fire time.
+        var tzRaw = readOptionalString(body, KEY_TIMEZONE);
+        if (tzRaw != null && !tzRaw.isBlank()) {
+            try {
+                java.time.ZoneId.of(tzRaw.trim());
+            } catch (java.time.DateTimeException e) {
+                response.status = 400;
+                renderText("Invalid IANA timezone '" + tzRaw + "': " + e.getMessage()
+                        + ". Use a value from GET /api/timezones (e.g. 'America/New_York', 'Asia/Tokyo').");
+            }
+            t.timezone = tzRaw.trim();
+        } else {
+            t.timezone = null;
         }
 
         t.save();

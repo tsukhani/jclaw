@@ -402,6 +402,14 @@ export interface Task {
   nextRunAt: string | null
   retryCount: number
   maxRetries: number
+  /** JCLAW-261: per-task IANA timezone override. Null = fall back to default. */
+  timezone?: string | null
+  /**
+   * JCLAW-261: precomputed effective IANA zone for this task, resolved
+   * server-side through (per-task → Config → application.conf → JVM)
+   * so the UI doesn't reimplement the fallback chain. Always present.
+   */
+  effectiveTimezone?: string
   [key: string]: unknown
 }
 

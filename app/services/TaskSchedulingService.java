@@ -269,7 +269,12 @@ public final class TaskSchedulingService {
                             .formatted(task.name));
             return null;
         }
-        Instant next = JClawCronUtils.nextExecution(task.cronExpression);
+        // JCLAW-261: resolve the per-task / config / conf / JVM-default
+        // timezone so "0 0 9 * * *" fires at 09:00 in the user's zone,
+        // not the server's. null task.timezone falls through to the global
+        // default via TimezoneResolver.
+        var zone = TimezoneResolver.resolve(task);
+        Instant next = JClawCronUtils.nextExecution(task.cronExpression, zone);
         if (next == null) {
             EventLogger.warn("task",
                     task.agent != null ? task.agent.name : null, null,

@@ -73,6 +73,7 @@ public class TaskTool implements ToolRegistry.Tool {
     private static final String KEY_NO_AGENT = "noAgent";
     private static final String KEY_CONTEXT_FROM_TASK_IDS = "contextFromTaskIds";
     private static final String KEY_REPEAT_LIMIT = "repeatLimit";
+    private static final String KEY_TIMEZONE = "timezone";
 
     // --- Common response strings ---
     private static final String ERR_NAME_REQUIRED = "Error: 'name' is required";
@@ -174,7 +175,12 @@ public class TaskTool implements ToolRegistry.Tool {
                 Map.entry(KEY_CONTEXT_FROM_TASK_IDS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "JSON array of upstream Task ids whose outputs feed this task's context")),
                 Map.entry(KEY_REPEAT_LIMIT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                        SchemaKeys.DESCRIPTION, "Max fires for a recurring task before auto-cancel. Null = unlimited."))
+                        SchemaKeys.DESCRIPTION, "Max fires for a recurring task before auto-cancel. Null = unlimited.")),
+                Map.entry(KEY_TIMEZONE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                        SchemaKeys.DESCRIPTION,
+                        "IANA timezone (e.g. 'America/New_York', 'Asia/Tokyo') for CRON / SCHEDULED "
+                                + "fire-time resolution. Null = use the operator's default "
+                                + "(Settings → Tasks → Default timezone). INTERVAL / IMMEDIATE ignore this field."))
         );
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
@@ -257,7 +263,14 @@ public class TaskTool implements ToolRegistry.Tool {
         if (conflict != null) return conflict;
 
         final String finalDescription = description;
-        var saved = services.Tx.run(() -> persistNewTask(args, agent, name, finalDescription, spec));
+        final Task saved;
+        try {
+            saved = services.Tx.run(() -> persistNewTask(args, agent, name, finalDescription, spec));
+        } catch (IllegalArgumentException e) {
+            // JCLAW-261: surface invalid-timezone (or any other validated
+            // arg) as a clean tool error instead of a Tx-wrapped trace.
+            return "Error: " + e.getMessage();
+        }
         services.TaskSchedulingService.register(saved);
 
         EventLogger.info("TASK_MGMT_CREATE", agent.name, null,
@@ -327,9 +340,34 @@ public class TaskTool implements ToolRegistry.Tool {
         if (hasValue(args, KEY_REPEAT_LIMIT)) {
             task.repeatLimit = args.get(KEY_REPEAT_LIMIT).getAsInt();
         }
+        // JCLAW-261: optional IANA timezone. Validated here so an invalid
+        // value surfaces as a tool error to the LLM rather than landing
+        // in the DB and silently falling through at fire time.
+        task.timezone = parseTimezoneOrNull(args);
 
         task.save();
         return task;
+    }
+
+    /**
+     * JCLAW-261: read the {@link #KEY_TIMEZONE} arg and validate as an
+     * IANA zone id. Returns the trimmed value when valid, null when
+     * absent or blank. Throws {@link IllegalArgumentException} on an
+     * invalid value so {@link #createTask}/{@link #updateTask} can
+     * surface a clear tool error.
+     */
+    private static String parseTimezoneOrNull(JsonObject args) {
+        var raw = optStr(args, KEY_TIMEZONE);
+        if (raw == null || raw.isBlank()) return null;
+        var trimmed = raw.trim();
+        try {
+            java.time.ZoneId.of(trimmed);
+        } catch (java.time.DateTimeException e) {
+            throw new IllegalArgumentException(
+                    "Invalid IANA timezone '" + trimmed + "': " + e.getMessage()
+                            + ". Use a value like 'America/New_York' or 'Asia/Tokyo'.");
+        }
+        return trimmed;
     }
 
     private String updateTask(JsonObject args, Agent agent) {
@@ -364,7 +402,14 @@ public class TaskTool implements ToolRegistry.Tool {
             spec = null;
         }
 
-        var changeFlags = services.Tx.run(() -> applyPatch(args, taskId, spec));
+        final boolean[] changeFlags;
+        try {
+            changeFlags = services.Tx.run(() -> applyPatch(args, taskId, spec));
+        } catch (IllegalArgumentException e) {
+            // JCLAW-261: surface invalid-timezone (or any other validated
+            // field) as a clean tool error.
+            return "Error: " + e.getMessage();
+        }
 
         if (!changeFlags[0]) {
             return "Error: No patchable fields provided in updateTask.";
@@ -459,6 +504,22 @@ public class TaskTool implements ToolRegistry.Tool {
         if (args.has(KEY_REPEAT_LIMIT)) {
             var el = args.get(KEY_REPEAT_LIMIT);
             task.repeatLimit = el.isJsonNull() ? null : el.getAsInt();
+            anyChange = true;
+        }
+        // JCLAW-261: explicit-null clears the per-task override (falls
+        // back to the global default); a value validates as IANA. Missing
+        // key is a no-op so updates that don't touch timezone don't wipe
+        // an existing value.
+        if (args.has(KEY_TIMEZONE)) {
+            var el = args.get(KEY_TIMEZONE);
+            if (el.isJsonNull()) {
+                task.timezone = null;
+            } else {
+                // parseTimezoneOrNull treats blank as null and validates
+                // non-blank values; rewrap as a JsonObject lookup so the
+                // helper's contract stays consistent.
+                task.timezone = parseTimezoneOrNull(args);
+            }
             anyChange = true;
         }
         return anyChange;

@@ -292,7 +292,11 @@ public final class TaskExecutionHandler {
 
     private static void rescheduleCronFire(Task task) {
         try {
-            Instant next = JClawCronUtils.nextExecution(task.cronExpression);
+            // JCLAW-261: same zone resolution as the first-fire computation
+            // in TaskSchedulingService so the next fire matches the user's
+            // intent ("9 am NYC") regardless of the JVM's default zone.
+            var zone = TimezoneResolver.resolve(task);
+            Instant next = JClawCronUtils.nextExecution(task.cronExpression, zone);
             if (next == null) {
                 EventLogger.warn("task",
                         task.agent != null ? task.agent.name : null, null,

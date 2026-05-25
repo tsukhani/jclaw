@@ -4,6 +4,7 @@ import com.github.kagkarlsson.scheduler.task.ExecutionComplete;
 import com.github.kagkarlsson.scheduler.task.schedule.CronSchedule;
 
 import java.time.Instant;
+import java.time.ZoneId;
 
 /**
  * JCLAW-294 cron migration: delegate cron parsing to db-scheduler's
@@ -39,16 +40,35 @@ public final class JClawCronUtils {
 
     /**
      * Compute the next fire instant after now for the given cron
-     * expression. Returns null on blank input or any parse failure
-     * — callers (TaskSchedulingService.computeNextRunAt,
+     * expression in the JVM-default zone. Returns null on blank input
+     * or any parse failure — callers (TaskSchedulingService.computeNextRunAt,
      * TaskExecutionHandler.scheduleCronNextCompletion) treat null as
      * "skip and log", matching the pre-migration behavior.
+     *
+     * <p>Prefer {@link #nextExecution(String, ZoneId)} for per-task
+     * timezone support (JCLAW-261). This single-arg overload is kept
+     * for legacy call sites that don't yet have a {@link models.Task}
+     * context to resolve a zone from.
      */
     public static Instant nextExecution(String expr) {
+        return nextExecution(expr, null);
+    }
+
+    /**
+     * JCLAW-261: zone-aware variant. When {@code zone} is non-null, the
+     * cron expression is interpreted in that zone — so {@code "0 0 9 * * *"}
+     * fires at 09:00 wall-clock in the supplied zone, regardless of the
+     * JVM default. A null zone falls back to {@code ZoneId.systemDefault()}
+     * (the same behavior as the no-zone constructor).
+     */
+    public static Instant nextExecution(String expr, ZoneId zone) {
         if (expr == null || expr.isBlank()) return null;
         try {
-            return new CronSchedule(expr)
-                    .getNextExecutionTime(ExecutionComplete.simulatedSuccess(Instant.now()));
+            var schedule = zone != null
+                    ? new CronSchedule(expr, zone)
+                    : new CronSchedule(expr);
+            return schedule.getNextExecutionTime(
+                    ExecutionComplete.simulatedSuccess(Instant.now()));
         } catch (RuntimeException _) {
             // Bad expression — caller logs and skips via null check.
             return null;

@@ -241,6 +241,23 @@ public class Task extends Model {
     @Column(name = "repeat_limit")
     public Integer repeatLimit;
 
+    /**
+     * JCLAW-261: optional IANA timezone (e.g. {@code "America/New_York"},
+     * {@code "Asia/Tokyo"}) for {@link Type#CRON} and {@link Type#SCHEDULED}
+     * fire-time resolution. When non-null, the scheduler interprets the
+     * cron expression / {@link #scheduledAt} wall-clock in this zone.
+     * When null, the resolver falls back through:
+     * <ol>
+     *   <li>Config row {@code tasks.defaultTimezone} (operator-set default)</li>
+     *   <li>application.conf {@code tasks.defaultTimezone}</li>
+     *   <li>{@code ZoneId.systemDefault()}</li>
+     * </ol>
+     * {@link Type#INTERVAL} and {@link Type#IMMEDIATE} ignore this field —
+     * their fire schedule is duration-based, with no wall-clock dependence.
+     */
+    @Column(name = "timezone", length = 64)
+    public String timezone;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

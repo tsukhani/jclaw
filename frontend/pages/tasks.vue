@@ -246,21 +246,44 @@ function formatTime12h(hour: number, min: number): string {
  * reads "May 24, 2026 · 9:00:00 AM" instead of the locale-default
  * "25/05/2026, 09:00:00". Pinned to 12-hour clock so AM/PM is consistent
  * regardless of OS locale settings.
+ *
+ * <p>JCLAW-261: when {@code zone} is supplied (the task's effective IANA
+ * timezone), the timestamp is rendered IN that zone — so "9 am NYC"
+ * shows as 9:00 AM regardless of where the operator's browser sits. The
+ * zone short-id is appended so the operator can tell which clock they're
+ * reading. A null/undefined zone falls back to browser-local (existing
+ * behavior); used by the few legacy call sites that don't carry a task.
  */
-function formatTaskTimestamp(iso: string): string {
+/**
+ * JCLAW-261: which IANA zone should the Next Run column render this
+ * task's timestamp in? CRON / SCHEDULED carry a meaningful per-task
+ * (or default-resolved) zone; INTERVAL and IMMEDIATE are duration-
+ * based and have no wall-clock binding — render those in the browser's
+ * local zone (return undefined to fall through formatTaskTimestamp's
+ * default behavior).
+ */
+function zoneForTaskRender(task: Task): string | undefined {
+  if (task.type !== 'CRON' && task.type !== 'SCHEDULED') return undefined
+  return task.effectiveTimezone ?? undefined
+}
+
+function formatTaskTimestamp(iso: string, zone?: string | null): string {
   const d = new Date(iso)
+  const opts: Intl.DateTimeFormatOptions = zone ? { timeZone: zone } : {}
   const date = d.toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+    ...opts,
   })
   const time = d.toLocaleTimeString(undefined, {
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
     hour12: true,
+    ...opts,
   })
-  return `${date} · ${time}`
+  return zone ? `${date} · ${time} (${zone})` : `${date} · ${time}`
 }
 
 // ─────────────────────────── Calendar projection ────────────────────────────
@@ -698,7 +721,7 @@ const typeSelectId = useId()
               {{ task.agentName || '—' }}
             </td>
             <td class="px-4 py-2.5 text-fg-muted text-xs">
-              {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string) : '—' }}
+              {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
             </td>
             <td class="px-4 py-2.5 text-fg-muted text-xs">
               {{ task.retryCount }}/{{ task.maxRetries }}
@@ -804,7 +827,7 @@ const typeSelectId = useId()
               Next run
             </dt>
             <dd class="text-fg-primary">
-              {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string) : '—' }}
+              {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
             </dd>
             <dt class="text-fg-muted">
               Retries
