@@ -33,6 +33,9 @@ public class AgentService {
      * user gets a clear reject rather than a silent drop. Returns {@code false}
      * when the provider or model can't be resolved — better to reject an
      * attachment than accept it against an unknown model.
+     *
+     * @param agent the agent whose default model is being inspected
+     * @return true when the agent's default model declares image-input support
      */
     public static boolean supportsVision(Agent agent) {
         return hasModelCapability(agent, llm.LlmTypes.ModelInfo::supportsVision);
@@ -90,6 +93,16 @@ public class AgentService {
      * {@link controllers.ApiAgentsController}) still get the full workspace
      * via the three other {@code create} overloads, which default
      * {@code createWorkspace=true} and preserve the pre-2026-05 behaviour.
+     *
+     * @param name             agent name (unique within the deployment)
+     * @param modelProvider    provider id the agent defaults to
+     * @param modelId          model id the agent defaults to
+     * @param thinkingMode     reasoning effort default; null clears the field
+     * @param description      operator-supplied short description
+     * @param createWorkspace  when true, materialise the workspace folder
+     *                         (SOUL / IDENTITY / USER / BOOTSTRAP / AGENT
+     *                         scaffolding); subagents pass false
+     * @return the persisted Agent
      */
     public static Agent create(String name, String modelProvider, String modelId,
                                 String thinkingMode, String description,
@@ -191,6 +204,12 @@ public class AgentService {
      * collapse to null (silent drop — the model can't reason anyway). Unknown
      * levels for a thinking model also collapse to null rather than 500-ing,
      * which protects against stale frontend state after a model swap.
+     *
+     * @param requested      operator-supplied thinking mode
+     * @param modelProvider  provider id to validate against
+     * @param modelId        model id to validate against
+     * @return the validated thinking mode, or {@code null} when not
+     *         applicable / unknown
      */
     private static String normalizeThinkingMode(String requested, String modelProvider, String modelId) {
         if (requested == null || requested.isBlank()) return null;
@@ -205,7 +224,14 @@ public class AgentService {
         return levels.contains(requested) ? requested : null;
     }
 
-    /** Check whether the given provider+model combination is currently configured and available. */
+    /**
+     * Check whether the given provider+model combination is currently
+     * configured and available.
+     *
+     * @param providerName provider id to check
+     * @param modelId      model id to check within that provider's list
+     * @return true when the provider is registered and lists this model id
+     */
     public static boolean isProviderConfigured(String providerName, String modelId) {
         var provider = ProviderRegistry.get(providerName);
         return provider != null
@@ -292,6 +318,8 @@ public class AgentService {
      *
      * <p>The on-disk workspace directory is removed last, after DB state is
      * clean, so a failed delete leaves the filesystem in a recoverable state.
+     *
+     * @param agent the agent to delete (must have a persisted id)
      */
     public static void delete(Agent agent) {
         var agentId = agent.id;
@@ -428,6 +456,9 @@ public class AgentService {
      * Throws {@link SecurityException} when the resolved path escapes the
      * workspace root — callers should not attempt to recover, the only
      * correct response is to refuse the operation.
+     *
+     * @param agentName agent whose workspace folder is requested
+     * @return the agent's workspace directory path
      */
     public static Path workspacePath(String agentName) {
         var rootName = resolveWorkspaceOwnerName(agentName);
@@ -505,6 +536,13 @@ public class AgentService {
      * escape, missing root, or I/O error. Prefer {@link #acquireContained}
      * when the result is about to be opened or executed against — it
      * additionally double-resolves to shrink the validate→use TOCTOU window.
+     *
+     * @param root         the workspace root (or any other "must stay inside"
+     *                     boundary)
+     * @param relativePath path relative to {@code root}, possibly containing
+     *                     {@code ..} segments
+     * @return the canonical absolute path inside {@code root}, or
+     *         {@code null} on escape / missing root / I/O error
      */
     public static Path resolveContained(Path root, String relativePath) {
         try {
@@ -574,6 +612,12 @@ public class AgentService {
      * {@code DocumentsTool}, {@code ShellExecTool} (workdir), upload handlers,
      * and {@code serveWorkspaceFile}. Use {@link #resolveContained} only when
      * you need a non-throwing yes/no check.
+     *
+     * @param root         the workspace root the target must stay inside
+     * @param relativePath path relative to {@code root}
+     * @return the canonical absolute path inside {@code root}, double-resolved
+     * @throws SecurityException on escape, mid-resolution divergence, or
+     *                           hardlink violation
      */
     public static Path acquireContained(Path root, String relativePath) {
         var first = resolveContained(root, relativePath);
@@ -610,18 +654,27 @@ public class AgentService {
 
     /**
      * Resolve a relative path inside an agent's workspace and reject any
-     * target that escapes the workspace root. Returns {@code null} on escape;
-     * callers should surface a traversal error. Prefer
+     * target that escapes the workspace root. Prefer
      * {@link #acquireWorkspacePath} when the result is about to be used.
+     *
+     * @param agentName    agent whose workspace to resolve within
+     * @param relativePath path relative to that workspace
+     * @return the canonical absolute path, or {@code null} on escape
      */
     public static Path resolveWorkspacePath(String agentName, String relativePath) {
         return resolveContained(workspacePath(agentName), relativePath);
     }
 
     /**
-     * Resolve and double-validate a path inside an agent's workspace. Throws
-     * {@link SecurityException} on any escape. Use this immediately before
-     * opening, reading, writing, or execing against the returned path.
+     * Resolve and double-validate a path inside an agent's workspace. Use
+     * this immediately before opening, reading, writing, or execing against
+     * the returned path.
+     *
+     * @param agentName    agent whose workspace to resolve within
+     * @param relativePath path relative to that workspace
+     * @return the canonical absolute path, double-resolved
+     * @throws SecurityException on any escape, mid-resolution divergence,
+     *                           or hardlink violation
      */
     public static Path acquireWorkspacePath(String agentName, String relativePath) {
         return acquireContained(workspacePath(agentName), relativePath);

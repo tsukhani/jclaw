@@ -53,7 +53,7 @@ import java.util.HashSet;
  *   skipped — operators need to fix the expression via the API.</li>
  * </ul>
  *
- * <h3>Invocation</h3>
+ * <h2>Invocation</h2>
  * Called inline from {@link DbSchedulerBootstrapJob#doJob}
  * immediately after {@code scheduler.start()} so the ordering is
  * deterministic. Pre-fix this class was its own
@@ -158,7 +158,7 @@ public class BootConsistencyCheck extends Job<Void> {
     /**
      * Test hook: re-run the sweep against the live scheduler.
      * Production callers should not use this — it's the same
-     * @OnApplicationStart entry point under a different name so
+     * {@code @OnApplicationStart} entry point under a different name so
      * tests can re-trigger without restarting the JVM.
      */
     public static void runForTest() {

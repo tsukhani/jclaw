@@ -157,6 +157,81 @@ class TaskExecutorTest extends UnitTest {
                 "blank description should fall back to task.name");
     }
 
+    // === Auto-delivery wire (Bug 1 fix) ===
+
+    @Test
+    void runTaskAutoDeliversToWebConversationViaTaskDelivery() throws Exception {
+        startLlmServer(simpleResponse("Reminder: brush your teeth."));
+        configureProvider();
+
+        var agent = createAgent("delivery-agent", "test-provider", "test-model");
+        var conv = new models.Conversation();
+        conv.agent = agent;
+        conv.channelType = "web";
+        conv.save();
+
+        var task = persistTask(agent, "brush-teeth",
+                "Tell the user to brush their teeth.", Task.Type.SCHEDULED);
+        task.delivery = "web:" + conv.id;
+        task.save();
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var closed = fireOnVirtualThread(task);
+        JPA.em().clear();
+
+        var fresh = (TaskRun) TaskRun.findById(closed.id);
+        assertEquals(TaskRun.Status.COMPLETED, fresh.status);
+        assertEquals(TaskRun.DeliveryStatus.DELIVERED, fresh.deliveryStatus,
+                "auto-delivery must mark the TaskRun delivered");
+        assertEquals("web:" + conv.id, fresh.deliveryTarget,
+                "deliveryTarget should echo the spec we routed through");
+        assertNull(fresh.deliveryError, "no error on successful delivery");
+
+        // The dispatched message lands as a USER row on the target conversation
+        // with messageKind="subagent_send" (see DeliveryDispatcher.dispatchWeb).
+        var delivered = Tx.run(() -> {
+            @SuppressWarnings("unchecked")
+            var rows = (java.util.List<Object>) (java.util.List<?>) models.Message.find(
+                    "conversation.id = ?1 ORDER BY id DESC", conv.id).fetch();
+            return rows.isEmpty() ? null : (models.Message) rows.getFirst();
+        });
+        assertNotNull(delivered, "auto-delivery must append a Message row to the target conversation");
+        assertEquals("Reminder: brush your teeth.", delivered.content);
+        assertEquals("subagent_send", delivered.messageKind);
+
+        services.EventLogger.flush();
+        var events = loadEventsByCategory("TASK_DELIVERED");
+        assertTrue(events.stream().anyMatch(e ->
+                        e.details != null
+                        && e.details.contains("\"task_id\":" + task.id)
+                        && e.details.contains("\"run_id\":" + closed.id)),
+                "TASK_DELIVERED lifecycle event must carry task_id and run_id");
+    }
+
+    @Test
+    void runTaskSkipsAutoDeliveryWhenNoDeliverySpec() throws Exception {
+        startLlmServer(simpleResponse("Headless reply."));
+        configureProvider();
+
+        var agent = createAgent("headless-agent", "test-provider", "test-model");
+        var task = persistTask(agent, "headless", "Do something quiet.", Task.Type.IMMEDIATE);
+        // task.delivery left null — no auto-delivery should fire.
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var closed = fireOnVirtualThread(task);
+        JPA.em().clear();
+
+        var fresh = (TaskRun) TaskRun.findById(closed.id);
+        assertEquals(TaskRun.Status.COMPLETED, fresh.status);
+        assertEquals(TaskRun.DeliveryStatus.NOT_REQUESTED, fresh.deliveryStatus,
+                "absent delivery spec must surface as NOT_REQUESTED, not DELIVERED");
+        assertNull(fresh.deliveryTarget);
+    }
+
     // === Provider-missing graceful degradation ===
 
     @Test

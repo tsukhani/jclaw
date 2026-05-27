@@ -16,13 +16,13 @@ import java.util.Locale;
  * call routes through the cached reference without re-asking the
  * connection.
  *
- * <h3>Dialect detection</h3>
+ * <h2>Dialect detection</h2>
  * Same pattern {@code DbSchedulerSchemaInitJob} uses: open a
  * connection, read {@code DatabaseMetaData.getDatabaseProductName},
  * substring-match against "postgresql" (case-insensitive). Default
  * is H2 — the JClaw Personal Edition's bundled dialect.
  *
- * <h3>Why static facade vs DI</h3>
+ * <h2>Why static facade vs DI</h2>
  * JClaw's services layer is uniformly static (matches Play 1.x's
  * controller convention). Threading a {@link MessageSearchRepository}
  * instance through call sites would require either:

@@ -19,7 +19,7 @@ import java.util.function.Supplier;
  * service so the {@code scheduled_tasks} row state stays consistent
  * with the {@link Task} row state.
  *
- * <h3>Instance-id convention</h3>
+ * <h2>Instance-id convention</h2>
  * The {@code task_instance} string column carries the JClaw
  * {@link Task#id} as a decimal string. {@link TaskExecutionHandler}
  * decodes it back to a primary key at fire time. One JClaw Task
@@ -30,7 +30,7 @@ import java.util.function.Supplier;
  * {@code stop()}-then-{@code schedule()} inside their
  * CompletionHandler to keep the slot occupied for the next fire.
  *
- * <h3>First-fire instant</h3>
+ * <h2>First-fire instant</h2>
  * {@link #register} computes the first scheduled time from the Task's
  * shape:
  * <ul>
@@ -46,7 +46,7 @@ import java.util.function.Supplier;
  *       early</li>
  * </ul>
  *
- * <h3>What this service does NOT do</h3>
+ * <h2>What this service does NOT do</h2>
  * <ul>
  *   <li>Does not touch the {@link Task} row's status / nextRunAt /
  *       paused fields. Caller is responsible for those — typically

@@ -214,21 +214,29 @@ public final class TelegramStreamingSink {
      * Test-friendly constructor: no conversation id, so checkpoint
      * persistence is a no-op. Production call sites should use
      * {@link #TelegramStreamingSink(String, String, Agent, Long)}.
+     *
+     * @param botToken the Telegram bot token used to authenticate API calls
+     * @param chatId   the Telegram chat id (target of edits)
+     * @param agent    the bound agent (used for markdown rendering hints and
+     *                 logging attribution)
      */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent) {
         this(botToken, chatId, agent, null, null);
     }
 
+    /**
+     * @param botToken       the Telegram bot token
+     * @param chatId         the Telegram chat id
+     * @param agent          the bound agent
+     * @param conversationId persisted Conversation id used for checkpoint
+     *                       persistence; null disables it (test path)
+     */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent, Long conversationId) {
         this(botToken, chatId, agent, conversationId, null);
     }
 
     /**
-     * Full constructor (JCLAW-105). {@code chatType} is Telegram's
-     * {@code chat.type} string ({@code "private"} / {@code "group"} /
-     * {@code "supergroup"} / {@code "channel"}); recorded as a structured-log
-     * breadcrumb so operators can attribute streaming activity to chat
-     * categories. Nullable; defaults to {@code "unknown"} in logs.
+     * Full constructor (JCLAW-105).
      *
      * <p>The streaming path is always placeholder + edit: one
      * {@code sendMessage} on first flush, subsequent flushes do
@@ -237,6 +245,18 @@ public final class TelegramStreamingSink {
      * JCLAW-121 — Telegram's Bot API has no working draft-clear method, so
      * a streamed draft left stale duplicate bubbles in the user's compose
      * area until client-side cache expiry.
+     *
+     * @param botToken       the Telegram bot token
+     * @param chatId         the Telegram chat id
+     * @param agent          the bound agent
+     * @param conversationId persisted Conversation id (enables checkpoint
+     *                       persistence)
+     * @param chatType       Telegram's {@code chat.type} string ({@code "private"}
+     *                       / {@code "group"} / {@code "supergroup"} /
+     *                       {@code "channel"}); recorded as a structured-log
+     *                       breadcrumb so operators can attribute streaming
+     *                       activity to chat categories. Nullable; defaults
+     *                       to {@code "unknown"} in logs.
      */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent,
                                  Long conversationId, String chatType) {
@@ -259,6 +279,8 @@ public final class TelegramStreamingSink {
      * flush if the accumulated preview would exceed the previously-flushed
      * text; stops accepting if the live-stream cap is hit (seal will then
      * deliver via the planner).
+     *
+     * @param chunk the new token batch to append; null / empty is a no-op
      */
     public void update(String chunk) {
         if (chunk == null || chunk.isEmpty()) return;
@@ -287,6 +309,8 @@ public final class TelegramStreamingSink {
      * deletes the placeholder and delegates to
      * {@link TelegramChannel#sendMessage(String, String, String, Agent)} for
      * media-rich / oversize responses.
+     *
+     * @param finalResponse the complete LLM response text
      */
     public void seal(String finalResponse) {
         if (!sealed.compareAndSet(false, true)) return;
@@ -400,6 +424,8 @@ public final class TelegramStreamingSink {
     /**
      * Called on LLM-side errors. Deletes the placeholder (if any) and sends
      * a short user-facing error message as a fresh Telegram message.
+     *
+     * @param e the error that ended the streaming run
      */
     public void errorFallback(Exception e) {
         if (!sealed.compareAndSet(false, true)) return;
@@ -426,7 +452,12 @@ public final class TelegramStreamingSink {
     // unnamed package, and they can't see package-private channels.*
     // members. Treat these as test-only API surface.
 
-    /** Strip markdown image tokens from a live-preview string. */
+    /**
+     * Strip markdown image tokens from a live-preview string.
+     *
+     * @param text the live preview to strip
+     * @return {@code text} with {@code ![alt](url)} tokens removed
+     */
     public static String stripImageRefs(String text) {
         if (text == null) return "";
         return IMAGE_MD.matcher(text).replaceAll("");
@@ -582,6 +613,8 @@ public final class TelegramStreamingSink {
      * untouched. Public so unit tests in the default package can exercise
      * the ratchet without standing up the network path — matches the
      * existing {@code *ForTest} convention elsewhere in this class.
+     *
+     * @param e the exception thrown by the failed flush attempt
      */
     public void recordFlushFailure(Exception e) {
         if (e instanceof TelegramApiRequestException tare
@@ -704,11 +737,16 @@ public final class TelegramStreamingSink {
 
     /**
      * Returns true if the notifier should fire for {@code conversationId}
-     * right now. Updates the last-fired timestamp in that case. Null
-     * conversationIds are permitted (test sinks without a conversation
-     * context) and always return false — we never notify without a
-     * conversation anchor because the rate limiter has no key to apply
-     * against. Public for test seam; not part of the sink's public API.
+     * right now. Updates the last-fired timestamp in that case. Public
+     * for test seam; not part of the sink's public API.
+     *
+     * @param conversationId the conversation key to rate-limit on. Null
+     *                       conversationIds (test sinks without a
+     *                       conversation context) always return false —
+     *                       we never notify without a conversation anchor
+     *                       because the rate limiter has no key to apply
+     *                       against.
+     * @return true when the caller is allowed to fire the notifier now
      */
     public static boolean tryFireNotifier(Long conversationId) {
         if (conversationId == null) return false;

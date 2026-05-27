@@ -413,11 +413,13 @@ public class ModelDiscoveryService {
     }
 
     /**
-     * Shared return shape for capability detectors. {@code confirmed} is the
-     * best-effort final answer; {@code fromProvider} is true when the provider
-     * explicitly reported enough metadata to decide (so the UI can lock the
-     * corresponding checkbox), false when we fell back to an ID-based heuristic
-     * or defaulted to absence.
+     * Shared return shape for capability detectors.
+     *
+     * @param confirmed    best-effort final answer for the capability
+     * @param fromProvider true when the provider explicitly reported enough
+     *                     metadata to decide (so the UI can lock the
+     *                     corresponding checkbox); false when we fell back
+     *                     to an ID-based heuristic or defaulted to absence
      */
     public record CapabilityDetection(boolean confirmed, boolean fromProvider) {}
 

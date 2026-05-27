@@ -26,7 +26,7 @@ import java.util.Map;
  * {@code FullTextLucene} as the keeper of the index files; sync is driven
  * by JPA lifecycle hooks on each indexed entity rather than DB triggers.
  *
- * <h3>Multi-scope (JCLAW-304)</h3>
+ * <h2>Multi-scope (JCLAW-304)</h2>
  * One {@link Scope} per indexed entity. Each scope gets its own
  * subdirectory under {@code data/jclaw-lucene/<scope>/}, its own
  * {@link IndexWriter}, and its own {@link SearcherManager}. Callers pass
@@ -35,7 +35,7 @@ import java.util.Map;
  * between e.g. TaskRunMessage transcripts and Task name/description
  * documents.
  *
- * <h3>Lifecycle</h3>
+ * <h2>Lifecycle</h2>
  * <ul>
  *   <li>{@link #open()} — called once from {@code FullTextSearchInitJob}
  *       at {@code @OnApplicationStart}. Opens an FSDirectory + writer +
@@ -49,7 +49,7 @@ import java.util.Map;
  *       and logged; the indexer never aborts the parent JPA transaction.</li>
  * </ul>
  *
- * <h3>Why a SearcherManager</h3>
+ * <h2>Why a SearcherManager</h2>
  * Lucene's IndexReader is immutable per snapshot — writes are invisible
  * until a fresh reader is opened. SearcherManager handles the
  * reopen-on-search cadence (we call {@code maybeRefresh} on each query),

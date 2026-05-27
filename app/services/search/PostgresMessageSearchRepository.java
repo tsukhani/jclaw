@@ -11,7 +11,7 @@ import java.util.List;
  * name reports "PostgreSQL" — for JClaw's operator-opt-in Postgres
  * deployment path.
  *
- * <h3>Status: skeleton</h3>
+ * <h2>Status: skeleton</h2>
  * The runtime path is wired so that selecting this impl at boot
  * doesn't crash the application, but {@link #init} and
  * {@link #search} are documented placeholders. The schema-side
@@ -21,7 +21,7 @@ import java.util.List;
  * against Postgres — that's the natural trigger to validate the
  * migration end-to-end on the target dialect.
  *
- * <h3>Reference shape</h3>
+ * <h2>Reference shape</h2>
  * The planned implementation:
  * <pre>
  *   ALTER TABLE task_run_message ADD COLUMN search_vector tsvector;

@@ -18,7 +18,7 @@ import java.time.ZoneId;
  * {@code @monthly}, {@code @yearly}). Operators can use any of these
  * directly.
  *
- * <h3>Why these helpers</h3>
+ * <h2>Why these helpers</h2>
  * {@link CronSchedule} is the right primitive but its
  * {@code getNextExecutionTime} requires an {@link ExecutionComplete}
  * — overkill for our "next fire after now" question.
@@ -26,7 +26,7 @@ import java.time.ZoneId;
  * cleanly. Wrapping the call in {@link #nextExecution(String)} also
  * lets callers stay null-soft instead of catching parse exceptions.
  *
- * <h3>Unix 5-field rejection</h3>
+ * <h2>Unix 5-field rejection</h2>
  * {@link #validate(String)} catches the common Unix-style 5-field
  * input ({@code "0 9 * * *"}) and surfaces an actionable message
  * (prepend {@code 0 } for the seconds position). Without this, the

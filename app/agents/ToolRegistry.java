@@ -27,12 +27,15 @@ import java.util.Set;
 public class ToolRegistry {
 
     /**
-     * JCLAW-170: rich tool output used by {@link #executeRich}. {@code text}
-     * is always the string the LLM sees (same shape as {@link Tool#execute}).
-     * {@code structuredJson} is an optional JSON payload the UI can render
-     * richly (e.g. search result chips with favicons) — persisted to
-     * {@code message.tool_result_structured} so re-opening a conversation
-     * keeps the richer render. {@code null} means "no structured view".
+     * JCLAW-170: rich tool output used by {@link #executeRich}.
+     *
+     * @param text           the string the LLM sees (same shape as
+     *                       {@link Tool#execute})
+     * @param structuredJson optional JSON payload the UI can render richly
+     *                       (e.g. search-result chips with favicons) —
+     *                       persisted to {@code message.tool_result_structured}
+     *                       so re-opening a conversation keeps the richer
+     *                       render. {@code null} means "no structured view".
      */
     public record ToolResult(String text, String structuredJson) {
         public static ToolResult text(String text) { return new ToolResult(text, null); }
@@ -49,6 +52,10 @@ public class ToolRegistry {
          * text-only {@link ToolResult}; tools that want the UI to render a richer
          * view (clickable result chips, favicons, previews) override this and
          * supply a structured JSON payload alongside the LLM-visible text.
+         *
+         * @param argsJson the JSON arguments string the model sent
+         * @param agent    the executing agent
+         * @return the rich tool result
          */
         default ToolResult executeRich(String argsJson, Agent agent) {
             return ToolResult.text(execute(argsJson, agent));
@@ -248,7 +255,7 @@ public class ToolRegistry {
 
     /** Resolve a tool's {@link Tool#parallelSafe()} flag by name, defaulting
      *  to {@code false} for unknown names. Used by
-     *  {@link agents.AgentRunner#executeToolsParallel} to decide whether
+     *  {@link ParallelToolExecutor#executeToolsParallel} to decide whether
      *  multiple calls to the same tool in one round may race or must serialize. */
     public static boolean isParallelSafe(String toolName) {
         var tool = tools.get(toolName);
@@ -353,7 +360,7 @@ public class ToolRegistry {
      *
      * <p>Native tools (group=null) ship every turn — they're predictable
      * workhorses with bounded count. MCP servers (group=server name) ship
-     * exactly one parameterized entry each via {@link McpServerTool}; the
+     * exactly one parameterized entry each via {@link mcp.McpServerTool}; the
      * per-action {@code McpToolAdapter} wrappers stay in the registry for
      * the execution path but are hidden from these defs (JCLAW-281).
      *

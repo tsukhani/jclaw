@@ -13,7 +13,7 @@ import java.util.List;
  * {@link ConversationService}, preserving the existing message
  * persistence semantics for chat flows.
  *
- * <h3>Detached-entity safety</h3>
+ * <h2>Detached-entity safety</h2>
  * Callers on virtual threads (db-scheduler fires via TaskExecutionHandler,
  * webhooks, the streaming
  * runStreaming entry point) pass a {@link Conversation} loaded in an

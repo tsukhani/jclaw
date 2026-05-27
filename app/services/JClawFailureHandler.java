@@ -23,7 +23,7 @@ import java.time.Instant;
  *   db-scheduler row.</li>
  * </ul>
  *
- * <h3>Why policy is in its own static method</h3>
+ * <h2>Why policy is in its own static method</h2>
  * db-scheduler's {@link ExecutionOperations} is a concrete class
  * with a non-trivial constructor ({@code TaskRepository},
  * {@code SchedulerListeners}, {@code Execution}), so the integration
@@ -35,7 +35,7 @@ import java.time.Instant;
  * {@code executionOps.reschedule}/{@code stop} call. Tests target
  * {@code decide} directly.
  *
- * <h3>Backoff schedule (spec)</h3>
+ * <h2>Backoff schedule (spec)</h2>
  * {@code 30s, 60s, 5m, 15m, 1h} at retry positions 0–4. Position 5
  * and beyond → permanent. {@code Task.maxRetries} (default 3, per
  * the column default) caps shorter than the backoff array when
@@ -61,9 +61,24 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * scheduler row and mark the Task FAILED.
      */
     public sealed interface Decision permits Decision.Reschedule, Decision.Fail {
-        /** Try again at {@code nextRunAt}; Task remains PENDING with bumped retryCount. */
+        /**
+         * Try again at {@code nextRunAt}; Task remains PENDING with bumped
+         * retryCount.
+         *
+         * @param nextRunAt      when db-scheduler should fire the next
+         *                       attempt
+         * @param newRetryCount  the bumped {@code Task.retryCount} value to
+         *                       persist
+         */
         record Reschedule(Instant nextRunAt, int newRetryCount) implements Decision {}
-        /** Stop the row and mark Task FAILED. */
+
+        /**
+         * Stop the row and mark Task FAILED.
+         *
+         * @param reason human-readable reason persisted to the Task's
+         *               {@code lastError} column and emitted in the
+         *               {@code TASK_FAILED} lifecycle event
+         */
         record Fail(String reason) implements Decision {}
     }
 

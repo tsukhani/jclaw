@@ -26,6 +26,13 @@ public class SkillLoader {
     /**
      * Metadata describing a discovered skill on disk.
      *
+     * @param name          skill name (from the {@code name:} frontmatter key or
+     *                      the SKILL.md directory name).
+     * @param description   short prose description (from {@code description:}).
+     * @param location      absolute path to the SKILL.md file on disk.
+     * @param tools         JClaw tool names this skill consumes (exec, filesystem,
+     *                      browser, …). See {@code commands} below for the
+     *                      shell-allowlist counterpart.
      * @param toolsDeclared true when the SKILL.md frontmatter contained a {@code tools:} key
      *                      (even if the list was empty). false means the skill predates the
      *                      declaration system and callers should fall back to heuristics.
@@ -42,6 +49,8 @@ public class SkillLoader {
      * @param author        name of the agent that authored the skill, from the {@code author:}
      *                      frontmatter key. Empty string when the skill predates the field
      *                      (caller should render no attribution rather than guessing).
+     * @param icon           icon identifier from the {@code icon:} frontmatter key (rendered
+     *                      next to the skill in the UI). Empty string when unset.
      * @param mcpServers    JCLAW-281: MCP server dependencies declared via the
      *                      {@code mcp_servers:} frontmatter key. A skill that uses Jira via
      *                      the {@code jira-confluence} MCP server declares

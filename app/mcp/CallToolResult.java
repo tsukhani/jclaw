@@ -11,6 +11,13 @@ import com.google.gson.JsonObject;
  * receives strings from native tools too. {@code isError} is the spec's
  * separate "tool ran but failed" signal, distinct from the JSON-RPC error
  * channel which means "tool didn't run at all".
+ *
+ * @param content flattened result body — concatenation of the spec's typed
+ *                content parts (text inlined, image / resource rendered as
+ *                bracketed placeholders)
+ * @param isError true when the tool ran but reported an error condition
+ *                (distinct from a JSON-RPC error that means the tool never
+ *                ran)
  */
 public record CallToolResult(String content, boolean isError) {
 

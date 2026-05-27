@@ -63,7 +63,14 @@ public class SkillPromotionService {
         record Failed(int statusCode, String message) implements Result {}
     }
 
-    /** Outcome of tool validation for a skill. */
+    /**
+     * Outcome of tool validation for a skill.
+     *
+     * @param ok      true when every tool the skill declares is enabled on
+     *                the target agent
+     * @param message human-readable explanation; empty when {@code ok} is
+     *                true, otherwise names the missing tool(s)
+     */
     public record ToolValidationResult(boolean ok, String message) {}
 
     // --- Copy: global skill → agent workspace ---

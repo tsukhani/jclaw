@@ -25,7 +25,7 @@ import static utils.GsonHolder.INSTANCE;
  * MCP per-action log expansion, which are coupled by the per-call
  * dispatch path.
  *
- * <h3>Scheduling model</h3>
+ * <h2>Scheduling model</h2>
  * <ul>
  *   <li><b>Parallel-safe tool</b> (opt-in via
  *   {@link ToolRegistry.Tool#parallelSafe()}): each call gets its own

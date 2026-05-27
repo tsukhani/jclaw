@@ -59,7 +59,13 @@ public class ConversationQueue {
 
     /**
      * Try to acquire the conversation for processing.
-     * Returns true if acquired (caller should process), false if message was queued.
+     *
+     * @param conversationId the conversation to acquire
+     * @param message        the inbound message asking for processing
+     * @return {@code true} when acquired (caller should process the
+     *         message), {@code false} when the conversation is already
+     *         being processed and the message was queued / handled
+     *         per the agent's queue mode
      */
     public static boolean tryAcquire(Long conversationId, QueuedMessage message) {
         var state = queues.computeIfAbsent(conversationId, _ -> new QueueState());
@@ -112,6 +118,10 @@ public class ConversationQueue {
      * Returns an {@link AtomicBoolean} that becomes {@code true} when interrupt
      * mode signals that the in-flight processor should cancel. Callers (e.g.
      * {@link agents.AgentRunner}) should poll this in their processing loops.
+     *
+     * @param conversationId the conversation whose cancel flag is needed
+     * @return the conversation's cancellation flag, or a never-cancelled
+     *         flag when the conversation has no state yet
      */
     public static AtomicBoolean cancellationFlag(Long conversationId) {
         var state = queues.get(conversationId);
@@ -141,6 +151,10 @@ public class ConversationQueue {
      *
      * <p>In "collect" mode, returns all pending messages combined. In "queue"
      * mode, returns just the next message.
+     *
+     * @param conversationId the conversation being drained
+     * @return the next message(s) to process, or an empty list when the
+     *         queue is empty (in which case ownership is released)
      */
     public static List<QueuedMessage> drain(Long conversationId) {
         var state = queues.get(conversationId);
@@ -185,6 +199,9 @@ public class ConversationQueue {
      * their {@code finally} block calls this to guarantee {@code processing}
      * flips back to false even when the run throws an exception that
      * short-circuits the normal re-drain.
+     *
+     * @param conversationId the conversation whose queue ownership is being
+     *                       released
      */
     public static void releaseOwnership(Long conversationId) {
         var state = queues.get(conversationId);
@@ -197,6 +214,10 @@ public class ConversationQueue {
 
     /**
      * Format collected messages into a single prompt.
+     *
+     * @param messages the queued messages to combine
+     * @return the single message verbatim when only one was queued; a
+     *         labeled multi-message block when multiple are present
      */
     public static String formatCollectedMessages(List<QueuedMessage> messages) {
         if (messages.size() == 1) return messages.getFirst().text();
@@ -210,6 +231,10 @@ public class ConversationQueue {
 
     /**
      * Get queue position for a conversation (0 if not queued).
+     *
+     * @param conversationId the conversation whose pending-queue size is
+     *                       requested
+     * @return number of pending messages waiting in the queue
      */
     public static int getQueueSize(Long conversationId) {
         var state = queues.get(conversationId);
@@ -221,6 +246,10 @@ public class ConversationQueue {
 
     /**
      * Check if a conversation is currently being processed.
+     *
+     * @param conversationId the conversation to check
+     * @return true when the conversation has an owner currently running
+     *         a turn against it
      */
     public static boolean isBusy(Long conversationId) {
         var state = queues.get(conversationId);
@@ -242,6 +271,10 @@ public class ConversationQueue {
      * <p>{@link ConcurrentHashMap}'s entry iterator is safe for concurrent
      * removal via {@link java.util.Iterator#remove()}.
      *
+     * @param olderThanMs idle threshold in ms — entries whose
+     *                    {@code lastActivityMs} is older than
+     *                    {@code now - olderThanMs} are eligible for
+     *                    eviction
      * @return number of entries evicted (visible to tests)
      */
     public static int evictIdle(long olderThanMs) {

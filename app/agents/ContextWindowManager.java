@@ -21,7 +21,7 @@ import services.EventLogger;
  * policy that keeps the assistant reply from collapsing into
  * {@code finish_reason=length}.
  *
- * <h3>Token measurement</h3>
+ * <h2>Token measurement</h2>
  * Runtime context-window arithmetic ({@link #effectiveMaxTokens},
  * {@link #trimToContextWindow}, {@link CompactionGate}, and
  * {@link TruncationDiagnostics}) routes through
@@ -32,7 +32,7 @@ import services.EventLogger;
  * regression coverage of the chars/4 baseline; no production code path
  * still consumes them.
  *
- * <h3>Reply-budget reservation (JCLAW-291)</h3>
+ * <h2>Reply-budget reservation (JCLAW-291)</h2>
  * {@link #trimToContextWindow} drops oldest non-system history until
  * the prompt fits in {@code contextWindow - RESERVED_OUTPUT_TOKENS}.
  * Without this, headroom in {@link #effectiveMaxTokens} collapses to

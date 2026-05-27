@@ -42,11 +42,17 @@ public final class LoadTestHarness {
     /**
      * Scenario shape streamed by the mock endpoint.
      *
-     * <p>When {@code simulatedToolCalls > 0}, the first response in a round
-     * emits that many {@code loadtest_sleep} tool_calls (each with
-     * {@code ms=toolSleepMs}) instead of content. The follow-up request
-     * carrying tool results triggers a normal content stream. This drives
-     * the agent's parallel tool-execution path end-to-end.
+     * @param ttftMs             simulated time-to-first-token in ms
+     * @param tokensPerSecond    streaming throughput in tokens/sec
+     * @param responseTokens     total tokens to emit in the response body
+     * @param simulatedToolCalls when {@code > 0}, the first response in a
+     *                           round emits this many {@code loadtest_sleep}
+     *                           tool_calls (each with {@code ms=toolSleepMs})
+     *                           instead of content. The follow-up request
+     *                           carrying tool results triggers a normal
+     *                           content stream — drives the agent's parallel
+     *                           tool-execution path end-to-end.
+     * @param toolSleepMs        per-tool-call sleep duration in ms
      */
     public record Scenario(int ttftMs, int tokensPerSecond, int responseTokens,
                             int simulatedToolCalls, int toolSleepMs) {

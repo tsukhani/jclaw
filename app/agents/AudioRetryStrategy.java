@@ -17,7 +17,7 @@ import services.Tx;
  * structured outcome log that grows the provider/format/outcome
  * field-data matrix.
  *
- * <h3>Where the cluster sits in the retry flow</h3>
+ * <h2>Where the cluster sits in the retry flow</h2>
  * <ol>
  *   <li>Streaming or sync call to an audio-capable provider fails.</li>
  *   <li>{@link #isAudioFormatRejection} decides whether the failure is

@@ -17,13 +17,18 @@ import java.util.concurrent.TimeoutException;
 public interface Channel {
 
     /**
-     * Result of a single delivery attempt. Carries both the success flag and,
-     * when the platform surfaced a rate-limit hint (e.g. Telegram's
-     * {@code retry_after}, Slack's {@code Retry-After} header), the number of
-     * milliseconds {@link #sendWithRetry} should wait before the next attempt.
-     * Returning the hint as a value instead of via per-thread state ensures
-     * correctness on virtual-thread-per-task dispatch, where the writer and
-     * the reader of the hint can live on different carriers (JCLAW-137).
+     * Result of a single delivery attempt. Returning the rate-limit hint as
+     * a value instead of via per-thread state ensures correctness on
+     * virtual-thread-per-task dispatch, where the writer and the reader of
+     * the hint can live on different carriers (JCLAW-137).
+     *
+     * @param ok            true when the platform accepted the message
+     * @param retryAfterMs  when the platform surfaced a rate-limit hint
+     *                      (e.g. Telegram's {@code retry_after}, Slack's
+     *                      {@code Retry-After} header), the number of
+     *                      milliseconds {@link #sendWithRetry} should wait
+     *                      before the next attempt; {@code 0} when no hint
+     *                      was provided
      */
     // Sonar java:S1845 flags OK/FAILED constants as case-clashing with the
     // record's `ok` component, but constant-instances-named-after-the-concept

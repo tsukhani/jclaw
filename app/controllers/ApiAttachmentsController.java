@@ -20,8 +20,12 @@ import java.nio.charset.StandardCharsets;
 @With(AuthCheck.class)
 public class ApiAttachmentsController extends Controller {
 
-    /** GET /api/attachments/{uuid} — Serve the raw bytes for a persisted
-     *  attachment. */
+    /**
+     * GET /api/attachments/{uuid} — Serve the raw bytes for a persisted
+     * attachment.
+     *
+     * @param uuid the attachment's client-facing key
+     */
     @SuppressWarnings("java:S2259")
     public static void download(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);

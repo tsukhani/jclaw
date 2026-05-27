@@ -136,6 +136,30 @@ class TaskToolTest extends UnitTest {
         var deltaSec = task.scheduledAt.getEpochSecond() - before.getEpochSecond();
         assertTrue(deltaSec >= 1799 && deltaSec <= 1810,
                 "scheduledAt ~ now + 30m; got " + deltaSec + "s");
+
+        // Bug fix: the scheduled-for clause must carry an explicit IANA zone
+        // (bracketed by ZonedDateTime.toString()) so the agent can't relabel a
+        // raw UTC Instant string as the operator's local zone. Raw Instants
+        // end with a `Z` and have no `[Zone/Id]` suffix — reject that shape.
+        assertFalse(result.matches(".*scheduled for \\S+Z\\.\\s*$"),
+                "response must not surface the raw UTC Instant.toString(); got: " + result);
+        assertTrue(result.matches(".*\\[[A-Za-z_]+/[A-Za-z_]+\\]\\.\\s*$")
+                        || result.matches(".*\\[UTC\\]\\.\\s*$"),
+                "response must carry a bracketed IANA zone (or [UTC]); got: " + result);
+    }
+
+    @Test
+    void createTaskScheduledHonorsExplicitTimezone() {
+        // Per-task timezone override flows through TimezoneResolver into the
+        // display string. Asia/Tokyo is +09:00 year-round so the assertion is
+        // DST-stable regardless of when the test runs.
+        var result = tool.execute("""
+                {"action":"createTask","name":"in-30-tokyo","schedule":"30m","timezone":"Asia/Tokyo"}""",
+                agent);
+        assertTrue(result.contains("[Asia/Tokyo]"),
+                "explicit per-task timezone must appear bracketed in the response; got: " + result);
+        assertTrue(result.contains("+09:00"),
+                "Tokyo's fixed +09:00 offset must surface; got: " + result);
     }
 
     @Test
@@ -368,6 +392,43 @@ class TaskToolTest extends UnitTest {
         var fresh = (Task) Tx.run(() -> Task.findById(taskId));
         assertEquals("new body", fresh.description);
         assertAuditCount("TASK_MGMT_UPDATE", "u1", 1L);
+    }
+
+    @Test
+    void createTaskCompletesBareChannelDeliveryFromConversation() {
+        // The chat agent often passes a bare channel name like "web" because
+        // it understands the user wants the task to land in this chat but
+        // doesn't know the channel-specific target format. resolveDeliverySpec
+        // should backfill the target from the calling agent's most-recently-
+        // updated conversation (auto-delivery wire — Bug 1 fix).
+        var conv = Tx.run(() -> {
+            var c = new models.Conversation();
+            c.agent = agent;
+            c.channelType = "web";
+            c.save();
+            return c;
+        });
+        tool.execute("""
+                {"action":"createTask","name":"bare-web","schedule":"30m","delivery":"web"}""", agent);
+        var fresh = (Task) Tx.run(() -> Task.findById(findTaskByName("bare-web").id));
+        assertEquals("web:" + conv.id, fresh.delivery,
+                "bare channel name must be completed with the calling conversation id");
+    }
+
+    @Test
+    void createTaskAutoInfersDeliveryWhenOmitted() {
+        var conv = Tx.run(() -> {
+            var c = new models.Conversation();
+            c.agent = agent;
+            c.channelType = "web";
+            c.save();
+            return c;
+        });
+        tool.execute("""
+                {"action":"createTask","name":"infer-web","schedule":"30m"}""", agent);
+        var fresh = (Task) Tx.run(() -> Task.findById(findTaskByName("infer-web").id));
+        assertEquals("web:" + conv.id, fresh.delivery,
+                "omitted delivery must auto-infer from the calling conversation");
     }
 
     @Test

@@ -71,12 +71,18 @@ public final class TelegramOutboundPlanner {
     /**
      * File segment dispatched via sendPhoto / sendDocument.
      *
-     * <p>{@code isBackground} marks the JCLAW-123 quality-duplicate document
-     * emit (second segment in the photo+document pair for an image). The
-     * channel fires background segments on a virtual thread and does not
-     * block subsequent dispatch on them — critical because these uploads of
-     * the already-rendered photo can take multiple minutes server-side, and
-     * we don't want text messages to wait behind them.
+     * @param displayName  filename / caption text shown to the user
+     * @param file         on-disk file to upload
+     * @param isImage      true when the file should ride as a photo (rendered
+     *                     inline) vs a document (file chip)
+     * @param isBackground marks the JCLAW-123 quality-duplicate document emit
+     *                     (second segment in the photo+document pair for an
+     *                     image). The channel fires background segments on a
+     *                     virtual thread and does not block subsequent
+     *                     dispatch on them — critical because these uploads
+     *                     of the already-rendered photo can take multiple
+     *                     minutes server-side, and we don't want text
+     *                     messages to wait behind them.
      */
     public record FileSegment(String displayName, File file, boolean isImage, boolean isBackground) implements Segment {}
 

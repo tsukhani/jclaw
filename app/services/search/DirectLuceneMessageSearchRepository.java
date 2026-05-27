@@ -18,7 +18,7 @@ import java.util.List;
  * Owns the per-scope SearcherManager dispatch and backfill logic that
  * sits behind {@link MessageSearch}.
  *
- * <h3>Why direct over H2.FullTextLucene</h3>
+ * <h2>Why direct over H2.FullTextLucene</h2>
  * H2 2.3.232's {@code FullTextLucene} was compiled against Lucene 9.x
  * and reads {@code TotalHits.value} as a public field. Lucene 10 made
  * that field private (now accessed via a getter), so H2.FullTextLucene
@@ -30,7 +30,7 @@ import java.util.List;
  * works against either dialect; only the disk location and crawl
  * source vary).
  *
- * <h3>Multi-scope (JCLAW-304)</h3>
+ * <h2>Multi-scope (JCLAW-304)</h2>
  * Each {@link LuceneIndexer.Scope} maintains its own on-disk index
  * under {@code data/jclaw-lucene/<scope>/}. The id-only search path
  * ({@link #searchIds}) takes a scope explicitly and returns a list

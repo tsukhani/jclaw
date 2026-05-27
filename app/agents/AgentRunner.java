@@ -54,8 +54,22 @@ public class AgentRunner {
         return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
     }
 
+    /**
+     * Carries the model's final reply along with the (possibly-new) conversation reference.
+     *
+     * @param response     the model's final assistant content
+     * @param conversation the resolved conversation (carriers like
+     *                     {@code /new} create a fresh one mid-run)
+     * @param truncated    true when the final non-tool-call assistant turn
+     *                     came back with {@code finish_reason=length}
+     */
     public record RunResult(String response, Conversation conversation, boolean truncated) {
-        /** 2-arg compatibility: legacy paths that don't track truncation. */
+        /**
+         * 2-arg compatibility: legacy paths that don't track truncation.
+         *
+         * @param response     the model's final assistant content
+         * @param conversation the resolved conversation
+         */
         public RunResult(String response, Conversation conversation) {
             this(response, conversation, false);
         }
@@ -77,8 +91,20 @@ public class AgentRunner {
      * once each tool call completes. Carries enough metadata for the UI to
      * render a per-call row (icon, name, arguments) plus the optional
      * structured result payload used by search-style tools to produce
-     * clickable chips with favicons. {@code resultStructuredJson} is null
-     * for tools that don't emit a structured view.
+     * clickable chips with favicons.
+     *
+     * @param id                   provider-supplied tool-call id (correlates
+     *                             the assistant {@code tool_calls} entry with
+     *                             the matching tool-role result row)
+     * @param name                 tool name (matches {@link ToolRegistry.Tool#name})
+     * @param icon                 icon identifier the UI renders next to the
+     *                             tool name
+     * @param arguments            raw JSON arguments string the model sent
+     * @param resultText           plain-text tool output the LLM sees on its
+     *                             next turn
+     * @param resultStructuredJson optional structured payload the UI renders
+     *                             richly; {@code null} for tools that don't
+     *                             emit a structured view
      */
     public record ToolCallEvent(
         String id,
@@ -93,13 +119,30 @@ public class AgentRunner {
      * Callbacks for streaming mode. Groups the event handlers that
      * {@link #runStreaming} pushes SSE data through.
      *
-     * <p>{@code onCancel} fires once when {@link CancellationManager#checkCancelled} detects a
-     * cancellation flag flip and the streaming thread is about to early-return.
-     * Unlike {@code onComplete} / {@code onError} it carries no payload — its
-     * job is to let transports quiesce side-channel state (the Telegram typing
-     * heartbeat is the motivating case: JCLAW-181 follow-up). Web's per-request
-     * cancellation is signalled via SSE close, not this hook, so the web
-     * caller passes a no-op.
+     * @param onInit      fires once with the resolved {@link Conversation}
+     *                    so transports can flush an "init" frame carrying
+     *                    the conversation id / channel context
+     * @param onToken     fires for every assistant content delta
+     * @param onReasoning fires for every reasoning-stream delta (thinking
+     *                    models only)
+     * @param onStatus    out-of-band status updates the transport can
+     *                    surface (e.g. "queued", "tool call in progress")
+     * @param onToolCall  fires once per completed tool call with the full
+     *                    {@link ToolCallEvent}
+     * @param onComplete  fires once with the final assistant content when
+     *                    the turn closes normally
+     * @param onError     fires once with the failure cause when the turn
+     *                    fails mid-stream
+     * @param onCancel    fires once when {@link CancellationManager#checkCancelled}
+     *                    detects a cancellation flag flip and the streaming
+     *                    thread is about to early-return. Unlike
+     *                    {@code onComplete} / {@code onError} it carries no
+     *                    payload — its job is to let transports quiesce
+     *                    side-channel state (the Telegram typing heartbeat
+     *                    is the motivating case: JCLAW-181 follow-up). Web's
+     *                    per-request cancellation is signalled via SSE
+     *                    close, not this hook, so the web caller passes a
+     *                    no-op.
      */
     public record StreamingCallbacks(
         Consumer<Conversation> onInit,
@@ -148,6 +191,10 @@ public class AgentRunner {
      * "instant break a hung HTTP read" property; the
      * {@code runTimeoutSeconds} budget remains the ceiling for that case.
      * See {@link services.SubagentRegistry} for the H2-corruption post-mortem.
+     *
+     * @param conversation the conversation whose pending SubagentRun should
+     *                     be checked for cancellation; null or transient
+     *                     conversations are no-ops
      */
     public static void checkSubagentCancel(Conversation conversation) {
         if (conversation == null || conversation.id == null) return;
@@ -172,19 +219,32 @@ public class AgentRunner {
      * Run the agent synchronously. Returns the final assistant response.
      * JPA transactions are scoped to short Tx.run() blocks — no JDBC connection
      * is held during LLM HTTP calls or tool execution.
+     *
+     * @param agent        the executing agent
+     * @param conversation the conversation to run inside
+     * @param userMessage  the user's input text
+     * @return the run outcome carrying the final assistant content and the
+     *         (possibly-new) conversation reference
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage) {
         return run(agent, conversation, userMessage, null);
     }
 
     /**
-     * JCLAW-25 vision variant: {@code attachments} is the list of files the
-     * caller already pre-uploaded via {@code POST /api/chat/upload}; each
-     * staged file gets finalized into the conversation-keyed directory and
-     * gains a {@link models.MessageAttachment} row against the new user
-     * message. Image attachments ride into the LLM request as OpenAI
-     * {@code image_url} content parts; non-image attachments are referenced
-     * by filename inside the text part.
+     * JCLAW-25 vision variant. Image attachments ride into the LLM request
+     * as OpenAI {@code image_url} content parts; non-image attachments are
+     * referenced by filename inside the text part.
+     *
+     * @param agent        the executing agent
+     * @param conversation the conversation to run inside
+     * @param userMessage  the user's input text
+     * @param attachments  files the caller already pre-uploaded via
+     *                     {@code POST /api/chat/upload}; each staged file
+     *                     gets finalized into the conversation-keyed
+     *                     directory and gains a
+     *                     {@link models.MessageAttachment} row against the
+     *                     new user message
+     * @return the run outcome
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage,
                                  java.util.List<services.AttachmentService.Input> attachments) {
@@ -201,8 +261,14 @@ public class AgentRunner {
      * conversation queue via {@link services.ConversationQueue#drain}
      * (JCLAW-117). Skips {@code tryAcquire} because the caller holds
      * ownership; the shared body's {@code finally} calls
-     * {@link QueueDrainOrchestrator#processQueueDrain} which releases ownership when the pending
-     * deque is empty (or transfers it to the next drained message).
+     * {@link QueueDrainOrchestrator#processQueueDrain} which releases
+     * ownership when the pending deque is empty (or transfers it to the
+     * next drained message).
+     *
+     * @param agent        the executing agent
+     * @param conversation the conversation the caller already owns
+     * @param userMessage  the user's input text
+     * @return the run outcome
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
         return runAfterAcquire(agent, conversation, userMessage, null, false);
@@ -226,6 +292,13 @@ public class AgentRunner {
      * queued just like any other inbound turn would be — the queued-canned-
      * response path returns a {@link RunResult} but the actual resume work
      * runs after the current owner finishes.
+     *
+     * @param agent        the executing agent (typically the parent of the
+     *                     just-terminated child)
+     * @param conversation the parent conversation carrying the yielded
+     *                     subagent_announce row
+     * @return the run outcome, or a queued-canned-response result when the
+     *         conversation queue is currently owned by another turn
      */
     public static RunResult runYieldResume(Agent agent, Conversation conversation) {
         // Empty user message because the actual input — the child's reply —
@@ -506,13 +579,28 @@ public class AgentRunner {
      * Run the agent with streaming. Resolves the conversation inside the virtual thread
      * so it commits in its own transaction before inserting messages.
      *
-     * <p>{@code acceptedAtNs} is the {@code System.nanoTime()} of when the inbound
-     * message entered the process. Web controllers forward the Netty-set stamp so
-     * {@code queue_wait} can be measured; Telegram polling, scheduled tasks, and
-     * other channels without a pre-runner timestamp pass {@code null}. A
-     * {@link LatencyTrace} is always constructed inside the virtual thread, so
-     * every channel contributes to the performance histograms (JCLAW performance
-     * dashboard).
+     * @param agent          the executing agent
+     * @param conversationId persisted Conversation id, or {@code null} when
+     *                       the channel hasn't created one yet (the runner
+     *                       creates one inside the virtual thread)
+     * @param channelType    {@code "web"}, {@code "telegram"},
+     *                       {@code "slack"}, {@code "whatsapp"}
+     * @param peerId         channel-specific peer identifier (Telegram chat
+     *                       id, Slack channel id, WhatsApp e.164, or
+     *                       {@code null} for web)
+     * @param userMessage    the user's input text
+     * @param isCancelled    flag the transport flips on disconnect / Telegram
+     *                       /cancel
+     * @param cb             event callbacks for SSE / streaming transports
+     * @param acceptedAtNs   {@code System.nanoTime()} of when the inbound
+     *                       message entered the process. Web controllers
+     *                       forward the Netty-set stamp so {@code queue_wait}
+     *                       can be measured; Telegram polling, scheduled
+     *                       tasks, and other channels without a pre-runner
+     *                       timestamp pass {@code null}. A
+     *                       {@link LatencyTrace} is always constructed
+     *                       inside the virtual thread, so every channel
+     *                       contributes to the performance histograms.
      */
     @SuppressWarnings("java:S107") // Streaming entrypoint signature retained for binary compat with channel callers
     public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
@@ -525,11 +613,22 @@ public class AgentRunner {
     }
 
     /**
-     * JCLAW-25 vision variant. {@code attachments} is the per-file metadata
-     * the frontend roundtripped from the prior {@code /api/chat/upload}
-     * response; each entry's staged file is moved into the conversation's
-     * attachments directory and recorded as a {@link models.MessageAttachment}
-     * row on the user message.
+     * JCLAW-25 vision variant. Each attachment's staged file is moved into
+     * the conversation's attachments directory and recorded as a
+     * {@link models.MessageAttachment} row on the user message.
+     *
+     * @param agent          the executing agent
+     * @param conversationId persisted Conversation id (see no-attachments
+     *                       overload)
+     * @param channelType    channel identifier
+     * @param peerId         channel-specific peer identifier
+     * @param userMessage    the user's input text
+     * @param isCancelled    cancellation flag
+     * @param cb             event callbacks
+     * @param acceptedAtNs   {@code System.nanoTime()} at process entry
+     * @param attachments    per-file metadata the frontend roundtripped
+     *                       from the prior {@code /api/chat/upload}
+     *                       response
      */
     @SuppressWarnings("java:S107") // Streaming entrypoint signature retained for binary compat with channel callers
     public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
@@ -1064,6 +1163,13 @@ public class AgentRunner {
      * we skip {@link AgentRouter} entirely and hand the message straight to the
      * bound agent. Conversation persistence still keys on (agent, channelType,
      * peerId) so history per end-user is preserved.
+     *
+     * @param agent        the bound agent the caller already resolved
+     * @param channelType  channel identifier
+     * @param peerId       channel-specific peer id (per-user conversation key)
+     * @param text         inbound message text
+     * @param sendResponse callback to deliver the response (receives
+     *                     {@code peerId} and response text)
      */
     public static void processInboundForAgent(Agent agent, String channelType, String peerId,
                                                String text, BiConsumer<String, String> sendResponse) {
@@ -1100,6 +1206,15 @@ public class AgentRunner {
      * completion the full response is handed to {@link channels.TelegramStreamingSink#seal},
      * which either performs one final HTML edit or falls back to the
      * chunked planner path for oversize / media-rich responses.
+     *
+     * @param agent        the bound agent
+     * @param channelType  channel identifier
+     * @param peerId       channel-specific peer id
+     * @param text         inbound message text
+     * @param sinkFactory  factory that returns a streaming sink for the
+     *                     given message id; called inside the streaming
+     *                     virtual thread once the persisted message id is
+     *                     known
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
@@ -1116,6 +1231,15 @@ public class AgentRunner {
      * directory, so each {@link services.AttachmentService.Input} points at
      * a real staged file the runner can finalize. Empty list is the
      * text-only path — same behavior as before.
+     *
+     * @param agent       the bound agent
+     * @param channelType channel identifier
+     * @param peerId      channel-specific peer id
+     * @param text        inbound message text
+     * @param sinkFactory factory that returns a streaming sink for the
+     *                    given message id
+     * @param attachments staged file metadata to finalize against the new
+     *                    user message; empty list is the text-only path
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,

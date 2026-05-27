@@ -36,7 +36,7 @@ import services.EventLogger;
  * function of its arguments, with side effects only via {@link EventLogger}
  * and the caller-supplied callbacks. The subagent-side cancellation path
  * (cooperative {@link services.SubagentRegistry} flag plus
- * {@link AgentRunner.RunCancelledException}) is a separate concern that
+ * {@link RunCancelledException}) is a separate concern that
  * stays in {@code AgentRunner} alongside the subagent-scope code (JCLAW-291)
  * — it surfaces as a thrown exception rather than a boolean checkpoint.
  */

@@ -25,9 +25,18 @@ public final class AttachmentService {
 
     /**
      * Everything {@code ApiChatController.uploadChatFiles} returned to the
-     * frontend, roundtripped verbatim on the send call. {@code mimeType},
-     * {@code sizeBytes}, and {@code kind} are client-supplied metadata we
-     * re-sniff on finalize to keep authority on the server.
+     * frontend, roundtripped verbatim on the send call. The last three
+     * fields are client-supplied metadata we re-sniff on finalize to keep
+     * authority on the server.
+     *
+     * @param attachmentId     server-issued id for the upload
+     * @param originalFilename filename the user picked
+     * @param mimeType         client-reported content type (re-sniffed on
+     *                         finalize)
+     * @param sizeBytes        client-reported size (re-verified on finalize)
+     * @param kind             discriminator for special-rendered kinds
+     *                         ({@code image}, {@code audio}, generic file);
+     *                         re-sniffed on finalize
      */
     public record Input(
             String attachmentId,

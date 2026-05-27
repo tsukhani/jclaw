@@ -131,6 +131,8 @@ public class ApiAgentsController extends Controller {
      * on its next turn. Feeds the Settings UI introspection dialog. Memory recall is
      * skipped (null user message) so the breakdown is deterministic for a given
      * agent state and doesn't depend on a hypothetical user query.
+     *
+     * @param id the agent id to break down
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptBreakdown.class)))
@@ -162,6 +164,8 @@ public class ApiAgentsController extends Controller {
      * global is edited via Settings; per-skill contributions are set at skill
      * install time. Operators who need to remove a per-skill grant do so by
      * disabling or removing the skill.
+     *
+     * @param id the agent id whose effective allowlist is requested
      */
     public static void effectiveShellAllowlist(Long id) {
         var agent = requireAgent(id);
@@ -336,6 +340,9 @@ public class ApiAgentsController extends Controller {
     /**
      * GET /api/agents/{id}/files/{filePath} — Serve a workspace file with proper content type.
      * Supports images, PDFs, and other binary files for inline rendering or download.
+     *
+     * @param id       the agent id whose workspace to serve from
+     * @param filePath path inside the agent's workspace
      */
     @SuppressWarnings("java:S2259")
     public static void serveWorkspaceFile(Long id, String filePath) {

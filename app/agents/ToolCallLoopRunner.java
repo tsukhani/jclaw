@@ -24,7 +24,7 @@ import utils.LatencyTrace;
  * tool-call recursion. Both share the {@link #yieldRequestedInLastRound}
  * helper for JCLAW-273 yield detection.
  *
- * <h3>Why two methods, not one</h3>
+ * <h2>Why two methods, not one</h2>
  * The sync loop consumes a single {@link ChatResponse} per round and
  * inspects {@code response.choices()} to pull out the assistant
  * message; the streaming loop consumes an SSE accumulator and walks
@@ -37,7 +37,7 @@ import utils.LatencyTrace;
  * detection — both of which delegate the heavy lifting to the
  * already-extracted helper classes.
  *
- * <h3>What the loop owns vs delegates</h3>
+ * <h2>What the loop owns vs delegates</h2>
  * <ul>
  *   <li><b>Owned</b>: round dispatch, JCLAW-291 cooperative-cancel
  *   checkpoints, JCLAW-165 audio-format retry in the sync path, the
@@ -52,7 +52,7 @@ import utils.LatencyTrace;
  *   ({@link MessageHydrator}).</li>
  * </ul>
  *
- * <h3>The yield handshake (JCLAW-273)</h3>
+ * <h2>The yield handshake (JCLAW-273)</h2>
  * Both loops scan tool-result entries from the just-appended round
  * for {@link tools.SubagentYieldTool#YIELD_SENTINEL_PREFIX}. When
  * the marker appears, the loop returns {@link AgentRunner#YIELDED_RESPONSE}
@@ -66,14 +66,16 @@ public final class ToolCallLoopRunner {
     private ToolCallLoopRunner() {}
 
     /**
-     * JCLAW-291: result wrapper for {@link #callWithToolLoop}. Carries
-     * the model's reply text plus a {@code truncated} flag set when
-     * the final non-tool-call assistant turn came back with
-     * {@code finish_reason = length / max_tokens}. Caller plumbs the
-     * flag into the persist site and (for subagents) into the
-     * {@link AgentRunner.RunResult} so the announce card can surface
-     * a truncation marker without the chat UI having to introspect
-     * raw provider responses.
+     * JCLAW-291: result wrapper for {@link #callWithToolLoop}. Caller
+     * plumbs {@code truncated} into the persist site and (for subagents)
+     * into the {@link AgentRunner.RunResult} so the announce card can
+     * surface a truncation marker without the chat UI having to
+     * introspect raw provider responses.
+     *
+     * @param content   the model's final reply text
+     * @param truncated true when the final non-tool-call assistant turn
+     *                  came back with {@code finish_reason = length /
+     *                  max_tokens}
      */
     public record LoopOutcome(String content, boolean truncated) {
         public LoopOutcome(String content) { this(content, false); }
@@ -331,6 +333,13 @@ public final class ToolCallLoopRunner {
      * sentinel shape is closed (the tool always returns the same
      * shape) and a prefix compare is robust against any future field
      * reordering.
+     *
+     * @param currentMessages the per-turn message list, with tool-result
+     *                        rows freshly appended
+     * @param fromIndex       index into {@code currentMessages} marking the
+     *                        start of this round's appended tool-result rows
+     * @return true when any of the just-appended tool-result rows carries
+     *         the yield sentinel prefix
      */
     // Visible (public) for ToolCallLoopRunnerEdgeCasesTest in the default package
     public static boolean yieldRequestedInLastRound(List<ChatMessage> currentMessages, int fromIndex) {

@@ -14,7 +14,7 @@ import services.EventLogger;
  * structured-warn diagnostic when a turn truncates. Extracted from
  * {@link AgentRunner} as part of JCLAW-299.
  *
- * <h3>Why "max_tokens" must alias to "length"</h3>
+ * <h2>Why "max_tokens" must alias to "length"</h2>
  * OpenAI-compatible routes emit {@code "length"} when the model
  * exhausted its output token budget; Anthropic-native (and
  * OpenRouter's Bedrock route for Anthropic models) emit
@@ -23,7 +23,7 @@ import services.EventLogger;
  * get dispatched with incomplete JSON args and the downstream tool
  * fails with a cryptic Gson EOFException.
  *
- * <h3>Why we log on truncation, not just retry</h3>
+ * <h2>Why we log on truncation, not just retry</h2>
  * The empty-tool-calls truncation diagnostic (JCLAW-291) dumps the
  * headroom math — configured cap, context window, prompt tokens
  * estimate, clamped {@code max_tokens} — so operators can correlate

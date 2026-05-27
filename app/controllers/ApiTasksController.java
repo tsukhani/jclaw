@@ -25,7 +25,7 @@ import java.util.List;
 /**
  * Tasks API.
  *
- * <h3>TODO: agent-ownership enforcement</h3>
+ * <h2>TODO: agent-ownership enforcement</h2>
  * Every id-addressed mutation here ({@link #update}, {@link #cancel},
  * {@link #retry}, {@link #run}, {@link #pause}, {@link #resume})
  * currently authenticates via

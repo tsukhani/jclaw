@@ -247,7 +247,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     public boolean parallelSafe() { return false; }
 
     /** Subagent-lifecycle group: shared with {@link SubagentYieldTool} so
-     *  the {@link ParallelToolExecutor} cannot dispatch yield's findById
+     *  the {@link agents.ParallelToolExecutor} cannot dispatch yield's findById
      *  before spawn's SubagentRun INSERT commits. Without this, a model that
      *  emits both tool calls in one assistant message (guessing the runId
      *  from prior history) races on the row visibility — the symptom is
@@ -1126,6 +1126,23 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * truth; no announce Message is posted for orphans (the parent
      * conversation may have moved on, surfacing a stale completion card
      * would be more disruptive than helpful).
+     *
+     * @param runId           the {@link models.SubagentRun} audit-row id
+     * @param childAgentId    id of the child agent to run
+     * @param childConvId     the child Conversation id (inline reuses the
+     *                        parent; session mode has a separate child)
+     * @param parentConvId    the parent Conversation id where the announce
+     *                        Message will be written
+     * @param parentAgentName parent agent's name (used in announce metadata
+     *                        and lifecycle events)
+     * @param mode            {@code "inline"} or {@code "session"}
+     * @param context         optional context string included in the
+     *                        announce Message body
+     * @param label           short label for the announce card
+     * @param timeoutSeconds  wall-clock cap; on expiry the SubagentRun is
+     *                        marked TIMED_OUT
+     * @param task            the user-prompt-equivalent string the child
+     *                        agent processes
      */
     @SuppressWarnings("java:S1181")
     public static void runAsyncAndAnnounce(Long runId, Long childAgentId, Long childConvId,

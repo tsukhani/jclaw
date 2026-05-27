@@ -26,7 +26,7 @@ import java.util.concurrent.Executors;
  * make the dependency explicit instead of relying on declaration
  * order.
  *
- * <h3>Configuration</h3>
+ * <h2>Configuration</h2>
  * <ul>
  *   <li><b>DataSource</b>: Play's pool (read via {@link DB#datasource}).</li>
  *   <li><b>Executor</b>: {@link Executors#newVirtualThreadPerTaskExecutor()}
@@ -45,7 +45,7 @@ import java.util.concurrent.Executors;
  *       {@link services.TaskExecutionHandler#buildTask}.</li>
  * </ul>
  *
- * <h3>Migration of pre-cutover PENDING Tasks</h3>
+ * <h2>Migration of pre-cutover PENDING Tasks</h2>
  * Pre-cutover Tasks (created before this scheduler was wired in)
  * exist as PENDING rows with no corresponding {@code scheduled_tasks}
  * row. {@link BootConsistencyCheck} runs as a separate
@@ -54,9 +54,9 @@ import java.util.concurrent.Executors;
  * The crash-recovery case (Task persisted but register() never
  * ran) is closed by the same sweep.
  *
- * <p>Static {@link #scheduler} reference exposed so
- * {@link DbSchedulerShutdownJob} can stop the same instance, and
- * future commits' {@code TaskSchedulingService} can read it for
+ * <p>Static {@link #scheduler} reference exposed so {@link ShutdownJob}
+ * can stop the same instance (via {@link #shutdownGracefully}), and so
+ * {@link services.TaskSchedulingService} can read it for
  * {@code SchedulerClient.schedule}-style operations.
  */
 @OnApplicationStart
@@ -64,9 +64,9 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
 
     /**
      * The running {@link Scheduler} instance. {@code volatile} because
-     * boot runs on the startup thread while
-     * {@link DbSchedulerShutdownJob}'s {@code @OnApplicationStop}
-     * callback runs on a different thread.
+     * boot runs on the startup thread while {@link ShutdownJob}'s
+     * {@code @OnApplicationStop} callback (which fans out to
+     * {@link #shutdownGracefully}) runs on a different thread.
      */
     // Publish-once-read-many handoff between the @OnApplicationStart
     // bootstrap and the @OnApplicationStop shutdown hook. S3077 targets

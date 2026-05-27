@@ -70,6 +70,9 @@ public final class McpServerService {
      * inside {@link View#tools} so the admin UI can render the
      * inline-expandable action list under each MCP Servers card —
      * no separate per-server tools endpoint needed.
+     *
+     * @param name        tool name from the MCP server's {@code tools/list}
+     * @param description tool description from the MCP server
      */
     public record ToolInfo(String name, String description) {}
 
@@ -130,8 +133,17 @@ public final class McpServerService {
 
     // ==================== translation ====================
 
-    /** Parsed form fields ready for a controller's response or for
-     *  rebuilding the {@code McpServer.configJson} on a save. */
+    /**
+     * Parsed form fields ready for a controller's response or for
+     * rebuilding the {@code McpServer.configJson} on a save.
+     *
+     * @param command stdio-transport executable to launch (null for HTTP
+     *                transport)
+     * @param args    command-line arguments
+     * @param env     environment variables to set on the spawned process
+     * @param url     HTTP-transport endpoint URL (null for stdio)
+     * @param headers HTTP-transport request headers
+     */
     public record TransportConfig(String command, List<String> args, Map<String, String> env,
                                   String url, Map<String, String> headers) {
 
@@ -276,8 +288,16 @@ public final class McpServerService {
 
     // ==================== test connection ====================
 
-    /** Result of a {@link #testConnection} run. {@code success=false}
-     *  carries a {@code message} the UI surfaces near the Test button. */
+    /**
+     * Result of a {@link #testConnection} run.
+     *
+     * @param success   true when the throwaway client successfully connected
+     *                  and listed tools
+     * @param toolCount number of tools the server advertised
+     * @param message   human-readable message — on failure this is the
+     *                  reason surfaced near the Test button
+     * @param toolNames names of the tools the server advertised
+     */
     public record TestResult(boolean success, int toolCount, String message,
                              List<String> toolNames) {}
 

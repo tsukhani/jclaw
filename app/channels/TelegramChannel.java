@@ -43,10 +43,23 @@ public class TelegramChannel implements Channel {
 
     /**
      * Generic inbound shape consumed by {@link controllers.WebhookTelegramController}
-     * and {@link TelegramPollingRunner}. {@code chatType} is the Telegram Bot API
-     * chat.type string ({@code "private"} / {@code "group"} / {@code "supergroup"} /
-     * {@code "channel"}), recorded for structured logging and possible future
-     * routing. Nullable when an update arrives without chat context.
+     * and {@link TelegramPollingRunner}.
+     *
+     * @param chatId       Telegram chat id (used as the conversation peer key)
+     * @param chatType     Telegram Bot API chat.type string ({@code "private"}
+     *                     / {@code "group"} / {@code "supergroup"} /
+     *                     {@code "channel"}), recorded for structured logging
+     *                     and possible future routing. Nullable when an
+     *                     update arrives without chat context.
+     * @param text         message body text; may be null for media-only updates
+     * @param fromId       sender's Telegram user id (used for binding
+     *                     authorization)
+     * @param fromUsername sender's Telegram @-handle if set
+     * @param attachments  inbound file attachments (resolved lazily by the
+     *                     webhook handler)
+     * @param mediaGroupId Telegram media-group identifier when multiple
+     *                     attachments are part of one user upload; null for
+     *                     single-attachment / text-only messages
      */
     public record InboundMessage(String chatId, String chatType, String text,
                                  String fromId, String fromUsername,
@@ -64,11 +77,21 @@ public class TelegramChannel implements Channel {
      * a virtual thread then resolves each {@code telegramFileId} via the Bot API
      * {@code getFile} call, streams the payload into workspace staging, and
      * produces an {@link services.AttachmentService.Input} the runner can feed
-     * into the existing JCLAW-25 multimodal assembly path. {@code kind} is
-     * derived at parse time from which Telegram field the attachment came from
-     * (photo → IMAGE, voice/audio → AUDIO, document/video → FILE) and is
-     * authoritative for the inbound modality gate; the stored MessageAttachment
-     * row's kind is re-sniffed from disk by {@code finalizeAttachment}.
+     * into the existing JCLAW-25 multimodal assembly path.
+     *
+     * @param telegramFileId    opaque Telegram file id used with the Bot API
+     *                          {@code getFile} call to resolve a download URL
+     * @param suggestedFilename filename suggested by Telegram (may be null /
+     *                          empty for voice notes etc.)
+     * @param mimeType          MIME type reported by Telegram
+     * @param sizeBytes         size in bytes reported by Telegram
+     * @param kind              derived at parse time from which Telegram
+     *                          field the attachment came from (photo →
+     *                          IMAGE, voice/audio → AUDIO, document/video →
+     *                          FILE). Authoritative for the inbound
+     *                          modality gate; the stored MessageAttachment
+     *                          row's kind is re-sniffed from disk by
+     *                          {@code finalizeAttachment}.
      */
     public record PendingAttachment(String telegramFileId,
                                     String suggestedFilename,
@@ -79,10 +102,21 @@ public class TelegramChannel implements Channel {
     /**
      * Inbound callback_query payload (JCLAW-109). Emitted by
      * {@link #parseUpdate(Update)} when the update is a tap on an inline
-     * keyboard button. Carries the callback id (for answerCallbackQuery),
-     * the chat + user identity (for binding authorization), the original
-     * message id (so the handler can edit-in-place), and the opaque data
-     * string (parsed by the kind-specific dispatcher).
+     * keyboard button.
+     *
+     * @param callbackId callback id passed back to
+     *                   {@code answerCallbackQuery} to dismiss the spinner
+     *                   on the user's button tap
+     * @param chatId     chat the button was tapped in (used for binding
+     *                   authorization)
+     * @param chatType   {@code "private"} or {@code "group"} from the
+     *                   inbound chat
+     * @param fromId     user id of the tapper (used for binding
+     *                   authorization)
+     * @param messageId  original message id carrying the inline keyboard,
+     *                   so the handler can edit-in-place
+     * @param data       opaque data string parsed by the kind-specific
+     *                   dispatcher
      */
     public record InboundCallback(String callbackId, String chatId, String chatType,
                                   String fromId, Integer messageId, String data) {}

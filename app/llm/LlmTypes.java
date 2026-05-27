@@ -114,6 +114,20 @@ public final class LlmTypes {
      * cache reads at ~0.1× (Anthropic) / ~0.5× (OpenAI), cache writes at ~1.25× (Anthropic
      * 5-min TTL). {@code cacheCreationTokens} is typically {@code 0} for OpenAI routes,
      * which cache implicitly and don't charge a write premium.
+     *
+     * @param promptTokens         total input tokens — uncached input plus cached
+     *                             reads plus cache writes
+     * @param completionTokens     tokens the model produced in its reply
+     * @param totalTokens          {@code promptTokens + completionTokens}
+     *                             (provider-reported, may not always exactly equal
+     *                             the sum)
+     * @param reasoningTokens      hidden chain-of-thought tokens billed separately
+     *                             on thinking-capable models; {@code 0} otherwise
+     * @param cachedTokens         cache <em>reads</em> — subset of
+     *                             {@code promptTokens}
+     * @param cacheCreationTokens  cache <em>writes</em> — subset of
+     *                             {@code promptTokens}; typically {@code 0} on
+     *                             OpenAI routes
      */
     public record Usage(
             int promptTokens,
@@ -215,18 +229,41 @@ public final class LlmTypes {
      * of {@code -1} to distinguish "not provided" from "free" ({@code 0.0}).
      * Values are per-million tokens, matching the convention in provider config JSON.
      *
-     * <p>{@code thinkingLevels} enumerates the reasoning-effort values the model
-     * accepts (e.g. {@code ["low","medium","high"]}, or the OpenRouter-extended
-     * {@code ["minimal","low","medium","high","xhigh"]}). A {@code null} or empty
-     * list is equivalent to {@link #DEFAULT_THINKING_LEVELS} when
-     * {@code supportsThinking} is true, and meaningless otherwise.
-     *
-     * <p>{@code alwaysThinks} marks pure reasoning models (e.g. OpenAI o1/o3,
-     * DeepSeek-R1, Qwen QwQ) whose architecture has no non-thinking mode — the
-     * provider API accepts a "reasoning off" value but the model thinks anyway.
-     * The UI surfaces these as a locked-on pill so the operator isn't misled
-     * into believing their off preference was honored. Implies
-     * {@code supportsThinking == true}; meaningless otherwise.
+     * @param id               provider's canonical model identifier (the value
+     *                         passed to the provider's API)
+     * @param name             display name shown in the UI
+     * @param contextWindow    maximum total tokens (input + output) the model
+     *                         accepts in one request
+     * @param maxTokens        maximum completion tokens the model will produce
+     * @param supportsThinking true when the model can produce reasoning /
+     *                         chain-of-thought tokens
+     * @param supportsVision   true when the model accepts image inputs
+     * @param supportsAudio    true when the model accepts audio inputs
+     * @param promptPrice      USD per million prompt (uncached input) tokens,
+     *                         {@code -1} when unknown
+     * @param completionPrice  USD per million completion tokens, {@code -1}
+     *                         when unknown
+     * @param cachedReadPrice  USD per million cache-read tokens, {@code -1}
+     *                         when unknown
+     * @param cacheWritePrice  USD per million cache-write tokens, {@code -1}
+     *                         when unknown
+     * @param thinkingLevels   reasoning-effort values the model accepts (e.g.
+     *                         {@code ["low","medium","high"]}, or the
+     *                         OpenRouter-extended
+     *                         {@code ["minimal","low","medium","high","xhigh"]}).
+     *                         {@code null} or empty is equivalent to
+     *                         {@link #DEFAULT_THINKING_LEVELS} when
+     *                         {@code supportsThinking} is true, and
+     *                         meaningless otherwise.
+     * @param alwaysThinks     marks pure reasoning models (e.g. OpenAI o1/o3,
+     *                         DeepSeek-R1, Qwen QwQ) whose architecture has no
+     *                         non-thinking mode — the provider API accepts a
+     *                         "reasoning off" value but the model thinks
+     *                         anyway. The UI surfaces these as a locked-on
+     *                         pill so the operator isn't misled into believing
+     *                         their off preference was honored. Implies
+     *                         {@code supportsThinking == true}; meaningless
+     *                         otherwise.
      */
     public record ModelInfo(
             String id,

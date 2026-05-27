@@ -7,7 +7,7 @@ import services.ConversationQueue;
 import services.EventLogger;
 
 /**
- * Periodically evicts idle {@link ConversationQueue.QueueState} entries to keep
+ * Periodically evicts idle {@link ConversationQueue} state entries to keep
  * the in-memory map bounded (JCLAW-286). Threshold is read from config
  * {@code conversation.queue.idleEvictionMs} (default 1h).
  */

@@ -8,8 +8,9 @@ import services.search.LuceneIndexer;
 /**
  * Close the Lucene index cleanly at JVM shutdown. Commits any
  * in-flight writes and releases the {@code write.lock} so the next
- * boot opens the directory without contention. Mirrors
- * {@link DbSchedulerShutdownJob}'s role for db-scheduler.
+ * boot opens the directory without contention. Mirrors the
+ * {@code @OnApplicationStop} hook in {@link ShutdownJob} that calls
+ * {@code DbSchedulerBootstrapJob.shutdownGracefully} for db-scheduler.
  *
  * <p>Skipped in test mode for the same reason
  * {@link FullTextSearchInitJob} skips init there: the test JVM

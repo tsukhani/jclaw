@@ -64,6 +64,25 @@ public class ApiMetricsController extends Controller {
      * spec generation — the actual response is built as a JsonObject below so
      * the conditional fields (turnBuckets, serverSegments, provider, model)
      * are emitted only when populated, matching the historical wire format.
+     *
+     * @param totalRequests      total requests issued in the run
+     * @param successCount       requests that returned a successful response
+     * @param errorCount         requests that errored
+     * @param wallClockMs        end-to-end wall-clock duration in ms
+     * @param avgPerRequestMs    average per-request duration in ms
+     * @param minPerRequestMs    fastest per-request duration in ms
+     * @param maxPerRequestMs    slowest per-request duration in ms
+     * @param avgTtftMs          average time-to-first-token in ms
+     * @param avgResponseTokens  mean completion-token count per request
+     * @param avgReasoningTokens mean reasoning-token count per request
+     * @param avgTokensPerSec    mean throughput (tokens/sec)
+     * @param provider           provider name when the run pinned a single
+     *                           provider; absent otherwise
+     * @param model              model id when the run pinned a single model;
+     *                           absent otherwise
+     * @param turnBuckets        per-turn breakdown buckets used by the chart UI
+     * @param serverSegments     server-side segment breakdown (queue wait,
+     *                           prompt build, etc.) when available
      */
     public record LoadtestResponse(int totalRequests, int successCount, int errorCount,
                                    long wallClockMs, long avgPerRequestMs, long minPerRequestMs,

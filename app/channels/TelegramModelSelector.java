@@ -177,7 +177,13 @@ public final class TelegramModelSelector {
         return Optional.of(new ResolvedModel(provider.config().name(), models.get(modelIdx)));
     }
 
-    /** Tuple of provider name and its model row, returned by {@link #resolveByIndex}. */
+    /**
+     * Tuple of provider name and its model row, returned by
+     * {@link #resolveByIndex}.
+     *
+     * @param providerName the provider's configured name
+     * @param model        the chosen model's metadata
+     */
     public record ResolvedModel(String providerName, ModelInfo model) {}
 
     /** Info logger convenience for the callback dispatcher. */

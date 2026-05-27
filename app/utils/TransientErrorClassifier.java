@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * English. Adding them back later is a one-line append per category
  * if a deployment proves to need them.
  *
- * <h3>Matching strategy</h3>
+ * <h2>Matching strategy</h2>
  * <ul>
  *   <li>Walks the {@link Throwable#getCause cause chain} up to
  *       {@link #MAX_CAUSE_DEPTH} levels — provider exceptions

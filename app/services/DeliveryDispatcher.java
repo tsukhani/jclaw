@@ -43,9 +43,17 @@ public final class DeliveryDispatcher {
 
     private DeliveryDispatcher() {}
 
-    /** Outcome of a dispatch. {@link #FAILED_NO_CONFIG} distinguishes "channel
-     *  not set up yet" from generic delivery failure so the {@code message}
-     *  tool can hint at setup steps. {@code reason} is human-readable. */
+    /**
+     * Outcome of a dispatch.
+     *
+     * @param ok     true on a successful push; false for any failure or
+     *               unsupported channel
+     * @param status fine-grained outcome — {@link Status#FAILED_NO_CONFIG}
+     *               distinguishes "channel not set up yet" from generic
+     *               delivery failure so the {@code message} tool can hint
+     *               at setup steps
+     * @param reason human-readable explanation
+     */
     public record DispatchResult(boolean ok, Status status, String reason) {
 
         public enum Status {
@@ -106,14 +114,17 @@ public final class DeliveryDispatcher {
             case "telegram" -> dispatchTelegram(agent, target, text);
             case "slack" -> dispatchSlack(target, text);
             case "whatsapp" -> dispatchWhatsApp(target, text);
-            case "web" -> dispatchWeb(agent, text);
+            case "web" -> dispatchWeb(agent, target, text);
             default -> DispatchResult.unsupported(channelType);
         };
     }
 
     /** Parse and dispatch a combined {@code channel:target} string — matches
      *  the format the {@link models.Task#delivery} column stores. Returns
-     *  {@code CHANNEL_UNSUPPORTED} when the spec doesn't contain a colon. */
+     *  {@code CHANNEL_UNSUPPORTED} when the spec doesn't contain a colon.
+     *  Web specs may carry the target {@link Conversation} id (so a task
+     *  fires-back to a specific chat, not just the agent's most-recent
+     *  conversation); see {@link #dispatchWeb(Agent, String, String)}. */
     public static DispatchResult dispatchSpec(Agent agent, String deliverySpec, String text) {
         if (deliverySpec == null || deliverySpec.isBlank()) {
             return DispatchResult.unsupported("(null)");
@@ -187,10 +198,13 @@ public final class DeliveryDispatcher {
     }
 
     /**
-     * Route a web-channel send by walking the calling agent's most-recent
-     * conversation up the {@link Conversation#parentConversation} chain to
-     * the root (the user-facing row the chat UI is polling), then appending
-     * a USER-role message stamped with {@code messageKind="subagent_send"}.
+     * Route a web-channel send to a specific {@link Conversation} (when
+     * {@code target} parses as a numeric conversation id) or — for the
+     * Radarr-monitor pattern where no explicit target was set — by walking
+     * the calling agent's most-recent conversation up the
+     * {@link Conversation#parentConversation} chain to the root (the
+     * user-facing row the chat UI is polling). Either path appends a
+     * USER-role message stamped with {@code messageKind="subagent_send"}.
      *
      * <p>Same shape JCLAW-326's {@link tools.ConversationSendTool} writes,
      * so the chat UI renders it through the existing "agent-initiated
@@ -199,18 +213,43 @@ public final class DeliveryDispatcher {
      * ({@code source="message_tool"}) for analytics/debug, but the UI
      * treatment is the same.
      *
-     * <p>Target is ignored for web — the destination is the parent-chain
-     * root of the calling agent's active conversation. A future
-     * "send to specific conversation id" use case could pass a conversation
-     * id as target, but the Radarr-monitor pattern doesn't need it.
+     * <p>Task auto-delivery (the
+     * {@link services.TaskExecutor} → {@link #dispatchSpec} wire) stamps
+     * the calling conversation id as the target so a fire that completes
+     * on a virtual-thread carrier with no Conversation context still
+     * lands in the right chat — the agent's "most-recent conversation"
+     * heuristic isn't reliable when the agent has parallel chats open.
      */
-    private static DispatchResult dispatchWeb(Agent agent, String text) {
+    private static DispatchResult dispatchWeb(Agent agent, String target, String text) {
         if (agent == null) {
             return DispatchResult.failedDelivery(
                     "Web dispatch requires an agent context to resolve the active conversation.");
         }
-        var conv = (Conversation) Conversation.find(
-                "agent = ?1 ORDER BY updatedAt DESC", agent).first();
+        // Numeric target = explicit conversation id (the auto-delivery wire
+        // from TaskExecutor stamps it this way so a fire pushes to the same
+        // chat that created the task, not the agent's "most-recent" one).
+        // Any other target value (legacy "ignored" sentinel from MessageTool's
+        // pre-explicit-routing era, a peerId from an external-channel
+        // conversation that doesn't apply to web) silently falls through to
+        // the walk-up — that path predates this overload and the existing
+        // callers depend on it.
+        Conversation conv = null;
+        if (target != null && !target.isBlank()) {
+            try {
+                var convId = Long.parseLong(target.trim());
+                conv = (Conversation) Conversation.findById(convId);
+                if (conv == null) {
+                    return DispatchResult.failedDelivery(
+                            "Web target conversation " + convId + " not found.");
+                }
+            } catch (NumberFormatException _) {
+                // Non-numeric → not an explicit routing signal; fall through.
+            }
+        }
+        if (conv == null) {
+            conv = (Conversation) Conversation.find(
+                    "agent = ?1 ORDER BY updatedAt DESC", agent).first();
+        }
         if (conv == null) {
             return DispatchResult.failedDelivery(
                     "No active conversation for agent '" + agent.name + "' to deliver to. "

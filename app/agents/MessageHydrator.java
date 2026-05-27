@@ -23,7 +23,7 @@ import static utils.GsonHolder.INSTANCE;
  * for the LLM. Extracted from {@link AgentRunner} as part of
  * JCLAW-299.
  *
- * <h3>What this class owns</h3>
+ * <h2>What this class owns</h2>
  * <ul>
  *   <li>{@link #buildMessages} — the central history walker (with an
  *   {@code audioBearersOut} side-map for JCLAW-165 audio-rewrite, and
@@ -36,7 +36,7 @@ import static utils.GsonHolder.INSTANCE;
  *   array back to a string (text-parts only).</li>
  * </ul>
  *
- * <h3>What this class does NOT own</h3>
+ * <h2>What this class does NOT own</h2>
  * The per-user-message content-part shaping (image_url, input_audio,
  * file-reference assembly) lives in {@link VisionAudioAssembler}; this
  * class composes its output via {@link VisionAudioAssembler#userMessageFor}.

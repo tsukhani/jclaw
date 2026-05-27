@@ -11,9 +11,9 @@ import java.util.Set;
  *
  * <p>Each configured provider has a set of {@linkplain #supportedFor
  * supported} modalities — what's plausible given who runs it and how — and
- * a single {@linkplain ProviderConfig#paymentModality selected} modality
- * the operator (or the default) picked. The cost dashboard reads the
- * selected modality to partition spend into per-token and subscription
+ * a single {@linkplain LlmTypes.ProviderConfig#paymentModality() selected}
+ * modality the operator (or the default) picked. The cost dashboard reads
+ * the selected modality to partition spend into per-token and subscription
  * subsections.
  *
  * <p>An empty supported-set is meaningful: it indicates the provider is
@@ -24,11 +24,11 @@ public enum PaymentModality {
 
     /** Operator pays per request, billed against the model's
      *  ${@code inputPricePerMillionTokens} / {@code outputPricePerMillionTokens}
-     *  rates already in {@link ModelInfo}. */
+     *  rates already in {@link LlmTypes.ModelInfo}. */
     PER_TOKEN,
 
     /** Operator pays a fixed monthly fee regardless of usage. The fee is
-     *  captured in {@link ProviderConfig#subscriptionMonthlyUsd}. */
+     *  captured in {@link LlmTypes.ProviderConfig#subscriptionMonthlyUsd()}. */
     SUBSCRIPTION;
 
     /**

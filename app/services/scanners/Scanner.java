@@ -33,7 +33,14 @@ public interface Scanner {
      */
     Verdict lookup(String sha256);
 
-    /** Scanner verdict for a single file. */
+    /**
+     * Scanner verdict for a single file.
+     *
+     * @param malicious true when the scanner classified the hash as
+     *                  malicious; false for clean / unknown
+     * @param reason    human-readable classification reason; {@code null}
+     *                  when {@code malicious} is false
+     */
     record Verdict(boolean malicious, String reason) {
         public static Verdict clean() { return new Verdict(false, null); }
         public static Verdict malicious(String reason) { return new Verdict(true, reason); }

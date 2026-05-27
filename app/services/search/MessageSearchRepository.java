@@ -11,12 +11,14 @@ import java.util.List;
  * backend tracks the configured Hibernate dialect:
  *
  * <ul>
- *   <li>{@link H2LuceneMessageSearchRepository} — the Personal
- *       Edition path. H2 ships {@code FullTextLucene} which hooks
- *       INSERT/UPDATE/DELETE triggers on the indexed table and
- *       keeps an Apache Lucene index in sync. JCLAW's Personal
- *       Edition operators get full-text without standing up a
- *       separate Postgres instance.</li>
+ *   <li>{@link DirectLuceneMessageSearchRepository} — the Personal
+ *       Edition path. JClaw owns its own Lucene 10 index directly via
+ *       {@link LuceneIndexer}; the JPA hooks on
+ *       {@link TaskRunMessage} drive sync (not DB triggers, since
+ *       H2's {@code FullTextLucene} ships an older Lucene that
+ *       {@code IllegalAccessError}s against Lucene 10). JCLAW's
+ *       Personal Edition operators get full-text without standing up
+ *       a separate Postgres instance.</li>
  *   <li>{@link PostgresMessageSearchRepository} — for the
  *       operator-opt-in Postgres path. Uses {@code tsvector}
  *       columns with GIN indexes, the canonical Postgres FT
@@ -27,7 +29,7 @@ import java.util.List;
  *
  * <p>The right implementation is selected at boot by
  * {@link MessageSearch} based on the JDBC product name.
- * {@link FullTextSearchInitJob} calls {@link #init} once at
+ * {@link jobs.FullTextSearchInitJob} calls {@link #init} once at
  * startup; everything else routes through the static facade.
  *
  * <p>Why this abstraction exists at JCLAW-21 time rather than

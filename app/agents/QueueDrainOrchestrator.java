@@ -15,7 +15,7 @@ import services.Tx;
  * conversation's queue lock is released exactly once and any messages
  * queued during the turn get re-processed.
  *
- * <h3>JCLAW-117 ownership-transfer invariant</h3>
+ * <h2>JCLAW-117 ownership-transfer invariant</h2>
  * {@link ConversationQueue#drain} returns the pending messages and
  * <em>keeps</em> {@code processing=true} when the list is non-empty —
  * ownership transfers to the caller, who is then responsible for either
@@ -25,7 +25,7 @@ import services.Tx;
  * {@code QueueDrainOwnershipTest} regression suite pins the underlying
  * invariant.
  *
- * <h3>Release timing (JCLAW-…fast-loop race)</h3>
+ * <h2>Release timing (JCLAW-…fast-loop race)</h2>
  * The terminal callbacks (onComplete / onError / onCancel) call
  * {@link #releaseQueueOnce} BEFORE invoking the wrapped caller's handler,
  * so the queue lock is freed before the SSE terminal frame flushes to

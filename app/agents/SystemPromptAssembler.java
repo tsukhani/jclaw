@@ -49,6 +49,19 @@ public class SystemPromptAssembler {
      * "View prompt breakdown" dialog. Captures the total prompt length plus per-category
      * size listings so the user can see which sections, skills, and tool schemas are
      * driving token cost.
+     *
+     * @param totalChars           total assembled prompt length in characters
+     * @param totalTokenEstimate   approximate total token count
+     * @param cacheBoundaryMarker  the literal marker string the providers use
+     *                             to split the cache-stable prefix from the
+     *                             per-turn variable suffix
+     * @param cacheablePrefixChars characters before the cache-boundary marker
+     *                             (stable across turns)
+     * @param variableSuffixChars  characters after the marker (vary per turn)
+     * @param sections             per-section size breakdown (one entry per
+     *                             named prompt section)
+     * @param skills               per-skill size breakdown
+     * @param tools                per-tool schema size breakdown
      */
     public record PromptBreakdown(
             int totalChars,
@@ -60,6 +73,11 @@ public class SystemPromptAssembler {
             List<Entry> skills,
             List<Entry> tools
     ) {
+        /**
+         * @param name   display label for the section/skill/tool
+         * @param chars  size in characters
+         * @param tokens approximate token count
+         */
         public record Entry(String name, int chars, int tokens) {}
     }
 

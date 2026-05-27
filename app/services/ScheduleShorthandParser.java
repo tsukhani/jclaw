@@ -17,8 +17,9 @@ import java.util.regex.Pattern;
  * {@code intervalSeconds}) from the API surface. Both the chat tool
  * and the upcoming POST / PATCH endpoints route here.
  *
- * <h3>Accepted forms</h3>
+ * <h2>Accepted forms</h2>
  * <table border="1">
+ *   <caption>Schedule shorthand → {@link Task.Type} + derived fields</caption>
  *   <tr><th>Input</th><th>Type</th><th>Sets</th></tr>
  *   <tr><td>{@code "now"} (case-insensitive)</td><td>IMMEDIATE</td><td>scheduledAt = now</td></tr>
  *   <tr><td>{@code "30m"}, {@code "2h"}, {@code "1d"}</td><td>SCHEDULED</td><td>scheduledAt = now + duration</td></tr>
@@ -30,13 +31,13 @@ import java.util.regex.Pattern;
  * for round-trip rendering — operators see the same form they typed,
  * not a normalized echo.
  *
- * <h3>Duration suffixes</h3>
+ * <h2>Duration suffixes</h2>
  * Only {@code m} (minutes), {@code h} (hours), {@code d} (days) per the
  * spec. No {@code s} (seconds — too short to be useful for scheduled
  * tasks) and no {@code w} / {@code y} (use cron). Single-unit only —
  * no {@code 1h30m} composite, by design.
  *
- * <h3>Cron detection heuristic</h3>
+ * <h2>Cron detection heuristic</h2>
  * A token starting with {@code @} OR a string with 5+ whitespace-
  * separated tokens is treated as cron. The 5-token bound catches
  * Unix 5-field expressions so {@link JClawCronUtils#validate} can
@@ -52,8 +53,19 @@ public final class ScheduleShorthandParser {
 
     /**
      * Bundle returned to callers — exactly the four fields the Task
-     * entity stores for scheduling. The {@code scheduleDisplay} field
-     * is the operator's raw input verbatim.
+     * entity stores for scheduling.
+     *
+     * @param type            resolved {@link Task.Type} (IMMEDIATE,
+     *                        SCHEDULED, INTERVAL, or CRON)
+     * @param scheduledAt     concrete fire instant for IMMEDIATE / SCHEDULED;
+     *                        {@code null} for INTERVAL / CRON
+     * @param cronExpression  Spring 6-field cron expression for CRON;
+     *                        {@code null} otherwise
+     * @param intervalSeconds interval duration in seconds for INTERVAL;
+     *                        {@code null} otherwise
+     * @param scheduleDisplay operator's raw input verbatim — preserved so
+     *                        round-trip rendering shows the form the
+     *                        operator typed, not a normalised echo
      */
     public record ScheduleSpec(
             Task.Type type,

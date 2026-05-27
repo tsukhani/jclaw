@@ -17,7 +17,7 @@ import java.time.Instant;
  * key, and the handler decodes it back to a row before invoking
  * {@link TaskExecutor#runTask}.
  *
- * <h3>Self-rescheduling for CRON</h3>
+ * <h2>Self-rescheduling for CRON</h2>
  * IMMEDIATE / SCHEDULED Tasks fire exactly once: db-scheduler's default
  * {@code OnCompleteRemove} handler drops the {@code scheduled_tasks}
  * row after the fire returns.
@@ -32,7 +32,7 @@ import java.time.Instant;
  * {@code schedule} while the original row still exists would trip the
  * unique constraint on {@code (task_name, task_instance)}.
  *
- * <h3>Why custom over OnCompleteReschedule</h3>
+ * <h2>Why custom over OnCompleteReschedule</h2>
  * db-scheduler ships {@link CompletionHandler.OnCompleteReschedule}
  * which takes a {@link com.github.kagkarlsson.scheduler.task.schedule.Schedule},
  * and {@link com.github.kagkarlsson.scheduler.task.schedule.CronSchedule}
@@ -43,7 +43,7 @@ import java.time.Instant;
  * Task inside the handler rather than baking one schedule into the
  * db-scheduler Task registration.
  *
- * <h3>Skip semantics</h3>
+ * <h2>Skip semantics</h2>
  * The handler short-circuits when the JClaw Task is missing
  * (deleted between scheduling and firing) or
  * {@link Task.Status#CANCELLED}. {@code TaskExecutor.runTask} owns the

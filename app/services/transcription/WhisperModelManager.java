@@ -48,10 +48,27 @@ public final class WhisperModelManager {
     /** State machine for a single model's local availability. */
     public enum State { ABSENT, DOWNLOADING, VERIFYING, AVAILABLE, ERROR }
 
-    /** Snapshot for status polling. {@code error} is non-null only when {@code state == ERROR}. */
+    /**
+     * Snapshot for status polling.
+     *
+     * @param state            current state in the local-availability state
+     *                         machine
+     * @param bytesDownloaded  bytes downloaded so far (0 when not in
+     *                         {@link State#DOWNLOADING})
+     * @param totalBytes       expected total bytes (0 when unknown)
+     * @param error            error message; non-null only when
+     *                         {@code state == ERROR}
+     */
     public record ModelStatus(State state, long bytesDownloaded, long totalBytes, String error) {}
 
-    /** Streaming progress event passed to the optional callback on every chunk. */
+    /**
+     * Streaming progress event passed to the optional callback on every
+     * chunk.
+     *
+     * @param modelId         which model the progress event belongs to
+     * @param bytesDownloaded bytes downloaded so far
+     * @param totalBytes      expected total bytes
+     */
     public record DownloadProgress(String modelId, long bytesDownloaded, long totalBytes) {}
 
     public static Path localPath(WhisperModel model) {

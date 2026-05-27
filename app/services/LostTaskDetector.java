@@ -15,7 +15,7 @@ import java.util.List;
  * {@code scheduled_tasks.last_heartbeat} signal into JClaw's
  * {@link Task.Status#LOST} visibility state.
  *
- * <h3>Design A: visibility-only</h3>
+ * <h2>Design A: visibility-only</h2>
  * Per the ticket, this detector deliberately does <em>not</em> touch
  * db-scheduler's {@code scheduled_tasks} row. db-scheduler owns the
  * recovery path; we only mirror its "this fire is dead" signal into
@@ -23,7 +23,7 @@ import java.util.List;
  * UI distinguishes "running" from "stranded by an unclean shutdown"
  * roughly 60 s before db-scheduler's own re-fire kicks in.
  *
- * <h3>Why direct JDBC instead of {@code SchedulerClient.getCurrentlyExecuting}</h3>
+ * <h2>Why direct JDBC instead of {@code SchedulerClient.getCurrentlyExecuting}</h2>
  * {@code getCurrentlyExecuting()} returns this JVM's in-memory set of
  * currently-running executions — empty for the crash-recovery case
  * where the row was picked by a now-dead JVM and the current process
@@ -34,7 +34,7 @@ import java.util.List;
  * and indexed on {@code last_heartbeat}, so the cost is constant in
  * the number of currently-picked rows (typically 0–N for small N).
  *
- * <h3>Wiring</h3>
+ * <h2>Wiring</h2>
  * <ul>
  *   <li>{@link jobs.LostTaskScanJob} fires the detector on a fixed
  *       cadence so a long-lived JVM observing another node's crash
@@ -45,7 +45,7 @@ import java.util.List;
  *       the next periodic tick.</li>
  * </ul>
  *
- * <h3>Recovery flow</h3>
+ * <h2>Recovery flow</h2>
  * Operators see LOST roughly 60 s after the crash. db-scheduler's
  * own dead-execution detection runs at {@code heartbeatInterval ×
  * missedHeartbeatsLimit = 30 s × 4 = 120 s} and re-fires the row;
@@ -100,6 +100,10 @@ public final class LostTaskDetector {
      * Carried so the TASK_LOST event log can record actual staleness
      * (lower bound: {@code STALE_THRESHOLD}; upper bound: however long
      * the JVM was offline).
+     *
+     * @param taskId        JClaw {@link models.Task} id
+     * @param lastHeartbeat last heartbeat timestamp read from the
+     *                      {@code scheduled_tasks} row
      */
     public record StaleRow(Long taskId, Instant lastHeartbeat) {}
 

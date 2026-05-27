@@ -42,12 +42,36 @@ public class ApiConversationsController extends Controller {
                                    Long parentConversationId,
                                    long compactionCount) {}
 
-    /** Documents the {@code GET /messages} response shape. The actual emission
-     *  uses a HashMap because several fields are conditionally absent (only
-     *  populated when the underlying Message column is non-null); converting
-     *  to a record would change the wire format from "field absent" to
-     *  "field: null" for those fields, which the chat-history hydrator on
-     *  the frontend may treat differently. */
+    /**
+     * Documents the {@code GET /messages} response shape. The actual emission
+     * uses a HashMap because several fields are conditionally absent (only
+     * populated when the underlying Message column is non-null); converting
+     * to a record would change the wire format from "field absent" to
+     * "field: null" for those fields, which the chat-history hydrator on
+     * the frontend may treat differently.
+     *
+     * @param id                   server message id
+     * @param role                 message role ({@code user}, {@code assistant},
+     *                             {@code tool}, {@code system})
+     * @param content              message body text
+     * @param toolCalls            assistant {@code tool_calls} JSON array
+     *                             (parsed); null for non-assistant rows or
+     *                             when the row had no tool calls
+     * @param toolResults          {@code tool_call_id} this tool-row answers
+     *                             (tool-role rows only)
+     * @param toolResultStructured optional structured payload for richer UI
+     *                             rendering (search-result chips etc.)
+     * @param reasoning            chain-of-thought text for thinking models
+     * @param createdAt            ISO-8601 timestamp
+     * @param usage                token-usage JSON for assistant rows
+     * @param subagentRunId        when this row was produced by a subagent,
+     *                             links back to the {@code SubagentRun} id
+     * @param messageKind          discriminator for non-standard kinds
+     *                             ({@code subagent_announce},
+     *                             {@code subagent_send}, …)
+     * @param metadata             kind-specific metadata object
+     * @param attachments          file attachments on the row
+     */
     public record MessageView(Long id, String role, String content,
                               JsonElement toolCalls, String toolResults,
                               JsonElement toolResultStructured,
@@ -58,9 +82,18 @@ public class ApiConversationsController extends Controller {
                               JsonElement metadata,
                               List<MessageAttachmentView> attachments) {}
 
-    /** Per-attachment metadata surfaced to the frontend in /messages. The
-     *  {@code uuid} is the client-facing key for the
-     *  {@code GET /api/attachments/{uuid}} download endpoint (JCLAW-279). */
+    /**
+     * Per-attachment metadata surfaced to the frontend in /messages.
+     *
+     * @param uuid             client-facing key for the
+     *                         {@code GET /api/attachments/{uuid}} download
+     *                         endpoint (JCLAW-279)
+     * @param originalFilename filename the user uploaded
+     * @param mimeType         content type
+     * @param sizeBytes        attachment size in bytes
+     * @param kind             discriminator for special-rendered kinds
+     *                         ({@code image}, {@code audio}, generic file)
+     */
     public record MessageAttachmentView(String uuid, String originalFilename,
                                         String mimeType, long sizeBytes, String kind) {}
 

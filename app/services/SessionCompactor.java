@@ -210,7 +210,17 @@ public final class SessionCompactor {
 
     // ─── Internals ──────────────────────────────────────────────────────
 
-    /** Snapshot of a persisted {@link Message} taken under a Tx, usable after the Tx closes. */
+    /**
+     * Snapshot of a persisted {@link Message} taken under a Tx, usable after
+     * the Tx closes.
+     *
+     * @param role        message role ({@code user}, {@code assistant},
+     *                    {@code tool}, {@code system})
+     * @param content     message body
+     * @param toolCalls   assistant tool-calls JSON (null for non-assistant)
+     * @param toolResults tool-call id this tool-row answers (null for non-tool)
+     * @param createdAt   creation timestamp
+     */
     public record MessageSnapshot(String role, String content, String toolCalls, String toolResults, Instant createdAt) {}
     record CompactionPlan(List<MessageSnapshot> toSummarize, Instant firstKeptAt) {}
 

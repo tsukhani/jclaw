@@ -12,8 +12,9 @@ import java.util.Objects;
 /**
  * Orchestrates one fire of a {@link Task}. Creates the {@link TaskRun},
  * wraps it in a {@link TaskRunSink}, drives the agent loop via
- * {@link AgentRunner#runForTask}, and returns the closed TaskRun for
- * downstream delivery dispatch.
+ * {@link AgentRunner#runForTask}, and on success routes the assistant's
+ * final reply through {@link DeliveryDispatcher#dispatchSpec} when the
+ * Task has a {@link Task#delivery} spec configured.
  *
  * <p>The TaskRun row is created in its own short transaction so
  * db-scheduler's heartbeat monitor and the monitoring UI can observe a
@@ -31,9 +32,8 @@ import java.util.Objects;
  * would starve the connection pool.
  *
  * <p>Part of JCLAW-21's Tasks foundation. Caller is
- * {@code TaskExecutionHandler} (subsequent JCLAW-21 commit), which is
- * the db-scheduler {@code Job} body that fires when a {@link Task}'s
- * scheduled time arrives.
+ * {@link TaskExecutionHandler}, the db-scheduler {@code Job} body that
+ * fires when a {@link Task}'s scheduled time arrives.
  */
 public final class TaskExecutor {
 
@@ -52,14 +52,15 @@ public final class TaskExecutor {
 
     /**
      * Run one fire of {@code task} and return the persisted TaskRun.
-     * The returned TaskRun has a terminal status (COMPLETED or FAILED)
-     * and a populated outputSummary on success or error on failure.
-     *
-     * <p>Does NOT dispatch delivery — that's the
-     * {@code TaskExecutionHandler}'s next step (subsequent JCLAW-21
-     * commit) which inspects the TaskRun's outcome and routes it via
-     * the delivery layer (separate sibling story under the JCLAW-237
-     * epic).
+     * The returned TaskRun has a terminal status (COMPLETED or FAILED),
+     * a populated {@code outputSummary} on success / {@code error} on
+     * failure, and — on success when {@link Task#delivery} is set — a
+     * populated {@code deliveryStatus} / {@code deliveryTarget} /
+     * {@code deliveryError} reflecting the result of dispatching
+     * {@code outputSummary} through {@link DeliveryDispatcher#dispatchSpec}
+     * (see {@link #dispatchDelivery}). Delivery failure does NOT fail
+     * the TaskRun — the body succeeded; only the post-completion push
+     * to the configured channel did not.
      */
     public static TaskRun runTask(Task task) {
         Objects.requireNonNull(task, "task");
@@ -172,7 +173,9 @@ public final class TaskExecutor {
 
     /**
      * Re-read the closed TaskRun, mark one-shot Tasks COMPLETED on success,
-     * and emit the TASK_COMPLETED lifecycle event.
+     * emit the TASK_COMPLETED lifecycle event, and route the assistant's
+     * final reply through {@link DeliveryDispatcher#dispatchSpec} when
+     * {@link Task#delivery} is set.
      */
     private static TaskRun finalizeRun(Task task, TaskRun run) {
         // Re-read the closed TaskRun so durationMs reflects the
@@ -192,8 +195,99 @@ public final class TaskExecutor {
             }
             TaskLifecycleEvents.recordCompleted(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
+            dispatchDelivery(task, closed);
         }
         return closed;
+    }
+
+    /**
+     * Push the closed TaskRun's {@link TaskRun#outputSummary} through
+     * {@link DeliveryDispatcher#dispatchSpec} when {@link Task#delivery}
+     * is set, and stamp the result onto the TaskRun's delivery columns.
+     *
+     * <p>Skipped silently (with {@link TaskRun.DeliveryStatus#NOT_REQUESTED})
+     * when no delivery spec is configured — that's the legacy default for
+     * Tasks created via the HTTP API without a {@code delivery} field, or
+     * created in headless contexts where there's no chat to push back to.
+     * Empty or whitespace-only output is also skipped: there's nothing
+     * useful to deliver, and pushing an empty message to a chat is noise.
+     *
+     * <p>Delivery failure does NOT fail the TaskRun — the body succeeded,
+     * and operators can see the delivery breakdown via the TaskRun's
+     * {@link TaskRun#deliveryStatus} / {@link TaskRun#deliveryError}
+     * columns plus the TASK_DELIVERY_FAILED lifecycle event.
+     */
+    private static void dispatchDelivery(Task task, TaskRun closed) {
+        var spec = task.delivery;
+        if (spec == null || spec.isBlank()) {
+            stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_REQUESTED, null, null);
+            return;
+        }
+        // Dedup: if the fire-time agent already pushed via the `message` tool
+        // (e.g. a Radarr-monitor-style progress update), the assistant's final
+        // reply was a follow-up to that push, not the user-facing payload —
+        // auto-delivering it would land a duplicate in the chat. Detection is
+        // a substring scan of TaskRunMessage.tool_calls JSON because the JSON
+        // shape (`{"function":{"name":"message"…}}`) is stable across providers
+        // (see {@link llm.LlmTypes.ToolCall}). False positives would need
+        // another tool literally named "message", which the registry disallows
+        // since tool names are uniqued.
+        if (alreadyDeliveredViaMessageTool(closed.id)) {
+            stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_REQUESTED, spec,
+                    "Skipped auto-delivery: fire called the 'message' tool directly");
+            return;
+        }
+        var content = closed.outputSummary;
+        if (content == null || content.isBlank()) {
+            stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_DELIVERED, spec,
+                    "TaskRun produced no output to deliver");
+            TaskLifecycleEvents.recordDeliveryFailed(task, closed, spec,
+                    "TaskRun produced no output to deliver");
+            return;
+        }
+        // dispatchSpec → dispatchTelegram / dispatchWeb / etc. all need a live
+        // EntityManager (TelegramBinding lookup, Conversation.findById for the
+        // web target, ConversationService.appendMessage for the web append).
+        // The db-scheduler carrier thread has no inherited Tx, so wrap.
+        var result = Tx.run(() -> DeliveryDispatcher.dispatchSpec(task.agent, spec, content));
+        if (result.ok()) {
+            stampDelivery(closed.id, TaskRun.DeliveryStatus.DELIVERED, spec, null);
+            TaskLifecycleEvents.recordDelivered(task, closed, spec);
+        } else {
+            stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_DELIVERED, spec, result.reason());
+            TaskLifecycleEvents.recordDeliveryFailed(task, closed, spec, result.reason());
+        }
+    }
+
+    private static boolean alreadyDeliveredViaMessageTool(Long runId) {
+        return Boolean.TRUE.equals(Tx.run(() -> {
+            var em = play.db.jpa.JPA.em();
+            // Match the JSON substring produced by GSON's compact encoding of
+            // the FunctionCall record: `"name":"message"`. Single-call rows
+            // dominate (MessageHydrator.parseToolCalls deserialises into a
+            // single ToolCall), so the LIKE wildcard count is bounded.
+            var count = (Long) em.createQuery(
+                    "SELECT COUNT(m) FROM TaskRunMessage m "
+                            + "WHERE m.taskRun.id = :runId "
+                            + "AND m.toolCalls LIKE :pattern")
+                    .setParameter("runId", runId)
+                    .setParameter("pattern", "%\"name\":\"" + tools.MessageTool.TOOL_NAME + "\"%")
+                    .getSingleResult();
+            return count != null && count > 0;
+        }));
+    }
+
+    private static void stampDelivery(Long runId, TaskRun.DeliveryStatus status,
+                                      String target, String error) {
+        Tx.run(() -> {
+            var fresh = (TaskRun) TaskRun.findById(runId);
+            if (fresh == null) return null;
+            fresh.deliveryStatus = status;
+            fresh.deliveryTarget = target;
+            fresh.deliveryError = error;
+            fresh.save();
+            return null;
+        });
     }
 
     private static void markTaskCompleted(Long taskId) {

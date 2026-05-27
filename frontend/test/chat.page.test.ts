@@ -651,6 +651,51 @@ describe('Chat page — async subagent announce polling', () => {
     expect(vm.hasPendingAsyncAnnounce()).toBe(false)
   })
 
+  it('triggers polling after a task_manager.createTask scheduled-task tool result', async () => {
+    // Bug 1 follow-up: after the user schedules a task, the fire that lands
+    // on the server has no SSE channel back to this tab — auto-delivery
+    // would otherwise only surface on manual reload. hasRecentTaskCreate
+    // detects the createTask fingerprint in tool-call results and keeps the
+    // poller awake long enough for the auto-delivered Message row to land.
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 410, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'task scheduled',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/410/messages', () => [
+      { id: 1200, role: 'user', content: 'remind me in 1m',
+        createdAt: new Date().toISOString() },
+      { id: 1201, role: 'assistant', content: 'Scheduled.',
+        createdAt: new Date().toISOString() },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+      hasRecentTaskCreate: () => boolean
+      messages: Array<{ role: string, toolCalls?: Array<{ id: string, name: string, icon: string, arguments: string, resultText?: string | null }> }>
+    }
+    await vm.loadConversation(410)
+    await flushPromises()
+
+    // Without a task_manager tool call: poll trigger off.
+    expect(vm.hasRecentTaskCreate()).toBe(false)
+
+    // Splice a task_manager tool call onto the assistant row, mirroring the
+    // post-stream SSE shape. Detection keys on the tool name only —
+    // resultText is intentionally absent here to prove the simpler signal
+    // works even when the SSE frame omitted the result body.
+    const assistant = vm.messages.find(m => m.role === 'assistant')!
+    assistant.toolCalls = [{
+      id: 'call_task', name: 'task_manager', icon: 'tasks', arguments: '{"action":"createTask"}',
+      resultText: null,
+    }]
+
+    expect(vm.hasRecentTaskCreate()).toBe(true)
+  })
+
   it('detects pending state from inline assistant.toolCalls (post-stream shape)', async () => {
     // Regression: between stream-end and the next reload, the SSE tool_call
     // frame folds the result into assistant.toolCalls[i].resultText rather

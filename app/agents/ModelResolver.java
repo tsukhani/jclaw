@@ -16,7 +16,7 @@ import services.ModelOverrideResolver;
  * triple, what model are we actually running?" — and the JCLAW-108 /
  * JCLAW-269 override resolution that answers it.
  *
- * <h3>Resolution chain</h3>
+ * <h2>Resolution chain</h2>
  * <ul>
  *   <li>{@link #effectiveModelId} and {@link #effectiveModelProvider}
  *   are thin wrappers over {@link ModelOverrideResolver}. They surface

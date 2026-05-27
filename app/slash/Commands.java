@@ -122,7 +122,18 @@ public final class Commands {
 
             I no longer remember our earlier exchange in this conversation.""";
 
-    /** Outcome of handling a slash command. */
+    /**
+     * Outcome of handling a slash command.
+     *
+     * @param conversation  the (possibly new) Conversation the command
+     *                      ran against — slash commands like {@code /new}
+     *                      open a fresh Conversation, so the caller
+     *                      must use this rather than the request's
+     *                      original conversation
+     * @param responseText  user-visible reply text (markdown) the
+     *                      transport should render
+     * @param command       which {@link Command} the input parsed as
+     */
     public record Result(Conversation conversation, String responseText, Command command) {}
 
     /**

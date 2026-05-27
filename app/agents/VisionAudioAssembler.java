@@ -21,7 +21,7 @@ import services.transcription.PendingTranscripts;
  * images and audio (JCLAW-25 / JCLAW-132 / JCLAW-165). Extracted from
  * {@link AgentRunner} as part of JCLAW-299.
  *
- * <h3>Output shapes</h3>
+ * <h2>Output shapes</h2>
  * Plain-text turns with no attachments emit the compact single-string
  * {@code {role,content:"..."}}. Turns with attachments emit the
  * content-parts array:
@@ -36,7 +36,7 @@ import services.transcription.PendingTranscripts;
  *   tool.</li>
  * </ul>
  *
- * <h3>JCLAW-165 capability handshake</h3>
+ * <h2>JCLAW-165 capability handshake</h2>
  * The audio path has two modes: the audio-capable happy path (Gemini
  * accepting OGG Opus natively, GPT-4o accepting MP3) ships the bytes
  * inline; the no-audio fallback path awaits any in-flight transcripts
@@ -84,11 +84,15 @@ public final class VisionAudioAssembler {
      * JCLAW-165: tracks which user messages in the assembled list carry
      * audio attachments, so the post-Tx orchestrator can rewrite them
      * as text-with-transcript when the active model lacks
-     * {@code supportsAudio}. The {@code chatMessageIndex} is the
-     * position in the returned {@link ChatMessage} list (which always
-     * begins with the system prompt at index 0); {@code msgId}
-     * re-locates the persisted Message in a fresh transaction at
-     * rewrite time.
+     * {@code supportsAudio}.
+     *
+     * @param chatMessageIndex   position in the returned {@link ChatMessage}
+     *                           list (which always begins with the system
+     *                           prompt at index 0)
+     * @param msgId              re-locates the persisted Message in a
+     *                           fresh transaction at rewrite time
+     * @param audioAttachmentIds the persisted audio attachment ids carried
+     *                           on this user turn
      */
     public record AudioBearer(int chatMessageIndex, Long msgId, List<Long> audioAttachmentIds) {}
 

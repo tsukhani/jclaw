@@ -38,6 +38,11 @@ public class ConversationService {
      * {@code runId} so every {@link #appendMessage} call made on the current
      * thread stamps that id on the persisted Message. Always clears in a
      * finally — never leak the marker back to the caller.
+     *
+     * @param runId the subagent run id to stamp on persisted messages
+     * @param body  work to run with the marker bound
+     * @param <T>   {@code body}'s return type
+     * @return the value returned by {@code body}
      */
     public static <T> T withSubagentRunIdMarker(Long runId, java.util.function.Supplier<T> body) {
         var prev = INLINE_SUBAGENT_RUN_ID.get();
@@ -63,6 +68,10 @@ public class ConversationService {
      * Caller owns the transaction — this method assumes an active Tx so it
      * can piggy-back on {@code /model NAME}'s handler transaction without
      * a redundant Tx.run nesting.
+     *
+     * @param conversation the conversation whose override columns to set
+     * @param provider     provider override, or null to clear
+     * @param modelId      model-id override, or null to clear
      */
     public static void setModelOverride(Conversation conversation, String provider, String modelId) {
         conversation.modelProviderOverride = provider;
@@ -70,7 +79,11 @@ public class ConversationService {
         conversation.save();
     }
 
-    /** Clear the conversation-scoped override. See {@link #setModelOverride}. */
+    /**
+     * Clear the conversation-scoped override. See {@link #setModelOverride}.
+     *
+     * @param conversation the conversation whose override columns to clear
+     */
     public static void clearModelOverride(Conversation conversation) {
         conversation.modelProviderOverride = null;
         conversation.modelIdOverride = null;
@@ -138,12 +151,18 @@ public class ConversationService {
 
     /**
      * Persist a user message together with its attached files (JCLAW-25).
-     * {@code attachments} is roundtripped verbatim from the upload response;
-     * each entry's staged file gets moved to the conversation-keyed final
-     * directory by {@link AttachmentService#finalizeAttachment} and a
+     * Each attachment's staged file gets moved to the conversation-keyed
+     * final directory by {@link AttachmentService#finalizeAttachment} and a
      * {@link models.MessageAttachment} row is written against the new
      * message. A {@code VISION_ATTACHMENT_INGEST} event is emitted per image
      * attachment.
+     *
+     * @param conversation the conversation to append into
+     * @param content      the user's message text
+     * @param attachments  roundtripped verbatim from the upload response;
+     *                     each entry's staged file is finalized against the
+     *                     new message row
+     * @return the persisted user message
      */
     public static Message appendUserMessage(Conversation conversation, String content,
                                              List<AttachmentService.Input> attachments) {
@@ -194,6 +213,14 @@ public class ConversationService {
      * {@code finish_reason=length / max_tokens} on a non-tool-call reply
      * (the empty-{@code toolCalls} truncation branch). The chat UI reads
      * the column and renders a "Reply was truncated by the model" marker.
+     *
+     * @param conversation the conversation to append into
+     * @param content      assistant body text
+     * @param toolCalls    JSON-encoded tool-call list, or {@code null}
+     * @param usageJson    JSON-encoded token-usage record, or {@code null}
+     * @param reasoning    model-reported reasoning trace, or {@code null}
+     * @param truncated    true when the model hit {@code finish_reason=length}
+     * @return the persisted assistant message
      */
     public static Message appendAssistantMessage(Conversation conversation, String content,
                                                    String toolCalls, String usageJson, String reasoning,
@@ -213,8 +240,15 @@ public class ConversationService {
     /**
      * JCLAW-170 overload: persist a tool-result row with an optional
      * structured JSON payload (e.g. web-search result list with favicons)
-     * the UI renders as rich widgets. {@code structuredJson} is null for
-     * tools that don't produce structured output.
+     * the UI renders as rich widgets.
+     *
+     * @param conversation   the conversation to append into
+     * @param toolCallId     id correlating this result with the assistant
+     *                       turn's {@code tool_calls} entry
+     * @param result         plain-text result body the LLM sees next turn
+     * @param structuredJson optional structured payload; {@code null} for
+     *                       tools that don't produce structured output
+     * @return the persisted tool-result message
      */
     public static Message appendToolResult(Conversation conversation, String toolCallId,
                                             String result, String structuredJson) {
@@ -338,6 +372,9 @@ public class ConversationService {
     /**
      * Bulk-delete conversations (and their messages) by ID using JPQL.
      * Both single and bulk delete routes use this to ensure consistent behavior.
+     *
+     * @param ids conversation ids to delete (children, SubagentRuns, and
+     *            attached messages cascade automatically)
      * @return the number of conversations deleted
      */
     public static int deleteByIds(List<Long> ids) {
@@ -396,6 +433,12 @@ public class ConversationService {
      * Building the id list once and reusing {@link #deleteByIds} keeps the
      * exact ordering this service has shipped with since launch.
      *
+     * @param channel  channel constraint, or null/blank for any channel
+     * @param agentId  agent constraint, or null for any agent
+     * @param name     case-insensitive substring of the conversation
+     *                 preview, or null/blank for any preview
+     * @param peer     case-insensitive substring of the peer id, or
+     *                 null/blank for any peer
      * @return the number of conversations deleted
      */
     public static int deleteByFilter(String channel, Long agentId, String name, String peer) {

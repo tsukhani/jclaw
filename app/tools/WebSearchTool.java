@@ -57,9 +57,13 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
     /**
      * JCLAW-170: structured per-result shape the UI renders as clickable chips.
-     * {@code faviconUrl} resolves through the DuckDuckGo favicon service, which
-     * handles every host uniformly and does not require an API key. {@code null}
-     * when the host cannot be parsed.
+     *
+     * @param title      result title shown as the chip's main label
+     * @param url        clickable destination
+     * @param snippet    short prose excerpt from the result page
+     * @param faviconUrl resolved through the DuckDuckGo favicon service
+     *                   (handles every host uniformly without an API key);
+     *                   {@code null} when the host cannot be parsed
      */
     public record SearchResult(String title, String url, String snippet, String faviconUrl) {}
 

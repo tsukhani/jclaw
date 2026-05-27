@@ -69,9 +69,18 @@ public final class PricingRefreshService {
     );
 
     /**
-     * Outcome of a refresh run. {@code skipped} is true when the toggle is
-     * off; the controller surfaces this distinct from "ran but updated nothing"
-     * so the operator's manual-trigger button can show a useful message.
+     * Outcome of a refresh run.
+     *
+     * @param skipped          true when the refresh toggle is off; the
+     *                         controller surfaces this distinct from
+     *                         "ran but updated nothing" so the
+     *                         manual-trigger button can show a useful
+     *                         message
+     * @param providersScanned number of providers the run consulted
+     * @param modelsUpdated    number of model rows whose pricing was
+     *                         updated this run
+     * @param warnings         human-readable per-provider issues to surface
+     *                         in the UI
      */
     public record RefreshResult(
             boolean skipped,

@@ -74,14 +74,29 @@ public final class LoadTestRunner {
     /**
      * Loadtest run shape.
      *
-     * <p>{@code userMessage} is the single message replayed every turn within
-     * a conversation — useful for measuring in-context recall and provider
-     * prompt-cache hits on a stable prefix. {@code prompts}, when non-null
-     * and non-empty, OVERRIDES {@code userMessage}: each turn {@code t} sends
-     * {@code prompts.get(t)}, exercising the model with a varied question
-     * sequence inside the same growing conversation. The list must contain
-     * at least {@link #turns()} entries; the controller validates this before
-     * dispatch. The two are mutually exclusive on the wire.
+     * @param concurrency  number of parallel virtual workers
+     * @param turns        number of turns each worker runs in its
+     *                     conversation
+     * @param compress     when true, force-compaction is invoked between
+     *                     turns to exercise the compaction path
+     * @param scenario     mock-endpoint timing scenario (ignored when
+     *                     {@code realProvider} is true)
+     * @param realProvider when true, the run hits the configured real
+     *                     provider instead of the mock harness
+     * @param provider     real-provider name override (only meaningful when
+     *                     {@code realProvider} is true)
+     * @param model        real-provider model id override
+     * @param userMessage  single message replayed every turn — useful for
+     *                     measuring in-context recall and provider
+     *                     prompt-cache hits on a stable prefix
+     * @param prompts      when non-null and non-empty, OVERRIDES
+     *                     {@code userMessage}: each turn {@code t} sends
+     *                     {@code prompts.get(t)}, exercising the model with
+     *                     a varied question sequence inside the same growing
+     *                     conversation. Must contain at least {@link #turns()}
+     *                     entries; the controller validates this before
+     *                     dispatch. Mutually exclusive with
+     *                     {@code userMessage} on the wire.
      */
     public record Request(int concurrency, int turns, boolean compress,
                           LoadTestHarness.Scenario scenario,
@@ -109,6 +124,16 @@ public final class LoadTestRunner {
     /**
      * Aggregated outcome of a single load-test run, returned to the API caller.
      *
+     * @param totalRequests      Total requests issued in the run (sum across
+     *                           all workers and turns).
+     * @param successCount       Requests that produced a complete response
+     *                           without error.
+     * @param errorCount         Requests that errored or timed out.
+     * @param wallClockMs        End-to-end wall-clock duration of the run
+     *                           in ms.
+     * @param avgPerRequestMs    Mean per-request duration in ms.
+     * @param minPerRequestMs    Fastest per-request duration in ms.
+     * @param maxPerRequestMs    Slowest per-request duration in ms.
      * @param avgTtftMs          Mean time-to-first-token across this run's requests, in ms.
      *                           Computed from the {@code web} channel {@code ttft}
      *                           histogram delta. For reasoning models, TTFT includes
@@ -164,20 +189,35 @@ public final class LoadTestRunner {
      * Per-turn-position aggregate across all workers in a run. TTFT is
      * client-measured (request-send → first {@code type:"token"} SSE frame),
      * so it includes loopback round-trip — close to but not identical to the
-     * server-side {@code web/ttft} histogram. {@code count} is the number of
-     * successful turns at this position (excludes errors / timeouts).
+     * server-side {@code web/ttft} histogram.
+     *
+     * @param turn           turn position (1-indexed)
+     * @param count          successful turns at this position (excludes
+     *                       errors / timeouts)
+     * @param ttftMeanMs     mean TTFT in ms across the {@code count} successful turns
+     * @param ttftP50Ms      median TTFT in ms
+     * @param ttftP95Ms      95th-percentile TTFT in ms
+     * @param durationMeanMs mean total turn duration in ms
+     * @param durationP50Ms  median total turn duration in ms
+     * @param durationP95Ms  95th-percentile total turn duration in ms
      */
     public record TurnBucket(int turn, int count,
                              long ttftMeanMs, long ttftP50Ms, long ttftP95Ms,
                              long durationMeanMs, long durationP50Ms, long durationP95Ms) {}
 
     /**
-     * Per-segment server-side latency for one loadtest run. {@code count} is
-     * the number of recordings in the segment's histogram during this run
-     * (post-warmup → post-workers). {@code meanMs = sumMs / count}, or 0 when
-     * {@code count == 0}. Percentiles aren't included because deltas of
-     * HdrHistograms are not directly subtractable; mean is sufficient for
-     * dominant-segment diagnosis.
+     * Per-segment server-side latency for one loadtest run. Percentiles
+     * aren't included because deltas of HdrHistograms are not directly
+     * subtractable; mean is sufficient for dominant-segment diagnosis.
+     *
+     * @param segment segment name (e.g. {@code "queue_wait"},
+     *                {@code "prologue_conv"}, {@code "ttft"},
+     *                {@code "stream_body"})
+     * @param count   number of recordings in the segment's histogram during
+     *                this run (post-warmup → post-workers)
+     * @param sumMs   total ms accumulated across the {@code count} recordings
+     * @param meanMs  {@code sumMs / count}, or {@code 0} when
+     *                {@code count == 0}
      */
     public record SegmentBreakdown(String segment, long count, long sumMs, long meanMs) {}
 

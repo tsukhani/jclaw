@@ -7,9 +7,10 @@ package agents;
  * schema. The backend is the authoritative source of this metadata —
  * JCLAW-72 removed the duplicated list previously hardcoded on the frontend.
  *
- * <p>{@code name} is the human-facing action name (e.g. {@code "readFile"},
- * {@code "scheduleRecurringTask"}). {@code description} is the short blurb
- * rendered under the tool card on {@code /tools} and anywhere else a user
- * browses capabilities.
+ * @param name        human-facing action name (e.g. {@code "readFile"},
+ *                    {@code "scheduleRecurringTask"})
+ * @param description short blurb rendered under the tool card on
+ *                    {@code /tools} and anywhere else a user browses
+ *                    capabilities
  */
 public record ToolAction(String name, String description) {}

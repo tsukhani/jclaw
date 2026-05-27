@@ -31,7 +31,7 @@ import services.search.MessageSearch;
  * already in place — both backends' {@code init} short-circuit on
  * the second call.
  *
- * <h3>Test-mode skip</h3>
+ * <h2>Test-mode skip</h2>
  * Pre-Lucene-10 the test-mode skip was necessary because H2's
  * {@code FullTextLucene} installed FT_* artifacts that clashed with
  * Play 1.x's {@code Fixtures.deleteDatabase}. The direct Lucene path

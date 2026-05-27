@@ -17,7 +17,7 @@ import java.util.Map;
  * JCLAW-294: agent-facing task management tool. One {@code task_manager}
  * tool with multiple actions; the {@code action} parameter dispatches.
  *
- * <h3>Schedule shorthand</h3>
+ * <h2>Schedule shorthand</h2>
  * The four typed creation actions
  * ({@code createTask}/{@code scheduleTask}/{@code scheduleRecurringTask}/{@code scheduleIntervalTask})
  * that JCLAW-21 shipped collapsed into a single {@code createTask} that
@@ -30,14 +30,14 @@ import java.util.Map;
  *   <li>Spring 6-field cron or {@code @hourly}/{@code @daily}/{@code @weekly}/{@code @monthly}/{@code @yearly} — CRON</li>
  * </ul>
  *
- * <h3>Agent-scoped name addressing</h3>
+ * <h2>Agent-scoped name addressing</h2>
  * Every action that addresses an existing task does so by name + the
  * calling agent (per the multi-tenancy stance —
  * project_multi_tenancy_design memory). Two agents can both have a
  * task called "daily summary" without colliding; one agent can't
  * pause/resume/cancel another's.
  *
- * <h3>Fan-out semantics</h3>
+ * <h2>Fan-out semantics</h2>
  * One-shot tasks (IMMEDIATE/SCHEDULED) allow duplicate names per agent.
  * {@code cancelTask}/{@code pause}/{@code resume}/{@code runNow} fan out
  * across all non-cancelled matches and report a count.
@@ -155,7 +155,14 @@ public class TaskTool implements ToolRegistry.Tool {
                 Map.entry(KEY_PAUSED, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "On updateTask: flip the paused flag")),
                 Map.entry(KEY_DELIVERY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Output delivery target — e.g. 'telegram:12345' or 'email:foo@bar'. Consumed by the delivery layer.")),
+                        SchemaKeys.DESCRIPTION,
+                        "Output delivery target as '<channel>:<target>' — "
+                                + "e.g. 'telegram:12345', 'slack:C0123', 'whatsapp:+15551234567'. "
+                                + "When the task should deliver back to the chat that's creating "
+                                + "it (the common 'remind me' case), OMIT this field — it auto-fills "
+                                + "to the calling conversation. Passing just the channel name (e.g. "
+                                + "'web' or 'telegram' with no colon) also works and fills the "
+                                + "target from the calling chat.")),
                 Map.entry(KEY_PAYLOAD_TYPE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Output payload format hint: 'text', 'json', or 'markdown'")),
                 Map.entry(KEY_MODEL_PROVIDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
@@ -279,10 +286,102 @@ public class TaskTool implements ToolRegistry.Tool {
 
         return switch (spec.type()) {
             case IMMEDIATE -> "Task '%s' created and queued for immediate execution.".formatted(name);
-            case SCHEDULED -> "Task '%s' scheduled for %s.".formatted(name, spec.scheduledAt());
+            case SCHEDULED -> "Task '%s' scheduled for %s.".formatted(name, formatScheduledAt(saved));
             case INTERVAL -> "Interval task '%s' created (every %ds).".formatted(name, spec.intervalSeconds());
             case CRON -> "Recurring task '%s' created with schedule '%s'.".formatted(name, spec.scheduleDisplay());
         };
+    }
+
+    /**
+     * Resolve the {@code delivery} value to store on a brand-new Task.
+     * Three input shapes from the LLM:
+     * <ol>
+     *   <li>Missing / null → infer the full {@code "<channel>:<target>"}
+     *       from the calling agent's most-recently-updated Conversation.</li>
+     *   <li>Bare channel name ({@code "web"}, {@code "telegram"},
+     *       {@code "slack"}, {@code "whatsapp"}) with no colon → keep the
+     *       agent's channel choice, fill the target from the same
+     *       Conversation lookup. This handles the common pattern where the
+     *       LLM picks a channel from the request ("message this chat") but
+     *       doesn't know the channel-specific target format.</li>
+     *   <li>Full {@code "channel:target"} spec → store verbatim, no
+     *       inference (operator knows what they're doing).</li>
+     * </ol>
+     */
+    private static String resolveDeliverySpec(String explicit, models.Agent agent) {
+        if (explicit == null) return inferDeliveryFromContext(agent);
+        var trimmed = explicit.trim();
+        if (trimmed.isEmpty()) return inferDeliveryFromContext(agent);
+        if (trimmed.indexOf(':') >= 0) return explicit;
+        // Bare channel name. Fill target from the same conversation lookup
+        // the no-arg path uses, then prepend the agent-supplied channel
+        // hint. If the conversation lookup doesn't yield a usable target,
+        // fall back to the inference shape (which will be null and produce
+        // NOT_REQUESTED rather than a fire-time spec rejection).
+        if (!services.DeliveryDispatcher.isSupported(trimmed.toLowerCase())) {
+            return explicit;  // Unknown channel — let dispatchSpec surface it.
+        }
+        var inferred = inferDeliveryFromContext(agent);
+        if (inferred == null) return null;
+        var colon = inferred.indexOf(':');
+        if (colon < 0) return null;
+        return "%s:%s".formatted(trimmed.toLowerCase(), inferred.substring(colon + 1));
+    }
+
+    /**
+     * Infer a {@link models.Task#delivery} spec for a task created via the
+     * agent-facing tool without an explicit {@code delivery} arg. Looks at
+     * the calling agent's most-recently-updated Conversation and formats
+     * the spec as {@code <channelType>:<target>}, where {@code target} is:
+     * <ul>
+     *   <li>{@link models.Conversation#peerId} for external channels
+     *       (telegram chat id, slack channel id, whatsapp e.164) — the
+     *       same shape {@link services.DeliveryDispatcher} parses.</li>
+     *   <li>{@link models.Conversation#id} for the web channel, because
+     *       web conversations don't always carry a peerId and the chat UI
+     *       is identified by conversation id. {@link services.DeliveryDispatcher#dispatchSpec}
+     *       routes this through the conv-id-aware web path.</li>
+     * </ul>
+     *
+     * <p>Returns null when the agent has no conversations (headless task
+     * creation via API), when the most-recent conversation is on a
+     * non-deliverable channel, or when the required target field is
+     * absent (no peerId on a non-web channel). Mirrors the inference
+     * shape that {@link tools.MessageTool} uses for mid-turn sends —
+     * agreeing on "most-recently-updated wins" keeps the two surfaces
+     * predictable.
+     */
+    private static String inferDeliveryFromContext(models.Agent agent) {
+        return services.Tx.run(() -> {
+            var conv = (models.Conversation) models.Conversation.find(
+                    "agent = ?1 ORDER BY updatedAt DESC", agent).first();
+            if (conv == null || conv.channelType == null) return null;
+            if (!services.DeliveryDispatcher.isSupported(conv.channelType)) return null;
+            String target;
+            if ("web".equalsIgnoreCase(conv.channelType)) {
+                target = conv.id != null ? conv.id.toString() : null;
+            } else {
+                target = conv.peerId;
+            }
+            if (target == null || target.isBlank()) return null;
+            return "%s:%s".formatted(conv.channelType, target);
+        });
+    }
+
+    /**
+     * Format a SCHEDULED task's fire instant in the task's effective IANA zone
+     * (per-task override → operator default → JVM default via
+     * {@link services.TimezoneResolver}). The returned string is a
+     * {@link java.time.ZonedDateTime#toString() ZonedDateTime ISO-8601
+     * representation} — local time + offset + bracketed zone, e.g.
+     * {@code 2026-05-26T23:17:31.538+08:00[Asia/Kuala_Lumpur]} — so the
+     * agent can't silently re-label the UTC {@code Z}-suffixed
+     * {@link java.time.Instant#toString() Instant.toString()} as the
+     * operator's local zone.
+     */
+    private static String formatScheduledAt(Task task) {
+        var zone = services.TimezoneResolver.resolve(task);
+        return task.scheduledAt.atZone(zone).toString();
     }
 
     /**
@@ -325,7 +424,17 @@ public class TaskTool implements ToolRegistry.Tool {
         task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
 
         // Plumbing fields (consumed by JCLAW-295/296/297/298).
-        task.delivery = optStr(args, KEY_DELIVERY);
+        // Default (no delivery arg) → infer "<channel>:<target>" from the
+        // calling agent's most-recently-touched Conversation so a task
+        // created from a chat auto-delivers back to that chat on completion
+        // (via TaskExecutor.dispatchDelivery → DeliveryDispatcher.dispatchSpec).
+        // A bare channel name like "web" or "telegram" (no colon) is also
+        // common from the LLM — interpret it as "use this channel, look up
+        // the target from the calling chat", because the alternative is a
+        // hard rejection at fire time with a "Delivery spec must be
+        // channel:target" error that the operator never sees. Headless API
+        // creation (no chat context) leaves delivery null.
+        task.delivery = resolveDeliverySpec(optStr(args, KEY_DELIVERY), agent);
         task.payloadType = optStr(args, KEY_PAYLOAD_TYPE);
         task.modelProvider = optStr(args, KEY_MODEL_PROVIDER);
         task.modelId = optStr(args, KEY_MODEL_ID);

@@ -35,7 +35,18 @@ public final class TelegramModelCallback {
     /** Kind of callback encoded in the payload. */
     public enum Kind { BROWSE, PROVIDER_PAGE, SELECT, BACK, DETAILS, CANCEL }
 
-    /** Parsed callback payload. Fields not relevant to the kind are -1 / 0. */
+    /**
+     * Parsed callback payload. Fields not relevant to the kind are -1 / 0.
+     *
+     * @param kind           which screen / action the callback triggered
+     * @param conversationId conversation the model selector is operating on
+     * @param providerIdx    index into the visible provider list for this
+     *                       page; -1 when not applicable
+     * @param modelIdx       index into the selected provider's model list;
+     *                       -1 when not applicable
+     * @param page           page number for paginated provider lists; 0 when
+     *                       not applicable
+     */
     public record Payload(Kind kind, long conversationId, int providerIdx, int modelIdx, int page) {}
 
     /** Prefix namespace: every JCLAW-109 callback starts with {@code m:}. */

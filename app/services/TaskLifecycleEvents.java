@@ -8,11 +8,12 @@ import java.time.Instant;
 
 /**
  * The structured {@code event_log} entries that bracket a JClaw
- * task fire. JCLAW-21 specifies five lifecycle points; three are
- * in scope for this story, two are stubbed for the delivery
- * sibling story.
+ * task fire. Five lifecycle points are emitted across the fire's
+ * STARTED → terminal → (optional) delivery sequence; a sixth
+ * out-of-band point covers operator-visible heartbeat loss
+ * ({@link #LOST}).
  *
- * <h3>The five points</h3>
+ * <h2>The lifecycle points</h2>
  * <ul>
  *   <li>{@link #STARTED} — emitted by {@link TaskExecutor} just
  *       before the agent body runs. Marks the start-of-fire so
@@ -27,15 +28,30 @@ import java.time.Instant;
  *       permanent (non-transient OR retry budget exhausted). NOT
  *       emitted on transient retries — those generate WARN entries
  *       under the {@code task} category instead.</li>
- *   <li>{@link #DELIVERED} — for the delivery sibling story; not
- *       emitted yet.</li>
- *   <li>{@link #DELIVERY_FAILED} — same.</li>
+ *   <li>{@link #DELIVERED} — emitted by
+ *       {@link TaskExecutor#dispatchDelivery} after a successful
+ *       post-completion push through {@link DeliveryDispatcher#dispatchSpec}.
+ *       Independent of {@link #COMPLETED} — a fire can complete
+ *       without delivery (no {@link models.Task#delivery} configured),
+ *       in which case the TaskRun's {@code deliveryStatus} is
+ *       {@code NOT_REQUESTED} and no DELIVERED event fires.</li>
+ *   <li>{@link #DELIVERY_FAILED} — emitted by
+ *       {@link TaskExecutor#dispatchDelivery} when the dispatcher
+ *       rejected the push. The TaskRun itself remains COMPLETED —
+ *       the body succeeded, only the channel push did not.
+ *       Dashboards key on this to distinguish "task broken" from
+ *       "channel broken".</li>
+ *   <li>{@link #LOST} — emitted by {@link LostTaskDetector} when a
+ *       RUNNING TaskRun's db-scheduler heartbeat goes stale past
+ *       the threshold. Visibility-only; db-scheduler's own
+ *       dead-execution recovery later re-fires the row.</li>
  * </ul>
  *
- * <h3>Why a separate helper class</h3>
- * The three emit methods centralise the format of the
+ * <h2>Why a separate helper class</h2>
+ * The {@code recordXxx} emit methods centralise the format of the
  * {@code details} JSON payload (run id + duration on COMPLETED,
- * reason on FAILED, etc.) so consumers parsing the events for
+ * reason on FAILED, delivery spec on DELIVERED / DELIVERY_FAILED,
+ * stale seconds on LOST) so consumers parsing the events for
  * dashboards / alerts can rely on a stable shape. Inlining the
  * format strings into the call sites would let it drift the next
  * time someone tweaks a message.
@@ -63,10 +79,14 @@ public final class TaskLifecycleEvents {
      * once the re-fire lands.
      */
     public static final String LOST = "TASK_LOST";
-    // Reserved for the JCLAW-21 sibling delivery story. Declared
-    // here so the taxonomy is one-stop and so dashboard consumers
-    // can group on the prefix.
+    /** Emitted after a successful TaskRun completion whose {@link Task#delivery}
+     *  spec was honored by {@link DeliveryDispatcher#dispatchSpec}. */
     public static final String DELIVERED = "TASK_DELIVERED";
+    /** Emitted when post-completion delivery dispatch returned a non-OK
+     *  {@link DeliveryDispatcher.DispatchResult}. The TaskRun itself is still
+     *  COMPLETED — the body succeeded, only the push to the configured channel
+     *  failed. Dashboards key on this to distinguish "task broken" from
+     *  "channel broken". */
     public static final String DELIVERY_FAILED = "TASK_DELIVERY_FAILED";
 
     private TaskLifecycleEvents() {}
@@ -133,6 +153,33 @@ public final class TaskLifecycleEvents {
                 "classification", classification,
                 "error_message", errorMessage);
         EventLogger.record("ERROR", FAILED, agentName, null, message, details);
+    }
+
+    /** Mark a successful post-completion delivery via {@link DeliveryDispatcher#dispatchSpec}. */
+    public static void recordDelivered(Task task, TaskRun run, String deliverySpec) {
+        var agentName = task.agent != null ? task.agent.name : null;
+        var message = "Task '%s' delivered via '%s' (run=%d)".formatted(
+                task.name, deliverySpec, run.id);
+        var details = detailsJson(
+                KEY_TASK_ID, task.id,
+                KEY_RUN_ID, run.id,
+                "delivery", deliverySpec);
+        EventLogger.record("INFO", DELIVERED, agentName, null, message, details);
+    }
+
+    /** Mark a failed post-completion delivery. {@code reason} is the
+     *  human-readable reason from {@link DeliveryDispatcher.DispatchResult#reason()}. */
+    public static void recordDeliveryFailed(Task task, TaskRun run,
+                                            String deliverySpec, String reason) {
+        var agentName = task.agent != null ? task.agent.name : null;
+        var message = "Task '%s' delivery failed via '%s' (run=%d): %s".formatted(
+                task.name, deliverySpec, run.id, reason);
+        var details = detailsJson(
+                KEY_TASK_ID, task.id,
+                KEY_RUN_ID, run.id,
+                "delivery", deliverySpec,
+                "reason", reason);
+        EventLogger.record("WARN", DELIVERY_FAILED, agentName, null, message, details);
     }
 
     /**

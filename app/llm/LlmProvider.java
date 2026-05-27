@@ -96,6 +96,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * the provider name in the config. Matches against known substrings
      * declaratively via {@link FactoryHolder}; falls back to
      * {@link OpenAiProvider} for unknown/standard OpenAI-compatible providers.
+     *
+     * @param config the provider configuration to instantiate against
+     * @return the most specific {@link LlmProvider} subclass for
+     *         {@code config.name()}
      */
     public static LlmProvider forConfig(ProviderConfig config) {
         var lowerName = config.name().toLowerCase();
@@ -109,19 +113,35 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     // ─── Template methods (override in subclasses) ───────────────────────
 
-    /** Add provider-specific reasoning/thinking parameters to the request JSON. */
+    /**
+     * Add provider-specific reasoning/thinking parameters to the request JSON.
+     *
+     * @param request      the outgoing request body the subclass may mutate
+     * @param thinkingMode operator-selected reasoning effort
+     *                     ({@code "low"}/{@code "medium"}/{@code "high"} or
+     *                     provider-specific extensions)
+     */
     protected void addReasoningParams(JsonObject request, String thinkingMode) {
         // Default: no reasoning support
     }
 
-    /** Explicitly disable reasoning for models that think by default. Called when thinkingMode is off. */
+    /**
+     * Explicitly disable reasoning for models that think by default. Called
+     * when thinkingMode is off.
+     *
+     * @param request the outgoing request body the subclass may mutate
+     */
     protected void disableReasoning(JsonObject request) {
         // Default: no action (most providers don't need explicit disable)
     }
 
     /**
      * Extract reasoning text from a streaming chunk delta.
-     * Called for each chunk during streaming. Return null if no reasoning in this chunk.
+     * Called for each chunk during streaming.
+     *
+     * @param delta the streaming chunk delta object
+     * @return reasoning text fragment, or {@code null} if no reasoning in
+     *         this chunk
      */
     @SuppressWarnings("java:S1172") // template method — subclasses use the delta
     protected String extractReasoningFromDelta(ChunkDelta delta) {
@@ -142,6 +162,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * fields specifically — providers either omit the field or report 0 when
      * a category didn't apply, and both should be treated equivalently by
      * downstream cost/usage aggregation.
+     *
+     * @param usageObj the provider's {@code usage} JSON object
+     * @param field    the top-level field name to read
+     * @return the field's int value, or {@code 0} when missing or null
      */
     protected static int readUsageInt(JsonObject usageObj, String field) {
         if (usageObj == null || !usageObj.has(field) || usageObj.get(field).isJsonNull()) return 0;
@@ -150,7 +174,12 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     /**
      * Read an integer field nested under one wrapping object — {@code usage.nestedObj.field}.
-     * Returns 0 when any path component is missing or null.
+     *
+     * @param usageObj  the provider's {@code usage} JSON object
+     * @param nestedObj the wrapping object's field name
+     * @param field     the inner field name
+     * @return the field's int value, or {@code 0} when any path component is
+     *         missing or null
      */
     protected static int readUsageInt(JsonObject usageObj, String nestedObj, String field) {
         if (usageObj == null || !usageObj.has(nestedObj) || usageObj.get(nestedObj).isJsonNull()) return 0;
@@ -160,6 +189,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     /**
      * Extract reasoning token count from a usage JSON object.
      * Called when parsing the usage block in responses.
+     *
+     * @param usageObj the provider's {@code usage} JSON object
+     * @return the reasoning-token count, or {@code 0} when the provider
+     *         doesn't expose one
      */
     @SuppressWarnings("java:S1172") // template method — subclasses use the usage object
     protected int extractReasoningTokens(JsonObject usageObj) {
@@ -172,6 +205,9 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * ({@code usage.prompt_tokens_details.cached_tokens}) which is also what
      * OpenRouter emits (with {@code usage: {include: true}}). Providers that
      * report differently — or not at all — override this.
+     *
+     * @param usageObj the provider's {@code usage} JSON object
+     * @return cache-read tokens, or {@code 0} when none reported
      */
     protected int extractCachedTokens(JsonObject usageObj) {
         return readUsageInt(usageObj, "prompt_tokens_details", "cached_tokens");
@@ -186,6 +222,9 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      *
      * <p>Cache writes are a disjoint subset of {@code prompt_tokens}, alongside cache
      * reads. They are priced at a premium (Anthropic: 1.25× base for 5-min TTL).
+     *
+     * @param usageObj the provider's {@code usage} JSON object
+     * @return cache-write tokens, or {@code 0} when none reported
      */
     protected int extractCacheCreationTokens(JsonObject usageObj) {
         // Anthropic/OpenRouter: top-level cache_creation_input_tokens.
@@ -200,6 +239,11 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * attached. Subclasses add things like Anthropic's {@code cache_control}
      * breakpoints (via OpenRouter) or Ollama's {@code keep_alive}. Default is no-op
      * because OpenAI and most OpenAI-compat providers cache automatically.
+     *
+     * @param request     the outgoing request body the subclass may mutate
+     * @param chatRequest the higher-level request the JSON was built from
+     *                    (gives subclasses access to message metadata for
+     *                    deciding where to drop cache breakpoints)
      */
     protected void applyCacheDirectives(JsonObject request, ChatRequest chatRequest) {
         // Default: no-op
@@ -254,14 +298,24 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     /**
      * Synchronous chat with an optional custom timeout (seconds).
-     * Pass null for the default 180s timeout.
      *
-     * <p>{@code channel} is the inbound chat channel (web, telegram, slack, …)
-     * that originated the call; the OkHttp dispatcher_wait metric
-     * (recorded by {@link utils.LlmCallEventListener}) is partitioned by it
-     * so each channel's dashboard view shows the dispatcher cost its chats
-     * actually paid. Pass {@code null} for callers without a chat-channel
-     * context (skill promotion, slash commands, scheduled summarization).
+     * @param model          model id to request
+     * @param messages       conversation messages in chronological order
+     * @param tools          tool definitions exposed to the model; may be null
+     * @param maxTokens      completion-token cap, or null for provider default
+     * @param thinkingMode   reasoning-effort level, or null when off / N/A
+     * @param timeoutSeconds custom HTTP timeout in seconds, or null for the
+     *                       default 180s timeout
+     * @param channel        inbound chat channel (web, telegram, slack, …)
+     *                       that originated the call; the OkHttp
+     *                       dispatcher_wait metric (recorded by
+     *                       {@link utils.LlmCallEventListener}) is
+     *                       partitioned by it so each channel's dashboard
+     *                       view shows the dispatcher cost its chats
+     *                       actually paid. Pass {@code null} for callers
+     *                       without a chat-channel context (skill promotion,
+     *                       slash commands, scheduled summarization).
+     * @return the parsed chat completion response
      */
     public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
                              Integer maxTokens, String thinkingMode, Integer timeoutSeconds,
@@ -561,6 +615,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * Build the absolute request URL by joining {@link ProviderConfig#baseUrl}
      * with {@code path}. Tolerates either a trailing slash on baseUrl or a
      * leading slash on path; emits exactly one slash between them.
+     *
+     * @param path API path beneath the provider's base URL (e.g.
+     *             {@code "/chat/completions"})
+     * @return the absolute URI for the request
      */
     protected URI buildUri(String path) {
         var url = config.baseUrl().endsWith("/")
@@ -655,6 +713,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * methods ({@link #extractReasoningTokens}, {@link #extractCachedTokens},
      * {@link #extractCacheCreationTokens}). Subclass overrides are honoured,
      * so provider-specific JSON paths are handled correctly.
+     *
+     * @param usageObj the provider's {@code usage} JSON object
+     * @return the parsed {@link Usage} record with all token-count categories
+     *         populated
      */
     public Usage parseUsage(JsonObject usageObj) {
         return new Usage(
@@ -985,6 +1047,11 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * A fresh slot is numbered {@code max(existing) + 1}. Well-behaved
      * providers (OpenRouter, Anthropic) whose chunks share id and name
      * across the call's streaming lifetime stay on the original slot.
+     *
+     * @param chunks      tool-call delta chunks emitted on the current SSE
+     *                    frame
+     * @param accumulator mutable per-call accumulator, keyed by slot
+     *                    number; mutated in place as chunks are folded in
      */
     public static void mergeToolCallChunks(
             List<ToolCallChunk> chunks,

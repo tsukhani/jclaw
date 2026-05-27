@@ -9,12 +9,16 @@ import java.util.Map;
 /**
  * One MCP tool advertised by a connected server (JCLAW-31).
  *
- * <p>{@code name} and {@code description} are display-facing. {@code inputSchema}
- * is a JSON Schema object the agent's LLM uses to construct {@code tools/call}
- * arguments — passed through to {@link mcp.McpToolAdapter#parameters()} unchanged
- * so the existing tool-call machinery in {@code AgentRunner} sees a normal
- * tool with a schema. The MCP spec guarantees {@code inputSchema} is always
- * an object with {@code type: "object"} (or empty for parameter-less tools).
+ * @param name        display-facing tool name from the MCP server
+ * @param description display-facing prose describing what the tool does
+ * @param inputSchema JSON Schema object the agent's LLM uses to construct
+ *                    {@code tools/call} arguments — passed through to
+ *                    {@link mcp.McpToolAdapter#parameters()} unchanged so
+ *                    the existing tool-call machinery in {@code AgentRunner}
+ *                    sees a normal tool with a schema. The MCP spec
+ *                    guarantees this is always an object with
+ *                    {@code type: "object"} (or empty for parameter-less
+ *                    tools).
  */
 public record McpToolDef(String name, String description, JsonObject inputSchema) {
 

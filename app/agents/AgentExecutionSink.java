@@ -52,8 +52,11 @@ public interface AgentExecutionSink {
     default void onStart() {}
 
     /**
-     * Persist the user turn. {@code attachments} may be {@code null} or
-     * empty for a text-only message.
+     * Persist the user turn.
+     *
+     * @param content     the user's message text
+     * @param attachments file attachments riding with the message; may be
+     *                    {@code null} or empty for a text-only message
      */
     void appendUserMessage(String content, List<AttachmentService.Input> attachments);
 
@@ -72,30 +75,48 @@ public interface AgentExecutionSink {
     void appendAssistantMessage(String content, String toolCalls, String usageJson,
                                 String reasoning, boolean truncated);
 
-    /** Convenience overload: assistant turn without usage, reasoning, or truncated. */
+    /**
+     * Convenience overload: assistant turn without usage, reasoning, or truncated.
+     *
+     * @param content   assistant text
+     * @param toolCalls JSON-encoded tool-call list, or {@code null}
+     */
     default void appendAssistantMessage(String content, String toolCalls) {
         appendAssistantMessage(content, toolCalls, null, null, false);
     }
 
     /**
-     * Persist the result of a tool invocation. {@code structuredJson} may
-     * be {@code null} for tools that don't produce structured output;
-     * the rich-widget renderer (web_search favicons, etc.) reads it when
-     * present.
+     * Persist the result of a tool invocation. The rich-widget renderer
+     * (web_search favicons, etc.) reads {@code structuredJson} when present.
+     *
+     * @param toolCallId     id correlating this result with the assistant
+     *                       turn's {@code tool_calls} entry
+     * @param result         plain-text result body the LLM sees on its next
+     *                       turn
+     * @param structuredJson optional structured payload for richer UI
+     *                       rendering; {@code null} for tools that don't
+     *                       produce one
      */
     void appendToolResult(String toolCallId, String result, String structuredJson);
 
-    /** Convenience overload: tool result with no structured payload. */
+    /**
+     * Convenience overload: tool result with no structured payload.
+     *
+     * @param toolCallId id correlating this result with the assistant
+     *                   turn's {@code tool_calls} entry
+     * @param result     plain-text result body
+     */
     default void appendToolResult(String toolCallId, String result) {
         appendToolResult(toolCallId, result, null);
     }
 
     /**
-     * Called once after the run completes successfully. {@code outputSummary}
-     * is the agent's final assistant text (post-tool-loop).
-     * {@link ConversationSink} ignores this; {@code TaskRunSink} stores it
-     * on the TaskRun row so the monitoring UI can show a one-line summary
-     * in the Timeline.
+     * Called once after the run completes successfully.
+     * {@link ConversationSink} ignores this; {@code TaskRunSink} stores
+     * {@code outputSummary} on the TaskRun row so the monitoring UI can
+     * show a one-line summary in the Timeline.
+     *
+     * @param outputSummary the agent's final assistant text (post-tool-loop)
      */
     default void onComplete(String outputSummary) {}
 
@@ -103,6 +124,8 @@ public interface AgentExecutionSink {
      * Called once if the run fails. {@link ConversationSink} ignores this;
      * {@code TaskRunSink} records the failure reason on the TaskRun row
      * and closes it.
+     *
+     * @param error human-readable failure reason
      */
     default void onFailure(String error) {}
 

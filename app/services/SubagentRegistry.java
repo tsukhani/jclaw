@@ -128,7 +128,17 @@ public final class SubagentRegistry {
         return entry != null && entry.cancelRequested().get();
     }
 
-    /** Outcome of a {@link #kill(Long, String)} call. */
+    /**
+     * Outcome of a {@link #kill(Long, String)} call.
+     *
+     * @param killed       true when this call actually transitioned the run
+     *                     to a terminal state; false when the run was
+     *                     already finished
+     * @param finalStatus  the run's status after this call (the kill target
+     *                     status, or the prior terminal status when the
+     *                     call was a no-op)
+     * @param message      human-readable summary used in audit + UI display
+     */
     public record KillResult(boolean killed, SubagentRun.Status finalStatus, String message) {}
 
     /**

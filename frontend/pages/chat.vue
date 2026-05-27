@@ -1256,6 +1256,63 @@ function isWithinPostAnnounceGrace(): boolean {
 }
 
 /**
+ * Grace window for polling after a {@code task_manager.createTask} call:
+ * once a scheduled / recurring task is in the conversation's history, the
+ * fire that lands on the server has no SSE channel back to this tab (the
+ * task fires on a virtual-thread carrier, not in a chat turn). Poll for
+ * this long after the latest createTask call so the auto-delivered fire
+ * output (TaskExecutor → DeliveryDispatcher web-send) surfaces inline
+ * rather than only on manual reload. Generous because recurring tasks
+ * re-fire indefinitely; one createTask call typically intends to receive
+ * many deliveries over time.
+ */
+const TASK_DELIVERY_POLL_GRACE_MS = 30 * 60_000
+
+/**
+ * Tool name that schedules background tasks; matches
+ * {@code TaskTool.TOOL_NAME} on the backend. Detecting by name (not by
+ * tool-result substring) is stable across the two shapes a tool call
+ * takes in the local list — the SSE {@code tool_call} frame may not
+ * populate {@code resultText} the same way the persisted-row reload
+ * does, but the {@code name} field is invariant.
+ */
+const TASK_MANAGER_TOOL_NAME = 'task_manager'
+
+/**
+ * True when the open conversation has any {@code task_manager} tool call
+ * within {@link TASK_DELIVERY_POLL_GRACE_MS}. While true,
+ * {@link announcePollTick} polls so a task fire's auto-delivered message
+ * (Bug 1 fix) surfaces inline. Scans both shapes the tool call takes in
+ * the local list (mirrors {@link hasPendingAsyncAnnounce}): standalone
+ * tool-role rows post-reload (where the assistant row above carried the
+ * call's name), and live SSE-pushed entries on the streaming assistant's
+ * {@link Message.toolCalls} array pre-reload.
+ *
+ * <p>Triggers on every {@code task_manager} action, not just
+ * {@code createTask} — only createTask actually schedules a new fire,
+ * but updateTask / pause / resume / runNow / cancelTask all leave the
+ * conversation in a state where another fire may land soon, and the cost
+ * of one extra GET per 5s while the grace window is open is trivial.
+ */
+function hasRecentTaskCreate(): boolean {
+  const msgs = messages.value
+  if (!msgs.length) return false
+  const cutoff = Date.now() - TASK_DELIVERY_POLL_GRACE_MS
+  for (const m of msgs) {
+    const messageAge = m.createdAt ? Date.parse(m.createdAt) : NaN
+    // When the message has no createdAt (optimistic), treat as "now" so
+    // we don't skip a just-issued create that races the timestamp write.
+    if (Number.isFinite(messageAge) && messageAge < cutoff) continue
+    if (m.toolCalls?.length) {
+      for (const tc of m.toolCalls) {
+        if (tc.name === TASK_MANAGER_TOOL_NAME) return true
+      }
+    }
+  }
+  return false
+}
+
+/**
  * Refetch the open conversation's messages and append any rows whose server
  * id isn't already present locally. Preserves client-only state on existing
  * rows (toolCallsCollapsed, _key on optimistic placeholders, etc.) by
@@ -1309,12 +1366,20 @@ function announcePollTick() {
   // reactive during the parent's own turn. Resume on the next tick after
   // streaming ends.
   if (streaming.value) return
-  // Two reasons to poll:
+  // Three reasons to poll:
   //   1. An async-spawn is in flight, awaiting its announce row.
   //   2. An announce row arrived within POST_ANNOUNCE_GRACE_MS — the
   //      backend's yield-resume may still be writing follow-up messages
   //      (Phase 4 "import starting", Phase 5 "ready to watch", etc.).
-  if (!hasPendingAsyncAnnounce() && !isWithinPostAnnounceGrace()) return
+  //   3. A task_manager.createTask call landed within
+  //      TASK_DELIVERY_POLL_GRACE_MS — its scheduled fire will auto-deliver
+  //      back into this conversation on a virtual-thread carrier with no
+  //      SSE channel to this tab (TaskExecutor → DeliveryDispatcher
+  //      web-send). Without polling, the delivered Message row sits in the
+  //      DB until the user reloads.
+  if (!hasPendingAsyncAnnounce()
+    && !isWithinPostAnnounceGrace()
+    && !hasRecentTaskCreate()) return
   void pollForAnnounce()
 }
 
@@ -2488,7 +2553,8 @@ async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]>
 // gap doesn't manifest in practice.
 // eslint-disable-next-line vue/no-expose-after-await
 defineExpose({ addAttachments, attachedFiles, attachError, loadConversation, messages,
-  hasPendingAsyncAnnounce, pollForAnnounce, resolveAndLoadConversation, subagentTranscript })
+  hasPendingAsyncAnnounce, hasRecentTaskCreate, pollForAnnounce, resolveAndLoadConversation,
+  subagentTranscript })
 
 function exportConversation() {
   if (!displayMessages.value.length) return

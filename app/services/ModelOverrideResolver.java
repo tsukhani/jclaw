@@ -33,10 +33,13 @@ public final class ModelOverrideResolver {
     private ModelOverrideResolver() {}
 
     /**
-     * The resolved (provider, modelId) pair for a turn. Either field may be
-     * {@code null} when neither the conversation override nor the agent
-     * default supplies a value — callers handle that by surfacing a
-     * "no LLM provider configured" error to the user.
+     * The resolved (provider, modelId) pair for a turn.
+     *
+     * @param provider provider name; {@code null} when neither the
+     *                 conversation override nor the agent default supplies
+     *                 a value (callers surface a
+     *                 "no LLM provider configured" error)
+     * @param modelId  model id; same null semantics as {@code provider}
      */
     public record Resolved(String provider, String modelId) {}
 
