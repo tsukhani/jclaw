@@ -8,7 +8,7 @@ Reach for a reminder when:
 - You want the nudge to land somewhere visible without polluting your chat scrollback or the agent's context.
 - The schedule is what matters, not the work — the agent doesn't need to *do* anything when the timer fires.
 
-The [Reminders](/reminders) page is the dashboard for everything you've scheduled.
+The [Reminders](/reminders) page is the dashboard for everything you've scheduled. If you're choosing between reminders, [tasks](/guide#tasks), and [subagents](/guide#subagents), the [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) section lays out the three side by side.
 
 ## How reminders get created
 

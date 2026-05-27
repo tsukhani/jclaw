@@ -18,6 +18,7 @@
  * bookmarks point at it.
  */
 import {
+  ArrowsRightLeftIcon,
   BellAlertIcon,
   BookOpenIcon,
   ChatBubbleOvalLeftEllipsisIcon,
@@ -40,6 +41,7 @@ import conversationsChannelsMd from '../../../docs/user-guide/conversations-and-
 import subagentsMd from '../../../docs/user-guide/subagents.md?raw'
 import tasksMd from '../../../docs/user-guide/tasks.md?raw'
 import remindersMd from '../../../docs/user-guide/reminders.md?raw'
+import subagentsTasksRemindersMd from '../../../docs/user-guide/subagents-tasks-reminders.md?raw'
 import skillsToolsMcpMd from '../../../docs/user-guide/skills-tools-mcp.md?raw'
 import settingsMd from '../../../docs/user-guide/settings.md?raw'
 import logsDashboardMd from '../../../docs/user-guide/logs-and-dashboard.md?raw'
@@ -98,6 +100,12 @@ export const sections: GuideSection[] = [
     title: 'Reminders',
     icon: BellAlertIcon,
     content: remindersMd,
+  },
+  {
+    id: 'subagents-tasks-reminders',
+    title: 'Subagents, Tasks, or Reminders?',
+    icon: ArrowsRightLeftIcon,
+    content: subagentsTasksRemindersMd,
   },
   {
     id: 'skills-tools-mcp',

@@ -8,7 +8,7 @@ Reach for a subagent when:
 - You want to fan out work in parallel without blocking the main conversation.
 - You want a separate transcript that's easy to inspect on its own.
 
-This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the four ways to inspect what a child did.
+This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the four ways to inspect what a child did. If you're choosing between subagents, [tasks](/guide#tasks), and [reminders](/guide#reminders), the [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) section lays out the three side by side.
 
 ## The simplest case
 

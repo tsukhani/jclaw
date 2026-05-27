@@ -42,7 +42,7 @@ The tour is fast (a few minutes) and complementary to this guide:
 ## Where to go next
 
 - New to agents? Start with [Agents](/guide#agents) and then [Chat](/guide#chat).
-- Want background or recurring work? Read [Tasks](/guide#tasks) and [Subagents](/guide#subagents).
+- Want background or recurring work? Read [Tasks](/guide#tasks), [Subagents](/guide#subagents), and [Reminders](/guide#reminders) — or jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) for a side-by-side comparison if you're not sure which one fits.
 - Connecting an external chat surface (Slack, Telegram, WhatsApp)? Read [Conversations & Channels](/guide#conversations-and-channels).
 - Plugging in tools, skills, or external MCP servers? Read [Skills, Tools & MCP Servers](/guide#skills-tools-mcp).
 - Configuring providers, API keys, performance caps? Read [Settings](/guide#settings).

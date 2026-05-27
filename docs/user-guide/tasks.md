@@ -7,7 +7,7 @@ A **task** is a unit of work an agent runs in the background, outside the flow o
 - **Interval** — runs every N seconds, minutes, hours, or days, with no calendar awareness.
 - **Cron** — runs on a Spring 6-field cron schedule, or one of the `@daily` / `@hourly` shortcuts.
 
-The [Tasks](/tasks) page is where you observe and manage every task across all your agents. For schedule-and-nudge work that doesn't need an agent turn — "remind me in 30 minutes to take the laundry out" — reach for [Reminders](/guide#reminders) instead.
+The [Tasks](/tasks) page is where you observe and manage every task across all your agents. For schedule-and-nudge work that doesn't need an agent turn — "remind me in 30 minutes to take the laundry out" — reach for [Reminders](/guide#reminders) instead. If you're trying to choose between tasks, reminders, and subagents, the [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) section lays out the three side by side.
 
 ## How tasks get created
 
