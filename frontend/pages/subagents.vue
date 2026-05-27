@@ -223,7 +223,7 @@ const {
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-lg font-semibold text-fg-strong">
-        Subagent Runs
+        Subagents
       </h1>
       <div class="flex items-center gap-2">
         <template v-if="!selectMode">

@@ -53,7 +53,7 @@ describe('Subagents admin page', () => {
     await flushPromises()
 
     const text = component.text()
-    expect(text).toContain('Subagent Runs')
+    expect(text).toContain('Subagents')
     expect(text).toContain('#11')
     expect(text).toContain('#12')
     expect(text).toContain('main-sub-abc')

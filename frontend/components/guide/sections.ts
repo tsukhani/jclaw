@@ -18,6 +18,7 @@
  * bookmarks point at it.
  */
 import {
+  BellAlertIcon,
   BookOpenIcon,
   ChatBubbleOvalLeftEllipsisIcon,
   ChartBarIcon,
@@ -38,6 +39,7 @@ import agentsMd from '../../../docs/user-guide/agents.md?raw'
 import conversationsChannelsMd from '../../../docs/user-guide/conversations-and-channels.md?raw'
 import subagentsMd from '../../../docs/user-guide/subagents.md?raw'
 import tasksMd from '../../../docs/user-guide/tasks.md?raw'
+import remindersMd from '../../../docs/user-guide/reminders.md?raw'
 import skillsToolsMcpMd from '../../../docs/user-guide/skills-tools-mcp.md?raw'
 import settingsMd from '../../../docs/user-guide/settings.md?raw'
 import logsDashboardMd from '../../../docs/user-guide/logs-and-dashboard.md?raw'
@@ -90,6 +92,12 @@ export const sections: GuideSection[] = [
     title: 'Tasks',
     icon: ClipboardDocumentCheckIcon,
     content: tasksMd,
+  },
+  {
+    id: 'reminders',
+    title: 'Reminders',
+    icon: BellAlertIcon,
+    content: remindersMd,
   },
   {
     id: 'skills-tools-mcp',
