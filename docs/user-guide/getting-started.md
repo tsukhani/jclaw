@@ -8,14 +8,28 @@ JClaw is a workbench for building, running, and observing AI agents. You configu
 
 Everything you create — agents, conversations, tasks, subagent runs — is **scoped to your login**. You can't see another operator's resources, and they can't see yours.
 
+## How the rest of the guide is organized
+
+The whole product layers on a single core loop: you send a message in [Chat](/chat) and an agent answers. Every other capability in JClaw is a layer on top of that:
+
+1. **[Chat](/guide#chat)** is the base experience — pick an agent, send messages, get answers.
+2. **[Agents](/guide#agents)** is where you configure the entities answering you — model, prompt, tools, skills.
+3. **[Conversations & Channels](/guide#conversations-and-channels)** is your chat history *and* how to make agents reachable from Slack, Telegram, and WhatsApp instead of just the web app.
+4. **[Subagents](/guide#subagents)**, **[Tasks](/guide#tasks)**, and **[Reminders](/guide#reminders)** are three flavors of "stuff happens outside the current chat turn" — parallel work *now*, scheduled work *later*, and pure scheduled notifications. [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) is the side-by-side comparison if you're not sure which fits.
+5. **[Skills, Tools & MCP Servers](/guide#skills-tools-mcp)** is how you extend what agents can do beyond plain text — web search, shell exec, external systems.
+6. **[Settings](/guide#settings)** is the operator's control panel for everything above.
+7. **[Logs & Dashboard](/guide#logs-and-dashboard)** is how you watch what's happening across the whole platform.
+
+Read in that order if it's your first time. Skim if you're hunting for a specific thing.
+
 ## Your first five minutes
 
 1. **Set a theme.** The toggle is in the top-right of every page (system / light / dark).
-2. **Visit [Settings](/settings) and add at least one model provider.** Without an API key (or a local provider like Ollama configured), no agent can answer. See the [Settings](/guide#settings) section of this guide for what each provider needs.
+2. **Visit [Settings](/settings) and add at least one LLM provider.** Without an API key (or a local provider like Ollama configured), no agent can answer. See the [Settings](/guide#settings) section of this guide for what each provider needs.
 3. **Visit [Agents](/agents) and create or enable an agent.** Pick a model, write a short system prompt, and turn on whatever tools you need. The default agent template is a sensible starting point.
 4. **Open [Chat](/chat), pick that agent in the sidebar, and say hello.** Your conversation appears in the sidebar and you can come back to it later.
 
-That's the minimum loop. The rest of this guide is how to do more — schedule background work, fan out subagents, plug in external chat surfaces, install skills.
+That's the minimum loop. Everything else in this guide is how to do more with it.
 
 ## The sidebar at a glance
 
@@ -23,12 +37,12 @@ The left sidebar is grouped by intent:
 
 | Group | What lives there |
 | --- | --- |
-| **Chat** | [Chat](/chat) (live conversations), [Channels](/channels) (external chat surfaces like Slack), [Conversations](/conversations) (every prior thread). |
+| **Chat** | [Chat](/chat) (live conversations), [Channels](/channels) (external chat surfaces like Slack), [Reminders](/reminders) (your scheduled nudges), [Conversations](/conversations) (every prior thread). |
 | **Ops** | [Agents](/agents), [Subagents](/subagents), [Tasks](/tasks), [Skills](/skills), [Tools](/tools), [MCP Servers](/mcp-servers). |
 | **Admin** | [Settings](/settings), [Logs](/logs). |
 | **Help** | Feedback, Guided Tour, this **User Guide**. |
 
-A green pip at the bottom of the sidebar shows the API status. Red means the backend can't be reached — most pages will fail until it recovers.
+At the bottom, two diagnostic rows: your JClaw version (with a green/red pip for API status) and the Play framework version (with a green/amber pip showing whether it matches the pinned `.play-version`). Red on the first dot means the backend is unreachable — most pages will fail until it recovers.
 
 ## The Guided Tour
 
@@ -41,11 +55,7 @@ The tour is fast (a few minutes) and complementary to this guide:
 
 ## Where to go next
 
-- New to agents? Start with [Agents](/guide#agents) and then [Chat](/guide#chat).
-- Want background or recurring work? Read [Tasks](/guide#tasks), [Subagents](/guide#subagents), and [Reminders](/guide#reminders) — or jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) for a side-by-side comparison if you're not sure which one fits.
-- Connecting an external chat surface (Slack, Telegram, WhatsApp)? Read [Conversations & Channels](/guide#conversations-and-channels).
-- Plugging in tools, skills, or external MCP servers? Read [Skills, Tools & MCP Servers](/guide#skills-tools-mcp).
-- Configuring providers, API keys, performance caps? Read [Settings](/guide#settings).
+The natural next step is [Chat](/guide#chat) — the base loop everything else builds on.
 
 :::tip
 Every page title in the top breadcrumb takes you back to that page. The **JClaw** crumb is always home (the [Dashboard](/)).

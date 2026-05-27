@@ -1,6 +1,6 @@
 # Tasks
 
-A **task** is a unit of work an agent runs in the background, outside the flow of a live conversation. Tasks come in four flavors:
+[Subagents](/guide#subagents) fan work out *now*. **Tasks** fan work out *later*. A task is a unit of background work the agent runs on a schedule — outside the flow of a live conversation. Tasks come in four flavors:
 
 - **Immediate** — runs as soon as it's created.
 - **Scheduled** — runs once, at a specific date and time.
@@ -184,7 +184,8 @@ Tasks are scoped to the owning agent. One agent never sees, pauses, or cancels a
 
 ## Where to go next
 
+Tasks fire an agent turn on a schedule. The third outside-the-turn flavor strips even the agent out of the loop:
+
 - [Reminders](/guide#reminders) — schedule-with-no-LLM nudges that surface as toasts or Telegram messages.
-- [Agents](/guide#agents) — enable `task_manager` on the agents that should be able to schedule work.
-- [Chat](/guide#chat) — ask an agent to schedule a task for you.
-- [Subagents](/guide#subagents) — for parallel work within a single conversation rather than scheduled work over time.
+- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.
+- [Agents](/guide#agents) — to enable `task_manager` on the agents that should be able to schedule work.

@@ -58,6 +58,9 @@ That's one **task** (the daily 9am schedule) whose description tells the agent t
 
 ## Where to go next
 
+Now that you can pick the right abstraction, the next layer is about giving the agent itself more powers:
+
+- [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) — extend what your agents can do at the capability layer.
 - [Subagents](/guide#subagents) — the three spawn modes, two context modes, and the `async` + `yield` pattern.
 - [Tasks](/guide#tasks) — the four task types, eight `task_manager` actions, and Spring 6-field cron.
 - [Reminders](/guide#reminders) — toast and Telegram delivery surfaces, cascade-delete semantics.

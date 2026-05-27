@@ -1,8 +1,12 @@
 # Settings
 
-The [Settings](/settings) page is the operator's control panel. It groups configuration into sections, scrollable on one long page so you can hit <kbd>Ctrl</kbd>+<kbd>F</kbd> and find anything.
+The [Settings](/settings) page is the operator's control panel. Configuration is grouped into sections on one long scrollable page, so <kbd>Ctrl</kbd>+<kbd>F</kbd> finds anything by key name. Most knobs apply live — sections that need a JVM restart say so inline.
 
-This page summarizes each section. The settings page itself is the source of truth for the current defaults and available knobs.
+This page summarizes each section. The settings page itself is the source of truth for current defaults and available knobs; hover any field's info icon for an inline tooltip.
+
+## Auto-update model prices
+
+A standalone opt-in toggle hoisted above LLM Providers. When on, JClaw fetches the community-maintained `model_prices_and_context_window.json` from `github.com/BerriAI/litellm` nightly and fills in missing prices on your configured models. Prices you've set manually are never overwritten. Off by default — the toggle is explicit so the outbound GitHub call is a deliberate opt-in. A **Refresh now** button forces an immediate fetch.
 
 ## LLM Providers
 
@@ -10,13 +14,15 @@ The most important section. Each row is a model provider JClaw can talk to:
 
 - **OpenAI, Anthropic, Google, Mistral, etc.** — first-party APIs. Paste in your API key and toggle **Enabled**.
 - **Ollama (local or cloud)** — runs models on your hardware or on Ollama's cloud. Set the base URL; no API key needed for local.
-- **OpenRouter, Groq, etc.** — aggregators that proxy many models. Same shape: base URL + API key.
+- **OpenRouter, Groq, DeepSeek, Z.AI, Kimi, etc.** — aggregators and frontier-model providers. Same shape: base URL + API key.
 
 For each provider you can:
 
 - Set the **API key** (stored encrypted at rest).
-- Pick a **Default model** — what new agents start with for that provider.
-- Mark whole providers as **Enabled / disabled** to hide them from the agent picker.
+- Set the **base URL** (most providers ship with a sensible default).
+- Mark **Enabled / disabled** to hide the provider from the agent picker.
+- **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability badges (vision, audio, thinking) confirmed by the provider or guessed from the model name.
+- **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in.
 
 If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
 
@@ -26,79 +32,139 @@ Each operator's API keys are scoped to their own login. Sharing keys with a team
 
 ## OCR
 
-Optical character recognition for image attachments. Pick a provider (e.g., Tesseract for local OCR, a cloud OCR provider for higher quality) and enable. With OCR on, image attachments get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
+Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
+
+- **active** — binary detected on PATH *and* enabled.
+- **disabled** — detected but turned off.
+- **not detected** — binary missing on PATH; install hint shown inline.
+
+Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
 
 ## Search Providers
 
-Configure the search engines available to the web-search tool. Common options:
+Web search engines available to the `web_search` tool. Drag rows to **reorder priority** — providers are tried in order, and the next one is tried automatically if the first fails. Each row shows three states:
 
-- **Tavily** — purpose-built for LLM web search; requires an API key.
-- **Brave Search** — privacy-respecting; requires an API key.
-- **DuckDuckGo** — no key needed; less rich results.
-- **Serper, Bing, Google** — others.
+- **active** — enabled *and* API key configured.
+- **needs API key** — enabled but the key is missing.
+- **disabled** — turned off.
 
-You can enable multiple; the tool uses the one you mark as default unless an agent picks otherwise.
+Typical providers: **Tavily**, **Brave Search**, **DuckDuckGo** (no key needed), **Serper**, **Bing**, **Google**, **Perplexity**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
 
 ## Transcription
 
-Speech-to-text provider for voice notes routed to non-audio models. OpenAI's Whisper API is the typical pick; local Whisper is also an option if you've set it up.
+Pairs every audio attachment with a text transcript before it reaches the LLM. Audio-capable models still receive native audio; text-only models receive the transcript as text.
+
+Master toggle, then a backend radio group:
+
+- **OpenRouter** — reuses your OpenRouter API key from LLM Providers.
+- **OpenAI** — reuses your OpenAI API key.
+- **Self-Hosted Whisper** — runs `whisper.cpp` locally; the chosen model file (tiny / base / small / medium / large variants, ~75 MB to ~3 GB) downloads from Hugging Face on first use with a progress bar. Requires `ffmpeg` on PATH; the page warns inline if it's missing.
+
+Cloud backends are disabled in the radio group until their underlying provider key is configured in LLM Providers.
 
 ## Chat
 
-Behavior settings for the in-app [Chat](/chat) surface:
+Behavior limits for the in-app [Chat](/chat) surface:
 
-- **Default streaming behavior** — whether new conversations start with streaming on or off.
-- **Idle eviction** — when an inactive conversation's context gets compacted automatically.
-- **Compose defaults** — input box sizing, hotkeys.
+| Key                    | Default | Meaning                                                                                          |
+|------------------------|---------|--------------------------------------------------------------------------------------------------|
+| `maxToolRounds`        | 8       | Maximum tool calls the agent can make per turn before it must give a final answer.               |
+| `maxContextMessages`   | 40      | How many recent messages get sent with each LLM request. Older messages are dropped to stay in the context window. |
+
+An **Advanced — context window & compaction** collapsible reveals four lower-level knobs:
+
+| Key                          | Default | Meaning                                                                                                 |
+|------------------------------|---------|---------------------------------------------------------------------------------------------------------|
+| `compactionReserveTokens`    | 8000    | Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed `contextWindow − reserve`. Larger reserve = compaction fires sooner. |
+| `compactionMinTurns`         | 8       | Minimum messages in the to-summarize prefix before auto-compaction will run. Below this, the gate skips and trim drops oldest instead. Manual `/compact` uses a relaxed threshold (2). |
+| `compactionKeepMessages`     | 4       | Minimum messages kept verbatim at the end of the conversation after compaction. Smaller keep = more aggressive summarization. |
+| `jtokkit safety multiplier`  | 1.3×    | Fudge factor applied to jtokkit's token estimate when the model uses a fallback encoding (Kimi, DeepSeek, Gemma, Qwen, GLM, Mistral, Llama). Higher = trim/compact earlier, safer. OpenAI-family models use 1.0× regardless. |
 
 ## Subagents
 
-The two hard caps that govern [Subagents](/guide#subagents):
+Two hard caps that govern [Subagents](/guide#subagents):
 
-| Key                              | Default | Meaning                                                            |
-|----------------------------------|---------|--------------------------------------------------------------------|
-| `subagent.maxDepth`              | 1       | How deep the parent → child → grandchild chain can go.             |
-| `subagent.maxChildrenPerParent`  | 5       | How many concurrently-running children a single parent can have.   |
+| Key                               | Default | Meaning                                                                                |
+|-----------------------------------|---------|----------------------------------------------------------------------------------------|
+| `subagent.maxDepth`               | 1       | How deep the parent → child → grandchild chain can go (1 = no grandchildren).          |
+| `subagent.maxChildrenPerParent`   | 5       | How many concurrently `RUNNING` children a single parent can have in flight.           |
 
-Bump for explicit fan-in patterns; keep low for runaway protection.
+Violations emit `SUBAGENT_LIMIT_EXCEEDED` on the [Logs](/logs) page and return a plain-text refusal to the model. Changes apply live; no restart needed.
+
+## Tasks
+
+Two knobs for the [Tasks](/guide#tasks) subsystem:
+
+| Key                       | Default | Meaning                                                                                                |
+|---------------------------|---------|--------------------------------------------------------------------------------------------------------|
+| `retentionDays`           | 30      | Days a terminal task (`COMPLETED` / `FAILED` / `CANCELLED` / `LOST`) stays in the DB before `TaskCleanupJob` hard-deletes it along with its run history. `0` disables auto-cleanup entirely. Active tasks (`PENDING` / `ACTIVE` / `RUNNING`) are never touched. Max: 3650 (≈10 years). |
+| `defaultTimezone`         | `UTC`   | IANA timezone applied to `CRON` / `SCHEDULED` tasks that don't specify their own. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
+
+The retention TTL is also displayed next to the [Tasks](/tasks) page title so operators don't get surprised by auto-deletes.
 
 ## Performance
 
-Caps and tuning knobs that affect how aggressively JClaw uses model providers — request concurrency, timeouts, retry policy, and the budgets used for streaming.
+OkHttp dispatcher concurrency caps for outbound LLM calls:
 
-The defaults are tuned for typical use. Raise them only if you're hitting throughput limits and have already confirmed the provider isn't rate-limiting you.
+| Key                                  | Default                | Meaning                                                              |
+|--------------------------------------|------------------------|----------------------------------------------------------------------|
+| `dispatcher.llm.maxRequestsPerHost`  | `clamp(8 × cores, 64, 256)` | In-flight calls allowed to a single provider.                   |
+| `dispatcher.llm.maxRequests`         | `2 × maxRequestsPerHost`    | Total in-flight calls across all providers.                     |
+
+Auto-tuned at first start; transiently bumped during loadtest if `--concurrency` would otherwise saturate. Changes apply live.
 
 ## Uploads
 
-What kinds of files agents may upload, how large, and where they live:
+Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIME decides which limit applies — images, audio, or everything else.
 
-- **Max file size** — per attachment.
-- **Allowed MIME types** — restrict what can be attached.
-- **Storage backend** — local disk by default; some operators back this with object storage.
+| Key                | Default | Bound                                                          |
+|--------------------|---------|----------------------------------------------------------------|
+| `maxImageBytes`    | 20 MB   | Image uploads (most vision models accept up to 20 MB).         |
+| `maxAudioBytes`    | 100 MB  | Audio uploads (~1 hour at 128 kbps).                           |
+| `maxFileBytes`     | 50 MB   | Every other attachment type (PDFs, text, archives, etc.).      |
+| `maxFiles`         | 5       | Max files per chat message. System-wide ceiling is 5.          |
+
+Takes effect without a restart; raise `play.netty.maxContentLength` in `conf/application.conf` if you need over the bundled 512 MB transport-layer ceiling.
 
 ## Skills Promotion
 
-Behavior for the **promote-to-global** drag-drop on the [Skills](/skills) page — whether promotion is gated behind a confirmation, what metadata is required, etc.
+LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) page. Promoted skills run an LLM pass that strips installation scripts and external network calls.
+
+| Key                                | Default                    | Meaning                                                                       |
+|------------------------------------|----------------------------|-------------------------------------------------------------------------------|
+| `skillsPromotion.provider`         | (main agent's provider)    | LLM provider for the sanitization pass. Defaults to the main agent's.         |
+| `skillsPromotion.model`            | (main agent's model)       | Model id paired with the above.                                               |
+| `skillsPromotion.timeoutSeconds`   | 180                        | Hard timeout for one sanitization pass (30–900 s).                            |
+| `skillsPromotion.batchSizeKb`      | 200                        | Source-text batch size sent to the LLM in one pass (10–1000 KB).              |
 
 ## Shell Execution
 
-The system-wide allowlist for the shell tool. Each entry is a command (with optional argument pattern) the agent is permitted to run. The allowlist applies to every agent unless an agent has **Bypass allowlist** turned on in its [Agents](/agents) config.
+Allowlist and timeout for the shell tool. Per-agent enable/disable lives on the [Tools](/tools) page; this section configures the shared execution policy.
+
+| Key                            | Default | Meaning                                                                                              |
+|--------------------------------|---------|------------------------------------------------------------------------------------------------------|
+| `shell.allowlist`              | (empty) | Newline-separated list of commands (with optional argument patterns) the agent may run.              |
+| `shell.defaultTimeoutSeconds`  | 30      | Per-command wall-clock budget (1–300 s).                                                              |
 
 :::gotcha
-The allowlist is the safety floor for shell access. An empty allowlist means agents can't run anything via the shell tool unless they have **Bypass allowlist** on. Be deliberate about what you add here.
+The allowlist is the safety floor for shell access. An empty allowlist plus no per-agent **Bypass allowlist** means agents can't run anything via the shell tool. Be deliberate about what you add here.
 :::
 
 ## Malware and Virus Scanners
 
-Configure scanning of file uploads against a local or cloud antivirus. Off by default; turn on for environments where users can upload arbitrary files.
+Hash-based reputation lookups that scan every binary inside a skill before it's installed. Each scanner hashes the file with SHA-256 and asks an external service whether that hash appears in its known-malware catalog — **file bytes never leave the host**.
+
+Multiple scanners run independently and compose under OR: a skill is rejected if any enabled scanner flags any binary. A scanner is only active when both **enabled** is on *and* its API key is configured. Each row links to the provider's signup page.
+
+Off by default; turn on for environments where users can upload arbitrary skill bundles.
 
 ## Password
 
-Change your operator login password. JClaw requires you to enter the current password and pick a new one that meets the configured strength policy.
+The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out — on the next access you'll be routed to the setup screen to choose a new password.
 
 ## Unmanaged keys
 
-A read-only view of any provider/tool API keys present in the underlying configuration files that JClaw didn't write itself. Useful when you've layered config across environments and want to see what's coming from where.
+A read-only diagnostic list that appears only when the Config DB contains keys not owned by any section above. Usually stale rows from a prior schema or mid-migration state — a signal that something needs cleanup, not a place to add new config.
 
 ---
 
@@ -109,7 +175,7 @@ The provider list is long. Don't enable a provider you're not using — every en
 :::
 
 :::note Restart sensitivity
-Most settings take effect immediately. A few performance and provider settings (those that affect connection pools) only take effect at the next server restart; JClaw flags those with an inline note.
+Most settings take effect immediately. A handful (some OCR backends, a few provider settings that affect connection pools) only take effect at the next server restart; the UI flags those with an inline note.
 :::
 
 ## Where to go next

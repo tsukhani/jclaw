@@ -1,6 +1,6 @@
 # Reminders
 
-A **reminder** is a special kind of [task](/guide#tasks) whose only job is to nudge you, in your own words, at the time you asked. Unlike a regular task, a reminder skips the LLM entirely when it fires — the description you wrote is the message you'll see, verbatim.
+[Tasks](/guide#tasks) fire an agent turn on a schedule. **Reminders** strip that down further: a scheduled message you've already written, delivered to you verbatim, with no LLM in the loop at fire time. They're the lightest of the three "outside-this-turn" abstractions — pure scheduling, no thinking.
 
 Reach for a reminder when:
 
@@ -126,6 +126,8 @@ Reminders never write to the agent's conversation history. The LLM cannot see pa
 
 ## Where to go next
 
+You've now seen all three outside-the-turn flavors. The natural next step is the comparison, then on to giving your agents more powers:
+
+- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.
+- [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) — extend what agents can do.
 - [Tasks](/guide#tasks) — the broader scheduling subsystem reminders are built on.
-- [Chat](/guide#chat) — ask an agent to set a reminder for you.
-- [Conversations & Channels](/guide#conversations-and-channels) — for Telegram delivery, the channel binding lives here.

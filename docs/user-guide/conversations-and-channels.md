@@ -1,8 +1,11 @@
 # Conversations & Channels
 
-JClaw separates **conversations** (threads of messages) from **channels** (the chat surface those messages came in on). [Chat](/chat) is the built-in surface; channels let agents reach you through Slack, Telegram, or WhatsApp.
+So far this guide has been about chatting *inside the JClaw web app*. This section covers two things that extend the base loop:
 
-This section covers both: how to browse your conversation history, and how to plug an agent into an external chat app.
+- **Conversations** — every thread the platform has ever had, searchable and exportable.
+- **Channels** — how to make an agent reachable outside the web app, over Slack, Telegram, or WhatsApp.
+
+JClaw separates these two concepts on purpose: a **conversation** is a thread of messages; a **channel** is the surface that thread came in on. [Chat](/chat) is the built-in surface, and external channels are the extra layer.
 
 ## Conversations
 
@@ -10,26 +13,29 @@ The [Conversations](/conversations) page is a searchable archive of every top-le
 
 ### Filtering and search
 
-The filter bar above the table accepts:
+The filter bar at the top of the page accepts free-text keywords and typed keys:
 
-- **Name** — partial match on the conversation preview (the first user message, usually).
-- **Channel** — restrict to `web`, `slack`, `telegram`, `whatsapp`, etc.
-- **Agent** — restrict to conversations served by a specific agent.
-- **Peer** — when the channel is external, the external user id (phone number, Telegram handle, Slack user id).
+| Key          | Example                | Matches                                                            |
+|--------------|------------------------|--------------------------------------------------------------------|
+| `q:`         | `q:morning`            | Lucene full-text on the conversation's messages.                    |
+| `name:`      | `name:planning`        | Substring match on the conversation preview (the first user message). |
+| `channel:`   | `channel:slack`        | Restrict to one of `web`, `slack`, `telegram`, `whatsapp`.          |
+| `agent:`     | `agent:main-bot`       | Conversations served by a specific agent.                           |
+| `peer:`      | `peer:+15551234567`    | The external user id (Telegram handle, Slack user id, phone number). Blank for web chat. |
 
-Filters compound. Clear them by clicking the **×** on each chip, or by removing them in the filter bar.
+Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversations from the scrum-bot agent whose messages mention "retro." Clear a filter chip with the **×** on it, or remove the token from the bar.
 
 ### What each row shows
 
-| Column      | Meaning                                                                              |
-|-------------|--------------------------------------------------------------------------------------|
-| **ID**      | The conversation id. Use this when reporting an issue or referencing in a tool call. |
-| **Preview** | The conversation's first user message (truncated).                                   |
-| **Channel** | Where it came in from.                                                               |
-| **Agent**   | Which agent answered.                                                                |
-| **Peer**    | External user id (blank for in-app web chat).                                        |
-| **Messages**| How many messages are in the thread.                                                 |
-| **Created / Updated** | Timestamps.                                                                |
+| Column                | Meaning                                                                              |
+|-----------------------|--------------------------------------------------------------------------------------|
+| **ID**                | The conversation id. Use this when reporting an issue or referencing in a tool call. |
+| **Preview**           | The conversation's first user message (truncated).                                   |
+| **Channel**           | Where it came in from.                                                               |
+| **Agent**             | Which agent answered.                                                                |
+| **Peer**              | External user id (blank for in-app web chat).                                        |
+| **Messages**          | How many messages are in the thread.                                                 |
+| **Created / Updated** | Timestamps.                                                                          |
 
 Click any row to open the conversation in [Chat](/chat) (read-only if it came from a subagent run; fully editable if it's your own thread).
 
@@ -41,19 +47,27 @@ The **Export all** button downloads the current filtered view as a CSV — usefu
 
 Select one or more rows and use the bulk action menu to delete. Deletion removes the thread and all its messages permanently; there's no undo.
 
-:::gotcha
-Deleting a conversation cascade-deletes every subagent run spawned from it — both the child transcripts and their audit rows on the [Subagents](/subagents) page. This is true for both the per-row delete and the bulk **Delete all matching** action. If you want to keep a child transcript, open it from the [Subagents](/subagents) page and use [Chat](/chat) → **Export as Markdown** *before* deleting the parent.
+:::gotcha Cascade
+Deleting a conversation cascade-deletes every subagent run spawned from it — both the child transcripts and their audit rows on the [Subagents](/subagents) page. If you want to keep a child transcript, open it from [Subagents](/subagents) and use [Chat](/chat) → **Export as Markdown** *before* deleting the parent.
 :::
 
 ## Channels
 
-The [Channels](/channels) page lets you connect external chat surfaces so an agent can serve users outside the JClaw web app. JClaw currently supports:
+[Channels](/channels) lets you reach the same agents from outside JClaw. The page shows three cards, one per supported external surface:
 
 - **Telegram** — per-bot bindings, each routed to its own agent.
 - **Slack** — one workspace binding.
 - **WhatsApp** — one Cloud-API binding.
 
-Each surface shows its current status in the channel card: `active`, `inactive`, or `not configured`.
+Each card shows its current status: `<N> active`, `not configured`, `active`, or `inactive`.
+
+The shared mental model is the same across all three:
+
+1. You give JClaw the channel-specific credentials (bot tokens, signing secrets, webhook strings).
+2. You bind that channel to an agent — or leave it unbound, in which case the [Main Agent](/guide#agents) handles traffic.
+3. JClaw routes incoming messages to the bound agent and streams replies back over the same channel.
+
+External messages flow into the same [Conversations](/conversations) page as web chat, so you can read the full history in-app without bouncing between Slack and Telegram.
 
 ### Telegram
 
@@ -64,27 +78,27 @@ You'll need:
 - A bot token from Telegram's BotFather.
 - An [agent](/agents) you want this bot to run as.
 
-The bot starts receiving messages as soon as you save and enable the binding.
+The bot starts receiving messages as soon as you save and enable the binding. Telegram surfaces JClaw's [slash commands](/guide#chat) (`/new`, `/reset`, `/compact`, …) in its native autocomplete dropdown automatically.
 
 ### Slack
 
-Configure a single workspace via:
+Configure a single workspace by clicking **Configure** on the Slack card:
 
-- **botToken** — your Slack app's bot token (xoxb-…).
-- **signingSecret** — the signing secret from your app's Basic Information page.
+- **botToken** — your Slack app's bot token (`xoxb-…`).
+- **signingSecret** — the signing secret from your Slack app's Basic Information page.
 
-Save and toggle **Enabled** on. The Main Agent serves Slack traffic unless a specific agent is bound to the workspace.
+Save and toggle **Enabled** on. The Main Agent serves Slack traffic by default; bind a specific agent to the workspace through that agent's config if you want a different one.
 
 ### WhatsApp
 
-Cloud-API integration. You'll need:
+Cloud-API integration via Meta's WhatsApp Business Platform. You'll need:
 
 - **phoneNumberId** — from the WhatsApp Business Platform.
 - **accessToken** — a long-lived access token for the same number.
 - **appSecret** — your Meta app's secret.
-- **verifyToken** — any string you pick; you'll paste the same string into Meta's webhook config so JClaw can verify incoming traffic.
+- **verifyToken** — any string you choose; you paste the same string into Meta's webhook config so JClaw can verify incoming traffic.
 
-Save, enable, and configure the webhook URL on Meta's side per their docs.
+Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
 
 ## How channels and conversations connect
 
@@ -94,10 +108,10 @@ When a message arrives over an external channel, JClaw:
 2. Routes the message to the bound agent (or to the Main Agent if no binding exists).
 3. Streams the reply back over the same channel.
 
-Every external message is also visible in [Chat](/chat) and [Conversations](/conversations), so you can read the full history in-app without bouncing between Slack and Telegram.
+The end result: each external user sees a private, persistent thread with the agent, and you see all of it consolidated in [Conversations](/conversations) and [Chat](/chat).
 
 :::tip Test in the web app first
-A new agent is much easier to iterate on inside [Chat](/chat) than over Telegram. Get the system prompt and tools right in-app, then bind a bot to it once you're happy.
+A new agent is much easier to iterate on inside [Chat](/chat) than over Telegram or Slack. Get the system prompt and tools right in-app, then bind a bot to it once you're happy.
 :::
 
 :::note Peer scoping
@@ -106,6 +120,9 @@ Each external user (peer) gets their own conversation thread with the bound agen
 
 ## Where to go next
 
-- [Agents](/guide#agents) — configure the agent that serves your channel traffic.
-- [Chat](/guide#chat) — verify your agent's behavior before binding it to a channel.
-- [Settings](/guide#settings) — additional per-channel settings live under various Settings sections.
+Now that you've covered live and external chat, the next layers are about *what happens outside of a chat turn* — work that runs in parallel, on a schedule, or as a pure nudge:
+
+- [Subagents](/guide#subagents) — fan out child agents from inside a conversation.
+- [Tasks](/guide#tasks) — schedule background work an agent figures out at fire time.
+- [Reminders](/guide#reminders) — schedule pre-written nudges that skip the LLM.
+- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.

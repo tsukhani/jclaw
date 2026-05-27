@@ -1,6 +1,6 @@
 # Subagents
 
-A subagent is a child agent that runs a focused task on behalf of the agent you're chatting with. The child has its own conversation, its own model context, and its own tools — when it finishes, its final reply comes back to the parent (and to you).
+So far, every chat turn has been one user talking to one agent. **Subagents** are the first way to break that 1:1 — the agent you're chatting with can spawn child agents that do focused work on its behalf. Each child has its own conversation, its own model context, and its own tools; when it finishes, its final reply comes back to the parent (and to you).
 
 Reach for a subagent when:
 
@@ -8,7 +8,7 @@ Reach for a subagent when:
 - You want to fan out work in parallel without blocking the main conversation.
 - You want a separate transcript that's easy to inspect on its own.
 
-This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the four ways to inspect what a child did. If you're choosing between subagents, [tasks](/guide#tasks), and [reminders](/guide#reminders), the [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) section lays out the three side by side.
+This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the four ways to inspect what a child did. Subagents are one of three "outside-this-turn" abstractions — [Tasks](/guide#tasks) and [Reminders](/guide#reminders) are the other two; jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) for the side-by-side comparison.
 
 ## The simplest case
 
@@ -178,3 +178,11 @@ Killed runs don't get an announce card. The `/subagent kill` response *is* your 
 :::tip Scoping
 Subagents are scoped to your login. You can't see or kill another user's runs from the [Subagents](/subagents) page or the `/subagent` command.
 :::
+
+## Where to go next
+
+Subagents fan out work *now*, in this turn. The next two sections cover fanning out *later*:
+
+- [Tasks](/guide#tasks) — scheduled work the agent figures out at fire time.
+- [Reminders](/guide#reminders) — scheduled pre-written nudges that skip the LLM entirely.
+- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.
