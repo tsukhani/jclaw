@@ -34,6 +34,25 @@ public class JpqlFilter {
         return this;
     }
 
+    /**
+     * Add a "{@code field IS NULL OR field <> value}" predicate if the value
+     * is non-null (and non-blank for strings). The IS-NULL leg matters when
+     * the column is nullable and "exclude X" should include rows that never
+     * set the column at all — e.g. excluding {@code payloadType="reminder"}
+     * tasks should still surface tasks whose {@code payloadType} is null.
+     *
+     * @param field column or path
+     * @param value value to exclude; null/blank skips the predicate entirely
+     * @return this filter for chaining
+     */
+    public JpqlFilter notEqOrNull(String field, Object value) {
+        if (isPresent(value)) {
+            clauses.add("(%s IS NULL OR %s <> ?%d)".formatted(field, field, idx++));
+            params.add(value);
+        }
+        return this;
+    }
+
     /** Add a LIKE predicate if the value is non-null and non-blank. */
     public JpqlFilter like(String field, String value) {
         if (isPresent(value)) {

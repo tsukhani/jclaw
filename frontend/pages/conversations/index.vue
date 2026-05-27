@@ -3,6 +3,7 @@ import type { Agent, Conversation, Message } from '~/types/api'
 import type { Filter } from '~/components/FilterBar.vue'
 import { h } from 'vue'
 import type { ColumnDef } from '@tanstack/vue-table'
+import { ChatBubbleLeftRightIcon } from '@heroicons/vue/24/outline'
 
 const { confirm } = useConfirm()
 
@@ -20,6 +21,17 @@ const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: ()
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const rangeStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize + 1)
 const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
+
+// True when the user has never started a conversation (zero rows AND no
+// active filters). Drives the welcome-style empty state — table chrome,
+// FilterBar, and Delete buttons are all hidden so the page feels like a
+// first-time landing instead of a data view with no data. When filters
+// are active we keep the chrome so the user can adjust them — "no
+// matching conversations" is a different mental model from "no
+// conversations at all".
+const hasNoData = computed(() =>
+  !loading.value && total.value === 0 && activeFilters.value.length === 0,
+)
 
 function getFilterValue(key: string): string {
   return activeFilters.value.find(f => f.key === key)?.value ?? ''
@@ -367,7 +379,10 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       <h1 class="text-lg font-semibold text-fg-strong">
         Conversations
       </h1>
-      <div class="flex items-center gap-2">
+      <div
+        v-if="!hasNoData"
+        class="flex items-center gap-2"
+      >
         <button
           :disabled="!selectedIds.size || deletingBulk"
           class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -395,50 +410,81 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       </div>
     </div>
 
-    <!-- Filter bar -->
-    <div class="mb-3">
-      <FilterBar
-        storage-key="conversations"
-        placeholder="Filter... (e.g., q:morning agent:main channel:web)"
-        :filter-keys="['q', 'name', 'channel', 'agent', 'peer']"
-        @update:filters="onFiltersChanged"
-        @export="exportAllConversations"
-      />
-    </div>
+    <!-- Empty-state landing: zero conversations AND no active filters.
+         Hides the filter / table / pagination chrome to give a focused
+         first-run nudge toward starting a chat. The "no rows after a
+         filter" case continues to use the table's built-in empty message
+         (kept on the DataTable below) so the user can still see and edit
+         the filter that produced no results. -->
+    <section
+      v-if="hasNoData"
+      class="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-6 py-12 text-center dark:border-zinc-700 dark:bg-zinc-900/30"
+    >
+      <ChatBubbleLeftRightIcon class="mx-auto h-10 w-10 text-zinc-400" />
+      <h2 class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        No conversations yet
+      </h2>
+      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
+        <!-- Link text sits flush against the opening/closing tags (no
+             newline between `>` and "new chat" or between "new chat" and
+             `</NuxtLink>`) so Vue's "condense" whitespace mode doesn't
+             leak a trailing space into the rendered <a>, which would
+             otherwise show as a visible gap before the comma. -->
+        Start a <NuxtLink
+          to="/chat"
+          class="font-medium text-emerald-600 underline-offset-2 hover:underline dark:text-emerald-400"
+        >new chat</NuxtLink>,
+        send a message to one of your bound Telegram bots, or hook up another channel —
+        every back-and-forth shows up here.
+      </p>
+    </section>
 
-    <!-- List view -->
-    <div class="bg-surface-elevated border border-border">
-      <DataTable
-        :columns="columns"
-        :data="conversations"
-        :loading="loading"
-        empty-message="No conversations yet"
-        @row-click="(c: Conversation) => navigateTo(`/chat?conversation=${c.id}`)"
-      />
-      <div
-        v-if="total > 0"
-        class="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-fg-muted"
-      >
-        <span>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ total }}</span>
-        <div class="flex items-center gap-1">
-          <button
-            :disabled="page <= 1 || loading"
-            class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            @click="goto(page - 1)"
-          >
-            Prev
-          </button>
-          <span class="px-2">Page {{ page }} of {{ totalPages }}</span>
-          <button
-            :disabled="page >= totalPages || loading"
-            class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            @click="goto(page + 1)"
-          >
-            Next
-          </button>
+    <template v-else>
+      <!-- Filter bar -->
+      <div class="mb-3">
+        <FilterBar
+          storage-key="conversations"
+          placeholder="Filter... (e.g., q:morning agent:main channel:web)"
+          :filter-keys="['q', 'name', 'channel', 'agent', 'peer']"
+          @update:filters="onFiltersChanged"
+          @export="exportAllConversations"
+        />
+      </div>
+
+      <!-- List view -->
+      <div class="bg-surface-elevated border border-border">
+        <DataTable
+          :columns="columns"
+          :data="conversations"
+          :loading="loading"
+          empty-message="No matching conversations"
+          @row-click="(c: Conversation) => navigateTo(`/chat?conversation=${c.id}`)"
+        />
+        <div
+          v-if="total > 0"
+          class="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-fg-muted"
+        >
+          <span>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ total }}</span>
+          <div class="flex items-center gap-1">
+            <button
+              :disabled="page <= 1 || loading"
+              class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              @click="goto(page - 1)"
+            >
+              Prev
+            </button>
+            <span class="px-2">Page {{ page }} of {{ totalPages }}</span>
+            <button
+              :disabled="page >= totalPages || loading"
+              class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              @click="goto(page + 1)"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </template>
 
     <!-- PeekPanel for conversation detail -->
     <PeekPanel

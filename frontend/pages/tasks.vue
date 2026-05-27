@@ -55,6 +55,10 @@ const url = computed(() => {
   if (statusFilter.value) params.set('status', statusFilter.value)
   if (typeFilter.value) params.set('type', typeFilter.value)
   if (agentFilter.value) params.set('agent', agentFilter.value)
+  // Reminders live on their own /reminders page (different mental model:
+  // personal nudges vs background automation). Filter them out here so
+  // the Tasks list stays focused on automation work.
+  params.set('excludePayloadType', 'reminder')
   params.set('limit', '50')
   return `/api/tasks?${params}`
 })

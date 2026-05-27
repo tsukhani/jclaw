@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { LogEvent } from '~/types/api'
+import { ChevronRightIcon } from '@heroicons/vue/24/outline'
 
 const categoryFilter = ref('')
 const levelFilter = ref('')
@@ -36,12 +37,6 @@ function toggleExpand(id: number) {
   expandedId.value = expandedId.value === id ? null : id
 }
 
-const levelColors: Record<string, string> = {
-  ERROR: 'bg-red-100 dark:bg-red-400/10 text-red-700 dark:text-red-400 border-red-300 dark:border-red-400/20',
-  WARN: 'bg-yellow-100 dark:bg-yellow-400/10 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-400/20',
-  INFO: 'bg-muted text-fg-muted border-input',
-}
-
 const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
 
 // JCLAW-272: subagent lifecycle taxonomy. Emission lands later (JCLAW-265
@@ -61,6 +56,28 @@ const autoRefreshId = useId()
 const categorySelectId = useId()
 const levelSelectId = useId()
 const searchInputId = useId()
+
+/**
+ * Format the event timestamp as "MMM D, YYYY · h:mm:ss AM/PM" — same
+ * format the Dashboard's Recent Activity panel uses so a row a user
+ * just saw on the dashboard reads identically when they click through
+ * to the full Logs page.
+ */
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso)
+  const date = d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+  const time = d.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })
+  return `${date} · ${time}`
+}
 </script>
 
 <template>
@@ -149,58 +166,115 @@ const searchInputId = useId()
       </label>
     </div>
 
-    <!-- Events -->
+    <!-- Events. Column layout mirrors the Dashboard's Recent Activity
+         panel (LEVEL | CATEGORY | AGENT | MESSAGE | TIMESTAMP) so the
+         two surfaces feel like the same table at different zoom levels.
+         Each shrink-0 width matches the dashboard widths exactly. -->
     <div class="bg-surface-elevated border border-border">
-      <div
-        v-if="logs?.events?.length"
-        class="divide-y divide-border"
-      >
-        <template
-          v-for="event in logs.events"
-          :key="event.id"
-        >
-          <button
-            v-if="event.details"
-            type="button"
-            class="w-full block text-left px-4 py-2 hover:bg-muted transition-colors cursor-pointer bg-transparent border-0"
-            @click="toggleExpand(event.id)"
+      <template v-if="logs?.events?.length">
+        <!-- Header row carries a 4-wide chevron slot at the start so the
+             data rows below can show a rotating chevron on detail-
+             bearing entries without breaking column alignment. Width
+             stays fixed whether or not a given row has details — only
+             the chevron's opacity differs. -->
+        <div class="px-4 py-2 flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
+          <span
+            class="shrink-0 w-4"
+            aria-hidden="true"
+          />
+          <span class="shrink-0 w-10">Level</span>
+          <span class="shrink-0 w-44">Category</span>
+          <span class="shrink-0 w-16">Agent</span>
+          <span class="flex-1 min-w-0">Message</span>
+          <span class="ml-auto shrink-0 w-48 text-right">Timestamp</span>
+        </div>
+        <div class="divide-y divide-border">
+          <template
+            v-for="event in logs.events"
+            :key="event.id"
           >
-            <div class="flex items-start gap-3">
-              <span class="text-xs text-fg-muted shrink-0 w-20 font-mono mt-0.5">
-                {{ new Date(event.timestamp).toLocaleTimeString() }}
-              </span>
-              <span
-                :class="levelColors[event.level]"
-                class="text-[10px] font-mono px-1.5 py-0.5 border shrink-0"
-              >{{ event.level }}</span>
-              <span class="text-xs text-fg-muted shrink-0 w-14 font-mono mt-0.5">{{ event.category }}</span>
-              <span class="text-sm text-fg-primary min-w-0">{{ event.message }}</span>
-            </div>
-            <div
-              v-if="expandedId === event.id"
-              class="mt-2 ml-[8.5rem] text-xs font-mono text-fg-muted bg-muted p-2 whitespace-pre-wrap"
+            <button
+              v-if="event.details"
+              type="button"
+              :aria-expanded="expandedId === event.id"
+              class="w-full block text-left px-4 py-2.5 hover:bg-muted transition-colors cursor-pointer bg-transparent border-0"
+              @click="toggleExpand(event.id)"
             >
-              {{ event.details }}
+              <div class="flex items-start gap-3">
+                <ChevronRightIcon
+                  :class="expandedId === event.id ? 'rotate-90' : ''"
+                  class="h-4 w-4 text-fg-muted shrink-0 mt-0.5 transition-transform"
+                  aria-hidden="true"
+                />
+                <span
+                  :class="{
+                    'text-red-400': event.level === 'ERROR',
+                    'text-yellow-400': event.level === 'WARN',
+                    'text-fg-muted': event.level === 'INFO',
+                  }"
+                  class="text-xs font-mono mt-0.5 shrink-0 w-10"
+                >{{ event.level }}</span>
+                <span
+                  :title="event.category"
+                  class="text-xs text-fg-muted shrink-0 w-44 font-mono truncate mt-0.5"
+                >{{ event.category }}</span>
+                <span
+                  :title="event.agentId ? String(event.agentId) : ''"
+                  class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5"
+                >{{ event.agentId || '—' }}</span>
+                <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
+                <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5">{{ formatTimestamp(event.timestamp) }}</span>
+              </div>
+              <!-- Details payload offset matches the (chevron + level +
+                   category + agent) column widths so the JSON aligns
+                   under the message column when expanded. -->
+              <div
+                v-if="expandedId === event.id"
+                class="mt-2 ml-[19.5rem] text-xs font-mono text-fg-muted bg-muted p-2 whitespace-pre-wrap"
+              >
+                {{ event.details }}
+              </div>
+            </button>
+            <div
+              v-else
+              class="px-4 py-2.5 hover:bg-muted transition-colors"
+            >
+              <div class="flex items-start gap-3">
+                <!-- Hollow circle in the chevron slot keeps column
+                     alignment with detail-bearing rows AND signals
+                     "this row has no details to expand" — distinguishing
+                     a non-clickable row from a broken / missing
+                     chevron column. Different glyph shape from the
+                     chevron so the eye reads it as "inactive marker"
+                     not "muted clickable affordance"; muted color
+                     keeps it from competing with the chevrons. -->
+                <span
+                  class="h-4 w-4 shrink-0 mt-0.5 text-fg-muted text-center text-sm leading-4 select-none"
+                  aria-hidden="true"
+                >◦</span>
+                <span
+                  :class="{
+                    'text-red-400': event.level === 'ERROR',
+                    'text-yellow-400': event.level === 'WARN',
+                    'text-fg-muted': event.level === 'INFO',
+                  }"
+                  class="text-xs font-mono mt-0.5 shrink-0 w-10"
+                >{{ event.level }}</span>
+                <span
+                  :title="event.category"
+                  class="text-xs text-fg-muted shrink-0 w-44 font-mono truncate mt-0.5"
+                >{{ event.category }}</span>
+                <span
+                  :title="event.agentId ? String(event.agentId) : ''"
+                  class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5"
+                >{{ event.agentId || '—' }}</span>
+                <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
+                <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5">{{ formatTimestamp(event.timestamp) }}</span>
+              </div>
             </div>
-          </button>
-          <div
-            v-else
-            class="px-4 py-2 hover:bg-muted transition-colors"
-          >
-            <div class="flex items-start gap-3">
-              <span class="text-xs text-fg-muted shrink-0 w-20 font-mono mt-0.5">
-                {{ new Date(event.timestamp).toLocaleTimeString() }}
-              </span>
-              <span
-                :class="levelColors[event.level]"
-                class="text-[10px] font-mono px-1.5 py-0.5 border shrink-0"
-              >{{ event.level }}</span>
-              <span class="text-xs text-fg-muted shrink-0 w-14 font-mono mt-0.5">{{ event.category }}</span>
-              <span class="text-sm text-fg-primary min-w-0">{{ event.message }}</span>
-            </div>
-          </div>
-        </template>
-      </div>
+          </template>
+        </div>
+      </template>
       <div
         v-else
         class="px-4 py-8 text-center text-sm text-fg-muted"

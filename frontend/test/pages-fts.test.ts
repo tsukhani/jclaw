@@ -117,6 +117,20 @@ describe('FilterBar — JCLAW-328 q: dispatch contract', () => {
 describe('Conversations page — JCLAW-328 q: wiring', () => {
   it('renders a FilterBar with q in its filter-keys', async () => {
     setupMockApi()
+    // Seed one conversation so the page renders its data view (chrome +
+    // FilterBar + DataTable) rather than the empty-state landing card,
+    // which hides the FilterBar by design. We're testing the data-view
+    // wiring here, not the first-run nudge.
+    registerEndpoint('/api/conversations', () => {
+      return new Response(
+        JSON.stringify([{
+          id: 1, agentId: 1, agentName: 'test', channelType: 'web',
+          peerId: 'admin', messageCount: 1, preview: 'hi',
+          createdAt: '2026-05-27T00:00:00Z', updatedAt: '2026-05-27T00:00:00Z',
+        }]),
+        { status: 200, headers: { 'x-total-count': '1', 'content-type': 'application/json' } },
+      )
+    })
     const component = await mountSuspended(Conversations)
     // The FilterBar shipped by JCLAW-304 lists q first so the operator's
     // autocomplete surfaces it as a top-of-mind option. find() locates

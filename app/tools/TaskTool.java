@@ -130,7 +130,20 @@ public class TaskTool implements ToolRegistry.Tool {
                 a new recurring task, call listRecurringTasks and \
                 cancelTask/deleteTask any prior attempts with similar names \
                 to avoid accumulating duplicates. Tasks run asynchronously \
-                via the agent.""";
+                via the agent.
+
+                REMINDERS: when the user says "remind me to X" / "remind me \
+                in N minutes to Y" / "remind me tomorrow about Z", create a \
+                task with payloadType="reminder". The `description` IS the \
+                reminder text the user sees verbatim (e.g. "Brush your \
+                teeth", "Pay salaries") — do NOT phrase it as instructions \
+                to yourself. Reminders SKIP the LLM at fire time, so no \
+                agent turn happens; the description goes straight to the \
+                user's notification toast (web) or Telegram chat (with a \
+                🔔 prefix). The reminder description should be 1-2 short \
+                lines, written as if you were the one nudging the user. \
+                Leave `delivery` unset and it auto-routes to the calling \
+                chat — that's almost always what the user wants.""";
     }
 
     @Override
@@ -164,7 +177,15 @@ public class TaskTool implements ToolRegistry.Tool {
                                 + "'web' or 'telegram' with no colon) also works and fills the "
                                 + "target from the calling chat.")),
                 Map.entry(KEY_PAYLOAD_TYPE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Output payload format hint: 'text', 'json', or 'markdown'")),
+                        SchemaKeys.DESCRIPTION,
+                        "Payload kind. \"reminder\" makes this a user-visible "
+                                + "reminder — fire skips the LLM, the description "
+                                + "is delivered verbatim to the configured channel "
+                                + "(web notification toast / Telegram chat with 🔔 "
+                                + "prefix). Other values (\"text\", \"json\", "
+                                + "\"markdown\") are hints for future delivery-layer "
+                                + "formatting; leave null for ordinary agent-driven "
+                                + "tasks.")),
                 Map.entry(KEY_MODEL_PROVIDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Override the agent's LLM provider for this task")),
                 Map.entry(KEY_MODEL_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,

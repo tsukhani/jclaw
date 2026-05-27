@@ -66,7 +66,8 @@ public class ApiTasksController extends Controller {
     private record TaskView(Long id, String name, String description, String type, String status,
                             String cronExpression, Long intervalSeconds, String scheduleDisplay,
                             int retryCount, int maxRetries, String lastError,
-                            String nextRunAt, String createdAt, Long agentId, String agentName,
+                            String nextRunAt, String lastFiredAt, String createdAt,
+                            Long agentId, String agentName,
                             boolean paused,
                             String delivery, String payloadType,
                             String modelProvider, String modelId,
@@ -75,10 +76,23 @@ public class ApiTasksController extends Controller {
                             String contextFromTaskIds, Integer repeatLimit,
                             String timezone, String effectiveTimezone) {
         static TaskView of(Task t) {
+            return of(t, null);
+        }
+
+        /**
+         * Variant that carries the latest {@link TaskRun#completedAt} for
+         * this task (populated in {@link #list} via a single bulk SQL
+         * pass). Used by the Reminders page's "Fired" column so the
+         * operator can see when the reminder actually landed without
+         * round-tripping to {@code /runs}. {@code null} when the task
+         * has never produced a completed run.
+         */
+        static TaskView of(Task t, Instant lastFiredAt) {
             return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
                     t.cronExpression, t.intervalSeconds, t.scheduleDisplay,
                     t.retryCount, t.maxRetries, t.lastError,
                     nextRunAtForDisplay(t),
+                    lastFiredAt != null ? lastFiredAt.toString() : null,
                     t.createdAt.toString(),
                     t.agent != null ? t.agent.id : null,
                     t.agent != null ? t.agent.name : null,
@@ -270,11 +284,19 @@ public class ApiTasksController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))
     public static void list(String status, String type, Long agentId, String q,
+                             String payloadType, String excludePayloadType,
                              Integer limit, Integer offset) {
         var filter = new JpqlFilter()
                 .eq("status", status != null && !status.isBlank() ? Task.Status.valueOf(status.toUpperCase()) : null)
                 .eq("type", type != null && !type.isBlank() ? Task.Type.valueOf(type.toUpperCase()) : null)
-                .eq("agent.id", agentId);
+                .eq("agent.id", agentId)
+                // payloadType filters: the frontend's /tasks page passes
+                // excludePayloadType=reminder so reminders don't appear in
+                // the automation-tasks list; /reminders passes
+                // payloadType=reminder for the inverse. Both null/blank for
+                // headless callers and the Dashboard tile counts.
+                .eq("payloadType", payloadType)
+                .notEqOrNull("payloadType", excludePayloadType);
 
         // JCLAW-304: q resolves against the TASK Lucene scope (virtual
         // doc of name + description). Null when q is absent/blank;
@@ -321,7 +343,29 @@ public class ApiTasksController extends Controller {
         Long total = countQ.getSingleResult();
         response.setHeader("X-Total-Count", String.valueOf(total));
 
-        renderJSON(gson.toJson(tasks.stream().map(TaskView::of).toList()));
+        // Bulk-fetch the latest TaskRun.completedAt for each task on the page
+        // so the Reminders "Fired" column (and any future "last run" surface)
+        // doesn't need an N+1 round-trip. GROUP BY task id, MAX(completedAt)
+        // gives the most-recent successful fire instant per task; tasks with
+        // no completed runs are absent from the map (column renders empty).
+        var taskIds = tasks.stream().map(t -> t.id).filter(java.util.Objects::nonNull).toList();
+        java.util.Map<Long, Instant> lastFiredAt = java.util.Map.of();
+        if (!taskIds.isEmpty()) {
+            @SuppressWarnings("unchecked")
+            var rows = (List<Object[]>) JPA.em().createQuery(
+                    "SELECT r.task.id, MAX(r.completedAt) FROM TaskRun r "
+                            + "WHERE r.task.id IN :ids AND r.completedAt IS NOT NULL "
+                            + "GROUP BY r.task.id")
+                    .setParameter("ids", taskIds)
+                    .getResultList();
+            var map = new java.util.HashMap<Long, Instant>(rows.size());
+            for (var row : rows) {
+                map.put((Long) row[0], (Instant) row[1]);
+            }
+            lastFiredAt = map;
+        }
+        final var fired = lastFiredAt;
+        renderJSON(gson.toJson(tasks.stream().map(t -> TaskView.of(t, fired.get(t.id))).toList()));
     }
 
     /**
@@ -686,6 +730,14 @@ public class ApiTasksController extends Controller {
         em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
                 .setParameter("taskId", taskId).executeUpdate();
         em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
+                .setParameter("taskId", taskId).executeUpdate();
+        // Cascade-delete user-visible notifications that originated from this
+        // task. Reminder tasks (payloadType="reminder") emit one Notification
+        // per fire; when the operator deletes the task the toast/Reminders
+        // surface should clear in lockstep so the row doesn't reappear after
+        // the next poll. Safe for non-reminder tasks too — they don't write
+        // Notifications, so this is a no-op.
+        em.createQuery("DELETE FROM Notification n WHERE n.sourceTaskId = :taskId")
                 .setParameter("taskId", taskId).executeUpdate();
         em.flush();
 

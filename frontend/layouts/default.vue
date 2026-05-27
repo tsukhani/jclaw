@@ -5,6 +5,7 @@
 import {
   ArrowRightOnRectangleIcon,
   Bars3Icon,
+  BellAlertIcon,
   BoltIcon,
   BookOpenIcon,
   ChatBubbleLeftRightIcon,
@@ -55,17 +56,40 @@ const isMac = ref(true)
 const paletteOpen = ref(false)
 
 const apiVersion = ref('')
+const frameworkVersion = ref('')
+const expectedFrameworkVersion = ref('')
+
+// Match-state for the dot next to FRAMEWORK in the sidebar footer:
+// green when the running fork matches .play-version, amber when it
+// drifts, hidden ('') when the expected version isn't reported (dist
+// install, file missing, pre-bump backend).
+const frameworkVersionMatch = computed<'match' | 'mismatch' | 'unknown'>(() => {
+  if (!frameworkVersion.value || !expectedFrameworkVersion.value) return 'unknown'
+  return frameworkVersion.value === expectedFrameworkVersion.value ? 'match' : 'mismatch'
+})
 const apiOnline = ref(false)
 
 async function checkStatus() {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
-    const data = await $fetch<{ status: string, applicationVersion: string }>('/api/status', {
+    const data = await $fetch<{
+      status: string
+      applicationVersion: string
+      frameworkVersion?: string
+      expectedFrameworkVersion?: string | null
+    }>('/api/status', {
       signal: controller.signal,
     })
     clearTimeout(timeout)
     apiVersion.value = data.applicationVersion
+    // frameworkVersion landed in the StatusResponse alongside the app
+    // version so the sidebar can render Play's own version under the
+    // JClaw line. Optional in the type because pre-bump deployments
+    // won't include it. expectedFrameworkVersion is the contents of
+    // .play-version — null in dist installs that strip the dotfile.
+    frameworkVersion.value = data.frameworkVersion ?? ''
+    expectedFrameworkVersion.value = data.expectedFrameworkVersion ?? ''
     apiOnline.value = data.status === 'ok'
   }
   catch {
@@ -176,6 +200,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Chat', to: '/chat', icon: ChatBubbleOvalLeftEllipsisIcon },
       { label: 'Channels', to: '/channels', icon: LinkIcon },
+      { label: 'Reminders', to: '/reminders', icon: BellAlertIcon },
       { label: 'Conversations', to: '/conversations', icon: ChatBubbleLeftRightIcon },
     ],
   },
@@ -382,30 +407,79 @@ const navGroups: NavGroup[] = [
         </div>
       </nav>
 
-      <!-- Version & API Status -->
-      <div
-        :class="sidebarOpen ? 'px-4 py-2.5' : 'px-0 py-3 flex justify-center'"
-        class="shrink-0 border-t border-fg-muted/40"
-      >
-        <div
-          v-if="sidebarOpen"
-          class="flex items-center justify-between"
-        >
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-fg-muted font-mono uppercase tracking-wider">Version</span>
-            <span class="text-sm text-fg-primary font-mono">{{ apiVersion ? `v${apiVersion}` : '...' }}</span>
+      <!-- Version & framework version. Two distinct rows separated by
+           a divider so each version reads as its own self-contained
+           row matching the rest of the sidebar's row pattern (Settings,
+           Logs above). Labels share a fixed-width column so the two
+           version values left-align; both values use the same color
+           token + size + font so neither reads as "more important"
+           than the other — they're peer pieces of diagnostic info,
+           and the colored dot is the only thing that should call
+           attention to one over the other. -->
+      <template v-if="sidebarOpen">
+        <div class="shrink-0 border-t border-fg-muted/40 px-4 py-2.5">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-xs text-fg-muted font-mono uppercase tracking-wider w-[5.5rem] shrink-0">Version</span>
+              <span class="text-sm text-fg-primary font-mono truncate">{{ apiVersion ? `v${apiVersion}` : '...' }}</span>
+            </div>
+            <span
+              class="w-2.5 h-2.5 rounded-full transition-colors shrink-0"
+              :class="apiOnline ? 'bg-ok' : 'bg-danger'"
+              :title="apiOnline ? 'API online' : 'API offline'"
+            />
           </div>
-          <span
-            class="w-2.5 h-2.5 rounded-full transition-colors"
-            :class="apiOnline ? 'bg-ok' : 'bg-danger'"
-            :title="apiOnline ? 'API online' : 'API offline'"
-          />
         </div>
+        <div
+          v-if="frameworkVersion"
+          class="shrink-0 border-t border-fg-muted/40 px-4 py-2.5"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-xs text-fg-muted font-mono uppercase tracking-wider w-[5.5rem] shrink-0">Framework</span>
+              <span class="text-sm text-fg-primary font-mono truncate">v{{ frameworkVersion }}</span>
+            </div>
+            <!-- Match dot: green when running fork == .play-version,
+                 amber when drift, hidden when the expected version
+                 isn't known (dist install, file missing). Tooltip
+                 spells out the comparison so an operator hovering an
+                 amber dot can read the actual delta without digging.
+                 Same size/position as the API-online dot above so the
+                 two rows read as visually parallel. -->
+            <span
+              v-if="frameworkVersionMatch !== 'unknown'"
+              class="w-2.5 h-2.5 rounded-full shrink-0"
+              :class="frameworkVersionMatch === 'match' ? 'bg-ok' : 'bg-yellow-500'"
+              :title="frameworkVersionMatch === 'match'
+                ? `Framework matches .play-version (${expectedFrameworkVersion})`
+                : `Framework drift: running v${frameworkVersion}, .play-version expects v${expectedFrameworkVersion}`"
+            />
+          </div>
+        </div>
+      </template>
+      <!-- Collapsed-rail diagnostic dots. Two side-by-side glyphs mirror
+           the two expanded rows (Version + Framework) so the operator
+           gets the same at-a-glance health read at either width. The
+           framework dot drops out when the expected version isn't
+           reported (dist install / .play-version absent) — better to
+           show one dot than a gray one whose state the operator has
+           to decode. -->
+      <div
+        v-else
+        class="shrink-0 border-t border-fg-muted/40 px-0 py-3 flex justify-center items-center gap-1.5"
+      >
         <span
-          v-else
           class="w-2.5 h-2.5 rounded-full transition-colors"
           :class="apiOnline ? 'bg-ok' : 'bg-danger'"
           :title="`${apiOnline ? 'API online' : 'API offline'}${apiVersion ? ` — v${apiVersion}` : ''}`"
+        />
+        <span
+          v-if="frameworkVersionMatch !== 'unknown'"
+          class="w-2.5 h-2.5 rounded-full"
+          :class="frameworkVersionMatch === 'match' ? 'bg-ok' : 'bg-yellow-500'"
+          :title="frameworkVersionMatch === 'match'
+            ? `Framework matches .play-version (v${expectedFrameworkVersion})`
+            : `Framework drift: running v${frameworkVersion}, .play-version expects v${expectedFrameworkVersion}`"
         />
       </div>
 
@@ -553,5 +627,9 @@ const navGroups: NavGroup[] = [
 
     <!-- Command Palette -->
     <CommandPalette v-model:open="paletteOpen" />
+
+    <!-- Reminder notification toasts (Teleported to body, so the wrapping
+         flex layout doesn't affect their fixed-position overlay). -->
+    <NotificationBar />
   </div>
 </template>

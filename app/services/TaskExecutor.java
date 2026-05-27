@@ -88,11 +88,36 @@ public final class TaskExecutor {
 
         var sink = new TaskRunSink(run);
         sink.onStart();
+
+        // Reminder short-circuit: payloadType="reminder" tasks are
+        // operator-visible nudges, not agent work. The description IS the
+        // delivered text verbatim — no LLM round, no tool loop, no
+        // transcript turns. Closing the TaskRun with the description as
+        // outputSummary keeps the monitoring UI consistent (a one-row run
+        // whose content is the reminder body) and lets dispatchDelivery
+        // route the same string through {@link ReminderDispatcher}.
+        if (isReminder(task)) {
+            String body = task.description != null && !task.description.isBlank()
+                    ? task.description : task.name;
+            sink.onComplete(body);
+            return finalizeRun(task, run);
+        }
+
         if (!driveAgentLoop(task, sink)) {
             return run;
         }
 
         return finalizeRun(task, run);
+    }
+
+    /**
+     * True when the task's {@code payloadType} marks it as a reminder.
+     * Stable single-point check so the firing-time branch and the
+     * delivery-time routing decision can stay in lockstep without
+     * comparing strings in two places.
+     */
+    public static boolean isReminder(Task task) {
+        return task != null && "reminder".equalsIgnoreCase(task.payloadType);
     }
 
     /**
@@ -231,8 +256,10 @@ public final class TaskExecutor {
         // shape (`{"function":{"name":"message"…}}`) is stable across providers
         // (see {@link llm.LlmTypes.ToolCall}). False positives would need
         // another tool literally named "message", which the registry disallows
-        // since tool names are uniqued.
-        if (alreadyDeliveredViaMessageTool(closed.id)) {
+        // since tool names are uniqued. Reminders skip the dedup — their
+        // fire path doesn't invoke the message tool, so the scan can't
+        // produce a meaningful signal.
+        if (!isReminder(task) && alreadyDeliveredViaMessageTool(closed.id)) {
             stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_REQUESTED, spec,
                     "Skipped auto-delivery: fire called the 'message' tool directly");
             return;
@@ -245,11 +272,16 @@ public final class TaskExecutor {
                     "TaskRun produced no output to deliver");
             return;
         }
-        // dispatchSpec → dispatchTelegram / dispatchWeb / etc. all need a live
-        // EntityManager (TelegramBinding lookup, Conversation.findById for the
-        // web target, ConversationService.appendMessage for the web append).
-        // The db-scheduler carrier thread has no inherited Tx, so wrap.
-        var result = Tx.run(() -> DeliveryDispatcher.dispatchSpec(task.agent, spec, content));
+        // Route through ReminderDispatcher for reminder tasks (writes a
+        // Notification row on web, frames the body for telegram).
+        // Non-reminders go through the standard chat-message dispatcher.
+        // Both need a live EntityManager (TelegramBinding lookup,
+        // Conversation.findById, ConversationService.appendMessage, the
+        // Notification row save) so each invocation is wrapped in its own
+        // short Tx — the db-scheduler carrier thread has no inherited one.
+        var result = isReminder(task)
+                ? Tx.run(() -> ReminderDispatcher.dispatch(task, closed, spec, content))
+                : Tx.run(() -> DeliveryDispatcher.dispatchSpec(task.agent, spec, content));
         if (result.ok()) {
             stampDelivery(closed.id, TaskRun.DeliveryStatus.DELIVERED, spec, null);
             TaskLifecycleEvents.recordDelivered(task, closed, spec);
