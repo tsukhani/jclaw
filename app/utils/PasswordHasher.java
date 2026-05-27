@@ -31,12 +31,13 @@ public final class PasswordHasher {
     private static final int SALT_BYTES = 16;
     private static final int HASH_BITS = 256;
     private static final String PREFIX = "pbkdf2-sha256";
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     /** Hash a password for storage. Returns a self-describing string
      *  suitable for direct storage in ConfigService. */
     public static String hash(String plaintext) {
         byte[] salt = new byte[SALT_BYTES];
-        new SecureRandom().nextBytes(salt);
+        RANDOM.nextBytes(salt);
         byte[] hash = pbkdf2(plaintext.toCharArray(), salt, ITERATIONS, HASH_BITS);
         var b64 = Base64.getEncoder().withoutPadding();
         return "%s:%d:%s:%s".formatted(

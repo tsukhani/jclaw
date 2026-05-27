@@ -29,6 +29,7 @@ public final class TokenHasher {
 
     public static final String TOKEN_PREFIX = "jcl_";
     private static final int RANDOM_BYTES = 32;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private TokenHasher() {}
 
@@ -38,7 +39,7 @@ public final class TokenHasher {
      *  {@link #hash}. */
     public static String mint() {
         var bytes = new byte[RANDOM_BYTES];
-        new SecureRandom().nextBytes(bytes);
+        RANDOM.nextBytes(bytes);
         return TOKEN_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
