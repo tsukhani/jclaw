@@ -329,16 +329,26 @@ interface ProjectedFire {
   taskStatus: string
   agentName: string | null
   fireAt: Date
+  /** True when {@link fireAt} is strictly before the current wall-clock
+   *  time at the moment the projection ran. Drives per-fire dimming in
+   *  the calendar's day cells — a daily-9am task on today's date should
+   *  read as already-fired by 9:01am even though today's whole-day
+   *  `isPast` flag is still false. */
+  isPast: boolean
 }
 
 function projectFires(task: Task, from: Date, to: Date): ProjectedFire[] {
   const out: ProjectedFire[] = []
+  const nowMs = Date.now()
   const base = {
     taskId: task.id,
     taskName: task.name,
     taskType: task.type,
     taskStatus: task.status,
     agentName: task.agentName,
+  }
+  const push = (fireAt: Date) => {
+    out.push({ ...base, fireAt, isPast: fireAt.getTime() < nowMs })
   }
   if (task.type === 'INTERVAL') {
     const secs = task.intervalSeconds as number | null | undefined
@@ -351,7 +361,7 @@ function projectFires(task: Task, from: Date, to: Date): ProjectedFire[] {
       // Then forward to fill the window. Cap at 500 iterations defensively
       // (e.g. every-second interval over a year would explode otherwise).
       for (let i = 0; i < 500 && cursor.getTime() < to.getTime(); i++) {
-        if (cursor.getTime() >= from.getTime()) out.push({ ...base, fireAt: new Date(cursor) })
+        if (cursor.getTime() >= from.getTime()) push(new Date(cursor))
         cursor = new Date(cursor.getTime() + secs * 1000)
       }
     }
@@ -361,18 +371,18 @@ function projectFires(task: Task, from: Date, to: Date): ProjectedFire[] {
     const expr = task.cronExpression as string | null | undefined
     if (expr) {
       const fires = expandCron(expr, from, to)
-      for (const f of fires) out.push({ ...base, fireAt: f })
+      for (const f of fires) push(f)
     }
     else if (task.nextRunAt) {
       const d = new Date(task.nextRunAt as string)
-      if (d >= from && d < to) out.push({ ...base, fireAt: d })
+      if (d >= from && d < to) push(d)
     }
     return out
   }
   // SCHEDULED / IMMEDIATE / one-shot — single fire on nextRunAt.
   if (task.nextRunAt) {
     const d = new Date(task.nextRunAt as string)
-    if (d >= from && d < to) out.push({ ...base, fireAt: d })
+    if (d >= from && d < to) push(d)
   }
   return out
 }
@@ -380,9 +390,12 @@ function projectFires(task: Task, from: Date, to: Date): ProjectedFire[] {
 /**
  * Lightweight cron expander covering the patterns humanCron recognizes.
  * For each minute slot in [from, to), tests whether the cron expression's
- * minute / hour / day-of-month / month / day-of-week fields match. Bounded
- * to 31 days to keep the iteration cheap; calendar view shows one month at
- * a time so that's plenty.
+ * minute / hour / day-of-month / month / day-of-week fields match. The
+ * calendar grid is always a 6-row × 7-col block (42 days) covering the
+ * current month plus leading/trailing days from neighbours, so the
+ * iteration is bounded at ~60k steps per task — well under what a modern
+ * browser does in a single tick. A defensive 45-day cap stays in place
+ * to guard against callers passing a degenerate window.
  */
 function expandCron(expr: string, from: Date, to: Date): Date[] {
   const out: Date[] = []
@@ -412,9 +425,9 @@ function expandCron(expr: string, from: Date, to: Date): Date[] {
   }
   else return []
 
-  const cap = Math.min(to.getTime(), from.getTime() + 31 * 24 * 60 * 60 * 1000)
-  // Iterate by minute (cron resolution). Bounded ~44k iterations for a 31-day
-  // window — well under what a modern browser can do in a single tick.
+  const cap = Math.min(to.getTime(), from.getTime() + 45 * 24 * 60 * 60 * 1000)
+  // Iterate by minute (cron resolution). Bounded ~60k iterations for a 42-day
+  // grid (the calendar's worst case) — well under a single browser tick.
   const cursor = new Date(from)
   cursor.setSeconds(0, 0)
   while (cursor.getTime() < cap) {
@@ -970,7 +983,10 @@ const calendarDays = computed<DayCell[]>(() => {
               v-for="(fire, i) in cell.fires.slice(0, 4)"
               :key="i"
               class="text-[10px] truncate"
-              :class="statusColors[fire.taskStatus] || 'text-fg-muted'"
+              :class="[
+                statusColors[fire.taskStatus] || 'text-fg-muted',
+                fire.isPast ? 'opacity-40' : '',
+              ]"
               :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}`"
             >
               <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>

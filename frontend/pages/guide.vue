@@ -74,6 +74,27 @@ function jumpTo(sectionId: string, anchorId?: string) {
 }
 
 /**
+ * Smooth-scroll the page's scroll container back to the very top.
+ * Wired to the Clawdia mascot in the right gutter so a single click
+ * gets the operator out of deep scroll without hunting for a separate
+ * back-to-top button.
+ *
+ * The scroll container is the layout-level <main>, not window —
+ * default.vue gives <main> overflow-auto so it owns the scroll. Falls
+ * back to window scroll if the element isn't reachable (test envs).
+ */
+function scrollToTop() {
+  const scroller = document.querySelector('main')
+  if (scroller) {
+    scroller.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  else {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  activeSectionId.value = sections[0]?.id ?? ''
+}
+
+/**
  * Resolve a URL fragment back to the owning section and scroll into view.
  * Used both on initial mount and when the user clicks a `/guide#x` link
  * from within a section (the inbound URL change fires `route.hash` but
@@ -186,10 +207,13 @@ const tocItems = computed(() => sections.map(s => ({
         </nav>
       </aside>
 
-      <!-- Reading rail. Caps at max-w-3xl to keep line lengths comfortable
-           regardless of viewport width. -->
-      <div class="flex-1 min-w-0">
-        <div class="max-w-3xl space-y-8">
+      <!-- Reading rail + right-side mascot rail. The flex wrapper lets
+           Clawdia live in the gutter to the right of the reading column,
+           sticky and pinned at the top alongside the TOC. items-start
+           keeps each child's sticky origin honest (without it, a flex
+           container's default stretch alignment would defeat sticky). -->
+      <div class="flex-1 min-w-0 flex items-start gap-8">
+        <div class="flex-1 min-w-0 max-w-3xl space-y-8">
           <section
             v-for="s in sections"
             :id="s.id"
@@ -218,6 +242,35 @@ const tocItems = computed(() => sections.map(s => ({
             />
           </section>
         </div>
+
+        <!-- Reading-Clawdia mascot, pinned in the right gutter alongside
+             the TOC. xl:block (not md:block) because at md/lg the reading
+             column already eats most of the horizontal budget — squeezing
+             a 134px mascot into a narrow gutter there would crowd the
+             text. shrink-0 keeps the mascot at its natural width so the
+             reading column gives ground first on tighter widths. Wraps
+             the <img> in a <button> so a click scrolls the page back to
+             the top — handy when the operator is deep in the guide. The
+             button's aria-label conveys the action; the img's alt is
+             empty because inside an interactive container the picture
+             is the visual handle, not independent content. -->
+        <button
+          type="button"
+          title="Scroll back to top"
+          aria-label="Scroll back to top"
+          class="hidden xl:block shrink-0 xl:sticky xl:top-4 cursor-pointer
+                 hover:opacity-80 focus-visible:outline focus-visible:outline-2
+                 focus-visible:outline-emerald-500 focus-visible:outline-offset-4
+                 rounded-lg transition-opacity"
+          @click="scrollToTop"
+        >
+          <img
+            src="/clawdia-reading.webp"
+            alt=""
+            width="134"
+            height="150"
+          >
+        </button>
       </div>
     </div>
   </div>

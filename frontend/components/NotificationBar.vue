@@ -190,10 +190,12 @@ onUnmounted(() => {
 .toast-leave-active {
   transition: opacity 200ms ease, transform 200ms ease;
 }
+
 .toast-enter-from {
   opacity: 0;
   transform: translateX(20px);
 }
+
 .toast-leave-to {
   opacity: 0;
   transform: translateX(20px);
