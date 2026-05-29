@@ -23,6 +23,9 @@ public class ToolRegistrationJob extends Job<Void> {
         var toolList = new java.util.ArrayList<ToolRegistry.Tool>();
         toolList.add(new TaskTool());
         toolList.add(new DateTimeTool());
+        // JClaw user-guide lookup: answers chat questions about JClaw's own
+        // features/usage by searching the bundled docs/user-guide/ markdown.
+        toolList.add(new UserGuideTool());
         toolList.add(new CheckListTool());
         toolList.add(new FileSystemTools());
         toolList.add(new DocumentsTool());
