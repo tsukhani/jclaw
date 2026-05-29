@@ -73,7 +73,8 @@ class UserGuideToolTest extends UnitTest {
     @Test
     void findsRelevantSectionAndCitesPage() {
         var result = tool.execute("{\"query\": \"how do I create a task?\"}", null);
-        assertTrue(result.contains("tasks.md"), "should cite the tasks page: " + result);
+        assertTrue(result.contains("/guide#tasks"),
+                "should cite the tasks section with its in-app deep link: " + result);
         assertTrue(result.toLowerCase().contains("creating a task"),
                 "should surface the creating-a-task section heading: " + result);
         assertTrue(result.toLowerCase().contains("cron"), "should include the section body: " + result);
@@ -82,7 +83,20 @@ class UserGuideToolTest extends UnitTest {
     @Test
     void ranksAgentsPageForAgentQuery() {
         var result = tool.execute("{\"query\": \"what is an agent?\"}", null);
-        assertTrue(result.contains("agents.md"), "should cite the agents page: " + result);
+        assertTrue(result.contains("/guide#agents"),
+                "should cite the agents section with its in-app deep link: " + result);
+    }
+
+    @Test
+    void citesInAppDeepLinkNotAnExternalUrl() {
+        // Regression: jclaw_docs answers used to render source links like
+        // https://jclaw-docs because the tool gave the model nothing real to
+        // cite. The output must carry the /guide#<id> path and no http(s) URL
+        // the model could copy verbatim.
+        var result = tool.execute("{\"query\": \"how do I create a task?\"}", null);
+        assertTrue(result.contains("/guide#tasks"), "expected in-app deep link: " + result);
+        assertFalse(result.contains("http://") || result.contains("https://"),
+                "tool output must not contain absolute/external URLs: " + result);
     }
 
     @Test

@@ -104,9 +104,11 @@ public class UserGuideTool implements ToolRegistry.Tool {
                 its features, settings, agents, chat, tasks, subagents, conversations and channels, \
                 skills/tools/MCP, reminders, and the logs/dashboard. Pass the user's question as \
                 'query'; the tool returns the most relevant user-guide sections, each with its \
-                source page. Use this whenever the user asks how to do something in JClaw or how a \
-                JClaw feature behaves, then answer concisely from the returned sections and cite the \
-                page — do not paste whole sections verbatim.""";
+                source page and an in-app deep link. Use this whenever the user asks how to do \
+                something in JClaw or how a JClaw feature behaves, then answer concisely from the \
+                returned sections and cite each source as a Markdown link using the "Link" path the \
+                tool returns (e.g. /guide#tasks) — never invent a citation URL, and do not paste \
+                whole sections verbatim.""";
     }
 
     @Override
@@ -168,17 +170,34 @@ public class UserGuideTool implements ToolRegistry.Tool {
         var sb = new StringBuilder();
         sb.append("Top JClaw user-guide sections for \"").append(query).append("\":\n");
         for (var s : ranked) {
-            sb.append("\n--- User Guide → ").append(s.page()).append(" → ").append(s.heading()).append(" ---\n");
+            sb.append("\n--- User Guide → ").append(s.pageTitle());
+            if (!s.heading().equals(s.pageTitle()) && !"(intro)".equals(s.heading())) {
+                sb.append(" → ").append(s.heading());
+            }
+            sb.append(" ---\n");
+            sb.append("Link (cite this exact path): ").append(s.link()).append('\n');
             sb.append(truncate(s.text(), MAX_SECTION_CHARS)).append('\n');
         }
-        sb.append("\n(Answer the user's question concisely from these sections and cite the page; do not paste them verbatim.)");
+        sb.append("\n(Answer the user's question concisely from these sections. When you cite a source, "
+                + "use the exact \"Link\" path shown for that section as a Markdown link — e.g. "
+                + "[Tasks](/guide#tasks) — never invent a URL or link to an external host. "
+                + "Do not paste sections verbatim.)");
         return sb.toString();
     }
 
     // ---------------------------------------------------------------- retrieval
 
-    /** A heading-delimited slice of a user-guide page. */
-    private record Section(String page, String heading, String text) {}
+    /**
+     * A heading-delimited slice of a user-guide page.
+     *
+     * @param page      source filename, e.g. {@code tasks.md}
+     * @param pageTitle the page's display title (its leading heading)
+     * @param link      in-app deep link to the page's guide section, e.g.
+     *                  {@code /guide#tasks} — cite this, never invent one
+     * @param heading   the section's own heading within the page
+     * @param text      the section body
+     */
+    private record Section(String page, String pageTitle, String link, String heading, String text) {}
 
     private List<Section> loadSections() throws IOException {
         var dir = docsDir();
@@ -200,28 +219,58 @@ public class UserGuideTool implements ToolRegistry.Tool {
 
     private List<Section> splitIntoSections(String page, String content) {
         var sections = new ArrayList<Section>();
+        var link = pageLink(page);
+        var pageTitle = pageTitle(page, content);
         String heading = null;
         var body = new StringBuilder();
         for (var line : content.split("\n", -1)) {
             var m = HEADING.matcher(line);
             if (m.matches()) {
-                flush(sections, page, heading, body);
+                flush(sections, page, pageTitle, link, heading, body);
                 heading = m.group(2).trim();
                 body.setLength(0);
             } else {
                 body.append(line).append('\n');
             }
         }
-        flush(sections, page, heading, body);
+        flush(sections, page, pageTitle, link, heading, body);
         return sections;
     }
 
-    private void flush(List<Section> out, String page, String heading, StringBuilder body) {
+    private void flush(List<Section> out, String page, String pageTitle, String link,
+                       String heading, StringBuilder body) {
         var text = body.toString().strip();
         if (heading == null && text.isEmpty()) {
             return;
         }
-        out.add(new Section(page, heading == null ? "(intro)" : heading, text));
+        out.add(new Section(page, pageTitle, link, heading == null ? "(intro)" : heading, text));
+    }
+
+    /**
+     * In-app guide deep link for a page. The frontend registers each guide
+     * section under an {@code id} equal to its source filename stem (see
+     * {@code frontend/components/guide/sections.ts}), and {@code /guide#<id>}
+     * scrolls straight to that section. Returning this exact path in the tool
+     * output stops the model from inventing citation URLs — it previously
+     * emitted external links like {@code https://jclaw-docs}.
+     */
+    private static String pageLink(String page) {
+        return "/guide#" + stem(page);
+    }
+
+    private static String stem(String page) {
+        return page.endsWith(".md") ? page.substring(0, page.length() - 3) : page;
+    }
+
+    /** Display title for a page: its leading heading, or the humanized stem. */
+    private static String pageTitle(String page, String content) {
+        for (var line : content.split("\n", -1)) {
+            var m = HEADING.matcher(line);
+            if (m.matches()) {
+                return m.group(2).trim();
+            }
+        }
+        return stem(page).replace('-', ' ');
     }
 
     private static List<String> tokenize(String s) {
