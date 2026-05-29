@@ -1,7 +1,7 @@
 ---
 name: skill-creator
 description: Create new skills or refactor existing skills to follow the standard directory structure.
-version: 1.1.1
+version: 1.1.2
 author: main
 tools: [filesystem]
 icon: 🛠️
@@ -57,6 +57,15 @@ Every skill MUST include an `author:` field in its frontmatter. The value is the
 - The value is a single unquoted YAML scalar: `author: main` (no list, no object).
 - When refactoring an existing skill, leave the existing `author:` value alone — it records the original creator. Only edit it if the user explicitly asks to reassign authorship.
 
+## Icon field
+
+Every skill MUST include an `icon:` field in its frontmatter — a single emoji that visually represents the skill.
+
+- Pick one emoji only (e.g., `🛠️`, `📺`, `🍽️`). Never use text, ASCII art, or multiple emojis.
+- Choose an icon relevant to the skill's purpose. If unsure, default to `🛠️` for general utility skills.
+- When creating a new skill, assign the icon yourself based on the skill name and description. If the user specifies a preference, use theirs; otherwise pick the most fitting emoji (e.g. `📺` for video/movie skills, `🍽️` for restaurant skills, `📇` for contact/ business-card skills).
+- When refactoring an existing skill that already has an `icon:`, leave it alone unless it's clearly wrong (e.g. a restaurant skill using `💀`).
+
 ## Creating a New Skill
 
 1. **Ask** the user what the skill should do. Get a clear name and description.
@@ -66,7 +75,8 @@ Every skill MUST include an `author:` field in its frontmatter. The value is the
    - **Pure reasoning / computation only (no I/O, no external data)** → `tools: []` (empty list). Do NOT invent tools for tasks the LLM can answer on its own. Example: "compute 2+2" or "rephrase this sentence" need zero tools.
 3. **Determine bundled commands.** If the skill will ship executable binaries under `tools/`, list every binary's basename in the `commands:` field. If the skill ships no binaries, use `commands: []`. See the Commands Catalog section above for rules. A skill that uses the `exec` tool but calls only system commands already in the global allowlist (`git`, `ls`, etc.) still ships zero commands — `commands:` only covers binaries the skill itself contributes.
 4. **Draft** the SKILL.md content:
-   - YAML frontmatter with (in this order): `name`, `description`, `author` (your own agent name — see the Author field section), `tools:` (the exact list from step 2), and `commands:` (the exact list from step 3)
+   - YAML frontmatter with (in this order): `name`, `description`, `author` (your own agent name — see the Author field section), `tools:` (the exact list from step 2), `commands:` (the exact list from step 3), and **`icon` (a single emoji; see Icon field below)**
+   - `version:` is **system-managed** — you never hand-write it (the filesystem tool injects it; see the version note below). It has no slot in the authored order above precisely because you don't author it; when the system adds it, it sits directly after `description`.
    - A clear title and purpose
    - Step-by-step instructions the agent should follow
    - Reference each declared tool by name in the body
@@ -95,7 +105,7 @@ Every skill MUST include an `author:` field in its frontmatter. The value is the
 
 **`skill-creator` itself is read-only for every agent except `main`.** Only the `main` agent can modify the skill-creator skill. All other agents can use skill-creator to create or refactor OTHER skills, but cannot alter skill-creator's own SKILL.md or any file inside `skills/skill-creator/`. If a user asks a non-main agent to modify skill-creator, explain: "I cannot modify my own skill-creator — only the main agent can. If you want skill-creator updated, modify it on the main agent and promote it to the global registry, then drag it from global onto my agent card to get the new version."
 
-If the global skill-creator is updated to a newer version, out-of-date copies on non-main agents are automatically hidden from `<available_skills>` — the agent cannot use skill-creator again until the user drags the updated version from global onto the agent card.
+If the global skill-creator is updated to a newer version, out-of-date copies on non-main agents are automatically hidden from `<available_skills>` — the agent cannot use skill-creator again until the user drags the updated version from global onto my agent card.
 
 ## Refactoring an Existing Skill
 
@@ -107,6 +117,7 @@ When asked to refactor or update an existing skill, or when you notice a skill t
    - Any credential/config files in the root folder → must move to `credentials/`
    - Any files other than SKILL.md in the root folder → categorize and move to the correct subfolder
    - Missing YAML frontmatter in SKILL.md → add it
+   - Missing `icon:` key in frontmatter → add it. Pick a single emoji relevant to the skill.
    - Non-kebab-case skill name → rename the folder
    - Missing `commands:` key in frontmatter → add it. Populate from binaries in `tools/` (basenames), or `commands: []` if none.
    - Binaries present under `tools/` that aren't listed in `commands:` → either add them to the list (if they're intended for execution) or delete them (if they're leftovers). No dormant binaries.
@@ -142,6 +153,7 @@ description: Send WhatsApp messages using the wacli tool
 author: main
 tools: [exec, filesystem]
 commands: [wacli]
+icon: 💬
 ---
 
 # WhatsApp Notifier
@@ -162,6 +174,7 @@ description: Rephrase a sentence in a different tone
 author: main
 tools: []
 commands: []
+icon: ✍️
 ---
 
 # Sentence Rephraser
