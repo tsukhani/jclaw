@@ -136,6 +136,20 @@ const filteredCards = computed(() =>
     : allCards.value.filter(c => c.category === activeCategory.value),
 )
 
+// Per-category tool counts for the filter-chip badges. Absolute totals: the
+// chips are the only filter on this page (the top-bar ⌘K palette is global
+// navigation, not a tools-grid search), so there's nothing to react to.
+// Derived from allCards so the counts stay correct as tools are added and
+// exclude MCP-grouped cards exactly as the grid does.
+const categoryCounts = computed<Record<string, number>>(() => {
+  const counts: Record<string, number> = { All: allCards.value.length }
+  for (const cat of CATEGORIES) {
+    if (cat === 'All') continue
+    counts[cat] = allCards.value.filter(c => c.category === cat).length
+  }
+  return counts
+})
+
 // ─── Expand/collapse ──────────────────────────────────────────────────────────
 
 const expandedSet = ref(new Set<string>())
@@ -187,7 +201,7 @@ function toggleAllExpanded() {
             : 'bg-surface-elevated border-border text-fg-muted hover:text-fg-primary hover:border-input'"
           @click="activeCategory = cat"
         >
-          {{ cat }}
+          {{ cat }} <span class="tabular-nums opacity-60">({{ categoryCounts[cat] }})</span>
         </button>
       </div>
 
