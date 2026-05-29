@@ -80,6 +80,7 @@ public class ApiSkillsController extends Controller {
 
     /** GET /api/skills — List all global skills. */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SkillView.class))))
+    @ChatSafe(summary = "List all skills in the global registry")
     public static void list() {
         var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
         var globalDir = SkillLoader.globalSkillsPath();
@@ -250,6 +251,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/agents/{id}/skills — List workspace skills for an agent with enabled status. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
+    @ChatSafe(summary = "List an agent's installed skills and their enabled state")
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -290,6 +292,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillToggleResponse.class)))
+    @ChatSafe(summary = "Enable or disable an already-installed skill on an agent", body = "enabled (bool)")
     public static void updateForAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -336,6 +339,7 @@ public class ApiSkillsController extends Controller {
     /** POST /api/agents/{id}/skills/{name}/copy — Copy a global skill into the agent's workspace. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCopyResponse.class)))
+    @ChatSafe(summary = "Install (copy) a global skill into an agent's workspace and enable it (use this to add a skill an agent lacks)")
     public static void copyToAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();

@@ -11,6 +11,13 @@ import tools.JClawApiTool;
  * the rest of the FunctionalTest suite. What only this layer can verify
  * is that the tool's blocklist and arg validation refuse bad inputs
  * before any socket opens.
+ *
+ * <p>JCLAW-329 adds the {@code discover} action: a route-table scan that
+ * returns only {@code @ChatSafe}-annotated {@code /api/} endpoints, minus the
+ * PATH_BLOCKLIST. Those tests run the real scan (UnitTest boots Play, so
+ * {@code Router.routes} is populated and the controllers carry their runtime
+ * annotations), and the call-path tests assert the existing validation still
+ * fires — the discover branch must not regress the original call path.
  */
 class JClawApiToolTest extends UnitTest {
 
@@ -132,18 +139,47 @@ class JClawApiToolTest extends UnitTest {
                 "/api/agents should clear the path-prefix check; got: " + result);
     }
 
+    // ==================== discover (JCLAW-329) ====================
+
+    @Test
+    void discoverListsChatSafeEndpoints() {
+        var out = tool.execute("{\"action\":\"discover\"}", null);
+        assertTrue(out.contains("/api/agents"), "agents endpoint missing: " + out);
+        assertTrue(out.toLowerCase().contains("list agents"), "agents summary missing: " + out);
+        assertTrue(out.contains("/api/mcp-servers"), "mcp-servers endpoint missing: " + out);
+        // body hint surfaced for a mutating endpoint (POST /api/agents)
+        assertTrue(out.contains("modelProvider"), "create-agent body hint missing: " + out);
+    }
+
+    @Test
+    void discoverExcludesUnannotatedAndBlocklisted() {
+        var out = tool.execute("{\"action\":\"discover\"}", null);
+        // /api/status is a real route but not @ChatSafe — must not appear
+        assertFalse(out.contains("/api/status"), "unannotated /api/status leaked: " + out);
+        // blocklisted families must never appear even if a marker slipped through
+        assertFalse(out.contains("/api/chat"), "blocklisted /api/chat leaked: " + out);
+        assertFalse(out.contains("/api/auth"), "blocklisted /api/auth leaked: " + out);
+    }
+
+    @Test
+    void discoverFilterNarrowsResults() {
+        var out = tool.execute("{\"action\":\"discover\",\"filter\":\"mcp-servers\"}", null);
+        assertTrue(out.contains("/api/mcp-servers"), "mcp-servers endpoint missing under filter: " + out);
+        assertFalse(out.contains("/api/agents"), "filter=mcp-servers should exclude agents: " + out);
+        assertFalse(out.contains("/api/providers"), "filter=mcp-servers should exclude providers: " + out);
+    }
+
     // ==================== schema-level checks ====================
 
     @Test
-    void parametersDeclareRequiredFields() {
-        @SuppressWarnings("unchecked")
-        var required = (java.util.List<String>) tool.parameters().get("required");
-        // The model's host validates required fields against this schema
-        // before dispatching the call. Documenting both as required is
-        // the only way to keep "ToolUse.params is empty" from being a
-        // silent no-op.
-        assertTrue(required.contains("method"));
-        assertTrue(required.contains("path"));
+    void parametersNoLongerForceMethodAndPath() {
+        // JCLAW-329: method/path moved from schema-required to runtime-validated.
+        // A discover call (action="discover") supplies neither, so declaring them
+        // required would make the host reject the discover round-trip before it
+        // ever reaches execute(). The required-field error now comes from the
+        // tool itself (see rejectsMissingMethod / rejectsMissingPath).
+        assertNull(tool.parameters().get("required"),
+                "method/path must not be schema-required so discover can omit them");
     }
 
     @Test

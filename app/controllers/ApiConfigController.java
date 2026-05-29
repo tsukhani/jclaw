@@ -46,6 +46,7 @@ public class ApiConfigController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigListResponse.class)))
+    @ChatSafe(summary = "List all config rows (sensitive values masked)")
     public static void list() {
         var configs = ConfigService.listAll();
         var entries = configs.stream()
@@ -60,6 +61,7 @@ public class ApiConfigController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigEntry.class)))
+    @ChatSafe(summary = "Read a config value by key")
     public static void get(String key) {
         if (isReservedKey(key)) notFound();
         var config = models.Config.findByKey(key);
@@ -75,6 +77,7 @@ public class ApiConfigController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ConfigSaveRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigSaveResponse.class)))
+    @ChatSafe(summary = "Write a config value", body = "key, value")
     public static void save() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("key") || !body.has("value")) {

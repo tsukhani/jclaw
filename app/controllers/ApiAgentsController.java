@@ -104,6 +104,7 @@ public class ApiAgentsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentView.class))))
+    @ChatSafe(summary = "List agents (id, name, modelProvider, modelId, enabled, isMain)")
     public static void list() {
         var agents = AgentService.listAll();
         var configuredKeys = AgentService.configuredModelKeys();
@@ -121,6 +122,7 @@ public class ApiAgentsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
+    @ChatSafe(summary = "Get one agent's full details by id")
     public static void get(Long id) {
         var agent = requireAgent(id);
         renderJSON(gson.toJson(AgentView.of(agent)));
@@ -206,6 +208,7 @@ public class ApiAgentsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
+    @ChatSafe(summary = "Create an agent", body = "name, modelProvider, modelId")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -252,6 +255,7 @@ public class ApiAgentsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
+    @ChatSafe(summary = "Update an agent by id", body = "any of name, modelProvider, modelId, enabled, thinkingMode, description")
     public static void update(Long id) {
         var agent = requireAgent(id);
 

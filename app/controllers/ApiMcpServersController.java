@@ -47,6 +47,7 @@ public class ApiMcpServersController extends Controller {
     private static final String KEY_TRANSPORT = "transport";
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
+    @ChatSafe(summary = "List MCP servers with status and tool count")
     public static void list() {
         renderJSON(gson.toJson(McpServerService.listAll()));
     }
@@ -60,6 +61,7 @@ public class ApiMcpServersController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
+    @ChatSafe(summary = "Add an MCP server (STDIO or HTTP)", body = "name, enabled, transport (STDIO or HTTP), then command/args/env or url/headers")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -91,6 +93,7 @@ public class ApiMcpServersController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
+    @ChatSafe(summary = "Update an MCP server by id; it reconnects automatically", body = "fields to change: transport, command, args, env, url, headers, enabled")
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
@@ -152,6 +155,7 @@ public class ApiMcpServersController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
+    @ChatSafe(summary = "Test an MCP server connection by id (probe); returns success, toolCount, toolNames")
     public static void test(Long id) {
         var row = requireServer(id);
         var result = McpServerService.testConnection(row);

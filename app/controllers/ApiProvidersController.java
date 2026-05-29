@@ -45,6 +45,7 @@ public class ApiProvidersController extends Controller {
      * partition spend.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ProviderInfo.class))))
+    @ChatSafe(summary = "List configured LLM providers")
     public static void list() {
         var infos = ProviderRegistry.listAll().stream()
                 .map(p -> {

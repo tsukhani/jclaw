@@ -9,10 +9,16 @@ import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import controllers.ChatSafe;
 import play.Play;
+import play.mvc.ActionInvoker;
+import play.mvc.Router;
 import services.InternalApiTokenService;
 import utils.HttpFactories;
 
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +58,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "jclaw_api";
 
+    private static final String KEY_ACTION = "action";
+    private static final String KEY_FILTER = "filter";
     private static final String KEY_METHOD = "method";
     private static final String KEY_PATH = "path";
     private static final String KEY_BODY = "body";
@@ -88,10 +96,12 @@ public class JClawApiTool implements ToolRegistry.Tool {
     @Override
     public String description() {
         return """
-                Invoke JClaw's own API by HTTP method + path. \
-                Read the jclaw-api SKILL.md for the catalog of safe endpoints and example payloads. \
-                Pass `path` like "/api/agents" — never a full URL. \
-                For mutating verbs (POST/PUT/PATCH/DELETE), pass `body` as a JSON object matching the endpoint's schema.""";
+                Invoke JClaw's own API by HTTP method + path, or discover what is callable. \
+                Set action="discover" to list the chat-safe endpoints (verb, path, summary, body hint); \
+                pass an optional `filter` substring to narrow the list. \
+                To invoke one, omit action (or action="call") and pass `method` and `path` like "/api/agents" — never a full URL; \
+                for mutating verbs (POST/PUT/PATCH/DELETE), pass `body` as a JSON object. \
+                Prefer discover over guessing paths; never call an endpoint that discover does not list.""";
     }
 
     @Override
@@ -99,13 +109,20 @@ public class JClawApiTool implements ToolRegistry.Tool {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
+                        KEY_ACTION, Map.of(
+                                SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("call", "discover"),
+                                SchemaKeys.DESCRIPTION, "\"discover\" lists the chat-safe endpoints; \"call\" (default) invokes one via method+path"),
+                        KEY_FILTER, Map.of(
+                                SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Optional substring for action=discover; narrows results by path or summary"),
                         KEY_METHOD, Map.of(
                                 SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.ENUM, ALLOWED_METHODS,
-                                SchemaKeys.DESCRIPTION, "HTTP method"),
+                                SchemaKeys.DESCRIPTION, "HTTP method (required when action=call)"),
                         KEY_PATH, Map.of(
                                 SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION, "JClaw API path starting with /api/ (e.g. /api/agents)"),
+                                SchemaKeys.DESCRIPTION, "JClaw API path starting with /api/ (required when action=call), e.g. /api/agents"),
                         KEY_BODY, Map.of(
                                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                                 SchemaKeys.DESCRIPTION, "JSON request body for POST/PUT/PATCH; omit for GET/DELETE",
@@ -114,8 +131,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
                                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                                 SchemaKeys.DESCRIPTION, "Query parameters as key→string-value pairs",
                                 SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING))
-                ),
-                SchemaKeys.REQUIRED, List.of(KEY_METHOD, KEY_PATH)
+                )
         );
     }
 
@@ -132,6 +148,11 @@ public class JClawApiTool implements ToolRegistry.Tool {
             args = JsonParser.parseString(argsJson).getAsJsonObject();
         } catch (RuntimeException e) {
             return "Error: arguments are not valid JSON: " + e.getMessage();
+        }
+
+        var action = stringField(args, KEY_ACTION);
+        if (action != null && "discover".equalsIgnoreCase(action)) {
+            return discover(stringField(args, KEY_FILTER));
         }
 
         var methodRaw = stringField(args, KEY_METHOD);
@@ -218,5 +239,92 @@ public class JClawApiTool implements ToolRegistry.Tool {
         if (!el.isJsonPrimitive()) return null;
         var s = el.getAsString();
         return s.isBlank() ? null : s;
+    }
+
+    // ---------------------------------------------------------------- discover
+
+    /**
+     * JCLAW-329: list the chat-safe JClaw API endpoints. Scans the live route
+     * table, keeps only actions annotated {@link controllers.ChatSafe}, and
+     * excludes anything matching {@link #PATH_BLOCKLIST} (the unconditional
+     * deny-floor — the annotation is an allowlist, not an override). The route
+     * table is the source of truth for verb + path, so a newly-added annotated
+     * endpoint shows up here at runtime with no skill edit.
+     */
+    private String discover(String filter) {
+        var needle = (filter == null || filter.isBlank()) ? null : filter.toLowerCase(Locale.ROOT);
+        var entries = new ArrayList<String>();
+        var seen = new HashSet<String>();
+        for (var route : Router.routes) {
+            ChatSafe ann = annotationFor(route.action);
+            if (ann == null) continue;
+            var path = route.path;
+            if (path == null || !path.startsWith("/api/")) continue;
+            boolean blocked = false;
+            for (var b : PATH_BLOCKLIST) {
+                if (path.startsWith(b)) { blocked = true; break; }
+            }
+            if (blocked) continue;   // deny-floor wins over the marker
+            var verb = (route.method == null || route.method.isBlank() || "*".equals(route.method))
+                    ? "ANY" : route.method.toUpperCase(Locale.ROOT);
+            if (!seen.add(verb + " " + path)) continue;
+            if (needle != null
+                    && !path.toLowerCase(Locale.ROOT).contains(needle)
+                    && !ann.summary().toLowerCase(Locale.ROOT).contains(needle)) {
+                continue;
+            }
+            var line = "- " + verb + " " + path + " — " + ann.summary();
+            if (!ann.body().isBlank()) {
+                line += "  [body: " + ann.body() + "]";
+            }
+            entries.add(line);
+        }
+        entries.sort(null);
+        if (entries.isEmpty()) {
+            return "No chat-safe JClaw API endpoints found"
+                    + (needle != null ? " matching \"" + filter + "\"." : ".");
+        }
+        return "Chat-safe JClaw API endpoints (" + entries.size() + ")"
+                + (needle != null ? " matching \"" + filter + "\"" : "")
+                + ". Invoke one by calling this tool with method + path (and body for mutating verbs); "
+                + "never call an endpoint that is not listed here.\n\n"
+                + String.join("\n", entries);
+    }
+
+    /**
+     * Resolve a route's action string to its {@link Method} and return its
+     * {@link ChatSafe} annotation, or {@code null} if it can't be resolved or
+     * isn't annotated. Defensive: many routes (static dirs, 404, non-controller
+     * actions) don't map to a controller Method — those are simply skipped.
+     */
+    private static ChatSafe annotationFor(String action) {
+        if (action == null || action.isBlank()) return null;
+        // Preferred: Play's own action resolver.
+        try {
+            Object[] resolved = ActionInvoker.getActionMethod(action);
+            if (resolved != null && resolved.length >= 2 && resolved[1] instanceof Method m) {
+                return m.getAnnotation(ChatSafe.class);
+            }
+        } catch (Throwable ignored) {
+            // fall through to manual resolution
+        }
+        // Fallback: resolve "Controller.method" by name off Play's classloader.
+        // Context-free, so it works outside an HTTP request (e.g. unit tests).
+        try {
+            int dot = action.lastIndexOf('.');
+            if (dot <= 0) return null;
+            var className = action.substring(0, dot);
+            var methodName = action.substring(dot + 1);
+            if (!className.contains(".")) className = "controllers." + className;
+            Class<?> cls = Play.classloader.loadClass(className);
+            for (var candidate : cls.getDeclaredMethods()) {
+                if (candidate.getName().equals(methodName) && candidate.isAnnotationPresent(ChatSafe.class)) {
+                    return candidate.getAnnotation(ChatSafe.class);
+                }
+            }
+        } catch (Throwable ignored) {
+            // not a resolvable controller action — skip
+        }
+        return null;
     }
 }
