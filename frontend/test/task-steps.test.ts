@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseTaskSteps } from '~/utils/task-steps'
+import { parseTaskSteps, serializeTaskSteps } from '~/utils/task-steps'
 
 describe('parseTaskSteps (JCLAW-260 — mirrors backend TaskSteps.parse)', () => {
   it('plain text → single step', () => {
@@ -37,5 +37,30 @@ describe('parseTaskSteps (JCLAW-260 — mirrors backend TaskSteps.parse)', () =>
 
   it('empty array → single (raw) step', () => {
     expect(parseTaskSteps('[]')).toEqual(['[]'])
+  })
+})
+
+describe('serializeTaskSteps (JCLAW-22 — inverse of parseTaskSteps)', () => {
+  it('multiple steps → JSON array string', () => {
+    expect(serializeTaskSteps(['a', 'b', 'c'])).toBe('["a","b","c"]')
+  })
+
+  it('single step → plain text (not wrapped)', () => {
+    expect(serializeTaskSteps(['just one'])).toBe('just one')
+  })
+
+  it('trims steps and drops blanks', () => {
+    expect(serializeTaskSteps([' a ', '', '   ', 'b'])).toBe('["a","b"]')
+  })
+
+  it('all-empty → empty string', () => {
+    expect(serializeTaskSteps([])).toBe('')
+    expect(serializeTaskSteps(['', '  '])).toBe('')
+  })
+
+  it('round-trips with parseTaskSteps', () => {
+    for (const steps of [['one'], ['a', 'b'], ['x', 'y', 'z']]) {
+      expect(parseTaskSteps(serializeTaskSteps(steps))).toEqual(steps)
+    }
   })
 })

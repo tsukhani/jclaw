@@ -30,3 +30,21 @@ export function parseTaskSteps(description: unknown): string[] {
   }
   return [description]
 }
+
+/**
+ * JCLAW-22 (slice E): inverse of {@link parseTaskSteps}. Serialise an edited
+ * step list back into the `description` string that gets PATCHed to the API.
+ * Steps are trimmed and empties dropped; a single step is stored as plain
+ * text and multiple steps as a JSON array — the canonical shapes the backend
+ * `TaskSteps.parse` and the frontend `parseTaskSteps` both understand. An
+ * all-empty edit collapses to "" (no instructions).
+ *
+ * Round-trips with {@link parseTaskSteps}: parse(serialize(steps)) === steps
+ * for any list of non-blank steps.
+ */
+export function serializeTaskSteps(steps: string[]): string {
+  const cleaned = steps.map(s => s.trim()).filter(s => s.length > 0)
+  if (cleaned.length === 0) return ''
+  if (cleaned.length === 1) return cleaned[0] ?? ''
+  return JSON.stringify(cleaned)
+}

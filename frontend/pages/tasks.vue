@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import type { Task, TaskRunView } from '~/types/api'
 import {
+  ArrowDownIcon,
   ArrowPathIcon,
+  ArrowUpIcon,
   CalendarDaysIcon,
+  CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   NoSymbolIcon,
+  PencilSquareIcon,
+  PlusIcon,
   Squares2X2Icon,
   TableCellsIcon,
   TrashIcon,
+  XMarkIcon,
 } from '@heroicons/vue/24/outline'
 
 // JCLAW-304: FilterBar-driven state. The legacy status/type select refs
@@ -185,6 +191,66 @@ const expandedSteps = computed(() => parseTaskSteps(expandedTask.value?.descript
 // colspan for the expanded detail row: every visible column, including the
 // leading checkbox column when bulk-select is active.
 const tableColspan = computed(() => (selectMode.value ? 9 : 8))
+
+// ── JCLAW-22 (slice E): inline step editor ──
+// Editing is tied to the expanded row, one task at a time. editSteps is a
+// working copy of the parsed steps; saving re-serialises it (single step →
+// plain text, multiple → JSON array via serializeTaskSteps) and PATCHes the
+// task's description, then refreshes so the read-only view reflects it.
+const editingId = ref<number | null>(null)
+const editSteps = ref<string[]>([])
+const savingSteps = ref(false)
+const stepsError = ref<string | null>(null)
+
+function startEditSteps(task: Task) {
+  const steps = parseTaskSteps(task.description)
+  editSteps.value = steps.length ? [...steps] : ['']
+  stepsError.value = null
+  editingId.value = task.id
+}
+
+function cancelEditSteps() {
+  editingId.value = null
+  editSteps.value = []
+  stepsError.value = null
+}
+
+function addStep() {
+  editSteps.value.push('')
+}
+
+function removeStep(i: number) {
+  editSteps.value.splice(i, 1)
+}
+
+function moveStep(i: number, dir: -1 | 1) {
+  const arr = editSteps.value
+  const j = i + dir
+  if (j < 0 || j >= arr.length) return
+  const a = arr[i]
+  const b = arr[j]
+  if (a === undefined || b === undefined) return
+  arr[i] = b
+  arr[j] = a
+}
+
+async function saveSteps(task: Task) {
+  savingSteps.value = true
+  stepsError.value = null
+  try {
+    const description = serializeTaskSteps(editSteps.value)
+    await $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { description } })
+    editingId.value = null
+    editSteps.value = []
+    refresh()
+  }
+  catch (e) {
+    stepsError.value = e instanceof Error ? e.message : 'Failed to save steps'
+  }
+  finally {
+    savingSteps.value = false
+  }
+}
 
 // LOST sits between RUNNING (blue) and FAILED (red) on the heat axis —
 // the task is stuck but db-scheduler will auto-recover it. Orange
@@ -848,35 +914,151 @@ const calendarDays = computed<DayCell[]>(() => {
                 class="px-4 py-3"
               >
                 <div class="grid gap-6 md:grid-cols-2">
-                  <!-- Instructions: the JCLAW-260 step list (numbered when
-                     multi-step, verbatim for a single step). -->
+                  <!-- Instructions: the JCLAW-260 step list, read-only by
+                     default with an inline editor (slice E) behind Edit. -->
                   <section>
-                    <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted mb-1.5">
-                      Instructions
-                    </h3>
-                    <ol
-                      v-if="expandedSteps.length > 1"
-                      class="list-decimal list-inside space-y-0.5 text-xs text-fg-primary"
-                    >
-                      <li
-                        v-for="(step, i) in expandedSteps"
-                        :key="i"
+                    <div class="flex items-center justify-between mb-1.5">
+                      <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
+                        Instructions
+                      </h3>
+                      <button
+                        v-if="editingId !== task.id"
+                        type="button"
+                        class="inline-flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+                        @click="startEditSteps(task)"
                       >
-                        {{ step }}
-                      </li>
-                    </ol>
-                    <p
-                      v-else-if="expandedSteps.length === 1"
-                      class="text-xs text-fg-primary whitespace-pre-wrap"
-                    >
-                      {{ expandedSteps[0] }}
-                    </p>
-                    <p
+                        <PencilSquareIcon
+                          class="h-3 w-3"
+                          aria-hidden="true"
+                        />
+                        Edit
+                      </button>
+                    </div>
+
+                    <!-- Read-only view (numbered when multi-step, verbatim for one). -->
+                    <template v-if="editingId !== task.id">
+                      <ol
+                        v-if="expandedSteps.length > 1"
+                        class="list-decimal list-inside space-y-0.5 text-xs text-fg-primary"
+                      >
+                        <li
+                          v-for="(step, i) in expandedSteps"
+                          :key="i"
+                        >
+                          {{ step }}
+                        </li>
+                      </ol>
+                      <p
+                        v-else-if="expandedSteps.length === 1"
+                        class="text-xs text-fg-primary whitespace-pre-wrap"
+                      >
+                        {{ expandedSteps[0] }}
+                      </p>
+                      <p
+                        v-else
+                        class="text-xs text-fg-muted italic"
+                      >
+                        No instructions
+                      </p>
+                    </template>
+
+                    <!-- Inline editor: add / edit / reorder / remove → PATCH. -->
+                    <div
                       v-else
-                      class="text-xs text-fg-muted italic"
+                      class="space-y-2"
                     >
-                      No instructions
-                    </p>
+                      <div
+                        v-for="(step, i) in editSteps"
+                        :key="i"
+                        class="flex items-start gap-1.5"
+                      >
+                        <span class="text-[10px] text-fg-muted font-mono mt-1.5 w-4 text-right shrink-0">{{ i + 1 }}</span>
+                        <textarea
+                          v-model="editSteps[i]"
+                          rows="2"
+                          :aria-label="`Step ${i + 1}`"
+                          placeholder="Step instruction…"
+                          class="flex-1 px-2 py-1 bg-muted border border-input text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors resize-y"
+                        />
+                        <div class="flex flex-col gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            :disabled="i === 0"
+                            :aria-label="`Move step ${i + 1} up`"
+                            class="p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
+                            @click="moveStep(i, -1)"
+                          >
+                            <ArrowUpIcon
+                              class="h-3 w-3"
+                              aria-hidden="true"
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            :disabled="i === editSteps.length - 1"
+                            :aria-label="`Move step ${i + 1} down`"
+                            class="p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
+                            @click="moveStep(i, 1)"
+                          >
+                            <ArrowDownIcon
+                              class="h-3 w-3"
+                              aria-hidden="true"
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            :aria-label="`Remove step ${i + 1}`"
+                            class="p-0.5 text-fg-muted hover:text-red-400"
+                            @click="removeStep(i)"
+                          >
+                            <XMarkIcon
+                              class="h-3 w-3"
+                              aria-hidden="true"
+                            />
+                          </button>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong bg-transparent border-0 cursor-pointer"
+                          @click="addStep"
+                        >
+                          <PlusIcon
+                            class="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                          Add step
+                        </button>
+                        <span class="flex-1" />
+                        <button
+                          type="button"
+                          :disabled="savingSteps"
+                          class="px-2 py-1 text-xs bg-muted border border-input text-fg-muted hover:text-fg-strong disabled:opacity-50 cursor-pointer"
+                          @click="cancelEditSteps"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          :disabled="savingSteps"
+                          class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
+                          @click="saveSteps(task)"
+                        >
+                          <CheckIcon
+                            class="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                          {{ savingSteps ? 'Saving…' : 'Save' }}
+                        </button>
+                      </div>
+                      <p
+                        v-if="stepsError"
+                        class="text-xs text-red-400"
+                      >
+                        {{ stepsError }}
+                      </p>
+                    </div>
                   </section>
                   <!-- Run history: lazy-loaded TaskRuns, most-recent first. -->
                   <section>
