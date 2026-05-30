@@ -75,6 +75,48 @@ class TaskExecutorTest extends UnitTest {
         }
     }
 
+    // === JCLAW-260: fire-time prompt resolution (pure, no fire) ===
+
+    @Test
+    void resolveAgentPromptFlattensMultiStepForAgentTask() {
+        var t = new Task();
+        t.name = "daily-summary";
+        t.description = "[\"Fetch orders\",\"Post summary\"]";
+        t.noAgent = false;
+        assertEquals("1. Fetch orders\n2. Post summary",
+                TaskExecutor.resolveAgentPrompt(t));
+    }
+
+    @Test
+    void resolveAgentPromptKeepsSingleStepVerbatim() {
+        var t = new Task();
+        t.name = "x";
+        t.description = "Just do the thing";
+        t.noAgent = false;
+        assertEquals("Just do the thing", TaskExecutor.resolveAgentPrompt(t));
+    }
+
+    @Test
+    void resolveAgentPromptExemptsNoAgentTasks() {
+        // script / noAgent tasks deliver their description verbatim — never
+        // flattened or numbered, even when it happens to be a JSON array.
+        var t = new Task();
+        t.name = "x";
+        t.description = "[\"line one\",\"line two\"]";
+        t.noAgent = true;
+        assertEquals("[\"line one\",\"line two\"]",
+                TaskExecutor.resolveAgentPrompt(t));
+    }
+
+    @Test
+    void resolveAgentPromptFallsBackToNameWhenDescriptionBlank() {
+        var t = new Task();
+        t.name = "fallback-name";
+        t.description = "";
+        t.noAgent = false;
+        assertEquals("fallback-name", TaskExecutor.resolveAgentPrompt(t));
+    }
+
     // === Happy path: description-as-prompt + assistant reply ===
 
     @Test

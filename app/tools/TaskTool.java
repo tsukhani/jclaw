@@ -162,7 +162,13 @@ public class TaskTool implements ToolRegistry.Tool {
                 Map.entry(KEY_NAME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Task name (short identifier)")),
                 Map.entry(SchemaKeys.DESCRIPTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Task description / instructions for the agent")),
+                        SchemaKeys.DESCRIPTION, "Task instructions for the agent. For a multi-step task, "
+                                + "pass a JSON array of step strings in order, e.g. "
+                                + "[\"Fetch yesterday's orders\", \"Summarise the totals\", "
+                                + "\"Post the summary to the channel\"] — the steps render as a numbered "
+                                + "list in the admin UI and are flattened into the agent's prompt. For a "
+                                + "simple task or a reminder, pass a single plain string. A one-element "
+                                + "array and a plain string behave identically.")),
                 Map.entry(KEY_SCHEDULE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Schedule shorthand: 'now', duration like '30m'/'2h'/'1d' for one-shot, 'every <duration>' for INTERVAL, or Spring 6-field cron / at-shortcut for CRON")),
                 Map.entry(KEY_PAUSED, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
@@ -252,6 +258,24 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     /**
+     * JCLAW-260: read the {@code description} arg, which the LLM may pass
+     * either as a plain string (single-step / free text) or as a JSON array
+     * of step strings. An array is stored as its canonical JSON serialization
+     * in the existing description TEXT column; a string is stored verbatim;
+     * missing or JSON-null yields null. {@link services.TaskSteps#parse}
+     * reverses this at read/fire time. Both shapes are accepted because some
+     * models honour the string schema by sending a JSON-array string while
+     * others send a real array.
+     */
+    private static String readDescriptionArg(JsonObject args) {
+        if (!hasValue(args, SchemaKeys.DESCRIPTION)) return null;
+        var el = args.get(SchemaKeys.DESCRIPTION);
+        if (el.isJsonArray()) return el.toString();         // ["step 1","step 2"]
+        if (el.isJsonPrimitive()) return el.getAsString();  // plain string OR a JSON-array string
+        return el.toString();                               // defensive: object / other
+    }
+
+    /**
      * Non-cancelled task ids matching (name, agent). Returns empty list
      * when nothing matches. Used by pause/resume/cancelTask — runNow uses
      * the any-state variant below because it explicitly revives CANCELLED.
@@ -275,7 +299,7 @@ public class TaskTool implements ToolRegistry.Tool {
             return ERR_NAME_REQUIRED;
         }
         var name = args.get(KEY_NAME).getAsString();
-        var description = optStr(args, SchemaKeys.DESCRIPTION);
+        var description = readDescriptionArg(args);
         if (description == null) description = "";
         if (!hasValue(args, KEY_SCHEDULE)) {
             return "Error: 'schedule' is required (use 'now', a duration like '30m', 'every 30m', or a Spring 6-field cron / @daily etc.)";
@@ -575,7 +599,7 @@ public class TaskTool implements ToolRegistry.Tool {
         }
 
         if (args.has(SchemaKeys.DESCRIPTION)) {
-            var v = optStr(args, SchemaKeys.DESCRIPTION);
+            var v = readDescriptionArg(args);
             task.description = v != null ? v : "";
             anyChange = true;
         }

@@ -121,6 +121,22 @@ public final class TaskExecutor {
     }
 
     /**
+     * JCLAW-260: resolve the user prompt for an agent fire. A blank
+     * description falls back to the task name (unchanged from before).
+     * For a genuine agent task an ordered step list in {@code description}
+     * is flattened into a numbered prompt via
+     * {@link TaskSteps#flattenForPrompt}. {@code noAgent} tasks (a shell
+     * script, or a verbatim-delivery body) are exempt — their description
+     * is used as-is, never numbered. Reminders never reach here; they
+     * short-circuit in {@link #runTask} with their description delivered
+     * verbatim.
+     */
+    public static String resolveAgentPrompt(Task task) {
+        if (task.description == null || task.description.isBlank()) return task.name;
+        return task.noAgent ? task.description : TaskSteps.flattenForPrompt(task.description);
+    }
+
+    /**
      * Open the TaskRun in RUNNING state. The re-query can race with deletion
      * (Fixtures.deleteDatabase in tests, or an operator cancel + delete in
      * prod) — return null so TaskExecutionHandler can drop the orphan via
@@ -155,9 +171,7 @@ public final class TaskExecutor {
             var prep = Tx.run(() -> {
                 var t = (Task) Task.findById(task.id);
                 if (t == null) return null;
-                var prompt = (t.description != null && !t.description.isBlank())
-                        ? t.description : t.name;
-                return new PreparedFire(t.agent, prompt);
+                return new PreparedFire(t.agent, resolveAgentPrompt(t));
             });
             if (prep == null) {
                 // Task deleted after the TaskRun row was opened. Mark the
