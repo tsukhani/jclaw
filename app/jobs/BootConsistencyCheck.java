@@ -111,6 +111,23 @@ public class BootConsistencyCheck extends Job<Void> {
                             .formatted(lost));
         }
 
+        return reArmOrphans(scheduler);
+    }
+
+    /**
+     * Re-arm orphaned non-terminal Tasks: register a fresh
+     * {@code scheduled_tasks} row for any PENDING or ACTIVE Task that has
+     * lost one. Split out of {@link #sweep} (JCLAW-22) so the periodic
+     * {@link OrphanReArmJob} can run JUST this step without re-invoking
+     * {@link LostTaskDetector#detect()} — {@link LostTaskScanJob} already
+     * ticks that every 30 s, so double-running it would be wasted work.
+     * Discovers the live schedule via the scheduler's public
+     * {@code getScheduledExecutionsForTask} API, not a raw
+     * {@code scheduled_tasks} read. Idempotent: a Task already holding a row
+     * is skipped, so an extra run is a no-op. Returns the count of Tasks
+     * newly registered.
+     */
+    public static int reArmOrphans(SchedulerClient scheduler) {
         // Build the set of task_instance ids currently scheduled, so we can
         // skip Tasks that already have a row. One query (typically a small
         // set — most Tasks complete and remove their row).

@@ -160,6 +160,33 @@ class BootConsistencyCheckTest extends UnitTest {
         assertTrue(stub.schedules.isEmpty());
     }
 
+    // === JCLAW-22: reArmOrphans (periodic-sweep half, no LOST detection) ===
+
+    @Test
+    void reArmOrphansRegistersOrphans() {
+        var orphan = persistTask("orphan", Task.Status.PENDING);
+
+        int registered = BootConsistencyCheck.reArmOrphans(stub.proxy());
+
+        assertEquals(1, registered, "reArmOrphans should register the orphan");
+        assertEquals(orphan.id.toString(), stub.schedules.getFirst().instance.getId());
+    }
+
+    @Test
+    void reArmOrphansDoesNotRunLostDetection() throws Exception {
+        // sweep() flips a stale-heartbeat RUNNING task to LOST; reArmOrphans
+        // must NOT — LostTaskScanJob owns LOST detection, and the periodic
+        // OrphanReArmJob calls only this half to avoid double-scanning.
+        var stale = persistTask("crash-orphan", Task.Status.RUNNING);
+        insertScheduledTaskRow(stale.id, Instant.now().minusSeconds(90));
+
+        BootConsistencyCheck.reArmOrphans(stub.proxy());
+
+        assertEquals(Task.Status.RUNNING,
+                ((Task) Task.findById(stale.id)).status,
+                "reArmOrphans must not reconcile RUNNING -> LOST");
+    }
+
     // === Helpers ===
 
     private Agent persistAgent() {

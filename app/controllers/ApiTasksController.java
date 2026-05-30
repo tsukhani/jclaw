@@ -91,7 +91,7 @@ public class ApiTasksController extends Controller {
             return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
                     t.cronExpression, t.intervalSeconds, t.scheduleDisplay,
                     t.retryCount, t.maxRetries, t.lastError,
-                    nextRunAtForDisplay(t),
+                    nextRunAtForDisplay(t, lastFiredAt),
                     lastFiredAt != null ? lastFiredAt.toString() : null,
                     t.createdAt.toString(),
                     t.agent != null ? t.agent.id : null,
@@ -111,43 +111,65 @@ public class ApiTasksController extends Controller {
                     services.TimezoneResolver.resolve(t).getId());
         }
 
-        /**
-         * Authoritative next-fire instant for the UI.  Task.nextRunAt is
-         * stamped at create/update time and never refreshed by the scheduler
-         * — db-scheduler owns the live next-fire in its own scheduled_tasks
-         * row. For CRON tasks we recompute from the expression so the Tasks
-         * page shows e.g. "tomorrow 09:00" instead of the create timestamp;
-         * for INTERVAL we project from now + intervalSeconds (a reasonable
-         * approximation between fires, since the last-fire timestamp isn't
-         * cheap to surface here). Terminal-status tasks fall back to the
-         * stored value because no further fire is expected.
-         */
-        private static String nextRunAtForDisplay(Task t) {
-            // Only live tasks (PENDING one-shot / ACTIVE recurring) have a
-            // meaningful "next fire" — terminal-state tasks fall through
-            // to the stored value since no further fire is expected.
-            if (t.status != Task.Status.PENDING && t.status != Task.Status.ACTIVE) {
-                return t.nextRunAt != null ? t.nextRunAt.toString() : null;
-            }
-            try {
-                if (t.type == Task.Type.CRON && t.cronExpression != null) {
-                    // JCLAW-261: render the next fire using the same
-                    // zone the scheduler will fire under, so the UI's
-                    // "Next Run" column matches the actual fire time.
-                    var zone = services.TimezoneResolver.resolve(t);
-                    var next = services.JClawCronUtils.nextExecution(t.cronExpression, zone);
-                    if (next != null) return next.toString();
-                }
-                if (t.type == Task.Type.INTERVAL && t.intervalSeconds != null && t.intervalSeconds > 0) {
-                    return Instant.now().plusSeconds(t.intervalSeconds).toString();
-                }
-            } catch (RuntimeException _) {
-                // Fall through to the stored value — better to show something
-                // than swallow the row on a malformed expression that somehow
-                // got past validation.
-            }
+    }
+
+    /**
+     * Authoritative next-fire instant for the UI. {@code Task.nextRunAt} is
+     * stamped at create/update time and never refreshed by the scheduler —
+     * db-scheduler owns the live next-fire in its own {@code scheduled_tasks}
+     * row, which JCLAW-22 deliberately does NOT read (that would couple the
+     * API to the scheduler's internal schema). Instead:
+     * <ul>
+     *   <li><b>Paused</b> → no next fire (null); it won't fire until resumed.</li>
+     *   <li><b>Terminal</b> → the stored value; no further fire is expected.</li>
+     *   <li><b>CRON</b> → recomputed from the expression in the task's
+     *       effective zone (JCLAW-261), so the column shows e.g. "tomorrow
+     *       09:00" rather than the create timestamp.</li>
+     *   <li><b>INTERVAL</b> (JCLAW-22 option C) → anchored on the previous
+     *       completion: {@code lastFiredAt + intervalSeconds}, because that's
+     *       where db-scheduler sets the next fire. {@code now + intervalSeconds}
+     *       would jitter a full interval ahead on every page load. Before the
+     *       first fire there's no completion to anchor on, so it falls back to
+     *       the stored creation-time first-fire projection.</li>
+     * </ul>
+     *
+     * @param lastFiredAt the most-recent {@link TaskRun#completedAt} for this
+     *     task (from {@link #list}'s bulk pass), or null when it has never
+     *     completed a run.
+     */
+    public static String nextRunAtForDisplay(Task t, Instant lastFiredAt) {
+        // Paused recurring tasks won't fire until resumed.
+        if (t.paused) return null;
+        // Only live tasks (PENDING one-shot / ACTIVE recurring) have a
+        // meaningful "next fire" — terminal-state tasks fall through to the
+        // stored value since no further fire is expected.
+        if (t.status != Task.Status.PENDING && t.status != Task.Status.ACTIVE) {
             return t.nextRunAt != null ? t.nextRunAt.toString() : null;
         }
+        try {
+            if (t.type == Task.Type.CRON && t.cronExpression != null) {
+                // JCLAW-261: render the next fire using the same zone the
+                // scheduler will fire under, so the column matches the real time.
+                var zone = services.TimezoneResolver.resolve(t);
+                var next = services.JClawCronUtils.nextExecution(t.cronExpression, zone);
+                if (next != null) return next.toString();
+            }
+            if (t.type == Task.Type.INTERVAL && t.intervalSeconds != null && t.intervalSeconds > 0) {
+                // Option C: db-scheduler anchors the next INTERVAL fire at the
+                // previous completion, so the live next-fire is
+                // lastFiredAt + intervalSeconds. Before the first fire fall
+                // back to the stored creation-time first-fire projection.
+                if (lastFiredAt != null) {
+                    return lastFiredAt.plusSeconds(t.intervalSeconds).toString();
+                }
+                return t.nextRunAt != null ? t.nextRunAt.toString() : null;
+            }
+        } catch (RuntimeException _) {
+            // Fall through to the stored value — better to show something
+            // than swallow the row on a malformed expression that somehow
+            // got past validation.
+        }
+        return t.nextRunAt != null ? t.nextRunAt.toString() : null;
     }
 
     /**
