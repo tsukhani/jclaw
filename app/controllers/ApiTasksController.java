@@ -230,6 +230,27 @@ public class ApiTasksController extends Controller {
     }
 
     /**
+     * Operator-facing view of one {@code task_run_message} row — the
+     * turn-by-turn execution trace surfaced in the Tasks UI PeekPanel
+     * (JCLAW-22 slice P). Carries the LLM-visible turn fields (role,
+     * content, reasoning, tool calls/results) plus the truncation flag.
+     * The structured-only {@code toolResultStructured} column is omitted —
+     * the agent never sees it and operators don't need it.
+     */
+    private record TaskRunMessageView(Long id, int turnIndex, String role, String content,
+                                      String reasoning, String toolCalls, String toolResults,
+                                      boolean truncated, String createdAt) {
+        static TaskRunMessageView of(TaskRunMessage m) {
+            return new TaskRunMessageView(
+                    m.id, m.turnIndex,
+                    m.role != null ? m.role.name() : null,
+                    m.content, m.reasoning, m.toolCalls, m.toolResults,
+                    m.truncated,
+                    m.createdAt != null ? m.createdAt.toString() : null);
+        }
+    }
+
+    /**
      * Full-text search across task transcripts. Routes through the
      * {@link services.search.MessageSearch} facade, which dispatches
      * to either the direct Lucene 10 backend (default) or Postgres
@@ -302,6 +323,26 @@ public class ApiTasksController extends Controller {
                 .fetch(effectiveLimit);
 
         renderJSON(gson.toJson(rows.stream().map(TaskRunView::of).toList()));
+    }
+
+    /**
+     * Turn-by-turn execution trace for one TaskRun — its
+     * {@code task_run_message} rows in turn order. Powers the Tasks UI
+     * PeekPanel (JCLAW-22 slice P). Returns {@code []} for a run that
+     * produced no messages (e.g. a reminder fire, which skips the LLM);
+     * 404 only when the TaskRun itself is missing.
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunMessageView.class))))
+    public static void runMessages(Long id) {
+        TaskRun run = TaskRun.findById(id);
+        if (run == null) notFound();
+
+        @SuppressWarnings("unchecked")
+        List<TaskRunMessage> rows = (List<TaskRunMessage>) (List<?>) TaskRunMessage.find(
+                "taskRun = ?1 ORDER BY turnIndex ASC", run).fetch();
+
+        renderJSON(gson.toJson(rows.stream().map(TaskRunMessageView::of).toList()));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))

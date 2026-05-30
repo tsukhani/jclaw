@@ -437,6 +437,22 @@ export interface TaskRunView {
   createdAt: string | null
 }
 
+/**
+ * One task_run_message row as returned by GET /api/task-runs/:id/messages —
+ * the turn-by-turn execution trace. Mirrors the backend TaskRunMessageView.
+ */
+export interface TaskRunMessageView {
+  id: number
+  turnIndex: number
+  role: string | null
+  content: string | null
+  reasoning: string | null
+  toolCalls: string | null
+  toolResults: string | null
+  truncated: boolean
+  createdAt: string | null
+}
+
 /** A single persisted model on a provider (stored inside provider.{name}.models JSON). */
 export interface ProviderModelDef {
   id: string

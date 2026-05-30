@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task, TaskRunView } from '~/types/api'
+import type { Task, TaskRunView, TaskRunMessageView } from '~/types/api'
 import {
   ArrowDownIcon,
   ArrowPathIcon,
@@ -250,6 +250,37 @@ async function saveSteps(task: Task) {
   finally {
     savingSteps.value = false
   }
+}
+
+// ── JCLAW-22 (slice P): TaskRun trace in a PeekPanel ──
+// Clicking a run in the history opens the shared PeekPanel and lazy-loads
+// that run's task_run_message rows (turn-by-turn trace) from
+// /api/task-runs/{id}/messages.
+const peekOpen = ref(false)
+const peekRun = ref<TaskRunView | null>(null)
+const peekMessages = ref<TaskRunMessageView[]>([])
+const peekLoading = ref(false)
+const peekError = ref<string | null>(null)
+
+async function openTrace(run: TaskRunView) {
+  peekRun.value = run
+  peekOpen.value = true
+  peekMessages.value = []
+  peekError.value = null
+  peekLoading.value = true
+  try {
+    peekMessages.value = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${run.id}/messages`)
+  }
+  catch (e) {
+    peekError.value = e instanceof Error ? e.message : 'Failed to load trace'
+  }
+  finally {
+    peekLoading.value = false
+  }
+}
+
+function closeTrace() {
+  peekOpen.value = false
 }
 
 // LOST sits between RUNNING (blue) and FAILED (red) on the heat axis —
@@ -1090,35 +1121,41 @@ const calendarDays = computed<DayCell[]>(() => {
                       <li
                         v-for="run in runsByTask[task.id]"
                         :key="run.id"
-                        class="text-xs border-l-2 border-border pl-2"
                       >
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span
-                            :class="statusColors[run.status ?? '']"
-                            class="font-mono"
-                          >{{ run.status }}</span>
-                          <span class="text-fg-muted">{{ run.startedAt ? formatTaskTimestamp(run.startedAt, zoneForTaskRender(task)) : '—' }}</span>
-                          <span
-                            v-if="run.durationMs != null"
-                            class="text-fg-muted"
-                          >· {{ (run.durationMs / 1000).toFixed(1) }}s</span>
-                          <span
-                            v-if="run.deliveryStatus && run.deliveryStatus !== 'NOT_REQUESTED'"
-                            class="text-fg-muted"
-                          >· {{ run.deliveryStatus }}</span>
-                        </div>
-                        <p
-                          v-if="run.error"
-                          class="text-red-400 mt-0.5 whitespace-pre-wrap break-words"
+                        <button
+                          type="button"
+                          class="w-full text-left text-xs border-l-2 border-border pl-2 py-0.5 bg-transparent cursor-pointer hover:border-emerald-500 hover:bg-muted/40 transition-colors"
+                          :aria-label="`View execution trace for this run`"
+                          @click="openTrace(run)"
                         >
-                          {{ run.error }}
-                        </p>
-                        <p
-                          v-else-if="run.outputSummary"
-                          class="text-fg-muted mt-0.5 whitespace-pre-wrap break-words line-clamp-3"
-                        >
-                          {{ run.outputSummary }}
-                        </p>
+                          <div class="flex flex-wrap items-center gap-2">
+                            <span
+                              :class="statusColors[run.status ?? '']"
+                              class="font-mono"
+                            >{{ run.status }}</span>
+                            <span class="text-fg-muted">{{ run.startedAt ? formatTaskTimestamp(run.startedAt, zoneForTaskRender(task)) : '—' }}</span>
+                            <span
+                              v-if="run.durationMs != null"
+                              class="text-fg-muted"
+                            >· {{ (run.durationMs / 1000).toFixed(1) }}s</span>
+                            <span
+                              v-if="run.deliveryStatus && run.deliveryStatus !== 'NOT_REQUESTED'"
+                              class="text-fg-muted"
+                            >· {{ run.deliveryStatus }}</span>
+                          </div>
+                          <p
+                            v-if="run.error"
+                            class="text-red-400 mt-0.5 whitespace-pre-wrap break-words"
+                          >
+                            {{ run.error }}
+                          </p>
+                          <p
+                            v-else-if="run.outputSummary"
+                            class="text-fg-muted mt-0.5 whitespace-pre-wrap break-words line-clamp-3"
+                          >
+                            {{ run.outputSummary }}
+                          </p>
+                        </button>
                       </li>
                     </ul>
                   </section>
@@ -1343,5 +1380,71 @@ const calendarDays = computed<DayCell[]>(() => {
         </div>
       </div>
     </div>
+
+    <!-- PeekPanel: turn-by-turn execution trace for a clicked TaskRun (slice P). -->
+    <PeekPanel
+      :open="peekOpen"
+      :title="peekRun ? `Run trace — ${peekRun.status ?? ''}` : 'Run trace'"
+      :description="peekRun && peekRun.startedAt ? new Date(peekRun.startedAt).toLocaleString() : ''"
+      @update:open="closeTrace"
+    >
+      <p
+        v-if="peekLoading"
+        class="text-sm text-fg-muted"
+      >
+        Loading trace…
+      </p>
+      <p
+        v-else-if="peekError"
+        class="text-sm text-red-400"
+      >
+        {{ peekError }}
+      </p>
+      <p
+        v-else-if="!peekMessages.length"
+        class="text-sm text-fg-muted italic"
+      >
+        No transcript for this run (e.g. a reminder, which skips the agent).
+      </p>
+      <div
+        v-else
+        class="space-y-3"
+      >
+        <div
+          v-for="msg in peekMessages"
+          :key="msg.id"
+          :class="msg.role === 'USER' ? 'ml-8' : msg.role === 'TOOL' ? 'ml-4' : ''"
+        >
+          <div class="flex items-center gap-2 mb-0.5">
+            <span class="text-[10px] font-mono uppercase text-fg-muted">{{ msg.role }}</span>
+            <span class="text-[10px] text-fg-muted">turn {{ msg.turnIndex }}</span>
+            <span
+              v-if="msg.truncated"
+              class="text-[10px] text-amber-400"
+            >truncated</span>
+          </div>
+          <p
+            v-if="msg.reasoning"
+            class="text-xs text-fg-muted italic border-l-2 border-border pl-2 mb-1 whitespace-pre-wrap break-words"
+          >
+            {{ msg.reasoning }}
+          </p>
+          <div
+            v-if="msg.content"
+            class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap break-words"
+          >
+            {{ msg.content }}
+          </div>
+          <pre
+            v-if="msg.toolCalls"
+            class="bg-muted border border-border px-2 py-1 text-[11px] text-fg-muted overflow-x-auto mt-1 whitespace-pre-wrap break-words"
+          >{{ msg.toolCalls }}</pre>
+          <pre
+            v-if="msg.toolResults"
+            class="bg-muted border border-border px-2 py-1 text-[11px] text-fg-muted overflow-x-auto mt-1 whitespace-pre-wrap break-words"
+          >{{ msg.toolResults }}</pre>
+        </div>
+      </div>
+    </PeekPanel>
   </div>
 </template>
