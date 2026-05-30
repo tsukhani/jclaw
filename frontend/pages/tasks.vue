@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task } from '~/types/api'
+import type { Task, TaskRunView } from '~/types/api'
 import {
   ArrowPathIcon,
   CalendarDaysIcon,
@@ -146,6 +146,45 @@ async function deleteTask(task: Task) {
   await mutate(`/api/tasks/${task.id}`, { method: 'DELETE' })
   refresh()
 }
+
+// ── JCLAW-22 (slice D): row-expand detail — step list + TaskRun history ──
+// Single-open accordion (same UX as /logs). The step list is parsed
+// client-side from task.description (already in the /api/tasks payload via
+// parseTaskSteps, the twin of the backend TaskSteps.parse); the run history
+// is lazy-loaded from /api/tasks/{id}/runs on first expand and cached.
+const expandedId = ref<number | null>(null)
+const runsByTask = reactive<Record<number, TaskRunView[]>>({})
+const runsLoading = reactive<Record<number, boolean>>({})
+const runsError = reactive<Record<number, string | null>>({})
+
+async function toggleExpand(id: number) {
+  if (expandedId.value === id) {
+    expandedId.value = null
+    return
+  }
+  expandedId.value = id
+  if (runsByTask[id] !== undefined || runsLoading[id]) return
+  runsLoading[id] = true
+  runsError[id] = null
+  try {
+    runsByTask[id] = await $fetch<TaskRunView[]>(`/api/tasks/${id}/runs?limit=20`)
+  }
+  catch (e) {
+    runsError[id] = e instanceof Error ? e.message : 'Failed to load run history'
+  }
+  finally {
+    runsLoading[id] = false
+  }
+}
+
+// Steps for the currently-expanded task — parsed once here rather than
+// per-render inside the v-for (only one row is ever open).
+const expandedTask = computed(() => tasks.value?.find(t => t.id === expandedId.value) ?? null)
+const expandedSteps = computed(() => parseTaskSteps(expandedTask.value?.description))
+
+// colspan for the expanded detail row: every visible column, including the
+// leading checkbox column when bulk-select is active.
+const tableColspan = computed(() => (selectMode.value ? 9 : 8))
 
 // LOST sits between RUNNING (blue) and FAILED (red) on the heat axis —
 // the task is stuck but db-scheduler will auto-recover it. Orange
@@ -698,93 +737,213 @@ const calendarDays = computed<DayCell[]>(() => {
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
-          <tr
+          <template
             v-for="task in tasks"
             :key="task.id"
-            :class="{ 'bg-muted/30 cursor-pointer': selectMode }"
-            @click="selectMode ? toggleSelection(task.id) : undefined"
           >
-            <td
-              v-if="selectMode"
-              class="px-4 py-2.5 w-8"
+            <tr
+              :class="{ 'bg-muted/30 cursor-pointer': selectMode }"
+              @click="selectMode ? toggleSelection(task.id) : undefined"
             >
-              <input
-                type="checkbox"
-                :checked="selectedIds.has(task.id)"
-                :aria-label="`Select ${task.name}`"
-                @click.stop="toggleSelection(task.id)"
+              <td
+                v-if="selectMode"
+                class="px-4 py-2.5 w-8"
               >
-            </td>
-            <td class="px-4 py-2.5 text-fg-primary">
-              {{ task.name }}
-            </td>
-            <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">
-              {{ task.type }}
-            </td>
-            <td class="px-4 py-2.5 text-fg-muted text-xs">
-              {{ humanSchedule(task) }}
-            </td>
-            <td class="px-4 py-2.5">
-              <span
-                :class="statusColors[task.status]"
-                class="text-xs font-mono"
-              >{{ task.status }}</span>
-            </td>
-            <td class="px-4 py-2.5 text-fg-muted">
-              {{ task.agentName || '—' }}
-            </td>
-            <td class="px-4 py-2.5 text-fg-muted text-xs">
-              {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
-            </td>
-            <td class="px-4 py-2.5 text-fg-muted text-xs">
-              {{ task.retryCount }}/{{ task.maxRetries }}
-            </td>
-            <td class="px-4 py-2.5 text-right">
-              <div class="inline-flex items-center gap-1">
-                <button
-                  v-if="!selectMode && (task.status === 'PENDING' || task.status === 'ACTIVE')"
-                  type="button"
-                  class="p-1 text-fg-muted hover:text-red-400 transition-colors"
-                  :title="task.type === 'CRON' || task.type === 'INTERVAL'
-                    ? `Stop recurring schedule for “${task.name}”`
-                    : `Cancel “${task.name}”`"
-                  :aria-label="`Cancel ${task.name}`"
-                  @click.stop="cancelTask(task.id)"
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.has(task.id)"
+                  :aria-label="`Select ${task.name}`"
+                  @click.stop="toggleSelection(task.id)"
                 >
-                  <NoSymbolIcon
-                    class="w-4 h-4"
+              </td>
+              <td class="px-4 py-2.5 text-fg-primary">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 text-left bg-transparent border-0 cursor-pointer text-fg-primary hover:text-fg-strong transition-colors"
+                  :aria-expanded="expandedId === task.id"
+                  :aria-label="`Toggle details for ${task.name}`"
+                  @click.stop="toggleExpand(task.id)"
+                >
+                  <ChevronRightIcon
+                    :class="expandedId === task.id ? 'rotate-90' : ''"
+                    class="h-3.5 w-3.5 text-fg-muted shrink-0 transition-transform"
                     aria-hidden="true"
                   />
+                  {{ task.name }}
                 </button>
-                <button
-                  v-if="!selectMode && (task.status === 'FAILED' || task.status === 'LOST')"
-                  type="button"
-                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                  :title="`Retry “${task.name}”`"
-                  :aria-label="`Retry ${task.name}`"
-                  @click.stop="retryTask(task.id)"
-                >
-                  <ArrowPathIcon
-                    class="w-4 h-4"
-                    aria-hidden="true"
-                  />
-                </button>
-                <button
-                  v-if="!selectMode"
-                  type="button"
-                  class="p-1 text-fg-muted hover:text-red-400 transition-colors"
-                  :title="`Permanently delete “${task.name}” and its run history`"
-                  :aria-label="`Delete ${task.name}`"
-                  @click.stop="deleteTask(task)"
-                >
-                  <TrashIcon
-                    class="w-4 h-4"
-                    aria-hidden="true"
-                  />
-                </button>
-              </div>
-            </td>
-          </tr>
+              </td>
+              <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">
+                {{ task.type }}
+              </td>
+              <td class="px-4 py-2.5 text-fg-muted text-xs">
+                {{ humanSchedule(task) }}
+              </td>
+              <td class="px-4 py-2.5">
+                <span
+                  :class="statusColors[task.status]"
+                  class="text-xs font-mono"
+                >{{ task.status }}</span>
+              </td>
+              <td class="px-4 py-2.5 text-fg-muted">
+                {{ task.agentName || '—' }}
+              </td>
+              <td class="px-4 py-2.5 text-fg-muted text-xs">
+                {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
+              </td>
+              <td class="px-4 py-2.5 text-fg-muted text-xs">
+                {{ task.retryCount }}/{{ task.maxRetries }}
+              </td>
+              <td class="px-4 py-2.5 text-right">
+                <div class="inline-flex items-center gap-1">
+                  <button
+                    v-if="!selectMode && (task.status === 'PENDING' || task.status === 'ACTIVE')"
+                    type="button"
+                    class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                    :title="task.type === 'CRON' || task.type === 'INTERVAL'
+                      ? `Stop recurring schedule for “${task.name}”`
+                      : `Cancel “${task.name}”`"
+                    :aria-label="`Cancel ${task.name}`"
+                    @click.stop="cancelTask(task.id)"
+                  >
+                    <NoSymbolIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <button
+                    v-if="!selectMode && (task.status === 'FAILED' || task.status === 'LOST')"
+                    type="button"
+                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                    :title="`Retry “${task.name}”`"
+                    :aria-label="`Retry ${task.name}`"
+                    @click.stop="retryTask(task.id)"
+                  >
+                    <ArrowPathIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <button
+                    v-if="!selectMode"
+                    type="button"
+                    class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                    :title="`Permanently delete “${task.name}” and its run history`"
+                    :aria-label="`Delete ${task.name}`"
+                    @click.stop="deleteTask(task)"
+                  >
+                    <TrashIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+              </td>
+            </tr>
+            <tr
+              v-if="expandedId === task.id"
+              class="bg-muted/20"
+            >
+              <td
+                :colspan="tableColspan"
+                class="px-4 py-3"
+              >
+                <div class="grid gap-6 md:grid-cols-2">
+                  <!-- Instructions: the JCLAW-260 step list (numbered when
+                     multi-step, verbatim for a single step). -->
+                  <section>
+                    <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted mb-1.5">
+                      Instructions
+                    </h3>
+                    <ol
+                      v-if="expandedSteps.length > 1"
+                      class="list-decimal list-inside space-y-0.5 text-xs text-fg-primary"
+                    >
+                      <li
+                        v-for="(step, i) in expandedSteps"
+                        :key="i"
+                      >
+                        {{ step }}
+                      </li>
+                    </ol>
+                    <p
+                      v-else-if="expandedSteps.length === 1"
+                      class="text-xs text-fg-primary whitespace-pre-wrap"
+                    >
+                      {{ expandedSteps[0] }}
+                    </p>
+                    <p
+                      v-else
+                      class="text-xs text-fg-muted italic"
+                    >
+                      No instructions
+                    </p>
+                  </section>
+                  <!-- Run history: lazy-loaded TaskRuns, most-recent first. -->
+                  <section>
+                    <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted mb-1.5">
+                      Run history
+                    </h3>
+                    <p
+                      v-if="runsLoading[task.id]"
+                      class="text-xs text-fg-muted"
+                    >
+                      Loading…
+                    </p>
+                    <p
+                      v-else-if="runsError[task.id]"
+                      class="text-xs text-red-400"
+                    >
+                      {{ runsError[task.id] }}
+                    </p>
+                    <p
+                      v-else-if="!runsByTask[task.id]?.length"
+                      class="text-xs text-fg-muted italic"
+                    >
+                      No runs yet
+                    </p>
+                    <ul
+                      v-else
+                      class="space-y-1.5"
+                    >
+                      <li
+                        v-for="run in runsByTask[task.id]"
+                        :key="run.id"
+                        class="text-xs border-l-2 border-border pl-2"
+                      >
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span
+                            :class="statusColors[run.status ?? '']"
+                            class="font-mono"
+                          >{{ run.status }}</span>
+                          <span class="text-fg-muted">{{ run.startedAt ? formatTaskTimestamp(run.startedAt, zoneForTaskRender(task)) : '—' }}</span>
+                          <span
+                            v-if="run.durationMs != null"
+                            class="text-fg-muted"
+                          >· {{ (run.durationMs / 1000).toFixed(1) }}s</span>
+                          <span
+                            v-if="run.deliveryStatus && run.deliveryStatus !== 'NOT_REQUESTED'"
+                            class="text-fg-muted"
+                          >· {{ run.deliveryStatus }}</span>
+                        </div>
+                        <p
+                          v-if="run.error"
+                          class="text-red-400 mt-0.5 whitespace-pre-wrap break-words"
+                        >
+                          {{ run.error }}
+                        </p>
+                        <p
+                          v-else-if="run.outputSummary"
+                          class="text-fg-muted mt-0.5 whitespace-pre-wrap break-words line-clamp-3"
+                        >
+                          {{ run.outputSummary }}
+                        </p>
+                      </li>
+                    </ul>
+                  </section>
+                </div>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
       <div

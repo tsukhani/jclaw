@@ -398,6 +398,11 @@ export interface Task {
   name: string
   type: string
   status: string
+  /**
+   * JCLAW-260: instruction body. Plain text is a single step; a JSON array
+   * of strings is an ordered step list. Parse with {@code parseTaskSteps}.
+   */
+  description?: string | null
   agentName: string | null
   nextRunAt: string | null
   retryCount: number
@@ -411,6 +416,25 @@ export interface Task {
    */
   effectiveTimezone?: string
   [key: string]: unknown
+}
+
+/**
+ * One TaskRun row as returned by GET /api/tasks/:id/runs (most-recent first).
+ * Mirrors the backend ApiTasksController.TaskRunView record.
+ */
+export interface TaskRunView {
+  id: number
+  status: string | null
+  startedAt: string | null
+  completedAt: string | null
+  durationMs: number | null
+  error: string | null
+  outputSummary: string | null
+  deliveryStatus: string | null
+  deliveryTarget: string | null
+  deliveryError: string | null
+  traceJson: string | null
+  createdAt: string | null
 }
 
 /** A single persisted model on a provider (stored inside provider.{name}.models JSON). */
