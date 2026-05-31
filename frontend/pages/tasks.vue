@@ -1019,10 +1019,45 @@ const statusBg: Record<string, string> = {
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <div class="flex items-baseline gap-3">
+      <div class="flex items-center gap-3">
         <h1 class="text-lg font-semibold text-fg-strong">
           Tasks
         </h1>
+        <!-- View switcher (icon-only, tooltips): table / calendar. Sits next
+             to the title. State persists in the URL (?view=calendar) so
+             refresh and shareable links survive. -->
+        <div
+          v-if="!selectMode"
+          class="inline-flex border border-input divide-x divide-input"
+          role="tablist"
+          aria-label="Task view"
+        >
+          <button
+            v-for="opt in ([
+              { id: 'table', label: 'Table', icon: TableCellsIcon },
+              { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
+            ] as const)"
+            :key="opt.id"
+            type="button"
+            role="tab"
+            :aria-selected="view === opt.id"
+            :title="`${opt.label} view`"
+            :aria-label="`${opt.label} view`"
+            class="p-2 inline-flex items-center transition-colors"
+            :class="view === opt.id
+              ? 'bg-muted text-fg-strong'
+              : 'text-fg-muted hover:text-fg-strong'"
+            @click="view = opt.id"
+          >
+            <component
+              :is="opt.icon"
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
         <!-- JCLAW-259: live retention TTL. Subtle muted text so it doesn't
              compete with the page title but stays visible enough that
              operators don't get surprised by auto-deletes. Sourced from
@@ -1034,41 +1069,7 @@ const statusBg: Record<string, string> = {
         >
           {{ retentionDisplay }}
         </NuxtLink>
-      </div>
-      <div class="flex items-center gap-2">
         <template v-if="!selectMode">
-          <!-- View switcher (icon-only, tooltips): table / calendar.
-               State persists in the URL (?view=calendar) so refresh and
-               shareable links survive. -->
-          <div
-            class="inline-flex border border-input divide-x divide-input"
-            role="tablist"
-            aria-label="Task view"
-          >
-            <button
-              v-for="opt in ([
-                { id: 'table', label: 'Table', icon: TableCellsIcon },
-                { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
-              ] as const)"
-              :key="opt.id"
-              type="button"
-              role="tab"
-              :aria-selected="view === opt.id"
-              :title="`${opt.label} view`"
-              :aria-label="`${opt.label} view`"
-              class="p-2 inline-flex items-center transition-colors"
-              :class="view === opt.id
-                ? 'bg-muted text-fg-strong'
-                : 'text-fg-muted hover:text-fg-strong'"
-              @click="view = opt.id"
-            >
-              <component
-                :is="opt.icon"
-                class="w-4 h-4"
-                aria-hidden="true"
-              />
-            </button>
-          </div>
           <button
             :disabled="!tasks?.length"
             class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
