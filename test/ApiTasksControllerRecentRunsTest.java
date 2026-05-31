@@ -103,6 +103,23 @@ class ApiTasksControllerRecentRunsTest extends FunctionalTest {
     }
 
     @Test
+    void rangeParamsSelectRunsInWindow() {
+        seedRuns();
+        var from = enc(Instant.now().minusSeconds(72L * 3600).toString());
+        var to = enc(Instant.now().minusSeconds(24L * 3600).toString());
+
+        var resp = GET("/api/task-runs/recent?from=" + from + "&to=" + to);
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"status\":\"FAILED\""), body);     // 48h-old run falls in [72h, 24h)
+        assertFalse(body.contains("\"status\":\"COMPLETED\""), body); // the just-now run is outside the window
+    }
+
+    private static String enc(String s) {
+        return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    @Test
     void emptyWhenNoRuns() {
         var resp = GET("/api/task-runs/recent");
         assertIsOk(resp);

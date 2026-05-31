@@ -422,21 +422,44 @@ public class ApiTasksController extends Controller {
     }
 
     /**
-     * Recent TaskRuns across all tasks for the Timeline view — most-recent
-     * first, within the last {@code hours} window (default 24, capped at 30
-     * days; {@code limit} default 200, capped at 500). Each carries its
-     * parent task name so the UI lays out per-task swimlanes without an
-     * N+1 round-trip.
+     * Recent TaskRuns across all tasks for the Calendar's Week/Day grids —
+     * most-recent first, each carrying its parent task name so the UI lays out
+     * per-day swimlanes without an N+1 round-trip.
+     *
+     * <p>Two windowing modes:
+     * <ul>
+     *   <li><b>Range</b> — pass ISO-8601 {@code from} (and optional {@code to},
+     *       default now); returns runs with {@code from <= startedAt < to}.
+     *       The Week/Day views use this so they can navigate to arbitrary
+     *       past/future dates.</li>
+     *   <li><b>Rolling</b> — omit {@code from}; returns the last {@code hours}
+     *       (default 24, capped at 30 days).</li>
+     * </ul>
+     * {@code limit} defaults to 200, capped at 500.
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = RecentRunView.class))))
-    public static void recentRuns(Integer hours, Integer limit) {
-        int h = (hours != null && hours > 0) ? Math.min(hours, 24 * 30) : 24;
+    public static void recentRuns(Integer hours, Integer limit, String from, String to) {
         int lim = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
-        var since = Instant.now().minusSeconds((long) h * 3600);
+        Instant since;
+        Instant until = null;
+        if (from != null && !from.isBlank()) {
+            try {
+                since = Instant.parse(from);
+                until = (to != null && !to.isBlank()) ? Instant.parse(to) : Instant.now();
+            } catch (java.time.DateTimeException e) {
+                error(400, "from/to must be ISO-8601 instants");
+                return; // unreachable — error() throws
+            }
+        } else {
+            int h = (hours != null && hours > 0) ? Math.min(hours, 24 * 30) : 24;
+            since = Instant.now().minusSeconds((long) h * 3600);
+        }
+        var query = (until != null)
+                ? TaskRun.find("startedAt >= ?1 AND startedAt < ?2 ORDER BY startedAt DESC", since, until)
+                : TaskRun.find("startedAt >= ?1 ORDER BY startedAt DESC", since);
         @SuppressWarnings("unchecked")
-        List<TaskRun> rows = (List<TaskRun>) (List<?>) TaskRun.find(
-                "startedAt >= ?1 ORDER BY startedAt DESC", since).fetch(lim);
+        List<TaskRun> rows = (List<TaskRun>) (List<?>) query.fetch(lim);
         renderJSON(gson.toJson(rows.stream().map(RecentRunView::of).toList()));
     }
 
