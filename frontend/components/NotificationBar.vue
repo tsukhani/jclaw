@@ -122,6 +122,7 @@ onUnmounted(() => {
         tag="div"
         class="flex flex-col gap-2"
       >
+        <!-- Toast card uses ARIA status live-region semantics so updates are announced politely; <output> is form-associated and inline (the wrong semantics + layout for a standalone notification). -->
         <article
           v-for="t in toasts"
           :key="t.id"

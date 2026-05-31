@@ -1735,6 +1735,7 @@ const statusBg: Record<string, string> = {
     >
       <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
         <!-- Granularity: Month / Week / Day -->
+        <!-- Segmented control uses ARIA group semantics on the wrapper because no native HTML element groups a set of related <button> toggles (fieldset/optgroup are for form inputs and carry UA styling); aria-label names the group for assistive tech. -->
         <div
           class="inline-flex border border-input divide-x divide-border"
           role="group"

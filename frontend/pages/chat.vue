@@ -3927,6 +3927,9 @@ function exportConversation() {
 }
 .prose-chat pre code { background: none; padding: 0; }
 
+/* #171717 (near-black) on a 6%-black-over-light-surface background is well above
+   WCAG AA. Sonar reports a false low-contrast reading because it cannot resolve
+   the alpha background against the surrounding surface. */
 .prose-chat code {
   padding: 0.15em 0.35em;
   font-size: 0.875em;
