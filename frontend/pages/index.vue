@@ -25,8 +25,13 @@ interface ActiveChannelsResponse {
  * response body's array length if the header is missing (test stubs
  * via registerEndpoint don't simulate response headers).
  */
-async function fetchTaskCount(status: string): Promise<number> {
-  const res = await $fetch.raw<unknown[]>(`/api/tasks?status=${status}&limit=1`)
+// `scope` narrows by payloadType. Default excludes reminders so the dashboard
+// "Tasks" card counts the same set the /tasks page shows (background automation
+// only); the Reminders card passes payloadType=reminder to count the other
+// half. Without this, a recurring reminder inflated the Tasks "Active" count
+// above what /tasks displayed.
+async function fetchTaskCount(status: string, scope = 'excludePayloadType=reminder'): Promise<number> {
+  const res = await $fetch.raw<unknown[]>(`/api/tasks?status=${status}&${scope}&limit=1`)
   const headerTotal = res.headers.get('x-total-count')
   return headerTotal ? Number.parseInt(headerTotal, 10) : (res._data?.length ?? 0)
 }
@@ -37,6 +42,8 @@ const [
   { data: activeTaskCount, refresh: refreshActiveTasks },
   { data: runningTaskCount, refresh: refreshRunningTasks },
   { data: pendingTaskCount, refresh: refreshPendingTasks },
+  { data: activeReminderCount, refresh: refreshActiveReminders },
+  { data: pendingReminderCount, refresh: refreshPendingReminders },
   { data: logs, refresh: refreshLogs },
   { data: conversationCount },
 ] = await Promise.all([
@@ -61,6 +68,10 @@ const [
   useAsyncData<number>('dashboard-active-task-count', () => fetchTaskCount('ACTIVE')),
   useAsyncData<number>('dashboard-running-task-count', () => fetchTaskCount('RUNNING')),
   useAsyncData<number>('dashboard-pending-task-count', () => fetchTaskCount('PENDING')),
+  // Reminders are payloadType=reminder tasks — counted separately for their
+  // own card (ACTIVE = recurring, PENDING = one-shot waiting to fire).
+  useAsyncData<number>('dashboard-active-reminder-count', () => fetchTaskCount('ACTIVE', 'payloadType=reminder')),
+  useAsyncData<number>('dashboard-pending-reminder-count', () => fetchTaskCount('PENDING', 'payloadType=reminder')),
   useFetch<{ events: LogEvent[] }>('/api/logs?limit=10'),
   // Total conversation count: ask the listing endpoint with a tiny limit
   // and read X-Total-Count from the response headers — same pattern the
@@ -80,6 +91,8 @@ const channelCount = computed(() => activeChannels.value?.count ?? 0)
 const activeTasks = computed(() => activeTaskCount.value ?? 0)
 const runningTasks = computed(() => runningTaskCount.value ?? 0)
 const pendingTasks = computed(() => pendingTaskCount.value ?? 0)
+const activeReminders = computed(() => activeReminderCount.value ?? 0)
+const pendingReminders = computed(() => pendingReminderCount.value ?? 0)
 const totalConversations = computed(() => conversationCount.value ?? 0)
 
 const { data: latency, refresh: refreshLatency } = useFetch<LatencyMetrics>(
@@ -199,6 +212,8 @@ onMounted(() => {
     refreshActiveTasks()
     refreshRunningTasks()
     refreshPendingTasks()
+    refreshActiveReminders()
+    refreshPendingReminders()
   }, 5000)
 })
 onBeforeUnmount(() => {
@@ -214,13 +229,15 @@ onBeforeUnmount(() => {
 
     <!-- Stats. Each card carries a small uppercase title at the top
          that names the entity (Agents / Conversations / Channels /
-         Tasks); the big number + small label below it describe which
-         slice of that entity we're counting. The Tasks card splits its
-         body into three sub-stats — ACTIVE (recurring CRON/INTERVAL in
-         steady state), RUNNING (currently firing), PENDING (one-shot
-         SCHEDULED/IMMEDIATE waiting). The three values stay vertically
-         packed so the card height matches the other three in the grid. -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+         Tasks / Reminders); the big number + small label below it
+         describe which slice of that entity we're counting. The Tasks
+         card splits its body into three sub-stats — ACTIVE (recurring
+         CRON/INTERVAL in steady state), RUNNING (currently firing),
+         PENDING (one-shot SCHEDULED/IMMEDIATE waiting); Reminders
+         (payloadType=reminder tasks, kept off /tasks) splits into ACTIVE
+         (recurring) and PENDING (one-shot). The sub-stats stay vertically
+         packed so every card matches height in the grid. -->
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
       <div class="bg-surface-elevated border border-border p-4">
         <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
           Agents
@@ -278,6 +295,29 @@ onBeforeUnmount(() => {
           <div>
             <div class="text-2xl font-semibold text-fg-strong leading-none">
               {{ pendingTasks }}
+            </div>
+            <div class="text-xs text-fg-muted mt-1.5">
+              Pending
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
+          Reminders
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <div class="text-2xl font-semibold text-fg-strong leading-none">
+              {{ activeReminders }}
+            </div>
+            <div class="text-xs text-fg-muted mt-1.5">
+              Active
+            </div>
+          </div>
+          <div>
+            <div class="text-2xl font-semibold text-fg-strong leading-none">
+              {{ pendingReminders }}
             </div>
             <div class="text-xs text-fg-muted mt-1.5">
               Pending
