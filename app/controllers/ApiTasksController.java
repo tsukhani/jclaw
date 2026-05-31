@@ -968,6 +968,40 @@ public class ApiTasksController extends Controller {
     }
 
     /**
+     * POST /api/tasks/{id}/reenable — re-arm a CANCELLED task's schedule
+     * <em>without</em> an immediate fire. Revives status to the type's
+     * initial live state (recurring → ACTIVE, one-shot → PENDING), clears any
+     * stale paused flag, and registers a fresh scheduler row at the next
+     * natural fire ({@link services.TaskSchedulingService#register}): CRON
+     * resumes at its next cron occurrence, INTERVAL at the next interval
+     * boundary, a SCHEDULED one-shot at its original time (or immediately if
+     * that time has already passed).
+     *
+     * <p>Distinct from {@link #run} (revives AND fires immediately) and
+     * {@link #retry} (the FAILED/LOST "reset retryCount and rerun" path).
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    public static void reenable(Long id) {
+        Task task = Task.findById(id);
+        if (task == null) notFound();
+        // Re-enable only applies to a CANCELLED task: reviving a live Task
+        // would double-schedule, and reviving a COMPLETED/FAILED one would
+        // resurrect a finished fire. Anything else is a client error.
+        if (task.status != Task.Status.CANCELLED) {
+            badRequest();
+        }
+        task.status = Task.initialStatusFor(task.type);
+        task.paused = false;
+        task.save();
+        services.TaskSchedulingService.register(task);
+        EventLogger.info("TASK_MGMT_REENABLE",
+                task.agent != null ? task.agent.name : null, null,
+                "Task '%s' (id=%d) re-enabled via API".formatted(task.name, task.id));
+        renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
+    }
+
+    /**
      * Operator-initiated immediate fire — distinct from {@link #retry} which
      * is the FAILED-only "fix and rerun" path. Accepts any current status
      * per AC; revives a CANCELLED task to PENDING first so

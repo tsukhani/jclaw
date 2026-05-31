@@ -10,7 +10,9 @@ import {
   ChevronRightIcon,
   MagnifyingGlassIcon,
   NoSymbolIcon,
+  PauseIcon,
   PencilSquareIcon,
+  PlayIcon,
   PlusIcon,
   TableCellsIcon,
   TrashIcon,
@@ -161,9 +163,40 @@ async function cancelTask(id: number) {
   refresh()
 }
 
+// Pause/resume — the reversible suspend for recurring tasks. Pause keeps the
+// scheduler row (cadence preserved); the backend skips the fire body while
+// paused, and resume clears the flag so the next scheduled fire runs.
+async function pauseTask(id: number) {
+  await mutate(`/api/tasks/${id}/pause`, { method: 'POST' })
+  refresh()
+}
+
+async function resumeTask(id: number) {
+  await mutate(`/api/tasks/${id}/resume`, { method: 'POST' })
+  refresh()
+}
+
+// Re-enable — restore a CANCELLED task's schedule at its next natural fire
+// (no immediate run for CRON). The one-off counterpart to resume.
+async function reenableTask(id: number) {
+  await mutate(`/api/tasks/${id}/reenable`, { method: 'POST' })
+  refresh()
+}
+
 async function retryTask(id: number) {
   await mutate(`/api/tasks/${id}/retry`, { method: 'POST' })
   refresh()
+}
+
+// Per-type action model: recurring tasks (CRON/INTERVAL) use Pause/Resume
+// (reversible, cadence-preserving); one-off tasks (SCHEDULED/IMMEDIATE) use
+// Cancel; any CANCELLED task uses Re-enable to re-arm. isLive = waiting or
+// recurring-active (the states a suspend action applies to).
+function isRecurring(t: Task): boolean {
+  return t.type === 'CRON' || t.type === 'INTERVAL'
+}
+function isLive(t: Task): boolean {
+  return t.status === 'PENDING' || t.status === 'ACTIVE'
 }
 
 /**
@@ -665,6 +698,10 @@ interface ProjectedFire {
    *  read as already-fired by 9:01am even though today's whole-day
    *  `isPast` flag is still false. */
   isPast: boolean
+  /** Mirrors {@link Task.paused}. A paused recurring task keeps its schedule
+   *  but skips the fire body, so its projected fires are real slots that
+   *  won't actually run — the calendar dims + strikes them to show that. */
+  taskPaused: boolean
 }
 
 function projectFires(task: Task, from: Date, to: Date): ProjectedFire[] {
@@ -676,6 +713,7 @@ function projectFires(task: Task, from: Date, to: Date): ProjectedFire[] {
     taskType: task.type,
     taskStatus: task.status,
     agentName: task.agentName,
+    taskPaused: task.paused,
   }
   const push = (fireAt: Date) => {
     out.push({ ...base, fireAt, isPast: fireAt.getTime() < nowMs })
@@ -1380,13 +1418,40 @@ const statusBg: Record<string, string> = {
               </td>
               <td class="px-4 py-2.5 text-right">
                 <div class="inline-flex items-center gap-1">
+                  <!-- Recurring + live + running → Pause (reversible suspend). -->
                   <button
-                    v-if="!selectMode && (task.status === 'PENDING' || task.status === 'ACTIVE')"
+                    v-if="!selectMode && isRecurring(task) && isLive(task) && !task.paused"
+                    type="button"
+                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                    :title="`Pause schedule for “${task.name}”`"
+                    :aria-label="`Pause ${task.name}`"
+                    @click.stop="pauseTask(task.id)"
+                  >
+                    <PauseIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <!-- Recurring + live + paused → Resume. -->
+                  <button
+                    v-else-if="!selectMode && isRecurring(task) && isLive(task) && task.paused"
+                    type="button"
+                    class="p-1 text-emerald-400 hover:text-emerald-300 transition-colors"
+                    :title="`Resume schedule for “${task.name}”`"
+                    :aria-label="`Resume ${task.name}`"
+                    @click.stop="resumeTask(task.id)"
+                  >
+                    <PlayIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <!-- One-off waiting → Cancel (won't fire). -->
+                  <button
+                    v-else-if="!selectMode && !isRecurring(task) && task.status === 'PENDING'"
                     type="button"
                     class="p-1 text-fg-muted hover:text-red-400 transition-colors"
-                    :title="task.type === 'CRON' || task.type === 'INTERVAL'
-                      ? `Stop recurring schedule for “${task.name}”`
-                      : `Cancel “${task.name}”`"
+                    :title="`Cancel “${task.name}” — it won't fire`"
                     :aria-label="`Cancel ${task.name}`"
                     @click.stop="cancelTask(task.id)"
                   >
@@ -1395,6 +1460,23 @@ const statusBg: Record<string, string> = {
                       aria-hidden="true"
                     />
                   </button>
+                  <!-- Cancelled (either type) → Re-enable (re-arm the schedule). -->
+                  <button
+                    v-if="!selectMode && task.status === 'CANCELLED'"
+                    type="button"
+                    class="p-1 text-fg-muted hover:text-emerald-400 transition-colors"
+                    :title="isRecurring(task)
+                      ? `Re-enable “${task.name}” — resume at its next scheduled fire`
+                      : `Re-enable “${task.name}” — re-arm its scheduled fire`"
+                    :aria-label="`Re-enable ${task.name}`"
+                    @click.stop="reenableTask(task.id)"
+                  >
+                    <ArrowPathIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <!-- Failed / lost → Retry (reset retries and rerun). -->
                   <button
                     v-if="!selectMode && (task.status === 'FAILED' || task.status === 'LOST')"
                     type="button"
@@ -1779,8 +1861,9 @@ const statusBg: Record<string, string> = {
                 :class="[
                   statusColors[fire.taskStatus] || 'text-fg-muted',
                   fire.isPast ? 'opacity-40' : '',
+                  fire.taskPaused ? 'opacity-40 line-through' : '',
                 ]"
-                :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}`"
+                :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}${fire.taskPaused ? ' · paused' : ''}`"
               >
                 <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>
                 <span class="ml-1">{{ fire.taskName }}</span>
@@ -1867,18 +1950,20 @@ const statusBg: Record<string, string> = {
             >
               <span class="font-mono">{{ blk.run.taskName ?? 'run' }}</span>
             </button>
-            <!-- Upcoming projected fires (hollow markers). -->
+            <!-- Upcoming projected fires (hollow markers; paused = dimmed). -->
             <div
               v-for="(fm, fi) in col.fires"
               :key="`f${fi}`"
               class="absolute left-0.5 right-0.5 flex items-center gap-1 pointer-events-none z-10"
+              :class="fm.fire.taskPaused ? 'opacity-40' : ''"
               :style="{ top: `${fm.topPct}%` }"
             >
               <span class="w-1.5 h-1.5 rounded-full border border-emerald-400 bg-surface-elevated shrink-0" />
               <span class="flex-1 border-t border-dashed border-emerald-400/50" />
               <span
                 class="text-[9px] text-emerald-300/90 font-mono truncate max-w-[70%]"
-                :title="`${fm.fire.taskName} · ${fm.fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`"
+                :class="fm.fire.taskPaused ? 'line-through' : ''"
+                :title="`${fm.fire.taskName} · ${fm.fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}${fm.fire.taskPaused ? ' · paused' : ''}`"
               >{{ fm.fire.taskName }}</span>
             </div>
           </div>

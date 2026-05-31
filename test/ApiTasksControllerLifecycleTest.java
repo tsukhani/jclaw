@@ -62,7 +62,7 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
      * task id doesn't exist. Single matrix covers all four endpoints.
      */
     @ParameterizedTest(name = "{0}Returns404ForUnknownTask")
-    @ValueSource(strings = {"cancel", "pause", "resume", "run"})
+    @ValueSource(strings = {"cancel", "pause", "resume", "run", "reenable"})
     void lifecycleActionReturns404ForUnknownTask(String action) {
         var resp = POST("/api/tasks/999999/" + action, "application/json", "");
         assertEquals(404, resp.status.intValue());
@@ -117,5 +117,30 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
         assertIsOk(POST("/api/tasks/" + taskId + "/pause", "application/json", ""));
         var resp = POST("/api/tasks/" + taskId + "/resume", "application/json", "");
         assertIsOk(resp);
+    }
+
+    // --- reenable ---
+
+    @Test
+    void reenableRevivesCancelledRecurringTaskToActive() {
+        var agentId = seedAgent();
+        var taskId = seedTask(agentId, "reenable-me", "every 1h");
+        // Cancel first so the task is in the only state reenable accepts.
+        assertIsOk(POST("/api/tasks/" + taskId + "/cancel", "application/json", ""));
+
+        var resp = POST("/api/tasks/" + taskId + "/reenable", "application/json", "");
+        assertIsOk(resp);
+        // Recurring (INTERVAL) revives to ACTIVE; the schedule is re-armed.
+        assertTrue(getContent(resp).contains("\"status\":\"ACTIVE\""),
+                "re-enabled recurring task must report ACTIVE: " + getContent(resp));
+    }
+
+    @Test
+    void reenableRejectsLiveTaskWith400() {
+        var agentId = seedAgent();
+        var taskId = seedTask(agentId, "reenable-live", "every 1h");
+        // Never cancelled — reenable on a live task is a client error.
+        var resp = POST("/api/tasks/" + taskId + "/reenable", "application/json", "");
+        assertEquals(400, resp.status.intValue());
     }
 }

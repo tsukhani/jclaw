@@ -399,6 +399,12 @@ export interface Task {
   type: string
   status: string
   /**
+   * Operational suspend flag, orthogonal to status. When true, a recurring
+   * task's scheduled fires are skipped (cadence preserved; resume clears the
+   * flag). Drives the Pause/Resume toggle and dims projected calendar fires.
+   */
+  paused: boolean
+  /**
    * JCLAW-260: instruction body. Plain text is a single step; a JSON array
    * of strings is an ordered step list. Parse with {@code parseTaskSteps}.
    */
