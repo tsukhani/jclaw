@@ -401,6 +401,45 @@ public class ApiTasksController extends Controller {
                 .getSingleResult();
     }
 
+    /**
+     * One TaskRun for the Timeline view (JCLAW-22 slice TL): the run plus its
+     * parent task name — enough to plot a bar (startedAt position, duration
+     * width, status colour) and link to the run's trace.
+     */
+    private record RecentRunView(Long id, Long taskId, String taskName, String status,
+                                 String startedAt, String completedAt, Long durationMs) {
+        static RecentRunView of(TaskRun r) {
+            var task = r.task;
+            return new RecentRunView(
+                    r.id,
+                    task != null ? task.id : null,
+                    task != null ? task.name : null,
+                    r.status != null ? r.status.name() : null,
+                    r.startedAt != null ? r.startedAt.toString() : null,
+                    r.completedAt != null ? r.completedAt.toString() : null,
+                    r.durationMs);
+        }
+    }
+
+    /**
+     * Recent TaskRuns across all tasks for the Timeline view — most-recent
+     * first, within the last {@code hours} window (default 24, capped at 30
+     * days; {@code limit} default 200, capped at 500). Each carries its
+     * parent task name so the UI lays out per-task swimlanes without an
+     * N+1 round-trip.
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = RecentRunView.class))))
+    public static void recentRuns(Integer hours, Integer limit) {
+        int h = (hours != null && hours > 0) ? Math.min(hours, 24 * 30) : 24;
+        int lim = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
+        var since = Instant.now().minusSeconds((long) h * 3600);
+        @SuppressWarnings("unchecked")
+        List<TaskRun> rows = (List<TaskRun>) (List<?>) TaskRun.find(
+                "startedAt >= ?1 ORDER BY startedAt DESC", since).fetch(lim);
+        renderJSON(gson.toJson(rows.stream().map(RecentRunView::of).toList()));
+    }
+
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))
     public static void list(String status, String type, Long agentId, String q,
                              String payloadType, String excludePayloadType,

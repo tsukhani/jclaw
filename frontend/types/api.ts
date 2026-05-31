@@ -471,6 +471,20 @@ export interface TranscriptSearchHit {
 }
 
 /**
+ * One TaskRun for the Timeline view from GET /api/task-runs/recent
+ * (JCLAW-22 slice TL). Mirrors the backend RecentRunView.
+ */
+export interface RecentRunView {
+  id: number
+  taskId: number | null
+  taskName: string | null
+  status: string | null
+  startedAt: string | null
+  completedAt: string | null
+  durationMs: number | null
+}
+
+/**
  * Dashboard KPI aggregate from GET /api/tasks/stats (JCLAW-22 slice K).
  * successRate (0..1) and avgDurationMs are absent when there's nothing to
  * average yet (no terminal / completed runs today).

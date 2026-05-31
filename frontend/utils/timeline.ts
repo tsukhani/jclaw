@@ -1,0 +1,29 @@
+/**
+ * JCLAW-22 (slice TL): geometry for the Timeline view's run bars.
+ */
+export interface TimelineBar {
+  leftPct: number
+  widthPct: number
+}
+
+/**
+ * Position + width (as percentages) for one run bar on a horizontal time axis
+ * spanning [axisStartMs, axisEndMs]. A RUNNING run (no end) extends to nowMs.
+ * Results are clamped to the axis, with a small minimum width so an instant
+ * run stays visible, and the width never overflows the right edge.
+ */
+export function timelineBar(
+  startMs: number,
+  endMs: number | null,
+  axisStartMs: number,
+  axisEndMs: number,
+  nowMs: number,
+): TimelineBar {
+  const span = Math.max(1, axisEndMs - axisStartMs)
+  const start = Math.max(axisStartMs, startMs)
+  const end = Math.min(axisEndMs, endMs ?? nowMs)
+  const leftPct = Math.max(0, Math.min(100, ((start - axisStartMs) / span) * 100))
+  const rawWidthPct = ((Math.max(end, start) - start) / span) * 100
+  const widthPct = Math.min(100 - leftPct, Math.max(0.8, rawWidthPct))
+  return { leftPct, widthPct }
+}

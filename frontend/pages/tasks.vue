@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task, TaskRunView, TaskRunMessageView, TranscriptSearchHit, TaskStats } from '~/types/api'
+import type { Task, TaskRunView, TaskRunMessageView, TranscriptSearchHit, TaskStats, RecentRunView } from '~/types/api'
 import {
   ArrowDownIcon,
   ArrowPathIcon,
@@ -8,6 +8,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ClockIcon,
   MagnifyingGlassIcon,
   NoSymbolIcon,
   PencilSquareIcon,
@@ -40,13 +41,13 @@ function onFiltersChanged(filters: Filter[]) {
 
 // Three layouts: dense table (default), card grid, month calendar. Persisted
 // to the URL so refresh / back-forward / shareable links keep the same view.
-type View = 'table' | 'cards' | 'calendar'
+type View = 'table' | 'cards' | 'calendar' | 'timeline'
 const route = useRoute()
 const router = useRouter()
 const view = computed<View>({
   get() {
     const q = route.query.view
-    return q === 'cards' || q === 'calendar' ? q : 'table'
+    return q === 'cards' || q === 'calendar' || q === 'timeline' ? q : 'table'
   },
   set(v: View) {
     void router.replace({ query: { ...route.query, view: v === 'table' ? undefined : v } })
@@ -74,6 +75,8 @@ const { data: tasks, refresh } = await useFetch<Task[]>(url)
 // JCLAW-22 (slice K): dashboard KPI aggregate. Refetched live on task
 // lifecycle events (see scheduleLiveRefresh) so the counts stay current.
 const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/tasks/stats')
+// JCLAW-22 (slice TL): recent runs across all tasks for the Timeline view.
+const { data: recentRuns, refresh: refreshRecent } = await useFetch<RecentRunView[]>('/api/task-runs/recent')
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
 
@@ -349,6 +352,11 @@ function openTraceForHit(hit: TranscriptSearchHit) {
   void loadTrace(hit.taskRunId, `Trace — ${hit.taskName ?? 'run'}`, `${hit.role ?? ''} · ${when}`)
 }
 
+function openTraceForRun(run: RecentRunView) {
+  const when = run.startedAt ? new Date(run.startedAt).toLocaleString() : ''
+  void loadTrace(run.id, `Trace — ${run.taskName ?? 'run'}`, `${run.status ?? ''} · ${when}`)
+}
+
 // ── JCLAW-22 (slice X): CSV/JSON audit export ──
 // The FilterBar's Export button downloads a JSON audit bundle of the current
 // (filtered) tasks, each with its TaskRuns. The trace PeekPanel adds a
@@ -437,6 +445,7 @@ function scheduleLiveRefresh() {
     if (editingId.value != null) return
     refresh()
     refreshStats()
+    refreshRecent()
     if (expandedId.value != null) void loadRuns(expandedId.value)
   }, 400)
 }
@@ -991,6 +1000,7 @@ const calendarDays = computed<DayCell[]>(() => {
             { id: 'table', label: 'Table', icon: TableCellsIcon },
             { id: 'cards', label: 'Cards', icon: Squares2X2Icon },
             { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
+            { id: 'timeline', label: 'Timeline', icon: ClockIcon },
           ] as const)"
           :key="opt.id"
           type="button"
@@ -1601,7 +1611,7 @@ const calendarDays = computed<DayCell[]>(() => {
          Unrecognized cron expressions just show the next fire so the
          operator at least knows something is scheduled. -->
     <div
-      v-else
+      v-else-if="view === 'calendar'"
       class="bg-surface-elevated border border-border"
     >
       <div class="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -1702,6 +1712,13 @@ const calendarDays = computed<DayCell[]>(() => {
         </div>
       </div>
     </div>
+
+    <TaskTimeline
+      v-else-if="view === 'timeline'"
+      :runs="recentRuns ?? []"
+      :now-ms="nowMs"
+      @select="openTraceForRun"
+    />
 
     <!-- PeekPanel: turn-by-turn execution trace for a clicked TaskRun (slice P). -->
     <PeekPanel
