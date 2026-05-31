@@ -339,6 +339,60 @@ function openTraceForHit(hit: TranscriptSearchHit) {
   void loadTrace(hit.taskRunId, `Trace — ${hit.taskName ?? 'run'}`, `${hit.role ?? ''} · ${when}`)
 }
 
+// ── JCLAW-22 (slice X): CSV/JSON audit export ──
+// The FilterBar's Export button downloads a JSON audit bundle of the current
+// (filtered) tasks, each with its TaskRuns. The trace PeekPanel adds a
+// per-run export of that run's task_run_message rows (the "selected" rows).
+const exporting = ref(false)
+
+function fileStamp(): string {
+  return new Date().toISOString().replaceAll(':', '-').slice(0, 19)
+}
+
+function downloadBlob(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function exportTasksBundle() {
+  if (exporting.value) return
+  const list = tasks.value ?? []
+  if (!list.length) return
+  exporting.value = true
+  try {
+    const tasksWithRuns = await Promise.all(list.map(async (t) => {
+      const runs = await $fetch<TaskRunView[]>(`/api/tasks/${t.id}/runs?limit=200`).catch(() => [])
+      return { ...t, runs }
+    }))
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      taskCount: tasksWithRuns.length,
+      tasks: tasksWithRuns,
+    }
+    downloadBlob(`jclaw-tasks-audit-${fileStamp()}.json`, JSON.stringify(payload, null, 2), 'application/json')
+  }
+  finally {
+    exporting.value = false
+  }
+}
+
+function exportTrace() {
+  if (!peekMessages.value.length) return
+  const payload = {
+    title: peekTitle.value,
+    exportedAt: new Date().toISOString(),
+    messages: peekMessages.value,
+  }
+  downloadBlob(`jclaw-run-trace-${fileStamp()}.json`, JSON.stringify(payload, null, 2), 'application/json')
+}
+
 // LOST sits between RUNNING (blue) and FAILED (red) on the heat axis —
 // the task is stuck but db-scheduler will auto-recover it. Orange
 // communicates "needs attention but not yet a terminal failure".
@@ -808,6 +862,7 @@ const calendarDays = computed<DayCell[]>(() => {
           placeholder="Filter... (e.g., q:summary status:PENDING type:CRON)"
           :filter-keys="['q', 'status', 'type', 'agent']"
           @update:filters="onFiltersChanged"
+          @export="exportTasksBundle"
         />
       </div>
       <!-- View switcher: table / cards / calendar. State persists in URL
@@ -1559,6 +1614,15 @@ const calendarDays = computed<DayCell[]>(() => {
         v-else
         class="space-y-3"
       >
+        <div class="flex justify-end">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-input text-fg-muted hover:text-fg-strong hover:border-ring cursor-pointer"
+            @click="exportTrace"
+          >
+            Export JSON
+          </button>
+        </div>
         <div
           v-for="msg in peekMessages"
           :key="msg.id"
