@@ -41,6 +41,8 @@ public final class ReminderDispatcher {
      *  notification toast surface itself signals "this is a reminder". */
     private static final String TELEGRAM_FRAMING = "🔔 Reminder: ";
 
+    private static final String TELEGRAM = "telegram";
+
     private ReminderDispatcher() {}
 
     /**
@@ -69,7 +71,7 @@ public final class ReminderDispatcher {
 
         return switch (channel) {
             case "web" -> dispatchWeb(task, run, content);
-            case "telegram" -> dispatchTelegram(task, target, content);
+            case TELEGRAM -> dispatchTelegram(task, target, content);
             default -> DeliveryDispatcher.DispatchResult.unsupported(channel);
         };
     }
@@ -99,13 +101,13 @@ public final class ReminderDispatcher {
         }
         var binding = TelegramBinding.findByAgentOrAncestor(task.agent);
         if (binding == null) {
-            return DeliveryDispatcher.DispatchResult.noConfig("telegram",
+            return DeliveryDispatcher.DispatchResult.noConfig(TELEGRAM,
                     "Connect a Telegram bot for agent '" + task.agent.name
                             + "' (or any of its ancestors) in Settings → Channels → Telegram, "
                             + "or via POST /api/telegram-bindings.");
         }
         if (!binding.enabled) {
-            return DeliveryDispatcher.DispatchResult.noConfig("telegram",
+            return DeliveryDispatcher.DispatchResult.noConfig(TELEGRAM,
                     "Telegram binding for agent '" + binding.agent.name + "' is disabled.");
         }
         return TelegramChannel.sendMessage(binding.botToken, chatId,

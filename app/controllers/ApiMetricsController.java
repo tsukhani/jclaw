@@ -197,6 +197,12 @@ public class ApiMetricsController extends Controller {
         renderJSON(INSTANCE.toJson(new CostResponse(since.toString(), rows)));
     }
 
+    /** Parsed loadtest request — collapses the body-parsing branch tower into one record carrier. */
+    private record LoadtestInput(int concurrency, int turns, int ttftMs, int tokensPerSecond,
+                                 int responseTokens, int simulatedToolCalls, int toolSleepMs,
+                                 boolean compress, String provider, String model, boolean real,
+                                 String userMessage, java.util.List<String> prompts) {}
+
     /**
      * POST /api/metrics/loadtest — run a synchronous load test against
      * /api/chat/stream using the in-process mock provider.
@@ -237,12 +243,6 @@ public class ApiMetricsController extends Controller {
      * <p>Returns the aggregate counts + wall-clock. Use GET
      * /api/metrics/latency afterwards for per-segment histograms.
      */
-    /** Parsed loadtest request — collapses the body-parsing branch tower into one record carrier. */
-    private record LoadtestInput(int concurrency, int turns, int ttftMs, int tokensPerSecond,
-                                 int responseTokens, int simulatedToolCalls, int toolSleepMs,
-                                 boolean compress, String provider, String model, boolean real,
-                                 String userMessage, java.util.List<String> prompts) {}
-
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoadtestResponse.class)))
     public static void loadtest() {

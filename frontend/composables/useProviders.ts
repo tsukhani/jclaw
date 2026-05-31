@@ -94,7 +94,7 @@ function dropDisabledProviders(entries: ConfigEntry[], providerMap: Map<string, 
   for (const e of entries) {
     if (!e.key.endsWith('.enabled')) continue
     const name = providerNameFromKey(e.key)
-    if (name && e.value && e.value.toLowerCase() === 'false') providerMap.delete(name)
+    if (name && e.value?.toLowerCase() === 'false') providerMap.delete(name)
   }
 }
 

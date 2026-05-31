@@ -69,9 +69,8 @@ public class TelegramCommandsRegistrationJob extends Job<Void> {
      * Map the {@link Commands.Command} enum into Telegram's BotCommand
      * shape. Single source of truth — adding a new enum entry
      * automatically flows through here on the next boot.
-     */
-    /**
-     * Package access plus {@code public} exposure so the default-package
+     *
+     * <p>Package access plus {@code public} exposure so the default-package
      * test file can assert the mapping without reflection. Not intended
      * as a public API — callers should invoke {@link #registerAll}.
      */

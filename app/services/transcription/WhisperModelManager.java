@@ -166,7 +166,6 @@ public final class WhisperModelManager {
      * <p>Package-private so {@link WhisperModelManagerTest} can hit it
      * directly with a mocked HTTP source.
      */
-    /** Visible to tests so they can drive the download against a MockWebServer URL. */
     public static Path doDownload(WhisperModel model, Consumer<DownloadProgress> onProgress) throws IOException {
         return doDownload(model, model.downloadUrl(), onProgress);
     }

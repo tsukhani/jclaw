@@ -613,7 +613,10 @@ function humanCron(expr: string): string | null {
     }
     if (min === '0' && hour.startsWith('*/')) {
       const n = Number.parseInt(hour.slice(2), 10)
-      if (!Number.isNaN(n)) return `every ${n === 1 ? '1 hour' : `${n} hours`}`
+      if (!Number.isNaN(n)) {
+        const unit = n === 1 ? '1 hour' : `${n} hours`
+        return `every ${unit}`
+      }
     }
     if (/^\d+$/.test(min) && /^\d+$/.test(hour)) {
       return `daily at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
@@ -829,11 +832,10 @@ function matchCronField(field: string, value: number, min: number, max: number):
     if (stepMatch) {
       const step = Number.parseInt(stepMatch[2]!, 10)
       const base = stepMatch[1]!
-      const [lo, hi] = base === '*'
-        ? [min, max]
-        : base.includes('-')
-          ? base.split('-').map(n => Number.parseInt(n, 10)) as [number, number]
-          : [Number.parseInt(base, 10), max]
+      const nonStarRange: [number, number] = base.includes('-')
+        ? base.split('-').map(n => Number.parseInt(n, 10)) as [number, number]
+        : [Number.parseInt(base, 10), max]
+      const [lo, hi] = base === '*' ? [min, max] : nonStarRange
       if (value >= lo && value <= hi && (value - lo) % step === 0) return true
       continue
     }

@@ -79,6 +79,8 @@ public class ConversationSendTool implements ToolRegistry.Tool {
     private static final String DEFAULT_PAYLOAD_TYPE = "text";
     private static final Set<String> ALLOWED_PAYLOAD_TYPES = Set.of("text", "json", "markdown");
 
+    private static final String ERR_RUN_ID = "Error: runId ";
+
     @Override
     public String name() { return TOOL_NAME; }
 
@@ -249,7 +251,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
             return "Error: no SubagentRun found for runId " + runId + ".";
         }
         if (run.parentAgent == null || !callingAgentId.equals(run.parentAgent.id)) {
-            return "Error: runId " + runId + " is not owned by the calling agent.";
+            return ERR_RUN_ID + runId + " is not owned by the calling agent.";
         }
         if (run.status != SubagentRun.Status.RUNNING) {
             return "Error: cannot send to child of runId " + runId + " — run is "
@@ -257,18 +259,18 @@ public class ConversationSendTool implements ToolRegistry.Tool {
         }
         var childConv = run.childConversation;
         if (childConv == null) {
-            return "Error: runId " + runId + " has no child conversation (audit row is malformed).";
+            return ERR_RUN_ID + runId + " has no child conversation (audit row is malformed).";
         }
         var metadata = new LinkedHashMap<String, Object>();
-        metadata.put("source", "parent");
-        metadata.put("runId", run.id);
+        metadata.put("source", TARGET_PARENT);
+        metadata.put(PARAM_RUN_ID, run.id);
         metadata.put("parentAgentId", run.parentAgent.id);
-        if (!DEFAULT_PAYLOAD_TYPE.equals(payloadType)) metadata.put("payloadType", payloadType);
+        if (!DEFAULT_PAYLOAD_TYPE.equals(payloadType)) metadata.put(PARAM_PAYLOAD_TYPE, payloadType);
         var msg = stampAsSubagentSend(childConv, message, metadata);
         var payload = new LinkedHashMap<String, Object>();
         payload.put("action", "sent");
         payload.put("direction", "parent_to_child");
-        payload.put("runId", String.valueOf(run.id));
+        payload.put(PARAM_RUN_ID, String.valueOf(run.id));
         payload.put("childConversationId", String.valueOf(childConv.id));
         payload.put("messageId", String.valueOf(msg.id));
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
@@ -279,18 +281,18 @@ public class ConversationSendTool implements ToolRegistry.Tool {
                                         String message, String payloadType) {
         var parentConv = run.parentConversation;
         if (parentConv == null) {
-            return "Error: runId " + run.id + " has no parent conversation (audit row is malformed).";
+            return ERR_RUN_ID + run.id + " has no parent conversation (audit row is malformed).";
         }
         var metadata = new LinkedHashMap<String, Object>();
-        metadata.put("source", "child");
-        metadata.put("runId", run.id);
+        metadata.put("source", TARGET_CHILD);
+        metadata.put(PARAM_RUN_ID, run.id);
         metadata.put("childAgentId", callingAgentId);
-        if (!DEFAULT_PAYLOAD_TYPE.equals(payloadType)) metadata.put("payloadType", payloadType);
+        if (!DEFAULT_PAYLOAD_TYPE.equals(payloadType)) metadata.put(PARAM_PAYLOAD_TYPE, payloadType);
         var msg = stampAsSubagentSend(parentConv, message, metadata);
         var payload = new LinkedHashMap<String, Object>();
         payload.put("action", "sent");
         payload.put("direction", "child_to_parent");
-        payload.put("runId", String.valueOf(run.id));
+        payload.put(PARAM_RUN_ID, String.valueOf(run.id));
         payload.put("parentConversationId", String.valueOf(parentConv.id));
         payload.put("messageId", String.valueOf(msg.id));
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);

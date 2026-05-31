@@ -260,15 +260,15 @@ public final class TelegramPollingRunner {
         return Instant.ofEpochMilli(until);
     }
 
+    /** Snapshot of binding state pulled inside the transaction, then read off-thread. */
+    private record Ctx(String botToken, String telegramUserId, Agent agent, boolean enabled) {}
+
     /**
      * Per-update dispatch. Looks up the binding (re-read for freshness — the
      * admin may have disabled it between the registration and this callback),
      * verifies the sender matches {@link TelegramBinding#telegramUserId},
      * and hands the message off to the bound agent.
      */
-    /** Snapshot of binding state pulled inside the transaction, then read off-thread. */
-    private record Ctx(String botToken, String telegramUserId, Agent agent, boolean enabled) {}
-
     private static void dispatch(Long bindingId, Update update) {
         try {
             // JCLAW-109: parse inline-keyboard callbacks first so text-message

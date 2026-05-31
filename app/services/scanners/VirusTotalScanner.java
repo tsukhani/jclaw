@@ -73,6 +73,9 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
         return sendJsonLookup(sha256, request, timeoutMs, true, this::parseVerdict);
     }
 
+    /** {@code [malicious, total]} pair extracted from {@code last_analysis_stats}. */
+    private record AnalysisCounts(int malicious, int total) {}
+
     /**
      * Parse a VirusTotal v3 file-info response. The relevant shape:
      * <pre>
@@ -95,9 +98,6 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
      * reason names up to three flagging engines plus the malicious/total count
      * so operators can see how widely the sample is detected.
      */
-    /** {@code [malicious, total]} pair extracted from {@code last_analysis_stats}. */
-    private record AnalysisCounts(int malicious, int total) {}
-
     private Verdict parseVerdict(JsonObject json) {
         var attributes = extractAttributes(json);
         if (attributes == null) return Verdict.clean();

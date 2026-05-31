@@ -476,8 +476,8 @@ public class ApiTasksController extends Controller {
                 // the automation-tasks list; /reminders passes
                 // payloadType=reminder for the inverse. Both null/blank for
                 // headless callers and the Dashboard tile counts.
-                .eq("payloadType", payloadType)
-                .notEqOrNull("payloadType", excludePayloadType);
+                .eq(KEY_PAYLOAD_TYPE, payloadType)
+                .notEqOrNull(KEY_PAYLOAD_TYPE, excludePayloadType);
 
         // JCLAW-304: q resolves against the TASK Lucene scope (virtual
         // doc of name + description). Null when q is absent/blank;
@@ -539,7 +539,7 @@ public class ApiTasksController extends Controller {
                             + "GROUP BY r.task.id")
                     .setParameter("ids", taskIds)
                     .getResultList();
-            var map = new java.util.HashMap<Long, Instant>(rows.size());
+            var map = java.util.HashMap.<Long, Instant>newHashMap(rows.size());
             for (var row : rows) {
                 map.put((Long) row[0], (Instant) row[1]);
             }
@@ -558,6 +558,7 @@ public class ApiTasksController extends Controller {
      * filter" so the operator sees equality-only results rather than a
      * 500 on a stray Lucene IO hiccup.
      */
+    @SuppressWarnings("java:S1168") // null vs empty-list is a deliberate tri-state: null = "no q filter"; empty = "matched nothing, render zero rows"; non-empty = "narrow" (see list())
     private static List<Long> ftsTaskIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
@@ -906,12 +907,13 @@ public class ApiTasksController extends Controller {
         var agentName = task.agent != null ? task.agent.name : null;
         var taskName = task.name;
         var taskId = task.id;
+        final String taskIdParam = "taskId";
 
         var em = play.db.jpa.JPA.em();
         em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
-                .setParameter("taskId", taskId).executeUpdate();
+                .setParameter(taskIdParam, taskId).executeUpdate();
         em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
-                .setParameter("taskId", taskId).executeUpdate();
+                .setParameter(taskIdParam, taskId).executeUpdate();
         // Cascade-delete user-visible notifications that originated from this
         // task. Reminder tasks (payloadType="reminder") emit one Notification
         // per fire; when the operator deletes the task the toast/Reminders
@@ -919,7 +921,7 @@ public class ApiTasksController extends Controller {
         // the next poll. Safe for non-reminder tasks too — they don't write
         // Notifications, so this is a no-op.
         em.createQuery("DELETE FROM Notification n WHERE n.sourceTaskId = :taskId")
-                .setParameter("taskId", taskId).executeUpdate();
+                .setParameter(taskIdParam, taskId).executeUpdate();
         em.flush();
 
         // Idempotent — harmless if the task is already in a terminal

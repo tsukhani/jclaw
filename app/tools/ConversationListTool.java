@@ -234,7 +234,7 @@ public class ConversationListTool implements ToolRegistry.Tool {
             row.put("childAgentId",
                     run.childAgent != null ? String.valueOf(run.childAgent.id) : null);
             row.put("label", run.label);
-            row.put("status", run.status != null ? run.status.name() : null);
+            row.put(PARAM_STATUS, run.status != null ? run.status.name() : null);
             row.put("startedAt", run.startedAt != null ? run.startedAt.toString() : null);
             row.put("endedAt", run.endedAt != null ? run.endedAt.toString() : null);
             row.put("outcomePreview", truncatePreview(run.outcome));

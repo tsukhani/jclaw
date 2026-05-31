@@ -308,17 +308,6 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     /**
-     * Ensure the main agent has {@code skill-creator} installed in its workspace.
-     * Runs on every boot so a clean checkout that ships {@code skills/skill-creator/}
-     * in the global registry can still reach a state where {@code main} can promote
-     * other skills (per {@code SkillPromotionService.SKILL_CREATOR_NAME}).
-     *
-     * <p>Skipped silently when the global registry doesn't ship skill-creator
-     * (e.g. in tests that strip skills) — main is still usable for everything
-     * except promotion, and the capability gate will reject promotion attempts
-     * with an actionable error.
-     */
-    /**
      * JCLAW-282: bring up the in-process JClaw API tool. Two steps:
      * <ol>
      *   <li>Mint (or recover) the internal bearer token so {@code jclaw_api}
@@ -365,6 +354,17 @@ public class DefaultConfigJob extends Job<Void> {
         }
     }
 
+    /**
+     * Ensure the main agent has {@code skill-creator} installed in its workspace.
+     * Runs on every boot so a clean checkout that ships {@code skills/skill-creator/}
+     * in the global registry can still reach a state where {@code main} can promote
+     * other skills (per {@code SkillPromotionService.SKILL_CREATOR_NAME}).
+     *
+     * <p>Skipped silently when the global registry doesn't ship skill-creator
+     * (e.g. in tests that strip skills) — main is still usable for everything
+     * except promotion, and the capability gate will reject promotion attempts
+     * with an actionable error.
+     */
     private void seedSkillCreatorForMain() {
         var skillName = services.SkillPromotionService.SKILL_CREATOR_NAME;
         var globalSkillMd = agents.SkillLoader.globalSkillsPath()

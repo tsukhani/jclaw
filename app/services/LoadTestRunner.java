@@ -54,15 +54,6 @@ public final class LoadTestRunner {
     public static final String DEFAULT_REAL_PROVIDER = "ollama-local";
 
     /**
-     * Load-test request shape. {@code realProvider} swaps the in-process
-     * mock for a real provider (default {@link #DEFAULT_REAL_PROVIDER},
-     * override via {@code provider}) running {@code model} — useful when
-     * the mock's deterministic stubs can't reproduce real network and SSE
-     * timing. {@code provider} is the registered name of any real provider
-     * in the registry — {@code ollama-local} for loopback runs,
-     * {@code ollama-cloud} or {@code openrouter} for cloud runs.
-     */
-    /**
      * Default user message when {@link Request#userMessage} is not provided.
      * Length-constrained, factual, and well-known across every model so
      * cross-provider tokens-per-second comparisons measure speed instead of

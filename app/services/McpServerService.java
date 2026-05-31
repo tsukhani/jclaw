@@ -60,12 +60,6 @@ public final class McpServerService {
     // ==================== view / list ====================
 
     /**
-     * Snapshot of one MCP server row as the admin UI sees it: persisted
-     * fields plus current runtime state. The flat transport-specific
-     * fields are exploded out of {@code configJson} so forms can bind
-     * directly without re-parsing.
-     */
-    /**
      * Snapshot of a single advertised tool on an MCP server. Exposed
      * inside {@link View#tools} so the admin UI can render the
      * inline-expandable action list under each MCP Servers card —
@@ -76,6 +70,12 @@ public final class McpServerService {
      */
     public record ToolInfo(String name, String description) {}
 
+    /**
+     * Snapshot of one MCP server row as the admin UI sees it: persisted
+     * fields plus current runtime state. The flat transport-specific
+     * fields are exploded out of {@code configJson} so forms can bind
+     * directly without re-parsing.
+     */
     public record View(Long id, String name, boolean enabled, String transport,
                        String command, List<String> args, Map<String, String> env,
                        String url, Map<String, String> headers,

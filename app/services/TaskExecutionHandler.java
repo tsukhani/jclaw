@@ -232,20 +232,6 @@ public final class TaskExecutionHandler {
     }
 
     /**
-     * Two-step CRON re-schedule: drop the current row via
-     * {@code executionOperations.stop()}, then insert the next-fire
-     * row with the same task_instance id via
-     * {@link SchedulerClient#schedule}. The stop-then-schedule order
-     * is load-bearing for the unique-constraint reasons documented at
-     * the class level.
-     *
-     * <p>If next-fire computation fails (malformed cron) or
-     * {@link #schedulerClient} hasn't been wired (test path, race at
-     * shutdown), the current row is still removed cleanly and the
-     * CRON Task effectively pauses until the next BootConsistencyCheck
-     * sweep reschedules it.
-     */
-    /**
      * INTERVAL counterpart to {@link #scheduleCronNextCompletion} —
      * same stop-then-schedule shape, but next fire is
      * {@code now + task.intervalSeconds} rather than parsed from a
@@ -283,6 +269,20 @@ public final class TaskExecutionHandler {
         };
     }
 
+    /**
+     * Two-step CRON re-schedule: drop the current row via
+     * {@code executionOperations.stop()}, then insert the next-fire
+     * row with the same task_instance id via
+     * {@link SchedulerClient#schedule}. The stop-then-schedule order
+     * is load-bearing for the unique-constraint reasons documented at
+     * the class level.
+     *
+     * <p>If next-fire computation fails (malformed cron) or
+     * {@link #schedulerClient} hasn't been wired (test path, race at
+     * shutdown), the current row is still removed cleanly and the
+     * CRON Task effectively pauses until the next BootConsistencyCheck
+     * sweep reschedules it.
+     */
     private static CompletionHandler<Void> scheduleCronNextCompletion(Task task) {
         return (executionComplete, executionOperations) -> {
             executionOperations.stop();

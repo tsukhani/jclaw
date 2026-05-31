@@ -45,6 +45,7 @@ public class ApiSubagentRunsController extends Controller {
 
     private static final String KEY_REASON = "reason";
     private static final String KEY_RUN_ID = "run_id";
+    private static final String HDR_TOTAL_COUNT = "X-Total-Count";
 
     @SuppressWarnings("java:S107") // each query param is its own filter axis; bundling into a DTO would hide them from OpenAPI generation
     public record SubagentRunView(Long id, Long parentAgentId, String parentAgentName,
@@ -101,8 +102,8 @@ public class ApiSubagentRunsController extends Controller {
         var where = filter.toWhereClause();
         if (ftsRunIds != null) {
             if (ftsRunIds.isEmpty()) {
-                response.setHeader("X-Total-Count", "0");
-                response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+                response.setHeader(HDR_TOTAL_COUNT, "0");
+                response.setHeader("Access-Control-Expose-Headers", HDR_TOTAL_COUNT);
                 renderJSON("[]");
             }
             where = where.isEmpty() ? "id IN (:fts)" : where + " AND id IN (:fts)";
@@ -142,8 +143,8 @@ public class ApiSubagentRunsController extends Controller {
         List<SubagentRun> runs = jpaQ.setFirstResult(effectiveOffset)
                 .setMaxResults(effectiveLimit).getResultList();
 
-        response.setHeader("X-Total-Count", String.valueOf(total));
-        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+        response.setHeader(HDR_TOTAL_COUNT, String.valueOf(total));
+        response.setHeader("Access-Control-Expose-Headers", HDR_TOTAL_COUNT);
 
         // Bulk-lookup modes from the SUBAGENT_SPAWN events so we don't issue
         // one query per row. Cheap because the events table is indexed on
@@ -168,6 +169,7 @@ public class ApiSubagentRunsController extends Controller {
      * conversation. Operators rarely remember the run label; they
      * remember what went wrong inside the run.
      */
+    @SuppressWarnings("java:S1168") // null vs empty-list is a deliberate tri-state: null = "no q filter, return all rows"; empty = "matched nothing, render zero rows"; non-empty = "narrow" (see callers in list())
     private static List<Long> ftsSubagentRunIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
@@ -238,13 +240,6 @@ public class ApiSubagentRunsController extends Controller {
     }
 
     /**
-     * POST /api/subagent-runs/{id}/kill — kill a running subagent. Routes
-     * through {@link SubagentRegistry#kill} so the behavior matches the
-     * {@code /subagent kill} slash command exactly: idempotent for terminal
-     * rows, emits SUBAGENT_KILL on success, returns the resulting message
-     * in either case.
-     */
-    /**
      * DELETE /api/subagent-runs/{id} — remove a subagent run row and the
      * child agent it spawned (which cascades to the child conversation,
      * its messages, the run row itself, and any other rows the agent
@@ -295,6 +290,13 @@ public class ApiSubagentRunsController extends Controller {
         renderJSON("{\"status\":\"deleted\",\"id\":" + id + "}");
     }
 
+    /**
+     * POST /api/subagent-runs/{id}/kill — kill a running subagent. Routes
+     * through {@link SubagentRegistry#kill} so the behavior matches the
+     * {@code /subagent kill} slash command exactly: idempotent for terminal
+     * rows, emits SUBAGENT_KILL on success, returns the resulting message
+     * in either case.
+     */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = KillResponse.class)))
     public static void kill(Long id) {
         if (id == null) {

@@ -116,9 +116,8 @@ public final class TelegramStreamingSink {
      * {@link #scheduledFlush} comparison), while virtual-thread-per-flush
      * gives cross-sink parallelism so N concurrent streams don't serialize
      * behind a single carrier (JCLAW-95).
-     */
-    /**
-     * Lazily-initialized, re-initializable scheduler. Direct static init would
+     *
+     * <p>Lazily-initialized, re-initializable scheduler. Direct static init would
      * mean that {@link #shutdown} leaves a dead scheduler reference for the
      * rest of the JVM lifetime — a problem during testing where
      * {@code JobLifecycleTest} invokes {@code ShutdownJob.doJob()} in the
@@ -172,16 +171,6 @@ public final class TelegramStreamingSink {
     private ScheduledFuture<?> scheduledFlush;
     private final AtomicBoolean sealed = new AtomicBoolean(false);
 
-    /**
-     * {@code true} while a flush's network call is in progress (between the
-     * first sync block and the post-network sync block). Volatile so
-     * {@link #seal(String)} on a different thread can observe it without
-     * taking the monitor. Needed to prevent a race where seal's final HTML
-     * edit is submitted to Telegram before an in-flight plain-text flush
-     * completes — Telegram processes edits in network-arrival order, not
-     * submission order, so an HTML seal that wins the race on submission
-     * can still be overwritten by a slower plain-text flush.
-     */
     /**
      * Non-null while a flush is in flight; {@code null} when idle. The future
      * is created under the {@link #stateLock} at the top of

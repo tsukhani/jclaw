@@ -207,9 +207,9 @@ public class MessageTool implements ToolRegistry.Tool {
         var result = DeliveryDispatcher.dispatch(agent, channel, target, message);
         if (result.ok()) {
             var payload = new LinkedHashMap<String, Object>();
-            payload.put("action", "sent");
-            payload.put("channel", channel);
-            payload.put("target", target);
+            payload.put(PARAM_ACTION, "sent");
+            payload.put(PARAM_CHANNEL, channel);
+            payload.put(PARAM_TARGET, target);
             return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
         }
         return "Error: " + result.reason();

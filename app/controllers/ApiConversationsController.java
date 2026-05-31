@@ -214,6 +214,7 @@ public class ApiConversationsController extends Controller {
      * a single JPQL distinct-projection — cheaper than fetching the
      * full Message rows just to read their FK.
      */
+    @SuppressWarnings("java:S1168") // null vs empty-list is a deliberate tri-state: null = "no q filter"; empty = "matched nothing, render zero rows"; non-empty = "narrow" (see listConversations)
     private static List<Long> ftsConversationIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {

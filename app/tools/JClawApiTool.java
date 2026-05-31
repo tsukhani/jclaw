@@ -305,7 +305,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             if (resolved != null && resolved.length >= 2 && resolved[1] instanceof Method m) {
                 return m.getAnnotation(ChatSafe.class);
             }
-        } catch (Throwable ignored) {
+        } catch (Exception ignored) {
             // fall through to manual resolution
         }
         // Fallback: resolve "Controller.method" by name off Play's classloader.
@@ -322,7 +322,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
                     return candidate.getAnnotation(ChatSafe.class);
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Exception ignored) {
             // not a resolvable controller action — skip
         }
         return null;

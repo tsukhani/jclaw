@@ -43,6 +43,10 @@ public final class DeliveryDispatcher {
 
     private DeliveryDispatcher() {}
 
+    private static final String TELEGRAM = "telegram";
+    private static final String SLACK = "slack";
+    private static final String WHATSAPP = "whatsapp";
+
     /**
      * Outcome of a dispatch.
      *
@@ -111,9 +115,9 @@ public final class DeliveryDispatcher {
         }
         var canonical = channelType.toLowerCase();
         return switch (canonical) {
-            case "telegram" -> dispatchTelegram(agent, target, text);
-            case "slack" -> dispatchSlack(target, text);
-            case "whatsapp" -> dispatchWhatsApp(target, text);
+            case TELEGRAM -> dispatchTelegram(agent, target, text);
+            case SLACK -> dispatchSlack(target, text);
+            case WHATSAPP -> dispatchWhatsApp(target, text);
             case "web" -> dispatchWeb(agent, target, text);
             default -> DispatchResult.unsupported(channelType);
         };
@@ -152,13 +156,13 @@ public final class DeliveryDispatcher {
         // misses. Mirror's the workspace-path parent-walk pattern.
         var binding = TelegramBinding.findByAgentOrAncestor(agent);
         if (binding == null) {
-            return DispatchResult.noConfig("telegram",
+            return DispatchResult.noConfig(TELEGRAM,
                     "Connect a Telegram bot for agent '" + agent.name
                             + "' (or any of its ancestors) in Settings → Channels → Telegram, "
                             + "or via POST /api/telegram-bindings.");
         }
         if (!binding.enabled) {
-            return DispatchResult.noConfig("telegram",
+            return DispatchResult.noConfig(TELEGRAM,
                     "Telegram binding for agent '" + binding.agent.name + "' is disabled.");
         }
         // Use the static sendMessage path (not channel.sendWithRetry directly)
@@ -177,7 +181,7 @@ public final class DeliveryDispatcher {
 
     private static DispatchResult dispatchSlack(String channelId, String text) {
         if (SlackChannel.SlackConfig.load() == null) {
-            return DispatchResult.noConfig("slack",
+            return DispatchResult.noConfig(SLACK,
                     "Configure the workspace Slack app in Settings → Channels → Slack.");
         }
         return new SlackChannel().sendWithRetry(channelId, text)
@@ -188,7 +192,7 @@ public final class DeliveryDispatcher {
 
     private static DispatchResult dispatchWhatsApp(String phoneNumber, String text) {
         if (WhatsAppChannel.WhatsAppConfig.load() == null) {
-            return DispatchResult.noConfig("whatsapp",
+            return DispatchResult.noConfig(WHATSAPP,
                     "Configure the WhatsApp Cloud API credentials in Settings → Channels → WhatsApp.");
         }
         return new WhatsAppChannel().sendWithRetry(phoneNumber, text)
@@ -285,7 +289,7 @@ public final class DeliveryDispatcher {
     public static boolean isSupported(String channelType) {
         if (channelType == null) return false;
         return switch (channelType.toLowerCase()) {
-            case "telegram", "slack", "whatsapp", "web" -> true;
+            case TELEGRAM, SLACK, WHATSAPP, "web" -> true;
             default -> false;
         };
     }
