@@ -8,12 +8,10 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ClockIcon,
   MagnifyingGlassIcon,
   NoSymbolIcon,
   PencilSquareIcon,
   PlusIcon,
-  Squares2X2Icon,
   TableCellsIcon,
   TrashIcon,
   XMarkIcon,
@@ -39,15 +37,15 @@ function onFiltersChanged(filters: Filter[]) {
   agentFilter.value = filters.find(f => f.key === 'agent')?.value ?? ''
 }
 
-// Three layouts: dense table (default), card grid, month calendar. Persisted
-// to the URL so refresh / back-forward / shareable links keep the same view.
-type View = 'table' | 'cards' | 'calendar' | 'timeline'
+// Two layouts: dense table (default) and a navigable calendar (month / week /
+// day granularity). Persisted to the URL so refresh / back-forward / shareable
+// links keep the same view.
+type View = 'table' | 'calendar'
 const route = useRoute()
 const router = useRouter()
 const view = computed<View>({
   get() {
-    const q = route.query.view
-    return q === 'cards' || q === 'calendar' || q === 'timeline' ? q : 'table'
+    return route.query.view === 'calendar' ? 'calendar' : 'table'
   },
   set(v: View) {
     void router.replace({ query: { ...route.query, view: v === 'table' ? undefined : v } })
@@ -75,8 +73,33 @@ const { data: tasks, refresh } = await useFetch<Task[]>(url)
 // JCLAW-22 (slice K): dashboard KPI aggregate. Refetched live on task
 // lifecycle events (see scheduleLiveRefresh) so the counts stay current.
 const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/tasks/stats')
-// JCLAW-22 (slice TL): recent runs across all tasks for the Timeline view.
-const { data: recentRuns, refresh: refreshRecent } = await useFetch<RecentRunView[]>('/api/task-runs/recent')
+// JCLAW-22: the calendar's week/day grids place real run blocks onto an hourly
+// axis. We fetch the runs that fall inside the currently-visible calendar range
+// (driven by the granularity + anchor below) and refetch reactively as the
+// operator navigates. The range computeds live here — above the fetch — so the
+// URL ref can key on them (const has no hoisting); the navigation handlers and
+// the per-day projection live further down with the rest of the grid logic.
+const calGranularity = ref<'month' | 'week' | 'day'>('month')
+const calendarMonth = ref(startOfMonth(new Date()))
+const calAnchor = ref(startOfDay(new Date()))
+const calRange = computed<{ start: Date, end: Date }>(() => {
+  if (calGranularity.value === 'day') {
+    const s = startOfDay(calAnchor.value)
+    return { start: s, end: addDays(s, 1) }
+  }
+  if (calGranularity.value === 'week') {
+    const s = startOfWeek(calAnchor.value)
+    return { start: s, end: addDays(s, 7) }
+  }
+  // Month: the 6×7 grid window (Sunday on/before the 1st, 42 days) — matches
+  // calendarDays so a run/fire never lands outside the visible cells.
+  const gridStart = startOfWeek(calendarMonth.value)
+  return { start: gridStart, end: addDays(gridStart, 42) }
+})
+const calRunsUrl = computed(() =>
+  `/api/task-runs/recent?from=${encodeURIComponent(calRange.value.start.toISOString())}`
+  + `&to=${encodeURIComponent(calRange.value.end.toISOString())}&limit=500`)
+const { data: recentRuns, refresh: refreshRecent } = await useFetch<RecentRunView[]>(calRunsUrl)
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
 
@@ -780,8 +803,8 @@ function matchCronField(field: string, value: number, min: number, max: number):
 }
 
 // ─────────────────────────── Calendar grid state ────────────────────────────
-
-const calendarMonth = ref(startOfMonth(new Date()))
+// (calGranularity / calendarMonth / calAnchor / calRange are declared up top so
+// the runs fetch can key on the visible range — see the fetch block above.)
 
 function startOfMonth(d: Date): Date {
   const r = new Date(d)
@@ -790,23 +813,65 @@ function startOfMonth(d: Date): Date {
   return r
 }
 
+function startOfDay(d: Date): Date {
+  const r = new Date(d)
+  r.setHours(0, 0, 0, 0)
+  return r
+}
+
+// Week starts on Sunday to match the month grid's leading-day padding.
+function startOfWeek(d: Date): Date {
+  const r = startOfDay(d)
+  r.setDate(r.getDate() - r.getDay())
+  return r
+}
+
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d)
+  r.setDate(r.getDate() + n)
+  return r
+}
+
 function nextMonthFrom(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth() + 1, 1)
 }
 
-function prevMonth() {
-  calendarMonth.value = new Date(calendarMonth.value.getFullYear(), calendarMonth.value.getMonth() - 1, 1)
+// Unified navigation: month steps by calendar month, week/day by 7/1 days.
+function calPrev() {
+  if (calGranularity.value === 'month') {
+    calendarMonth.value = new Date(calendarMonth.value.getFullYear(), calendarMonth.value.getMonth() - 1, 1)
+  }
+  else {
+    calAnchor.value = addDays(calAnchor.value, calGranularity.value === 'week' ? -7 : -1)
+  }
 }
-function nextMonth() {
-  calendarMonth.value = nextMonthFrom(calendarMonth.value)
+function calNext() {
+  if (calGranularity.value === 'month') {
+    calendarMonth.value = nextMonthFrom(calendarMonth.value)
+  }
+  else {
+    calAnchor.value = addDays(calAnchor.value, calGranularity.value === 'week' ? 7 : 1)
+  }
 }
-function thisMonth() {
+function calToday() {
   calendarMonth.value = startOfMonth(new Date())
+  calAnchor.value = startOfDay(new Date())
 }
 
-const calendarTitle = computed(() =>
-  calendarMonth.value.toLocaleDateString(undefined, { year: 'numeric', month: 'long' }),
-)
+const calTitle = computed(() => {
+  if (calGranularity.value === 'day') {
+    return calAnchor.value.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  }
+  if (calGranularity.value === 'week') {
+    const s = startOfWeek(calAnchor.value)
+    const e = addDays(s, 6)
+    const sameMonth = s.getMonth() === e.getMonth()
+    const sStr = s.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    const eStr = e.toLocaleDateString(undefined, sameMonth ? { day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })
+    return `${sStr} – ${eStr}`
+  }
+  return calendarMonth.value.toLocaleDateString(undefined, { year: 'numeric', month: 'long' })
+})
 
 /**
  * 6-row × 7-col grid covering the visible month, padded with leading days
@@ -854,6 +919,98 @@ const calendarDays = computed<DayCell[]>(() => {
   }
   return cells
 })
+
+// ───────────────────── Week / Day hourly-grid projection ─────────────────────
+// Week = 7 columns, Day = 1 column. Each column places its runs as absolutely
+// positioned blocks on a 24h axis (top + height as a % of the day, sized by
+// duration), plus hollow markers for upcoming projected fires that have not
+// run yet. RUNNING runs (no completedAt) extend to the live `nowMs` tick.
+const DAY_MS = 24 * 60 * 60 * 1000
+const HOUR_PX = 48
+const hours = Array.from({ length: 24 }, (_, h) => h)
+const gridBodyStyle = { height: `${24 * HOUR_PX}px` }
+
+interface RunBlock {
+  run: RecentRunView
+  topPct: number
+  heightPct: number
+}
+interface FireMarker {
+  fire: ProjectedFire
+  topPct: number
+}
+interface DayColumn {
+  date: Date
+  isToday: boolean
+  runs: RunBlock[]
+  fires: FireMarker[]
+}
+
+const calColumns = computed<DayColumn[]>(() => {
+  const count = calGranularity.value === 'day' ? 1 : 7
+  const gridStart = startOfDay(calRange.value.start)
+  const today = startOfDay(new Date(nowMs.value)).getTime()
+  const runs = recentRuns.value ?? []
+  // Project once over the whole visible window, then bucket per day below.
+  const allFires: ProjectedFire[] = []
+  for (const t of tasks.value ?? []) {
+    allFires.push(...projectFires(t, gridStart, addDays(gridStart, count)))
+  }
+  const cols: DayColumn[] = []
+  for (let i = 0; i < count; i++) {
+    const d = addDays(gridStart, i)
+    const dayStart = d.getTime()
+    const dayEnd = dayStart + DAY_MS
+    const dayRuns: RunBlock[] = []
+    for (const run of runs) {
+      if (!run.startedAt) continue
+      const s = new Date(run.startedAt).getTime()
+      if (s < dayStart || s >= dayEnd) continue
+      const endMs = run.completedAt ? new Date(run.completedAt).getTime() : nowMs.value
+      const topPct = ((s - dayStart) / DAY_MS) * 100
+      const rawH = ((Math.max(endMs, s) - s) / DAY_MS) * 100
+      // Min height so instant runs stay clickable; never spill past midnight.
+      const heightPct = Math.min(100 - topPct, Math.max(1.5, rawH))
+      dayRuns.push({ run, topPct, heightPct })
+    }
+    // Only upcoming fires — a past fire already has its run block, so showing
+    // both would double-count. isPast is stamped at projection time.
+    const dayFires: FireMarker[] = allFires
+      .filter(f => !f.isPast && f.fireAt.getTime() >= dayStart && f.fireAt.getTime() < dayEnd)
+      .map(f => ({ fire: f, topPct: ((f.fireAt.getTime() - dayStart) / DAY_MS) * 100 }))
+    cols.push({ date: d, isToday: dayStart === today, runs: dayRuns, fires: dayFires })
+  }
+  return cols
+})
+
+// Red "now" line position as a % of the day, for today's column.
+const nowTopPct = computed(() => {
+  const d = new Date(nowMs.value)
+  return ((d.getHours() * 60 + d.getMinutes()) / (24 * 60)) * 100
+})
+
+function formatHour(h: number): string {
+  const period = h < 12 ? 'a' : 'p'
+  const hour = h % 12 === 0 ? 12 : h % 12
+  return `${hour}${period}`
+}
+
+function fmtRunTime(run: RecentRunView): string {
+  const s = run.startedAt
+    ? new Date(run.startedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : '?'
+  return run.durationMs != null ? `${s} · ${(run.durationMs / 1000).toFixed(1)}s` : s
+}
+
+// Solid block fills for actual runs (the text statusColors are too faint as a
+// filled background). Falls back to neutral for any unmapped status.
+const statusBg: Record<string, string> = {
+  RUNNING: 'bg-blue-500/70 border-blue-400',
+  LOST: 'bg-orange-500/70 border-orange-400',
+  COMPLETED: 'bg-green-600/60 border-green-500',
+  FAILED: 'bg-red-500/70 border-red-400',
+  CANCELLED: 'bg-neutral-600/60 border-neutral-500',
+}
 
 // (JCLAW-304: status/type select ids were retired with their dropdowns.
 // FilterBar manages its own ARIA labels on the underlying input.)
@@ -998,9 +1155,7 @@ const calendarDays = computed<DayCell[]>(() => {
         <button
           v-for="opt in ([
             { id: 'table', label: 'Table', icon: TableCellsIcon },
-            { id: 'cards', label: 'Cards', icon: Squares2X2Icon },
             { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
-            { id: 'timeline', label: 'Timeline', icon: ClockIcon },
           ] as const)"
           :key="opt.id"
           type="button"
@@ -1505,126 +1660,46 @@ const calendarDays = computed<DayCell[]>(() => {
       </div>
     </div>
 
-    <!-- Cards view: one card per task. Same data shape as the table —
-         denser per-card layout, friendlier on wide screens. -->
-    <div
-      v-else-if="view === 'cards'"
-    >
-      <div
-        v-if="!tasks?.length"
-        class="bg-surface-elevated border border-border px-4 py-8 text-center text-sm text-fg-muted"
-      >
-        No tasks found
-      </div>
-      <div
-        v-else
-        class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
-      >
-        <div
-          v-for="task in tasks"
-          :key="task.id"
-          class="bg-surface-elevated border border-border p-4 flex flex-col gap-3"
-        >
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-fg-strong truncate">
-                {{ task.name }}
-              </div>
-              <div class="text-xs text-fg-muted font-mono mt-0.5">
-                {{ task.type }} · {{ humanSchedule(task) }}
-              </div>
-            </div>
-            <span
-              :class="statusColors[task.status]"
-              class="text-[10px] font-mono shrink-0"
-            >{{ task.status }}</span>
-          </div>
-          <dl class="text-xs grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <dt class="text-fg-muted">
-              Agent
-            </dt>
-            <dd class="text-fg-primary truncate">
-              {{ task.agentName || '—' }}
-            </dd>
-            <dt class="text-fg-muted">
-              Next run
-            </dt>
-            <dd class="text-fg-primary">
-              {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
-            </dd>
-            <dt class="text-fg-muted">
-              Retries
-            </dt>
-            <dd class="text-fg-primary">
-              {{ task.retryCount }}/{{ task.maxRetries }}
-            </dd>
-          </dl>
-          <div class="flex items-center justify-end gap-1 pt-1 border-t border-border">
-            <button
-              v-if="task.status === 'PENDING' || task.status === 'ACTIVE'"
-              type="button"
-              class="p-1 text-fg-muted hover:text-red-400 transition-colors"
-              :title="task.type === 'CRON' || task.type === 'INTERVAL'
-                ? `Stop recurring schedule for “${task.name}”`
-                : `Cancel “${task.name}”`"
-              :aria-label="`Cancel ${task.name}`"
-              @click="cancelTask(task.id)"
-            >
-              <NoSymbolIcon
-                class="w-4 h-4"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              v-if="task.status === 'FAILED' || task.status === 'LOST'"
-              type="button"
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              :title="`Retry “${task.name}”`"
-              :aria-label="`Retry ${task.name}`"
-              @click="retryTask(task.id)"
-            >
-              <ArrowPathIcon
-                class="w-4 h-4"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              type="button"
-              class="p-1 text-fg-muted hover:text-red-400 transition-colors"
-              :title="`Permanently delete “${task.name}” and its run history`"
-              :aria-label="`Delete ${task.name}`"
-              @click="deleteTask(task)"
-            >
-              <TrashIcon
-                class="w-4 h-4"
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Calendar view: month grid with projected fires. CRON expansion
-         covers the patterns humanCron understands; INTERVAL steps from
-         nextRunAt; SCHEDULED / IMMEDIATE pin to their nextRunAt date.
-         Unrecognized cron expressions just show the next fire so the
-         operator at least knows something is scheduled. -->
+    <!-- Calendar view: month grid of projected fires, or week/day hourly grids
+         that place actual run blocks (sized by duration) plus hollow markers
+         for upcoming fires. CRON expansion covers the patterns humanCron
+         understands; INTERVAL steps from nextRunAt; SCHEDULED / IMMEDIATE pin
+         to their nextRunAt date. -->
     <div
       v-else-if="view === 'calendar'"
       class="bg-surface-elevated border border-border"
     >
-      <div class="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div class="text-sm font-medium text-fg-strong">
-          {{ calendarTitle }}
+      <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+        <!-- Granularity: Month / Week / Day -->
+        <div
+          class="inline-flex border border-input divide-x divide-border"
+          role="group"
+          aria-label="Calendar granularity"
+        >
+          <button
+            v-for="g in (['month', 'week', 'day'] as const)"
+            :key="g"
+            type="button"
+            class="px-2.5 py-1 text-xs capitalize transition-colors"
+            :class="calGranularity === g
+              ? 'bg-emerald-600/20 text-emerald-300'
+              : 'text-fg-muted hover:text-fg-strong'"
+            :aria-pressed="calGranularity === g"
+            @click="calGranularity = g"
+          >
+            {{ g }}
+          </button>
+        </div>
+        <div class="text-sm font-medium text-fg-strong truncate">
+          {{ calTitle }}
         </div>
         <div class="inline-flex items-center gap-1">
           <button
             type="button"
             class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-            title="Previous month"
-            aria-label="Previous month"
-            @click="prevMonth"
+            :title="`Previous ${calGranularity}`"
+            :aria-label="`Previous ${calGranularity}`"
+            @click="calPrev"
           >
             <ChevronLeftIcon
               class="w-4 h-4"
@@ -1635,16 +1710,16 @@ const calendarDays = computed<DayCell[]>(() => {
             type="button"
             class="px-2 py-1 text-xs text-fg-muted hover:text-fg-strong transition-colors"
             title="Jump to today"
-            @click="thisMonth"
+            @click="calToday"
           >
             Today
           </button>
           <button
             type="button"
             class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-            title="Next month"
-            aria-label="Next month"
-            @click="nextMonth"
+            :title="`Next ${calGranularity}`"
+            :aria-label="`Next ${calGranularity}`"
+            @click="calNext"
           >
             <ChevronRightIcon
               class="w-4 h-4"
@@ -1653,72 +1728,158 @@ const calendarDays = computed<DayCell[]>(() => {
           </button>
         </div>
       </div>
-      <div class="grid grid-cols-7 text-[10px] uppercase tracking-wider text-fg-muted border-b border-border">
-        <div
-          v-for="dn in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']"
-          :key="dn"
-          class="px-2 py-1.5"
-        >
-          {{ dn }}
-        </div>
-      </div>
-      <div class="grid grid-cols-7">
-        <div
-          v-for="(cell, idx) in calendarDays"
-          :key="idx"
-          class="min-h-[100px] border-r border-b border-border last:border-r-0 px-2 py-1.5 flex flex-col gap-1"
-          :class="[
-            cell.inMonth ? '' : 'bg-muted/20',
-            cell.isPast ? 'opacity-40' : '',
-          ]"
-        >
+
+      <!-- Month: 6×7 day grid of projected fires (compact per-day fire list). -->
+      <template v-if="calGranularity === 'month'">
+        <div class="grid grid-cols-7 text-[10px] uppercase tracking-wider text-fg-muted border-b border-border">
           <div
-            class="text-xs flex items-center gap-1"
+            v-for="dn in ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']"
+            :key="dn"
+            class="px-2 py-1.5"
+          >
+            {{ dn }}
+          </div>
+        </div>
+        <div class="grid grid-cols-7">
+          <div
+            v-for="(cell, idx) in calendarDays"
+            :key="idx"
+            class="min-h-[100px] border-r border-b border-border last:border-r-0 px-2 py-1.5 flex flex-col gap-1"
             :class="[
-              cell.inMonth ? 'text-fg-primary' : 'text-fg-muted',
-              cell.isToday ? 'font-semibold' : '',
+              cell.inMonth ? '' : 'bg-muted/20',
+              cell.isPast ? 'opacity-40' : '',
             ]"
           >
-            <span
-              v-if="cell.isToday"
-              class="inline-block w-5 h-5 rounded-full bg-emerald-500 text-white text-center leading-5"
-            >{{ cell.date.getDate() }}</span>
-            <span v-else>{{ cell.date.getDate() }}</span>
-          </div>
-          <ul
-            v-if="cell.fires.length"
-            class="flex flex-col gap-0.5 overflow-hidden"
-          >
-            <li
-              v-for="(fire, i) in cell.fires.slice(0, 4)"
-              :key="i"
-              class="text-[10px] truncate"
+            <div
+              class="text-xs flex items-center gap-1"
               :class="[
-                statusColors[fire.taskStatus] || 'text-fg-muted',
-                fire.isPast ? 'opacity-40' : '',
+                cell.inMonth ? 'text-fg-primary' : 'text-fg-muted',
+                cell.isToday ? 'font-semibold' : '',
               ]"
-              :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}`"
             >
-              <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>
-              <span class="ml-1">{{ fire.taskName }}</span>
-            </li>
-            <li
-              v-if="cell.fires.length > 4"
-              class="text-[10px] text-fg-muted"
+              <span
+                v-if="cell.isToday"
+                class="inline-block w-5 h-5 rounded-full bg-emerald-500 text-white text-center leading-5"
+              >{{ cell.date.getDate() }}</span>
+              <span v-else>{{ cell.date.getDate() }}</span>
+            </div>
+            <ul
+              v-if="cell.fires.length"
+              class="flex flex-col gap-0.5 overflow-hidden"
             >
-              +{{ cell.fires.length - 4 }} more
-            </li>
-          </ul>
+              <li
+                v-for="(fire, i) in cell.fires.slice(0, 4)"
+                :key="i"
+                class="text-[10px] truncate"
+                :class="[
+                  statusColors[fire.taskStatus] || 'text-fg-muted',
+                  fire.isPast ? 'opacity-40' : '',
+                ]"
+                :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}`"
+              >
+                <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>
+                <span class="ml-1">{{ fire.taskName }}</span>
+              </li>
+              <li
+                v-if="cell.fires.length > 4"
+                class="text-[10px] text-fg-muted"
+              >
+                +{{ cell.fires.length - 4 }} more
+              </li>
+            </ul>
+          </div>
+        </div>
+      </template>
+
+      <!-- Week (7 cols) / Day (1 col): hourly grid placing real run blocks
+           (sized by duration) plus hollow markers for upcoming fires. -->
+      <div
+        v-else
+        class="overflow-auto max-h-[70vh]"
+      >
+        <!-- Sticky column-date headers. -->
+        <div class="flex sticky top-0 z-30 bg-surface-elevated border-b border-border">
+          <div class="w-12 shrink-0" />
+          <div
+            v-for="col in calColumns"
+            :key="col.date.toISOString()"
+            class="flex-1 px-1 py-1.5 text-center border-l border-border"
+          >
+            <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+              {{ col.date.toLocaleDateString(undefined, { weekday: 'short' }) }}
+            </div>
+            <div
+              class="text-xs"
+              :class="col.isToday ? 'font-semibold text-emerald-400' : 'text-fg-primary'"
+            >
+              {{ col.date.getDate() }}
+            </div>
+          </div>
+        </div>
+        <!-- Hour grid body. -->
+        <div class="flex">
+          <!-- Hour-label gutter. -->
+          <div class="w-12 shrink-0">
+            <div
+              v-for="h in hours"
+              :key="h"
+              class="h-12 text-[10px] text-fg-muted text-right pr-1 -translate-y-1.5"
+            >
+              {{ formatHour(h) }}
+            </div>
+          </div>
+          <!-- One column per visible day. -->
+          <div
+            v-for="col in calColumns"
+            :key="col.date.toISOString()"
+            class="flex-1 relative border-l border-border"
+            :style="gridBodyStyle"
+          >
+            <!-- Hour lines. -->
+            <div
+              v-for="h in hours"
+              :key="h"
+              class="h-12 border-b border-border/40"
+            />
+            <!-- Live "now" line (today's column only). -->
+            <div
+              v-if="col.isToday"
+              class="absolute left-0 right-0 border-t border-red-500/70 pointer-events-none z-20"
+              :style="{ top: `${nowTopPct}%` }"
+            >
+              <span class="absolute -left-1 -top-[3px] w-1.5 h-1.5 rounded-full bg-red-500" />
+            </div>
+            <!-- Run blocks (solid, sized by duration; click → trace). -->
+            <button
+              v-for="(blk, bi) in col.runs"
+              :key="`r${bi}`"
+              type="button"
+              class="absolute left-0.5 right-0.5 rounded-sm border px-1 text-[10px] text-white text-left leading-tight overflow-hidden hover:brightness-125 transition z-10"
+              :class="statusBg[blk.run.status ?? ''] ?? 'bg-neutral-600/60 border-neutral-500'"
+              :style="{ top: `${blk.topPct}%`, height: `${blk.heightPct}%` }"
+              :title="`${blk.run.taskName ?? 'run'} · ${blk.run.status} · ${fmtRunTime(blk.run)}`"
+              @click="openTraceForRun(blk.run)"
+            >
+              <span class="font-mono">{{ blk.run.taskName ?? 'run' }}</span>
+            </button>
+            <!-- Upcoming projected fires (hollow markers). -->
+            <div
+              v-for="(fm, fi) in col.fires"
+              :key="`f${fi}`"
+              class="absolute left-0.5 right-0.5 flex items-center gap-1 pointer-events-none z-10"
+              :style="{ top: `${fm.topPct}%` }"
+            >
+              <span class="w-1.5 h-1.5 rounded-full border border-emerald-400 bg-surface-elevated shrink-0" />
+              <span class="flex-1 border-t border-dashed border-emerald-400/50" />
+              <span
+                class="text-[9px] text-emerald-300/90 font-mono truncate max-w-[70%]"
+                :title="`${fm.fire.taskName} · ${fm.fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`"
+              >{{ fm.fire.taskName }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-
-    <TaskTimeline
-      v-else-if="view === 'timeline'"
-      :runs="recentRuns ?? []"
-      :now-ms="nowMs"
-      @select="openTraceForRun"
-    />
 
     <!-- PeekPanel: turn-by-turn execution trace for a clicked TaskRun (slice P). -->
     <PeekPanel
