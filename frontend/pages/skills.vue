@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowPathIcon,
+  ChevronRightIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
   CommandLineIcon,
@@ -60,6 +61,17 @@ watch(agents, () => loadAllAgentSkills(), { immediate: true })
 // added items land in their correct slot rather than at the end.
 const globalFilter = ref('')
 const agentFilter = ref('')
+
+// Per-agent collapse state for the skill list — keyed by agent id, true =
+// collapsed. The header (name / model / count) stays visible; only the skill
+// rows fold away so a long list (e.g. main's 15) doesn't bury the agents below.
+const collapsedAgents = ref<Record<number, boolean>>({})
+function isAgentCollapsed(id: number): boolean {
+  return !!collapsedAgents.value[id]
+}
+function toggleAgentCollapse(id: number) {
+  collapsedAgents.value[id] = !collapsedAgents.value[id]
+}
 
 // Locale-aware, case-insensitive comparator — matches user expectations across
 // mixed-case names without surprising ASCII-order placements (e.g. "Z" before "a").
@@ -989,9 +1001,21 @@ function totalSkillCount(agentId: number) {
                 @dragleave="onAgentDragLeave(agent.id)"
                 @drop="onAgentDrop($event, agent)"
               >
-                <!-- Agent header -->
-                <div class="flex items-center justify-between gap-2 mb-1">
+                <!-- Agent header — click to collapse/expand the skill list. The
+                     name / model / count stay visible while collapsed. -->
+                <button
+                  type="button"
+                  class="w-full flex items-center justify-between gap-2 mb-1 text-left bg-transparent border-0 cursor-pointer"
+                  :aria-expanded="!isAgentCollapsed(agent.id)"
+                  :aria-label="`${isAgentCollapsed(agent.id) ? 'Expand' : 'Collapse'} ${agent.name} skills`"
+                  @click="toggleAgentCollapse(agent.id)"
+                >
                   <div class="flex items-center gap-2 min-w-0">
+                    <ChevronRightIcon
+                      class="w-3.5 h-3.5 text-fg-muted shrink-0 transition-transform duration-150"
+                      :class="isAgentCollapsed(agent.id) ? '' : 'rotate-90'"
+                      aria-hidden="true"
+                    />
                     <span class="text-sm font-medium text-fg-strong truncate">{{ agent.name }}</span>
                     <span
                       v-if="agent.isMain"
@@ -1001,7 +1025,7 @@ function totalSkillCount(agentId: number) {
                   <span class="text-[10px] text-fg-muted shrink-0 tabular-nums">
                     {{ enabledSkillCount(agent.id) }}/{{ totalSkillCount(agent.id) }}
                   </span>
-                </div>
+                </button>
                 <div class="text-[10px] text-fg-muted mb-2 truncate">
                   {{ agent.modelProvider }} / {{ agent.modelId }}
                 </div>
@@ -1010,7 +1034,7 @@ function totalSkillCount(agentId: number) {
                    toggling lives on the Agents page; this panel is read-only
                    for the enabled state. -->
                 <div
-                  v-if="sortedAgentSkillsMap[agent.id]?.length"
+                  v-if="!isAgentCollapsed(agent.id) && sortedAgentSkillsMap[agent.id]?.length"
                   class="space-y-1"
                 >
                   <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag source for skill promotion; HTML5 drag events have no keyboard equivalent -->
@@ -1064,7 +1088,7 @@ function totalSkillCount(agentId: number) {
                   </div>
                 </div>
                 <div
-                  v-else
+                  v-else-if="!isAgentCollapsed(agent.id)"
                   class="text-[10px] text-fg-muted italic"
                 >
                   {{ loadingAgents ? 'Loading...' : 'No skills assigned' }}
