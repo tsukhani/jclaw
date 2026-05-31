@@ -325,17 +325,28 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
         assertEquals(400, response.status.intValue());
     }
 
-    @Test
-    void updateAcceptsEnabledToggle() {
+    /**
+     * Accepted single-field updates that share the seed + PUT + 200 +
+     * response-contains skeleton: the enabled toggle, clearing the webhook
+     * secret, and switching transport. {@code enabled:false} on the transport
+     * case keeps post-mutation reconcile() from hitting api.telegram.org while
+     * the persisted transport field still asserts as POLLING.
+     */
+    @ParameterizedTest(name = "updateAccepts[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "EnabledToggle      | {\"enabled\": false}                          | \"enabled\":false",
+            "ClearWebhookSecret | {\"webhookSecret\": null}                     | \"hasWebhookSecret\":false",
+            "TransportChange    | {\"transport\": \"POLLING\", \"enabled\": false} | \"transport\":\"POLLING\""
+    })
+    void updateAcceptsSingleFieldChange(String label, String body, String expectedSubstring) {
         var agentId = seedAgent("tg-agent");
         var bindingId = seedBinding(agentId, "111:tok", "42");
         login();
-        var body = "{\"enabled\": false}";
         var response = PUT("/api/channels/telegram/bindings/" + bindingId,
                 "application/json", body);
         assertIsOk(response);
-        assertTrue(getContent(response).contains("\"enabled\":false"),
-                "update should reflect enabled=false: " + getContent(response));
+        assertTrue(getContent(response).contains(expectedSubstring),
+                label + " should surface " + expectedSubstring + ": " + getContent(response));
     }
 
     /**
@@ -398,32 +409,8 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
         assertIsOk(response);
     }
 
-    @Test
-    void updateCanClearWebhookSecret() {
-        var agentId = seedAgent("tg-agent");
-        var bindingId = seedBinding(agentId, "111:tok", "42");
-        login();
-        var body = "{\"webhookSecret\": null}";
-        var response = PUT("/api/channels/telegram/bindings/" + bindingId,
-                "application/json", body);
-        assertIsOk(response);
-        assertTrue(getContent(response).contains("\"hasWebhookSecret\":false"),
-                "clearing secret should flip hasWebhookSecret: " + getContent(response));
-    }
-
-    @Test
-    void updateAcceptsTransportChange() {
-        var agentId = seedAgent("tg-agent");
-        var bindingId = seedBinding(agentId, "111:tok", "42");
-        login();
-        // enabled=false so post-mutation reconcile() doesn't trigger a real api.telegram.org call via the SDK; the persisted transport field is still POLLING for assertion.
-        var body = "{\"transport\": \"POLLING\", \"enabled\": false}";
-        var response = PUT("/api/channels/telegram/bindings/" + bindingId,
-                "application/json", body);
-        assertIsOk(response);
-        assertTrue(getContent(response).contains("\"transport\":\"POLLING\""),
-                "transport switch should surface in response: " + getContent(response));
-    }
+    // updateCanClearWebhookSecret and updateAcceptsTransportChange merged into
+    // updateAcceptsSingleFieldChange above.
 
     // ===== Delete =====
 

@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 import services.TaskSteps;
 
@@ -41,26 +43,19 @@ class TaskStepsTest extends UnitTest {
         assertTrue(TaskSteps.parse("   ").isEmpty());
     }
 
-    @Test
-    void malformedJsonArrayFallsBackToSingleStep() {
-        var raw = "[not valid json";
-        assertEquals(List.of(raw), TaskSteps.parse(raw));
-    }
-
-    @Test
-    void nonStringArrayElementsFallBackToSingleStep() {
-        var raw = "[\"ok\", 42, true]";
-        assertEquals(List.of(raw), TaskSteps.parse(raw));
-    }
-
-    @Test
-    void emptyJsonArrayFallsBackToSingleStep() {
-        assertEquals(List.of("[]"), TaskSteps.parse("[]"));
-    }
-
-    @Test
-    void jsonObjectIsTreatedAsPlainText() {
-        var raw = "{\"foo\":\"bar\"}";
+    /**
+     * Every input that isn't a JSON array of strings falls back to a
+     * single-element list holding the raw text verbatim: malformed JSON,
+     * an array with non-string elements, an empty array, and a JSON object.
+     */
+    @ParameterizedTest(name = "fallsBackToSingleStep[{0}]")
+    @ValueSource(strings = {
+            "[not valid json",
+            "[\"ok\", 42, true]",
+            "[]",
+            "{\"foo\":\"bar\"}"
+    })
+    void nonStringArrayInputFallsBackToSingleStep(String raw) {
         assertEquals(List.of(raw), TaskSteps.parse(raw));
     }
 

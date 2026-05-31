@@ -72,15 +72,28 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
         assertContentMatch("\"noAgent\":false", resp);
     }
 
-    @Test
-    void createScheduledBareDuration() {
+    /**
+     * Schedule-shorthand happy paths that share the seed + POST + 200 + two
+     * assertContentMatch skeleton: a bare duration ("2h" → SCHEDULED with
+     * scheduleDisplay), a 6-field Spring cron and an @-shortcut cron (both
+     * CRON with the cronExpression echoed back). The second expected match
+     * is a regex — the cron-star case escapes the literal asterisks.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "ScheduledBareDuration | later-task   | 2h          | \"type\":\"SCHEDULED\" | \"scheduleDisplay\":\"2h\"",
+            "CronSpring6Field      | morning-task | 0 0 9 * * * | \"type\":\"CRON\"      | \"cronExpression\":\"0 0 9 \\* \\* \\*\"",
+            "CronAtShortcut        | daily-task   | @daily      | \"type\":\"CRON\"      | \"cronExpression\":\"@daily\""
+    })
+    void createWithScheduleShorthand(String label, String name, String schedule,
+                                     String expectedType, String expectedField) {
         var agentId = seedAgent();
         var resp = POST("/api/tasks", "application/json", """
-                {"agentId": %d, "name": "later-task", "schedule": "2h"}
-                """.formatted(agentId));
+                {"agentId": %d, "name": "%s", "schedule": "%s"}
+                """.formatted(agentId, name, schedule));
         assertIsOk(resp);
-        assertContentMatch("\"type\":\"SCHEDULED\"", resp);
-        assertContentMatch("\"scheduleDisplay\":\"2h\"", resp);
+        assertContentMatch(expectedType, resp);
+        assertContentMatch(expectedField, resp);
     }
 
     @Test
@@ -95,27 +108,8 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
         assertContentMatch("\"scheduleDisplay\":\"every 30m\"", resp);
     }
 
-    @Test
-    void createCronSpring6Field() {
-        var agentId = seedAgent();
-        var resp = POST("/api/tasks", "application/json", """
-                {"agentId": %d, "name": "morning-task", "schedule": "0 0 9 * * *"}
-                """.formatted(agentId));
-        assertIsOk(resp);
-        assertContentMatch("\"type\":\"CRON\"", resp);
-        assertContentMatch("\"cronExpression\":\"0 0 9 \\* \\* \\*\"", resp);
-    }
-
-    @Test
-    void createCronAtShortcut() {
-        var agentId = seedAgent();
-        var resp = POST("/api/tasks", "application/json", """
-                {"agentId": %d, "name": "daily-task", "schedule": "@daily"}
-                """.formatted(agentId));
-        assertIsOk(resp);
-        assertContentMatch("\"type\":\"CRON\"", resp);
-        assertContentMatch("\"cronExpression\":\"@daily\"", resp);
-    }
+    // createCronSpring6Field and createCronAtShortcut merged into
+    // createWithScheduleShorthand above.
 
     @Test
     void createWithPlumbingFieldsRoundTrips() {

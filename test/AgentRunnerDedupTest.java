@@ -73,15 +73,24 @@ class AgentRunnerDedupTest extends UnitTest {
         assertEquals("", MessageDeduplicator.buildImagePrefix(collected, content));
     }
 
-    @Test
-    void dedupsWhenOnlyFilenameMatches() {
-        // The LLM rewrote the URL (e.g., stripped the /api/agents/1/files/ prefix)
-        // but kept the filename. Filename-based dedup must still catch this.
+    /**
+     * Three re-embed shapes that all dedup against the same collected
+     * screenshot (so buildImagePrefix returns ""): the LLM rewrote the URL
+     * but kept the filename, re-embedded as an HTML img tag (double-quoted
+     * src), and the same with a single-quoted src. Each must suppress the
+     * prepend so the image isn't shown twice.
+     */
+    @ParameterizedTest(name = "dedups[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "OnlyFilenameMatches      | Here's the screenshot: ![Screenshot](./workspace/screenshot-1000.png)",
+            "HtmlImgTagDoubleQuotes   | Here: <img src=\"/api/agents/1/files/screenshot-1000.png\" alt=\"\">",
+            "HtmlImgTagSingleQuotes   | <img alt='shot' src='./workspace/screenshot-1000.png'>"
+    })
+    void dedupsWhenLlmReembedsImage(String label, String content) {
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
-        var content = "Here's the screenshot: ![Screenshot](./workspace/screenshot-1000.png)";
         assertEquals("", MessageDeduplicator.buildImagePrefix(collected, content),
-                "Dedup should catch filename match even when path differs");
+                label + " must suppress the prepend (dedup against the collected image)");
     }
 
     @Test
@@ -115,27 +124,8 @@ class AgentRunnerDedupTest extends UnitTest {
                 "Regular markdown link must NOT suppress the inline-image prepend");
     }
 
-    @Test
-    void dedupsWhenLlmReembedsAsHtmlImgTag() {
-        // LLMs occasionally emit HTML <img src="..."> instead of markdown.
-        // The dedup must catch both forms — otherwise the prepend fires AND the
-        // LLM's HTML <img> renders, producing a duplicate.
-        List<String> collected = List.of(
-                "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
-        var content = "Here: <img src=\"/api/agents/1/files/screenshot-1000.png\" alt=\"\">";
-        assertEquals("", MessageDeduplicator.buildImagePrefix(collected, content),
-                "HTML <img> re-embed must suppress the prepend");
-    }
-
-    @Test
-    void dedupsWhenLlmReembedsAsHtmlImgTagWithSingleQuotes() {
-        // Single-quoted src attribute — same contract.
-        List<String> collected = List.of(
-                "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
-        var content = "<img alt='shot' src='./workspace/screenshot-1000.png'>";
-        assertEquals("", MessageDeduplicator.buildImagePrefix(collected, content),
-                "HTML <img> with single-quoted src must also suppress the prepend");
-    }
+    // dedupsWhenLlmReembedsAsHtmlImgTag and ...WithSingleQuotes merged into
+    // dedupsWhenLlmReembedsImage above.
 
     // ==================== buildImagePrefix: prepend paths ====================
 

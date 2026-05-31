@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.ConfigService;
 import tools.WebSearchTool;
@@ -54,34 +56,28 @@ class WebSearchToolTest extends UnitTest {
         assertTrue(result.contains("No search provider"));
     }
 
-    @Test
-    void enabledButNoKey_autoSelectReportsError() {
-        ConfigService.set("search.exa.enabled", "true");
+    /**
+     * Each case sets one Exa config key, then auto-select must still report
+     * "No search provider": enabled-but-keyless (enabled=true, no apiKey),
+     * disabled-with-key (apiKey set but enabled stays false from setup()),
+     * and the same disabled-with-key while the LLM passes provider:"exa"
+     * (the provider arg is ignored, fallback order applies). The
+     * {@code @BeforeEach} leaves every provider disabled and keyless, so
+     * exactly the one key each case sets is the only deviation.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "EnabledButNoKey          | search.exa.enabled | true     | {\"query\":\"test\"}",
+            "DisabledWithKey          | search.exa.apiKey  | fake-key | {\"query\":\"test\"}",
+            "ProviderArgIgnoredWithKey | search.exa.apiKey  | fake-key | {\"query\":\"test\",\"provider\":\"exa\"}"
+    })
+    void autoSelectReportsNoProvider(String label, String configKey, String configValue, String executeJson) {
+        ConfigService.set(configKey, configValue);
         ConfigService.clearCache();
-        var result = tool.execute("{\"query\":\"test\"}", null);
-        assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("No search provider"));
-    }
-
-    @Test
-    void disabledProviderSkippedEvenWithKey() {
-        // Exa has a key but is disabled — should be skipped
-        ConfigService.set("search.exa.apiKey", "fake-key");
-        ConfigService.clearCache();
-        var result = tool.execute("{\"query\":\"test\"}", null);
-        assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("No search provider"));
-    }
-
-    @Test
-    void providerArgIgnored_usesFallbackOrder() {
-        // Even if the LLM passes provider:"exa", the tool should use fallback
-        // order. With exa disabled, this should report no provider.
-        ConfigService.set("search.exa.apiKey", "fake-key");
-        ConfigService.clearCache();
-        var result = tool.execute("{\"query\":\"test\",\"provider\":\"exa\"}", null);
-        assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("No search provider"));
+        var result = tool.execute(executeJson, null);
+        assertTrue(result.startsWith("Error:"), label + " should be an error: " + result);
+        assertTrue(result.contains("No search provider"),
+                label + " should report no provider: " + result);
     }
 
     @Test

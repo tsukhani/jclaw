@@ -1,5 +1,6 @@
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 
@@ -83,13 +84,19 @@ class ControllerApiTest extends FunctionalTest {
     // ApiAgentsController
     // =====================
 
-    @Test
-    void agentsListReturnsJsonArray() {
+    /**
+     * The top-level collection endpoints (agents, tasks, channels, skills)
+     * all return 200 + application/json with a JSON-array body. After
+     * deleteDatabase the array may be empty; the contract is only that it's
+     * a valid array.
+     */
+    @ParameterizedTest(name = "listReturnsJsonArray[{0}]")
+    @ValueSource(strings = {"/api/agents", "/api/tasks", "/api/channels", "/api/skills"})
+    void collectionEndpointReturnsJsonArray(String url) {
         login();
-        var response = GET("/api/agents");
+        var response = GET(url);
         assertIsOk(response);
         assertContentType("application/json", response);
-        // After deleteDatabase the list may be empty; verify it's a valid JSON array
         assertTrue(getContent(response).startsWith("["));
     }
 
@@ -144,13 +151,20 @@ class ControllerApiTest extends FunctionalTest {
         assertEquals(404, afterDelete.status.intValue());
     }
 
-    @Test
-    void agentsCreateRejectsReservedMainName() {
+    /**
+     * Reserved-name / reserved-key POSTs that conflict with 409: creating an
+     * agent named "main", creating an agent named "__loadtest__", and saving
+     * the reserved provider.loadtest-mock config key.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "createReservedMainName     | /api/agents | {\"name\": \"main\", \"modelProvider\": \"openrouter\", \"modelId\": \"gpt-4.1\"}",
+            "createReservedLoadtestName | /api/agents | {\"name\": \"__loadtest__\", \"modelProvider\": \"openrouter\", \"modelId\": \"gpt-4.1\"}",
+            "saveReservedLoadtestKey    | /api/config | {\"key\":\"provider.loadtest-mock.baseUrl\",\"value\":\"http://localhost:19999/v1\"}"
+    })
+    void reservedNamePostReturns409(String label, String url, String body) {
         login();
-        var body = """
-                {"name": "main", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
-        var response = POST("/api/agents", "application/json", body);
+        var response = POST(url, "application/json", body);
         assertEquals(409, response.status.intValue());
     }
 
@@ -231,15 +245,8 @@ class ControllerApiTest extends FunctionalTest {
         assertIsOk(response);
     }
 
-    @Test
-    void agentsCreateRejectsReservedLoadtestName() {
-        login();
-        var body = """
-                {"name": "__loadtest__", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """;
-        var response = POST("/api/agents", "application/json", body);
-        assertEquals(409, response.status.intValue());
-    }
+    // agentsCreateRejectsReservedLoadtestName merged into reservedNamePostReturns409
+    // (POST /api/agents with name __loadtest__).
 
     @Test
     void agentsUpdateRejectsRenameToReservedLoadtestName() {
@@ -252,10 +259,22 @@ class ControllerApiTest extends FunctionalTest {
         assertEquals(409, response.status.intValue());
     }
 
-    @Test
-    void agentsGetNonExistentReturns404() {
+    /**
+     * GETs for a non-existent resource all return 404: an unknown agent id,
+     * an unknown channel type, an unknown skill name, and the agent-scoped
+     * skills/tools listings for an unknown agent id.
+     */
+    @ParameterizedTest(name = "getReturns404[{0}]")
+    @ValueSource(strings = {
+            "/api/agents/999999",
+            "/api/channels/nonexistent",
+            "/api/skills/nonexistent-skill-xyz",
+            "/api/agents/999999/skills",
+            "/api/agents/999999/tools"
+    })
+    void nonExistentResourceGetReturns404(String url) {
         login();
-        var response = GET("/api/agents/999999");
+        var response = GET(url);
         assertEquals(404, response.status.intValue());
     }
 
@@ -281,61 +300,57 @@ class ControllerApiTest extends FunctionalTest {
     // ApiProvidersController
     // =====================
 
-    @Test
-    void providersDiscoverModelsRequiresConfig() {
+    /**
+     * Empty-body POSTs that reject on a missing prerequisite: discover-models
+     * on an unconfigured provider is a 400 (no base URL), while cancel/retry
+     * on a non-existent task id are 404s.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "discoverModelsUnconfiguredProvider | /api/providers/nonexistent/discover-models | 400",
+            "cancelNonExistentTask              | /api/tasks/999999/cancel                   | 404",
+            "retryNonExistentTask               | /api/tasks/999999/retry                    | 404"
+    })
+    void emptyBodyPostRejection(String label, String url, int expectedStatus) {
         login();
-        // Provider "nonexistent" has no base URL configured, so should return 400
-        var response = POST("/api/providers/nonexistent/discover-models", "application/json", "{}");
-        assertEquals(400, response.status.intValue());
+        var response = POST(url, "application/json", "{}");
+        assertEquals(expectedStatus, response.status.intValue());
     }
 
     // =====================
     // ApiTasksController
     // =====================
 
-    @Test
-    void tasksList() {
+    // tasksList merged into collectionEndpointReturnsJsonArray (GET /api/tasks).
+
+    /**
+     * Filter/query-param variants of the list endpoints return 200 +
+     * application/json: the tasks list with status/limit/offset, the logs
+     * list with category/level/limit/offset, and the logs list with a
+     * search filter. Body shape is exercised by the no-filter tests; here we
+     * only assert the filtered request is accepted.
+     */
+    @ParameterizedTest(name = "filteredListOk[{0}]")
+    @ValueSource(strings = {
+            "/api/tasks?status=PENDING&limit=10&offset=0",
+            "/api/logs?category=system&level=INFO&limit=10&offset=0",
+            "/api/logs?search=test&limit=5"
+    })
+    void filteredListEndpointReturnsJson(String url) {
         login();
-        var response = GET("/api/tasks");
+        var response = GET(url);
         assertIsOk(response);
         assertContentType("application/json", response);
-        assertTrue(getContent(response).startsWith("["));
     }
 
-    @Test
-    void tasksListWithFilters() {
-        login();
-        var response = GET("/api/tasks?status=PENDING&limit=10&offset=0");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-    }
-
-    @Test
-    void tasksCancelNonExistentReturns404() {
-        login();
-        var response = POST("/api/tasks/999999/cancel", "application/json", "{}");
-        assertEquals(404, response.status.intValue());
-    }
-
-    @Test
-    void tasksRetryNonExistentReturns404() {
-        login();
-        var response = POST("/api/tasks/999999/retry", "application/json", "{}");
-        assertEquals(404, response.status.intValue());
-    }
+    // tasksCancelNonExistentReturns404 and tasksRetryNonExistentReturns404
+    // merged into emptyBodyPostRejection above.
 
     // =====================
     // ApiChannelsController
     // =====================
 
-    @Test
-    void channelsList() {
-        login();
-        var response = GET("/api/channels");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-        assertTrue(getContent(response).startsWith("["));
-    }
+    // channelsList merged into collectionEndpointReturnsJsonArray (GET /api/channels).
 
     @Test
     void channelsCrud() {
@@ -372,12 +387,8 @@ class ControllerApiTest extends FunctionalTest {
         assertTrue(getContent(listResp).contains("\"channelType\":\"telegram\""));
     }
 
-    @Test
-    void channelsGetNonExistentReturns404() {
-        login();
-        var response = GET("/api/channels/nonexistent");
-        assertEquals(404, response.status.intValue());
-    }
+    // channelsGetNonExistentReturns404 merged into nonExistentResourceGetReturns404
+    // (GET /api/channels/nonexistent).
 
     // =====================
     // ApiLogsController
@@ -395,41 +406,17 @@ class ControllerApiTest extends FunctionalTest {
         assertTrue(content.contains("\"offset\""));
     }
 
-    @Test
-    void logsListWithFilters() {
-        login();
-        var response = GET("/api/logs?category=system&level=INFO&limit=10&offset=0");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-    }
-
-    @Test
-    void logsListWithSearchFilter() {
-        login();
-        var response = GET("/api/logs?search=test&limit=5");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-    }
+    // logsListWithFilters and logsListWithSearchFilter merged into
+    // filteredListEndpointReturnsJson above.
 
     // =====================
     // ApiSkillsController
     // =====================
 
-    @Test
-    void skillsList() {
-        login();
-        var response = GET("/api/skills");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-        assertTrue(getContent(response).startsWith("["));
-    }
+    // skillsList merged into collectionEndpointReturnsJsonArray (GET /api/skills).
 
-    @Test
-    void skillsGetNonExistentReturns404() {
-        login();
-        var response = GET("/api/skills/nonexistent-skill-xyz");
-        assertEquals(404, response.status.intValue());
-    }
+    // skillsGetNonExistentReturns404 merged into nonExistentResourceGetReturns404
+    // (GET /api/skills/nonexistent-skill-xyz).
 
     @Test
     void skillsListForAgent() {
@@ -440,12 +427,8 @@ class ControllerApiTest extends FunctionalTest {
         assertContentType("application/json", response);
     }
 
-    @Test
-    void skillsListForNonExistentAgentReturns404() {
-        login();
-        var response = GET("/api/agents/999999/skills");
-        assertEquals(404, response.status.intValue());
-    }
+    // skillsListForNonExistentAgentReturns404 merged into
+    // nonExistentResourceGetReturns404 (GET /api/agents/999999/skills).
 
     @Test
     void skillsDeleteNonExistentReturns404() {
@@ -525,12 +508,8 @@ class ControllerApiTest extends FunctionalTest {
         assertTrue(getContent(response).contains("\"enabled\""));
     }
 
-    @Test
-    void toolsListForNonExistentAgentReturns404() {
-        login();
-        var response = GET("/api/agents/999999/tools");
-        assertEquals(404, response.status.intValue());
-    }
+    // toolsListForNonExistentAgentReturns404 merged into
+    // nonExistentResourceGetReturns404 (GET /api/agents/999999/tools).
 
     @Test
     void toolsUpdateForAgent() {
@@ -580,15 +559,8 @@ class ControllerApiTest extends FunctionalTest {
     // ApiConfigController — loadtest-mock reserved key guards
     // =====================
 
-    @Test
-    void configSaveOnLoadtestMockKeyReturns409() {
-        login();
-        var body = """
-                {"key":"provider.loadtest-mock.baseUrl","value":"http://localhost:19999/v1"}
-                """;
-        var response = POST("/api/config", "application/json", body);
-        assertEquals(409, response.status.intValue());
-    }
+    // configSaveOnLoadtestMockKeyReturns409 merged into reservedNamePostReturns409
+    // (POST /api/config with the reserved provider.loadtest-mock key).
 
     @Test
     void configDeleteOnLoadtestMockKeyReturns409() {

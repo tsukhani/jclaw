@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 import models.Agent;
 import models.Conversation;
@@ -59,10 +60,20 @@ class ApiConversationsControllerTest extends FunctionalTest {
         assertEquals(401, response.status.intValue());
     }
 
-    @Test
-    void listConversationsReturnsJsonArray() {
+    /**
+     * The JSON-array list endpoints — the bare conversations list, the
+     * limit/offset-paginated list, and the channels list — all return 200
+     * with an application/json array body.
+     */
+    @ParameterizedTest(name = "listReturnsJsonArray[{0}]")
+    @ValueSource(strings = {
+            "/api/conversations",
+            "/api/conversations?limit=5&offset=0",
+            "/api/conversations/channels"
+    })
+    void listEndpointReturnsJsonArray(String url) {
         login();
-        var response = GET("/api/conversations");
+        var response = GET(url);
         assertIsOk(response);
         assertContentType("application/json", response);
         assertTrue(getContent(response).startsWith("["));
@@ -268,23 +279,8 @@ class ApiConversationsControllerTest extends FunctionalTest {
                 "subagent child must be cascaded when its parent is deleted (FK integrity)");
     }
 
-    @Test
-    void listConversationsWithLimitAndOffset() {
-        login();
-        var response = GET("/api/conversations?limit=5&offset=0");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-        assertTrue(getContent(response).startsWith("["));
-    }
-
-    @Test
-    void listConversationChannels() {
-        login();
-        var response = GET("/api/conversations/channels");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-        assertTrue(getContent(response).startsWith("["));
-    }
+    // listConversationsWithLimitAndOffset and listConversationChannels merged
+    // into listEndpointReturnsJsonArray above.
 
     /**
      * JCLAW-170: tool-call rows persist as one assistant row per call (the

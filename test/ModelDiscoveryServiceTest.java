@@ -240,40 +240,22 @@ class ModelDiscoveryServiceTest extends UnitTest {
 
     // --- detectVisionSupport ---
 
-    @Test
-    void detectVisionFromOpenRouterModalities() {
-        // OpenRouter's /api/v1/models puts input modalities under
-        // architecture.input_modalities as an array of tokens.
-        var obj = JsonParser.parseString("""
-                {"id": "anthropic/claude-sonnet-4-6",
-                 "architecture": {"input_modalities": ["text", "image"]}}
-                """).getAsJsonObject();
+    /**
+     * Provider-surfaced vision signals from {@code architecture}: the new
+     * input_modalities array (positive + text-only negative) and the legacy
+     * single modality string. All three are provider-confirmed; confirmed()
+     * tracks whether "image" is present.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "OpenRouterModalitiesImage | {\"id\":\"anthropic/claude-sonnet-4-6\",\"architecture\":{\"input_modalities\":[\"text\",\"image\"]}} | true",
+            "OpenRouterModalitiesText  | {\"id\":\"vendor/text-only-model\",\"architecture\":{\"input_modalities\":[\"text\"]}}             | false",
+            "LegacyModalityString      | {\"id\":\"vendor/legacy\",\"architecture\":{\"modality\":\"text+image->text\"}}                     | true"
+    })
+    void detectVisionFromArchitecture(String label, String json, boolean expectedConfirmed) {
+        var obj = JsonParser.parseString(json).getAsJsonObject();
         var result = ModelDiscoveryService.detectVisionSupport(obj);
-        assertTrue(result.confirmed());
-        assertTrue(result.fromProvider());
-    }
-
-    @Test
-    void detectVisionFromOpenRouterModalitiesNegative() {
-        // Provider explicitly reports text-only input — confirmed absence.
-        var obj = JsonParser.parseString("""
-                {"id": "vendor/text-only-model",
-                 "architecture": {"input_modalities": ["text"]}}
-                """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
-        assertFalse(result.confirmed());
-        assertTrue(result.fromProvider());
-    }
-
-    @Test
-    void detectVisionFromLegacyModalityString() {
-        // OpenRouter's older shape: a single modality string like "text+image->text".
-        var obj = JsonParser.parseString("""
-                {"id": "vendor/legacy",
-                 "architecture": {"modality": "text+image->text"}}
-                """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
-        assertTrue(result.confirmed());
+        assertEquals(expectedConfirmed, result.confirmed());
         assertTrue(result.fromProvider());
     }
 
@@ -322,35 +304,24 @@ class ModelDiscoveryServiceTest extends UnitTest {
 
     // --- detectAudioSupport ---
 
-    @Test
-    void detectAudioFromOpenRouterModalities() {
-        var obj = JsonParser.parseString("""
-                {"id": "openai/gpt-4o-audio-preview",
-                 "architecture": {"input_modalities": ["text", "audio"]}}
-                """).getAsJsonObject();
+    /**
+     * Audio support confirmed across all three positive signals — the
+     * OpenRouter input_modalities array, the gpt-4o-audio id heuristic
+     * (fromProvider=false), and the Ollama capabilities array. confirmed()
+     * is true throughout; only the modality/capabilities cases are
+     * provider-confirmed, the bare-id case is a heuristic guess.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "OpenRouterModalities | {\"id\":\"openai/gpt-4o-audio-preview\",\"architecture\":{\"input_modalities\":[\"text\",\"audio\"]}} | true",
+            "FallbackGpt4oAudioId  | {\"id\":\"openai/gpt-4o-audio-preview\"}                                                            | false",
+            "OllamaCapabilities    | {\"id\":\"qwen2-audio:7b\",\"capabilities\":[\"completion\",\"audio\"]}                              | true"
+    })
+    void detectAudioConfirmed(String label, String json, boolean expectedFromProvider) {
+        var obj = JsonParser.parseString(json).getAsJsonObject();
         var result = ModelDiscoveryService.detectAudioSupport(obj);
         assertTrue(result.confirmed());
-        assertTrue(result.fromProvider());
-    }
-
-    @Test
-    void detectAudioFallbackGpt4oAudio() {
-        var obj = JsonParser.parseString("""
-                {"id": "openai/gpt-4o-audio-preview"}
-                """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
-        assertTrue(result.confirmed());
-        assertFalse(result.fromProvider());
-    }
-
-    @Test
-    void detectAudioFromOllamaCapabilities() {
-        var obj = JsonParser.parseString("""
-                {"id": "qwen2-audio:7b", "capabilities": ["completion", "audio"]}
-                """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
-        assertTrue(result.confirmed());
-        assertTrue(result.fromProvider());
+        assertEquals(expectedFromProvider, result.fromProvider());
     }
 
     @Test

@@ -4,6 +4,8 @@ import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import models.SkillRegistryTool;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 import services.AgentService;
 import services.SkillPromotionService;
@@ -299,10 +301,22 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"commands\""));
     }
 
-    @Test
-    void listGlobalSkillFilesReturns404ForUnknown() {
+    /**
+     * Unknown-resource GETs that 404 with no per-test setup beyond login:
+     * the global skill-files listing, the agent skills listing, the agent
+     * skill-files listing, and the agent skill-file read. Each targets a
+     * resource that doesn't exist (missing skill name or agent id 999999).
+     */
+    @ParameterizedTest(name = "get404[{0}]")
+    @ValueSource(strings = {
+            "/api/skills/missing/files",
+            "/api/agents/999999/skills",
+            "/api/agents/999999/skills/foo/files",
+            "/api/agents/999999/skills/foo/files/SKILL.md"
+    })
+    void unknownResourceGetReturns404(String url) {
         login();
-        assertEquals(404, GET("/api/skills/missing/files").status.intValue());
+        assertEquals(404, GET(url).status.intValue());
     }
 
     // ==================== GET /api/skills/{name}/files/{filePath} ====================
@@ -361,11 +375,8 @@ class ApiSkillsControllerTest extends FunctionalTest {
 
     // ==================== GET /api/agents/{id}/skills ====================
 
-    @Test
-    void listForAgentReturns404ForUnknownAgent() {
-        login();
-        assertEquals(404, GET("/api/agents/999999/skills").status.intValue());
-    }
+    // listForAgentReturns404ForUnknownAgent merged into
+    // unknownResourceGetReturns404 (GET /api/agents/999999/skills).
 
     @Test
     void listForAgentReturnsEmptyArrayWhenNoWorkspaceSkills() {
@@ -534,11 +545,8 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"files\""));
     }
 
-    @Test
-    void listAgentSkillFilesReturns404ForUnknownAgent() {
-        login();
-        assertEquals(404, GET("/api/agents/999999/skills/foo/files").status.intValue());
-    }
+    // listAgentSkillFilesReturns404ForUnknownAgent merged into
+    // unknownResourceGetReturns404 (GET /api/agents/999999/skills/foo/files).
 
     @Test
     void listAgentSkillFilesReturns404ForUnknownSkill() {
@@ -563,11 +571,8 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertTrue(body.contains("workspace copy"));
     }
 
-    @Test
-    void readAgentSkillFileReturns404ForUnknownAgent() {
-        login();
-        assertEquals(404, GET("/api/agents/999999/skills/foo/files/SKILL.md").status.intValue());
-    }
+    // readAgentSkillFileReturns404ForUnknownAgent merged into
+    // unknownResourceGetReturns404 (GET /api/agents/999999/skills/foo/files/SKILL.md).
 
     @Test
     void readAgentSkillFileReturns404ForMissingFile() throws Exception {

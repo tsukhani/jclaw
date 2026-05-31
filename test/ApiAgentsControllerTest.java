@@ -86,16 +86,36 @@ class ApiAgentsControllerTest extends FunctionalTest {
     // GET /api/agents/{id}/shell/effective-allowlist
     // =====================
 
-    @Test
-    void effectiveShellAllowlistRequiresAuth() {
-        var response = GET("/api/agents/1/shell/effective-allowlist");
+    /**
+     * Every agent-scoped GET surface (effective-allowlist, workspace-file
+     * JSON, workspace-file binary serve) must reject an unauthenticated
+     * request with 401 before any agent lookup.
+     */
+    @ParameterizedTest(name = "requiresAuth[{0}]")
+    @ValueSource(strings = {
+            "/api/agents/1/shell/effective-allowlist",
+            "/api/agents/1/workspace/AGENT.md",
+            "/api/agents/1/files/AGENT.md"
+    })
+    void agentGetEndpointRequiresAuth(String url) {
+        var response = GET(url);
         assertEquals(401, response.status.intValue());
     }
 
-    @Test
-    void effectiveShellAllowlistReturns404ForUnknownAgent() {
+    /**
+     * Agent-scoped GETs return 404 when the agent id doesn't exist:
+     * effective-allowlist, workspace-file JSON, and prompt-breakdown all
+     * resolve the agent first and 404 on a missing id (999999).
+     */
+    @ParameterizedTest(name = "unknownAgent404[{0}]")
+    @ValueSource(strings = {
+            "/api/agents/999999/shell/effective-allowlist",
+            "/api/agents/999999/workspace/AGENT.md",
+            "/api/agents/999999/prompt-breakdown?channelType=web"
+    })
+    void agentGetEndpointReturns404ForUnknownAgent(String url) {
         login();
-        var response = GET("/api/agents/999999/shell/effective-allowlist");
+        var response = GET(url);
         assertEquals(404, response.status.intValue());
     }
 
@@ -117,11 +137,8 @@ class ApiAgentsControllerTest extends FunctionalTest {
     // Workspace file endpoints
     // =====================
 
-    @Test
-    void getWorkspaceFileRequiresAuth() {
-        var response = GET("/api/agents/1/workspace/AGENT.md");
-        assertEquals(401, response.status.intValue());
-    }
+    // getWorkspaceFileRequiresAuth merged into agentGetEndpointRequiresAuth
+    // (GET /api/agents/1/workspace/AGENT.md).
 
     @Test
     void getWorkspaceFileReturnsSeededAgentMd() {
@@ -149,12 +166,8 @@ class ApiAgentsControllerTest extends FunctionalTest {
         assertEquals(404, response.status.intValue());
     }
 
-    @Test
-    void getWorkspaceFileReturns404ForUnknownAgent() {
-        login();
-        var response = GET("/api/agents/999999/workspace/AGENT.md");
-        assertEquals(404, response.status.intValue());
-    }
+    // getWorkspaceFileReturns404ForUnknownAgent merged into
+    // agentGetEndpointReturns404ForUnknownAgent (GET /api/agents/999999/workspace/AGENT.md).
 
     @Test
     void saveWorkspaceFileRoundTrips() {
@@ -225,11 +238,8 @@ class ApiAgentsControllerTest extends FunctionalTest {
         assertEquals(404, response.status.intValue());
     }
 
-    @Test
-    void serveWorkspaceFileRequiresAuth() {
-        var response = GET("/api/agents/1/files/AGENT.md");
-        assertEquals(401, response.status.intValue());
-    }
+    // serveWorkspaceFileRequiresAuth merged into agentGetEndpointRequiresAuth
+    // (GET /api/agents/1/files/AGENT.md).
 
     @Test
     void serveWorkspaceFileRejectsTraversalWith403() {
@@ -261,12 +271,8 @@ class ApiAgentsControllerTest extends FunctionalTest {
         assertContentType("application/json", response);
     }
 
-    @Test
-    void promptBreakdownReturns404ForUnknownAgent() {
-        login();
-        var response = GET("/api/agents/999999/prompt-breakdown?channelType=web");
-        assertEquals(404, response.status.intValue());
-    }
+    // promptBreakdownReturns404ForUnknownAgent merged into
+    // agentGetEndpointReturns404ForUnknownAgent (GET /api/agents/999999/prompt-breakdown?channelType=web).
 
 // =====================
     // Main-agent invariants

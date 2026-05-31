@@ -1,5 +1,6 @@
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.*;
 
@@ -78,11 +79,16 @@ class ApiChatControllerTest extends FunctionalTest {
         assertEquals(401, response.status.intValue());
     }
 
-    @Test
-    void sendRejectsEmptyBody() {
+    /**
+     * An empty body posted to each chat endpoint is a 400: send/stream both
+     * lack agentId+message (resolveChatContext badRequest), and upload lacks
+     * the agentId param (controller badRequest).
+     */
+    @ParameterizedTest(name = "emptyBodyRejected[{0}]")
+    @ValueSource(strings = {"/api/chat/send", "/api/chat/stream", "/api/chat/upload"})
+    void emptyBodyReturns400(String endpoint) {
         login();
-        // No agentId, no message: resolveChatContext calls badRequest().
-        var response = POST("/api/chat/send", "application/json", "{}");
+        var response = POST(endpoint, "application/json", "{}");
         assertEquals(400, response.status.intValue());
     }
 
@@ -97,25 +103,26 @@ class ApiChatControllerTest extends FunctionalTest {
         assertEquals(400, response.status.intValue());
     }
 
-    @Test
-    void sendRejectsMissingAgentId() {
+    /**
+     * Body-bearing rejections that share the login + POST + status-assert
+     * skeleton: send without agentId is a 400, send/stream with a
+     * non-existent agentId are 404s (the agent lookup fails before any LLM
+     * round).
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "sendMissingAgentId400      | /api/chat/send   | {\"message\": \"hello\"}                       | 400",
+            "sendUnknownAgent404        | /api/chat/send   | {\"agentId\": 999999, \"message\": \"hello\"} | 404",
+            "streamUnknownAgent404      | /api/chat/stream | {\"agentId\": 999999, \"message\": \"hello\"} | 404"
+    })
+    void chatBodyRejection(String label, String endpoint, String body, int expectedStatus) {
         login();
-        var body = """
-                {"message": "hello"}
-                """;
-        var response = POST("/api/chat/send", "application/json", body);
-        assertEquals(400, response.status.intValue());
+        var response = POST(endpoint, "application/json", body);
+        assertEquals(expectedStatus, response.status.intValue());
     }
 
-    @Test
-    void sendReturns404ForUnknownAgent() {
-        login();
-        var body = """
-                {"agentId": 999999, "message": "hello"}
-                """;
-        var response = POST("/api/chat/send", "application/json", body);
-        assertEquals(404, response.status.intValue());
-    }
+    // sendReturns404ForUnknownAgent merged into chatBodyRejection
+    // (POST /api/chat/send with agentId 999999 → 404).
 
     @Test
     void sendReturns404ForUnknownConversationId() {
@@ -156,22 +163,11 @@ class ApiChatControllerTest extends FunctionalTest {
     // POST /api/chat/stream — slash command path only
     // =====================
 
-    @Test
-    void streamRejectsEmptyBody() {
-        login();
-        var response = POST("/api/chat/stream", "application/json", "{}");
-        assertEquals(400, response.status.intValue());
-    }
+    // streamRejectsEmptyBody merged into emptyBodyReturns400
+    // (POST /api/chat/stream with "{}" → 400).
 
-    @Test
-    void streamReturns404ForUnknownAgent() {
-        login();
-        var body = """
-                {"agentId": 999999, "message": "hello"}
-                """;
-        var response = POST("/api/chat/stream", "application/json", body);
-        assertEquals(404, response.status.intValue());
-    }
+    // streamReturns404ForUnknownAgent merged into chatBodyRejection
+    // (POST /api/chat/stream with agentId 999999 → 404).
 
     @Test
     void streamSlashCommandEmitsSseFrames() {
@@ -203,13 +199,8 @@ class ApiChatControllerTest extends FunctionalTest {
     // POST /api/chat/upload — multipart attachment intake
     // =====================
 
-    @Test
-    void uploadRejectsMissingAgentId() {
-        login();
-        // Body with no agentId param at all → controller's `if (agentId == null) badRequest()`.
-        var response = POST("/api/chat/upload", "application/json", "{}");
-        assertEquals(400, response.status.intValue());
-    }
+    // uploadRejectsMissingAgentId merged into emptyBodyReturns400
+    // (POST /api/chat/upload with "{}" → 400, the missing-agentId branch).
 
     @Test
     void uploadReturns404ForUnknownAgent() {
