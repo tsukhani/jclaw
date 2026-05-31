@@ -345,6 +345,62 @@ public class ApiTasksController extends Controller {
         renderJSON(gson.toJson(rows.stream().map(TaskRunMessageView::of).toList()));
     }
 
+    /**
+     * Operator dashboard KPIs for the Tasks surface (JCLAW-22 slice K):
+     * today's fire count, success rate, and average duration, plus the
+     * current pending-queue depth, running count, and failed-needing-
+     * attention count. "Today" is midnight in the operator's effective
+     * default zone. {@code successRate} / {@code avgDurationMs} are null
+     * when there's nothing to average yet (no terminal / completed runs
+     * today) so the UI renders an em dash rather than 0.
+     */
+    private record TaskStatsView(long runsToday, Double successRate, Double avgDurationMs,
+                                 long pendingCount, long runningCount, long failedCount) {}
+
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
+    public static void stats() {
+        var zone = services.TimezoneResolver.currentDefault();
+        var since = java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant();
+
+        long runsToday = countRunsSince(since, null);
+        long completedToday = countRunsSince(since, TaskRun.Status.COMPLETED);
+        long failedRunsToday = countRunsSince(since, TaskRun.Status.FAILED);
+
+        Double avgDurationMs = (Double) JPA.em().createQuery(
+                "SELECT AVG(r.durationMs) FROM TaskRun r "
+                        + "WHERE r.startedAt >= ?1 AND r.status = ?2 AND r.durationMs IS NOT NULL")
+                .setParameter(1, since)
+                .setParameter(2, TaskRun.Status.COMPLETED)
+                .getSingleResult();
+
+        long terminalToday = completedToday + failedRunsToday;
+        Double successRate = terminalToday > 0
+                ? (double) completedToday / terminalToday
+                : null;
+
+        var payload = new TaskStatsView(
+                runsToday, successRate, avgDurationMs,
+                countTasks(Task.Status.PENDING),
+                countTasks(Task.Status.RUNNING),
+                countTasks(Task.Status.FAILED));
+        renderJSON(gson.toJson(payload));
+    }
+
+    private static long countRunsSince(Instant since, TaskRun.Status status) {
+        var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.startedAt >= ?1"
+                + (status != null ? " AND r.status = ?2" : "");
+        var q = JPA.em().createQuery(jpql, Long.class).setParameter(1, since);
+        if (status != null) q.setParameter(2, status);
+        return q.getSingleResult();
+    }
+
+    private static long countTasks(Task.Status status) {
+        return JPA.em().createQuery("SELECT COUNT(t) FROM Task t WHERE t.status = ?1", Long.class)
+                .setParameter(1, status)
+                .getSingleResult();
+    }
+
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))
     public static void list(String status, String type, Long agentId, String q,
                              String payloadType, String excludePayloadType,

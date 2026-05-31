@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task, TaskRunView, TaskRunMessageView, TranscriptSearchHit } from '~/types/api'
+import type { Task, TaskRunView, TaskRunMessageView, TranscriptSearchHit, TaskStats } from '~/types/api'
 import {
   ArrowDownIcon,
   ArrowPathIcon,
@@ -71,6 +71,9 @@ const url = computed(() => {
 })
 
 const { data: tasks, refresh } = await useFetch<Task[]>(url)
+// JCLAW-22 (slice K): dashboard KPI aggregate. Refetched live on task
+// lifecycle events (see scheduleLiveRefresh) so the counts stay current.
+const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/tasks/stats')
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
 
@@ -433,6 +436,7 @@ function scheduleLiveRefresh() {
   liveRefreshHandle = setTimeout(() => {
     if (editingId.value != null) return
     refresh()
+    refreshStats()
     if (expandedId.value != null) void loadRuns(expandedId.value)
   }, 400)
 }
@@ -894,6 +898,68 @@ const calendarDays = computed<DayCell[]>(() => {
             Delete {{ selectedIds.size || '' }}
           </button>
         </template>
+      </div>
+    </div>
+
+    <!-- JCLAW-22 (slice K): dashboard KPI strip. Refetched live on task
+         lifecycle events so the counts stay current. -->
+    <div
+      v-if="stats"
+      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4"
+    >
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Runs today
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ stats.runsToday }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Success rate
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ stats.successRate != null ? `${Math.round(stats.successRate * 100)}%` : '—' }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Avg duration
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ stats.avgDurationMs != null ? `${(stats.avgDurationMs / 1000).toFixed(1)}s` : '—' }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Pending
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ stats.pendingCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Running
+        </div>
+        <div
+          class="text-lg font-semibold"
+          :class="stats.runningCount > 0 ? 'text-blue-400' : 'text-fg-strong'"
+        >
+          {{ stats.runningCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Failed
+        </div>
+        <div
+          class="text-lg font-semibold"
+          :class="stats.failedCount > 0 ? 'text-red-400' : 'text-fg-strong'"
+        >
+          {{ stats.failedCount }}
+        </div>
       </div>
     </div>
 

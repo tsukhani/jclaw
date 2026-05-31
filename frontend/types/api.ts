@@ -470,6 +470,20 @@ export interface TranscriptSearchHit {
   agentName: string | null
 }
 
+/**
+ * Dashboard KPI aggregate from GET /api/tasks/stats (JCLAW-22 slice K).
+ * successRate (0..1) and avgDurationMs are absent when there's nothing to
+ * average yet (no terminal / completed runs today).
+ */
+export interface TaskStats {
+  runsToday: number
+  successRate?: number | null
+  avgDurationMs?: number | null
+  pendingCount: number
+  runningCount: number
+  failedCount: number
+}
+
 /** A single persisted model on a provider (stored inside provider.{name}.models JSON). */
 export interface ProviderModelDef {
   id: string
