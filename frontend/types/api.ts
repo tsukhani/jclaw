@@ -453,6 +453,23 @@ export interface TaskRunMessageView {
   createdAt: string | null
 }
 
+/**
+ * One transcript-search hit from GET /api/task-runs/search — a matched
+ * task_run_message plus enough parent context to link back to the run.
+ * Mirrors the backend TranscriptSearchHit.
+ */
+export interface TranscriptSearchHit {
+  messageId: number
+  role: string | null
+  content: string | null
+  createdAt: string | null
+  taskRunId: number | null
+  taskId: number | null
+  taskName: string | null
+  agentId: number | null
+  agentName: string | null
+}
+
 /** A single persisted model on a provider (stored inside provider.{name}.models JSON). */
 export interface ProviderModelDef {
   id: string

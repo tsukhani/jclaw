@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task, TaskRunView, TaskRunMessageView } from '~/types/api'
+import type { Task, TaskRunView, TaskRunMessageView, TranscriptSearchHit } from '~/types/api'
 import {
   ArrowDownIcon,
   ArrowPathIcon,
@@ -8,6 +8,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  MagnifyingGlassIcon,
   NoSymbolIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -253,23 +254,26 @@ async function saveSteps(task: Task) {
 }
 
 // ── JCLAW-22 (slice P): TaskRun trace in a PeekPanel ──
-// Clicking a run in the history opens the shared PeekPanel and lazy-loads
-// that run's task_run_message rows (turn-by-turn trace) from
-// /api/task-runs/{id}/messages.
+// The shared PeekPanel lazy-loads a run's task_run_message rows (turn-by-turn
+// trace) from /api/task-runs/{id}/messages. Opened either from a run row in
+// the history (openTrace) or from a transcript-search hit (openTraceForHit,
+// slice T) — both funnel through loadTrace with their own title/subtitle.
 const peekOpen = ref(false)
-const peekRun = ref<TaskRunView | null>(null)
+const peekTitle = ref('Run trace')
+const peekSubtitle = ref('')
 const peekMessages = ref<TaskRunMessageView[]>([])
 const peekLoading = ref(false)
 const peekError = ref<string | null>(null)
 
-async function openTrace(run: TaskRunView) {
-  peekRun.value = run
+async function loadTrace(runId: number, title: string, subtitle: string) {
+  peekTitle.value = title
+  peekSubtitle.value = subtitle
   peekOpen.value = true
   peekMessages.value = []
   peekError.value = null
   peekLoading.value = true
   try {
-    peekMessages.value = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${run.id}/messages`)
+    peekMessages.value = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${runId}/messages`)
   }
   catch (e) {
     peekError.value = e instanceof Error ? e.message : 'Failed to load trace'
@@ -279,8 +283,60 @@ async function openTrace(run: TaskRunView) {
   }
 }
 
+function openTrace(run: TaskRunView) {
+  const when = run.startedAt ? new Date(run.startedAt).toLocaleString() : ''
+  void loadTrace(run.id, `Run trace — ${run.status ?? ''}`, when)
+}
+
 function closeTrace() {
   peekOpen.value = false
+}
+
+// ── JCLAW-22 (slice T): transcript search ──
+// Distinct from the FilterBar's q (task name/description, JCLAW-304): this
+// searches task_run_message bodies via the shipped /api/task-runs/search
+// (Lucene QueryParser — phrase, AND/OR/NOT, prefix*). Each hit opens the
+// run's trace in the same PeekPanel.
+const transcriptQuery = ref('')
+const transcriptHits = ref<TranscriptSearchHit[]>([])
+const transcriptSearching = ref(false)
+const transcriptError = ref<string | null>(null)
+const transcriptActive = ref(false)
+
+async function searchTranscripts() {
+  const q = transcriptQuery.value.trim()
+  if (!q) {
+    clearTranscriptSearch()
+    return
+  }
+  transcriptActive.value = true
+  transcriptSearching.value = true
+  transcriptError.value = null
+  try {
+    transcriptHits.value = await $fetch<TranscriptSearchHit[]>(
+      `/api/task-runs/search?q=${encodeURIComponent(q)}&limit=50`,
+    )
+  }
+  catch (e) {
+    transcriptError.value = e instanceof Error ? e.message : 'Search failed'
+    transcriptHits.value = []
+  }
+  finally {
+    transcriptSearching.value = false
+  }
+}
+
+function clearTranscriptSearch() {
+  transcriptQuery.value = ''
+  transcriptHits.value = []
+  transcriptActive.value = false
+  transcriptError.value = null
+}
+
+function openTraceForHit(hit: TranscriptSearchHit) {
+  if (hit.taskRunId == null) return
+  const when = hit.createdAt ? new Date(hit.createdAt).toLocaleString() : ''
+  void loadTrace(hit.taskRunId, `Trace — ${hit.taskName ?? 'run'}`, `${hit.role ?? ''} · ${when}`)
 }
 
 // LOST sits between RUNNING (blue) and FAILED (red) on the heat axis —
@@ -786,6 +842,99 @@ const calendarDays = computed<DayCell[]>(() => {
           {{ opt.label }}
         </button>
       </div>
+    </div>
+
+    <!-- JCLAW-22 (slice T): transcript search over task_run_message bodies —
+         distinct from the FilterBar's q (task name/description). Each hit
+         opens the run's turn-by-turn trace in the slice-P PeekPanel. -->
+    <div class="flex items-center gap-2 mb-4">
+      <div class="relative flex-1 min-w-[280px]">
+        <MagnifyingGlassIcon
+          class="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-muted"
+          aria-hidden="true"
+        />
+        <input
+          v-model="transcriptQuery"
+          type="search"
+          placeholder="Search run transcripts… (phrase, AND/OR/NOT, prefix*)"
+          aria-label="Search task run transcripts"
+          class="w-full pl-8 pr-2 py-1.5 bg-muted border border-input text-sm text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors"
+          @keyup.enter="searchTranscripts"
+        >
+      </div>
+      <button
+        type="button"
+        class="px-3 py-1.5 text-xs bg-muted border border-input text-fg-strong hover:border-ring cursor-pointer"
+        @click="searchTranscripts"
+      >
+        Search transcripts
+      </button>
+      <button
+        v-if="transcriptActive"
+        type="button"
+        class="px-3 py-1.5 text-xs text-fg-muted hover:text-fg-strong cursor-pointer"
+        @click="clearTranscriptSearch"
+      >
+        Clear
+      </button>
+    </div>
+
+    <div
+      v-if="transcriptActive"
+      class="bg-surface-elevated border border-border mb-4"
+    >
+      <div class="px-4 py-2 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
+        Transcript results
+      </div>
+      <p
+        v-if="transcriptSearching"
+        class="px-4 py-6 text-center text-sm text-fg-muted"
+      >
+        Searching…
+      </p>
+      <p
+        v-else-if="transcriptError"
+        class="px-4 py-6 text-center text-sm text-red-400"
+      >
+        {{ transcriptError }}
+      </p>
+      <p
+        v-else-if="!transcriptHits.length"
+        class="px-4 py-6 text-center text-sm text-fg-muted"
+      >
+        No transcript matches.
+      </p>
+      <ul
+        v-else
+        class="divide-y divide-border"
+      >
+        <li
+          v-for="hit in transcriptHits"
+          :key="hit.messageId"
+        >
+          <button
+            type="button"
+            class="w-full text-left px-4 py-2.5 hover:bg-muted transition-colors bg-transparent cursor-pointer"
+            @click="openTraceForHit(hit)"
+          >
+            <div class="flex flex-wrap items-center gap-2 mb-0.5">
+              <span class="text-xs text-fg-primary font-medium">{{ hit.taskName ?? '—' }}</span>
+              <span class="text-[10px] font-mono uppercase text-fg-muted">{{ hit.role }}</span>
+              <span
+                v-if="hit.agentName"
+                class="text-[10px] text-fg-muted"
+              >· {{ hit.agentName }}</span>
+              <span
+                v-if="hit.createdAt"
+                class="text-[10px] text-fg-muted ml-auto"
+              >{{ new Date(hit.createdAt).toLocaleString() }}</span>
+            </div>
+            <p class="text-xs text-fg-muted line-clamp-2 whitespace-pre-wrap break-words">
+              {{ hit.content }}
+            </p>
+          </button>
+        </li>
+      </ul>
     </div>
 
     <div
@@ -1384,8 +1533,8 @@ const calendarDays = computed<DayCell[]>(() => {
     <!-- PeekPanel: turn-by-turn execution trace for a clicked TaskRun (slice P). -->
     <PeekPanel
       :open="peekOpen"
-      :title="peekRun ? `Run trace — ${peekRun.status ?? ''}` : 'Run trace'"
-      :description="peekRun && peekRun.startedAt ? new Date(peekRun.startedAt).toLocaleString() : ''"
+      :title="peekTitle"
+      :description="peekSubtitle"
       @update:open="closeTrace"
     >
       <p
