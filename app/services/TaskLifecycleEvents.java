@@ -5,6 +5,7 @@ import models.TaskRun;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 
 /**
  * The structured {@code event_log} entries that bracket a JClaw
@@ -89,6 +90,17 @@ public final class TaskLifecycleEvents {
      *  "channel broken". */
     public static final String DELIVERY_FAILED = "TASK_DELIVERY_FAILED";
 
+    // JCLAW-22 (slice L): SSE bus event types mirrored from the lifecycle
+    // points above so the Tasks UI updates in real time. The event_log
+    // entries are the durable record; these are the live signal published
+    // on the existing NotificationBus (no new transport).
+    public static final String BUS_STARTED = "task.started";
+    public static final String BUS_COMPLETED = "task.completed";
+    public static final String BUS_FAILED = "task.failed";
+    public static final String BUS_DELIVERED = "task.delivered";
+    public static final String BUS_DELIVERY_FAILED = "task.delivery_failed";
+    public static final String BUS_LOST = "task.lost";
+
     private TaskLifecycleEvents() {}
 
     /**
@@ -103,6 +115,7 @@ public final class TaskLifecycleEvents {
                 KEY_RUN_ID, run.id,
                 "type", task.type != null ? task.type.name() : null);
         EventLogger.record("INFO", STARTED, agentName, null, message, details);
+        publishBus(BUS_STARTED, task.id, run.id);
     }
 
     /**
@@ -120,6 +133,7 @@ public final class TaskLifecycleEvents {
                 KEY_RUN_ID, run.id,
                 "duration_ms", durationMs);
         EventLogger.record("INFO", COMPLETED, agentName, null, message, details);
+        publishBus(BUS_COMPLETED, task.id, run.id);
     }
 
     /**
@@ -153,6 +167,7 @@ public final class TaskLifecycleEvents {
                 "classification", classification,
                 "error_message", errorMessage);
         EventLogger.record("ERROR", FAILED, agentName, null, message, details);
+        publishBus(BUS_FAILED, task.id, run != null ? run.id : null);
     }
 
     /** Mark a successful post-completion delivery via {@link DeliveryDispatcher#dispatchSpec}. */
@@ -165,6 +180,7 @@ public final class TaskLifecycleEvents {
                 KEY_RUN_ID, run.id,
                 "delivery", deliverySpec);
         EventLogger.record("INFO", DELIVERED, agentName, null, message, details);
+        publishBus(BUS_DELIVERED, task.id, run.id);
     }
 
     /** Mark a failed post-completion delivery. {@code reason} is the
@@ -180,6 +196,7 @@ public final class TaskLifecycleEvents {
                 "delivery", deliverySpec,
                 "reason", reason);
         EventLogger.record("WARN", DELIVERY_FAILED, agentName, null, message, details);
+        publishBus(BUS_DELIVERY_FAILED, task.id, run.id);
     }
 
     /**
@@ -197,6 +214,20 @@ public final class TaskLifecycleEvents {
                 KEY_TASK_ID, task.id,
                 "stale_seconds", staleSeconds);
         EventLogger.record("WARN", LOST, agentName, null, message, details);
+        publishBus(BUS_LOST, task.id, null);
+    }
+
+    /**
+     * JCLAW-22 (slice L): publish a task lifecycle event on the in-memory
+     * SSE bus so the Tasks UI reflects state changes in real time. A cheap
+     * no-op when no SSE client is subscribed. {@code runId} is omitted for
+     * out-of-band points like LOST that aren't tied to a single run.
+     */
+    private static void publishBus(String type, Long taskId, Long runId) {
+        var data = new HashMap<String, Object>();
+        data.put("taskId", taskId);
+        if (runId != null) data.put("runId", runId);
+        NotificationBus.publish(type, data);
     }
 
     /**

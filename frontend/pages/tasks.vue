@@ -164,13 +164,7 @@ const runsByTask = reactive<Record<number, TaskRunView[]>>({})
 const runsLoading = reactive<Record<number, boolean>>({})
 const runsError = reactive<Record<number, string | null>>({})
 
-async function toggleExpand(id: number) {
-  if (expandedId.value === id) {
-    expandedId.value = null
-    return
-  }
-  expandedId.value = id
-  if (runsByTask[id] !== undefined || runsLoading[id]) return
+async function loadRuns(id: number) {
   runsLoading[id] = true
   runsError[id] = null
   try {
@@ -181,6 +175,19 @@ async function toggleExpand(id: number) {
   }
   finally {
     runsLoading[id] = false
+  }
+}
+
+function toggleExpand(id: number) {
+  if (expandedId.value === id) {
+    expandedId.value = null
+    return
+  }
+  expandedId.value = id
+  // Lazy-load the run history on first expand; the live SSE refresh
+  // (slice L) reuses loadRuns to keep an open task's history current.
+  if (runsByTask[id] === undefined && !runsLoading[id]) {
+    void loadRuns(id)
   }
 }
 
@@ -391,6 +398,47 @@ function exportTrace() {
     messages: peekMessages.value,
   }
   downloadBlob(`jclaw-run-trace-${fileStamp()}.json`, JSON.stringify(payload, null, 2), 'application/json')
+}
+
+// ── JCLAW-22 (slice L): live updates via SSE + elapsed-time indicator ──
+const { onEvent } = useEventBus()
+
+// 1s tick drives the live elapsed-time indicator for RUNNING runs.
+const nowMs = ref(Date.now())
+let tickHandle: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  tickHandle = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+onUnmounted(() => {
+  if (tickHandle) clearInterval(tickHandle)
+})
+
+function elapsedSince(startedAt: string | null): string {
+  if (!startedAt) return ''
+  const secs = Math.max(0, Math.floor((nowMs.value - new Date(startedAt).getTime()) / 1000))
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  return m > 0 ? `${m}m ${s}s` : `${s}s`
+}
+
+// Real-time list updates: any task lifecycle event (published on the SSE bus
+// by TaskLifecycleEvents) refreshes the list and the open task's run history.
+// Debounced so a burst of events collapses to one refetch; skipped mid-edit
+// so an in-progress step edit isn't disrupted.
+let liveRefreshHandle: ReturnType<typeof setTimeout> | undefined
+function scheduleLiveRefresh() {
+  if (liveRefreshHandle) clearTimeout(liveRefreshHandle)
+  liveRefreshHandle = setTimeout(() => {
+    if (editingId.value != null) return
+    refresh()
+    if (expandedId.value != null) void loadRuns(expandedId.value)
+  }, 400)
+}
+
+for (const evt of ['task.started', 'task.completed', 'task.failed', 'task.delivered', 'task.delivery_failed', 'task.lost']) {
+  onEvent(evt, scheduleLiveRefresh)
 }
 
 // LOST sits between RUNNING (blue) and FAILED (red) on the heat axis —
@@ -1342,6 +1390,10 @@ const calendarDays = computed<DayCell[]>(() => {
                               v-if="run.durationMs != null"
                               class="text-fg-muted"
                             >· {{ (run.durationMs / 1000).toFixed(1) }}s</span>
+                            <span
+                              v-else-if="run.status === 'RUNNING'"
+                              class="text-blue-400"
+                            >· {{ elapsedSince(run.startedAt) }} elapsed</span>
                             <span
                               v-if="run.deliveryStatus && run.deliveryStatus !== 'NOT_REQUESTED'"
                               class="text-fg-muted"
