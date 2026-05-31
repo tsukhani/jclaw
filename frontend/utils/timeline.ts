@@ -22,8 +22,12 @@ export function timelineBar(
   const span = Math.max(1, axisEndMs - axisStartMs)
   const start = Math.max(axisStartMs, startMs)
   const end = Math.min(axisEndMs, endMs ?? nowMs)
-  const leftPct = Math.max(0, Math.min(100, ((start - axisStartMs) / span) * 100))
   const rawWidthPct = ((Math.max(end, start) - start) / span) * 100
-  const widthPct = Math.min(100 - leftPct, Math.max(0.8, rawWidthPct))
+  // Min visible width so instant runs don't vanish; never wider than the axis.
+  const widthPct = Math.min(100, Math.max(0.8, rawWidthPct))
+  let leftPct = Math.max(0, Math.min(100, ((start - axisStartMs) / span) * 100))
+  // If the bar would overflow the right edge, pull it left so the min width
+  // stays visible — otherwise just-now runs collapse to a sliver at 100%.
+  if (leftPct + widthPct > 100) leftPct = Math.max(0, 100 - widthPct)
   return { leftPct, widthPct }
 }

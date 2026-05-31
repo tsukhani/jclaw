@@ -34,4 +34,12 @@ describe('timelineBar (JCLAW-22 slice TL)', () => {
     const { leftPct, widthPct } = timelineBar(900, 5000, AXIS_START, AXIS_END, NOW)
     expect(leftPct + widthPct).toBeLessThanOrEqual(100.0001)
   })
+
+  it('keeps a just-now run visible (right-aligned min width)', () => {
+    // A run at the right edge would clamp to a sliver; instead it keeps the
+    // min width and is pulled left so it stays on screen.
+    const { leftPct, widthPct } = timelineBar(NOW, NOW, AXIS_START, AXIS_END, NOW)
+    expect(widthPct).toBeGreaterThanOrEqual(0.8)
+    expect(leftPct + widthPct).toBeCloseTo(100)
+  })
 })
