@@ -1037,6 +1037,38 @@ const statusBg: Record<string, string> = {
       </div>
       <div class="flex items-center gap-2">
         <template v-if="!selectMode">
+          <!-- View switcher (icon-only, tooltips): table / calendar.
+               State persists in the URL (?view=calendar) so refresh and
+               shareable links survive. -->
+          <div
+            class="inline-flex border border-input divide-x divide-input"
+            role="tablist"
+            aria-label="Task view"
+          >
+            <button
+              v-for="opt in ([
+                { id: 'table', label: 'Table', icon: TableCellsIcon },
+                { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
+              ] as const)"
+              :key="opt.id"
+              type="button"
+              role="tab"
+              :aria-selected="view === opt.id"
+              :title="`${opt.label} view`"
+              :aria-label="`${opt.label} view`"
+              class="p-2 inline-flex items-center transition-colors"
+              :class="view === opt.id
+                ? 'bg-muted text-fg-strong'
+                : 'text-fg-muted hover:text-fg-strong'"
+              @click="view = opt.id"
+            >
+              <component
+                :is="opt.icon"
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
           <button
             :disabled="!tasks?.length"
             class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
@@ -1135,47 +1167,14 @@ const statusBg: Record<string, string> = {
          TASK Lucene scope (task.name + task.description virtual doc);
          `status:`, `type:`, and `agent:` are equality keys the backend
          intersects with the FTS hit set. -->
-    <div class="flex flex-wrap items-center gap-3 mb-4">
-      <div class="flex-1 min-w-[280px]">
-        <FilterBar
-          storage-key="tasks"
-          placeholder="Filter... (e.g., q:summary status:PENDING type:CRON)"
-          :filter-keys="['q', 'status', 'type', 'agent']"
-          @update:filters="onFiltersChanged"
-          @export="exportTasksBundle"
-        />
-      </div>
-      <!-- View switcher: table / cards / calendar. State persists in URL
-           (?view=cards|calendar) so refresh and shareable links survive. -->
-      <div
-        class="ml-auto inline-flex border border-input divide-x divide-input"
-        role="tablist"
-        aria-label="Task view"
-      >
-        <button
-          v-for="opt in ([
-            { id: 'table', label: 'Table', icon: TableCellsIcon },
-            { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
-          ] as const)"
-          :key="opt.id"
-          type="button"
-          role="tab"
-          :aria-selected="view === opt.id"
-          :title="`${opt.label} view`"
-          class="px-3 py-1.5 inline-flex items-center gap-1.5 text-xs transition-colors"
-          :class="view === opt.id
-            ? 'bg-muted text-fg-strong'
-            : 'text-fg-muted hover:text-fg-strong'"
-          @click="view = opt.id"
-        >
-          <component
-            :is="opt.icon"
-            class="w-3.5 h-3.5"
-            aria-hidden="true"
-          />
-          {{ opt.label }}
-        </button>
-      </div>
+    <div class="mb-4">
+      <FilterBar
+        storage-key="tasks"
+        placeholder="Filter... (e.g., q:summary status:PENDING type:CRON)"
+        :filter-keys="['q', 'status', 'type', 'agent']"
+        @update:filters="onFiltersChanged"
+        @export="exportTasksBundle"
+      />
     </div>
 
     <!-- JCLAW-22 (slice T): transcript search over task_run_message bodies —
@@ -1198,10 +1197,15 @@ const statusBg: Record<string, string> = {
       </div>
       <button
         type="button"
-        class="px-3 py-1.5 text-xs bg-muted border border-input text-fg-strong hover:border-ring cursor-pointer"
+        class="p-2 inline-flex items-center bg-muted border border-input text-fg-strong hover:border-ring cursor-pointer"
+        title="Search transcripts"
+        aria-label="Search transcripts"
         @click="searchTranscripts"
       >
-        Search transcripts
+        <MagnifyingGlassIcon
+          class="w-4 h-4"
+          aria-hidden="true"
+        />
       </button>
       <button
         v-if="transcriptActive"
