@@ -72,6 +72,53 @@ describe('FilterBar', () => {
     expect(emitted![0]![0]).toEqual([{ key: 'name', value: 'hello' }])
   })
 
+  it('keeps a quoted multi-word value as one filter (spaces preserved, quotes stripped)', async () => {
+    const component = await mountSuspended(FilterBar, {
+      props: { storageKey: 'test-quoted' },
+    })
+    const input = component.find('input[type="text"]')
+    await input.setValue('transcript:"send the invoice"')
+    await input.trigger('keydown', { key: 'Enter' })
+    const emitted = component.emitted('update:filters')
+    expect(emitted![0]![0]).toEqual([{ key: 'transcript', value: 'send the invoice' }])
+  })
+
+  it('mixes a quoted value with a bare key:value token', async () => {
+    const component = await mountSuspended(FilterBar, {
+      props: { storageKey: 'test-quoted-mix' },
+    })
+    const input = component.find('input[type="text"]')
+    await input.setValue('transcript:"daily briefing" status:FAILED')
+    await input.trigger('keydown', { key: 'Enter' })
+    const emitted = component.emitted('update:filters')
+    expect(emitted![0]![0]).toEqual([
+      { key: 'transcript', value: 'daily briefing' },
+      { key: 'status', value: 'FAILED' },
+    ])
+  })
+
+  it('preserves boolean operators inside a quoted transcript value', async () => {
+    const component = await mountSuspended(FilterBar, {
+      props: { storageKey: 'test-quoted-bool' },
+    })
+    const input = component.find('input[type="text"]')
+    await input.setValue('transcript:"invoice AND refund"')
+    await input.trigger('keydown', { key: 'Enter' })
+    const emitted = component.emitted('update:filters')
+    expect(emitted![0]![0]).toEqual([{ key: 'transcript', value: 'invoice AND refund' }])
+  })
+
+  it('treats a bare quoted phrase as a name filter', async () => {
+    const component = await mountSuspended(FilterBar, {
+      props: { storageKey: 'test-bare-quoted' },
+    })
+    const input = component.find('input[type="text"]')
+    await input.setValue('"hello world"')
+    await input.trigger('keydown', { key: 'Enter' })
+    const emitted = component.emitted('update:filters')
+    expect(emitted![0]![0]).toEqual([{ key: 'name', value: 'hello world' }])
+  })
+
   it('removes a chip when × is clicked', async () => {
     const component = await mountSuspended(FilterBar, {
       props: { storageKey: 'test-remove' },

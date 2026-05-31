@@ -39,14 +39,27 @@ const saveName = ref('')
 const showSaveInput = ref(false)
 
 // ── Parse query syntax ──────────────────────────────────────────────────────
+function stripQuotes(s: string): string {
+  return s.length >= 2 && s.startsWith('"') && s.endsWith('"') ? s.slice(1, -1) : s
+}
+
 function parseQuery(query: string): Filter[] {
   if (!query.trim()) return []
-  return query.trim().split(/\s+/).map((token) => {
+  // Tokenize on whitespace, but keep double-quoted spans intact so a value can
+  // contain spaces — e.g. transcript:"send the invoice" stays one token and
+  // reaches the backend FTS verbatim (multi-word, AND/OR/NOT, prefix*). Each
+  // token is an optional `key:` prefix plus a quoted span or a bare run; the
+  // surrounding quotes are stripped from the stored value.
+  const tokens = query.trim().match(/(?:[^\s:"]+:)?(?:"[^"]*"|[^\s"]+)/g) ?? []
+  return tokens.map((token) => {
     const colonIdx = token.indexOf(':')
-    if (colonIdx > 0) {
-      return { key: token.substring(0, colonIdx), value: token.substring(colonIdx + 1) }
+    const quoteIdx = token.indexOf('"')
+    // key:value only when the colon precedes any quote, so a colon inside a
+    // quoted value (or a bare quoted phrase) stays part of the value.
+    if (colonIdx > 0 && (quoteIdx === -1 || colonIdx < quoteIdx)) {
+      return { key: token.slice(0, colonIdx), value: stripQuotes(token.slice(colonIdx + 1)) }
     }
-    return { key: 'name', value: token }
+    return { key: 'name', value: stripQuotes(token) }
   }).filter(f => f.value)
 }
 

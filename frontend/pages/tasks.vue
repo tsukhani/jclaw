@@ -8,7 +8,6 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  MagnifyingGlassIcon,
   NoSymbolIcon,
   PauseIcon,
   PencilSquareIcon,
@@ -37,6 +36,16 @@ function onFiltersChanged(filters: Filter[]) {
   statusFilter.value = filters.find(f => f.key === 'status')?.value ?? ''
   typeFilter.value = filters.find(f => f.key === 'type')?.value ?? ''
   agentFilter.value = filters.find(f => f.key === 'agent')?.value ?? ''
+  // Transcript search rides the same bar via a `transcript:` token (distinct
+  // Lucene scope: task_run_message bodies, not the task name/description that
+  // `q:` searches). A non-empty token runs the search and shows the hit panel;
+  // removing the chip clears it. Multi-word queries are quoted in the bar
+  // (transcript:"send the invoice") and reach the backend FTS verbatim, so
+  // AND/OR/NOT and prefix* all work.
+  const tq = filters.find(f => f.key === 'transcript')?.value ?? ''
+  transcriptQuery.value = tq
+  if (tq) void searchTranscripts()
+  else clearTranscriptSearch()
 }
 
 // Two layouts: dense table (default) and a navigable calendar (month / week /
@@ -1200,68 +1209,34 @@ const statusBg: Record<string, string> = {
       </div>
     </div>
 
-    <!-- Filters + view switcher. JCLAW-304 replaces the legacy status/type
-         select dropdowns with a FilterBar consistent with /conversations
-         and /subagents. The bar's `q:KEYWORD` token drives FTS over the
-         TASK Lucene scope (task.name + task.description virtual doc);
-         `status:`, `type:`, and `agent:` are equality keys the backend
-         intersects with the FTS hit set. -->
+    <!-- One filter bar drives everything. JCLAW-304 replaced the legacy
+         status/type selects with this FilterBar; the `q:KEYWORD` token runs
+         FTS over the TASK Lucene scope (task.name + task.description virtual
+         doc); `status:`, `type:`, and `agent:` are equality keys the backend
+         intersects with the FTS hit set. The `transcript:` token is a separate
+         scope (task_run_message bodies) — see onFiltersChanged; its results
+         render in the hit panel below, not the table. Multi-word transcript
+         queries are quoted so they survive tokenization: transcript:"send the
+         invoice" (also supports AND/OR/NOT and prefix*). -->
     <div class="mb-4">
       <FilterBar
         storage-key="tasks"
-        placeholder="Filter... (e.g., q:summary status:PENDING type:CRON)"
-        :filter-keys="['q', 'status', 'type', 'agent']"
+        placeholder="Filter... (e.g., q:invoice status:PENDING transcript:&quot;daily briefing&quot;)"
+        :filter-keys="['q', 'status', 'type', 'agent', 'transcript']"
         @update:filters="onFiltersChanged"
         @export="exportTasksBundle"
       />
     </div>
 
-    <!-- JCLAW-22 (slice T): transcript search over task_run_message bodies —
-         distinct from the FilterBar's q (task name/description). Each hit
-         opens the run's turn-by-turn trace in the slice-P PeekPanel. -->
-    <div class="flex items-center gap-2 mb-4">
-      <div class="relative flex-1 min-w-[280px]">
-        <MagnifyingGlassIcon
-          class="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-muted"
-          aria-hidden="true"
-        />
-        <input
-          v-model="transcriptQuery"
-          type="search"
-          placeholder="Search run transcripts… (phrase, AND/OR/NOT, prefix*)"
-          aria-label="Search task run transcripts"
-          class="w-full pl-8 pr-2 py-1.5 bg-muted border border-input text-sm text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors"
-          @keyup.enter="searchTranscripts"
-        >
-      </div>
-      <button
-        type="button"
-        class="p-2 inline-flex items-center bg-muted border border-input text-fg-strong hover:border-ring cursor-pointer"
-        title="Search transcripts"
-        aria-label="Search transcripts"
-        @click="searchTranscripts"
-      >
-        <MagnifyingGlassIcon
-          class="w-4 h-4"
-          aria-hidden="true"
-        />
-      </button>
-      <button
-        v-if="transcriptActive"
-        type="button"
-        class="px-3 py-1.5 text-xs text-fg-muted hover:text-fg-strong cursor-pointer"
-        @click="clearTranscriptSearch"
-      >
-        Clear
-      </button>
-    </div>
-
+    <!-- JCLAW-22 (slice T): transcript search over task_run_message bodies,
+         driven by the FilterBar's `transcript:` token (distinct scope from
+         `q:`). Each hit opens the run's turn-by-turn trace in the PeekPanel. -->
     <div
       v-if="transcriptActive"
       class="bg-surface-elevated border border-border mb-4"
     >
       <div class="px-4 py-2 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
-        Transcript results
+        Transcript results for "{{ transcriptQuery }}"
       </div>
       <p
         v-if="transcriptSearching"
