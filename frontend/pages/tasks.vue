@@ -1221,7 +1221,7 @@ const statusBg: Record<string, string> = {
     <div class="mb-4">
       <FilterBar
         storage-key="tasks"
-        placeholder="Filter... (e.g., q:invoice status:PENDING transcript:&quot;daily briefing&quot;)"
+        placeholder="Filter... (e.g., q:invoice type:CRON status:PENDING transcript:&quot;daily briefing&quot;)"
         :filter-keys="['q', 'status', 'type', 'agent', 'transcript']"
         @update:filters="onFiltersChanged"
         @export="exportTasksBundle"
