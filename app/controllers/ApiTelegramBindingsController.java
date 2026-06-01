@@ -241,7 +241,19 @@ public class ApiTelegramBindingsController extends Controller {
      *  so a bot is never simultaneously polling and webhooked (Telegram 409s the
      *  {@code getUpdates} loop otherwise). Entering WEBHOOK: stop the poller
      *  ({@code reconcile} drops a no-longer-POLLING binding) BEFORE {@code setWebhook}.
-     *  Entering POLLING: {@code deleteWebhook} BEFORE the poller's first getUpdates. */
+     *  Entering POLLING: {@code deleteWebhook} BEFORE the poller's first getUpdates.
+     *
+     *  <p>Known, harmless residual on POLLING→WEBHOOK: a single
+     *  {@code BotSession} "GetUpdates 409" ERROR may be logged. When the binding
+     *  was polling, a long-poll {@code getUpdates} is already in flight to
+     *  Telegram (it blocks for the poll timeout). Unregistering the session does
+     *  NOT abort that already-sent request — the telegrambots library exposes no
+     *  hook for it — so when {@code setWebhook} activates the webhook ~1s later,
+     *  Telegram terminates the pending poll with a 409. The webhook still
+     *  registers and the poller is gone (no retry-storm — this ordering bounds it
+     *  to one line). Eliminating it would mean draining the long-poll first (tens
+     *  of seconds of save latency) or library-level request abort; both are
+     *  disproportionate for an infrequent admin transport switch. */
     private static void reconcileChannels(TelegramBinding binding) {
         if (binding.transport == ChannelTransport.WEBHOOK) {
             TelegramPollingRunner.reconcile();
