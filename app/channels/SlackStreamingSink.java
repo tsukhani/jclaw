@@ -26,6 +26,7 @@ public final class SlackStreamingSink {
     private static final String LOG_CATEGORY = "channel";
     private static final String LOG_SOURCE = "slack";
     private static final long APPEND_THROTTLE_MS = 500L;
+    private static final String STATUS_TYPING = "is typing...";
 
     /** Slack streaming + fallback operations, injectable so tests don't hit the API. */
     public interface Slacker {
@@ -35,6 +36,8 @@ public final class SlackStreamingSink {
         boolean appendStream(String channelId, String ts, String markdownDelta);
         /** Finalize the stream; return true on success. */
         boolean stopStream(String channelId, String ts);
+        /** Set (or clear, with "") the assistant-thread "is typing…" status line. */
+        void setStatus(String channelId, String threadTs, String status);
         /** Off-thread fallback: post the reply once (text is mrkdwn-formatted by the sender). */
         void postFallback(String channelId, String text, String threadTs);
     }
@@ -43,6 +46,7 @@ public final class SlackStreamingSink {
         @Override public String startStream(String c, String th, String u) { return SlackChannel.startStream(c, th, u); }
         @Override public boolean appendStream(String c, String ts, String d) { return SlackChannel.appendStream(c, ts, d); }
         @Override public boolean stopStream(String c, String ts) { return SlackChannel.stopStream(c, ts); }
+        @Override public void setStatus(String c, String th, String s) { SlackChannel.setAssistantStatus(c, th, s); }
         @Override public void postFallback(String c, String text, String th) { SlackChannel.sendMessage(c, text, th); }
     };
 
@@ -54,6 +58,7 @@ public final class SlackStreamingSink {
     private final StringBuilder pending = new StringBuilder();
     private String streamTs;     // native stream ts; null = fallback mode
     private boolean nativeMode;
+    private boolean statusSet;   // true while the "is typing…" status is showing
     private long lastFlushMs;
 
     public SlackStreamingSink(String channelId, String threadTs, String recipientUserId) {
@@ -70,11 +75,18 @@ public final class SlackStreamingSink {
         this.throttleMs = throttleMs;
     }
 
-    /** Start a native stream when a thread + recipient are present; else fall back. */
+    /** Show the "is typing…" status (assistant thread) + start a native stream when
+     *  a thread + recipient are present; else fall back to a single post. */
     public void begin() {
-        if (threadTs != null && !threadTs.isBlank() && recipientUserId != null && !recipientUserId.isBlank()) {
-            streamTs = slacker.startStream(channelId, threadTs, recipientUserId);
-            nativeMode = streamTs != null;
+        boolean thread = threadTs != null && !threadTs.isBlank();
+        if (thread) {
+            // Status line cue, set before the LLM runs so it shows during "thinking".
+            slacker.setStatus(channelId, threadTs, STATUS_TYPING);
+            statusSet = true;
+            if (recipientUserId != null && !recipientUserId.isBlank()) {
+                streamTs = slacker.startStream(channelId, threadTs, recipientUserId);
+                nativeMode = streamTs != null;
+            }
         }
         lastFlushMs = System.currentTimeMillis();
     }
@@ -98,6 +110,7 @@ public final class SlackStreamingSink {
         } else {
             slacker.postFallback(channelId, fullText, threadTs);
         }
+        clearStatus();
     }
 
     /** Error: append a notice to the stream (or post one) and finalize. */
@@ -110,6 +123,14 @@ public final class SlackStreamingSink {
             slacker.stopStream(channelId, streamTs);
         } else {
             slacker.postFallback(channelId, msg, threadTs);
+        }
+        clearStatus();
+    }
+
+    private void clearStatus() {
+        if (statusSet) {
+            slacker.setStatus(channelId, threadTs, "");
+            statusSet = false;
         }
     }
 

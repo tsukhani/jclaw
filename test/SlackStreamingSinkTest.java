@@ -16,6 +16,7 @@ class SlackStreamingSinkTest extends UnitTest {
     static final class FakeSlacker implements Slacker {
         final List<String> appended = new ArrayList<>();
         final List<String> fallbackPosts = new ArrayList<>();
+        final List<String> statuses = new ArrayList<>();
         boolean stopped = false;
         String startResult = "1700000000.0001";
         String startedThread;
@@ -37,6 +38,10 @@ class SlackStreamingSinkTest extends UnitTest {
             return true;
         }
 
+        @Override public void setStatus(String channelId, String threadTs, String status) {
+            statuses.add(status);
+        }
+
         @Override public void postFallback(String channelId, String text, String threadTs) {
             fallbackPosts.add(text);
         }
@@ -56,6 +61,17 @@ class SlackStreamingSinkTest extends UnitTest {
         assertEquals(List.of("Hel", "lo"), f.appended);
         assertTrue(f.stopped, "stream must be finalized");
         assertTrue(f.fallbackPosts.isEmpty(), "native path must not post a fallback");
+        // "is typing…" set at begin, cleared at seal.
+        assertEquals(List.of("is typing...", ""), f.statuses);
+    }
+
+    @Test
+    void noStatusWhenOffThread() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", null, "U1", f, 0L);
+        sink.begin();
+        sink.seal("hi");
+        assertTrue(f.statuses.isEmpty(), "no thread → no assistant status");
     }
 
     @Test

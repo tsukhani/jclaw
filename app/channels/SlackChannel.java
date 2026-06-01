@@ -183,6 +183,22 @@ public class SlackChannel implements Channel {
         }
     }
 
+    /**
+     * JCLAW-341: set (or clear, with {@code ""}) the assistant-thread status line —
+     * the native "X is typing…" indicator. Requires the AI Assistant feature +
+     * {@code assistant:write} + a {@code thread_ts}. Best-effort; failures logged.
+     */
+    public static void setAssistantStatus(String channelId, String threadTs, String status) {
+        var config = SlackConfig.load();
+        if (config == null) return;
+        try {
+            slack.methods(config.botToken()).assistantThreadsSetStatus(r -> r
+                    .channelId(channelId).threadTs(threadTs).status(status));
+        } catch (SlackApiException | IOException e) {
+            EventLogger.warn(CHANNEL, null, SLACK, "setStatus failed: %s".formatted(e.getMessage()));
+        }
+    }
+
     private static long parseRetryAfterMs(String header) {
         if (header == null || header.isBlank()) return 0L;
         try {
