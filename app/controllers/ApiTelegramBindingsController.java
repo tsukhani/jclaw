@@ -142,11 +142,7 @@ public class ApiTelegramBindingsController extends Controller {
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                 "Binding %d created (user=%s)".formatted(binding.id, telegramUserId));
 
-        // JCLAW-339: register/deregister the Telegram webhook BEFORE the polling
-        // reconcile so a non-webhook binding's webhook is cleared before the
-        // poller's first getUpdates (Telegram 409s while a webhook is set).
-        TelegramWebhookRegistrar.onBindingSaved(binding);
-        TelegramPollingRunner.reconcile();
+        reconcileChannels(binding);
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
@@ -171,10 +167,7 @@ public class ApiTelegramBindingsController extends Controller {
                 binding.agent != null ? binding.agent.name : null, CHANNEL_TELEGRAM,
                 "Binding %d updated".formatted(binding.id));
 
-        // JCLAW-339: on a WEBHOOK→POLLING switch this clears the webhook before
-        // the poller starts, so getUpdates doesn't 409.
-        TelegramWebhookRegistrar.onBindingSaved(binding);
-        TelegramPollingRunner.reconcile();
+        reconcileChannels(binding);
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
@@ -241,6 +234,21 @@ public class ApiTelegramBindingsController extends Controller {
             var bytes = new byte[32];
             new java.security.SecureRandom().nextBytes(bytes);
             b.webhookSecret = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        }
+    }
+
+    /** JCLAW-339: tear down the OLD delivery mode before standing up the new one,
+     *  so a bot is never simultaneously polling and webhooked (Telegram 409s the
+     *  {@code getUpdates} loop otherwise). Entering WEBHOOK: stop the poller
+     *  ({@code reconcile} drops a no-longer-POLLING binding) BEFORE {@code setWebhook}.
+     *  Entering POLLING: {@code deleteWebhook} BEFORE the poller's first getUpdates. */
+    private static void reconcileChannels(TelegramBinding binding) {
+        if (binding.transport == ChannelTransport.WEBHOOK) {
+            TelegramPollingRunner.reconcile();
+            TelegramWebhookRegistrar.onBindingSaved(binding);
+        } else {
+            TelegramWebhookRegistrar.onBindingSaved(binding);
+            TelegramPollingRunner.reconcile();
         }
     }
 
