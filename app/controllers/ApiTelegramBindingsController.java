@@ -14,6 +14,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 import services.EventLogger;
+import services.TailscaleFunnel;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -50,10 +51,11 @@ public class ApiTelegramBindingsController extends Controller {
     private record BindingView(Long id, Long agentId, String agentName,
                                 String telegramUserId, String transport,
                                 String webhookUrl, boolean hasWebhookSecret,
+                                String effectiveWebhookUrl,
                                 boolean enabled,
                                 String cooldownUntil,
                                 String createdAt, String updatedAt) {
-        static BindingView of(TelegramBinding b) {
+        static BindingView of(TelegramBinding b, String funnelBase) {
             var cooldown = TelegramPollingRunner.cooldownUntil(b.botToken);
             return new BindingView(b.id,
                     b.agent != null ? b.agent.id : null,
@@ -62,18 +64,34 @@ public class ApiTelegramBindingsController extends Controller {
                     b.transport != null ? b.transport.name() : ChannelTransport.POLLING.name(),
                     b.webhookUrl,
                     b.webhookSecret != null && !b.webhookSecret.isBlank(),
+                    effectiveWebhookUrl(b, funnelBase),
                     b.enabled,
                     cooldown != null ? cooldown.toString() : null,
                     b.createdAt != null ? b.createdAt.toString() : null,
                     b.updatedAt != null ? b.updatedAt.toString() : null);
         }
+
+        /** The webhook URL to register with Telegram, derived from the funnel base
+         *  + binding id + secret (JCLAW-338) — what the operator copies into
+         *  setWebhook/BotFather. Null unless this is a WEBHOOK binding with a secret
+         *  and an active funnel base. */
+        private static String effectiveWebhookUrl(TelegramBinding b, String funnelBase) {
+            if (b.transport != ChannelTransport.WEBHOOK || funnelBase == null
+                    || b.webhookSecret == null || b.webhookSecret.isBlank()) {
+                return null;
+            }
+            return funnelBase + "/api/webhooks/telegram/" + b.id + "/" + b.webhookSecret;
+        }
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
     public static void list() {
-        var items = TelegramBinding.<TelegramBinding>findAll().stream()
-                .map(BindingView::of)
-                .toList();
+        var all = TelegramBinding.<TelegramBinding>findAll();
+        // One funnel-base lookup per request (it execs `tailscale status`), and
+        // only when a webhook binding actually needs it (JCLAW-338).
+        var funnelBase = all.stream().anyMatch(b -> b.transport == ChannelTransport.WEBHOOK)
+                ? TailscaleFunnel.publicBaseUrl() : null;
+        var items = all.stream().map(b -> BindingView.of(b, funnelBase)).toList();
         renderJSON(gson.toJson(items));
     }
 
@@ -126,7 +144,7 @@ public class ApiTelegramBindingsController extends Controller {
                 "Binding %d created (user=%s)".formatted(binding.id, telegramUserId));
 
         TelegramPollingRunner.reconcile();
-        renderJSON(gson.toJson(BindingView.of(binding)));
+        renderJSON(gson.toJson(BindingView.of(binding, webhookFunnelBase(binding))));
     }
 
     @SuppressWarnings("java:S2259")
@@ -150,7 +168,7 @@ public class ApiTelegramBindingsController extends Controller {
                 "Binding %d updated".formatted(binding.id));
 
         TelegramPollingRunner.reconcile();
-        renderJSON(gson.toJson(BindingView.of(binding)));
+        renderJSON(gson.toJson(BindingView.of(binding, webhookFunnelBase(binding))));
     }
 
     @SuppressWarnings("java:S2259")
@@ -204,6 +222,12 @@ public class ApiTelegramBindingsController extends Controller {
         if (body.has(KEY_ENABLED)) {
             binding.enabled = body.get(KEY_ENABLED).getAsBoolean();
         }
+    }
+
+    /** Funnel base for a single binding's effective webhook URL (JCLAW-338) — only
+     *  execs {@code tailscale status} for WEBHOOK bindings. */
+    private static String webhookFunnelBase(TelegramBinding b) {
+        return b.transport == ChannelTransport.WEBHOOK ? TailscaleFunnel.publicBaseUrl() : null;
     }
 
     @SuppressWarnings("java:S2259")

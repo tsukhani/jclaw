@@ -30,6 +30,13 @@ export interface TelegramBindingSummary {
   transport: string
   webhookUrl: string | null
   hasWebhookSecret: boolean
+  /**
+   * Webhook URL derived from the live Tailscale Funnel base + this binding's id
+   * and secret (JCLAW-338). Non-null only for WEBHOOK-transport bindings while
+   * the funnel is active and a secret exists; the operator registers it with
+   * Telegram's setWebhook. Display-only — JClaw does not call setWebhook itself.
+   */
+  effectiveWebhookUrl: string | null
   enabled: boolean
   /**
    * ISO-8601 instant until which the binding's bot token is in post-unregister

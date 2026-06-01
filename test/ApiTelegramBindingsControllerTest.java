@@ -412,6 +412,32 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
     // updateCanClearWebhookSecret and updateAcceptsTransportChange merged into
     // updateAcceptsSingleFieldChange above.
 
+    // ===== effectiveWebhookUrl (JCLAW-338) =====
+
+    @Test
+    void pollingBindingNeverExposesEffectiveWebhookUrl() {
+        // The funnel-derived webhook URL is WEBHOOK-only. A POLLING binding must
+        // never carry it — the deriver short-circuits on transport before even
+        // probing tailscale — so the read side stays deterministic regardless of
+        // whether a Funnel is live on the host running the tests. (The WEBHOOK
+        // case can't be asserted here: its value depends on a real `tailscale`
+        // CLI + an active Funnel, which CI doesn't have.)
+        var agentId = seedAgent("tg-agent");
+        login();
+        var body = """
+                {"botToken": "400:tok", "agentId": %d, "telegramUserId": "9", "enabled": false}
+                """.formatted(agentId);
+        var create = POST("/api/channels/telegram/bindings", "application/json", body);
+        assertIsOk(create);
+        assertFalse(getContent(create).contains("/api/webhooks/telegram/"),
+                "polling create must not carry a funnel webhook URL: " + getContent(create));
+
+        var list = GET("/api/channels/telegram/bindings");
+        assertIsOk(list);
+        assertFalse(getContent(list).contains("/api/webhooks/telegram/"),
+                "polling list must not carry a funnel webhook URL: " + getContent(list));
+    }
+
     // ===== Delete =====
 
     @Test

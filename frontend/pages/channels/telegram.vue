@@ -543,6 +543,20 @@ async function remove(binding: TelegramBindingSummary) {
                      focus:outline-hidden focus:border-ring transition-colors"
             >
           </label>
+
+          <div
+            v-if="editing?.effectiveWebhookUrl"
+            class="border border-border bg-muted p-3 text-xs text-fg-muted space-y-1"
+          >
+            <span class="block text-fg-strong">Webhook URL (live via Tailscale Funnel)</span>
+            <span class="block font-normal">
+              Register this with Telegram's
+              <code class="font-mono px-1 bg-muted text-fg-strong">setWebhook</code>
+              so updates reach this binding. It embeds the binding id and secret —
+              keep it private.
+            </span>
+            <code class="block mt-1 font-mono break-all text-emerald-400">{{ editing.effectiveWebhookUrl }}</code>
+          </div>
         </template>
       </div>
 
