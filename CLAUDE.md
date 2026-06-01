@@ -97,7 +97,7 @@ Why this matters: every push to `main` triggers the `pre-push` hook's full backe
 - Routes defined in `conf/routes` — uses Play's `{controller}.{action}` catch-all pattern
 - Configuration in `conf/application.conf` — supports environment prefixes (`%prod.`, `%test.`)
 - Dependencies managed via `build.gradle.kts` using the `org.playframework.play1` plugin from the `/opt/play1` fork (composite build wired in `settings.gradle.kts`)
-- Tests in `test/` — JUnit 5, extending Play's `UnitTest` or `FunctionalTest`
+- Tests in `test/` — JUnit 6 (Jupiter 6.0.3, bundled by the play1 fork in `framework/lib`), extending Play's `UnitTest` or `FunctionalTest`
 - Test mode uses H2 in-memory database (`%test.db.url` in application.conf)
 
 ### Outbound HTTP — OkHttp 5
