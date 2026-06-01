@@ -41,6 +41,10 @@ public final class TailscaleFunnel {
     private static final String CATEGORY = "tailscale";
     private static final Duration EXEC_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration STATUS_TIMEOUT = Duration.ofSeconds(5);
+    /** {@code funnel --bg} can return before the node's funnel capability has synced
+     *  (e.g. right after a Tailscale reconnect), so confirm-and-retry (JCLAW-337). */
+    private static final int ENABLE_ATTEMPTS = 3;
+    private static final long ENABLE_RETRY_MILLIS = 2000;
     /** macOS GUI-app install location, checked when {@code tailscale} isn't on PATH. */
     private static final String MAC_APP_BINARY = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 
@@ -127,6 +131,8 @@ public final class TailscaleFunnel {
     }
 
     public static List<String> resetCmd(String bin) { return List.of(bin, "funnel", "reset"); }
+
+    public static List<String> funnelStatusCmd(String bin) { return List.of(bin, "funnel", "status"); }
 
     // ===================== pure parsing =====================
 
@@ -229,15 +235,51 @@ public final class TailscaleFunnel {
     }
 
     public static boolean enable(int localPort, Runner runner) {
+        return enable(localPort, runner, ENABLE_ATTEMPTS, ENABLE_RETRY_MILLIS);
+    }
+
+    /**
+     * Enable Funnel and confirm it is actually serving (JCLAW-337). {@code funnel --bg}
+     * can return without the funnel established — the node's funnel capability may still
+     * be syncing right after a Tailscale reconnect, and the command can even exit 0 while
+     * nothing is served — so we verify via {@code funnel status} and retry a few times
+     * before giving up, reporting a clear error rather than a false success. {@code attempts}
+     * and {@code retryMillis} are parameters so tests run without sleeping.
+     */
+    public static boolean enable(int localPort, Runner runner, int attempts, long retryMillis) {
         var bin = detectBinary(runner);
-        var res = runner.run(enableCmd(bin, localPort), EXEC_TIMEOUT);
-        if (res.ok()) {
-            EventLogger.info(CATEGORY, null, null, "Funnel enabled on local port " + localPort);
-            return true;
+        String lastError = null;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            var res = runner.run(enableCmd(bin, localPort), EXEC_TIMEOUT);
+            if (res.ok() && funnelServing(bin, runner)) {
+                EventLogger.info(CATEGORY, null, null, "Funnel enabled on local port " + localPort
+                        + (attempt > 1 ? " (attempt " + attempt + ")" : ""));
+                return true;
+            }
+            lastError = res.ok()
+                    ? "command exited 0 but funnel is not serving (node may be re-syncing)"
+                    : firstNonBlank(res.stderr(), res.stdout(), "exit " + res.exitCode());
+            if (attempt < attempts && retryMillis > 0) sleepQuietly(retryMillis);
         }
-        EventLogger.warn(CATEGORY, null, null, "Funnel enable failed (port " + localPort + "): "
-                + firstNonBlank(res.stderr(), res.stdout(), "exit " + res.exitCode()));
+        EventLogger.warn(CATEGORY, null, null, "Funnel enable failed (port " + localPort
+                + ") after " + attempts + " attempt(s): " + lastError);
         return false;
+    }
+
+    /** True when {@code tailscale funnel status} reports an active funnel (vs "No serve config"). */
+    private static boolean funnelServing(String bin, Runner runner) {
+        var res = runner.run(funnelStatusCmd(bin), STATUS_TIMEOUT);
+        if (!res.ok() || res.stdout() == null) return false;
+        var out = res.stdout().strip().toLowerCase();
+        return out.contains("https://") && !out.contains("no serve config");
+    }
+
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     public static boolean disable(Runner runner) {

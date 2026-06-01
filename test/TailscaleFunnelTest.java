@@ -122,17 +122,52 @@ class TailscaleFunnelTest extends UnitTest {
     // ----- enable / disable dispatch -----
 
     @Test
-    void enableRunsFunnelBgAndReportsSuccess() {
-        var fake = new FakeRunner(cmd -> cmd.contains("which") ? ok("/usr/bin/tailscale") : ok(""));
-        assertTrue(TailscaleFunnel.enable(9000, fake));
+    void enableRunsFunnelBgAndReportsSuccessWhenServing() {
+        var fake = new FakeRunner(cmd -> {
+            if (cmd.contains("which")) return ok("/usr/bin/tailscale");
+            if (cmd.contains("status")) return ok("https://host.tailnet.ts.net (Funnel on)\n|-- / proxy http://127.0.0.1:9000");
+            return ok("");  // funnel --bg exits 0
+        });
+        assertTrue(TailscaleFunnel.enable(9000, fake, 1, 0));
         assertTrue(fake.ran("funnel", "--bg", "9000"));
+        assertTrue(fake.ran("funnel", "status"));  // JCLAW-337: verifies the serve state
     }
 
     @Test
     void enableReportsFailureOnNonZeroExit() {
         var fake = new FakeRunner(cmd ->
                 cmd.contains("which") ? ok("/usr/bin/tailscale") : failed("Funnel not available; 'funnel' node attribute not set."));
-        assertFalse(TailscaleFunnel.enable(9000, fake));
+        assertFalse(TailscaleFunnel.enable(9000, fake, 1, 0));
+    }
+
+    @Test
+    void enableReportsFailureWhenExit0ButNotServing() {
+        // JCLAW-337: funnel --bg exits 0 but funnel status shows nothing served
+        // (transient node-attribute sync) -> must report failure, not false success.
+        var fake = new FakeRunner(cmd -> {
+            if (cmd.contains("which")) return ok("/usr/bin/tailscale");
+            if (cmd.contains("status")) return ok("No serve config");
+            return ok("");  // funnel --bg exits 0
+        });
+        assertFalse(TailscaleFunnel.enable(9000, fake, 1, 0));
+    }
+
+    @Test
+    void enableRetriesUntilFunnelIsServing() {
+        // JCLAW-337: not serving on the first check, serving on the second -> retry then succeed.
+        var statusChecks = new int[]{0};
+        var fake = new FakeRunner(cmd -> {
+            if (cmd.contains("which")) return ok("/usr/bin/tailscale");
+            if (cmd.contains("status")) {
+                statusChecks[0]++;
+                return statusChecks[0] >= 2
+                        ? ok("https://host.tailnet.ts.net (Funnel on)")
+                        : ok("No serve config");
+            }
+            return ok("");  // funnel --bg exits 0
+        });
+        assertTrue(TailscaleFunnel.enable(9000, fake, 3, 0));
+        assertEquals(2, statusChecks[0]);
     }
 
     @Test
