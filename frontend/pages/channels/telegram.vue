@@ -599,8 +599,11 @@ async function remove(binding: TelegramBindingSummary) {
             class="text-xs text-fg-muted"
           >
             Pre-filled from the live Tailscale Funnel. Register it with Telegram's
-            <code class="font-mono px-1 bg-muted text-fg-strong">setWebhook</code>
-            — it embeds the binding id and secret, so keep it private.
+            <code class="font-mono px-1 bg-muted text-fg-strong">setWebhook</code>,
+            passing
+            <code class="font-mono px-1 bg-muted text-fg-strong">secret_token</code>
+            set to the same webhookSecret — JClaw checks both the URL secret and
+            that header. The URL embeds the binding id and secret, so keep it private.
           </p>
         </template>
       </div>
