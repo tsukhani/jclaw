@@ -22,6 +22,10 @@ interface ChannelSetup {
   // against the live origin) — e.g. Slack's Events API Request URL.
   requestUrlPath?: string
   steps: string[]
+  // Grouped values the operator transcribes verbatim into the provider's
+  // dashboard (scopes, event names, settings), rendered as labeled monospace
+  // blocks — one value per line — so they're easy to scan and copy (JCLAW-13).
+  groups?: Array<{ label: string, hint?: string, values: string[] }>
 }
 
 interface ChannelTypeDef {
@@ -73,12 +77,28 @@ const channelTypes: ChannelTypeDef[] = [
       requestUrlPath: '/api/webhooks/slack',
       steps: [
         'Create a Slack app at api.slack.com/apps (From scratch) in your workspace.',
-        'OAuth and Permissions: add Bot Token Scopes chat:write and channels:history (plus app_mentions:read / im:history as needed), then Install to Workspace.',
-        'Copy the Bot User OAuth Token (starts with xoxb-) into Bot token below.',
-        'Basic Information: copy the Signing Secret (App Credentials) into Signing secret below, then click Save here.',
-        'Event Subscriptions: enable it and set the Request URL to your public HTTPS base URL + /api/webhooks/slack; Slack verifies it automatically.',
-        'Subscribe to bot events message.channels (and app_mention for at-mentions); Save Changes and reinstall if prompted.',
-        'Invite the bot to a channel with /invite @YourBot.',
+        'OAuth & Permissions: add every Bot Token Scope listed below, then Install to Workspace.',
+        'Copy the Bot User OAuth Token (xoxb-…) into Bot token, and the Signing Secret (Basic Information → App Credentials) into Signing secret, then Save here.',
+        'Event Subscriptions: turn it On, set the Request URL above, and subscribe to every bot event listed below; Save Changes.',
+        'App Home: enable both settings below so users can DM the bot.',
+        'Reinstall to Workspace if Slack prompts (scope/event changes require it). Then DM the bot, or invite it to a channel with /invite @YourBot.',
+      ],
+      groups: [
+        {
+          label: 'OAuth & Permissions → Bot Token Scopes',
+          hint: 'chat:write sends replies; each *:history scope lets the bot read that surface; app_mentions:read covers @-mentions.',
+          values: ['chat:write', 'app_mentions:read', 'channels:history', 'groups:history', 'im:history', 'mpim:history'],
+        },
+        {
+          label: 'Event Subscriptions → Subscribe to bot events',
+          hint: 'Each event needs its matching scope above (e.g. message.im ↔ im:history). message.im is what delivers a DM to the bot.',
+          values: ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim'],
+        },
+        {
+          label: 'App Home → Show Tabs (toggle both On)',
+          hint: 'Without these, Slack greys out the DM box with "Sending messages to this app has been turned off."',
+          values: ['Messages Tab', 'Allow users to send Slash commands and messages from the messages tab'],
+        },
       ],
     },
   },
@@ -116,6 +136,7 @@ async function toggleTailscale() {
 const currentDef = computed(() =>
   editing.value ? channelTypes.find(c => c.type === editing.value) ?? null : null)
 const setupSteps = computed<string[]>(() => currentDef.value?.setup?.steps ?? [])
+const setupGroups = computed(() => currentDef.value?.setup?.groups ?? [])
 const requestPath = computed(() => currentDef.value?.setup?.requestUrlPath ?? '')
 
 // Slack POSTs the webhook from its own servers, so the Request URL must be a
@@ -336,6 +357,18 @@ onActivated(() => refreshBindings())
             {{ step }}
           </li>
         </ol>
+        <div
+          v-for="g in setupGroups"
+          :key="g.label"
+          class="text-fg-strong"
+        >
+          {{ g.label }}
+          <span
+            v-if="g.hint"
+            class="block font-normal text-fg-muted"
+          >{{ g.hint }}</span>
+          <code class="mt-1 block whitespace-pre-line break-words font-mono text-emerald-400">{{ g.values.join('\n') }}</code>
+        </div>
       </div>
       <div class="space-y-3">
         <template

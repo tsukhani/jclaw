@@ -34,6 +34,11 @@ describe('channels page — Slack guidance (JCLAW-83) + Tailscale Funnel (JCLAW-
     // Public-HTTPS requirement + the localhost caveat (no funnel here).
     expect(text).toContain('public HTTPS')
     expect(text).toContain('tunnel')
+    // JCLAW-13: grouped, transcribable permissions + the DM path.
+    expect(text).toContain('chat:write')
+    expect(text).toContain('im:history')
+    expect(text).toContain('message.im')
+    expect(text).toContain('Messages Tab')
   })
 
   it('shows the app-level Tailscale Funnel toggle', async () => {
