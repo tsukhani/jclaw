@@ -407,6 +407,14 @@ public final class McpConnectionManager {
      *  every disconnect path: explicit {@link #stop}, watchdog teardown,
      *  and connect-failure rollback. */
     private static void clearAllowlistAndAudit(String serverName) {
+        // During graceful shutdown the JPA layer is tearing down, so this DELETE
+        // can't begin a transaction — and it's redundant: the next boot's connect
+        // calls McpAllowlist.registerForAllAgents, which clears the prior set
+        // first. Nothing can use the grants while the app is down, so skipping the
+        // revoke here is safe and avoids a spurious "begin transaction failed" WARN.
+        // (Runtime disconnect paths — admin DELETE, watchdog — are not shutting
+        // down, so they still revoke with JPA alive.)
+        if (EventLogger.isShuttingDown()) return;
         try {
             Tx.run(() -> {
                 int removed = McpAllowlist.unregister(serverName);

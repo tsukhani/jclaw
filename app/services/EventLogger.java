@@ -54,6 +54,13 @@ public class EventLogger {
         }
     }
 
+    /** True once graceful shutdown has begun. Lets shutdown-path code skip DB
+     *  work that can't run (the JPA layer is tearing down) and isn't needed —
+     *  e.g. MCP allowlist revocation, which the next boot's connect resyncs. */
+    public static boolean isShuttingDown() {
+        return shuttingDown.get();
+    }
+
     @SuppressWarnings("java:S6213") // 'record' as method name predates the restricted identifier; rename would churn callers/tests with no real ambiguity
     public static void record(String level, String category, String message, String details) {
         record(level, category, null, null, message, details);
