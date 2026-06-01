@@ -64,7 +64,7 @@ const channelTypes: ChannelTypeDef[] = [
         'OAuth and Permissions: add Bot Token Scopes chat:write and channels:history (plus app_mentions:read / im:history as needed), then Install to Workspace.',
         'Copy the Bot User OAuth Token (starts with xoxb-) into Bot token below.',
         'Basic Information: copy the Signing Secret (App Credentials) into Signing secret below, then click Save here.',
-        'Event Subscriptions: enable it, then set the Request URL to the address shown above (Slack verifies it automatically).',
+        'Event Subscriptions: enable it and set the Request URL to your public HTTPS base URL + /api/webhooks/slack; Slack verifies it automatically.',
         'Subscribe to bot events message.channels (and app_mention for at-mentions); Save Changes and reinstall if prompted.',
         'Invite the bot to a channel with /invite @YourBot.',
       ],
@@ -93,11 +93,25 @@ const { mutate, loading: saving } = useApiMutation()
 const currentDef = computed(() =>
   editing.value ? channelTypes.find(c => c.type === editing.value) ?? null : null)
 const setupSteps = computed<string[]>(() => currentDef.value?.setup?.steps ?? [])
-const requestUrl = computed(() => {
-  const path = currentDef.value?.setup?.requestUrlPath
-  if (!path) return ''
-  return `${import.meta.client ? window.location.origin : ''}${path}`
+const requestPath = computed(() => currentDef.value?.setup?.requestUrlPath ?? '')
+
+// Slack POSTs the webhook from its own servers, so the Request URL must be a
+// public HTTPS address — the browser origin only qualifies in a real deployment,
+// never localhost / LAN / plain HTTP (even https://localhost is unreachable from
+// Slack). requestUrl is shown as a ready value only when this page is already
+// loaded over such an address; otherwise we show the path + guidance.
+const isPublicHttps = computed(() => {
+  const o = import.meta.client ? window.location.origin : ''
+  if (!/^https:\/\//i.test(o)) return false
+  const host = o.replace(/^https:\/\//i, '').replace(/:\d+$/, '').toLowerCase()
+  return !(host === 'localhost' || host.endsWith('.local') || host === '[::1]'
+    || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === '0.0.0.0')
 })
+const requestUrl = computed(() =>
+  requestPath.value && isPublicHttps.value
+    ? `${window.location.origin}${requestPath.value}`
+    : '')
 
 const telegramActiveCount = computed(() =>
   (telegramBindings.value ?? []).filter(b => b.enabled).length)
@@ -208,16 +222,25 @@ onActivated(() => refreshBindings())
         v-if="setupSteps.length"
         class="mb-4 border border-border bg-muted p-3 text-xs text-fg-muted space-y-2"
       >
-        <p
-          v-if="requestUrl"
+        <div
+          v-if="requestPath"
           class="text-fg-strong"
         >
           Events API Request URL
-          <code class="block mt-1 font-mono break-all text-fg-strong">{{ requestUrl }}</code>
           <span class="block mt-1 font-normal text-fg-muted">
-            Paste this into your Slack app's Event Subscriptions; it must be reachable by Slack over HTTPS.
+            Append <code class="font-mono text-fg-strong">{{ requestPath }}</code> to your deployment's public HTTPS base URL and set it as the Request URL under Event Subscriptions.
           </span>
-        </p>
+          <span
+            v-if="requestUrl"
+            class="block mt-1 font-normal text-fg-muted"
+          >
+            From this page that is
+            <code class="font-mono break-all text-fg-strong">{{ requestUrl }}</code>
+          </span>
+          <span class="block mt-1 font-normal text-fg-muted">
+            Slack reaches it from its own servers, so localhost, LAN addresses, and plain HTTP will not work; for local development, expose this host with a tunnel such as Tailscale Funnel.
+          </span>
+        </div>
         <ol class="list-decimal list-inside space-y-1">
           <li
             v-for="(step, i) in setupSteps"

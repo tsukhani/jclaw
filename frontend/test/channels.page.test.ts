@@ -11,9 +11,9 @@ describe('channels page — Slack configuration guidance (JCLAW-83)', () => {
     const component = await mountSuspended(Channels)
 
     // channelTypes = [slack, whatsapp]; the first "Configure" button is Slack.
-    const configure = component.findAll('button').filter(b => b.text() === 'Configure')
-    expect(configure.length).toBeGreaterThan(0)
-    await configure[0].trigger('click')
+    const slackButton = component.findAll('button').find(b => b.text() === 'Configure')
+    expect(slackButton).toBeDefined()
+    await slackButton?.trigger('click')
 
     const text = component.text()
     // Computed Events API Request URL (origin-relative assertion is host-agnostic).
@@ -22,5 +22,9 @@ describe('channels page — Slack configuration guidance (JCLAW-83)', () => {
     expect(text).toContain('Event Subscriptions')
     expect(text).toContain('Bot token')
     expect(text).toContain('xoxb-')
+    // Must not contradict itself: the public-HTTPS requirement + the localhost
+    // caveat must be present (test origin is http://localhost, so no ready URL).
+    expect(text).toContain('public HTTPS')
+    expect(text).toContain('tunnel')
   })
 })
