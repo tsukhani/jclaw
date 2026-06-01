@@ -62,6 +62,17 @@ public class ConversationService {
     }
 
     /**
+     * Read-only counterpart to {@link #findOrCreate}: return the existing
+     * conversation for this {@code (agent, channelType, peerId)}, or
+     * {@code null} when none exists yet. Lets callers detect first contact
+     * (no row) without creating one — used by the Telegram {@code /start}
+     * welcome (JCLAW-97).
+     */
+    public static Conversation find(Agent agent, String channelType, String peerId) {
+        return Conversation.findByAgentChannelPeer(agent, channelType, peerId);
+    }
+
+    /**
      * Set both conversation-scoped override columns atomically (JCLAW-108).
      * Both non-null means "use these for this conversation's turns"; both
      * null clears the override and falls back to the agent's defaults.

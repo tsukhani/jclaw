@@ -195,6 +195,23 @@ public final class Commands {
         return rest.isEmpty() ? null : rest;
     }
 
+    /**
+     * True when {@code text}'s first token is {@code /start} (case-insensitive).
+     *
+     * <p>{@code /start} is deliberately NOT a {@link Command}: on Telegram it
+     * must fall through to the LLM once a conversation exists, so it can't go
+     * through the always-short-circuiting {@link #execute} path. The Telegram
+     * entry point (JCLAW-97) checks this and only intercepts the FIRST contact,
+     * building the greeting via {@link #executeStartWelcome}.
+     */
+    public static boolean isStart(String text) {
+        if (text == null) return false;
+        var trimmed = text.strip();
+        var firstSpace = indexOfWhitespace(trimmed);
+        var head = firstSpace < 0 ? trimmed : trimmed.substring(0, firstSpace);
+        return "/start".equalsIgnoreCase(head);
+    }
+
     /** Execute a previously-parsed command. See class javadoc for side effects. */
     public static Result execute(Command cmd, Agent agent, String channelType,
                                   String peerId, Conversation current) {
@@ -231,6 +248,50 @@ public final class Commands {
         EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                 "/new → new conversation %d for peer=%s".formatted(newConv.id, peerId));
         return new Result(newConv, NEW_TEXT, Command.NEW);
+    }
+
+    /**
+     * Build the first-contact welcome (JCLAW-97): the agent's operator-supplied
+     * {@link models.Agent#description} framed under a blockquote header (the
+     * leading {@code >} renders as a colored bar on Telegram — see
+     * {@link #NEW_TEXT}), plus a pointer to {@code /help}. Falls back to the
+     * agent name when the description is blank. Pure — no DB, no side effects —
+     * so it's safe to call from the seal path or a test.
+     */
+    public static String welcomeText(Agent agent) {
+        var name = (agent != null && agent.name != null && !agent.name.isBlank())
+                ? agent.name.strip() : "JClaw";
+        var sb = new StringBuilder("> ").append(name).append("\n");
+        if (agent != null && agent.description != null && !agent.description.isBlank()) {
+            sb.append("\n").append(agent.description.strip()).append("\n");
+        }
+        sb.append("\nType /help to see what I can do.");
+        return sb.toString();
+    }
+
+    /**
+     * First-contact welcome for Telegram {@code /start} (JCLAW-97). Mirrors
+     * {@link #executeNew} — opens a fresh Conversation and persists the canned
+     * reply as its first assistant message — but the reply is the
+     * {@link #welcomeText} greeting rather than {@link #NEW_TEXT}. Only invoked
+     * by the Telegram entry point when no Conversation exists yet for the peer;
+     * a later {@code /start} falls through to the LLM.
+     *
+     * <p>{@link Result#command()} is {@code null}: {@code /start} is not a
+     * registered {@link Command} (it must be able to pass through), so there's
+     * no enum constant to report. The Telegram seal path reads only
+     * {@code conversation()} and {@code responseText()}.
+     */
+    public static Result executeStartWelcome(Agent agent, String channelType, String peerId) {
+        var welcome = welcomeText(agent);
+        var newConv = Tx.run(() -> {
+            var conv = ConversationService.create(agent, channelType, peerId);
+            ConversationService.appendAssistantMessage(conv, welcome, null);
+            return conv;
+        });
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+                "/start → welcome + new conversation %d for peer=%s".formatted(newConv.id, peerId));
+        return new Result(newConv, welcome, null);
     }
 
     private static Result executeReset(Agent agent, String channelType, Conversation current) {

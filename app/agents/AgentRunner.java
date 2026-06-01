@@ -1268,6 +1268,27 @@ public class AgentRunner {
             }
             return;
         }
+        // JCLAW-97: first-contact welcome. Telegram clients auto-send /start when
+        // a user first opens the bot. On that first contact — no Conversation row
+        // exists yet for this peer — reply with a deterministic, capability-aware
+        // welcome (the agent's description + a /help pointer) and open the
+        // conversation, instead of letting the LLM improvise a greeting. A later
+        // /start (the peer already has a conversation) falls through to the normal
+        // LLM turn, preserving the JCLAW-26 passthrough.
+        if (slash.Commands.isStart(text)) {
+            var existing = services.Tx.run(() ->
+                    services.ConversationService.find(agent, channelType, peerId));
+            if (existing == null) {
+                var result = slash.Commands.executeStartWelcome(agent, channelType, peerId);
+                var welcomeSink = sinkFactory.apply(
+                        result.conversation() != null ? result.conversation().id : null);
+                if (result.responseText() != null && !result.responseText().isEmpty()) {
+                    welcomeSink.seal(result.responseText());
+                }
+                return;
+            }
+            // conversation already exists → fall through to the normal LLM turn
+        }
         var conversation = services.Tx.run(() ->
                 ConversationService.findOrCreate(agent, channelType, peerId));
         // The sink needs the conversation id so it can persist / clear the
