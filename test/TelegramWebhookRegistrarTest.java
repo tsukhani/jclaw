@@ -9,8 +9,9 @@ import java.util.List;
 
 /**
  * JCLAW-339: the {@link TelegramWebhookRegistrar} decision logic, exercised with
- * an injected {@link WebhookApi} so nothing hits the real Telegram API and the
- * funnel base is supplied directly (no {@code tailscale} CLI dependency).
+ * an injected {@link WebhookApi} so nothing hits the real Telegram API. The
+ * public base URL is supplied directly (it's a stored binding field, not derived
+ * here).
  */
 class TelegramWebhookRegistrarTest extends UnitTest {
 
@@ -39,9 +40,15 @@ class TelegramWebhookRegistrarTest extends UnitTest {
     }
 
     @Test
-    void enabledWebhookWithSecretAndFunnelRegisters() {
+    void webhookUrlStripsTrailingSlashFromBase() {
+        assertEquals("https://h.ts.net/api/webhooks/telegram/7/abc",
+                TelegramWebhookRegistrar.webhookUrl("https://h.ts.net/", 7L, "abc"));
+    }
+
+    @Test
+    void enabledWebhookWithSecretAndBaseRegisters() {
         var api = new FakeApi();
-        TelegramWebhookRegistrar.apply(7L, "tok", "sek", ChannelTransport.WEBHOOK, true, BASE, api);
+        TelegramWebhookRegistrar.apply(7L, "tok", "sek", BASE, ChannelTransport.WEBHOOK, true, api);
         assertEquals(List.of("tok|" + BASE + "/api/webhooks/telegram/7/sek|sek"), api.set);
         assertTrue(api.deleted.isEmpty(), "should not deregister an active webhook binding");
     }
@@ -49,7 +56,7 @@ class TelegramWebhookRegistrarTest extends UnitTest {
     @Test
     void pollingBindingDeregisters() {
         var api = new FakeApi();
-        TelegramWebhookRegistrar.apply(7L, "tok", "sek", ChannelTransport.POLLING, true, BASE, api);
+        TelegramWebhookRegistrar.apply(7L, "tok", "sek", BASE, ChannelTransport.POLLING, true, api);
         assertEquals(List.of("tok"), api.deleted);
         assertTrue(api.set.isEmpty(), "POLLING must not register a webhook");
     }
@@ -58,17 +65,17 @@ class TelegramWebhookRegistrarTest extends UnitTest {
     void disabledWebhookBindingDeregisters() {
         // A disabled WEBHOOK binding must clear its webhook so it stops receiving.
         var api = new FakeApi();
-        TelegramWebhookRegistrar.apply(7L, "tok", "sek", ChannelTransport.WEBHOOK, false, BASE, api);
+        TelegramWebhookRegistrar.apply(7L, "tok", "sek", BASE, ChannelTransport.WEBHOOK, false, api);
         assertEquals(List.of("tok"), api.deleted);
         assertTrue(api.set.isEmpty());
     }
 
     @Test
-    void funnelOfflineSkipsRegistrationWithoutDeleting() {
+    void blankBaseSkipsRegistrationWithoutDeleting() {
         // No public base → can't form a URL → skip + warn, but DON'T deregister
-        // (a brief funnel blip shouldn't tear down an existing registration).
+        // (the binding is still intended as a webhook).
         var api = new FakeApi();
-        TelegramWebhookRegistrar.apply(7L, "tok", "sek", ChannelTransport.WEBHOOK, true, null, api);
+        TelegramWebhookRegistrar.apply(7L, "tok", "sek", null, ChannelTransport.WEBHOOK, true, api);
         assertTrue(api.set.isEmpty());
         assertTrue(api.deleted.isEmpty());
     }
@@ -76,7 +83,7 @@ class TelegramWebhookRegistrarTest extends UnitTest {
     @Test
     void missingSecretSkipsRegistration() {
         var api = new FakeApi();
-        TelegramWebhookRegistrar.apply(7L, "tok", "   ", ChannelTransport.WEBHOOK, true, BASE, api);
+        TelegramWebhookRegistrar.apply(7L, "tok", "   ", BASE, ChannelTransport.WEBHOOK, true, api);
         assertTrue(api.set.isEmpty());
         assertTrue(api.deleted.isEmpty());
     }

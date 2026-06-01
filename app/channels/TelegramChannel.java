@@ -3,7 +3,6 @@ package channels;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
 import models.Agent;
-import models.TelegramBinding;
 import okhttp3.OkHttpClient;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
@@ -469,12 +468,6 @@ public class TelegramChannel implements Channel {
         }
         if (start < text.length()) out.add(text.substring(start));
         return out;
-    }
-
-    /** Register the webhook URL with Telegram for a specific binding. */
-    public static boolean setWebhook(TelegramBinding binding) {
-        if (binding == null || binding.webhookUrl == null) return false;
-        return setWebhook(binding.botToken, binding.webhookUrl, binding.webhookSecret);
     }
 
     /**

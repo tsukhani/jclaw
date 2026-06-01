@@ -90,7 +90,10 @@ interface BindingForm {
   agentQuery: string
   telegramUserId: string
   transport: 'POLLING' | 'WEBHOOK'
-  webhookUrl: string
+  // Editable public host (scheme + host, no path), e.g. https://host.ts.net.
+  webhookBaseUrl: string
+  // Auto-generated client-side for a new/secretless webhook binding; '' means
+  // "keep the binding's existing secret" (we never receive it).
   webhookSecret: string
 }
 
@@ -100,7 +103,7 @@ const emptyForm = (): BindingForm => ({
   agentQuery: '',
   telegramUserId: '',
   transport: 'POLLING',
-  webhookUrl: '',
+  webhookBaseUrl: '',
   webhookSecret: '',
 })
 
@@ -118,76 +121,99 @@ const canSave = computed(() => {
   if (!form.value.agentId) return false
   if (!/^\d+$/.test(form.value.telegramUserId.trim())) return false
   if (editing.value === null && form.value.botToken.trim().length === 0) return false
-  if (form.value.transport === 'WEBHOOK') {
-    if (form.value.webhookUrl.trim().length === 0) return false
-    // Webhook secret is required when creating or when the existing binding
-    // doesn't already have one; editing a binding with an existing secret
-    // allows leaving this blank to keep the current value.
-    const hadSecret = editing.value?.hasWebhookSecret === true
-    if (!hadSecret && form.value.webhookSecret.trim().length === 0) return false
+  if (form.value.transport === 'WEBHOOK' && form.value.webhookBaseUrl.trim().length === 0) {
+    // A webhook binding needs a public host to register; the secret is
+    // auto-generated, so that's the only thing the operator might supply.
+    return false
   }
   return true
 })
 
-// JCLAW-338: the webhook URL the operator registers with Telegram is fully
-// determined by the live Tailscale Funnel base + this binding's id + secret
-// (the secret is a URL path segment). Pre-populate it so the operator never
-// hand-builds the public host. The base comes from /api/tailscale; the secret
-// from what they type, or — when editing a binding that already has one — from
-// the server-derived effectiveWebhookUrl (the frontend never receives raw
-// secrets).
+// JCLAW-339: the webhook URL is base + a FIXED contract path
+// (/api/webhooks/telegram/{id}/{secret}). Only the public base is editable; the
+// secret is auto-generated and the path is derived. The base is pre-filled from
+// the live Tailscale Funnel, else the page's own origin when that's a public
+// HTTPS host, else left blank for the operator to enter.
 const funnelBaseUrl = computed(() => {
   const t = tailscale.value
   return t?.enabled && t.available && t.publicUrl ? t.publicUrl : ''
 })
 
-const suggestedWebhookUrl = computed(() => {
-  if (form.value.transport !== 'WEBHOOK') return ''
-  const base = funnelBaseUrl.value
-  const id = editing.value?.id
-  if (!base || !id) return '' // no funnel, or creating (id is assigned on save)
-  const typed = form.value.webhookSecret.trim()
-  if (typed) return `${base}/api/webhooks/telegram/${id}/${typed}`
-  return editing.value?.effectiveWebhookUrl ?? ''
+const isPublicHttps = computed(() => {
+  const o = import.meta.client ? window.location.origin : ''
+  if (!/^https:\/\//i.test(o)) return false
+  const host = o.replace(/^https:\/\//i, '').replace(/:\d+$/, '').toLowerCase()
+  return !(host === 'localhost' || host.endsWith('.local') || host === '[::1]'
+    || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === '0.0.0.0')
 })
 
-// Cleared on open; set once the operator hand-edits the URL so the live
-// suggestion stops overwriting their value.
-const webhookUrlEdited = ref(false)
-watch(suggestedWebhookUrl, (url) => {
-  if (url && !webhookUrlEdited.value && form.value.transport === 'WEBHOOK') {
-    form.value.webhookUrl = url
+const defaultPublicBase = computed(() =>
+  funnelBaseUrl.value || (isPublicHttps.value ? window.location.origin : ''))
+
+// Telegram secret_token charset is base64url (A-Z a-z 0-9 _ -).
+function generateWebhookSecret(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  let bin = ''
+  for (const b of bytes) bin += String.fromCharCode(b)
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+// The full webhook URL preview: editable base + the fixed path. For an existing
+// secret (which we never receive) we reuse the server-built path from
+// effectiveWebhookUrl, swapping in the current base; otherwise we build it from
+// the freshly generated secret. Empty while creating (id assigned on save).
+const fullWebhookUrl = computed(() => {
+  if (form.value.transport !== 'WEBHOOK') return ''
+  const base = form.value.webhookBaseUrl.trim().replace(/\/$/, '')
+  if (!base) return ''
+  const existing = editing.value?.effectiveWebhookUrl
+  if (existing && !form.value.webhookSecret) {
+    return base + existing.replace(/^https?:\/\/[^/]+/i, '')
   }
+  const id = editing.value?.id
+  if (id && form.value.webhookSecret) {
+    return `${base}/api/webhooks/telegram/${id}/${form.value.webhookSecret}`
+  }
+  return '' // creating: the id (and thus the path) is assigned on save
 })
+
+// Pre-fill the base + generate a secret when a binding enters webhook mode
+// without an existing one. Idempotent — won't clobber an edited base or
+// regenerate over an existing/already-generated secret.
+function enterWebhookMode() {
+  if (form.value.transport !== 'WEBHOOK') return
+  if (!form.value.webhookBaseUrl.trim()) {
+    form.value.webhookBaseUrl = defaultPublicBase.value
+  }
+  if (!editing.value?.hasWebhookSecret && !form.value.webhookSecret) {
+    form.value.webhookSecret = generateWebhookSecret()
+  }
+}
+watch(() => form.value.transport, () => enterWebhookMode())
 
 function openCreate() {
   form.value = emptyForm()
   errorMessage.value = ''
-  webhookUrlEdited.value = false
   creating.value = true
   editing.value = null
 }
 
 function openEdit(binding: TelegramBindingSummary) {
-  // A stored URL counts as a manual value to preserve; an empty one lets the
-  // funnel-derived suggestion fill in — now (below) for an existing secret, or
-  // via the watch as the operator types one.
-  webhookUrlEdited.value = (binding.webhookUrl ?? '').trim() !== ''
   form.value = {
     botToken: '',
     agentId: binding.agentId,
     agentQuery: binding.agentName ?? '',
     telegramUserId: binding.telegramUserId,
     transport: binding.transport === 'WEBHOOK' ? 'WEBHOOK' : 'POLLING',
-    webhookUrl: binding.webhookUrl ?? '',
+    webhookBaseUrl: binding.webhookBaseUrl ?? '',
     webhookSecret: '',
   }
   errorMessage.value = ''
   editing.value = binding
   creating.value = false
-  if (!webhookUrlEdited.value && suggestedWebhookUrl.value) {
-    form.value.webhookUrl = suggestedWebhookUrl.value
-  }
+  enterWebhookMode()
 }
 
 function closeModal() {
@@ -230,17 +256,17 @@ async function save() {
     body.botToken = form.value.botToken.trim()
   }
   if (form.value.transport === 'WEBHOOK') {
-    body.webhookUrl = form.value.webhookUrl.trim()
-    // Blank-on-edit leaves the stored secret untouched; sending it only when
-    // provided matches the botToken "leave blank to keep" semantics.
-    if (form.value.webhookSecret.trim()) {
-      body.webhookSecret = form.value.webhookSecret.trim()
+    body.webhookBaseUrl = form.value.webhookBaseUrl.trim()
+    // Only send a secret when we generated one (new/secretless binding); blank
+    // leaves the stored secret untouched, like the botToken "leave blank to keep".
+    if (form.value.webhookSecret) {
+      body.webhookSecret = form.value.webhookSecret
     }
   }
   else {
     // Switching to POLLING clears webhook config so the stored binding doesn't
-    // leak stale URL/secret if the admin flips back later.
-    body.webhookUrl = null
+    // leak a stale base/secret if the admin flips back later.
+    body.webhookBaseUrl = null
     body.webhookSecret = null
   }
   const result = await mutate(url, { method, body })
@@ -560,59 +586,40 @@ async function remove(binding: TelegramBindingSummary) {
 
         <template v-if="form.transport === 'WEBHOOK'">
           <label
-            for="binding-webhook-url"
+            for="binding-webhook-base"
             class="block"
           >
-            <span class="block text-xs text-fg-muted mb-1">webhookUrl</span>
+            <span class="block text-xs text-fg-muted mb-1">Public URL</span>
             <input
-              id="binding-webhook-url"
-              v-model="form.webhookUrl"
+              id="binding-webhook-base"
+              v-model="form.webhookBaseUrl"
               type="url"
-              :placeholder="funnelBaseUrl
-                ? `${funnelBaseUrl}/api/webhooks/telegram/…`
-                : 'https://your-host.example.com/api/webhooks/telegram/…'"
-              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                     focus:outline-hidden focus:border-ring transition-colors"
-              @input="webhookUrlEdited = true"
-            >
-          </label>
-
-          <label
-            for="binding-webhook-secret"
-            class="block"
-          >
-            <span class="block text-xs text-fg-muted mb-1">webhookSecret</span>
-            <input
-              id="binding-webhook-secret"
-              v-model="form.webhookSecret"
-              type="password"
-              :placeholder="editing && editing.hasWebhookSecret
-                ? 'leave blank to keep existing secret'
-                : 'shared secret Telegram echoes on every POST'"
+              placeholder="https://your-host.example.com"
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
                      focus:outline-hidden focus:border-ring transition-colors"
             >
           </label>
 
-          <p
-            v-if="funnelBaseUrl && editing"
-            class="text-xs text-fg-muted"
+          <div
+            v-if="fullWebhookUrl"
+            class="text-xs text-fg-muted space-y-1"
           >
-            Pre-filled from the live Tailscale Funnel. Register it with Telegram's
-            <code class="font-mono px-1 bg-muted text-fg-strong">setWebhook</code>,
-            passing
-            <code class="font-mono px-1 bg-muted text-fg-strong">secret_token</code>
-            set to the same webhookSecret — JClaw checks both the URL secret and
-            that header. The URL embeds the binding id and secret, so keep it private.
-          </p>
+            <span class="block">Webhook URL — JClaw registers this with Telegram automatically on save:</span>
+            <code class="block font-mono break-all text-emerald-400">{{ fullWebhookUrl }}</code>
+            <span class="block">The path and secret are generated for you; only the public host above is editable. Keep it private.</span>
+          </div>
           <p
-            v-else-if="!funnelBaseUrl"
+            v-else-if="!form.webhookBaseUrl.trim()"
             class="text-xs text-amber-400"
           >
-            Tailscale Funnel is offline, so JClaw can't auto-register this webhook
-            with Telegram. Enable the Funnel on the Channels page (or expose this
-            host another way) and re-save, or register the URL manually with
-            <code class="font-mono px-1 bg-muted text-fg-strong">setWebhook</code>.
+            Enter your public HTTPS URL — or enable the Tailscale Funnel on the
+            Channels page — so JClaw can register the webhook with Telegram.
+          </p>
+          <p
+            v-else
+            class="text-xs text-fg-muted"
+          >
+            The full webhook URL is generated when you save (it includes the new binding's id).
           </p>
         </template>
       </div>

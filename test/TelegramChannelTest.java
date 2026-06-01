@@ -565,42 +565,7 @@ class TelegramChannelTest extends UnitTest {
                 "video_note maps to KIND_FILE");
     }
 
-    // ─── setWebhook — JCLAW-325 ─────────────────────────────────────────
-
-    @Test
-    void setWebhook_nullInputsReturnFalseImmediately() {
-        // Line 469: null binding or null webhookUrl short-circuits.
-        assertFalse(TelegramChannel.setWebhook(null));
-        var b = new models.TelegramBinding();
-        b.botToken = "any";
-        b.webhookUrl = null;
-        assertFalse(TelegramChannel.setWebhook(b));
-    }
-
-    @Test
-    void setWebhook_successAndFailurePaths() {
-        // Drives 473-475 (success log) and 477-480 (catch). Use a dummy
-        // binding with id=0 since we don't persist.
-        String token = "wh-" + System.nanoTime();
-        try {
-            TelegramChannel.installForTest(token, mock.telegramUrl());
-            var b = new models.TelegramBinding();
-            b.id = 1L;
-            b.botToken = token;
-            b.webhookUrl = "https://example.com/wh";
-            b.webhookSecret = "secret-bytes";
-            assertTrue(TelegramChannel.setWebhook(b));
-            assertEquals(1, mock.countRequests("setWebhook"));
-
-            mock.respondWith("setWebhook", 400,
-                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad url\"}");
-            assertFalse(TelegramChannel.setWebhook(b));
-        } finally {
-            TelegramChannel.clearForTest(token);
-        }
-    }
-
-    // ─── setWebhook(token,url,secret) + deleteWebhook — JCLAW-339 ───────────
+    // ─── setWebhook(token,url,secret) + deleteWebhook — JCLAW-325/339 ───────
 
     @Test
     void setWebhook_tokenOverloadRegistersAndGuardsNulls() {

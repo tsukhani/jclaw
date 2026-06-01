@@ -201,7 +201,7 @@ class WebhookControllerTest extends FunctionalTest {
             binding.botToken = "123:test-token";
             binding.telegramUserId = "42";
             binding.webhookSecret = secret;
-            binding.webhookUrl = "https://example.com/tg-webhook";
+            binding.webhookBaseUrl = "https://example.com/tg-webhook";
             binding.transport = ChannelTransport.WEBHOOK;
             binding.enabled = enabled;
             binding.save();

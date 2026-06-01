@@ -28,13 +28,15 @@ export interface TelegramBindingSummary {
   agentName: string | null
   telegramUserId: string
   transport: string
-  webhookUrl: string | null
+  /** Editable public base (scheme + host, no path) Telegram reaches this instance
+   *  at, e.g. https://host.tailnet.ts.net. The fixed path + secret are appended
+   *  to form the full webhook URL. Null for polling bindings. */
+  webhookBaseUrl: string | null
   hasWebhookSecret: boolean
   /**
-   * Webhook URL derived from the live Tailscale Funnel base + this binding's id
-   * and secret (JCLAW-338). Non-null only for WEBHOOK-transport bindings while
-   * the funnel is active and a secret exists; the operator registers it with
-   * Telegram's setWebhook. Display-only — JClaw does not call setWebhook itself.
+   * Full webhook URL JClaw registers with Telegram (JCLAW-338/339):
+   * base + /api/webhooks/telegram/{id}/{secret}. Non-null only for a WEBHOOK
+   * binding that has both a public base and a secret.
    */
   effectiveWebhookUrl: string | null
   enabled: boolean

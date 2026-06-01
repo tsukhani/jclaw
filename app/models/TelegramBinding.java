@@ -64,13 +64,23 @@ public class TelegramBinding extends Model {
     @Column(nullable = false)
     public ChannelTransport transport = ChannelTransport.POLLING;
 
-    /** Shared secret for webhook transport; null for polling bindings. */
+    /**
+     * Shared secret for webhook transport; null for polling bindings. Auto-
+     * generated (JCLAW-339) — the operator never types it. Used both as the
+     * {@code /…/{secret}} path segment and Telegram's {@code secret_token}.
+     */
     @Column(name = "webhook_secret")
     public String webhookSecret;
 
-    /** Public HTTPS URL Telegram should POST to; null for polling bindings. */
-    @Column(name = "webhook_url")
-    public String webhookUrl;
+    /**
+     * Public base URL (scheme + host, no path) Telegram should reach this
+     * instance at, e.g. {@code https://host.tailnet.ts.net}. The fixed contract
+     * path {@code /api/webhooks/telegram/{id}/{secret}} is appended when building
+     * the full webhook URL for display and registration. Null for polling
+     * bindings.
+     */
+    @Column(name = "webhook_base_url")
+    public String webhookBaseUrl;
 
     @Column(nullable = false)
     public boolean enabled = true;

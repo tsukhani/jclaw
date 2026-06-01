@@ -109,7 +109,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
             b.telegramUserId = tgUserId;
             b.transport = ChannelTransport.WEBHOOK;
             b.webhookSecret = "ws";
-            b.webhookUrl = "https://example.com/tg";
+            b.webhookBaseUrl = "https://example.com/tg";
             b.enabled = true;
             b.save();
             return b.id;

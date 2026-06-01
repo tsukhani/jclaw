@@ -104,7 +104,7 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
             b.telegramUserId = tgUserId;
             b.transport = ChannelTransport.WEBHOOK;
             b.webhookSecret = "ws-secret";
-            b.webhookUrl = "https://example.com/tg";
+            b.webhookBaseUrl = "https://example.com/tg";
             b.enabled = true;
             b.save();
             return b.id;
@@ -273,7 +273,7 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
         login();
         var body = """
                 {"botToken": "200:tok", "agentId": %d, "telegramUserId": "42",
-                 "transport": "WEBHOOK", "webhookSecret": "ws", "webhookUrl": "https://example.com/tg"}
+                 "transport": "WEBHOOK", "webhookSecret": "ws", "webhookBaseUrl": "https://example.com/tg"}
                 """.formatted(agentId);
         var response = POST("/api/channels/telegram/bindings",
                 "application/json", body);
@@ -327,16 +327,18 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
 
     /**
      * Accepted single-field updates that share the seed + PUT + 200 +
-     * response-contains skeleton: the enabled toggle, clearing the webhook
+     * response-contains skeleton: the enabled toggle, the auto-managed webhook
      * secret, and switching transport. {@code enabled:false} on the transport
      * case keeps post-mutation reconcile() from hitting api.telegram.org while
-     * the persisted transport field still asserts as POLLING.
+     * the persisted transport field still asserts as POLLING. JCLAW-339: clearing
+     * a WEBHOOK binding's secret regenerates one (it always needs one), so
+     * hasWebhookSecret stays true.
      */
     @ParameterizedTest(name = "updateAccepts[{0}]")
     @CsvSource(delimiter = '|', value = {
-            "EnabledToggle      | {\"enabled\": false}                          | \"enabled\":false",
-            "ClearWebhookSecret | {\"webhookSecret\": null}                     | \"hasWebhookSecret\":false",
-            "TransportChange    | {\"transport\": \"POLLING\", \"enabled\": false} | \"transport\":\"POLLING\""
+            "EnabledToggle          | {\"enabled\": false}                          | \"enabled\":false",
+            "WebhookSecretAutoKept  | {\"webhookSecret\": null}                     | \"hasWebhookSecret\":true",
+            "TransportChange        | {\"transport\": \"POLLING\", \"enabled\": false} | \"transport\":\"POLLING\""
     })
     void updateAcceptsSingleFieldChange(String label, String body, String expectedSubstring) {
         var agentId = seedAgent("tg-agent");

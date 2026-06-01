@@ -1,6 +1,5 @@
 package controllers;
 
-import channels.TelegramWebhookRegistrar;
 import com.google.gson.Gson;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -54,11 +53,6 @@ public class ApiTailscaleController extends Controller {
 
         if (enabled) {
             TailscaleFunnel.reconcile();
-            // JCLAW-339: now that a public base URL exists, register any WEBHOOK
-            // bindings that were configured while the funnel was offline. Off the
-            // request thread — these are one-shot setWebhook calls to Telegram.
-            Thread.ofVirtual().name("tg-webhook-register-all")
-                    .start(TelegramWebhookRegistrar::registerAllEnabled);
         } else {
             TailscaleFunnel.disable();
         }

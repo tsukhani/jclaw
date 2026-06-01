@@ -71,7 +71,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
             b.telegramUserId = BOUND_USER_ID;
             b.transport = ChannelTransport.WEBHOOK;
             b.webhookSecret = SECRET;
-            b.webhookUrl = "https://example.com/tg";
+            b.webhookBaseUrl = "https://example.com/tg";
             b.enabled = enabled;
             b.save();
             return b.id;
