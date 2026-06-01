@@ -3,27 +3,30 @@ package channels;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.slack.api.Slack;
 import com.slack.api.app_backend.SlackSignature;
+import com.slack.api.methods.SlackApiException;
+import com.slack.api.methods.request.chat.ChatPostMessageRequest;
 import com.slack.api.model.event.MessageEvent;
 import com.slack.api.util.json.GsonFactory;
 import models.ChannelConfig;
 import services.EventLogger;
-import utils.HttpKeys;
 
-import java.util.LinkedHashMap;
+import java.io.IOException;
 
 /**
- * Slack Web API + Events API client.
+ * Slack Web API + Events API client, on the official Slack SDK (com.slack.api).
  *
- * <p>JCLAW-83: inbound signature verification and event parsing use the official
- * Slack SDK (com.slack.api) — {@link SlackSignature.Verifier} and the typed
- * {@link MessageEvent} model — instead of hand-rolled HMAC + Gson. Outbound is
- * still raw OkHttp here; the Web API client ({@code MethodsClient}) swap and
- * {@code mrkdwn} land in Phase 2.
+ * <p>JCLAW-83: inbound uses {@link SlackSignature.Verifier} + the typed
+ * {@link MessageEvent} model; outbound uses the Web API {@code MethodsClient}
+ * ({@code chat.postMessage} with {@code mrkdwn} and {@code thread_ts}). The SDK
+ * manages its own OkHttp client, so Slack traffic stays off JClaw's LLM/general
+ * connection pools.
  */
 public class SlackChannel implements Channel {
 
-    private static final Gson gson = utils.GsonHolder.INSTANCE;
+    /** Shared SDK entry point; {@code methods(token)} yields a per-token client. */
+    private static final Slack slack = Slack.getInstance();
     /** Slack's snake_case Gson for deserializing inbound event POJOs. */
     private static final Gson SLACK_GSON = GsonFactory.createSnakeCase();
 
@@ -79,39 +82,51 @@ public class SlackChannel implements Channel {
         return trySend(config, peerId, text, outboundThreadTs);
     }
 
-    private SendResult trySend(SlackConfig config, String channelId, String text, String threadTs) {
-        var body = new LinkedHashMap<String, String>();
-        body.put(CHANNEL, channelId);
-        body.put("text", text);
-        if (threadTs != null) body.put("thread_ts", threadTs);
-        var jsonBody = gson.toJson(body);
-        var jsonMediaType = okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON);
-        var request = new okhttp3.Request.Builder()
-                .url("https://slack.com/api/chat.postMessage")
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.botToken())
-                .post(okhttp3.RequestBody.create(jsonBody, jsonMediaType))
+    /**
+     * Pure, testable {@code chat.postMessage} request builder — sets
+     * {@code mrkdwn:true} (JCLAW-14 §4.4) and the optional {@code thread_ts}
+     * (JCLAW-83). A null {@code threadTs} is omitted, so the reply posts at
+     * channel level.
+     */
+    public static ChatPostMessageRequest postRequest(String channelId, String text, String threadTs) {
+        return ChatPostMessageRequest.builder()
+                .channel(channelId)
+                .text(text)
+                .mrkdwn(true)
+                .threadTs(threadTs)
                 .build();
-        try (var response = utils.HttpFactories.general().newCall(request).execute()) {
-            if (response.code() == 429) {
-                var retryAfterHeader = response.header("Retry-After");
-                long retryAfterMs = parseRetryAfterMs(retryAfterHeader);
-                EventLogger.warn(CHANNEL, null, SLACK,
-                        "Rate-limited; Retry-After=%sms".formatted(retryAfterMs));
-                return SendResult.rateLimited(retryAfterMs);
-            }
-            var responseBody = response.body().string();
-            var result = JsonParser.parseString(responseBody).getAsJsonObject();
+    }
 
-            if (result.get("ok").getAsBoolean()) {
+    private SendResult trySend(SlackConfig config, String channelId, String text, String threadTs) {
+        try {
+            var resp = slack.methods(config.botToken())
+                    .chatPostMessage(postRequest(channelId, text, threadTs));
+            if (resp.isOk()) {
                 EventLogger.info(CHANNEL, null, SLACK,
                         "Message sent to channel %s".formatted(channelId));
                 return SendResult.OK;
             }
-
+            // The synchronous client surfaces a 429 as SlackApiException (below);
+            // a "ratelimited" body error is rare but handled defensively.
+            if ("ratelimited".equals(resp.getError())) {
+                EventLogger.warn(CHANNEL, null, SLACK, "Rate-limited (API error)");
+                return SendResult.rateLimited(0L);
+            }
             EventLogger.warn(CHANNEL, null, SLACK,
-                    "Slack API error: %s".formatted(result.has("error") ? result.get("error").getAsString() : responseBody));
+                    "Slack API error: %s".formatted(resp.getError()));
             return SendResult.FAILED;
-        } catch (Exception e) {
+        } catch (SlackApiException e) {
+            var http = e.getResponse();
+            if (http != null && http.code() == 429) {
+                long retryAfterMs = parseRetryAfterMs(http.header("Retry-After"));
+                EventLogger.warn(CHANNEL, null, SLACK,
+                        "Rate-limited; Retry-After=%sms".formatted(retryAfterMs));
+                return SendResult.rateLimited(retryAfterMs);
+            }
+            EventLogger.warn(CHANNEL, null, SLACK,
+                    "Slack API error: %s".formatted(e.getResponseBody()));
+            return SendResult.FAILED;
+        } catch (IOException e) {
             EventLogger.warn(CHANNEL, null, SLACK,
                     "Send failed: %s".formatted(e.getMessage()));
             return SendResult.FAILED;

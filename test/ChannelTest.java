@@ -653,6 +653,22 @@ class ChannelTest extends UnitTest {
         assertNull(msg.threadTs());
     }
 
+    @Test
+    void slackPostRequestSetsMrkdwnAndThreadTs() {
+        var req = SlackChannel.postRequest("C0", "hello", "1700000000.000100");
+        assertEquals("C0", req.getChannel());
+        assertEquals("hello", req.getText());
+        assertTrue(req.isMrkdwn(), "agent output must be sent with mrkdwn:true");
+        assertEquals("1700000000.000100", req.getThreadTs());
+    }
+
+    @Test
+    void slackPostRequestOmitsThreadTsWhenNull() {
+        var req = SlackChannel.postRequest("C0", "hi", null);
+        assertTrue(req.isMrkdwn());
+        assertNull(req.getThreadTs(), "no thread_ts → reply posts at channel level");
+    }
+
     // === WhatsApp ===
 
     @Test
