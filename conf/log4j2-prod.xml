@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Configuration status="WARN">
+<!-- shutdownHook="disable": log4j2's default JVM shutdown hook closes the
+     appenders concurrently with Play's @OnApplicationStop, racing (and often
+     dropping) anything logged during graceful shutdown — e.g. ShutdownJob's
+     "Graceful shutdown: stopping N subsystems" sequence. Disabling it keeps
+     the appenders open until the JVM exits; the synchronous Console/RollingFile
+     appenders are immediateFlush, so nothing is buffered or lost. -->
+<Configuration status="WARN" shutdownHook="disable">
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>

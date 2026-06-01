@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Configuration status="WARN">
+<!-- shutdownHook="disable": keep appenders open during graceful shutdown so
+     logs emitted from Play's @OnApplicationStop (e.g. ShutdownJob's sequence)
+     aren't dropped by log4j2's own shutdown hook closing them first. Safe here
+     — all appenders are synchronous + immediateFlush. -->
+<Configuration status="WARN" shutdownHook="disable">
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
             <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
