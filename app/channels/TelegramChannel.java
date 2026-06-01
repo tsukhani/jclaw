@@ -10,6 +10,7 @@ import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
+import org.telegram.telegrambots.meta.api.methods.updates.DeleteWebhook;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
@@ -473,16 +474,47 @@ public class TelegramChannel implements Channel {
     /** Register the webhook URL with Telegram for a specific binding. */
     public static boolean setWebhook(TelegramBinding binding) {
         if (binding == null || binding.webhookUrl == null) return false;
-        var builder = SetWebhook.builder().url(binding.webhookUrl);
-        if (binding.webhookSecret != null) builder.secretToken(binding.webhookSecret);
+        return setWebhook(binding.botToken, binding.webhookUrl, binding.webhookSecret);
+    }
+
+    /**
+     * JCLAW-339: register {@code url} as the bot's webhook, passing
+     * {@code secretToken} (null skips it) so Telegram echoes it back in the
+     * {@code X-Telegram-Bot-Api-Secret-Token} header. Telegram stops its own
+     * long polling for the bot once a webhook is set. Returns false on any API
+     * error (logged).
+     */
+    public static boolean setWebhook(String botToken, String url, String secretToken) {
+        if (botToken == null || url == null) return false;
+        var builder = SetWebhook.builder().url(url);
+        if (secretToken != null) builder.secretToken(secretToken);
         try {
-            forToken(binding.botToken).client.execute(builder.build());
+            forToken(botToken).client.execute(builder.build());
             EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Webhook registered for binding %d: %s".formatted(binding.id, binding.webhookUrl));
+                    "Webhook registered: %s".formatted(url));
             return true;
         } catch (TelegramApiException e) {
             EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Webhook registration failed for binding %d: %s".formatted(binding.id, e.getMessage()));
+                    "Webhook registration failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * JCLAW-339: clear any webhook registered for {@code botToken} so Telegram
+     * stops POSTing and long-poll {@code getUpdates} is allowed again (Telegram
+     * 409s while a webhook is set). Idempotent — a no-op when none is
+     * registered. Returns false on API error (logged).
+     */
+    public static boolean deleteWebhook(String botToken) {
+        if (botToken == null) return false;
+        try {
+            forToken(botToken).client.execute(DeleteWebhook.builder().build());
+            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME, "Webhook deleted");
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "Webhook deletion failed: %s".formatted(e.getMessage()));
             return false;
         }
     }

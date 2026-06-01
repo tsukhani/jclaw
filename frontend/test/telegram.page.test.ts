@@ -78,5 +78,7 @@ describe('telegram bindings page — funnel-derived webhook URL (JCLAW-338)', ()
     await nextTick()
     const input = c.find('#binding-webhook-url').element as HTMLInputElement
     expect(input.value).toBe('')
+    // JCLAW-339: the operator is told it won't be auto-registered.
+    expect(c.text()).toContain('Tailscale Funnel is offline')
   })
 })

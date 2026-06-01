@@ -2,6 +2,7 @@ package controllers;
 
 import channels.ChannelTransport;
 import channels.TelegramPollingRunner;
+import channels.TelegramWebhookRegistrar;
 import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -143,6 +144,10 @@ public class ApiTelegramBindingsController extends Controller {
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                 "Binding %d created (user=%s)".formatted(binding.id, telegramUserId));
 
+        // JCLAW-339: register/deregister the Telegram webhook BEFORE the polling
+        // reconcile so a non-webhook binding's webhook is cleared before the
+        // poller's first getUpdates (Telegram 409s while a webhook is set).
+        TelegramWebhookRegistrar.onBindingSaved(binding);
         TelegramPollingRunner.reconcile();
         renderJSON(gson.toJson(BindingView.of(binding, webhookFunnelBase(binding))));
     }
@@ -167,6 +172,9 @@ public class ApiTelegramBindingsController extends Controller {
                 binding.agent != null ? binding.agent.name : null, CHANNEL_TELEGRAM,
                 "Binding %d updated".formatted(binding.id));
 
+        // JCLAW-339: on a WEBHOOK→POLLING switch this clears the webhook before
+        // the poller starts, so getUpdates doesn't 409.
+        TelegramWebhookRegistrar.onBindingSaved(binding);
         TelegramPollingRunner.reconcile();
         renderJSON(gson.toJson(BindingView.of(binding, webhookFunnelBase(binding))));
     }
@@ -235,9 +243,12 @@ public class ApiTelegramBindingsController extends Controller {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();
         String agentName = binding.agent != null ? binding.agent.name : null;
+        String botToken = binding.botToken;
         binding.delete();
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agentName, CHANNEL_TELEGRAM,
                 "Binding %d deleted".formatted(id));
+        // JCLAW-339: drop any webhook so Telegram stops POSTing to a now-dead binding.
+        TelegramWebhookRegistrar.onBindingDeleted(botToken);
         TelegramPollingRunner.reconcile();
         renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
     }

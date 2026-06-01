@@ -605,6 +605,15 @@ async function remove(binding: TelegramBindingSummary) {
             set to the same webhookSecret — JClaw checks both the URL secret and
             that header. The URL embeds the binding id and secret, so keep it private.
           </p>
+          <p
+            v-else-if="!funnelBaseUrl"
+            class="text-xs text-amber-400"
+          >
+            Tailscale Funnel is offline, so JClaw can't auto-register this webhook
+            with Telegram. Enable the Funnel on the Channels page (or expose this
+            host another way) and re-save, or register the URL manually with
+            <code class="font-mono px-1 bg-muted text-fg-strong">setWebhook</code>.
+          </p>
         </template>
       </div>
 

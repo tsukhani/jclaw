@@ -139,6 +139,7 @@ public final class MockTelegramServer implements AutoCloseable {
         if (m.equals("deletemessage")
                 || m.equals("sendchataction")
                 || m.equals("setwebhook")
+                || m.equals("deletewebhook")
                 || m.equals("setmycommands")
                 // JCLAW-109: answerCallbackQuery returns True per the Bot API.
                 // editMessageText can return True or the updated Message — the

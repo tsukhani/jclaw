@@ -599,4 +599,43 @@ class TelegramChannelTest extends UnitTest {
             TelegramChannel.clearForTest(token);
         }
     }
+
+    // ─── setWebhook(token,url,secret) + deleteWebhook — JCLAW-339 ───────────
+
+    @Test
+    void setWebhook_tokenOverloadRegistersAndGuardsNulls() {
+        String token = "whx-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.setWebhook(token, "https://example.com/wh", "sek"));
+            assertEquals(1, mock.countRequests("setWebhook"));
+            // Null token or url short-circuits before any request.
+            assertFalse(TelegramChannel.setWebhook(null, "https://example.com/wh", "sek"));
+            assertFalse(TelegramChannel.setWebhook(token, null, "sek"));
+            assertEquals(1, mock.countRequests("setWebhook"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void deleteWebhook_nullTokenReturnsFalse() {
+        assertFalse(TelegramChannel.deleteWebhook(null));
+    }
+
+    @Test
+    void deleteWebhook_successAndFailurePaths() {
+        String token = "del-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.deleteWebhook(token));
+            assertEquals(1, mock.countRequests("deleteWebhook"));
+
+            mock.respondWith("deleteWebhook", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"nope\"}");
+            assertFalse(TelegramChannel.deleteWebhook(token));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
 }
