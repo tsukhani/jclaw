@@ -40,8 +40,8 @@ import java.util.Map;
  *   <li>{@link #open()} — called once from {@code FullTextSearchInitJob}
  *       at {@code @OnApplicationStart}. Opens an FSDirectory + writer +
  *       SearcherManager per scope.</li>
- *   <li>{@link #close()} — called from {@code FullTextSearchShutdownJob}
- *       at {@code @OnApplicationStop}. Commits pending writes and
+ *   <li>{@link #close()} — called from {@code ShutdownJob} as one of its
+ *       {@code @OnApplicationStop} fan-out components. Commits pending writes and
  *       releases file locks for every scope so the next boot opens
  *       cleanly.</li>
  *   <li>{@link #upsert(Scope, long, String)} / {@link #remove(Scope, long)}

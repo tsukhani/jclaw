@@ -54,7 +54,8 @@ public class ShutdownJob extends Job<Void> {
                 new Component("telegram-polling", TelegramPollingRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("whisper-transcriber", services.transcription.WhisperJniTranscriber::shutdown),
-                new Component("mcp-connections", mcp.McpConnectionManager::shutdown)
+                new Component("mcp-connections", mcp.McpConnectionManager::shutdown),
+                new Component("lucene-index", services.search.LuceneIndexer::close)
         );
 
         EventLogger.info("shutdown",
