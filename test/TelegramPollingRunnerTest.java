@@ -237,6 +237,27 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    void cooldownSchedulerDropsDeferredReconcileOnShutdown() throws Exception {
+        // JCLAW-335: a binding unregister schedules a reconcile ~30.5s out
+        // (COOLDOWN_MS + 500). At shutdown the scheduler must not wait on that
+        // deferred task — gracefulShutdown only awaits 5s, and an unconfigured
+        // ScheduledThreadPoolExecutor would force-kill it with a WARN after the
+        // 5s tail. Verify newScheduler() drops queued delayed tasks on
+        // shutdown() so the drain is immediate.
+        var newScheduler = TelegramPollingRunner.class.getDeclaredMethod("newScheduler");
+        newScheduler.setAccessible(true);
+        var exec = (java.util.concurrent.ScheduledExecutorService) newScheduler.invoke(null);
+        try {
+            exec.schedule(() -> { }, 60, java.util.concurrent.TimeUnit.SECONDS); // stand in for the deferred reconcile
+            exec.shutdown();
+            assertTrue(exec.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS),
+                    "scheduler must terminate promptly, not wait out the deferred reconcile");
+        } finally {
+            exec.shutdownNow();
+        }
+    }
+
+    @Test
     void reconcileRestartsOnTokenRotation() {
         String tokenA = "555:tokA";
         String tokenB = "555:tokB";

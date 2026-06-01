@@ -14,8 +14,8 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -66,8 +66,19 @@ public final class TelegramPollingRunner {
     private static volatile ScheduledExecutorService scheduler = newScheduler();
 
     private static ScheduledExecutorService newScheduler() {
-        return Executors.newSingleThreadScheduledExecutor(
+        var exec = new ScheduledThreadPoolExecutor(1,
                 r -> Thread.ofVirtual().name("telegram-cooldown-reconcile").unstarted(r));
+        // Each unregister schedules a cooldown-reconcile ~30.5s out
+        // (COOLDOWN_MS + 500). A ScheduledThreadPoolExecutor by default keeps
+        // such delayed tasks queued after shutdown(), so this single-thread
+        // scheduler would stay alive until the task fires — past
+        // gracefulShutdown's 5s await, which then force-kills it with a noisy
+        // WARN. A deferred reconcile is pointless once we're stopping, so drop
+        // pending delayed tasks on shutdown; the executor then terminates
+        // immediately and the drain is clean.
+        exec.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        exec.setRemoveOnCancelPolicy(true);
+        return exec;
     }
 
     private TelegramPollingRunner() {}
