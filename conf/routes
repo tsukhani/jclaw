@@ -176,6 +176,11 @@ POST    /api/metrics/loadtest                   ApiMetricsController.loadtest
 DELETE  /api/metrics/loadtest                   ApiMetricsController.stopLoadtest
 DELETE  /api/metrics/loadtest/data              ApiMetricsController.cleanLoadtest
 
+# Unknown /api/* paths -> clean 404 JSON (JCLAW-336). Must be after all real /api
+# routes and before the SPA + {controller}/{action} catch-alls, so scanners hitting
+# e.g. /api/graphql get a 404 instead of an ActionNotFound ERROR + stack trace.
+*       /api/{<.*>path}                         ApiNotFoundController.handle
+
 # SPA static assets (production build: nuxi generate output copied to public/spa/)
 GET     /_nuxt/                                 staticDir:public/spa/_nuxt
 
