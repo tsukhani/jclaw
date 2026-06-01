@@ -39,7 +39,7 @@ Reject anything else with a clear message; do not guess.
 10. Compose a commit message:
     - Title line: `Release vNEW_VERSION` (e.g. `Release v0.7.6`).
     - Body: one short paragraph summarizing the *why* of the changes being shipped — inferred from the staged diff, not just the version bump. If there are no meaningful changes other than the version, write `Version bump only; no code changes since v<OLD_VERSION>.`
-    - Trailer: `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
+    - Trailer: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
 11. Create the **signed** commit using a HEREDOC so line breaks survive the shell. The `-S` flag is explicit even though `commit.gpgsign=true` is set globally — this documents the workflow's intent in the file and survives if the global config is ever disabled or the deploy runs on a machine missing it:
     ```bash
     /usr/bin/git commit -S -m "$(cat <<'EOF'
@@ -47,7 +47,7 @@ Reject anything else with a clear message; do not guess.
 
     <body paragraph>
 
-    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
     EOF
     )"
     ```
