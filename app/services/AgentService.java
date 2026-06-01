@@ -3,7 +3,6 @@ package services;
 import llm.ProviderRegistry;
 import memory.MemoryStoreFactory;
 import models.Agent;
-import models.Config;
 import play.Play;
 import play.cache.CacheConfig;
 import play.cache.Caches;
@@ -388,7 +387,13 @@ public class AgentService {
         // only wipe the JPA table, silently orphaning Neo4j memory nodes if that
         // backend is ever enabled via memory.backend=neo4j.
         MemoryStoreFactory.get().deleteAll(agentName);
-        Config.delete("key LIKE ?1", "agent." + agentName + ".%");
+        // Native delete (not a bulk HQL Config.delete): the HQL form makes
+        // Hibernate provision an HTE_config id-table whose DDL emits the
+        // entity attribute `key` unquoted, which H2 rejects as a reserved
+        // word — ~600 failed CREATE statements in the trace log. Native SQL
+        // skips the id-table strategy and uses the real `config_key` column.
+        em.createNativeQuery("DELETE FROM config WHERE config_key LIKE ?1")
+                .setParameter(1, "agent." + agentName + ".%").executeUpdate();
         ConfigService.clearCache();
 
         agent.delete();
