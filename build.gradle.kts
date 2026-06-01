@@ -331,6 +331,22 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp-sse:5.3.2")
     implementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
 
+    // JCLAW-83: Slack SDK (official com.slack.api), a la carte — slack-api-client
+    // (Web API + Block Kit) + slack-app-backend (SlackSignature.Verifier + event
+    // parsers). NO Bolt. Exclude its bare OkHttp 4.x + Okio so it runs on
+    // okhttp-jvm 5.3.2 instead of clashing in the shared okhttp3 package
+    // (same treatment as the Telegram SDK above).
+    listOf(
+        "slack-api-client",
+        "slack-app-backend",
+    ).forEach { module ->
+        implementation("com.slack.api:$module:1.49.0") {
+            exclude(group = "com.squareup.okhttp3", module = "okhttp")
+            exclude(group = "com.squareup.okhttp3", module = "mockwebserver")
+            exclude(group = "com.squareup.okio")
+        }
+    }
+
     // JCLAW-163: whisper.cpp via JNI for offline transcription. The artifact
     // bundles native libs for every developer-laptop platform (mac arm64/x64,
     // linux x64, win x64) so there's no per-platform install dance.
