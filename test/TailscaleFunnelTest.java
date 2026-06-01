@@ -141,4 +141,13 @@ class TailscaleFunnelTest extends UnitTest {
         assertTrue(TailscaleFunnel.disable(fake));
         assertTrue(fake.ran("funnel", "reset"));
     }
+
+    @Test
+    void reconcileIsNoOpWhenDisabled() {
+        // No tailscale.funnel.enabled config row → treated as off → reconcile must
+        // short-circuit (spawning no tailscale subprocess) and report disabled.
+        var st = TailscaleFunnel.reconcile();
+        assertFalse(st.available());
+        assertNotNull(st.error());
+    }
 }

@@ -74,6 +74,50 @@ public final class TailscaleFunnel {
     /** Stop funnelling (idempotent — safe even when nothing is configured). */
     public static boolean disable() { return disable(PROCESS_RUNNER); }
 
+    // ===================== config-driven orchestration =====================
+
+    public static final String CFG_ENABLED = "tailscale.funnel.enabled";
+    public static final String CFG_PORT = "tailscale.funnel.port";
+
+    /** Whether the operator switched Funnel on for this JClaw instance. */
+    public static boolean isFunnelEnabled() {
+        return Boolean.parseBoolean(ConfigService.get(CFG_ENABLED, "false"));
+    }
+
+    /** Local port to funnel — the configured override, else JClaw's http.port (9000). */
+    public static int configuredPort() {
+        int fallback;
+        try {
+            fallback = Integer.parseInt(play.Play.configuration.getProperty("http.port", "9000"));
+        } catch (NumberFormatException e) {
+            fallback = 9000;
+        }
+        return ConfigService.getInt(CFG_PORT, fallback);
+    }
+
+    /**
+     * Align the live funnel with config — called at boot and after a toggle-on.
+     * No-op (no process spawned) when disabled, so the common "off" case is free.
+     * When enabled and Tailscale is usable, (re)establishes the funnel; otherwise
+     * returns the unavailable {@link Status} so the caller can surface why.
+     */
+    public static Status reconcile() {
+        if (!isFunnelEnabled()) {
+            return new Status(false, null, "Tailscale Funnel is disabled");
+        }
+        var st = status();
+        if (st.available()) {
+            enable(configuredPort());
+            return status();
+        }
+        return st;
+    }
+
+    /** Tear down the funnel on shutdown, but only if this instance enabled it. */
+    public static void disableIfEnabled() {
+        if (isFunnelEnabled()) disable();
+    }
+
     // ===================== command builders (pure) =====================
 
     public static List<String> statusCmd(String bin) { return List.of(bin, "status", "--json"); }

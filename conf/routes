@@ -149,6 +149,10 @@ DELETE  /api/channels/telegram/bindings/{id}    ApiTelegramBindingsController.de
 GET     /api/channels/{channelType}             ApiChannelsController.get
 PUT     /api/channels/{channelType}             ApiChannelsController.save
 
+# Tailscale Funnel (JCLAW-84): app-level public-URL toggle for webhook channels
+GET     /api/tailscale                          ApiTailscaleController.status
+POST    /api/tailscale                          ApiTailscaleController.toggle
+
 # Webhooks (no auth — verified by their own mechanisms)
 POST    /api/webhooks/telegram/{bindingId}/{secret}  WebhookTelegramController.webhook
 POST    /api/webhooks/slack                     WebhookSlackController.webhook
