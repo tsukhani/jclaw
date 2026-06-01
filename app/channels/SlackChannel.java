@@ -72,7 +72,9 @@ public class SlackChannel implements Channel {
             EventLogger.error(CHANNEL, null, SLACK, "Slack not configured");
             return false;
         }
-        return new SlackChannel(threadTs).sendWithRetry(channelId, text);
+        // JCLAW-341: agents emit CommonMark; convert to Slack mrkdwn so it renders
+        // formatted instead of showing literal **bold** / # headings / [t](u).
+        return new SlackChannel(threadTs).sendWithRetry(channelId, SlackMarkdownFormatter.format(text));
     }
 
     @Override
