@@ -7,6 +7,7 @@ import com.slack.api.Slack;
 import com.slack.api.app_backend.SlackSignature;
 import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.request.chat.ChatPostMessageRequest;
+import com.slack.api.methods.request.chat.ChatUpdateRequest;
 import com.slack.api.model.event.MessageEvent;
 import com.slack.api.util.json.GsonFactory;
 import models.ChannelConfig;
@@ -131,6 +132,47 @@ public class SlackChannel implements Channel {
         } catch (IOException e) {
             EventLogger.warn(CHANNEL, null, SLACK,
                     "Send failed: %s".formatted(e.getMessage()));
+            return SendResult.FAILED;
+        }
+    }
+
+    /**
+     * JCLAW-341: post a message and return its {@code ts} — the streaming sink's
+     * handle for later {@code chat.update} — or null on failure. Text is sent
+     * verbatim; the caller owns formatting.
+     */
+    public static String postReturningTs(String channelId, String text, String threadTs) {
+        var config = SlackConfig.load();
+        if (config == null) return null;
+        try {
+            var resp = slack.methods(config.botToken()).chatPostMessage(postRequest(channelId, text, threadTs));
+            return resp.isOk() ? resp.getTs() : null;
+        } catch (SlackApiException | IOException e) {
+            EventLogger.warn(CHANNEL, null, SLACK, "Streaming placeholder post failed: %s".formatted(e.getMessage()));
+            return null;
+        }
+    }
+
+    /**
+     * JCLAW-341: edit a previously-posted message ({@code chat.update}). Returns a
+     * {@link SendResult} so a streaming caller can back off on a 429.
+     */
+    public static SendResult updateMessage(String channelId, String ts, String text) {
+        var config = SlackConfig.load();
+        if (config == null) return SendResult.FAILED;
+        try {
+            var resp = slack.methods(config.botToken()).chatUpdate(
+                    ChatUpdateRequest.builder().channel(channelId).ts(ts).text(text).build());
+            if (resp.isOk()) return SendResult.OK;
+            if ("ratelimited".equals(resp.getError())) return SendResult.rateLimited(0L);
+            return SendResult.FAILED;
+        } catch (SlackApiException e) {
+            var http = e.getResponse();
+            if (http != null && http.code() == 429) {
+                return SendResult.rateLimited(parseRetryAfterMs(http.header("Retry-After")));
+            }
+            return SendResult.FAILED;
+        } catch (IOException e) {
             return SendResult.FAILED;
         }
     }

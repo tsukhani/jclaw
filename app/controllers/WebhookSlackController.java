@@ -1,12 +1,18 @@
 package controllers;
 
+import agents.AgentRouter;
 import agents.AgentRunner;
 import channels.SlackChannel;
+import channels.SlackStreamingSink;
 import com.google.gson.JsonParser;
 import play.mvc.Controller;
 import play.mvc.Http;
+import services.ConversationService;
 import services.EventLogger;
+import services.Tx;
 import utils.WebhookUtil;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class WebhookSlackController extends Controller {
 
@@ -82,13 +88,28 @@ public class WebhookSlackController extends Controller {
     }
 
     private static void processMessage(SlackChannel.InboundMessage message) {
+        long acceptedAtNs = System.nanoTime();
         try {
             // JCLAW-83: capture the inbound thread_ts so the reply lands in-thread
             // (null for a non-threaded message → posts at channel level).
             var threadTs = message.threadTs();
-            AgentRunner.processWebhookMessage(CHANNEL_SLACK, message.channelId(), message.text(),
-                    (peer, txt) -> SlackChannel.sendMessage(peer, txt, threadTs),
-                    peer -> SlackChannel.sendMessage(peer, "No agent configured for this channel.", null));
+            var route = Tx.run(() -> AgentRouter.resolve(CHANNEL_SLACK, message.channelId()));
+            if (route == null) {
+                SlackChannel.sendMessage(message.channelId(), "No agent configured for this channel.", null);
+                return;
+            }
+            var conversation = Tx.run(() ->
+                    ConversationService.findOrCreate(route.agent(), CHANNEL_SLACK, message.channelId()));
+            // JCLAW-341: stream the reply into one Slack message — placeholder
+            // (working indicator) → throttled chat.update → mrkdwn-formatted seal.
+            var sink = new SlackStreamingSink(message.channelId(), threadTs);
+            sink.begin();
+            AgentRunner.runStreaming(route.agent(), conversation.id, CHANNEL_SLACK, message.channelId(),
+                    message.text(), new AtomicBoolean(false),
+                    new AgentRunner.StreamingCallbacks(
+                            conv -> { }, sink::update, reasoning -> { }, status -> { },
+                            tool -> { }, sink::seal, sink::errorFallback, () -> { }),
+                    acceptedAtNs);
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "Error processing message: %s".formatted(e.getMessage()));
