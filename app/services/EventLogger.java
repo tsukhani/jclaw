@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class EventLogger {
 
@@ -37,12 +38,20 @@ public class EventLogger {
      *  the JPA layer is tearing down, so a batched flush would fail to begin a
      *  transaction and emit a spurious "Failed to flush N event logs" WARN.
      *  File logging — the actual shutdown observability — is unaffected. */
-    private static volatile boolean shuttingDown = false;
+    private static final AtomicBoolean shuttingDown = new AtomicBoolean(false);
 
-    /** Called by the shutdown hooks before any subsystem logging so
-     *  shutdown-time events stay file-only and don't trip the batch flush. */
+    /** Marks shutdown started — called first by every @OnApplicationStop hook,
+     *  before any subsystem teardown, so EventLogger goes file-only and the
+     *  shutdown logging doesn't trip the batch flush. The first caller (any
+     *  hook; Play doesn't order them) also logs the "Shutting down JClaw"
+     *  banner: the symmetric counterpart to Play's "Application 'JClaw' is now
+     *  started !" and the opening bookend to "Graceful shutdown complete". The
+     *  compareAndSet keeps the banner to exactly one line even if two hooks
+     *  race. */
     public static void markShuttingDown() {
-        shuttingDown = true;
+        if (shuttingDown.compareAndSet(false, true)) {
+            info("shutdown", "Shutting down JClaw");
+        }
     }
 
     @SuppressWarnings("java:S6213") // 'record' as method name predates the restricted identifier; rename would churn callers/tests with no real ambiguity
@@ -65,7 +74,7 @@ public class EventLogger {
         // queuing for DB persistence is pointless and would trip the batch flush
         // into a doomed "begin transaction failed". The file line above is what
         // shutdown observability needs.
-        if (shuttingDown) return;
+        if (shuttingDown.get()) return;
 
         // Queue for batch persistence — avoids opening a new transaction per log entry
         // when called from virtual threads (e.g., during tool-execution loops).
@@ -89,7 +98,7 @@ public class EventLogger {
      */
     public static void clear() {
         pending.clear();
-        shuttingDown = false;
+        shuttingDown.set(false);
     }
 
     /**
@@ -98,7 +107,7 @@ public class EventLogger {
      * threshold is reached.
      */
     public static void flush() {
-        if (shuttingDown) return;
+        if (shuttingDown.get()) return;
         var batch = new ArrayList<EventLog>();
         EventLog e;
         while ((e = pending.poll()) != null) batch.add(e);
