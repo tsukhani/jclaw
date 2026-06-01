@@ -9,16 +9,26 @@ interface ChannelInfo {
 
 interface ChannelField {
   name: string
+  label?: string
+  hint?: string
   type?: 'text' | 'password' | 'select'
   options?: Array<{ value: string, label: string }>
   default?: string
   showWhen?: (form: Record<string, string>) => boolean
 }
 
+interface ChannelSetup {
+  // Provider callback the channel must receive on (rendered as an absolute URL
+  // against the live origin) — e.g. Slack's Events API Request URL.
+  requestUrlPath?: string
+  steps: string[]
+}
+
 interface ChannelTypeDef {
   type: string
   label: string
   fields: ChannelField[]
+  setup?: ChannelSetup
 }
 
 const [{ data: channels, refresh }, { data: telegramBindings, refresh: refreshBindings }] = await Promise.all([
@@ -34,9 +44,31 @@ const channelTypes: ChannelTypeDef[] = [
     type: 'slack',
     label: 'Slack',
     fields: [
-      { name: 'botToken', type: 'password' },
-      { name: 'signingSecret', type: 'password' },
+      {
+        name: 'botToken',
+        label: 'Bot token',
+        type: 'password',
+        hint: 'OAuth and Permissions: Bot User OAuth Token (starts with xoxb-).',
+      },
+      {
+        name: 'signingSecret',
+        label: 'Signing secret',
+        type: 'password',
+        hint: 'Basic Information: App Credentials: Signing Secret.',
+      },
     ],
+    setup: {
+      requestUrlPath: '/api/webhooks/slack',
+      steps: [
+        'Create a Slack app at api.slack.com/apps (From scratch) in your workspace.',
+        'OAuth and Permissions: add Bot Token Scopes chat:write and channels:history (plus app_mentions:read / im:history as needed), then Install to Workspace.',
+        'Copy the Bot User OAuth Token (starts with xoxb-) into Bot token below.',
+        'Basic Information: copy the Signing Secret (App Credentials) into Signing secret below, then click Save here.',
+        'Event Subscriptions: enable it, then set the Request URL to the address shown above (Slack verifies it automatically).',
+        'Subscribe to bot events message.channels (and app_mention for at-mentions); Save Changes and reinstall if prompted.',
+        'Invite the bot to a channel with /invite @YourBot.',
+      ],
+    },
   },
   {
     type: 'whatsapp',
@@ -54,6 +86,18 @@ const editing = ref<string | null>(null)
 const form = ref<Record<string, string>>({})
 const enabled = ref(false)
 const { mutate, loading: saving } = useApiMutation()
+
+// JCLAW-83: setup guidance for the channel being configured. requestUrl renders
+// the provider callback (e.g. Slack's Events API Request URL) against the live
+// origin so the operator can copy it straight into their Slack app.
+const currentDef = computed(() =>
+  editing.value ? channelTypes.find(c => c.type === editing.value) ?? null : null)
+const setupSteps = computed<string[]>(() => currentDef.value?.setup?.steps ?? [])
+const requestUrl = computed(() => {
+  const path = currentDef.value?.setup?.requestUrlPath
+  if (!path) return ''
+  return `${import.meta.client ? window.location.origin : ''}${path}`
+})
 
 const telegramActiveCount = computed(() =>
   (telegramBindings.value ?? []).filter(b => b.enabled).length)
@@ -160,6 +204,29 @@ onActivated(() => refreshBindings())
       <h2 class="text-sm font-medium text-fg-strong mb-4">
         Configure {{ channelTypes.find(c => c.type === editing)?.label }}
       </h2>
+      <div
+        v-if="setupSteps.length"
+        class="mb-4 border border-border bg-muted p-3 text-xs text-fg-muted space-y-2"
+      >
+        <p
+          v-if="requestUrl"
+          class="text-fg-strong"
+        >
+          Events API Request URL
+          <code class="block mt-1 font-mono break-all text-fg-strong">{{ requestUrl }}</code>
+          <span class="block mt-1 font-normal text-fg-muted">
+            Paste this into your Slack app's Event Subscriptions; it must be reachable by Slack over HTTPS.
+          </span>
+        </p>
+        <ol class="list-decimal list-inside space-y-1">
+          <li
+            v-for="(step, i) in setupSteps"
+            :key="i"
+          >
+            {{ step }}
+          </li>
+        </ol>
+      </div>
       <div class="space-y-3">
         <template
           v-for="field in visibleFields(channelTypes.find(c => c.type === editing)!)"
@@ -169,7 +236,7 @@ onActivated(() => refreshBindings())
             :for="`channel-field-${field.name}`"
             class="block"
           >
-            <span class="block text-xs text-fg-muted mb-1">{{ field.name }}</span>
+            <span class="block text-xs text-fg-muted mb-1">{{ field.label ?? field.name }}</span>
             <select
               v-if="field.type === 'select'"
               :id="`channel-field-${field.name}`"
@@ -193,6 +260,10 @@ onActivated(() => refreshBindings())
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
                      focus:outline-hidden focus:border-ring transition-colors"
             >
+            <span
+              v-if="field.hint"
+              class="block text-xs text-fg-muted mt-1"
+            >{{ field.hint }}</span>
           </label>
         </template>
         <label
