@@ -614,6 +614,45 @@ class ChannelTest extends UnitTest {
         assertNull(msg);
     }
 
+    @Test
+    void slackParseEventCarriesThreadTs() {
+        var json = JsonParser.parseString("""
+                {
+                    "type": "event_callback",
+                    "event": {
+                        "type": "message",
+                        "channel": "C01234567",
+                        "user": "U99999",
+                        "text": "in a thread",
+                        "thread_ts": "1700000000.000100"
+                    }
+                }
+                """).getAsJsonObject();
+
+        var msg = SlackChannel.parseEvent(json);
+        assertNotNull(msg);
+        assertEquals("1700000000.000100", msg.threadTs());
+    }
+
+    @Test
+    void slackParseEventThreadTsNullWhenTopLevel() {
+        var json = JsonParser.parseString("""
+                {
+                    "type": "event_callback",
+                    "event": {
+                        "type": "message",
+                        "channel": "C01234567",
+                        "user": "U99999",
+                        "text": "top-level"
+                    }
+                }
+                """).getAsJsonObject();
+
+        var msg = SlackChannel.parseEvent(json);
+        assertNotNull(msg);
+        assertNull(msg.threadTs());
+    }
+
     // === WhatsApp ===
 
     @Test

@@ -83,9 +83,12 @@ public class WebhookSlackController extends Controller {
 
     private static void processMessage(SlackChannel.InboundMessage message) {
         try {
+            // JCLAW-83: capture the inbound thread_ts so the reply lands in-thread
+            // (null for a non-threaded message → posts at channel level).
+            var threadTs = message.threadTs();
             AgentRunner.processWebhookMessage(CHANNEL_SLACK, message.channelId(), message.text(),
-                    SlackChannel::sendMessage,
-                    peerId -> SlackChannel.sendMessage(peerId, "No agent configured for this channel."));
+                    (peer, txt) -> SlackChannel.sendMessage(peer, txt, threadTs),
+                    peer -> SlackChannel.sendMessage(peer, "No agent configured for this channel.", null));
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "Error processing message: %s".formatted(e.getMessage()));
