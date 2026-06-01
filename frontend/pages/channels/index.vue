@@ -277,10 +277,10 @@ onActivated(() => refreshBindings())
       </p>
       <button
         :disabled="tailscaleToggling"
-        class="px-4 py-1.5 text-sm font-medium disabled:opacity-40 transition-colors"
+        class="px-4 py-1.5 text-sm font-medium border disabled:opacity-40 transition-colors"
         :class="tailscale?.enabled
-          ? 'text-fg-muted hover:text-fg-strong'
-          : 'bg-emerald-600 text-white hover:bg-emerald-500'"
+          ? 'border-input text-fg-strong hover:border-ring hover:bg-muted'
+          : 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500'"
         @click="toggleTailscale"
       >
         {{ tailscaleToggling ? 'Working...' : (tailscale?.enabled ? 'Disable Funnel' : 'Enable Funnel') }}
