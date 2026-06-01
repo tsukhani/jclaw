@@ -39,6 +39,9 @@ describe('channels page — Slack guidance (JCLAW-83) + Tailscale Funnel (JCLAW-
     expect(text).toContain('im:history')
     expect(text).toContain('message.im')
     expect(text).toContain('Messages Tab')
+    // JCLAW-341: Assistant feature + scope for the native typing indicator + streaming.
+    expect(text).toContain('assistant:write')
+    expect(text).toContain('Assistant')
   })
 
   it('shows the app-level Tailscale Funnel toggle', async () => {

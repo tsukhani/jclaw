@@ -100,9 +100,11 @@ public class WebhookSlackController extends Controller {
             }
             var conversation = Tx.run(() ->
                     ConversationService.findOrCreate(route.agent(), CHANNEL_SLACK, message.channelId()));
-            // JCLAW-341: stream the reply into one Slack message — placeholder
-            // (working indicator) → throttled chat.update → mrkdwn-formatted seal.
-            var sink = new SlackStreamingSink(message.channelId(), threadTs);
+            // JCLAW-341: native Slack streaming (chat.startStream/appendStream/
+            // stopStream) → live "is typing…" + progressive text, no (edited) tag.
+            // Falls back to a single formatted post off-thread. recipientUserId is
+            // required by the streaming API for DMs.
+            var sink = new SlackStreamingSink(message.channelId(), threadTs, message.userId());
             sink.begin();
             AgentRunner.runStreaming(route.agent(), conversation.id, CHANNEL_SLACK, message.channelId(),
                     message.text(), new AtomicBoolean(false),

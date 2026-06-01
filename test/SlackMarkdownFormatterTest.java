@@ -89,6 +89,19 @@ class SlackMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
+    void tableRendersAsFormattedBulletsNotCodeFence() {
+        // The reported bug: a Markdown table was code-fenced, so **bcr** stayed
+        // literal. Tables must render as bullets with cell markdown converted.
+        var md = "| Skill | Description |\n|---|---|\n| **bcr** | Read cards |";
+        var out = SlackMarkdownFormatter.format(md);
+        assertFalse(out.contains("```"), "table must not be a code fence: " + out);
+        assertFalse(out.contains("**bcr**"), "cell bold must convert, not stay literal: " + out);
+        assertTrue(out.contains("*bcr*"), "cell bold should be mrkdwn: " + out);
+        assertTrue(out.startsWith("• "), "rows render as bullets: " + out);
+        assertTrue(out.contains("*Skill*"), "header keys the cell: " + out);
+    }
+
+    @Test
     void mixedDocument() {
         var md = "# Report\n\nStatus: **green**, see [docs](https://d.io).\n\n- one\n- two";
         var out = SlackMarkdownFormatter.format(md);

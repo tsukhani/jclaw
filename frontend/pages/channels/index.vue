@@ -81,13 +81,14 @@ const channelTypes: ChannelTypeDef[] = [
         'Copy the Bot User OAuth Token (xoxb-…) into Bot token, and the Signing Secret (Basic Information → App Credentials) into Signing secret, then Save here.',
         'Event Subscriptions: turn it On, set the Request URL above, and subscribe to every bot event listed below; Save Changes.',
         'App Home: enable both settings below so users can DM the bot.',
+        'Agents & AI Apps: enable the Assistant feature (below) for the native "is typing…" indicator and streaming replies.',
         'Reinstall to Workspace if Slack prompts (scope/event changes require it). Then DM the bot, or invite it to a channel with /invite @YourBot.',
       ],
       groups: [
         {
           label: 'OAuth & Permissions → Bot Token Scopes',
-          hint: 'chat:write sends replies; each *:history scope lets the bot read that surface; app_mentions:read covers @-mentions.',
-          values: ['chat:write', 'app_mentions:read', 'channels:history', 'groups:history', 'im:history', 'mpim:history'],
+          hint: 'chat:write sends replies; each *:history scope lets the bot read that surface; app_mentions:read covers @-mentions; assistant:write enables the typing indicator + streaming.',
+          values: ['chat:write', 'assistant:write', 'app_mentions:read', 'channels:history', 'groups:history', 'im:history', 'mpim:history'],
         },
         {
           label: 'Event Subscriptions → Subscribe to bot events',
@@ -98,6 +99,11 @@ const channelTypes: ChannelTypeDef[] = [
           label: 'App Home → Show Tabs (toggle both On)',
           hint: 'Without these, Slack greys out the DM box with "Sending messages to this app has been turned off."',
           values: ['Messages Tab', 'Allow users to send Slash commands and messages from the messages tab'],
+        },
+        {
+          label: 'Agents & AI Apps → enable the Assistant',
+          hint: 'Optional but recommended: lets the bot stream replies with a native "is typing…" indicator (chat.startStream). Without it, replies post once when ready (still formatted, no "(edited)").',
+          values: ['Enable the Assistant / Agent feature'],
         },
       ],
     },

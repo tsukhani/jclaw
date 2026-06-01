@@ -7,7 +7,6 @@ import com.slack.api.Slack;
 import com.slack.api.app_backend.SlackSignature;
 import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.request.chat.ChatPostMessageRequest;
-import com.slack.api.methods.request.chat.ChatUpdateRequest;
 import com.slack.api.model.event.MessageEvent;
 import com.slack.api.util.json.GsonFactory;
 import models.ChannelConfig;
@@ -137,43 +136,50 @@ public class SlackChannel implements Channel {
     }
 
     /**
-     * JCLAW-341: post a message and return its {@code ts} — the streaming sink's
-     * handle for later {@code chat.update} — or null on failure. Text is sent
-     * verbatim; the caller owns formatting.
+     * JCLAW-341: start a native Slack text stream in a thread and return its
+     * {@code ts} (or null on failure). {@code recipientUserId} is required for DM
+     * streaming. The {@code markdown_text} fields render standard markdown
+     * natively, so no mrkdwn conversion is applied on the streaming path. Requires
+     * the app to be a Slack AI Assistant (Agents & AI Apps) with {@code assistant:write}.
      */
-    public static String postReturningTs(String channelId, String text, String threadTs) {
+    public static String startStream(String channelId, String threadTs, String recipientUserId) {
         var config = SlackConfig.load();
         if (config == null) return null;
         try {
-            var resp = slack.methods(config.botToken()).chatPostMessage(postRequest(channelId, text, threadTs));
-            return resp.isOk() ? resp.getTs() : null;
+            var resp = slack.methods(config.botToken()).chatStartStream(r -> r
+                    .channel(channelId).threadTs(threadTs).recipientUserId(recipientUserId));
+            if (resp.isOk()) return resp.getTs();
+            EventLogger.warn(CHANNEL, null, SLACK, "startStream not ok: %s".formatted(resp.getError()));
+            return null;
         } catch (SlackApiException | IOException e) {
-            EventLogger.warn(CHANNEL, null, SLACK, "Streaming placeholder post failed: %s".formatted(e.getMessage()));
+            EventLogger.warn(CHANNEL, null, SLACK, "startStream failed: %s".formatted(e.getMessage()));
             return null;
         }
     }
 
-    /**
-     * JCLAW-341: edit a previously-posted message ({@code chat.update}). Returns a
-     * {@link SendResult} so a streaming caller can back off on a 429.
-     */
-    public static SendResult updateMessage(String channelId, String ts, String text) {
+    /** JCLAW-341: append a markdown delta to a live stream. Returns false on error. */
+    public static boolean appendStream(String channelId, String ts, String markdownDelta) {
         var config = SlackConfig.load();
-        if (config == null) return SendResult.FAILED;
+        if (config == null) return false;
         try {
-            var resp = slack.methods(config.botToken()).chatUpdate(
-                    ChatUpdateRequest.builder().channel(channelId).ts(ts).text(text).build());
-            if (resp.isOk()) return SendResult.OK;
-            if ("ratelimited".equals(resp.getError())) return SendResult.rateLimited(0L);
-            return SendResult.FAILED;
-        } catch (SlackApiException e) {
-            var http = e.getResponse();
-            if (http != null && http.code() == 429) {
-                return SendResult.rateLimited(parseRetryAfterMs(http.header("Retry-After")));
-            }
-            return SendResult.FAILED;
-        } catch (IOException e) {
-            return SendResult.FAILED;
+            return slack.methods(config.botToken())
+                    .chatAppendStream(r -> r.channel(channelId).ts(ts).markdownText(markdownDelta))
+                    .isOk();
+        } catch (SlackApiException | IOException e) {
+            return false;
+        }
+    }
+
+    /** JCLAW-341: finalize a live stream. Returns false on error. */
+    public static boolean stopStream(String channelId, String ts) {
+        var config = SlackConfig.load();
+        if (config == null) return false;
+        try {
+            return slack.methods(config.botToken())
+                    .chatStopStream(r -> r.channel(channelId).ts(ts))
+                    .isOk();
+        } catch (SlackApiException | IOException e) {
+            return false;
         }
     }
 

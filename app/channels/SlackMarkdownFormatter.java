@@ -22,11 +22,16 @@ import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
 import com.vladsch.flexmark.ext.gfm.strikethrough.Strikethrough;
 import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension;
 import com.vladsch.flexmark.ext.tables.TableBlock;
+import com.vladsch.flexmark.ext.tables.TableBody;
+import com.vladsch.flexmark.ext.tables.TableCell;
+import com.vladsch.flexmark.ext.tables.TableHead;
+import com.vladsch.flexmark.ext.tables.TableRow;
 import com.vladsch.flexmark.ext.tables.TablesExtension;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -88,7 +93,7 @@ public final class SlackMarkdownFormatter {
                 case BlockQuote bq -> emitQuote(bq);
                 case BulletList bl -> emitBulletList(bl);
                 case OrderedList ol -> emitOrderedList(ol);
-                case TableBlock tb -> emitFence(tb.getChars().toString());
+                case TableBlock tb -> emitTable(tb);
                 case Link link -> emitLink(link.getUrl().toString(), link);
                 case AutoLink al -> out.append('<').append(al.getUrl().toString()).append('>');
                 case Text t -> out.append(escape(t.getChars().toString()));
@@ -168,6 +173,59 @@ public final class SlackMarkdownFormatter {
                 if (c instanceof Text t) sb.append(t.getChars());
                 else collectInto(c, sb);
             }
+        }
+
+        // Slack has no table grammar, so render each body row as a bulleted line
+        // keyed by the header cells — and crucially run the cell content through
+        // the inline emitter so **bold** etc. convert (a code fence would keep
+        // them literal). Mirrors TelegramMarkdownFormatter's BULLETS mode.
+        void emitTable(TableBlock table) {
+            TableHead head = findChild(table, TableHead.class);
+            TableBody body = findChild(table, TableBody.class);
+            if (body == null) return;
+            List<String> headers = collectHeaderLabels(head);
+            for (Node row = body.getFirstChild(); row != null; row = row.getNext()) {
+                if (row instanceof TableRow) emitTableBodyRow(row, headers);
+            }
+            out.append('\n');
+        }
+
+        void emitTableBodyRow(Node row, List<String> headers) {
+            List<TableCell> cells = new ArrayList<>();
+            for (Node c = row.getFirstChild(); c != null; c = c.getNext()) {
+                if (c instanceof TableCell tc) cells.add(tc);
+            }
+            if (cells.isEmpty()) return;
+            out.append("• ");
+            for (int i = 0; i < cells.size(); i++) {
+                if (i > 0) out.append(" — ");
+                if (i < headers.size() && !headers.get(i).isBlank()) {
+                    out.append('*').append(headers.get(i)).append("*: ");
+                }
+                emitChildren(cells.get(i));
+            }
+            out.append('\n');
+        }
+
+        List<String> collectHeaderLabels(TableHead head) {
+            List<String> labels = new ArrayList<>();
+            if (head == null) return labels;
+            for (Node row = head.getFirstChild(); row != null; row = row.getNext()) {
+                if (row instanceof TableRow) {
+                    for (Node cell = row.getFirstChild(); cell != null; cell = cell.getNext()) {
+                        if (cell instanceof TableCell tc) labels.add(escape(collectText(tc).trim()));
+                    }
+                    return labels;
+                }
+            }
+            return labels;
+        }
+
+        static <T extends Node> T findChild(Node parent, Class<T> type) {
+            for (Node c = parent.getFirstChild(); c != null; c = c.getNext()) {
+                if (type.isInstance(c)) return type.cast(c);
+            }
+            return null;
         }
     }
 }
