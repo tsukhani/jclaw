@@ -1,12 +1,23 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { clearNuxtData } from '#app'
 import Channels from '~/pages/channels/index.vue'
 
-// The page fetches both on load (Telegram bindings drive the header badge).
+// Mutable so individual tests can vary the Tailscale Funnel status.
+let tailscaleResponse: Record<string, unknown> = { enabled: false, available: false, publicUrl: null, error: null }
+
 registerEndpoint('/api/channels', () => [])
 registerEndpoint('/api/channels/telegram/bindings', () => [])
+registerEndpoint('/api/tailscale', () => tailscaleResponse)
 
-describe('channels page — Slack configuration guidance (JCLAW-83)', () => {
+beforeEach(() => {
+  // useFetch caches by URL across mounts; clear it so each test re-fetches the
+  // (possibly different) /api/tailscale response below.
+  clearNuxtData()
+  tailscaleResponse = { enabled: false, available: false, publicUrl: null, error: null }
+})
+
+describe('channels page — Slack guidance (JCLAW-83) + Tailscale Funnel (JCLAW-84)', () => {
   it('reveals the Events API request URL and setup steps when configuring Slack', async () => {
     const component = await mountSuspended(Channels)
 
@@ -16,15 +27,31 @@ describe('channels page — Slack configuration guidance (JCLAW-83)', () => {
     await slackButton?.trigger('click')
 
     const text = component.text()
-    // Computed Events API Request URL (origin-relative assertion is host-agnostic).
     expect(text).toContain('/api/webhooks/slack')
-    // Setup steps + field guidance the operator needs.
     expect(text).toContain('Event Subscriptions')
     expect(text).toContain('Bot token')
     expect(text).toContain('xoxb-')
-    // Must not contradict itself: the public-HTTPS requirement + the localhost
-    // caveat must be present (test origin is http://localhost, so no ready URL).
+    // Public-HTTPS requirement + the localhost caveat (no funnel here).
     expect(text).toContain('public HTTPS')
     expect(text).toContain('tunnel')
+  })
+
+  it('shows the app-level Tailscale Funnel toggle', async () => {
+    const component = await mountSuspended(Channels)
+    const text = component.text()
+    expect(text).toContain('Tailscale Funnel')
+    expect(text).toContain('Enable Funnel')
+  })
+
+  it('uses the funnel public URL as the Slack request URL when the funnel is active', async () => {
+    tailscaleResponse = { enabled: true, available: true, publicUrl: 'https://jclaw.tnet.ts.net', error: null }
+    const component = await mountSuspended(Channels)
+
+    const slackButton = component.findAll('button').find(b => b.text() === 'Configure')
+    await slackButton?.trigger('click')
+
+    const text = component.text()
+    expect(text).toContain('Ready via Tailscale Funnel')
+    expect(text).toContain('https://jclaw.tnet.ts.net/api/webhooks/slack')
   })
 })

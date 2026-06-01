@@ -31,9 +31,21 @@ interface ChannelTypeDef {
   setup?: ChannelSetup
 }
 
-const [{ data: channels, refresh }, { data: telegramBindings, refresh: refreshBindings }] = await Promise.all([
+interface TailscaleStatus {
+  enabled: boolean
+  available: boolean
+  publicUrl: string | null
+  error: string | null
+}
+
+const [
+  { data: channels, refresh },
+  { data: telegramBindings, refresh: refreshBindings },
+  { data: tailscale, refresh: refreshTailscale },
+] = await Promise.all([
   useFetch<ChannelInfo[]>('/api/channels'),
   useFetch<TelegramBindingSummary[]>('/api/channels/telegram/bindings'),
+  useFetch<TailscaleStatus>('/api/tailscale'),
 ])
 
 // Telegram was removed from the inline-configure list in JCLAW-89: it now
@@ -87,6 +99,17 @@ const form = ref<Record<string, string>>({})
 const enabled = ref(false)
 const { mutate, loading: saving } = useApiMutation()
 
+// JCLAW-84: app-level Tailscale Funnel toggle. Exposes this whole instance (one
+// port serves every channel webhook), so it's one switch, not per-channel.
+const tailscaleToggling = ref(false)
+async function toggleTailscale() {
+  tailscaleToggling.value = true
+  const next = !(tailscale.value?.enabled ?? false)
+  const result = await mutate('/api/tailscale', { method: 'POST', body: { enabled: next } })
+  tailscaleToggling.value = false
+  if (result !== null) refreshTailscale()
+}
+
 // JCLAW-83: setup guidance for the channel being configured. requestUrl renders
 // the provider callback (e.g. Slack's Events API Request URL) against the live
 // origin so the operator can copy it straight into their Slack app.
@@ -108,10 +131,19 @@ const isPublicHttps = computed(() => {
     || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
     || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === '0.0.0.0')
 })
-const requestUrl = computed(() =>
-  requestPath.value && isPublicHttps.value
-    ? `${window.location.origin}${requestPath.value}`
-    : '')
+// When the Tailscale Funnel (JCLAW-84) is enabled and live, its public URL is the
+// real, copy-paste-ready base for webhook Request URLs — preferred over the
+// browser origin, which only qualifies in a public deployment.
+const funnelBaseUrl = computed(() => {
+  const t = tailscale.value
+  return t?.enabled && t.available && t.publicUrl ? t.publicUrl : ''
+})
+const requestUrl = computed(() => {
+  if (!requestPath.value) return ''
+  if (funnelBaseUrl.value) return `${funnelBaseUrl.value}${requestPath.value}`
+  return isPublicHttps.value ? `${window.location.origin}${requestPath.value}` : ''
+})
+const requestUrlViaFunnel = computed(() => requestPath.value !== '' && funnelBaseUrl.value !== '')
 
 const telegramActiveCount = computed(() =>
   (telegramBindings.value ?? []).filter(b => b.enabled).length)
@@ -212,6 +244,50 @@ onActivated(() => refreshBindings())
     </div>
 
     <div
+      class="bg-surface-elevated border border-border p-4 mb-6"
+      data-tour="tailscale-funnel"
+    >
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-medium text-fg-strong">
+          Public access — Tailscale Funnel
+        </h3>
+        <span
+          :class="tailscale?.enabled && tailscale?.available ? 'text-green-400' : 'text-fg-muted'"
+          class="text-xs font-mono"
+        >{{ tailscale?.enabled ? (tailscale?.available ? 'active' : 'enabled (unavailable)') : 'off' }}</span>
+      </div>
+      <p class="text-xs text-fg-muted mb-3">
+        Exposes this JClaw instance to the public internet over HTTPS via Tailscale
+        Funnel, so webhook channels (e.g. the Slack Events API) get a reachable
+        Request URL with no manual tunnel. One switch covers every channel — Funnel
+        publishes the whole port.
+      </p>
+      <p
+        v-if="tailscale?.publicUrl"
+        class="text-xs text-fg-muted mb-3"
+      >
+        Public URL:
+        <code class="font-mono break-all text-fg-strong">{{ tailscale?.publicUrl }}</code>
+      </p>
+      <p
+        v-if="tailscale?.error"
+        class="text-xs text-amber-400 mb-3"
+      >
+        {{ tailscale?.error }}
+      </p>
+      <button
+        :disabled="tailscaleToggling"
+        class="px-4 py-1.5 text-sm font-medium disabled:opacity-40 transition-colors"
+        :class="tailscale?.enabled
+          ? 'text-fg-muted hover:text-fg-strong'
+          : 'bg-emerald-600 text-white hover:bg-emerald-500'"
+        @click="toggleTailscale"
+      >
+        {{ tailscaleToggling ? 'Working...' : (tailscale?.enabled ? 'Disable Funnel' : 'Enable Funnel') }}
+      </button>
+    </div>
+
+    <div
       v-if="editing"
       class="bg-surface-elevated border border-border p-6"
     >
@@ -228,17 +304,27 @@ onActivated(() => refreshBindings())
         >
           Events API Request URL
           <span class="block mt-1 font-normal text-fg-muted">
-            Append <code class="font-mono text-fg-strong">{{ requestPath }}</code> to your deployment's public HTTPS base URL and set it as the Request URL under Event Subscriptions.
+            Append <code class="font-mono text-fg-strong">{{ requestPath }}</code> to your public HTTPS base URL and set it as the Request URL under Event Subscriptions.
           </span>
           <span
-            v-if="requestUrl"
+            v-if="requestUrlViaFunnel"
+            class="block mt-1 font-normal text-emerald-400"
+          >
+            Ready via Tailscale Funnel —
+            <code class="font-mono break-all text-fg-strong">{{ requestUrl }}</code>
+          </span>
+          <span
+            v-else-if="requestUrl"
             class="block mt-1 font-normal text-fg-muted"
           >
             From this page that is
             <code class="font-mono break-all text-fg-strong">{{ requestUrl }}</code>
           </span>
-          <span class="block mt-1 font-normal text-fg-muted">
-            Slack reaches it from its own servers, so localhost, LAN addresses, and plain HTTP will not work; for local development, expose this host with a tunnel such as Tailscale Funnel.
+          <span
+            v-else
+            class="block mt-1 font-normal text-fg-muted"
+          >
+            Slack reaches it from its own servers, so localhost, LAN, and plain HTTP will not work. Enable Tailscale Funnel above, or expose this host with another tunnel.
           </span>
         </div>
         <ol class="list-decimal list-inside space-y-1">
