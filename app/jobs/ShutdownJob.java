@@ -43,6 +43,11 @@ public class ShutdownJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        // From here on EventLogger is file-only: the JPA layer is tearing down,
+        // so the shutdown logging below would otherwise trip a batched DB flush
+        // into a doomed "begin transaction failed" WARN. (Set in every
+        // @OnApplicationStop hook — whichever runs first wins; the rest no-op.)
+        EventLogger.markShuttingDown();
         var components = List.of(
                 new Component("db-scheduler", DbSchedulerBootstrapJob::shutdownGracefully),
                 new Component("playwright-browser", PlaywrightBrowserTool::closeAllSessions),

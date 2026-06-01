@@ -32,6 +32,19 @@ public class EventLogger {
     private static final ConcurrentLinkedQueue<EventLog> pending = new ConcurrentLinkedQueue<>();
     private static final int BATCH_SIZE = 20;
 
+    /** Set at the start of graceful shutdown (by the @OnApplicationStop hooks).
+     *  Once true, EventLogger logs to the file only and skips DB persistence:
+     *  the JPA layer is tearing down, so a batched flush would fail to begin a
+     *  transaction and emit a spurious "Failed to flush N event logs" WARN.
+     *  File logging — the actual shutdown observability — is unaffected. */
+    private static volatile boolean shuttingDown = false;
+
+    /** Called by the shutdown hooks before any subsystem logging so
+     *  shutdown-time events stay file-only and don't trip the batch flush. */
+    public static void markShuttingDown() {
+        shuttingDown = true;
+    }
+
     @SuppressWarnings("java:S6213") // 'record' as method name predates the restricted identifier; rename would churn callers/tests with no real ambiguity
     public static void record(String level, String category, String message, String details) {
         record(level, category, null, null, message, details);
@@ -47,6 +60,12 @@ public class EventLogger {
             case "WARN" -> Logger.warn(logMessage);
             default -> Logger.info(logMessage);
         }
+
+        // During graceful shutdown stay file-only: the JPA layer is closing, so
+        // queuing for DB persistence is pointless and would trip the batch flush
+        // into a doomed "begin transaction failed". The file line above is what
+        // shutdown observability needs.
+        if (shuttingDown) return;
 
         // Queue for batch persistence — avoids opening a new transaction per log entry
         // when called from virtual threads (e.g., during tool-execution loops).
@@ -70,6 +89,7 @@ public class EventLogger {
      */
     public static void clear() {
         pending.clear();
+        shuttingDown = false;
     }
 
     /**
@@ -78,6 +98,7 @@ public class EventLogger {
      * threshold is reached.
      */
     public static void flush() {
+        if (shuttingDown) return;
         var batch = new ArrayList<EventLog>();
         EventLog e;
         while ((e = pending.poll()) != null) batch.add(e);

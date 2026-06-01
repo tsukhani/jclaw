@@ -24,6 +24,11 @@ public class FullTextSearchShutdownJob extends Job<Void> {
         if (Play.runningInTestMode()) {
             return;
         }
+        // Mark shutdown before LuceneIndexer.close() logs "Lucene index closed":
+        // this hook often runs before ShutdownJob, so it's the first chance to
+        // flip EventLogger to file-only and keep shutdown logs off the doomed
+        // batched DB flush. Idempotent with ShutdownJob's identical call.
+        services.EventLogger.markShuttingDown();
         LuceneIndexer.close();
     }
 }

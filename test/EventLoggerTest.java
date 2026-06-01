@@ -129,4 +129,12 @@ class EventLoggerTest extends UnitTest {
                 && e.details.contains("synthetic boom"));
         assertTrue(found, "Throwable.toString() must land in details");
     }
+
+    // JCLAW-334 note: the shutdown-only "file-only / skip flush" behavior of
+    // markShuttingDown() is deliberately NOT unit-tested here. TestEngine runs
+    // unit tests (launcher thread) and functional tests (functionalTestsExecutor,
+    // a separate single-thread VT) concurrently, so flipping EventLogger's
+    // process-global shuttingDown flag in a test races any functional test that
+    // persists via EventLogger (e.g. ApiLogsControllerTest), making it no-op and
+    // flaky. The guard is verified by the live restart -> stop check instead.
 }
