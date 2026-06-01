@@ -51,7 +51,8 @@ describe('channels page — Slack guidance (JCLAW-83) + Tailscale Funnel (JCLAW-
     await slackButton?.trigger('click')
 
     const text = component.text()
-    expect(text).toContain('Ready via Tailscale Funnel')
+    expect(text).toContain('Set this as the Request URL')
+    expect(text).toContain('via Tailscale Funnel')
     expect(text).toContain('https://jclaw.tnet.ts.net/api/webhooks/slack')
   })
 })

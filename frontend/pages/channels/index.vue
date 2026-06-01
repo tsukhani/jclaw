@@ -303,29 +303,30 @@ onActivated(() => refreshBindings())
           class="text-fg-strong"
         >
           Events API Request URL
-          <span class="block mt-1 font-normal text-fg-muted">
-            Append <code class="font-mono text-fg-strong">{{ requestPath }}</code> to your public HTTPS base URL and set it as the Request URL under Event Subscriptions.
-          </span>
-          <span
-            v-if="requestUrlViaFunnel"
-            class="block mt-1 font-normal text-emerald-400"
-          >
-            Ready via Tailscale Funnel —
-            <code class="font-mono break-all text-fg-strong">{{ requestUrl }}</code>
-          </span>
-          <span
-            v-else-if="requestUrl"
-            class="block mt-1 font-normal text-fg-muted"
-          >
-            From this page that is
-            <code class="font-mono break-all text-fg-strong">{{ requestUrl }}</code>
-          </span>
-          <span
-            v-else
-            class="block mt-1 font-normal text-fg-muted"
-          >
-            Slack reaches it from its own servers, so localhost, LAN, and plain HTTP will not work. Enable Tailscale Funnel above, or expose this host with another tunnel.
-          </span>
+          <template v-if="requestUrlViaFunnel">
+            <span class="block mt-1 font-normal text-fg-muted">
+              Set this as the Request URL under Event Subscriptions (live via Tailscale Funnel):
+            </span>
+            <code class="block mt-1 font-mono break-all text-emerald-400">{{ requestUrl }}</code>
+          </template>
+          <template v-else>
+            <span class="block mt-1 font-normal text-fg-muted">
+              Append <code class="font-mono text-fg-strong">{{ requestPath }}</code> to your public HTTPS base URL and set it as the Request URL under Event Subscriptions.
+            </span>
+            <span
+              v-if="requestUrl"
+              class="block mt-1 font-normal text-fg-muted"
+            >
+              From this page that is
+              <code class="font-mono break-all text-fg-strong">{{ requestUrl }}</code>
+            </span>
+            <span
+              v-else
+              class="block mt-1 font-normal text-fg-muted"
+            >
+              Slack reaches it from its own servers, so localhost, LAN, and plain HTTP will not work. Enable Tailscale Funnel above, or expose this host with another tunnel.
+            </span>
+          </template>
         </div>
         <ol class="list-decimal list-inside space-y-1">
           <li
