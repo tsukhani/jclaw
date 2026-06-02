@@ -6,6 +6,7 @@ import channels.TelegramApprovalService;
 import channels.TelegramChannel;
 import models.Agent;
 import models.TelegramBinding;
+import models.ToolApprovalGrant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -157,6 +158,74 @@ class DangerousActionGateTest extends UnitTest {
                 DangerousActionGate.guard(agent, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
         assertEquals(promptsAfterFirst, server.countRequests("sendMessage"),
                 "a session-approved tool must not re-prompt on its next call");
+    }
+
+    // ── JCLAW-385: APPROVE_ALWAYS persists + survives a "restart" ───────
+
+    @Test
+    void alwaysApprovalPersistsAndSuppressesSecondPromptAfterRestart() throws Exception {
+        var agent = boundAgent("gate-always");
+
+        // First call prompts and is approved "always".
+        var first = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        var approvalId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_ALWAYS, TG_USER);
+        assertEquals(Decision.PROCEED, first.get(2, TimeUnit.SECONDS));
+
+        // A durable grant row must now exist (read on a committed tx like the gate does).
+        assertTrue(commitInFreshTx(() -> ToolApprovalGrant.exists(agent.id, DANGEROUS_TOOL)),
+                "APPROVE_ALWAYS must persist a ToolApprovalGrant row");
+
+        long promptsAfterFirst = server.countRequests("sendMessage");
+
+        // Simulate a JVM restart: the in-process session set is gone, only the DB row remains.
+        DangerousActionGate.clearGrantsForTest();
+
+        // Second call for the same (agent, tool) must proceed off the persisted grant, no new prompt.
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
+        assertEquals(promptsAfterFirst, server.countRequests("sendMessage"),
+                "a persisted always-grant must suppress the prompt after the in-process set is cleared");
+    }
+
+    @Test
+    void sessionApprovalDoesNotPersistAndRePromptsAfterRestart() throws Exception {
+        var agent = boundAgent("gate-session-volatile");
+
+        // First call prompts and is approved for the session only.
+        var first = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        var approvalId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_SESSION, TG_USER);
+        assertEquals(Decision.PROCEED, first.get(2, TimeUnit.SECONDS));
+
+        // A session grant must NOT write a durable row.
+        assertFalse(commitInFreshTx(() -> ToolApprovalGrant.exists(agent.id, DANGEROUS_TOOL)),
+                "APPROVE_SESSION must not persist a ToolApprovalGrant row");
+
+        long promptsAfterFirst = server.countRequests("sendMessage");
+
+        // Simulate a restart: with no persisted grant, the next call must re-prompt.
+        DangerousActionGate.clearGrantsForTest();
+        var second = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}");
+        var secondId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(secondId, TelegramApprovalCallback.Decision.APPROVE_ONCE, TG_USER);
+        assertEquals(Decision.PROCEED, second.get(2, TimeUnit.SECONDS));
+        assertTrue(server.countRequests("sendMessage") > promptsAfterFirst,
+                "a session-approved tool must re-prompt once the in-process set is cleared (no persisted grant)");
+    }
+
+    @Test
+    void preSeededPersistedGrantSuppressesPromptWithNoBotCall() {
+        var agent = boundAgent("gate-preseed");
+
+        // Seed a durable always-grant on a committed tx, as a prior JVM would have left behind.
+        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL); return null; });
+
+        // No in-process grant exists for this fresh process; the gate must read the DB row.
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a pre-seeded persisted grant must suppress the prompt with no Bot API call");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────

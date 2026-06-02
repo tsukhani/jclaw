@@ -5,6 +5,7 @@ import channels.TelegramApprovalService.Outcome;
 import channels.TelegramMarkdownFormatter;
 import models.Agent;
 import models.TelegramBinding;
+import models.ToolApprovalGrant;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
@@ -41,11 +42,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * <h2>Session / always scope</h2>
  * <p>An {@code APPROVED_SESSION} or {@code APPROVED_ALWAYS} tap records a
  * grant keyed by {@code (agentId, toolName)} in {@link #GRANTS}, so the same
- * action isn't re-prompted on its next invocation. Both scopes behave
- * identically <em>in-process</em>: the grant registry is in-memory and dies
- * with the JVM, matching the deliberately ephemeral lifetime documented on
- * {@link TelegramApprovalService}. A durable, restart-surviving
- * {@code APPROVED_ALWAYS} would need a persisted store — left as a follow-up.
+ * action isn't re-prompted on its next invocation. {@code APPROVED_SESSION}
+ * lives only in that in-memory set and dies with the JVM, matching the
+ * deliberately ephemeral lifetime documented on
+ * {@link TelegramApprovalService}.
+ *
+ * <p>JCLAW-385: {@code APPROVED_ALWAYS} additionally persists a
+ * {@link ToolApprovalGrant} row, so the grant survives a restart. The
+ * pre-prompt check consults <em>both</em> the in-process set and the
+ * persisted store, so a durable always-grant keeps suppressing the prompt
+ * even after the in-memory set has been emptied (a fresh JVM).
  *
  * <p>The binding lookup walks the agent's parent chain, so a dangerous call
  * made by a sub-agent surfaces the prompt on its root ancestor's bound chat
@@ -98,7 +104,11 @@ public final class DangerousActionGate {
             return Decision.PROCEED;
         }
 
-        if (GRANTS.contains(grantKey(agent, toolName))) {
+        // Suppress the prompt if a standing grant exists in either the
+        // in-process session set or the persisted always-store (JCLAW-385).
+        // The persisted lookup hits the DB, so it shares the gate's tx.
+        if (GRANTS.contains(grantKey(agent, toolName))
+                || Tx.run(() -> ToolApprovalGrant.exists(agent.id, toolName))) {
             EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
                     "Dangerous tool '%s' pre-approved for this agent; skipping prompt".formatted(toolName));
             return Decision.PROCEED;
@@ -124,10 +134,20 @@ public final class DangerousActionGate {
 
         return switch (outcome) {
             case APPROVED_ONCE -> Decision.PROCEED;
-            case APPROVED_SESSION, APPROVED_ALWAYS -> {
+            case APPROVED_SESSION -> {
                 GRANTS.add(grantKey(agent, toolName));
                 EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
                         "Dangerous tool '%s' approved (%s) — future calls won't re-prompt"
+                                .formatted(toolName, outcome));
+                yield Decision.PROCEED;
+            }
+            case APPROVED_ALWAYS -> {
+                GRANTS.add(grantKey(agent, toolName));
+                // JCLAW-385: persist the always-grant so it survives a restart.
+                // Idempotent on the unique (agent, tool) key.
+                Tx.run(() -> ToolApprovalGrant.upsert(agent, toolName));
+                EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
+                        "Dangerous tool '%s' approved (%s) — future calls won't re-prompt (persisted)"
                                 .formatted(toolName, outcome));
                 yield Decision.PROCEED;
             }
