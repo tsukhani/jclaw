@@ -36,11 +36,22 @@ let bindingsResponse: unknown[] = []
 let tailscaleResponse: Record<string, unknown> = {}
 // JCLAW-362: the next probe response the test endpoint returns.
 let probeResponse: Record<string, unknown> = {}
+// JCLAW-378: capture the PUT body of a binding save (endpoint registered at module
+// scope — a registerEndpoint inside an it() block doesn't intercept reliably).
+let capturedPutBody: unknown = null
 
 registerEndpoint('/api/agents', () => [AGENT])
 registerEndpoint('/api/channels/telegram/bindings', () => bindingsResponse)
 registerEndpoint('/api/tailscale', () => tailscaleResponse)
 registerEndpoint('/api/channels/telegram/bindings/7/test', { method: 'POST', handler: () => probeResponse })
+registerEndpoint('/api/channels/telegram/bindings/7', {
+  method: 'PUT',
+  handler: async (event) => {
+    const { readBody } = await import('h3')
+    capturedPutBody = await readBody(event)
+    return binding({ id: 7, transport: 'POLLING' })
+  },
+})
 
 beforeEach(() => {
   // useFetch caches by URL across mounts; clear so each test re-fetches.
@@ -48,6 +59,7 @@ beforeEach(() => {
   bindingsResponse = []
   tailscaleResponse = { enabled: true, available: true, publicUrl: 'https://jclaw.tnet.ts.net', error: null }
   probeResponse = {}
+  capturedPutBody = null
 })
 
 describe('telegram bindings page — webhook base URL + auto-secret (JCLAW-339)', () => {
@@ -122,15 +134,6 @@ describe('telegram bindings page — per-binding settings (JCLAW-378)', () => {
 
   it('submits the chosen overrides (and null for blanks) in the PUT body', async () => {
     bindingsResponse = [binding({ id: 7, transport: 'POLLING' })]
-    let captured: unknown = null
-    registerEndpoint('/api/channels/telegram/bindings/7', {
-      method: 'PUT',
-      handler: async (event) => {
-        const { readBody } = await import('h3')
-        captured = await readBody(event)
-        return binding({ id: 7, transport: 'POLLING' })
-      },
-    })
     const c = await mountSuspended(Telegram)
     await c.find('[aria-label="Edit binding"]').trigger('click')
     await nextTick()
@@ -140,10 +143,14 @@ describe('telegram bindings page — per-binding settings (JCLAW-378)', () => {
     const saveBtn = c.findAll('button').find(b => b.text() === 'Save')
     expect(saveBtn).toBeTruthy()
     await saveBtn!.trigger('click')
-    await flushPromises()
-    await nextTick()
-    expect(captured).not.toBeNull()
-    expect(captured).toMatchObject({
+    // The save PUT's $fetch resolves on a later (macro)task under load, which
+    // flushPromises alone doesn't await — poll until the handler records the body.
+    for (let i = 0; i < 50 && capturedPutBody === null; i++) {
+      await flushPromises()
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect(capturedPutBody).not.toBeNull()
+    expect(capturedPutBody).toMatchObject({
       replyToMode: 'first',
       notifierCooldownMs: 9000,
       errorReplyPolicy: null,

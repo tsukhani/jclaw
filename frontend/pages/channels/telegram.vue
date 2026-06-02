@@ -287,8 +287,9 @@ async function save() {
     // default" → send null so the backend clears any stored override.
     replyToMode: form.value.replyToMode || null,
     errorReplyPolicy: form.value.errorReplyPolicy || null,
-    notifierCooldownMs: form.value.notifierCooldownMs.trim()
-      ? Number(form.value.notifierCooldownMs.trim())
+    // Coerce defensively: the numeric input can yield a number, string, or null.
+    notifierCooldownMs: String(form.value.notifierCooldownMs ?? '').trim()
+      ? Number(String(form.value.notifierCooldownMs).trim())
       : null,
   }
   // New bindings default to enabled=true; existing enabled state is preserved
