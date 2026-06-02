@@ -15,6 +15,8 @@ import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageTe
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.MessageEntity;
+import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
@@ -52,22 +54,54 @@ public class TelegramChannel implements Channel {
      *                     and possible future routing. Nullable when an
      *                     update arrives without chat context.
      * @param text         message body text; may be null for media-only updates
-     * @param fromId       sender's Telegram user id (used for binding
-     *                     authorization)
-     * @param fromUsername sender's Telegram @-handle if set
-     * @param attachments  inbound file attachments (resolved lazily by the
-     *                     webhook handler)
-     * @param mediaGroupId Telegram media-group identifier when multiple
-     *                     attachments are part of one user upload; null for
-     *                     single-attachment / text-only messages
+     * @param fromId          sender's Telegram user id (used for binding
+     *                        authorization)
+     * @param fromUsername    sender's Telegram @-handle if set
+     * @param fromDisplayName sender's display name for transcript attribution
+     *                        (JCLAW-367): first + last name when available,
+     *                        falling back to the @-handle, else null. Distinct
+     *                        from {@code fromUsername} so the UI can show a
+     *                        human label even for users who never set a handle.
+     * @param botMentioned    JCLAW-367 access-policy signal: true when the bot
+     *                        was directly addressed in this message — via an
+     *                        {@code @botusername} mention, a {@code text_mention}
+     *                        resolving to the bot's own user id, a
+     *                        {@code /cmd@botusername} bot_command suffix, or a
+     *                        reply to one of the bot's own messages. A later
+     *                        group-gating story consumes this; parsing here does
+     *                        NOT itself gate or drop anything. Best-effort when
+     *                        the bot identity is unknown (see
+     *                        {@link #parseUpdate(Update)}).
+     * @param attachments     inbound file attachments (resolved lazily by the
+     *                        webhook handler)
+     * @param mediaGroupId    Telegram media-group identifier when multiple
+     *                        attachments are part of one user upload; null for
+     *                        single-attachment / text-only messages
      */
     public record InboundMessage(String chatId, String chatType, String text,
                                  String fromId, String fromUsername,
+                                 String fromDisplayName, boolean botMentioned,
                                  java.util.List<PendingAttachment> attachments,
                                  String mediaGroupId) {
         public InboundMessage(String chatId, String chatType, String text,
                               String fromId, String fromUsername) {
-            this(chatId, chatType, text, fromId, fromUsername, java.util.List.of(), null);
+            this(chatId, chatType, text, fromId, fromUsername, null, false,
+                    java.util.List.of(), null);
+        }
+
+        /**
+         * JCLAW-367: pre-sender-capture convenience overload. Callers that
+         * carry attachments + media-group context but no per-message sender
+         * display name / addressed-bot signal (e.g. the media-group reassembler)
+         * use this; {@code fromDisplayName} defaults to null and
+         * {@code botMentioned} to false.
+         */
+        public InboundMessage(String chatId, String chatType, String text,
+                              String fromId, String fromUsername,
+                              java.util.List<PendingAttachment> attachments,
+                              String mediaGroupId) {
+            this(chatId, chatType, text, fromId, fromUsername, null, false,
+                    attachments, mediaGroupId);
         }
     }
 
@@ -595,8 +629,34 @@ public class TelegramChannel implements Channel {
      * populates {@code attachments} with one {@link PendingAttachment} per
      * media field present. Returns {@code null} only when the update has
      * neither text nor caption nor any recognizable attachment.
+     *
+     * <p>JCLAW-367: this single-arg form has no bot identity to resolve
+     * {@code @mention} / {@code text_mention} / {@code /cmd@botname} against,
+     * so {@link InboundMessage#botMentioned()} only fires on the
+     * identity-independent signal (a reply to a bot message that the SDK can
+     * see). Prefer {@link #parseUpdate(Update, String, Long)} where the
+     * caller knows the bot's username/id; the kept single-arg overload exists
+     * so existing call sites compile unchanged.
      */
     public static InboundMessage parseUpdate(Update update) {
+        return parseUpdate(update, null, null);
+    }
+
+    /**
+     * JCLAW-367: identity-aware parse. {@code botUsername} (the bot's
+     * {@code @}-handle, without the leading {@code @}; null if unknown) and
+     * {@code botUserId} (the bot's numeric Telegram user id; null if unknown)
+     * let the entity scan decide whether a {@code mention} / {@code text_mention}
+     * / {@code bot_command@suffix} addresses <i>this</i> bot. Entity OFFSETS are
+     * used, never substring search, so an {@code @handle} or {@code /cmd}
+     * appearing inside a URL or code span never false-positives.
+     *
+     * <p>The bot user id is derivable from the bot token (Telegram tokens are
+     * {@code <bot_id>:<hash>}) by the caller; the username is only known after
+     * a {@code getMe} call. When neither is supplied this degrades exactly to
+     * {@link #parseUpdate(Update)}'s best-effort behavior.
+     */
+    public static InboundMessage parseUpdate(Update update, String botUsername, Long botUserId) {
         if (update == null || update.getMessage() == null) return null;
         Message msg = update.getMessage();
 
@@ -604,9 +664,11 @@ public class TelegramChannel implements Channel {
         String chatType = msg.getChat() != null ? msg.getChat().getType() : null;
         String fromId = null;
         String fromUsername = null;
+        String fromDisplayName = null;
         if (msg.getFrom() != null) {
             fromId = String.valueOf(msg.getFrom().getId());
             fromUsername = msg.getFrom().getUserName();
+            fromDisplayName = displayNameOf(msg.getFrom());
         }
 
         var attachments = new java.util.ArrayList<PendingAttachment>();
@@ -620,6 +682,8 @@ public class TelegramChannel implements Channel {
         // (means "user attached a file with no prose context").
         String text = pickInboundText(msg);
 
+        boolean botMentioned = detectBotAddressed(msg, botUsername, botUserId);
+
         String mediaGroupId = msg.getMediaGroupId();
 
         // Fully empty updates (no text, no caption, no attachments) are
@@ -627,7 +691,123 @@ public class TelegramChannel implements Channel {
         if (text.isEmpty() && attachments.isEmpty()) return null;
 
         return new InboundMessage(chatId, chatType, text, fromId, fromUsername,
-                attachments, mediaGroupId);
+                fromDisplayName, botMentioned, attachments, mediaGroupId);
+    }
+
+    /**
+     * Build a human-readable display name from a Telegram {@link User} for
+     * transcript attribution (JCLAW-367): "First Last" when names are present,
+     * falling back to the {@code @}-handle, else null. Telegram guarantees a
+     * non-blank first name on real users, but a defensive trim keeps the
+     * result clean for edge shapes.
+     */
+    private static String displayNameOf(User user) {
+        var sb = new StringBuilder();
+        if (user.getFirstName() != null && !user.getFirstName().isBlank()) {
+            sb.append(user.getFirstName().strip());
+        }
+        if (user.getLastName() != null && !user.getLastName().isBlank()) {
+            if (!sb.isEmpty()) sb.append(' ');
+            sb.append(user.getLastName().strip());
+        }
+        if (!sb.isEmpty()) return sb.toString();
+        return (user.getUserName() != null && !user.getUserName().isBlank())
+                ? user.getUserName().strip() : null;
+    }
+
+    /**
+     * JCLAW-367: decide whether the bot is directly addressed by {@code msg}.
+     * Uses entity offsets (never substring search) so {@code @handle}/{@code /cmd}
+     * inside a URL, {@code code} span, or {@code text_link} can't false-positive.
+     * Fires on any of:
+     * <ul>
+     *   <li>a {@code mention} entity whose {@code @handle} (case-insensitively)
+     *       equals {@code botUsername};</li>
+     *   <li>a {@code text_mention} entity whose embedded {@link User} id equals
+     *       {@code botUserId};</li>
+     *   <li>a {@code bot_command} entity carrying a {@code @botusername} suffix
+     *       that matches {@code botUsername};</li>
+     *   <li>a reply to a message authored by the bot itself (matched by
+     *       {@code botUserId}, or — when the id is unknown — by the reply
+     *       target being authored by any bot, the best-effort fallback).</li>
+     * </ul>
+     */
+    private static boolean detectBotAddressed(Message msg, String botUsername, Long botUserId) {
+        if (entitiesAddressBot(msg.getText(), msg.getEntities(), botUsername, botUserId)
+                || entitiesAddressBot(msg.getCaption(), msg.getCaptionEntities(), botUsername, botUserId)) {
+            return true;
+        }
+        return isReplyToBot(msg, botUserId);
+    }
+
+    /** Scan one text/entity pair for a mention, text_mention, or bot_command suffix addressing the bot. */
+    private static boolean entitiesAddressBot(String body, java.util.List<MessageEntity> entities,
+                                              String botUsername, Long botUserId) {
+        if (body == null || entities == null) return false;
+        for (var entity : entities) {
+            if (entityAddressesBot(body, entity, botUsername, botUserId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean entityAddressesBot(String body, MessageEntity entity,
+                                              String botUsername, Long botUserId) {
+        var type = entity.getType();
+        if (type == null) return false;
+        return switch (type) {
+            case "mention" -> botUsername != null
+                    && botUsername.equalsIgnoreCase(stripLeadingAt(entitySlice(body, entity)));
+            case "text_mention" -> botUserId != null
+                    && entity.getUser() != null
+                    && botUserId.equals(entity.getUser().getId());
+            case "bot_command" -> commandSuffixMatchesBot(entitySlice(body, entity), botUsername);
+            default -> false;
+        };
+    }
+
+    /**
+     * Safe offset-based slice of the entity text. {@link MessageEntity#computeText}
+     * is only populated by the SDK's getters in some shapes, so we slice from
+     * the offset/length ourselves and clamp to the body bounds to stay robust
+     * against malformed offsets.
+     */
+    private static String entitySlice(String body, MessageEntity entity) {
+        if (entity.getOffset() == null || entity.getLength() == null) return "";
+        int start = Math.max(0, entity.getOffset());
+        int end = Math.min(body.length(), start + Math.max(0, entity.getLength()));
+        return start <= end ? body.substring(start, end) : "";
+    }
+
+    private static String stripLeadingAt(String s) {
+        return s.startsWith("@") ? s.substring(1) : s;
+    }
+
+    /**
+     * A bot_command entity slice is shaped {@code /cmd} or {@code /cmd@botname}.
+     * Returns true only when a {@code @suffix} is present AND matches the bot's
+     * own username — a bare {@code /cmd} (no suffix) is not a direct address in
+     * a group, so it does not fire the signal here.
+     */
+    private static boolean commandSuffixMatchesBot(String slice, String botUsername) {
+        if (botUsername == null) return false;
+        int at = slice.indexOf('@');
+        if (at < 0) return false;
+        return botUsername.equalsIgnoreCase(slice.substring(at + 1));
+    }
+
+    /**
+     * True when {@code msg} replies to a message the bot itself authored. When
+     * {@code botUserId} is known, match the reply target's author by id; when it
+     * is unknown (single-arg parse), fall back to "the reply target was authored
+     * by a bot" — best-effort, since in a 1:1 binding the only bot in the chat
+     * is ours.
+     */
+    private static boolean isReplyToBot(Message msg, Long botUserId) {
+        var replyTo = msg.getReplyToMessage();
+        if (replyTo == null || replyTo.getFrom() == null) return false;
+        var author = replyTo.getFrom();
+        if (botUserId != null) return botUserId.equals(author.getId());
+        return Boolean.TRUE.equals(author.getIsBot());
     }
 
     /**

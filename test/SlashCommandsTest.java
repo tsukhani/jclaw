@@ -133,6 +133,26 @@ class SlashCommandsTest extends UnitTest {
     }
 
     @Test
+    void parseStripsTrailingBotnameSuffix() {
+        // JCLAW-367: Telegram addresses a bot in a group as /cmd@botname.
+        // The @<botusername> suffix must be stripped before enum matching.
+        assertEquals(Commands.Command.HELP, Commands.parse("/help@jclaw_bot").orElseThrow());
+        assertEquals(Commands.Command.MODEL, Commands.parse("/model@JClaw_Bot openrouter/x").orElseThrow(),
+                "suffix strip must coexist with trailing args");
+        assertEquals(Commands.Command.NEW, Commands.parse("  /new@some_bot  ").orElseThrow(),
+                "surrounding whitespace + suffix both handled");
+        assertTrue(Commands.parse("/tarun@jclaw_bot").isEmpty(),
+                "unknown command keeps falling through even with a bot suffix");
+    }
+
+    @Test
+    void isStartRecognizesBotnameSuffixForm() {
+        // JCLAW-367: /start@botname is the group form of the onboarding token.
+        assertTrue(Commands.isStart("/start@jclaw_bot"));
+        assertTrue(Commands.isStart("  /start@JClaw_Bot  "));
+    }
+
+    @Test
     void parseReturnsEmptyForUnknownSlashCommand() {
         assertTrue(Commands.parse("/tarun").isEmpty(),
                 "unknown slash commands must pass through so LLM sees them");

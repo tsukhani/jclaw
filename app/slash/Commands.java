@@ -148,10 +148,25 @@ public final class Commands {
         if (!trimmed.startsWith("/")) return Optional.empty();
         var firstSpace = indexOfWhitespace(trimmed);
         var head = firstSpace < 0 ? trimmed : trimmed.substring(0, firstSpace);
+        head = stripBotSuffix(head);
         for (var cmd : Command.values()) {
             if (cmd.literal.equalsIgnoreCase(head)) return Optional.of(cmd);
         }
         return Optional.empty();
+    }
+
+    /**
+     * JCLAW-367: Telegram addresses a bot in a group as {@code /cmd@botname}.
+     * Strip the trailing {@code @<botusername>} from a command token so the
+     * enum match sees the bare {@code /cmd}. A token without an {@code @}
+     * suffix is returned unchanged; the {@code @} is only stripped from a
+     * leading-slash command token, never from arguments (those aren't passed
+     * here — {@code head} is the first whitespace-delimited token).
+     */
+    private static String stripBotSuffix(String head) {
+        if (!head.startsWith("/")) return head;
+        int at = head.indexOf('@');
+        return at < 0 ? head : head.substring(0, at);
     }
 
     private static int indexOfWhitespace(String s) {
@@ -209,6 +224,8 @@ public final class Commands {
         var trimmed = text.strip();
         var firstSpace = indexOfWhitespace(trimmed);
         var head = firstSpace < 0 ? trimmed : trimmed.substring(0, firstSpace);
+        // JCLAW-367: tolerate the Telegram group form /start@botname.
+        head = stripBotSuffix(head);
         return "/start".equalsIgnoreCase(head);
     }
 
