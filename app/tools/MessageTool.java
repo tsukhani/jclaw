@@ -46,16 +46,18 @@ import java.util.Set;
  * <p><b>Send (JCLAW-327).</b> {@code action="send"} delivers text to the
  * inferred-or-explicit channel + target via {@link DeliveryDispatcher}.
  *
- * <p><b>Telegram message actions (JCLAW-374).</b> {@code delete}, {@code pin},
- * {@code unpin}, and {@code react} operate on an existing Telegram message
- * by {@code message_id}, calling the corresponding
- * {@link channels.TelegramChannel} primitive. The bot token is resolved from
+ * <p><b>Telegram message actions (JCLAW-374, JCLAW-381).</b> {@code reply},
+ * {@code edit}, {@code delete}, {@code pin}, {@code unpin}, and {@code react}
+ * operate on an existing Telegram message by {@code message_id}, calling the
+ * corresponding {@link channels.TelegramChannel} primitive. {@code reply}
+ * sends a fresh message that quotes the target, and {@code edit} revises a
+ * bot-sent message's text in place (JCLAW-381). The bot token is resolved from
  * the calling agent's (or an ancestor's) {@link models.TelegramBinding}, and
  * the chat id from the explicit {@code target} or the agent's active
  * conversation peer — the same resolution {@code send} uses. Each is gated
  * behind a per-action capability toggle (see {@link #actionEnabled}); a
  * disabled action returns a structured {@code not-enabled} result rather than
- * throwing. {@code reply} / {@code edit} remain deferred.
+ * throwing.
  */
 public class MessageTool implements ToolRegistry.Tool {
 
@@ -73,17 +75,26 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final String ACTION_PIN = "pin";
     private static final String ACTION_UNPIN = "unpin";
     private static final String ACTION_REACT = "react";
+    private static final String ACTION_REPLY = "reply";
+    private static final String ACTION_EDIT = "edit";
     private static final Set<String> ALLOWED_ACTIONS =
-            Set.of(ACTION_SEND, ACTION_DELETE, ACTION_PIN, ACTION_UNPIN, ACTION_REACT);
+            Set.of(ACTION_SEND, ACTION_DELETE, ACTION_PIN, ACTION_UNPIN,
+                    ACTION_REACT, ACTION_REPLY, ACTION_EDIT);
 
     // JCLAW-374: per-action capability toggles, read from play.Play.configuration
     // (same mechanism as TelegramChannel.replyToMode). Sensible defaults: react
     // and delete are low-blast-radius and commonly wanted, so they default ON;
     // pin/unpin mutate chat-wide pinned state for everyone in the chat, so it
     // defaults OFF and the operator opts in. unpin shares the pin toggle.
+    // JCLAW-381: reply (a fresh message that quotes a target) and edit (revise a
+    // bot-sent message in place) are both low-blast-radius — they only add or
+    // amend the bot's own output, never delete anyone's message or mutate
+    // chat-wide pinned state — so they default ON like react/delete.
     private static final String CFG_ACTION_DELETE = "telegram.actions.delete";
     private static final String CFG_ACTION_PIN = "telegram.actions.pin";
     private static final String CFG_ACTION_REACT = "telegram.actions.react";
+    private static final String CFG_ACTION_REPLY = "telegram.actions.reply";
+    private static final String CFG_ACTION_EDIT = "telegram.actions.edit";
 
     @Override
     public String name() { return TOOL_NAME; }
@@ -111,7 +122,11 @@ public class MessageTool implements ToolRegistry.Tool {
                 new ToolAction(ACTION_UNPIN,
                         "Unpin a Telegram message by message_id."),
                 new ToolAction(ACTION_REACT,
-                        "Set (or clear) the bot's reaction on a Telegram message by message_id."));
+                        "Set (or clear) the bot's reaction on a Telegram message by message_id."),
+                new ToolAction(ACTION_REPLY,
+                        "Send a Telegram message as a reply to an existing message_id."),
+                new ToolAction(ACTION_EDIT,
+                        "Edit the text of a bot-sent Telegram message by message_id."));
     }
 
     @Override
@@ -129,12 +144,14 @@ public class MessageTool implements ToolRegistry.Tool {
                 inherit the parent's channel + target, so they can call this with just \
                 `action` and `message` to reply where the user is. Cross-channel sends are \
                 allowed when both `channel` and `target` are explicit. \
-                For Telegram message actions `delete` / `pin` / `unpin` / `react`: required \
-                `message_id` (the Telegram message to act on); the chat is taken from `target` \
-                or the active conversation's peer, and the bot token from the agent's Telegram \
-                binding. `react` takes an optional `emoji` (a blank/omitted emoji clears the \
-                bot's reaction). These actions may be disabled by the operator, in which case \
-                you get a `not-enabled` result.""";
+                For Telegram message actions `reply` / `edit` / `delete` / `pin` / `unpin` / \
+                `react`: required `message_id` (the Telegram message to act on); the chat is \
+                taken from `target` or the active conversation's peer, and the bot token from \
+                the agent's Telegram binding. `reply` sends `message` as a reply quoting \
+                `message_id`; `edit` replaces a bot-sent message's text with `message`; both \
+                require `message`. `react` takes an optional `emoji` (a blank/omitted emoji \
+                clears the bot's reaction). These actions may be disabled by the operator, in \
+                which case you get a `not-enabled` result.""";
     }
 
     @Override
@@ -148,14 +165,17 @@ public class MessageTool implements ToolRegistry.Tool {
         props.put(PARAM_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.ENUM, List.copyOf(ALLOWED_ACTIONS),
                 SchemaKeys.DESCRIPTION,
-                "What to do: \"send\" a new message, or (Telegram only) \"delete\" / "
-                        + "\"pin\" / \"unpin\" / \"react\" on an existing message."));
+                "What to do: \"send\" a new message, or (Telegram only) \"reply\" / "
+                        + "\"edit\" / \"delete\" / \"pin\" / \"unpin\" / \"react\" on an "
+                        + "existing message."));
         props.put(PARAM_MESSAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "The message body to deliver (required for action=\"send\")."));
+                "The message body to deliver (required for action=\"send\", \"reply\", "
+                        + "and \"edit\")."));
         props.put(PARAM_MESSAGE_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
-                "Telegram message id to act on (required for delete / pin / unpin / react)."));
+                "Telegram message id to act on (required for reply / edit / delete / "
+                        + "pin / unpin / react)."));
         props.put(PARAM_EMOJI, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Reaction emoji for action=\"react\" (e.g. \"👍\"). "
@@ -196,8 +216,7 @@ public class MessageTool implements ToolRegistry.Tool {
         var normalized = action.toLowerCase();
         if (!ALLOWED_ACTIONS.contains(normalized)) {
             return "Error: 'action' must be one of " + ALLOWED_ACTIONS
-                    + " (got '" + action + "'). Other actions (reply, edit) "
-                    + "are not yet supported in this build.";
+                    + " (got '" + action + "').";
         }
         final var finalCallerId = callingAgent.id;
         if (ACTION_SEND.equals(normalized)) {
@@ -210,16 +229,24 @@ public class MessageTool implements ToolRegistry.Tool {
             final var finalMessage = message;
             return Tx.run(() -> dispatch(finalCallerId, finalChannel, finalTarget, finalMessage));
         }
-        // JCLAW-374: delete / pin / unpin / react — Telegram message actions.
+        // JCLAW-374/381: reply / edit / delete / pin / unpin / react — Telegram
+        // message actions, all keyed on message_id.
         var messageId = optInteger(args, PARAM_MESSAGE_ID);
         if (messageId == null) {
             return "Error: 'message_id' is required for action '" + normalized + "'.";
         }
+        // JCLAW-381: reply and edit carry a text body in `message`.
+        var text = optString(args, PARAM_MESSAGE);
+        if ((ACTION_REPLY.equals(normalized) || ACTION_EDIT.equals(normalized))
+                && (text == null || text.isBlank())) {
+            return "Error: 'message' is required for action '" + normalized + "'.";
+        }
         final var finalTarget = optString(args, PARAM_TARGET);
         final var finalEmoji = optString(args, PARAM_EMOJI);
+        final var finalMessage = text;
         final var finalMessageId = messageId;
-        return Tx.run(() ->
-                telegramAction(finalCallerId, normalized, finalTarget, finalMessageId, finalEmoji));
+        return Tx.run(() -> telegramAction(
+                finalCallerId, normalized, finalTarget, finalMessageId, finalEmoji, finalMessage));
     }
 
     /** Resolve channel + target (explicit overrides win; otherwise infer from
@@ -276,16 +303,20 @@ public class MessageTool implements ToolRegistry.Tool {
     }
 
     /**
-     * JCLAW-374: execute a Telegram message action (delete / pin / unpin /
-     * react) on {@code messageId}. Resolves the bot token from the agent's
-     * (or an ancestor's) Telegram binding and the chat id from {@code target}
-     * or the agent's active conversation peer, then calls the matching
-     * {@link TelegramChannel} primitive. Gated per-action by
+     * JCLAW-374/381: execute a Telegram message action (reply / edit / delete /
+     * pin / unpin / react) on {@code messageId}. Resolves the bot token from the
+     * agent's (or an ancestor's) Telegram binding and the chat id from
+     * {@code target} or the agent's active conversation peer, then calls the
+     * matching {@link TelegramChannel} primitive. {@code reply} sends
+     * {@code message} via {@link TelegramChannel#sendMessage} quoting
+     * {@code messageId}; {@code edit} replaces a bot-sent message's text via
+     * {@link TelegramChannel#editMessageText}. Gated per-action by
      * {@link #actionEnabled}: a disabled action returns a {@code not-enabled}
      * envelope without touching the API. Must run inside an active Tx.
      */
     private static String telegramAction(Long callingAgentId, String action,
-                                          String explicitTarget, int messageId, String emoji) {
+                                          String explicitTarget, int messageId,
+                                          String emoji, String message) {
         if (!actionEnabled(action)) {
             return resultJson(action, "not-enabled",
                     "Action '" + action + "' is disabled by configuration "
@@ -313,6 +344,12 @@ public class MessageTool implements ToolRegistry.Tool {
             case ACTION_PIN -> TelegramChannel.pinChatMessage(binding.botToken, chatId, messageId);
             case ACTION_UNPIN -> TelegramChannel.unpinChatMessage(binding.botToken, chatId, messageId);
             case ACTION_REACT -> TelegramChannel.setMessageReaction(binding.botToken, chatId, messageId, emoji);
+            // JCLAW-381: reply = sendMessage with replyToMessageId set (null thread);
+            // edit = editMessageText with the new text (null keyboard, no change to markup).
+            case ACTION_REPLY -> TelegramChannel.sendMessage(
+                    binding.botToken, chatId, message, agent, messageId, null);
+            case ACTION_EDIT -> TelegramChannel.editMessageText(
+                    binding.botToken, chatId, messageId, message, null);
             default -> false;
         };
         if (ok) {
@@ -348,6 +385,8 @@ public class MessageTool implements ToolRegistry.Tool {
             case ACTION_DELETE -> CFG_ACTION_DELETE;
             case ACTION_PIN, ACTION_UNPIN -> CFG_ACTION_PIN;
             case ACTION_REACT -> CFG_ACTION_REACT;
+            case ACTION_REPLY -> CFG_ACTION_REPLY;
+            case ACTION_EDIT -> CFG_ACTION_EDIT;
             default -> "telegram.actions." + action;
         };
     }

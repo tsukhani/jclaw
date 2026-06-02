@@ -32,6 +32,12 @@ class MessageToolTest extends UnitTest {
     private static final String CFG_DELETE = "telegram.actions.delete";
     private static final String CFG_PIN = "telegram.actions.pin";
     private static final String CFG_REACT = "telegram.actions.react";
+    // JCLAW-381: reply + edit toggles (both default ON).
+    private static final String CFG_REPLY = "telegram.actions.reply";
+    private static final String CFG_EDIT = "telegram.actions.edit";
+    // Reply-target attach policy (TelegramChannel.replyToMode); pinned to "all"
+    // in the reply test so the quoted message id is deterministically on the wire.
+    private static final String CFG_REPLY_TO_MODE = "telegram.replyTo.mode";
 
     private static final String BOT_TOKEN = "374:msg-action-bot";
     private static final String CHAT_ID = "424242";
@@ -64,6 +70,8 @@ class MessageToolTest extends UnitTest {
         play.Play.configuration.remove(CFG_DELETE);
         play.Play.configuration.remove(CFG_PIN);
         play.Play.configuration.remove(CFG_REACT);
+        play.Play.configuration.remove(CFG_REPLY);
+        play.Play.configuration.remove(CFG_EDIT);
     }
 
     /** Bind {@link #BOT_TOKEN} to {@link #agent} and seed a Telegram
@@ -96,13 +104,15 @@ class MessageToolTest extends UnitTest {
     }
 
     @Test
-    void unsupportedActionRejectedWithHintAtP1Followups() throws Exception {
-        // AC-3 lists reply/edit/delete/react but only send is in this build.
+    void unknownActionRejectedWithAllowedSetHint() throws Exception {
+        // JCLAW-381: reply/edit/delete/pin/unpin/react are all supported now;
+        // an action outside the allowed set (e.g. "forward") still errors and
+        // the error names the allowed set.
         var result = invokeTool(agent.id,
-                "{\"action\":\"reply\",\"message\":\"hi\",\"channel\":\"telegram\",\"target\":\"1\"}");
+                "{\"action\":\"forward\",\"message\":\"hi\",\"channel\":\"telegram\",\"target\":\"1\"}");
         assertTrue(result.startsWith("Error: 'action' must be one of"), result);
-        assertTrue(result.contains("not yet supported"),
-                "rejection should hint that reply/edit/delete/react are deferred: " + result);
+        assertTrue(result.contains("reply") && result.contains("edit"),
+                "rejection should list reply/edit among the supported actions: " + result);
     }
 
     @Test
@@ -340,6 +350,114 @@ class MessageToolTest extends UnitTest {
         var result = invokeTool(agent.id, "{\"action\":\"delete\",\"message_id\":7}");
         assertTrue(result.startsWith("Error: no Telegram bot is connected"), result);
         assertEquals(0, server.countRequests("deleteMessage"));
+    }
+
+    // ──────── JCLAW-381: reply + edit message actions ────────
+
+    @Test
+    void replyActionCallsSendMessageWithReplyTarget() throws Exception {
+        // reply defaults ON; chat id inferred from the active telegram convo.
+        // It must hit sendMessage with the supplied text and quote message_id 7.
+        // Pin replyTo.mode=all so the reply target is attached unconditionally
+        // (default FIRST also attaches it on a single-chunk send, but pinning
+        // it here keeps the wire-body assertion deterministic).
+        play.Play.configuration.setProperty(CFG_REPLY_TO_MODE, "all");
+        try {
+            seedTelegramBindingAndConversation();
+            var result = invokeTool(agent.id,
+                    "{\"action\":\"reply\",\"message_id\":7,\"message\":\"replytoken\"}");
+            var parsed = JsonParser.parseString(result).getAsJsonObject();
+            assertEquals("ok", parsed.get("status").getAsString(), result);
+            assertEquals("reply", parsed.get("action").getAsString());
+            assertEquals(1, server.countRequests("sendMessage"),
+                    "reply must hit the sendMessage endpoint exactly once");
+            var body = server.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .reduce("", (a, b) -> a + b);
+            assertTrue(body.contains("replytoken"),
+                    "the reply text must appear in the sendMessage body: " + body);
+            assertTrue(body.contains("7"),
+                    "the reply target message id must appear in the sendMessage body: " + body);
+        } finally {
+            play.Play.configuration.remove(CFG_REPLY_TO_MODE);
+        }
+    }
+
+    @Test
+    void editActionCallsEditMessageTextWithNewText() throws Exception {
+        // edit defaults ON; the new text must reach the editMessageText body.
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"edit\",\"message_id\":8,\"message\":\"editedtoken\"}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        assertEquals("edit", parsed.get("action").getAsString());
+        assertEquals(1, server.countRequests("editMessageText"),
+                "edit must hit the editMessageText endpoint exactly once");
+        var body = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("editMessageText"))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .reduce("", (a, b) -> a + b);
+        assertTrue(body.contains("editedtoken"),
+                "the new text must appear in the editMessageText body: " + body);
+    }
+
+    @Test
+    void disabledReplyIsRefusedWithoutApiCall() throws Exception {
+        play.Play.configuration.setProperty(CFG_REPLY, "false");
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"reply\",\"message_id\":7,\"message\":\"hi\"}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("not-enabled", parsed.get("status").getAsString(), result);
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a disabled reply must NOT touch the Telegram API");
+    }
+
+    @Test
+    void disabledEditIsRefusedWithoutApiCall() throws Exception {
+        play.Play.configuration.setProperty(CFG_EDIT, "false");
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"edit\",\"message_id\":8,\"message\":\"hi\"}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("not-enabled", parsed.get("status").getAsString(), result);
+        assertEquals(0, server.countRequests("editMessageText"),
+                "a disabled edit must NOT touch the Telegram API");
+    }
+
+    @Test
+    void replyMissingMessageIdReturnsError() throws Exception {
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"reply\",\"message\":\"hi\"}");
+        assertTrue(result.startsWith("Error: 'message_id' is required"), result);
+        assertEquals(0, server.countRequests("sendMessage"));
+    }
+
+    @Test
+    void editMissingMessageIdReturnsError() throws Exception {
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"edit\",\"message\":\"hi\"}");
+        assertTrue(result.startsWith("Error: 'message_id' is required"), result);
+        assertEquals(0, server.countRequests("editMessageText"));
+    }
+
+    @Test
+    void replyMissingMessageTextReturnsError() throws Exception {
+        // reply requires a `message` body; message_id alone is not enough.
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"reply\",\"message_id\":7}");
+        assertTrue(result.startsWith("Error: 'message' is required"), result);
+        assertEquals(0, server.countRequests("sendMessage"));
+    }
+
+    @Test
+    void editMissingMessageTextReturnsError() throws Exception {
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"edit\",\"message_id\":8}");
+        assertTrue(result.startsWith("Error: 'message' is required"), result);
+        assertEquals(0, server.countRequests("editMessageText"));
     }
 
     // ──────── helpers ────────
