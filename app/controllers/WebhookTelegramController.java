@@ -210,7 +210,8 @@ public class WebhookTelegramController extends Controller {
             AgentRunner.processInboundForAgentStreaming(
                     sendAgent, CHANNEL_TELEGRAM, peerId, attributedText,
                     convId -> new channels.TelegramStreamingSink(
-                            sendToken, sendChatId, sendAgent, convId, sendChatType),
+                            sendToken, sendChatId, sendAgent, convId, sendChatType,
+                            message.messageId(), message.messageThreadId()),
                     inputs);
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,

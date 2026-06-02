@@ -451,7 +451,8 @@ public final class TelegramPollingRunner {
                 AgentRunner.processInboundForAgentStreaming(
                         sendAgent, LOG_SOURCE, peerId, attributedText,
                         convId -> new TelegramStreamingSink(
-                                sendToken, sendChatId, sendAgent, convId, sendChatType),
+                                sendToken, sendChatId, sendAgent, convId, sendChatType,
+                                merged.messageId(), merged.messageThreadId()),
                         inputs);
             } catch (Exception e) {
                 EventLogger.error(LOG_CATEGORY, sendAgent != null ? sendAgent.name : null,
