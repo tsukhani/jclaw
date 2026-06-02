@@ -104,20 +104,26 @@ class TelegramOutboundPlannerTest extends UnitTest {
 
         var md = "Here is the shot: [capture.png](<capture.png>) as requested.";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
-        // JCLAW-123: an image reference now produces two FileSegments — a
-        // photo (inline preview) and a document (downloadable original).
-        assertEquals(4, segments.size(),
-                () -> "text + photo + document + text: " + segments);
-        assertTrue(segments.get(0) instanceof TelegramOutboundPlanner.TextSegment);
+        // JCLAW-123: an image reference produces two FileSegments — a photo
+        // (inline preview) and a background document (downloadable original).
+        // JCLAW-364: the lead-in prose "Here is the shot:" folds into the
+        // photo's caption, so the leading TextSegment is gone — the trailing
+        // " as requested." stays a standalone text segment.
+        assertEquals(3, segments.size(),
+                () -> "photo(captioned) + document + text: " + segments);
+        assertTrue(segments.get(0) instanceof TelegramOutboundPlanner.FileSegment);
         assertTrue(segments.get(1) instanceof TelegramOutboundPlanner.FileSegment);
-        assertTrue(segments.get(2) instanceof TelegramOutboundPlanner.FileSegment);
-        assertTrue(segments.get(3) instanceof TelegramOutboundPlanner.TextSegment);
+        assertTrue(segments.get(2) instanceof TelegramOutboundPlanner.TextSegment);
 
-        var photoSeg = (TelegramOutboundPlanner.FileSegment) segments.get(1);
-        var docSeg = (TelegramOutboundPlanner.FileSegment) segments.get(2);
+        var photoSeg = (TelegramOutboundPlanner.FileSegment) segments.get(0);
+        var docSeg = (TelegramOutboundPlanner.FileSegment) segments.get(1);
         assertEquals("capture.png", photoSeg.displayName());
         assertTrue(photoSeg.isImage(), "first image segment must be photo");
+        assertEquals(TelegramOutboundPlanner.MediaKind.PHOTO, photoSeg.kind());
+        assertEquals("Here is the shot:", photoSeg.caption(),
+                "lead-in prose must fold into the photo caption");
         assertFalse(docSeg.isImage(), "second image segment must be document");
+        assertNull(docSeg.caption(), "background document must not carry the caption");
         assertEquals(photoSeg.file().getAbsolutePath(), docSeg.file().getAbsolutePath(),
                 "photo and document segments must target the same file");
         // JCLAW-126: the quality-duplicate document must be marked background
@@ -133,10 +139,15 @@ class TelegramOutboundPlannerTest extends UnitTest {
 
         var md = "Your report: [report.pdf](report.pdf)";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
-        assertEquals(2, segments.size(), () -> "leading text + file: " + segments);
-        assertTrue(segments.get(1) instanceof TelegramOutboundPlanner.FileSegment);
-        var fs = (TelegramOutboundPlanner.FileSegment) segments.get(1);
+        // JCLAW-364: "Your report:" folds into the document's caption, leaving
+        // a single document segment (no standalone leading text).
+        assertEquals(1, segments.size(), () -> "captioned document only: " + segments);
+        assertTrue(segments.get(0) instanceof TelegramOutboundPlanner.FileSegment);
+        var fs = (TelegramOutboundPlanner.FileSegment) segments.get(0);
         assertFalse(fs.isImage(), "pdf must be classified as document");
+        assertEquals(TelegramOutboundPlanner.MediaKind.DOCUMENT, fs.kind());
+        assertEquals("Your report:", fs.caption(),
+                "lead-in prose must fold into the document caption");
     }
 
     @Test
@@ -160,6 +171,118 @@ class TelegramOutboundPlannerTest extends UnitTest {
         assertFalse(TelegramOutboundPlanner.isImageFilename("foo.docx"));
         assertFalse(TelegramOutboundPlanner.isImageFilename("foo"));
         assertFalse(TelegramOutboundPlanner.isImageFilename(null));
+    }
+
+    // ── JCLAW-364: MIME/extension routing to native media kinds ──
+
+    @Test
+    void classifyRoutesByExtensionWithDocumentFallback() {
+        // Images → PHOTO.
+        assertEquals(TelegramOutboundPlanner.MediaKind.PHOTO,
+                TelegramOutboundPlanner.classify("a.png"));
+        // OGG/Opus → VOICE (case-insensitive).
+        assertEquals(TelegramOutboundPlanner.MediaKind.VOICE,
+                TelegramOutboundPlanner.classify("note.ogg"));
+        assertEquals(TelegramOutboundPlanner.MediaKind.VOICE,
+                TelegramOutboundPlanner.classify("NOTE.OPUS"));
+        // Music / spoken audio → AUDIO.
+        assertEquals(TelegramOutboundPlanner.MediaKind.AUDIO,
+                TelegramOutboundPlanner.classify("song.mp3"));
+        assertEquals(TelegramOutboundPlanner.MediaKind.AUDIO,
+                TelegramOutboundPlanner.classify("clip.m4a"));
+        // Video → VIDEO.
+        assertEquals(TelegramOutboundPlanner.MediaKind.VIDEO,
+                TelegramOutboundPlanner.classify("clip.mp4"));
+        assertEquals(TelegramOutboundPlanner.MediaKind.VIDEO,
+                TelegramOutboundPlanner.classify("clip.mov"));
+        // Unknown / extension-less / null → DOCUMENT fallback.
+        assertEquals(TelegramOutboundPlanner.MediaKind.DOCUMENT,
+                TelegramOutboundPlanner.classify("report.pdf"));
+        assertEquals(TelegramOutboundPlanner.MediaKind.DOCUMENT,
+                TelegramOutboundPlanner.classify("mystery.xyz"));
+        assertEquals(TelegramOutboundPlanner.MediaKind.DOCUMENT,
+                TelegramOutboundPlanner.classify("noext"));
+        assertEquals(TelegramOutboundPlanner.MediaKind.DOCUMENT,
+                TelegramOutboundPlanner.classify(null));
+    }
+
+    @Test
+    void oggFileRoutesToVoiceSegment() {
+        var agent = AgentService.create("planner-voice", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "memo.ogg", "opus-bytes");
+        var segments = TelegramOutboundPlanner.plan("[memo](<memo.ogg>)", agent.name);
+        var fs = onlyFileSegment(segments);
+        assertEquals(TelegramOutboundPlanner.MediaKind.VOICE, fs.kind());
+        assertFalse(fs.isImage(), "voice must not classify as image");
+    }
+
+    @Test
+    void mp3FileRoutesToAudioSegment() {
+        var agent = AgentService.create("planner-audio", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "track.mp3", "mp3-bytes");
+        var segments = TelegramOutboundPlanner.plan("[track](<track.mp3>)", agent.name);
+        var fs = onlyFileSegment(segments);
+        assertEquals(TelegramOutboundPlanner.MediaKind.AUDIO, fs.kind());
+    }
+
+    @Test
+    void mp4FileRoutesToVideoSegment() {
+        var agent = AgentService.create("planner-video", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "demo.mp4", "mp4-bytes");
+        var segments = TelegramOutboundPlanner.plan("[demo](<demo.mp4>)", agent.name);
+        var fs = onlyFileSegment(segments);
+        assertEquals(TelegramOutboundPlanner.MediaKind.VIDEO, fs.kind());
+    }
+
+    @Test
+    void unknownExtensionRoutesToDocumentSegment() {
+        var agent = AgentService.create("planner-unknown", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "data.bin", "bytes");
+        var segments = TelegramOutboundPlanner.plan("[data](<data.bin>)", agent.name);
+        var fs = onlyFileSegment(segments);
+        assertEquals(TelegramOutboundPlanner.MediaKind.DOCUMENT, fs.kind());
+        assertFalse(fs.isImage());
+    }
+
+    @Test
+    void adjacentProseFoldsIntoVoiceCaption() {
+        var agent = AgentService.create("planner-voice-caption", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "memo.ogg", "opus-bytes");
+        var segments = TelegramOutboundPlanner.plan(
+                "Here is the recap: [memo](<memo.ogg>)", agent.name);
+        // Single voice segment — the lead-in prose folded into the caption, so
+        // there's no standalone leading text bubble.
+        assertEquals(1, segments.size(), () -> "captioned voice only: " + segments);
+        var fs = onlyFileSegment(segments);
+        assertEquals(TelegramOutboundPlanner.MediaKind.VOICE, fs.kind());
+        assertEquals("Here is the recap:", fs.caption());
+    }
+
+    @Test
+    void overlongProseStaysSeparateAndIsNotCaptioned() {
+        var agent = AgentService.create("planner-longcap", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "track.mp3", "mp3-bytes");
+        // > 1024 chars: too long for a Telegram caption — must remain a
+        // standalone text message rather than be silently truncated.
+        var longProse = "x".repeat(1100);
+        var segments = TelegramOutboundPlanner.plan(
+                longProse + " [track](<track.mp3>)", agent.name);
+        assertEquals(2, segments.size(), () -> "leading text + audio: " + segments);
+        assertTrue(segments.get(0) instanceof TelegramOutboundPlanner.TextSegment);
+        var fs = (TelegramOutboundPlanner.FileSegment) segments.get(1);
+        assertEquals(TelegramOutboundPlanner.MediaKind.AUDIO, fs.kind());
+        assertNull(fs.caption(), "over-limit prose must not become a caption");
+    }
+
+    /** Return the single FileSegment in {@code segments}, failing if not exactly one. */
+    private static TelegramOutboundPlanner.FileSegment onlyFileSegment(
+            java.util.List<TelegramOutboundPlanner.Segment> segments) {
+        var files = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
+                .map(s -> (TelegramOutboundPlanner.FileSegment) s)
+                .toList();
+        assertEquals(1, files.size(), () -> "expected exactly one FileSegment: " + segments);
+        return files.get(0);
     }
 
     // ── Fallback: unresolvable paths ──
@@ -201,22 +324,31 @@ class TelegramOutboundPlannerTest extends UnitTest {
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
 
         // JCLAW-123: images (a.png, c.png) each emit photo+document pairs;
-        // PDFs emit a single document. Result: text + photo(a) + doc(a) + text
-        // + doc(b) + text + photo(c) + doc(c) + text = 9 segments.
-        assertEquals(9, segments.size(),
-                () -> "intro, a-photo, a-doc, middle, b-doc, more, c-photo, c-doc, outro: " + segments);
+        // PDFs emit a single document. JCLAW-364: each lead-in prose run folds
+        // into the following foreground media's caption, so the standalone
+        // "intro", "middle", "more" text segments are gone. Result:
+        // photo(a,"intro") + bgdoc(a) + doc(b,"middle") + photo(c,"more") +
+        // bgdoc(c) + text(" outro") = 6 segments.
+        assertEquals(6, segments.size(),
+                () -> "a-photo, a-doc, b-doc, c-photo, c-doc, outro: " + segments);
 
-        var fsAPhoto = (TelegramOutboundPlanner.FileSegment) segments.get(1);
-        var fsADoc = (TelegramOutboundPlanner.FileSegment) segments.get(2);
-        var fsBDoc = (TelegramOutboundPlanner.FileSegment) segments.get(4);
-        var fsCPhoto = (TelegramOutboundPlanner.FileSegment) segments.get(6);
-        var fsCDoc = (TelegramOutboundPlanner.FileSegment) segments.get(7);
+        var fsAPhoto = (TelegramOutboundPlanner.FileSegment) segments.get(0);
+        var fsADoc = (TelegramOutboundPlanner.FileSegment) segments.get(1);
+        var fsBDoc = (TelegramOutboundPlanner.FileSegment) segments.get(2);
+        var fsCPhoto = (TelegramOutboundPlanner.FileSegment) segments.get(3);
+        var fsCDoc = (TelegramOutboundPlanner.FileSegment) segments.get(4);
 
         assertTrue(fsAPhoto.isImage(), "a.png first pass must be photo");
+        assertEquals("intro", fsAPhoto.caption(), "intro prose folds into a.png photo caption");
         assertFalse(fsADoc.isImage(), "a.png second pass must be document");
+        assertNull(fsADoc.caption(), "background document keeps no caption");
         assertFalse(fsBDoc.isImage(), "b.pdf must be document only");
+        assertEquals("middle", fsBDoc.caption(), "middle prose folds into b.pdf document caption");
         assertTrue(fsCPhoto.isImage(), "c.png first pass must be photo");
+        assertEquals("more", fsCPhoto.caption(), "more prose folds into c.png photo caption");
         assertFalse(fsCDoc.isImage(), "c.png second pass must be document");
+        assertEquals(TelegramOutboundPlanner.TextSegment.class, segments.get(5).getClass(),
+                "trailing outro stays a standalone text segment");
     }
 
     @Test

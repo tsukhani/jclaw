@@ -146,10 +146,15 @@ public final class MockTelegramServer implements AutoCloseable {
                 // SDK accepts either, but True is the safer default since the
                 // test assertions only care about the request side.
                 || m.equals("answercallbackquery")
-                || m.equals("editmessagetext")) {
+                || m.equals("editmessagetext")
+                // JCLAW-364: dormant reaction/pin primitives all return True.
+                || m.equals("setmessagereaction")
+                || m.equals("pinchatmessage")
+                || m.equals("unpinchatmessage")) {
             return DEFAULT_BOOLEAN_RESPONSE;
         }
-        // Message-returning methods: sendMessage, sendPhoto, sendDocument.
+        // Message-returning methods: sendMessage, sendPhoto, sendDocument,
+        // sendVoice, sendAudio, sendVideo (all deserialize a Message).
         return DEFAULT_MESSAGE_RESPONSE;
     }
 

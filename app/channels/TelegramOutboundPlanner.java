@@ -35,6 +35,33 @@ public final class TelegramOutboundPlanner {
     private static final List<String> IMAGE_EXTS = List.of(
             ".png", ".jpg", ".jpeg", ".webp", ".gif");
 
+    /** Extensions routed to {@code sendVoice} (Telegram voice note — OGG/Opus). */
+    private static final List<String> VOICE_EXTS = List.of(".ogg", ".oga", ".opus");
+
+    /** Extensions routed to {@code sendAudio} (music / spoken-word tracks). */
+    private static final List<String> AUDIO_EXTS = List.of(
+            ".mp3", ".m4a", ".aac", ".flac", ".wav");
+
+    /** Extensions routed to {@code sendVideo}. */
+    private static final List<String> VIDEO_EXTS = List.of(
+            ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v");
+
+    /**
+     * Telegram caption hard limit (1024 UTF-16 code units). Prose longer than
+     * this stays a standalone text message rather than being truncated into a
+     * caption — losing content silently would be worse than an extra bubble.
+     */
+    private static final int CAPTION_MAX = 1024;
+
+    /**
+     * How a {@link FileSegment} should be dispatched. The channel's dispatch
+     * switches on this to pick the right {@code trySend*} call; unknown file
+     * types fall back to {@link #DOCUMENT}.
+     */
+    public enum MediaKind {
+        PHOTO, VOICE, AUDIO, VIDEO, DOCUMENT
+    }
+
     /**
      * Markdown link pattern. Accepts both the canonical angle-bracket form
      * {@code [text](<path>)} from the file delivery convention and the plain
@@ -69,12 +96,16 @@ public final class TelegramOutboundPlanner {
     public record TextSegment(String markdown) implements Segment {}
 
     /**
-     * File segment dispatched via sendPhoto / sendDocument.
+     * File segment dispatched via the matching {@code trySend*} method per
+     * {@link #kind}.
      *
-     * @param displayName  filename / caption text shown to the user
+     * @param displayName  filename hint shown to the user
      * @param file         on-disk file to upload
      * @param isImage      true when the file should ride as a photo (rendered
-     *                     inline) vs a document (file chip)
+     *                     inline) vs a document (file chip). Retained alongside
+     *                     {@link #kind} ({@code isImage == (kind == PHOTO)}) so
+     *                     the JCLAW-123 photo+document duplicate logic and its
+     *                     tests read clearly.
      * @param isBackground marks the JCLAW-123 quality-duplicate document emit
      *                     (second segment in the photo+document pair for an
      *                     image). The channel fires background segments on a
@@ -83,8 +114,25 @@ public final class TelegramOutboundPlanner {
      *                     of the already-rendered photo can take multiple
      *                     minutes server-side, and we don't want text
      *                     messages to wait behind them.
+     * @param kind         JCLAW-364: how the channel should dispatch the file
+     *                     (photo / voice / audio / video / document).
+     * @param caption      JCLAW-364: prose folded in from the immediately
+     *                     preceding text run, attached to the media instead of
+     *                     sent as a separate message; {@code null} when none.
      */
-    public record FileSegment(String displayName, File file, boolean isImage, boolean isBackground) implements Segment {}
+    public record FileSegment(String displayName, File file, boolean isImage, boolean isBackground,
+                              MediaKind kind, String caption) implements Segment {
+
+        /** Convenience constructor for the no-caption case. */
+        public FileSegment(String displayName, File file, boolean isImage, boolean isBackground, MediaKind kind) {
+            this(displayName, file, isImage, isBackground, kind, null);
+        }
+
+        /** Return a copy of this segment with {@code newCaption} attached. */
+        public FileSegment withCaption(String newCaption) {
+            return new FileSegment(displayName, file, isImage, isBackground, kind, newCaption);
+        }
+    }
 
     /**
      * Split {@code markdown} into an ordered list of text and file segments.
@@ -117,7 +165,42 @@ public final class TelegramOutboundPlanner {
         // No file references found — hand back a single-segment list so the
         // caller has a single uniform code path.
         if (segments.isEmpty()) return List.of(new TextSegment(markdown));
-        return segments;
+        return foldCaptions(segments);
+    }
+
+    /**
+     * JCLAW-364: fold the prose immediately preceding a media file into that
+     * file's caption, dropping the standalone {@link TextSegment} so the user
+     * sees the prose attached to the media rather than as a separate bubble.
+     *
+     * <p>Scoped to be safe against the JCLAW-123 photo+document pair:
+     * <ul>
+     *   <li>only a <em>foreground</em> segment ({@code !isBackground}) absorbs a
+     *       caption — the quality-duplicate background document keeps none, so a
+     *       photo's lead-in prose rides the visible photo, not the silent file
+     *       re-upload;</li>
+     *   <li>the preceding text must be the segment directly before the file and
+     *       must not already belong to another file (i.e. it is a real
+     *       {@link TextSegment});</li>
+     *   <li>prose longer than {@link #CAPTION_MAX} stays a standalone message —
+     *       captioning it would silently truncate.</li>
+     * </ul>
+     */
+    private static List<Segment> foldCaptions(List<Segment> segments) {
+        var out = new ArrayList<Segment>(segments.size());
+        for (var segment : segments) {
+            if (segment instanceof FileSegment fs && !fs.isBackground() && fs.caption() == null
+                    && !out.isEmpty() && out.get(out.size() - 1) instanceof TextSegment(String prose)) {
+                var trimmed = prose.strip();
+                if (!trimmed.isEmpty() && trimmed.length() <= CAPTION_MAX) {
+                    out.remove(out.size() - 1);
+                    out.add(fs.withCaption(trimmed));
+                    continue;
+                }
+            }
+            out.add(segment);
+        }
+        return out;
     }
 
     /**
@@ -155,8 +238,9 @@ public final class TelegramOutboundPlanner {
 
         if (!seenFiles.add(canonicalPath(resolved))) return newCursor;
 
-        boolean isImage = isImageFilename(resolved.getName());
-        segments.add(new FileSegment(display, resolved, isImage, false));
+        MediaKind kind = classify(resolved.getName());
+        boolean isImage = kind == MediaKind.PHOTO;
+        segments.add(new FileSegment(display, resolved, isImage, false, kind));
         // JCLAW-123: Telegram compresses photos aggressively (JPEG re-encode,
         // downscaled). For image files we also emit a sendDocument pass so
         // the user gets the original-quality downloadable file alongside
@@ -166,7 +250,7 @@ public final class TelegramOutboundPlanner {
         // uploads of a just-sent photo can stall for 2+ minutes, and we
         // don't want text messages to wait behind that.
         if (isImage) {
-            segments.add(new FileSegment(display, resolved, false, true));
+            segments.add(new FileSegment(display, resolved, false, true, MediaKind.DOCUMENT));
         }
         return newCursor;
     }
@@ -238,9 +322,28 @@ public final class TelegramOutboundPlanner {
      * preview, the latter shows up as a download attachment.
      */
     public static boolean isImageFilename(String filename) {
+        return hasExtensionIn(filename, IMAGE_EXTS);
+    }
+
+    /**
+     * JCLAW-364: route {@code filename} to the native Telegram send method best
+     * matching its extension. Images → {@link MediaKind#PHOTO}, OGG/Opus →
+     * {@link MediaKind#VOICE}, other audio → {@link MediaKind#AUDIO}, video →
+     * {@link MediaKind#VIDEO}; everything else (including a null/extension-less
+     * name) falls back to {@link MediaKind#DOCUMENT}.
+     */
+    public static MediaKind classify(String filename) {
+        if (hasExtensionIn(filename, IMAGE_EXTS)) return MediaKind.PHOTO;
+        if (hasExtensionIn(filename, VOICE_EXTS)) return MediaKind.VOICE;
+        if (hasExtensionIn(filename, AUDIO_EXTS)) return MediaKind.AUDIO;
+        if (hasExtensionIn(filename, VIDEO_EXTS)) return MediaKind.VIDEO;
+        return MediaKind.DOCUMENT;
+    }
+
+    private static boolean hasExtensionIn(String filename, List<String> exts) {
         if (filename == null) return false;
         var lower = filename.toLowerCase(Locale.ROOT);
-        for (String ext : IMAGE_EXTS) {
+        for (String ext : exts) {
             if (lower.endsWith(ext)) return true;
         }
         return false;

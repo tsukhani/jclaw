@@ -6,14 +6,22 @@ import models.Agent;
 import okhttp3.OkHttpClient;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
+import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
+import org.telegram.telegrambots.meta.api.methods.pinnedmessages.UnpinChatMessage;
+import org.telegram.telegrambots.meta.api.methods.reactions.SetMessageReaction;
+import org.telegram.telegrambots.meta.api.methods.send.SendAudio;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
+import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
+import org.telegram.telegrambots.meta.api.methods.send.SendVoice;
 import org.telegram.telegrambots.meta.api.methods.updates.DeleteWebhook;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
+import org.telegram.telegrambots.meta.api.objects.reactions.ReactionType;
+import org.telegram.telegrambots.meta.api.objects.reactions.ReactionTypeEmoji;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.MessageEntity;
 import org.telegram.telegrambots.meta.api.objects.User;
@@ -343,6 +351,80 @@ public class TelegramChannel implements Channel {
         }
     }
 
+    // ── JCLAW-364: dormant send primitives (consumed by JCLAW-374/375) ──
+    //
+    // Added but intentionally not wired into any dispatch path yet. They follow
+    // the static-helper + execute + warn-on-fail shape of setMyCommands so the
+    // next wave can call them directly.
+
+    /**
+     * JCLAW-364: set (or clear) the bot's reaction on a message. A non-blank
+     * {@code emoji} sets a single {@link ReactionTypeEmoji} reaction; a
+     * {@code null}/blank emoji sends an empty reaction list, which clears any
+     * reaction the bot previously placed. Returns false (logged) on any API
+     * failure — never throws. Dormant: no caller yet (JCLAW-374).
+     */
+    public static boolean setMessageReaction(String botToken, String chatId, Integer messageId, String emoji) {
+        if (botToken == null || chatId == null || messageId == null) return false;
+        var builder = SetMessageReaction.builder()
+                .chatId(chatId)
+                .messageId(messageId);
+        if (emoji != null && !emoji.isBlank()) {
+            builder.reactionTypes(java.util.List.<ReactionType>of(
+                    ReactionTypeEmoji.builder().emoji(emoji).build()));
+        } else {
+            // Empty list clears the bot's reaction.
+            builder.reactionTypes(java.util.List.of());
+        }
+        try {
+            forToken(botToken).client.execute(builder.build());
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "setMessageReaction failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * JCLAW-364: pin {@code messageId} in {@code chatId}. Returns false (logged)
+     * on any API failure — never throws. Dormant: no caller yet (JCLAW-375).
+     */
+    public static boolean pinChatMessage(String botToken, String chatId, Integer messageId) {
+        if (botToken == null || chatId == null || messageId == null) return false;
+        try {
+            forToken(botToken).client.execute(PinChatMessage.builder()
+                    .chatId(chatId)
+                    .messageId(messageId)
+                    .build());
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "pinChatMessage failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * JCLAW-364: unpin {@code messageId} in {@code chatId}. Returns false
+     * (logged) on any API failure — never throws. Dormant: no caller yet
+     * (JCLAW-375).
+     */
+    public static boolean unpinChatMessage(String botToken, String chatId, Integer messageId) {
+        if (botToken == null || chatId == null || messageId == null) return false;
+        try {
+            forToken(botToken).client.execute(UnpinChatMessage.builder()
+                    .chatId(chatId)
+                    .messageId(messageId)
+                    .build());
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "unpinChatMessage failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
     /**
      * Telegram Bot API base URL used by the raw-HTTP helpers. Package-visible
      * so tests targeting {@code MockTelegramServer} can redirect traffic
@@ -637,20 +719,30 @@ public class TelegramChannel implements Channel {
         return allOk;
     }
 
-    /** Dispatch a file segment through sendPhoto or sendDocument depending on type. */
+    /**
+     * Dispatch a file segment through the native send method matching its
+     * {@link TelegramOutboundPlanner.MediaKind} (JCLAW-364), forwarding the
+     * planner-folded caption. Unknown types route through sendDocument.
+     */
     private static boolean sendFileSegment(TelegramChannel channel, String chatId,
                                             TelegramOutboundPlanner.FileSegment fs,
                                             Integer replyToMessageId, Integer threadId,
                                             boolean firstChunk) {
         var reply = replyParamsFor(replyToMessageId, firstChunk);
+        var file = fs.file();
+        var name = fs.displayName();
+        var caption = fs.caption();
         try {
-            if (fs.isImage()) {
-                return channel.trySendPhoto(chatId, fs.file(), fs.displayName(), reply, threadId);
-            }
-            return channel.trySendDocument(chatId, fs.file(), fs.displayName(), reply, threadId);
+            return switch (fs.kind()) {
+                case PHOTO -> channel.trySendPhoto(chatId, file, name, reply, threadId, caption);
+                case VOICE -> channel.trySendVoice(chatId, file, name, reply, threadId, caption);
+                case AUDIO -> channel.trySendAudio(chatId, file, name, reply, threadId, caption);
+                case VIDEO -> channel.trySendVideo(chatId, file, name, reply, threadId, caption);
+                case DOCUMENT -> channel.trySendDocument(chatId, file, name, reply, threadId, caption);
+            };
         } catch (Exception e) {
             EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "File send failed for %s: %s".formatted(fs.displayName(), e.getMessage()));
+                    "File send failed for %s: %s".formatted(name, e.getMessage()));
             return false;
         }
     }
@@ -1128,15 +1220,29 @@ public class TelegramChannel implements Channel {
      * (null to omit) attaches {@code reply_parameters}; {@code messageThreadId}
      * (already General-stripped by the caller; null to omit) scopes the upload
      * to a forum topic. The no-extra-args {@link #trySendPhoto(String, java.io.File, String)}
-     * overload preserves the legacy call sites.
+     * overload preserves the legacy call sites. Delegates to the caption-aware
+     * overload with a null caption.
      */
     public boolean trySendPhoto(String peerId, java.io.File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
+        return trySendPhoto(peerId, file, displayName, replyParams, messageThreadId, null);
+    }
+
+    /**
+     * JCLAW-364: caption-aware photo upload. {@code caption} (null/blank to
+     * omit) rides as the photo's {@code caption} so prose adjacent to the file
+     * reference arrives attached to the image instead of as a separate text
+     * message. Other params as
+     * {@link #trySendPhoto(String, java.io.File, String, ReplyParameters, Integer)}.
+     */
+    public boolean trySendPhoto(String peerId, java.io.File file, String displayName,
+                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
         var builder = SendPhoto.builder()
                 .chatId(peerId)
                 .photo(new InputFile(file, displayName != null ? displayName : file.getName()));
         if (replyParams != null) builder.replyParameters(replyParams);
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        if (caption != null && !caption.isBlank()) builder.caption(caption);
         var request = builder.build();
         // JCLAW-126: explicit upload timing so we can pinpoint slowdowns.
         // Format: elapsedMs, file size in bytes. Together with the matching
@@ -1175,15 +1281,27 @@ public class TelegramChannel implements Channel {
      * {@link #trySendPhoto(String, java.io.File, String, ReplyParameters, Integer)} —
      * {@code replyParams} / {@code messageThreadId} (both null to omit) attach
      * {@code reply_parameters} / {@code message_thread_id}. The no-extra-args
-     * overload preserves the legacy call sites.
+     * overload preserves the legacy call sites. Delegates to the caption-aware
+     * overload with a null caption.
      */
     public boolean trySendDocument(String peerId, java.io.File file, String displayName,
                                    ReplyParameters replyParams, Integer messageThreadId) {
+        return trySendDocument(peerId, file, displayName, replyParams, messageThreadId, null);
+    }
+
+    /**
+     * JCLAW-364: caption-aware document upload. {@code caption} (null/blank to
+     * omit) rides as the document's {@code caption}. Other params as
+     * {@link #trySendDocument(String, java.io.File, String, ReplyParameters, Integer)}.
+     */
+    public boolean trySendDocument(String peerId, java.io.File file, String displayName,
+                                   ReplyParameters replyParams, Integer messageThreadId, String caption) {
         var builder = SendDocument.builder()
                 .chatId(peerId)
                 .document(new InputFile(file, displayName != null ? displayName : file.getName()));
         if (replyParams != null) builder.replyParameters(replyParams);
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        if (caption != null && !caption.isBlank()) builder.caption(caption);
         var request = builder.build();
         long startNs = System.nanoTime();
         long fileSize = file.length();
@@ -1204,6 +1322,133 @@ public class TelegramChannel implements Channel {
                             .formatted(displayName, elapsedMs, e.getMessage()));
             return false;
         }
+    }
+
+    // ── JCLAW-364: native media send paths ──
+    //
+    // Each mirrors trySendPhoto/trySendDocument: a legacy 3-arg overload, a
+    // JCLAW-369 reply/topic 5-arg overload (caption null), and a caption-aware
+    // 6-arg overload that builds + uploads the request. All upload via
+    // uploadClient (60 s r/w) — voice/audio/video bodies routinely exceed the
+    // text-path timeouts. The execute call is inlined per method because the
+    // SDK's TelegramClient exposes a distinct, concretely-typed execute()
+    // overload per send class (no shared PartialBotApiMethod entry point).
+
+    /** Upload {@code file} as a Telegram voice note (.ogg/opus). */
+    public boolean trySendVoice(String peerId, java.io.File file, String displayName) {
+        return trySendVoice(peerId, file, displayName, null, null);
+    }
+
+    /** Reply/topic-aware voice upload; delegates with a null caption. */
+    public boolean trySendVoice(String peerId, java.io.File file, String displayName,
+                                ReplyParameters replyParams, Integer messageThreadId) {
+        return trySendVoice(peerId, file, displayName, replyParams, messageThreadId, null);
+    }
+
+    /** Caption-aware voice upload. {@code caption} null/blank to omit. */
+    public boolean trySendVoice(String peerId, java.io.File file, String displayName,
+                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+        var builder = SendVoice.builder()
+                .chatId(peerId)
+                .voice(new InputFile(file, displayName != null ? displayName : file.getName()));
+        if (replyParams != null) builder.replyParameters(replyParams);
+        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        if (caption != null && !caption.isBlank()) builder.caption(caption);
+        var request = builder.build();
+        long startNs = System.nanoTime();
+        long fileSize = file.length();
+        try {
+            uploadClient.execute(request);
+            logMediaSent("Voice", peerId, displayName, startNs, fileSize);
+            return true;
+        } catch (TelegramApiException e) {
+            logMediaFailed("Voice", displayName, startNs, e);
+            return false;
+        }
+    }
+
+    /** Upload {@code file} as a Telegram audio track (.mp3 and other audio). */
+    public boolean trySendAudio(String peerId, java.io.File file, String displayName) {
+        return trySendAudio(peerId, file, displayName, null, null);
+    }
+
+    /** Reply/topic-aware audio upload; delegates with a null caption. */
+    public boolean trySendAudio(String peerId, java.io.File file, String displayName,
+                                ReplyParameters replyParams, Integer messageThreadId) {
+        return trySendAudio(peerId, file, displayName, replyParams, messageThreadId, null);
+    }
+
+    /** Caption-aware audio upload. {@code caption} null/blank to omit. */
+    public boolean trySendAudio(String peerId, java.io.File file, String displayName,
+                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+        var builder = SendAudio.builder()
+                .chatId(peerId)
+                .audio(new InputFile(file, displayName != null ? displayName : file.getName()));
+        if (replyParams != null) builder.replyParameters(replyParams);
+        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        if (caption != null && !caption.isBlank()) builder.caption(caption);
+        var request = builder.build();
+        long startNs = System.nanoTime();
+        long fileSize = file.length();
+        try {
+            uploadClient.execute(request);
+            logMediaSent("Audio", peerId, displayName, startNs, fileSize);
+            return true;
+        } catch (TelegramApiException e) {
+            logMediaFailed("Audio", displayName, startNs, e);
+            return false;
+        }
+    }
+
+    /** Upload {@code file} as a Telegram video. */
+    public boolean trySendVideo(String peerId, java.io.File file, String displayName) {
+        return trySendVideo(peerId, file, displayName, null, null);
+    }
+
+    /** Reply/topic-aware video upload; delegates with a null caption. */
+    public boolean trySendVideo(String peerId, java.io.File file, String displayName,
+                                ReplyParameters replyParams, Integer messageThreadId) {
+        return trySendVideo(peerId, file, displayName, replyParams, messageThreadId, null);
+    }
+
+    /** Caption-aware video upload. {@code caption} null/blank to omit. */
+    public boolean trySendVideo(String peerId, java.io.File file, String displayName,
+                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+        var builder = SendVideo.builder()
+                .chatId(peerId)
+                .video(new InputFile(file, displayName != null ? displayName : file.getName()));
+        if (replyParams != null) builder.replyParameters(replyParams);
+        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        if (caption != null && !caption.isBlank()) builder.caption(caption);
+        var request = builder.build();
+        long startNs = System.nanoTime();
+        long fileSize = file.length();
+        try {
+            uploadClient.execute(request);
+            logMediaSent("Video", peerId, displayName, startNs, fileSize);
+            return true;
+        } catch (TelegramApiException e) {
+            logMediaFailed("Video", displayName, startNs, e);
+            return false;
+        }
+    }
+
+    /** Shared success-log for the native media send methods. {@code kind} labels the line. */
+    private static void logMediaSent(String kind, String peerId, String displayName,
+                                     long startNs, long fileSize) {
+        long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+        EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
+                "%s sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
+                        .formatted(kind, peerId, displayName, elapsedMs, fileSize));
+    }
+
+    /** Shared failure-log for the native media send methods. */
+    private static void logMediaFailed(String kind, String displayName,
+                                       long startNs, TelegramApiException e) {
+        long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+        EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                "%s send failed for %s after %dms: %s"
+                        .formatted(kind, displayName, elapsedMs, e.getMessage()));
     }
 
     @Override

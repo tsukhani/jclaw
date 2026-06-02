@@ -820,4 +820,223 @@ class TelegramChannelTest extends UnitTest {
             TelegramChannel.clearForTest(token);
         }
     }
+
+    // ─── JCLAW-364: native media send paths ─────────────────────────────
+
+    /** First recorded request body whose method matches {@code methodName}, case-insensitively. */
+    private String firstBodyFor(String methodName) {
+        return mock.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase(methodName))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .findFirst().orElse("");
+    }
+
+    private java.io.File tempFile(String suffix) throws Exception {
+        var tmp = java.nio.file.Files.createTempFile("jclaw-media-", suffix);
+        java.nio.file.Files.write(tmp, new byte[]{ 1, 2, 3, 4 });
+        tmp.toFile().deleteOnExit();
+        return tmp.toFile();
+    }
+
+    @Test
+    void trySendVoice_hitsSendVoiceEndpoint() throws Exception {
+        String token = "voice-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.forToken(token)
+                    .trySendVoice("12345", tempFile(".ogg"), "memo.ogg");
+            assertTrue(ok, "voice upload should succeed against the mock");
+            assertEquals(1, mock.countRequests("sendVoice"),
+                    "voice file must dispatch sendVoice");
+            assertEquals(0, mock.countRequests("sendDocument"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySendAudio_hitsSendAudioEndpoint() throws Exception {
+        String token = "audio-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.forToken(token)
+                    .trySendAudio("12345", tempFile(".mp3"), "track.mp3");
+            assertTrue(ok);
+            assertEquals(1, mock.countRequests("sendAudio"),
+                    "audio file must dispatch sendAudio");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySendVideo_hitsSendVideoEndpoint() throws Exception {
+        String token = "video-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.forToken(token)
+                    .trySendVideo("12345", tempFile(".mp4"), "demo.mp4");
+            assertTrue(ok);
+            assertEquals(1, mock.countRequests("sendVideo"),
+                    "video file must dispatch sendVideo");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySendVoice_attachesCaptionInMultipartBody() throws Exception {
+        String token = "voice-cap-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.forToken(token).trySendVoice(
+                    "12345", tempFile(".ogg"), "memo.ogg", null, null, "Here is the recap");
+            assertTrue(ok);
+            String body = firstBodyFor("sendVoice");
+            assertTrue(body.contains("caption"), "caption form field must be present: " + body);
+            assertTrue(body.contains("Here is the recap"),
+                    "caption text must be on the wire: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySendPhoto_attachesCaptionInMultipartBody() throws Exception {
+        String token = "photo-cap-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.forToken(token).trySendPhoto(
+                    "12345", tempFile(".png"), "shot.png", null, null, "look at this");
+            assertTrue(ok);
+            String body = firstBodyFor("sendPhoto");
+            assertTrue(body.contains("caption") && body.contains("look at this"),
+                    "photo caption must ride in the multipart body: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void mediaSend_returnsFalseOnServerError() throws Exception {
+        String token = "media-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendVideo", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad video\"}");
+            boolean ok = TelegramChannel.forToken(token)
+                    .trySendVideo("12345", tempFile(".mp4"), "demo.mp4");
+            assertFalse(ok, "a 400 from Telegram must surface as false, not throw");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── JCLAW-364: dormant reaction / pin primitives ───────────────────
+
+    @Test
+    void setMessageReaction_sendsEmojiToReactionEndpoint() {
+        String token = "react-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.setMessageReaction(token, "12345", 77, "👍");
+            assertTrue(ok, "reaction set should succeed against the mock");
+            assertEquals(1, mock.countRequests("setMessageReaction"),
+                    "must hit the setMessageReaction endpoint");
+            String body = firstBodyFor("setMessageReaction");
+            assertTrue(body.contains("reaction"), "reaction list must be present: " + body);
+            assertTrue(body.contains("emoji"), "emoji reaction type must be present: " + body);
+            assertTrue(body.contains("\"message_id\":77"),
+                    "target message id must be on the wire: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void setMessageReaction_nullEmojiClearsReaction() {
+        String token = "react-clear-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.setMessageReaction(token, "12345", 77, null);
+            assertTrue(ok);
+            assertEquals(1, mock.countRequests("setMessageReaction"));
+            String body = firstBodyFor("setMessageReaction");
+            // Empty reaction list clears — the field is present but carries no emoji.
+            assertTrue(body.contains("\"reaction\":[]"),
+                    "clearing must send an empty reaction list: " + body);
+            assertFalse(body.contains("emoji"),
+                    "no emoji reaction type when clearing: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void setMessageReaction_returnsFalseOnNullArgsAndServerError() throws Exception {
+        String token = "react-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertFalse(TelegramChannel.setMessageReaction(null, "12345", 1, "x"));
+            assertFalse(TelegramChannel.setMessageReaction(token, null, 1, "x"));
+            assertFalse(TelegramChannel.setMessageReaction(token, "12345", null, "x"));
+            assertEquals(0, mock.requests().size(), "null args must short-circuit");
+
+            mock.respondWith("setMessageReaction", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad\"}");
+            assertFalse(TelegramChannel.setMessageReaction(token, "12345", 1, "👍"),
+                    "server error must surface as false, not throw");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void pinChatMessage_hitsPinEndpoint() {
+        String token = "pin-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.pinChatMessage(token, "12345", 42);
+            assertTrue(ok);
+            assertEquals(1, mock.countRequests("pinChatMessage"),
+                    "must hit the pinChatMessage endpoint");
+            assertTrue(firstBodyFor("pinChatMessage").contains("\"message_id\":42"),
+                    "pin must carry the target message id");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void unpinChatMessage_hitsUnpinEndpoint() {
+        String token = "unpin-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            boolean ok = TelegramChannel.unpinChatMessage(token, "12345", 42);
+            assertTrue(ok);
+            assertEquals(1, mock.countRequests("unpinChatMessage"),
+                    "must hit the unpinChatMessage endpoint");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void pinAndUnpin_returnFalseOnNullArgsAndServerError() {
+        String token = "pin-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertFalse(TelegramChannel.pinChatMessage(null, "12345", 1));
+            assertFalse(TelegramChannel.pinChatMessage(token, "12345", null));
+            assertFalse(TelegramChannel.unpinChatMessage(token, null, 1));
+            assertEquals(0, mock.requests().size(), "null args must short-circuit");
+
+            mock.respondWith("pinChatMessage", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad\"}");
+            assertFalse(TelegramChannel.pinChatMessage(token, "12345", 1),
+                    "pin server error must surface as false");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
 }
