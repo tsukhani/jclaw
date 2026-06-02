@@ -5,6 +5,19 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { Agent, TelegramBindingSummary } from '~/types/api'
 
+// JCLAW-362: structured result of the per-binding health probe
+// (POST /api/channels/telegram/bindings/{id}/test).
+interface ProbeResult {
+  ok: boolean
+  transport: string
+  botUsername: string | null
+  botId: number | null
+  webhookUrl: string | null
+  webhookPendingUpdates: number | null
+  webhookLastError: string | null
+  error: string | null
+}
+
 interface TailscaleStatus {
   enabled: boolean
   available: boolean
@@ -301,6 +314,40 @@ async function remove(binding: TelegramBindingSummary) {
   const result = await mutate(`/api/channels/telegram/bindings/${binding.id}`, { method: 'DELETE' })
   if (result !== null) refresh()
 }
+
+// JCLAW-362: per-binding health probe. Calls getMe (and getWebhookInfo for
+// webhook bindings) so a bad token or stale webhook surfaces here rather than
+// only at the next send. Keyed by binding id so each card shows its own state.
+const probing = ref<Set<number>>(new Set())
+const probeResults = ref<Record<number, ProbeResult>>({})
+
+async function testBinding(binding: TelegramBindingSummary) {
+  probing.value = new Set(probing.value).add(binding.id)
+  try {
+    const result = await mutate<ProbeResult>(
+      `/api/channels/telegram/bindings/${binding.id}/test`,
+      { method: 'POST' },
+    )
+    probeResults.value = {
+      ...probeResults.value,
+      [binding.id]: result ?? {
+        ok: false,
+        transport: binding.transport,
+        botUsername: null,
+        botId: null,
+        webhookUrl: null,
+        webhookPendingUpdates: null,
+        webhookLastError: null,
+        error: 'Probe request failed — check server logs.',
+      },
+    }
+  }
+  finally {
+    const next = new Set(probing.value)
+    next.delete(binding.id)
+    probing.value = next
+  }
+}
 </script>
 
 <template>
@@ -400,7 +447,19 @@ async function remove(binding: TelegramBindingSummary) {
             </dd>
           </div>
         </dl>
-        <div class="flex justify-end gap-1">
+        <div class="flex justify-end items-center gap-1">
+          <button
+            type="button"
+            :disabled="probing.has(b.id)"
+            title="Test binding — calls Telegram getMe (and getWebhookInfo for webhooks)"
+            aria-label="Test binding"
+            class="px-2 py-1 mr-auto text-xs text-fg-muted hover:text-fg-strong
+                   border border-border transition-colors disabled:opacity-40
+                   disabled:cursor-not-allowed"
+            @click="testBinding(b)"
+          >
+            {{ probing.has(b.id) ? 'Testing…' : 'Test' }}
+          </button>
           <button
             type="button"
             title="Edit binding"
@@ -425,6 +484,41 @@ async function remove(binding: TelegramBindingSummary) {
               aria-hidden="true"
             />
           </button>
+        </div>
+        <!-- JCLAW-362: health-probe result. ok → green summary with the bot
+             username; not-ok → the error reason. Webhook bindings also surface
+             pending-update count and the last delivery error when present. -->
+        <div
+          v-if="probeResults[b.id]"
+          :data-testid="`probe-result-${b.id}`"
+          class="mt-3 pt-3 border-t border-border text-xs"
+        >
+          <p
+            v-if="probeResults[b.id]?.ok"
+            class="text-emerald-400"
+          >
+            OK — connected as
+            <span class="font-mono text-fg-strong">@{{ probeResults[b.id]?.botUsername ?? '?' }}</span>
+          </p>
+          <p
+            v-else
+            class="text-red-400"
+          >
+            {{ probeResults[b.id]?.error ?? 'Probe failed.' }}
+          </p>
+          <p
+            v-if="probeResults[b.id]?.ok && probeResults[b.id]?.transport === 'WEBHOOK'"
+            class="text-fg-muted mt-1"
+          >
+            Webhook pending updates:
+            <span class="font-mono text-fg-strong">{{ probeResults[b.id]?.webhookPendingUpdates ?? 0 }}</span>
+          </p>
+          <p
+            v-if="probeResults[b.id]?.webhookLastError"
+            class="text-amber-400 mt-1"
+          >
+            Last webhook error: {{ probeResults[b.id]?.webhookLastError }}
+          </p>
         </div>
       </div>
     </div>

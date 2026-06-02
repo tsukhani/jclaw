@@ -673,7 +673,7 @@ public final class TelegramStreamingSink {
      * Per-conversation rate limiter for {@link #notifyDeliveryFailure}
      * (JCLAW-106). Maps conversationId → last-notifier-fire-ms so a
      * conversation hitting repeated delivery failures only sees one
-     * "please retry" message per {@link #NOTIFIER_RATE_LIMIT_MS}.
+     * "please retry" message per {@link #notifierCooldownMs()} window.
      *
      * <p>Static + JVM-scope rather than per-sink because each turn gets a
      * fresh sink, and without shared state the rate limit would fire on
@@ -690,7 +690,45 @@ public final class TelegramStreamingSink {
      */
     private static final java.util.concurrent.ConcurrentHashMap<Long, Long>
             LAST_NOTIFIER_FIRE_MS = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final long NOTIFIER_RATE_LIMIT_MS = 60_000;
+    /** Fallback cooldown when {@code telegram.notifier.cooldownMs} is unset/invalid. */
+    private static final long DEFAULT_NOTIFIER_RATE_LIMIT_MS = 60_000;
+
+    /**
+     * Error-reply policy + cooldown (JCLAW-362). Replaces the previously
+     * hardcoded 60 s cooldown with operator-configurable values, read from
+     * {@code conf/application.conf}:
+     *
+     * <ul>
+     *   <li>{@code telegram.notifier.policy} — {@code reply} (default) sends
+     *       the user a "couldn't deliver" message; {@code silent} suppresses
+     *       it (the failure is still logged). Channel/config level because the
+     *       per-binding {@code TelegramBinding} model is owned by another lane
+     *       this wave; the per-binding override is a follow-up.</li>
+     *   <li>{@code telegram.notifier.cooldownMs} — per-conversation rate-limit
+     *       window in milliseconds (default {@value #DEFAULT_NOTIFIER_RATE_LIMIT_MS}).</li>
+     * </ul>
+     */
+    private static final String CFG_NOTIFIER_POLICY = "telegram.notifier.policy";
+    private static final String CFG_NOTIFIER_COOLDOWN_MS = "telegram.notifier.cooldownMs";
+    private static final String POLICY_SILENT = "silent";
+
+    /** Resolve the configured cooldown window, falling back on a missing/invalid value. */
+    static long notifierCooldownMs() {
+        var raw = play.Play.configuration.getProperty(CFG_NOTIFIER_COOLDOWN_MS);
+        if (raw == null || raw.isBlank()) return DEFAULT_NOTIFIER_RATE_LIMIT_MS;
+        try {
+            long ms = Long.parseLong(raw.trim());
+            return ms > 0 ? ms : DEFAULT_NOTIFIER_RATE_LIMIT_MS;
+        } catch (NumberFormatException _) {
+            return DEFAULT_NOTIFIER_RATE_LIMIT_MS;
+        }
+    }
+
+    /** True when the operator opted out of the user-facing delivery-failure reply. */
+    static boolean notifierSilent() {
+        var raw = play.Play.configuration.getProperty(CFG_NOTIFIER_POLICY, "reply");
+        return raw != null && raw.trim().equalsIgnoreCase(POLICY_SILENT);
+    }
 
     /**
      * Tell the user their response couldn't be delivered (JCLAW-106). Called
@@ -701,8 +739,17 @@ public final class TelegramStreamingSink {
      * because the sink is already sealed and would refuse further input.
      * If the notifier's own send fails, we log a warning and give up:
      * the user will notice their bot stopped replying anyway.
+     *
+     * <p>JCLAW-362: honours the {@code telegram.notifier.policy} setting —
+     * under {@code silent} the failure is logged but no chat message is sent.
      */
     private void notifyDeliveryFailure() {
+        if (notifierSilent()) {
+            EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
+                    "Delivery failure (policy=silent — notification suppressed for chat "
+                            + chatId + ")");
+            return;
+        }
         if (!tryFireNotifier(conversationId)) {
             EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Delivery failure (rate-limited — notification suppressed for chat "
@@ -741,7 +788,7 @@ public final class TelegramStreamingSink {
         if (conversationId == null) return false;
         long now = System.currentTimeMillis();
         var prev = LAST_NOTIFIER_FIRE_MS.get(conversationId);
-        if (prev != null && (now - prev) < NOTIFIER_RATE_LIMIT_MS) return false;
+        if (prev != null && (now - prev) < notifierCooldownMs()) return false;
         LAST_NOTIFIER_FIRE_MS.put(conversationId, now);
         return true;
     }

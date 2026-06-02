@@ -146,6 +146,7 @@ GET     /api/channels/telegram/bindings         ApiTelegramBindingsController.li
 POST    /api/channels/telegram/bindings         ApiTelegramBindingsController.create
 PUT     /api/channels/telegram/bindings/{id}    ApiTelegramBindingsController.update
 DELETE  /api/channels/telegram/bindings/{id}    ApiTelegramBindingsController.delete
+POST    /api/channels/telegram/bindings/{id}/test  ApiTelegramBindingsController.test
 GET     /api/channels/{channelType}             ApiChannelsController.get
 PUT     /api/channels/{channelType}             ApiChannelsController.save
 

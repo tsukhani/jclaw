@@ -264,6 +264,26 @@ public class ApiTelegramBindingsController extends Controller {
         }
     }
 
+    /**
+     * JCLAW-362: probe a binding's health against the live Bot API. Calls
+     * {@code getMe} (so a bad token surfaces as a 401 here rather than at the
+     * next send) and, for WEBHOOK bindings, {@code getWebhookInfo} (so a stale
+     * or errored webhook registration is visible). Returns the structured
+     * {@link TelegramWebhookRegistrar.ProbeResult} either way — the HTTP status
+     * stays 200 and the {@code ok} flag carries the verdict, so the UI can
+     * render the failure detail rather than a bare error page.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TelegramWebhookRegistrar.ProbeResult.class)))
+    public static void test(Long id) {
+        var binding = TelegramBinding.<TelegramBinding>findById(id);
+        if (binding == null) notFound();
+        var result = TelegramWebhookRegistrar.probe(binding);
+        EventLogger.info(EVENT_CATEGORY_CHANNEL,
+                binding.agent != null ? binding.agent.name : null, CHANNEL_TELEGRAM,
+                "Binding %d health probe: %s".formatted(id, result.ok() ? "ok" : "error"));
+        renderJSON(gson.toJson(result));
+    }
+
     @SuppressWarnings("java:S2259")
     public static void delete(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
