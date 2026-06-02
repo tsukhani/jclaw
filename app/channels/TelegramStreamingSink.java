@@ -4,6 +4,7 @@ import models.Agent;
 import models.Conversation;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
@@ -774,6 +775,23 @@ public final class TelegramStreamingSink {
         }
     }
 
+    /**
+     * D2: the {@link LinkPreviewOptions} to attach to a streaming send/edit, or
+     * null to leave Telegram's default preview-on behavior. Mirrors
+     * {@code TelegramChannel.linkPreviewOptions()} (private there) but reads the
+     * public {@link TelegramChannel#suppressLinkPreview()} accessor so the live
+     * placeholder + every streaming edit honor {@code telegram.linkPreview=off}
+     * the same way the non-streaming send paths do — previously the live drafts
+     * still rendered URL preview cards until the final seal edit. Package-visible
+     * so the default-package test can assert the config-read contract.
+     */
+    static LinkPreviewOptions streamingLinkPreviewOptions() {
+        if (!TelegramChannel.suppressLinkPreview()) return null;
+        return LinkPreviewOptions.builder()
+                .isDisabled(true)
+                .build();
+    }
+
     private Integer sendPlaceholder(String plainText) throws TelegramApiException {
         var client = TelegramChannel.forToken(botToken).client();
         var builder = SendMessage.builder()
@@ -789,6 +807,10 @@ public final class TelegramStreamingSink {
         if (reply != null) builder.replyParameters(reply);
         var threadId = TelegramChannel.sendThreadIdForSink(messageThreadId);
         if (threadId != null) builder.messageThreadId(threadId);
+        // D2: honor telegram.linkPreview=off on the live placeholder, matching
+        // the non-streaming send paths in TelegramChannel.
+        var linkPreview = streamingLinkPreviewOptions();
+        if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         var message = client.execute(builder.build());
         return message.getMessageId();
     }
@@ -968,6 +990,12 @@ public final class TelegramStreamingSink {
                 .messageId(messageId)
                 .text(text);
         if (html) builder.parseMode(ParseMode.HTML);
+        // D2: honor telegram.linkPreview=off on every streaming edit (live draft
+        // + the final seal edit), matching the non-streaming edit path in
+        // TelegramChannel.editMessageText. Previously the live drafts rendered
+        // URL preview cards until the seal.
+        var linkPreview = streamingLinkPreviewOptions();
+        if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         client.execute(builder.build());
     }
 

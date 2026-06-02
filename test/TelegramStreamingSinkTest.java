@@ -750,4 +750,54 @@ class TelegramStreamingSinkTest extends UnitTest {
         assertEquals(56, sink.messageThreadIdForTest().intValue(),
                 "constructor must round-trip messageThreadId");
     }
+
+    // === D2: link-preview suppression on streaming placeholder + edits ===
+    //
+    // Both sendPlaceholder() and editMessage() build their Telegram requests
+    // through streamingLinkPreviewOptions(), which gates on the public
+    // TelegramChannel.suppressLinkPreview() accessor (config key
+    // telegram.linkPreview). The streaming sink's network seams aren't mocked
+    // in these unit tests, so we assert directly on the options-builder helper
+    // — the same object the builders attach via .linkPreviewOptions(...).
+    // Toggling is via play.Play.configuration, mirroring the notifier-policy
+    // tests above.
+
+    @Test
+    void streamingLinkPreviewOptionsDisabledWhenSuppressionOn() {
+        var prior = play.Play.configuration.getProperty("telegram.linkPreview");
+        play.Play.configuration.setProperty("telegram.linkPreview", "off");
+        try {
+            var opts = TelegramStreamingSink.streamingLinkPreviewOptions();
+            assertNotNull(opts,
+                    "telegram.linkPreview=off must yield non-null LinkPreviewOptions "
+                            + "for the placeholder send + every streaming edit");
+            assertEquals(Boolean.TRUE, opts.getIsDisabled(),
+                    "the streaming options must carry is_disabled=true so live "
+                            + "drafts render no URL preview card");
+        } finally {
+            restoreLinkPreview(prior);
+        }
+    }
+
+    @Test
+    void streamingLinkPreviewOptionsNullWhenSuppressionOff() {
+        var prior = play.Play.configuration.getProperty("telegram.linkPreview");
+        // "on" is the explicit preview-on value; also covers the default branch.
+        play.Play.configuration.setProperty("telegram.linkPreview", "on");
+        try {
+            assertNull(TelegramStreamingSink.streamingLinkPreviewOptions(),
+                    "telegram.linkPreview=on must leave Telegram's default "
+                            + "preview-on behavior (null options) on streaming sends");
+        } finally {
+            restoreLinkPreview(prior);
+        }
+    }
+
+    private static void restoreLinkPreview(String prior) {
+        if (prior == null) {
+            play.Play.configuration.remove("telegram.linkPreview");
+        } else {
+            play.Play.configuration.setProperty("telegram.linkPreview", prior);
+        }
+    }
 }
