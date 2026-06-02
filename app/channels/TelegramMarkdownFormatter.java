@@ -467,7 +467,7 @@ public final class TelegramMarkdownFormatter {
         if (html.length() <= maxLen) return List.of(html);
 
         List<String> chunks = new ArrayList<>();
-        String[] blocks = html.split("\n\n", -1);
+        List<String> blocks = splitBlocks(html);
         StringBuilder current = new StringBuilder();
 
         for (String block : blocks) {
@@ -476,6 +476,42 @@ public final class TelegramMarkdownFormatter {
         }
         if (!current.isEmpty()) chunks.add(current.toString());
         return chunks;
+    }
+
+    /**
+     * Split {@code html} into blocks at double-newline boundaries, but treat a
+     * {@code <pre>…</pre>} fence as a single indivisible block. Flexmark preserves
+     * literal blank lines inside a fenced code block, so a naive
+     * {@code split("\n\n")} would cut a fence in half and leave the two halves in
+     * different chunks with unbalanced {@code <pre>}/{@code <code>} tags. Tracking
+     * {@code <pre>} open/close depth keeps every fence intact; an oversized fence
+     * still flows through to {@link #splitOversizedBlock}, which re-wraps it.
+     */
+    private static List<String> splitBlocks(String html) {
+        List<String> blocks = new ArrayList<>();
+        StringBuilder block = new StringBuilder();
+        int preDepth = 0;
+        int i = 0;
+        while (i < html.length()) {
+            if (html.startsWith(PRE_OPEN, i)) {
+                preDepth++;
+                block.append(PRE_OPEN);
+                i += PRE_OPEN.length();
+            } else if (preDepth > 0 && html.startsWith("</pre>", i)) {
+                preDepth--;
+                block.append("</pre>");
+                i += "</pre>".length();
+            } else if (preDepth == 0 && html.startsWith("\n\n", i)) {
+                blocks.add(block.toString());
+                block.setLength(0);
+                i += 2;
+            } else {
+                block.append(html.charAt(i));
+                i++;
+            }
+        }
+        blocks.add(block.toString());
+        return blocks;
     }
 
     /**

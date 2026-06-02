@@ -357,6 +357,53 @@ class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
+    void chunkHtmlKeepsFenceWithInternalBlankLineIntact() {
+        // D1 regression: a <pre><code> fence whose source has an internal blank
+        // line carries a literal \n\n that flexmark preserves. The rendered HTML
+        // exceeds the chunk limit, so without fence-awareness the naive
+        // split("\n\n") would cut the fence in half and emit chunks with
+        // unbalanced <pre>/<code> tags. Build such a payload directly.
+        var maxLen = 4000;
+        // Prose before, then a fence containing an internal blank line, then prose
+        // after. Pad both prose blocks so the whole payload comfortably exceeds the
+        // chunk limit and a real split is forced.
+        var before = "<b>" + "b".repeat(2500) + "</b>";
+        var after = "<b>" + "a".repeat(2500) + "</b>";
+        var fence = "<pre><code>top line\n\nbottom line</code></pre>";
+        var html = before + "\n\n" + fence + "\n\n" + after;
+        assertTrue(html.length() > 4000, "payload must exceed the chunk limit");
+
+        var chunks = TelegramMarkdownFormatter.chunkHtml(html, maxLen);
+        assertTrue(chunks.size() >= 2,
+                () -> "oversized payload should split, got " + chunks.size());
+
+        for (String c : chunks) {
+            // (b) every chunk within the size limit
+            assertTrue(c.length() <= maxLen,
+                    () -> "chunk exceeds maxLen: " + c.length());
+            // (a) no chunk has an unbalanced <pre> or <code> tag
+            assertEquals(countOccurrences(c, "<pre>"), countOccurrences(c, "</pre>"),
+                    () -> "unbalanced <pre> in chunk: " + c);
+            assertEquals(countOccurrences(c, "<code>"), countOccurrences(c, "</code>"),
+                    () -> "unbalanced <code> in chunk: " + c);
+        }
+
+        // (c) the fence is not split at the internal blank line: exactly one chunk
+        // carries the whole fence, with both halves still together.
+        long fenceChunks = chunks.stream()
+                .filter(c -> c.contains("top line") || c.contains("bottom line"))
+                .count();
+        assertEquals(1L, fenceChunks,
+                () -> "fence content must stay in a single chunk: " + chunks);
+        var fenceChunk = chunks.stream()
+                .filter(c -> c.contains("top line"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(fenceChunk.contains("top line\n\nbottom line"),
+                () -> "internal blank line must stay inside the fence: " + fenceChunk);
+    }
+
+    @Test
     void chunkHtmlEmptyInputReturnsEmptyList() {
         assertTrue(TelegramMarkdownFormatter.chunkHtml(null, 100).isEmpty());
         assertTrue(TelegramMarkdownFormatter.chunkHtml("", 100).isEmpty());
