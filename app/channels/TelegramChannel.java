@@ -978,6 +978,14 @@ public class TelegramChannel implements Channel {
      * {@code firstChunk} is consumed (set false) on the first non-blank chunk
      * actually put on the wire so the {@code first} reply-mode badges exactly
      * one message of the turn.
+     *
+     * <p>JCLAW-387 (A1): when this segment splits into more than one chunk, a
+     * {@code (n/m)} ordering marker is appended to each chunk via
+     * {@link #withChunkMarker(String, int, int)} so the user can see the order.
+     * A single-chunk segment gets nothing. The marker is plain ASCII on its own
+     * trailing line — HTML-parse-safe under {@code parse_mode=HTML} — and the
+     * chunker's 4000-char budget (vs Telegram's 4096 cap) leaves ample headroom
+     * for the few extra characters.
      */
     private static boolean sendTextSegment(TelegramChannel channel, String chatId, String markdown,
                                            Integer replyToMessageId, Integer threadId,
@@ -986,14 +994,42 @@ public class TelegramChannel implements Channel {
         if (markdown == null || markdown.isBlank()) return true;
         var html = TelegramMarkdownFormatter.toHtml(markdown);
         if (html.isBlank()) return true;
-        var chunks = TelegramMarkdownFormatter.chunkHtml(html, 4000);
+        var chunks = TelegramMarkdownFormatter.chunkHtml(html, CHUNK_BUDGET);
         boolean allOk = true;
-        for (var part : chunks) {
+        int total = chunks.size();
+        for (int i = 0; i < total; i++) {
+            String part = withChunkMarker(chunks.get(i), i + 1, total);
             boolean ownsFirst = firstChunk.getAndSet(false);
             var reply = replyParamsFor(replyToMessageId, ownsFirst, mode);
             if (!channel.sendTextWithRetry(chatId, part, reply, threadId)) allOk = false;
         }
         return allOk;
+    }
+
+    /**
+     * JCLAW-387 (A1): per-chunk character budget handed to
+     * {@link TelegramMarkdownFormatter#chunkHtml}. Held below Telegram's 4096
+     * hard cap so the {@code (n/m)} ordering marker appended by
+     * {@link #withChunkMarker} can never push a chunk over the limit (the marker
+     * is at most a few characters).
+     */
+    static final int CHUNK_BUDGET = 4000;
+
+    /**
+     * JCLAW-387 (A1): append a {@code (n/m)} ordering marker to a chunk when the
+     * reply was split into multiple messages ({@code total > 1}); a single-chunk
+     * reply is returned unchanged. The marker is appended on its own trailing
+     * line as plain ASCII text — it contains no HTML metacharacters, so it can't
+     * break {@code parse_mode=HTML} parsing — and is tiny relative to the
+     * {@link #CHUNK_BUDGET}-to-4096 headroom, so it never risks the 4096 cap.
+     *
+     * <p>Public so default-package tests can assert the marker contract directly,
+     * matching the convention used by {@link #replyToMode()} /
+     * {@link #suppressLinkPreview()}.
+     */
+    public static String withChunkMarker(String chunk, int index, int total) {
+        if (total <= 1) return chunk;
+        return chunk + "\n\n(" + index + "/" + total + ")";
     }
 
     /**
@@ -1345,7 +1381,89 @@ public class TelegramChannel implements Channel {
                 || entitiesAddressBot(msg.getCaption(), msg.getCaptionEntities(), botUsername, botUserId)) {
             return true;
         }
-        return isReplyToBot(msg, botUserId);
+        if (isReplyToBot(msg, botUserId)) return true;
+        // JCLAW-387 (B3): operator-configured regex wake-words. If the message
+        // body (text or caption) matches any configured pattern, treat the
+        // message as addressed to the bot — same access effect as a @mention.
+        return matchesWakeWord(msg.getText()) || matchesWakeWord(msg.getCaption());
+    }
+
+    // ── JCLAW-387 (B3): configurable regex wake-word patterns ────────────
+
+    /**
+     * JCLAW-387 (B3): config key for operator-configured wake-word patterns.
+     * Value is a newline-or-comma-separated list of Java regexes; a group
+     * message whose text matches any of them is treated as addressed to the bot
+     * (see {@link #matchesWakeWord(String)}). Empty / unset disables the feature.
+     */
+    static final String CFG_MENTION_PATTERNS = "telegram.mentionPatterns";
+
+    /**
+     * Cached compiled wake-word patterns, keyed by the raw config string they
+     * were compiled from, so a config change recompiles but a steady config
+     * compiles exactly once. {@code volatile} single-slot cache: the hot path
+     * reads {@link CompiledPatterns#source} and reuses {@link CompiledPatterns#patterns}
+     * when the source is unchanged. An invalid regex is skipped (logged once at
+     * compile time), never thrown on the matching hot path.
+     */
+    private static volatile CompiledPatterns wakeWordCache = null;
+
+    /** Immutable (raw-config, compiled-patterns) pair for the wake-word cache. */
+    private record CompiledPatterns(String source, java.util.List<java.util.regex.Pattern> patterns) {}
+
+    /**
+     * JCLAW-387 (B3): true when {@code body} matches any configured wake-word
+     * pattern. Returns false on null/blank body or when the feature is off
+     * (empty config). Patterns are compiled once and cached (see
+     * {@link #wakeWordCache}); an unmatched body or an empty pattern set is a
+     * cheap false. Never throws — an invalid regex is dropped at compile time.
+     *
+     * <p>Public so default-package tests can assert the match / off / invalid-skip
+     * contract directly, matching the {@link #replyToMode()} convention.
+     */
+    public static boolean matchesWakeWord(String body) {
+        if (body == null || body.isBlank()) return false;
+        var compiled = compiledWakeWords();
+        for (var p : compiled) {
+            if (p.matcher(body).find()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Resolve the compiled wake-word patterns, recompiling only when the raw
+     * config value changes. Reads {@link #CFG_MENTION_PATTERNS} via
+     * {@link play.Play#configuration}. Splits on newlines and commas, trims, and
+     * compiles each non-blank token; an invalid regex is skipped with a warn log
+     * (so one bad pattern can't disable the rest, and the hot path never sees a
+     * {@link java.util.regex.PatternSyntaxException}).
+     */
+    private static java.util.List<java.util.regex.Pattern> compiledWakeWords() {
+        var raw = play.Play.configuration.getProperty(CFG_MENTION_PATTERNS, "");
+        if (raw == null) raw = "";
+        var cached = wakeWordCache;
+        if (cached != null && cached.source().equals(raw)) return cached.patterns();
+        var compiled = compileWakeWords(raw);
+        wakeWordCache = new CompiledPatterns(raw, compiled);
+        return compiled;
+    }
+
+    /** Split, trim, and compile the raw wake-word config into patterns, skipping invalid regexes. */
+    private static java.util.List<java.util.regex.Pattern> compileWakeWords(String raw) {
+        var out = new java.util.ArrayList<java.util.regex.Pattern>();
+        if (raw.isBlank()) return out;
+        for (var token : raw.split("[\\n,]")) {
+            var trimmed = token.trim();
+            if (trimmed.isEmpty()) continue;
+            try {
+                out.add(java.util.regex.Pattern.compile(trimmed));
+            } catch (java.util.regex.PatternSyntaxException e) {
+                EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                        "Ignoring invalid telegram.mentionPatterns regex %s: %s"
+                                .formatted(trimmed, e.getMessage()));
+            }
+        }
+        return out;
     }
 
     /** Scan one text/entity pair for a mention, text_mention, or bot_command suffix addressing the bot. */

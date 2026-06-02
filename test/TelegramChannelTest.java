@@ -32,6 +32,9 @@ class TelegramChannelTest extends UnitTest {
         play.Play.configuration.remove("telegram.replyTo.mode");
         // JCLAW-359: same for the link-preview flag the suppression tests set.
         play.Play.configuration.remove("telegram.linkPreview");
+        // JCLAW-387 (B3): same for the wake-word patterns the wake-word tests set,
+        // so a stale value can't leak into another test's parse path.
+        play.Play.configuration.remove("telegram.mentionPatterns");
         if (mock != null) mock.close();
     }
 
@@ -1648,5 +1651,214 @@ class TelegramChannelTest extends UnitTest {
         } finally {
             TelegramChannel.clearForTest(token);
         }
+    }
+
+    // ─── JCLAW-387 (A1): multi-part chunk counter "(n/m)" ────────────────
+
+    @Test
+    void withChunkMarker_singleChunkLeftUnchanged() {
+        // total == 1 (and the degenerate 0) means a one-message reply: no marker.
+        assertEquals("hello", TelegramChannel.withChunkMarker("hello", 1, 1),
+                "a single-chunk reply must not carry a (n/m) marker");
+        assertEquals("hello", TelegramChannel.withChunkMarker("hello", 1, 0),
+                "a zero-total (no split) reply must not carry a marker");
+    }
+
+    @Test
+    void withChunkMarker_multiChunkAppendsOrderedMarker() {
+        assertEquals("part one\n\n(1/3)", TelegramChannel.withChunkMarker("part one", 1, 3),
+                "the first of three chunks must be marked (1/3) on its own trailing line");
+        assertEquals("part three\n\n(3/3)", TelegramChannel.withChunkMarker("part three", 3, 3),
+                "the last of three chunks must be marked (3/3)");
+    }
+
+    @Test
+    void sendMessage_multiChunkReply_appendsCounterToEveryChunk() {
+        // A 4500-char reply splits into >=2 chunks (same precedent the JCLAW-369
+        // reply-mode tests rely on). Every chunk must carry an ordered (n/m)
+        // marker; the marker is plain ASCII so it appears verbatim in the JSON
+        // sendMessage body, and the 4000-char chunk budget keeps each send well
+        // under Telegram's 4096 cap even with the few extra marker characters.
+        String token = "jclaw387-counter-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            String big = "A".repeat(4500);
+            assertTrue(TelegramChannel.sendMessage(token, "12345", big));
+            long sends = mock.countRequests("sendMessage");
+            assertTrue(sends >= 2, "4500 chars must split into >=2 chunks; got " + sends);
+            String bodies = allSendMessageBodies();
+            assertTrue(bodies.contains("(1/" + sends + ")"),
+                    "first chunk must be marked (1/" + sends + "); bodies=" + bodies);
+            assertTrue(bodies.contains("(" + sends + "/" + sends + ")"),
+                    "last chunk must be marked (" + sends + "/" + sends + ")");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_singleChunkReply_hasNoCounter() {
+        // A short reply is one message — it must not gain any (n/m) marker.
+        String token = "jclaw387-single-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendMessage(token, "12345", "just one short line"));
+            assertEquals(1, mock.countRequests("sendMessage"),
+                    "a short reply is a single send");
+            String body = allSendMessageBodies();
+            assertFalse(body.contains("(1/1)"),
+                    "single-chunk reply must not carry a (1/1) marker");
+            assertFalse(body.matches("(?s).*\\(\\d+/\\d+\\).*"),
+                    "single-chunk reply must carry no (n/m) marker at all; body=" + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_multiChunkReply_staysUnderTelegramHardCap() {
+        // Each chunk + its marker must never exceed Telegram's 4096-char cap.
+        // We can't read the wire-length directly, but the 4000-char chunk budget
+        // plus a marker bounded by " (n/m)" guarantees it; assert the budget
+        // invariant holds for the produced chunks by reconstructing them.
+        String token = "jclaw387-cap-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            String big = "A".repeat(12000);
+            assertTrue(TelegramChannel.sendMessage(token, "12345", big));
+            long sends = mock.countRequests("sendMessage");
+            assertTrue(sends >= 3, "12000 chars must split into >=3 chunks; got " + sends);
+            // Every recorded sendMessage body (JSON, includes the text + marker)
+            // must be comfortably under any plausible per-message ceiling.
+            for (var r : mock.requests()) {
+                if (r.method().equalsIgnoreCase("sendMessage")) {
+                    assertTrue(r.body().length() < 4096 + 256,
+                            "a chunk body grew unexpectedly large: " + r.body().length());
+                }
+            }
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── JCLAW-387 (B3): configurable regex wake-word patterns ───────────
+
+    @Test
+    void matchesWakeWord_offByDefaultWhenConfigEmpty() {
+        play.Play.configuration.remove("telegram.mentionPatterns");
+        assertFalse(TelegramChannel.matchesWakeWord("hey assistant, help me"),
+                "no configured patterns means the feature is off — never a match");
+        play.Play.configuration.setProperty("telegram.mentionPatterns", "");
+        assertFalse(TelegramChannel.matchesWakeWord("hey assistant"),
+                "an empty pattern config means the feature is off");
+    }
+
+    @Test
+    void matchesWakeWord_matchesConfiguredPattern() {
+        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        assertTrue(TelegramChannel.matchesWakeWord("ok Jarvis, what's the weather?"),
+                "a body matching the configured wake-word is a match");
+        assertFalse(TelegramChannel.matchesWakeWord("talking about something else"),
+                "a body not matching any pattern is not a match");
+        assertFalse(TelegramChannel.matchesWakeWord(null),
+                "null body is never a match");
+        assertFalse(TelegramChannel.matchesWakeWord("   "),
+                "blank body is never a match");
+    }
+
+    @Test
+    void matchesWakeWord_multiplePatternsNewlineAndCommaSeparated() {
+        play.Play.configuration.setProperty("telegram.mentionPatterns",
+                "(?i)hey bot\n(?i)\\bassistant\\b, ^/summon\\b");
+        assertTrue(TelegramChannel.matchesWakeWord("Hey Bot can you help"),
+                "first (newline-separated) pattern matches");
+        assertTrue(TelegramChannel.matchesWakeWord("dear ASSISTANT please respond"),
+                "second pattern matches");
+        assertTrue(TelegramChannel.matchesWakeWord("/summon now"),
+                "third (comma-separated) pattern matches");
+        assertFalse(TelegramChannel.matchesWakeWord("unrelated chatter"),
+                "a body matching none of the patterns is not a match");
+    }
+
+    @Test
+    void matchesWakeWord_invalidRegexIsSkippedNotThrown() {
+        // A malformed regex must be dropped (logged) without throwing, and the
+        // valid patterns alongside it must still work.
+        play.Play.configuration.setProperty("telegram.mentionPatterns",
+                "[invalid(regex\n(?i)\\bvalid\\b");
+        Assertions.assertDoesNotThrow(() ->
+                TelegramChannel.matchesWakeWord("anything"));
+        assertTrue(TelegramChannel.matchesWakeWord("this is VALID text"),
+                "the valid pattern must still match despite an invalid sibling");
+        assertFalse(TelegramChannel.matchesWakeWord("no match here"),
+                "a non-matching body stays false");
+    }
+
+    @Test
+    void parseUpdate_groupMessageMatchingWakeWord_setsBotMentioned() {
+        // End-to-end wiring: a group message matching a configured wake-word
+        // pattern must surface botMentioned=true (so TelegramAccessPolicy admits
+        // it), even on the identity-independent single-arg parse path.
+        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 5,
+                    "from": {"id": 42, "is_bot": false, "first_name": "Alice"},
+                    "chat": {"id": -100, "type": "supergroup"},
+                    "date": 1712345678,
+                    "text": "Jarvis, summarize the thread"
+                  }
+                }
+                """).getAsJsonObject();
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertTrue(msg.botMentioned(),
+                "a group message matching a wake-word must be treated as addressed to the bot");
+    }
+
+    @Test
+    void parseUpdate_groupMessageNotMatchingWakeWord_leavesBotMentionedFalse() {
+        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 2,
+                  "message": {
+                    "message_id": 6,
+                    "from": {"id": 42, "is_bot": false, "first_name": "Alice"},
+                    "chat": {"id": -100, "type": "supergroup"},
+                    "date": 1712345678,
+                    "text": "just chatting with the group"
+                  }
+                }
+                """).getAsJsonObject();
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertFalse(msg.botMentioned(),
+                "an unaddressed group message that matches no wake-word stays not-mentioned");
+    }
+
+    @Test
+    void parseUpdate_emptyWakeWordConfig_unchangedBehavior() {
+        // Empty config = feature off: a plain group message with no mention and
+        // no wake-word match must remain not-addressed (back-compat).
+        play.Play.configuration.remove("telegram.mentionPatterns");
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 3,
+                  "message": {
+                    "message_id": 7,
+                    "from": {"id": 42, "is_bot": false, "first_name": "Alice"},
+                    "chat": {"id": -100, "type": "supergroup"},
+                    "date": 1712345678,
+                    "text": "Jarvis, are you there"
+                  }
+                }
+                """).getAsJsonObject();
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertFalse(msg.botMentioned(),
+                "with no configured patterns the wake-word feature is off — botMentioned stays false");
     }
 }

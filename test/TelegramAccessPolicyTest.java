@@ -1,4 +1,5 @@
 import channels.TelegramAccessPolicy;
+import channels.TelegramChannel;
 import org.junit.jupiter.api.*;
 import play.test.*;
 
@@ -56,5 +57,32 @@ class TelegramAccessPolicyTest extends UnitTest {
                 "null chat type defaults to the restrictive mention-gated branch");
         assertTrue(TelegramAccessPolicy.isAllowed(false, "channel", true),
                 "an addressed message in a non-private context is served");
+    }
+
+    // ─── JCLAW-387 (B3): wake-word match feeds the access decision ───────
+
+    @AfterEach
+    void clearWakeWordConfig() {
+        play.Play.configuration.remove("telegram.mentionPatterns");
+    }
+
+    @Test
+    void wakeWordMatchAdmitsGroupMessageViaIsAllowed() {
+        // A configured wake-word match surfaces as botMentioned=true, which the
+        // existing group branch of isAllowed admits — no policy change needed.
+        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        boolean addressed = TelegramChannel.matchesWakeWord("Jarvis, what's up");
+        assertTrue(addressed, "the configured wake-word must match");
+        assertTrue(TelegramAccessPolicy.isAllowed(false, "group", addressed),
+                "a wake-word-addressed group message is served");
+    }
+
+    @Test
+    void nonMatchingGroupMessageStillIgnored() {
+        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        boolean addressed = TelegramChannel.matchesWakeWord("just chatting");
+        assertFalse(addressed, "an unrelated message must not match the wake-word");
+        assertFalse(TelegramAccessPolicy.isAllowed(false, "group", addressed),
+                "an unaddressed group message stays ignored");
     }
 }
