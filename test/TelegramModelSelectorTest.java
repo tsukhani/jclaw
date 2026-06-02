@@ -337,6 +337,83 @@ class TelegramModelSelectorTest extends UnitTest {
                         + keyboard.getKeyboard().size());
     }
 
+    // ── Per-model checkmark (JCLAW-387 A4) ────────────────────────────
+
+    @Test
+    void modelsKeyboardMarksCurrentModelOnly() {
+        // openrouter was seeded with a single model, gpt-4.1 (label "GPT 4.1").
+        // Mark it as the conversation's current model and assert exactly that
+        // button carries the ✓ and no other button does.
+        int openrouterIdx = providerIndex("openrouter");
+        var keyboard = TelegramModelKeyboard.modelsKeyboard(
+                conversation.id, openrouterIdx, 0, "gpt-4.1");
+
+        int checks = 0;
+        boolean currentMarked = false;
+        for (var row : keyboard.getKeyboard()) {
+            for (var btn : row) {
+                if (btn.getText().startsWith("✓ ")) {
+                    checks++;
+                    if (btn.getText().contains("GPT 4.1")) currentMarked = true;
+                }
+            }
+        }
+        assertTrue(currentMarked, "the current model's button must carry a leading ✓");
+        assertEquals(1, checks, "exactly one button is marked");
+        // Nav buttons (Back / Cancel) must stay unmarked.
+        var lastRow = keyboard.getKeyboard().get(keyboard.getKeyboard().size() - 1);
+        for (var btn : lastRow) {
+            assertFalse(btn.getText().startsWith("✓ "),
+                    "nav button must not be marked: " + btn.getText());
+        }
+    }
+
+    @Test
+    void modelsKeyboardMarksNothingWhenCurrentModelNotOnPage() {
+        // Guard: when the conversation's current model id isn't among the
+        // listed page's models, no button is marked. Use a multi-model
+        // provider and a current id that lives on a later page.
+        var manyModels = java.util.stream.IntStream.rangeClosed(1, 12)
+                .mapToObj(i -> "{\"id\":\"m" + i + "\",\"contextWindow\":1000}")
+                .collect(java.util.stream.Collectors.joining(","));
+        services.ConfigService.set("provider.bigco.baseUrl", "http://127.0.0.1:9999/v1");
+        services.ConfigService.set("provider.bigco.apiKey", "sk-test");
+        services.ConfigService.set("provider.bigco.models", "[" + manyModels + "]");
+        llm.ProviderRegistry.refresh();
+
+        var providers = channels.TelegramModelSelector.userVisibleProviders();
+        int bigcoIdx = -1;
+        for (int i = 0; i < providers.size(); i++) {
+            if ("bigco".equals(providers.get(i).config().name())) { bigcoIdx = i; break; }
+        }
+        assertTrue(bigcoIdx >= 0, "bigco should be in the user-visible list");
+
+        // m12 is on page 1 (page size 8); render page 0 and assert nothing marked.
+        var keyboard = TelegramModelKeyboard.modelsKeyboard(
+                conversation.id, bigcoIdx, 0, "m12");
+        for (var row : keyboard.getKeyboard()) {
+            for (var btn : row) {
+                assertFalse(btn.getText().startsWith("✓ "),
+                        "no button should be marked when the current model is off-page: "
+                                + btn.getText());
+            }
+        }
+    }
+
+    @Test
+    void modelsKeyboardLeavesNoCheckmarkWhenCurrentModelNull() {
+        // Backwards-compatible 3-arg overload (and a null current id) render
+        // no checkmark — same fail-open contract as providersKeyboard(long).
+        int openrouterIdx = providerIndex("openrouter");
+        var keyboard = TelegramModelKeyboard.modelsKeyboard(conversation.id, openrouterIdx, 0);
+        for (var row : keyboard.getKeyboard()) {
+            for (var btn : row) {
+                assertFalse(btn.getText().startsWith("✓ "),
+                        "no checkmark without a current model id: " + btn.getText());
+            }
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────
 
     private String firstRequestBody(String methodName) {

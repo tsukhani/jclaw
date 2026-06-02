@@ -21,9 +21,10 @@ import java.util.Map;
  *   <li>Providers list: 2-per-row grid, each button labelled
  *       {@code "{label} ({modelCount})"} with a leading {@code ✓} on the
  *       conversation's current provider. Bottom row is {@code × Cancel}.</li>
- *   <li>Models list: 2-per-row grid, paginated at {@link #MODELS_PER_PAGE}.
- *       Pagination row appears only on multi-page providers and adapts to
- *       first/middle/last position. Final row pairs {@code ◀ Back} (to the
+ *   <li>Models list: 2-per-row grid, paginated at {@link #MODELS_PER_PAGE},
+ *       each button with a leading {@code ✓} on the conversation's current
+ *       model. Pagination row appears only on multi-page providers and adapts
+ *       to first/middle/last position. Final row pairs {@code ◀ Back} (to the
  *       providers list) with {@code × Cancel}.</li>
  *   <li>Post-switch confirmation: no keyboard (null).</li>
  * </ul>
@@ -124,8 +125,30 @@ public final class TelegramModelKeyboard {
      * <p>Final row pairs {@code ◀ Back} (to the providers list) with
      * {@code × Cancel} — both navigation actions on the same row keeps them
      * one thumb-stretch apart and clearly distinct from model selection.
+     *
+     * <p>Backwards-compatible variant for callers that don't supply the
+     * conversation's current model — no checkmark is rendered. Delegates to
+     * {@link #modelsKeyboard(long, int, int, String)} with a null current id.
      */
     public static InlineKeyboardMarkup modelsKeyboard(long conversationId, int providerIdx, int page) {
+        return modelsKeyboard(conversationId, providerIdx, page, null);
+    }
+
+    /**
+     * Models list for a specific provider index, paginated, with a leading
+     * {@code ✓} on the button whose model id equals {@code currentModelId}.
+     * Mirrors the providers-list checkmark convention in
+     * {@link #providersKeyboard(long, String)} so the two drill-in levels are
+     * visually consistent — the user sees at a glance both which provider and
+     * which model their conversation is currently pointing at.
+     *
+     * <p>The match is on {@link ModelInfo#id()} (the stable identifier the
+     * override is written against), not the display label. When
+     * {@code currentModelId} is null or doesn't fall on the rendered page, no
+     * button is marked.
+     */
+    public static InlineKeyboardMarkup modelsKeyboard(long conversationId, int providerIdx, int page,
+                                                      String currentModelId) {
         var providers = TelegramModelSelector.userVisibleProviders();
         if (providerIdx < 0 || providerIdx >= providers.size()) {
             // Defensive: stale index. Return an empty keyboard so the
@@ -143,8 +166,9 @@ public final class TelegramModelKeyboard {
         var row = new ArrayList<InlineKeyboardButton>();
         for (int i = start; i < end; i++) {
             var m = models.get(i);
+            var prefix = m.id() != null && m.id().equals(currentModelId) ? "✓ " : "";
             var button = InlineKeyboardButton.builder()
-                    .text(labelFor(m))
+                    .text(prefix + labelFor(m))
                     .callbackData(TelegramModelCallback.encodeSelect(conversationId, providerIdx, i))
                     .build();
             row.add(button);

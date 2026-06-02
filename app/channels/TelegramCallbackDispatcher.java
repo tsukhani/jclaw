@@ -69,7 +69,7 @@ public final class TelegramCallbackDispatcher {
 
         switch (payload.kind()) {
             case BROWSE, BACK -> handleBrowse(botToken, agent, cb, conversation);
-            case PROVIDER_PAGE -> handleProviderPage(botToken, cb, conversation, payload);
+            case PROVIDER_PAGE -> handleProviderPage(botToken, agent, cb, conversation, payload);
             case SELECT -> handleSelect(botToken, agent, cb, conversation, payload);
             case CANCEL -> handleCancel(botToken, cb);
             case DETAILS -> handleDetails(botToken, agent, cb, conversation);
@@ -114,7 +114,7 @@ public final class TelegramCallbackDispatcher {
         TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(), text, keyboard);
     }
 
-    private static void handleProviderPage(String botToken, InboundCallback cb,
+    private static void handleProviderPage(String botToken, Agent agent, InboundCallback cb,
                                             Conversation conv, Payload payload) {
         var providers = TelegramModelSelector.userVisibleProviders();
         if (payload.providerIdx() < 0 || payload.providerIdx() >= providers.size()) {
@@ -144,7 +144,8 @@ public final class TelegramCallbackDispatcher {
             header.append("Select a model:");
         }
         var keyboard = TelegramModelKeyboard.modelsKeyboard(
-                conv.id, payload.providerIdx(), payload.page());
+                conv.id, payload.providerIdx(), payload.page(),
+                services.ModelOverrideResolver.modelId(conv, agent));
         TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
                 header.toString(), keyboard);
     }
