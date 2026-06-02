@@ -309,4 +309,182 @@ class TelegramEntityParseTest extends UnitTest {
         assertNull(msg.messageThreadId(),
                 "message_thread_id must be null for a plain non-topic message");
     }
+
+    // ── JCLAW-366 AC1: stickers ─────────────────────────────────────────
+
+    @Test
+    void staticStickerSurfacedAsNoteAndStagesWebpImage() throws Exception {
+        // A regular (non-animated, non-video) sticker: surfaced as an emoji +
+        // set note AND staged as a WEBP image attachment, not dropped.
+        var u = update("""
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":1,
+                  "sticker":{"file_id":"STK1","file_unique_id":"u1","type":"regular",
+                    "width":512,"height":512,"is_animated":false,"is_video":false,
+                    "emoji":"😀","set_name":"AnimalsPack","file_size":2048}}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg, "a sticker message must not be dropped");
+        assertTrue(msg.text().contains("[sticker: 😀 (set AnimalsPack)]"),
+                "sticker note must carry emoji + set name, got: " + msg.text());
+        assertEquals(1, msg.attachments().size(),
+                "a static sticker should stage one WEBP image attachment");
+        assertEquals("STK1", msg.attachments().get(0).telegramFileId());
+        assertEquals(models.MessageAttachment.KIND_IMAGE,
+                msg.attachments().get(0).kind(),
+                "static sticker stages as KIND_IMAGE");
+    }
+
+    @Test
+    void animatedStickerSurfacedAsNoteOnly_noAttachment() throws Exception {
+        // Animated (TGS) sticker: placeholder note only — no download/convert.
+        var u = update("""
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":1,
+                  "sticker":{"file_id":"STK2","file_unique_id":"u2","type":"regular",
+                    "width":512,"height":512,"is_animated":true,"is_video":false,
+                    "emoji":"🎉","set_name":"PartyPack","file_size":4096}}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg, "an animated sticker message must not be dropped");
+        assertTrue(msg.text().contains("[sticker: 🎉 (set PartyPack)]"),
+                "animated sticker still surfaces an emoji/set note, got: " + msg.text());
+        assertTrue(msg.attachments().isEmpty(),
+                "an animated sticker must NOT stage a downloadable attachment");
+    }
+
+    @Test
+    void videoStickerSurfacedAsNoteOnly_noAttachment() throws Exception {
+        // Video (WEBM) sticker: placeholder note only, like the animated case.
+        var u = update("""
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":1,
+                  "sticker":{"file_id":"STK3","file_unique_id":"u3","type":"regular",
+                    "width":512,"height":512,"is_animated":false,"is_video":true,
+                    "emoji":"🔥","file_size":8192}}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg);
+        assertTrue(msg.text().contains("[sticker: 🔥]"),
+                "video sticker with no set still surfaces a bare emoji note, got: " + msg.text());
+        assertTrue(msg.attachments().isEmpty(),
+                "a video sticker must NOT stage a downloadable attachment");
+    }
+
+    // ── JCLAW-366 AC2: location / venue ─────────────────────────────────
+
+    @Test
+    void locationOnlyMessageSurfacedAsNote() throws Exception {
+        var u = update("""
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":1,
+                  "location":{"latitude":37.7749,"longitude":-122.4194}}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg, "a location-only message must not be dropped");
+        assertTrue(msg.text().contains("[location: 37.7749, -122.4194]"),
+                "location note must carry lat/long, got: " + msg.text());
+        assertTrue(msg.attachments().isEmpty());
+    }
+
+    @Test
+    void venueMessageSurfacedWithTitleAddressAndCoords() throws Exception {
+        var u = update("""
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":1,
+                  "venue":{"title":"Ferry Building","address":"1 Ferry Building, SF",
+                    "location":{"latitude":37.7955,"longitude":-122.3937}}}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg, "a venue message must not be dropped");
+        assertTrue(msg.text().contains("Ferry Building")
+                        && msg.text().contains("1 Ferry Building, SF"),
+                "venue note must carry title + address, got: " + msg.text());
+        assertTrue(msg.text().contains("(37.7955, -122.3937)"),
+                "venue note must carry coordinates, got: " + msg.text());
+    }
+
+    // ── JCLAW-366 AC3: reply / quote context ────────────────────────────
+
+    @Test
+    void replyToTextMessageFoldsInReplyContext() throws Exception {
+        var u = update("""
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":2,
+                  "text":"sounds good",
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":77,"is_bot":false,"first_name":"Bob"},
+                    "chat":{"id":-100,"type":"supergroup"},"date":1,
+                    "text":"shall we ship on Friday?"}}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg);
+        assertEquals("sounds good", msg.text(),
+                "the main turn text must be untouched by the reply context");
+        assertNotNull(msg.replyContext(), "a reply must fold in a replyContext block");
+        assertEquals("in reply to: shall we ship on Friday?", msg.replyContext());
+    }
+
+    @Test
+    void nativeQuotePreferredOverFullRepliedToBody() throws Exception {
+        // The message replies to a long body but the user selected a quote
+        // substring — the quote wins.
+        var u = update("""
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":2,
+                  "text":"yes that part",
+                  "quote":{"text":"ship on Friday","position":10,"is_manual":true},
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":77,"is_bot":false,"first_name":"Bob"},
+                    "chat":{"id":-100,"type":"supergroup"},"date":1,
+                    "text":"there is a lot here but we should ship on Friday for sure"}}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg);
+        assertEquals("in reply to (quoted): ship on Friday", msg.replyContext(),
+                "the native quote substring must be preferred over the full replied-to body");
+    }
+
+    @Test
+    void replyToMediaOnlyMessageNotesMediaType() throws Exception {
+        // The replied-to message is a photo with no caption — note its type.
+        var u = update("""
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":2,
+                  "text":"nice shot",
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":77,"is_bot":false,"first_name":"Bob"},
+                    "chat":{"id":-100,"type":"supergroup"},"date":1,
+                    "photo":[{"file_id":"P1","file_unique_id":"up1","width":90,"height":90}]}}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg);
+        assertEquals("in reply to: [photo]", msg.replyContext(),
+                "a media-only replied-to message must note its media type");
+    }
+
+    @Test
+    void plainMessageUnaffected_noReplyContextNoNotes() throws Exception {
+        var u = update("""
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":1,
+                  "text":"just a normal message"}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg);
+        assertEquals("just a normal message", msg.text(),
+                "a plain message's text must be unchanged");
+        assertNull(msg.replyContext(),
+                "a non-reply plain message must carry no replyContext");
+        assertTrue(msg.attachments().isEmpty());
+    }
 }

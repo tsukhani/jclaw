@@ -97,17 +97,28 @@ public class TelegramChannel implements Channel {
      *                        for plain non-topic messages so a thread id is
      *                        only carried when Telegram actually scopes the
      *                        message to a topic.
+     * @param replyContext    JCLAW-366: a supplemental "in reply to: …" context
+     *                        block when this message replies to (and/or natively
+     *                        quotes) an earlier message. Carries the quoted
+     *                        substring (preferred when present) or the
+     *                        replied-to message's text/snippet, plus a media-type
+     *                        note when the replied-to message is media-only.
+     *                        Null when the message is not a reply / has no
+     *                        usable reply context. The runner folds this into
+     *                        the turn the agent sees; it is NOT part of
+     *                        {@code text} so callers can render it distinctly.
      */
     public record InboundMessage(String chatId, String chatType, String text,
                                  String fromId, String fromUsername,
                                  String fromDisplayName, boolean botMentioned,
                                  java.util.List<PendingAttachment> attachments,
                                  String mediaGroupId,
-                                 Integer messageId, Integer messageThreadId) {
+                                 Integer messageId, Integer messageThreadId,
+                                 String replyContext) {
         public InboundMessage(String chatId, String chatType, String text,
                               String fromId, String fromUsername) {
             this(chatId, chatType, text, fromId, fromUsername, null, false,
-                    java.util.List.of(), null, null, null);
+                    java.util.List.of(), null, null, null, null);
         }
 
         /**
@@ -118,14 +129,32 @@ public class TelegramChannel implements Channel {
          * {@code botMentioned} to false. JCLAW-368: {@code messageId} and
          * {@code messageThreadId} default to null — the merge path that uses
          * this overload synthesizes one inbound from many and has no single
-         * message id / thread id to attribute.
+         * message id / thread id to attribute. JCLAW-366: {@code replyContext}
+         * defaults to null for the same reason.
          */
         public InboundMessage(String chatId, String chatType, String text,
                               String fromId, String fromUsername,
                               java.util.List<PendingAttachment> attachments,
                               String mediaGroupId) {
             this(chatId, chatType, text, fromId, fromUsername, null, false,
-                    attachments, mediaGroupId, null, null);
+                    attachments, mediaGroupId, null, null, null);
+        }
+
+        /**
+         * JCLAW-368 convenience overload preserved for callers that carry the
+         * full sender/attachment shape but pre-date the {@code replyContext}
+         * field (JCLAW-366) — defaults it to null so those call sites compile
+         * unchanged.
+         */
+        public InboundMessage(String chatId, String chatType, String text,
+                              String fromId, String fromUsername,
+                              String fromDisplayName, boolean botMentioned,
+                              java.util.List<PendingAttachment> attachments,
+                              String mediaGroupId,
+                              Integer messageId, Integer messageThreadId) {
+            this(chatId, chatType, text, fromId, fromUsername, fromDisplayName,
+                    botMentioned, attachments, mediaGroupId, messageId,
+                    messageThreadId, null);
         }
     }
 
@@ -1001,12 +1030,24 @@ public class TelegramChannel implements Channel {
         collectPhotoAttachment(msg, attachments);
         collectAudioAttachments(msg, attachments);
         collectFileAttachments(msg, attachments);
+        // JCLAW-366: a static WEBP sticker stages as an image attachment;
+        // animated/video stickers stage nothing (placeholder note only).
+        collectStickerAttachment(msg, attachments);
 
         // Caption wins over plain-text when both exist is impossible per
         // Telegram's shape — a given Message carries either text or caption,
         // never both. Pick whichever is populated; empty string is fine
         // (means "user attached a file with no prose context").
         String text = pickInboundText(msg);
+
+        // JCLAW-366: stickers, location, and venue messages carry no text and
+        // (for animated/video stickers, location, venue) no downloadable
+        // attachment, so they previously hit the empty-drop below. Surface
+        // each as a text context note so the turn is no longer discarded.
+        String note = inboundContextNote(msg);
+        if (!note.isEmpty()) {
+            text = text.isEmpty() ? note : text + "\n" + note;
+        }
 
         boolean botMentioned = detectBotAddressed(msg, botUsername, botUserId);
 
@@ -1020,13 +1061,19 @@ public class TelegramChannel implements Channel {
         Integer messageId = msg.getMessageId();
         Integer messageThreadId = msg.isTopicMessage() ? msg.getMessageThreadId() : null;
 
-        // Fully empty updates (no text, no caption, no attachments) are
-        // nothing we can act on — drop as before.
+        // JCLAW-366: fold the replied-to / natively-quoted context into a
+        // supplemental block carried alongside (not inside) text.
+        String replyContext = buildReplyContext(msg);
+
+        // Fully empty updates (no text, no caption, no attachment, no
+        // sticker/location/venue note) are nothing we can act on — drop as
+        // before. A reply with no body of its own (replyContext only) is not
+        // actionable on its own, so it does not keep the turn alive.
         if (text.isEmpty() && attachments.isEmpty()) return null;
 
         return new InboundMessage(chatId, chatType, text, fromId, fromUsername,
                 fromDisplayName, botMentioned, attachments, mediaGroupId,
-                messageId, messageThreadId);
+                messageId, messageThreadId, replyContext);
     }
 
     /**
@@ -1216,6 +1263,133 @@ public class TelegramChannel implements Channel {
         if (msg.hasText()) return msg.getText();
         if (msg.getCaption() != null) return msg.getCaption();
         return "";
+    }
+
+    /**
+     * JCLAW-366: stage a STATIC (non-animated, non-video) sticker's WEBP as an
+     * image attachment so the model can see the picture, reusing the same
+     * {@code getFile} download path as photos. Animated (TGS) and video (WEBM)
+     * stickers are NOT staged — they aren't a still image the vision path can
+     * consume, and we deliberately don't convert them — the
+     * {@link #stickerNote(org.telegram.telegrambots.meta.api.objects.stickers.Sticker)}
+     * placeholder is the only surfacing for those. Telegram's WEBP is sniffed
+     * to {@code image/webp} on disk by {@code finalizeAttachment}; the reported
+     * MIME here is a best-effort hint.
+     */
+    private static void collectStickerAttachment(Message msg, java.util.List<PendingAttachment> attachments) {
+        if (!msg.hasSticker() || msg.getSticker() == null) return;
+        var s = msg.getSticker();
+        boolean animated = Boolean.TRUE.equals(s.getIsAnimated());
+        boolean video = Boolean.TRUE.equals(s.getIsVideo());
+        if (animated || video) return; // placeholder note only
+        long bytes = s.getFileSize() != null ? s.getFileSize() : 0L;
+        attachments.add(new PendingAttachment(
+                s.getFileId(), null, "image/webp", bytes,
+                models.MessageAttachment.KIND_IMAGE));
+    }
+
+    /**
+     * JCLAW-366: build a text context note for the non-attachment "rich" inbound
+     * types this story surfaces — sticker, location, venue. Returns "" when none
+     * are present. A sticker yields {@code [sticker: 😀 (set X)]}; a venue yields
+     * its title/address; a bare location yields its lat/long. Only one of these
+     * is ever present on a given Message, but they're checked independently so a
+     * future combined shape still degrades gracefully.
+     */
+    private static String inboundContextNote(Message msg) {
+        var parts = new java.util.ArrayList<String>(1);
+        if (msg.hasSticker() && msg.getSticker() != null) {
+            parts.add(stickerNote(msg.getSticker()));
+        }
+        // Venue wraps a location, so prefer the richer venue note and skip the
+        // bare-location branch when a venue is present.
+        if (msg.getVenue() != null) {
+            parts.add(venueNote(msg.getVenue()));
+        } else if (msg.hasLocation() && msg.getLocation() != null) {
+            parts.add(locationNote(msg.getLocation()));
+        }
+        return String.join("\n", parts);
+    }
+
+    /**
+     * {@code [sticker: <emoji> (set <name>)]} — emoji and set name are both
+     * optional on the Bot API object, so each is omitted when absent. A sticker
+     * with neither degrades to a bare {@code [sticker]}.
+     */
+    private static String stickerNote(org.telegram.telegrambots.meta.api.objects.stickers.Sticker s) {
+        var sb = new StringBuilder("[sticker");
+        boolean hasEmoji = s.getEmoji() != null && !s.getEmoji().isBlank();
+        if (hasEmoji) sb.append(": ").append(s.getEmoji().strip());
+        if (s.getSetName() != null && !s.getSetName().isBlank()) {
+            sb.append(hasEmoji ? " " : ": ").append("(set ").append(s.getSetName().strip()).append(')');
+        }
+        return sb.append(']').toString();
+    }
+
+    /** {@code [location: <lat>, <long>]} from the location's coordinates. */
+    private static String locationNote(org.telegram.telegrambots.meta.api.objects.location.Location loc) {
+        return "[location: %s, %s]".formatted(loc.getLatitude(), loc.getLongitude());
+    }
+
+    /**
+     * {@code [venue: <title> — <address> (<lat>, <long>)]}. Title/address are
+     * appended when present; the embedded location's coordinates ride in
+     * parentheses when the venue carries a location (it always should).
+     */
+    private static String venueNote(org.telegram.telegrambots.meta.api.objects.Venue v) {
+        var sb = new StringBuilder("[venue");
+        if (v.getTitle() != null && !v.getTitle().isBlank()) sb.append(": ").append(v.getTitle().strip());
+        if (v.getAddress() != null && !v.getAddress().isBlank()) sb.append(" — ").append(v.getAddress().strip());
+        var loc = v.getLocation();
+        if (loc != null) sb.append(" (%s, %s)".formatted(loc.getLatitude(), loc.getLongitude()));
+        return sb.append(']').toString();
+    }
+
+    /**
+     * JCLAW-366: build the "in reply to: …" supplemental context block, or null
+     * when this message neither replies to another nor carries a native quote.
+     * Prefers the native {@code quote} substring (the user explicitly selected
+     * that span) over the full replied-to body. When neither text is available
+     * but the replied-to message is media, notes the media type instead so the
+     * agent still knows what was referenced.
+     */
+    private static String buildReplyContext(Message msg) {
+        var quote = msg.getQuote();
+        if (quote != null && quote.getText() != null && !quote.getText().isBlank()) {
+            return "in reply to (quoted): " + quote.getText().strip();
+        }
+        var replyTo = msg.getReplyToMessage();
+        if (replyTo == null) return null;
+        String body = replyToText(replyTo);
+        if (!body.isEmpty()) return "in reply to: " + body;
+        String media = replyToMediaType(replyTo);
+        if (media != null) return "in reply to: [" + media + "]";
+        return null;
+    }
+
+    /** Text/caption of the replied-to message, trimmed; "" when it carries neither. */
+    private static String replyToText(Message replyTo) {
+        if (replyTo.hasText() && replyTo.getText() != null) return replyTo.getText().strip();
+        if (replyTo.getCaption() != null && !replyTo.getCaption().isBlank()) return replyTo.getCaption().strip();
+        return "";
+    }
+
+    /**
+     * A short media-type label for a media-only replied-to message, or null when
+     * it isn't one of the recognized media shapes. Used only when the replied-to
+     * message has no text/caption of its own.
+     */
+    private static String replyToMediaType(Message replyTo) {
+        if (replyTo.hasPhoto()) return "photo";
+        if (replyTo.hasSticker()) return "sticker";
+        if (replyTo.hasVoice()) return "voice";
+        if (replyTo.hasAudio()) return "audio";
+        if (replyTo.hasVideo()) return "video";
+        if (replyTo.hasVideoNote()) return "video note";
+        if (replyTo.hasDocument()) return "document";
+        if (replyTo.getVenue() != null) return "venue";
+        if (replyTo.hasLocation()) return "location";
+        return null;
     }
 
     /**
