@@ -99,8 +99,10 @@ class DangerousActionGateTest extends UnitTest {
 
     @Test
     void boundDangerousToolTimesOutAborts() throws Exception {
-        // Tiny timeout so the await() in the gate elapses fast with no tap.
-        ConfigService.set("telegram.approval.timeout-seconds", "1");
+        // Tiny timeout so the await() in the gate elapses fast with no tap. Commit it on
+        // a fresh tx so the gate's lookup thread reads it from the DB (the ambient test
+        // tx isn't visible cross-thread), then clear the cache to force a re-read.
+        commitInFreshTx(() -> { ConfigService.set("telegram.approval.timeout-seconds", "1"); return null; });
         ConfigService.clearCache();
         var agent = boundAgent("gate-timeout");
 
@@ -177,23 +179,45 @@ class DangerousActionGateTest extends UnitTest {
                     .map(r -> CALLBACK_ID.matcher(r.body()))
                     .filter(java.util.regex.Matcher::find)
                     .findFirst();
-            if (match.isPresent()) return match.get().group(1);
+            // Wait until the prompt is recorded AND the pending entry is registered:
+            // request() sends the prompt before it puts the PENDING entry, so resolving
+            // off the bare mock request would race that put and miss.
+            if (match.isPresent() && TelegramApprovalService.isPending(match.get().group(1))) {
+                return match.get().group(1);
+            }
             Thread.sleep(10);
         }
         throw new AssertionError("approval prompt with callback_data never arrived");
     }
 
     private Agent boundAgent(String name) {
-        var agent = Tx.run(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
-        Tx.run(() -> {
+        // Seed the agent + binding on a fresh COMMITTED tx (not the ambient test
+        // tx, which doesn't commit cross-thread): the gate resolves the binding on
+        // its own virtual thread, so it must see the row. Same constraint as the
+        // commitInFreshTx pattern used by the HTTP functional tests.
+        return commitInFreshTx(() -> {
+            var agent = AgentService.create(name, "openrouter", "gpt-4.1");
             var b = new TelegramBinding();
             b.agent = agent;
             b.botToken = BOT_TOKEN;
             b.telegramUserId = TG_USER;
             b.enabled = true;
             b.save();
+            return agent;
         });
-        return agent;
+    }
+
+    private static <T> T commitInFreshTx(java.util.function.Supplier<T> block) {
+        var ref = new java.util.concurrent.atomic.AtomicReference<T>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try { ref.set(Tx.run(block::get)); }
+            catch (Throwable ex) { err.set(ex); }
+        });
+        try { t.join(); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new RuntimeException(e); }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return ref.get();
     }
 
     private static ToolRegistry.Tool stubTool(String toolName, boolean dangerous) {
