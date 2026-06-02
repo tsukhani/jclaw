@@ -33,11 +33,17 @@ import java.util.function.Supplier;
 final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
 
     private final Set<String> registered = ConcurrentHashMap.newKeySet();
+    // JCLAW-361: capture the consumer + getUpdates generator the runner passes
+    // to the 4-arg registerBot, so offset-persistence/seeding tests can drive
+    // them without dialing api.telegram.org.
+    private final ConcurrentHashMap<String, LongPollingUpdateConsumer> consumers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Function<Integer, GetUpdates>> generators = new ConcurrentHashMap<>();
     private volatile boolean running = false;
 
     @Override
     public BotSession registerBot(String botToken, LongPollingUpdateConsumer updatesConsumer) {
         registered.add(botToken);
+        consumers.put(botToken, updatesConsumer);
         return null;
     }
 
@@ -47,6 +53,8 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
                                   Function<Integer, GetUpdates> getUpdatesGenerator,
                                   LongPollingUpdateConsumer updatesConsumer) {
         registered.add(botToken);
+        consumers.put(botToken, updatesConsumer);
+        generators.put(botToken, getUpdatesGenerator);
         return null;
     }
 
@@ -74,10 +82,22 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
     public void close() {
         running = false;
         registered.clear();
+        consumers.clear();
+        generators.clear();
     }
 
     /** Snapshot of tokens currently registered with this fake. */
     Set<String> registeredTokens() {
         return Set.copyOf(registered);
+    }
+
+    /** Consumer the runner registered for {@code botToken} (JCLAW-361), or null. */
+    LongPollingUpdateConsumer consumerFor(String botToken) {
+        return consumers.get(botToken);
+    }
+
+    /** getUpdates generator the runner registered for {@code botToken} (JCLAW-361), or null. */
+    Function<Integer, GetUpdates> generatorFor(String botToken) {
+        return generators.get(botToken);
     }
 }

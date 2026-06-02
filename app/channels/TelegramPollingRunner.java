@@ -5,10 +5,13 @@ import models.Agent;
 import models.TelegramBinding;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
+import org.telegram.telegrambots.meta.TelegramUrl;
+import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import services.EventLogger;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Objects;
@@ -214,15 +217,52 @@ public final class TelegramPollingRunner {
         COOLDOWN_UNTIL.remove(token);
 
         try {
-            LongPollingSingleThreadUpdateConsumer consumer = update -> dispatch(bindingId, update);
-            app.registerBot(token, consumer);
+            // JCLAW-361: seed the getUpdates start offset from the durable
+            // per-bot store and persist the high-water update id as we consume.
+            // The SDK keeps the offset only in an in-memory AtomicInteger that
+            // resets to 0 on restart, so without this a restart re-fetches and
+            // re-dispatches every update Telegram still buffers.
+            int persistedOffset = TelegramOffsetStore.load(token);
+            LongPollingSingleThreadUpdateConsumer consumer = update -> {
+                dispatch(bindingId, update);
+                if (update.getUpdateId() != null) {
+                    TelegramOffsetStore.record(token, update.getUpdateId());
+                }
+            };
+            app.registerBot(token, () -> TelegramUrl.DEFAULT_URL,
+                    seedingGetUpdatesGenerator(persistedOffset), consumer);
             ACTIVE.put(bindingId, token);
             EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
-                    "Registered polling session for binding %d".formatted(bindingId));
+                    "Registered polling session for binding %d (offset seeded from %d)".formatted(
+                            bindingId, persistedOffset));
         } catch (Exception e) {
             EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
                     "Failed to register binding %d: %s".formatted(bindingId, e.getMessage()));
         }
+    }
+
+    /**
+     * {@code getUpdates} generator that seeds the start offset from
+     * {@code persistedOffset} (JCLAW-361). Mirrors the SDK's
+     * {@code DefaultGetUpdatesGenerator} (limit 100, timeout 50, empty
+     * allowedUpdates) but clamps the requested offset to
+     * {@code max(sdkLastReceived, persistedOffset) + 1}.
+     *
+     * <p>The clamp is what makes seeding race-free and monotonic: the SDK passes
+     * its in-memory {@code lastReceivedUpdate} (0 on a fresh session) on every
+     * poll. On the first poll {@code max(0, persisted) + 1 == persisted + 1}, so
+     * Telegram skips everything already consumed before the restart. Once the
+     * session has advanced past {@code persistedOffset}, {@code max} picks the
+     * SDK's own (now higher) value, so the persisted seed never rewinds a
+     * running session.
+     */
+    private static java.util.function.Function<Integer, GetUpdates> seedingGetUpdatesGenerator(int persistedOffset) {
+        return sdkLastReceived -> GetUpdates.builder()
+                .limit(100)
+                .timeout(50)
+                .offset(Math.max(sdkLastReceived, persistedOffset) + 1)
+                .allowedUpdates(new ArrayList<>())
+                .build();
     }
 
     private static void unregisterInternal(TelegramBotsLongPollingApplication app,

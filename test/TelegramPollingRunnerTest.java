@@ -1,13 +1,22 @@
 import channels.ChannelTransport;
+import channels.TelegramOffsetStore;
 import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
 import models.Agent;
 import models.TelegramBinding;
 import org.junit.jupiter.api.*;
+import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
+import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
+import org.telegram.telegrambots.meta.api.objects.Update;
 import play.test.*;
 import services.Tx;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * Unit-ish coverage for {@link TelegramPollingRunner} (JCLAW-313). The
@@ -33,9 +42,10 @@ import java.util.function.Supplier;
 class TelegramPollingRunnerTest extends FunctionalTest {
 
     private InMemoryPollingApp fakeApp;
+    private Path offsetTmp;
 
     @BeforeEach
-    void setup() {
+    void setup() throws Exception {
         Fixtures.deleteDatabase();
         // JCLAW-316: clear the runner's static state without shutting down
         // its background scheduler — stop() would kill SCHEDULER, and a
@@ -47,11 +57,23 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         // bindings without dialing api.telegram.org.
         fakeApp = new InMemoryPollingApp();
         TelegramPollingRunnerTestHooks.setApp(fakeApp);
+        // JCLAW-361: redirect the offset store at a per-test temp dir so the
+        // runner's offset persist/seed lands in tmp, never production state.
+        offsetTmp = Files.createTempDirectory("jclaw-tg-offset-runner-");
+        System.setProperty(TelegramOffsetStore.OFFSET_PATH_PROPERTY, offsetTmp.toString());
     }
 
     @AfterEach
-    void teardown() {
+    void teardown() throws Exception {
         TelegramPollingRunnerTestHooks.clear();
+        System.clearProperty(TelegramOffsetStore.OFFSET_PATH_PROPERTY);
+        if (offsetTmp != null && Files.exists(offsetTmp)) {
+            try (Stream<Path> walk = Files.walk(offsetTmp)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                    try { Files.deleteIfExists(p); } catch (Exception _) { /* best-effort */ }
+                });
+            }
+        }
     }
 
     private static <T> T commitInFreshTx(Supplier<T> block) {
@@ -318,6 +340,52 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         TelegramPollingRunner.reconcile();
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                 "re-enable during cooldown must defer registration");
+    }
+
+    // ===== JCLAW-361: offset persistence + seeding wiring =====
+
+    @Test
+    void consumingAnUpdatePersistsItsOffset() {
+        String token = "987:tokOffset";
+        seedPollingBinding("agent-offset", token, "9", true);
+        TelegramPollingRunner.reconcile();
+
+        // Drive the consumer the runner registered with a bare Update carrying
+        // only an update_id. dispatch() short-circuits (no message/callback) so
+        // no agent/DB path runs; the runner's wrapper then records the offset.
+        var consumer = fakeApp.consumerFor(token);
+        assertNotNull(consumer, "runner should have registered a consumer for the token");
+        Update update = new Update();
+        update.setUpdateId(4242);
+        ((LongPollingSingleThreadUpdateConsumer) consumer).consume(update);
+
+        assertEquals(4242, TelegramOffsetStore.load(token),
+                "consuming an update should persist its update_id as the new offset");
+    }
+
+    @Test
+    void registerSeedsGetUpdatesOffsetFromPersistedValue() {
+        String token = "654:tokSeed";
+        // Pre-persist a high-water mark as if a prior JVM had consumed up to 7000.
+        TelegramOffsetStore.record(token, 7000);
+
+        seedPollingBinding("agent-seed", token, "6", true);
+        TelegramPollingRunner.reconcile();
+
+        // On a fresh BotSession the SDK passes lastReceivedUpdate=0; the runner's
+        // seeding generator must clamp the requested offset to persisted+1 so
+        // already-consumed updates (<= 7000) are skipped on restart.
+        Function<Integer, GetUpdates> gen = fakeApp.generatorFor(token);
+        assertNotNull(gen, "runner should have registered a getUpdates generator for the token");
+        GetUpdates firstPoll = gen.apply(0);
+        assertEquals(7001, firstPoll.getOffset(),
+                "first poll after restart must request offset persisted+1, not 1");
+
+        // Once the live session advances past the seed, the SDK's own value wins
+        // (monotonic — the seed never rewinds a running session).
+        GetUpdates laterPoll = gen.apply(8000);
+        assertEquals(8001, laterPoll.getOffset(),
+                "after the session advances past the seed, the SDK value drives the offset");
     }
 
     // ===== stop() =====
