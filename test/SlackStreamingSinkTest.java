@@ -21,10 +21,12 @@ class SlackStreamingSinkTest extends UnitTest {
         String startResult = "1700000000.0001";
         String startedThread;
         String startedUser;
+        String startedInitial;
 
-        @Override public String startStream(String channelId, String threadTs, String recipientUserId) {
+        @Override public String startStream(String channelId, String threadTs, String recipientUserId, String initialMarkdown) {
             startedThread = threadTs;
             startedUser = recipientUserId;
+            startedInitial = initialMarkdown;
             return startResult;
         }
 
@@ -57,8 +59,10 @@ class SlackStreamingSinkTest extends UnitTest {
         sink.seal("Hello");
         assertEquals("U1", f.startedUser);
         assertEquals("1700.0", f.startedThread);
-        // Throttle 0 → each update flushes its delta; markdown is sent raw (Slack renders it).
-        assertEquals(List.of("Hel", "lo"), f.appended);
+        // Lazy start: the first token seeds the stream (never an empty message);
+        // subsequent deltas append (throttle 0 → each flushes).
+        assertEquals("Hel", f.startedInitial);
+        assertEquals(List.of("lo"), f.appended);
         assertTrue(f.stopped, "stream must be finalized");
         assertTrue(f.fallbackPosts.isEmpty(), "native path must not post a fallback");
         // "is typing…" set at begin, cleared at seal.

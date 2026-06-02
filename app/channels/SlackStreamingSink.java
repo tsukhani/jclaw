@@ -30,8 +30,8 @@ public final class SlackStreamingSink {
 
     /** Slack streaming + fallback operations, injectable so tests don't hit the API. */
     public interface Slacker {
-        /** Start a native stream; return its ts, or null on failure / unavailable. */
-        String startStream(String channelId, String threadTs, String recipientUserId);
+        /** Start a native stream carrying the first content; return its ts, or null. */
+        String startStream(String channelId, String threadTs, String recipientUserId, String initialMarkdown);
         /** Append a markdown delta to the stream; return true on success. */
         boolean appendStream(String channelId, String ts, String markdownDelta);
         /** Finalize the stream; return true on success. */
@@ -43,7 +43,7 @@ public final class SlackStreamingSink {
     }
 
     private static final Slacker LIVE = new Slacker() {
-        @Override public String startStream(String c, String th, String u) { return SlackChannel.startStream(c, th, u); }
+        @Override public String startStream(String c, String th, String u, String init) { return SlackChannel.startStream(c, th, u, init); }
         @Override public boolean appendStream(String c, String ts, String d) { return SlackChannel.appendStream(c, ts, d); }
         @Override public boolean stopStream(String c, String ts) { return SlackChannel.stopStream(c, ts); }
         @Override public void setStatus(String c, String th, String s) { SlackChannel.setAssistantStatus(c, th, s); }
@@ -56,7 +56,9 @@ public final class SlackStreamingSink {
     private final Slacker slacker;
     private final long throttleMs;
     private final StringBuilder pending = new StringBuilder();
-    private String streamTs;     // native stream ts; null = fallback mode
+    private String streamTs;     // native stream ts; null until first token (lazy start)
+    private boolean canStream;   // assistant thread + recipient present
+    private boolean startAttempted;
     private boolean nativeMode;
     private boolean statusSet;   // true while the "is typing…" status is showing
     private long lastFlushMs;
@@ -75,26 +77,34 @@ public final class SlackStreamingSink {
         this.throttleMs = throttleMs;
     }
 
-    /** Show the "is typing…" status (assistant thread) + start a native stream when
-     *  a thread + recipient are present; else fall back to a single post. */
+    /** Show the "is typing…" status (assistant thread). The stream message itself is
+     *  created lazily on the first token (see {@link #update}) so it's never empty. */
     public void begin() {
         boolean thread = threadTs != null && !threadTs.isBlank();
         if (thread) {
             // Status line cue, set before the LLM runs so it shows during "thinking".
             slacker.setStatus(channelId, threadTs, STATUS_TYPING);
             statusSet = true;
-            if (recipientUserId != null && !recipientUserId.isBlank()) {
-                streamTs = slacker.startStream(channelId, threadTs, recipientUserId);
-                nativeMode = streamTs != null;
-            }
+            canStream = recipientUserId != null && !recipientUserId.isBlank();
         }
         lastFlushMs = System.currentTimeMillis();
     }
 
-    /** Per-token-batch hook: coalesce + throttled appendStream of the markdown delta. */
+    /** Per-token-batch hook: lazily start the stream with the first content (so the
+     *  message is never empty), then coalesce + throttled appendStream of deltas. */
     public void update(String token) {
-        if (token == null || token.isEmpty() || !nativeMode) return;
+        if (token == null || token.isEmpty()) return;
         pending.append(token);
+        if (!canStream) return;
+        if (streamTs == null) {
+            if (startAttempted) return; // start failed earlier → fall back at seal
+            startAttempted = true;
+            streamTs = slacker.startStream(channelId, threadTs, recipientUserId, pending.toString());
+            nativeMode = streamTs != null;
+            if (nativeMode) pending.setLength(0);
+            lastFlushMs = System.currentTimeMillis();
+            return;
+        }
         long now = System.currentTimeMillis();
         if (now - lastFlushMs >= throttleMs) {
             flush();

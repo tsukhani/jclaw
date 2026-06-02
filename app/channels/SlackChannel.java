@@ -142,12 +142,14 @@ public class SlackChannel implements Channel {
      * natively, so no mrkdwn conversion is applied on the streaming path. Requires
      * the app to be a Slack AI Assistant (Agents & AI Apps) with {@code assistant:write}.
      */
-    public static String startStream(String channelId, String threadTs, String recipientUserId) {
+    public static String startStream(String channelId, String threadTs, String recipientUserId,
+                                     String initialMarkdown) {
         var config = SlackConfig.load();
         if (config == null) return null;
         try {
             var resp = slack.methods(config.botToken()).chatStartStream(r -> r
-                    .channel(channelId).threadTs(threadTs).recipientUserId(recipientUserId));
+                    .channel(channelId).threadTs(threadTs).recipientUserId(recipientUserId)
+                    .markdownText(initialMarkdown));
             if (resp.isOk()) return resp.getTs();
             EventLogger.warn(CHANNEL, null, SLACK, "startStream not ok: %s".formatted(resp.getError()));
             return null;
