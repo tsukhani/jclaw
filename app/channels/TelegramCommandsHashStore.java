@@ -99,13 +99,36 @@ public final class TelegramCommandsHashStore {
         }
     }
 
+    /** Per-JVM-run isolated dir used in test mode when no explicit override is
+     *  set, so the suite never reads/writes the real data/ store. */
+    private static Path testHashDir;
+
     /** Directory holding the per-bot command-hash files. */
     private static Path hashDir() {
         String override = System.getProperty(HASH_PATH_PROPERTY);
         if (override != null && !override.isBlank()) {
             return Path.of(override);
         }
+        // JCLAW-387: in test mode (no override) isolate to a fresh per-run temp
+        // dir so autotest never persists into data/telegram-command-hashes — a
+        // hash left by a prior run would otherwise make registerOne skip a
+        // setMyCommands that ApiTelegramBindingsControllerTest asserts. Prod
+        // uses the durable data/ path below.
+        if (Play.runningInTestMode()) {
+            return testHashDir();
+        }
         return Play.applicationPath.toPath().resolve("data/telegram-command-hashes");
+    }
+
+    private static synchronized Path testHashDir() {
+        if (testHashDir == null) {
+            try {
+                testHashDir = Files.createTempDirectory("jclaw-cmdhash-test-");
+            } catch (IOException e) {
+                testHashDir = Play.applicationPath.toPath().resolve("tmp/cmdhash-test");
+            }
+        }
+        return testHashDir;
     }
 
     /** File holding the hash for {@code botId} ({@code <botId>.hash}). */
