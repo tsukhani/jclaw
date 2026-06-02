@@ -349,12 +349,13 @@ public class TelegramChannel implements Channel {
      */
     public static void editMessageText(String botToken, String chatId,
                                        Integer messageId, String text) throws TelegramApiException {
-        forToken(botToken).client.execute(
-                org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText.builder()
-                        .chatId(chatId)
-                        .messageId(messageId)
-                        .text(text)
-                        .build());
+        var builder = org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText.builder()
+                .chatId(chatId)
+                .messageId(messageId)
+                .text(text);
+        var linkPreview = linkPreviewOptions();
+        if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
+        forToken(botToken).client.execute(builder.build());
     }
 
     /**
@@ -1985,6 +1986,8 @@ public class TelegramChannel implements Channel {
         if (reply != null) builder.replyParameters(reply);
         var threadId = sendThreadId(messageThreadId);
         if (threadId != null) builder.messageThreadId(threadId);
+        var linkPreview = linkPreviewOptions();
+        if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         try {
             var msg = channel.client.execute(builder.build());
             return msg.getMessageId();
@@ -2010,6 +2013,8 @@ public class TelegramChannel implements Channel {
                 .text(htmlText)
                 .parseMode("HTML");
         if (keyboard != null) builder.replyMarkup(keyboard);
+        var linkPreview = linkPreviewOptions();
+        if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         try {
             channel.client.execute(builder.build());
             return true;

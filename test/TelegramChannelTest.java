@@ -555,6 +555,102 @@ class TelegramChannelTest extends UnitTest {
     }
 
     @Test
+    void sendMessageWithKeyboard_linkPreviewDisabled_whenConfiguredOff() {
+        // JCLAW-380: telegram.linkPreview=off attaches link_preview_options with
+        // is_disabled=true to the keyboard send body, mirroring the main path.
+        String token = "jclaw380-kbd-lpoff-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.linkPreview", "off");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var keyboard = InlineKeyboardMarkup.builder()
+                    .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
+                            .text("OK").callbackData("ok").build()))
+                    .build();
+            assertNotNull(TelegramChannel.sendMessageWithKeyboard(token, "12345",
+                    "<b>see https://x.test</b>", keyboard));
+            String body = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .findFirst().orElse("");
+            assertTrue(body.contains("link_preview_options"),
+                    "off must attach link_preview_options to the keyboard send");
+            assertTrue(body.contains("is_disabled"),
+                    "the options must carry is_disabled=true");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessageWithKeyboard_linkPreviewAbsent_byDefault() {
+        // JCLAW-380: with the flag unset, the keyboard send omits
+        // link_preview_options — Telegram's default preview-on behavior holds.
+        String token = "jclaw380-kbd-lpdefault-" + System.nanoTime();
+        try {
+            play.Play.configuration.remove("telegram.linkPreview");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var keyboard = InlineKeyboardMarkup.builder()
+                    .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
+                            .text("OK").callbackData("ok").build()))
+                    .build();
+            assertNotNull(TelegramChannel.sendMessageWithKeyboard(token, "12345",
+                    "<b>see https://x.test</b>", keyboard));
+            String body = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .findFirst().orElse("");
+            assertFalse(body.contains("link_preview_options"),
+                    "default (unset) must omit link_preview_options on the keyboard send");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void editMessageText_linkPreviewDisabled_whenConfiguredOff() {
+        // JCLAW-380: telegram.linkPreview=off attaches link_preview_options with
+        // is_disabled=true to the edit body, mirroring the main path.
+        String token = "jclaw380-edit-lpoff-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.linkPreview", "off");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.editMessageText(token, "12345", 7,
+                    "<b>see https://x.test</b>", null));
+            String body = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("editMessageText"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .findFirst().orElse("");
+            assertTrue(body.contains("link_preview_options"),
+                    "off must attach link_preview_options to the edit");
+            assertTrue(body.contains("is_disabled"),
+                    "the options must carry is_disabled=true");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void editMessageText_linkPreviewAbsent_byDefault() {
+        // JCLAW-380: with the flag unset, the edit omits link_preview_options —
+        // Telegram's default preview-on behavior is preserved.
+        String token = "jclaw380-edit-lpdefault-" + System.nanoTime();
+        try {
+            play.Play.configuration.remove("telegram.linkPreview");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.editMessageText(token, "12345", 7,
+                    "<b>see https://x.test</b>", null));
+            String body = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("editMessageText"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .findFirst().orElse("");
+            assertFalse(body.contains("link_preview_options"),
+                    "default (unset) must omit link_preview_options on the edit");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
     void answerCallbackQuery_successWithText() {
         String token = "ans-ok-" + System.nanoTime();
         try {
