@@ -9,6 +9,7 @@ import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.UnpinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.reactions.SetMessageReaction;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendAudio;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -421,6 +422,25 @@ public class TelegramChannel implements Channel {
         } catch (TelegramApiException e) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "unpinChatMessage failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * JCLAW-374: delete {@code messageId} from {@code chatId}. Returns false
+     * (logged) on any API failure — never throws.
+     */
+    public static boolean deleteMessage(String botToken, String chatId, Integer messageId) {
+        if (botToken == null || chatId == null || messageId == null) return false;
+        try {
+            forToken(botToken).client.execute(DeleteMessage.builder()
+                    .chatId(chatId)
+                    .messageId(messageId)
+                    .build());
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "deleteMessage failed: %s".formatted(e.getMessage()));
             return false;
         }
     }
