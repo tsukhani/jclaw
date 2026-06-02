@@ -15,10 +15,13 @@
 certs/*
 !certs/.env.example
 
-# Defense-in-depth: catch a project-root .env if anything accidentally
-# creates one (legacy convention, copy-paste from older docs, etc.).
-# The canonical PLAY_SECRET store is certs/.env above.
+# Environment files (don't commit secrets!)
+# All environment overrides live in conf/application.conf with %prod. / %test.
+# prefixes — there are no per-environment conf files. Only secrets are
+# gitignored, via .env (loaded by jclaw.sh into the JVM environment).
 .env
+.env.local
+.env.*.local
 
 # Play Framework runtime files
 tmp/
@@ -47,13 +50,6 @@ javadoc/
 
 # Autoresearch state
 .autoresearch/
-
-# Eclipse/IDE project files
-.classpath
-.project
-.settings/
-.cache-main
-.cache-tests
 
 # IntelliJ IDEA
 .idea/
@@ -98,14 +94,6 @@ frontend/.output/
 frontend/dist/
 frontend/.cache/
 public/spa/
-
-# Environment files (don't commit secrets!)
-# All environment overrides live in conf/application.conf with %prod. / %test.
-# prefixes — there are no per-environment conf files. Only secrets are
-# gitignored, via .env (loaded by jclaw.sh into the JVM environment).
-.env
-.env.local
-.env.*.local
 
 # SSL certificates/keys (defense-in-depth wildcards — the certs/ directory
 # itself is handled above with a !certs/.gitkeep negation). `.cert` is
