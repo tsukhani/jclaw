@@ -30,6 +30,11 @@ public class ApiTelegramBindingsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // Sonar java:S2119 — a single shared SecureRandom for webhook-secret
+    // generation. SecureRandom is thread-safe and meant to be reused; a fresh
+    // instance per call needlessly re-seeds.
+    private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
+
     // JSON body keys reused across create/update parsers.
     private static final String KEY_BOT_TOKEN = "botToken";
     private static final String KEY_AGENT_ID = "agentId";
@@ -283,7 +288,7 @@ public class ApiTelegramBindingsController extends Controller {
         if (b.transport == ChannelTransport.WEBHOOK
                 && (b.webhookSecret == null || b.webhookSecret.isBlank())) {
             var bytes = new byte[32];
-            new java.security.SecureRandom().nextBytes(bytes);
+            SECURE_RANDOM.nextBytes(bytes);
             b.webhookSecret = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         }
     }
@@ -331,6 +336,10 @@ public class ApiTelegramBindingsController extends Controller {
      * render the failure detail rather than a bare error page.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TelegramWebhookRegistrar.ProbeResult.class)))
+    // Sonar java:S2259 false positive: Play's notFound() never returns (throws
+    // play.mvc.results.NotFound), so binding is non-null below. Matches the
+    // identical suppression on delete().
+    @SuppressWarnings("java:S2259")
     public static void test(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();
