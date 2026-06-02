@@ -40,6 +40,16 @@ public class WebhookTelegramController extends Controller {
     private record BindingCtx(Long bindingId, String botToken, String telegramUserId,
                               Agent agent, String webhookSecret, boolean enabled) {}
 
+    // M1 webhook ingress hardening config keys (read via Play.configuration so
+    // the documented defaults below hold until an operator overrides them).
+    private static final String CFG_RATE_LIMIT_MAX = "telegram.webhook.rate-limit.max";
+    private static final String CFG_RATE_LIMIT_WINDOW_SECONDS = "telegram.webhook.rate-limit.window-seconds";
+    private static final String CFG_MAX_BODY_BYTES = "telegram.webhook.max-body-bytes";
+    private static final String CFG_TRUSTED_PROXY = "telegram.webhook.trusted-proxy";
+    private static final int DEFAULT_RATE_LIMIT_MAX = 60;
+    private static final long DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60;
+    private static final long DEFAULT_MAX_BODY_BYTES = 1_048_576L;
+
     @SuppressWarnings("java:S2259")
     public static void webhook(Long bindingId, String secret) {
         BindingCtx ctx = loadBindingCtx(bindingId);
@@ -54,19 +64,130 @@ public class WebhookTelegramController extends Controller {
             ok();
         }
 
+        // M1: pre-auth rate limit. Runs AFTER the binding is loaded (so we have
+        // a bindingId to key on) but BEFORE verifySecret, so a wrong-secret
+        // flood against one binding is rejected cheaply with HTTP 429 instead of
+        // paying the constant-time secret compares on every request. The real
+        // client IP is resolved for accurate logging (it does not gate).
+        String clientIp = resolveClientIp();
+        if (!TelegramWebhookRateLimiter.allow(bindingId, rateLimitMax(), rateLimitWindowSeconds())) {
+            EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
+                    "Rate-limited webhook for binding %d from %s".formatted(bindingId, clientIp));
+            error(429, "Too Many Requests");
+        }
+
+        // M1: body-size limit. Check Content-Length first so an oversized POST
+        // is rejected before the body is read at all; the read-length backstop
+        // below guards a missing / lying Content-Length header.
+        long maxBodyBytes = maxBodyBytes();
+        if (contentLengthExceeds(maxBodyBytes)) {
+            EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
+                    "Oversized webhook body (Content-Length) for binding %d from %s".formatted(bindingId, clientIp));
+            error(413, "Payload Too Large");
+        }
+
         if (!verifySecret(ctx, secret, bindingId)) {
             unauthorized("Invalid signature");
         }
 
         try {
-            var update = JsonParser.parseString(WebhookUtil.readRawBody()).getAsJsonObject();
+            var rawBody = WebhookUtil.readRawBody();
+            // Backstop the Content-Length check against the actual read length
+            // (a chunked / unset Content-Length request bypasses the early guard).
+            if (rawBody.getBytes(StandardCharsets.UTF_8).length > maxBodyBytes) {
+                EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
+                        "Oversized webhook body (read length) for binding %d from %s".formatted(bindingId, clientIp));
+                error(413, "Payload Too Large");
+            }
+            var update = JsonParser.parseString(rawBody).getAsJsonObject();
             dispatchUpdate(ctx, update, bindingId);
+        } catch (play.mvc.results.Result r) {
+            // 413 from the read-length backstop above: rethrow so Play renders
+            // it; do not swallow it as a generic parse error.
+            throw r;
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Webhook parse error for binding %d: %s".formatted(bindingId, e.getMessage()));
         }
 
         ok();
+    }
+
+    /**
+     * M1: read the rate-limit ceiling ({@code telegram.webhook.rate-limit.max},
+     * default 60). Unparseable / unset values fall back to the default.
+     */
+    private static int rateLimitMax() {
+        return readInt(CFG_RATE_LIMIT_MAX, DEFAULT_RATE_LIMIT_MAX);
+    }
+
+    /** M1: rate-limit window in seconds ({@code telegram.webhook.rate-limit.window-seconds}, default 60). */
+    private static long rateLimitWindowSeconds() {
+        return readInt(CFG_RATE_LIMIT_WINDOW_SECONDS, (int) DEFAULT_RATE_LIMIT_WINDOW_SECONDS);
+    }
+
+    /** M1: maximum accepted body size in bytes ({@code telegram.webhook.max-body-bytes}, default 1 MiB). */
+    private static long maxBodyBytes() {
+        return readLong(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
+    }
+
+    /**
+     * M1: true when the request's {@code Content-Length} header is present and
+     * exceeds {@code maxBodyBytes}. A missing / unparseable header returns false
+     * here; the read-length backstop in {@link #webhook} catches those.
+     */
+    private static boolean contentLengthExceeds(long maxBodyBytes) {
+        var header = Http.Request.current().headers.get("content-length");
+        if (header == null || header.value() == null) return false;
+        try {
+            return Long.parseLong(header.value().trim()) > maxBodyBytes;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    /**
+     * M1: resolve the real client IP for logging. When
+     * {@code telegram.webhook.trusted-proxy=false} (default) the socket peer
+     * ({@code remoteAddress}) is authoritative. When {@code true} — JClaw sits
+     * behind a trusted reverse proxy — prefer the left-most entry of
+     * {@code X-Forwarded-For}, falling back to {@code remoteAddress}. This is a
+     * best-effort logging aid; it never gates the request.
+     */
+    private static String resolveClientIp() {
+        var req = Http.Request.current();
+        if (trustedProxy()) {
+            var xff = req.headers.get("x-forwarded-for");
+            if (xff != null && xff.value() != null && !xff.value().isBlank()) {
+                return xff.value().split(",")[0].trim();
+            }
+        }
+        return req.remoteAddress;
+    }
+
+    private static boolean trustedProxy() {
+        var raw = play.Play.configuration.getProperty(CFG_TRUSTED_PROXY, "false");
+        return raw != null && raw.trim().equalsIgnoreCase("true");
+    }
+
+    private static int readInt(String key, int fallback) {
+        var raw = play.Play.configuration.getProperty(key);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static long readLong(String key, long fallback) {
+        var raw = play.Play.configuration.getProperty(key);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            return Long.parseLong(raw.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     private static BindingCtx loadBindingCtx(Long bindingId) {
@@ -185,8 +306,21 @@ public class WebhookTelegramController extends Controller {
         // so N photos sharing a media_group_id dispatch as ONE turn, not N.
         // Plain-text and single-attachment messages skip the buffer (null
         // media_group_id → immediate dispatch).
-        channels.TelegramMediaGroupBuffer.add(message, merged ->
-                Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(ctx, merged)));
+        //
+        // M2 inbound reassembly: an eligible plain-text message (no
+        // attachments, no media_group_id) routes through the inbound-text
+        // buffer so a long paste auto-split by the client into consecutive
+        // pieces coalesces into ONE turn. Sub-threshold pieces dispatch
+        // immediately there, so normal messages keep today's zero-latency path.
+        // Everything else (attachments / media groups) stays on the existing
+        // media-group buffer unchanged.
+        if (channels.TelegramInboundTextBuffer.isEligible(message)) {
+            channels.TelegramInboundTextBuffer.add(message, merged ->
+                    Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(ctx, merged)));
+        } else {
+            channels.TelegramMediaGroupBuffer.add(message, merged ->
+                    Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(ctx, merged)));
+        }
     }
 
     private static void processMessage(BindingCtx ctx, TelegramChannel.InboundMessage message) {

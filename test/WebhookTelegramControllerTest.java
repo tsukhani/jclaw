@@ -1,6 +1,7 @@
 import channels.ChannelTransport;
 import channels.TelegramBotIdentityTestHooks;
 import channels.TelegramChannel;
+import channels.TelegramWebhookRateLimiter;
 import controllers.WebhookTelegramController;
 import models.Agent;
 import models.TelegramBinding;
@@ -41,6 +42,11 @@ class WebhookTelegramControllerTest extends FunctionalTest {
     void setup() throws Exception {
         Fixtures.deleteDatabase();
         EventLogger.clear();
+        // M1: clear the static per-binding rate-limit counters so a flood test
+        // doesn't bleed into unrelated cases (and vice-versa). The default
+        // ceiling (60/60s) is permissive enough that other single-request
+        // cases never trip the limiter regardless.
+        TelegramWebhookRateLimiter.resetForTest();
         // JCLAW-371: the dispatch path now resolves the bot identity via getMe.
         // Redirect that call to an embedded mock so no test hits api.telegram.org;
         // the rejection-branch tests below never spawn the downstream agent path,
@@ -229,6 +235,50 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         // bindingId returns 404 (the missing-row check runs first).
         var response = postWithSecretHeader(99999999L, SECRET, SECRET, "{}");
         assertEquals(404, response.status.intValue());
+    }
+
+    // ===== M1 webhook ingress hardening =====
+
+    @Test
+    void floodIsRateLimitedWith429BeforeSecretCheck() {
+        // M1: with a small rate-limit ceiling, a flood for one binding starts
+        // returning 429 once the window count is exceeded. The requests carry a
+        // WRONG header secret on purpose — a 429 (not 401) proves the rate-limit
+        // runs BEFORE verifySecret.
+        play.Play.configuration.setProperty("telegram.webhook.rate-limit.max", "3");
+        play.Play.configuration.setProperty("telegram.webhook.rate-limit.window-seconds", "60");
+        try {
+            var bindingId = seedBinding(true);
+            // First `max` (3) requests: wrong secret → 401 (rate limit not yet hit).
+            for (int i = 0; i < 3; i++) {
+                var r = postWithSecretHeader(bindingId, SECRET, "wrong-header", "{}");
+                assertEquals(401, r.status.intValue(),
+                        "request " + (i + 1) + " is under the limit, so the wrong secret yields 401");
+            }
+            // The 4th exceeds the window → 429, even though the secret is still wrong.
+            var flooded = postWithSecretHeader(bindingId, SECRET, "wrong-header", "{}");
+            assertEquals(429, flooded.status.intValue(),
+                    "exceeding the rate-limit window returns 429 before the secret check");
+        } finally {
+            play.Play.configuration.remove("telegram.webhook.rate-limit.max");
+            play.Play.configuration.remove("telegram.webhook.rate-limit.window-seconds");
+        }
+    }
+
+    @Test
+    void oversizedBodyReturns413() {
+        // M1: a body larger than the configured max-body-bytes is rejected with
+        // 413 before parsing. Valid secrets are supplied so the only thing that
+        // can stop the request is the size guard.
+        play.Play.configuration.setProperty("telegram.webhook.max-body-bytes", "8");
+        try {
+            var bindingId = seedBinding(true);
+            var oversized = "{\"update_id\":1234567890}"; // > 8 bytes
+            var response = postWithSecretHeader(bindingId, SECRET, SECRET, oversized);
+            assertEquals(413, response.status.intValue());
+        } finally {
+            play.Play.configuration.remove("telegram.webhook.max-body-bytes");
+        }
     }
 
     // ===== Callback query (inline keyboard) — peer mismatch only =====

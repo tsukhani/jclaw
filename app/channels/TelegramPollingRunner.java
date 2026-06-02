@@ -646,8 +646,20 @@ public final class TelegramPollingRunner {
         // download + dispatch so multi-photo albums collapse into one
         // turn. Plain-text and single-attachment messages skip the
         // buffer (null media_group_id → immediate dispatch).
-        TelegramMediaGroupBuffer.add(msg, merged -> dispatchMerged(
-                sendToken, sendAgent, ownerKey, merged));
+        //
+        // M2 inbound reassembly: an eligible plain-text message (no
+        // attachments, no media_group_id) routes through the inbound-text
+        // buffer so a long paste auto-split by the client into consecutive
+        // pieces coalesces into ONE turn. Sub-threshold pieces dispatch
+        // immediately there, so normal messages keep today's zero-latency
+        // path. Everything else stays on the media-group buffer unchanged.
+        if (TelegramInboundTextBuffer.isEligible(msg)) {
+            TelegramInboundTextBuffer.add(msg, merged -> dispatchMerged(
+                    sendToken, sendAgent, ownerKey, merged));
+        } else {
+            TelegramMediaGroupBuffer.add(msg, merged -> dispatchMerged(
+                    sendToken, sendAgent, ownerKey, merged));
+        }
     }
 
     /**
