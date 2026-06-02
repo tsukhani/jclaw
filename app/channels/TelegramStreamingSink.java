@@ -109,6 +109,20 @@ public final class TelegramStreamingSink {
     private static final Pattern IMAGE_MD = Pattern.compile("!\\[[^\\]]*\\]\\([^)]*\\)");
 
     /**
+     * JCLAW-375: ack-reaction lifecycle config + emoji. Opt-in via
+     * {@code telegram.ackReaction} ({@code off} default | {@code on}). When on,
+     * the sink places {@link #ACK_WORKING} on the triggering message at turn
+     * start, swaps to {@link #ACK_SUCCESS} on seal, or {@link #ACK_ERROR} on
+     * error. The reacted-to message is the sink's {@code replyToMessageId} (the
+     * inbound message id); no-op when that is null or the feature is off.
+     */
+    private static final String CFG_ACK_REACTION = "telegram.ackReaction";
+    private static final String ACK_ON = "on";
+    private static final String ACK_WORKING = "👀";
+    private static final String ACK_SUCCESS = "✅";
+    private static final String ACK_ERROR = "❌";
+
+    /**
      * Single-thread scheduler used ONLY to dispatch throttled flush tasks.
      * The scheduler thread itself never performs network I/O — it spawns a
      * fresh virtual thread for each flush. Keeping one scheduler thread
@@ -261,6 +275,12 @@ public final class TelegramStreamingSink {
         EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
                 "Streaming start (chat.type=%s)"
                         .formatted(chatType != null ? chatType : "unknown"));
+        // JCLAW-375: opt-in ack lifecycle. On turn start, place a "working"
+        // reaction (👀) on the triggering message so the user sees the bot
+        // picked up their message before the first token lands. seal swaps it
+        // to ✅, errorFallback to ❌. No-op when the feature is off or there is
+        // no message to react to (a fresh sink per turn means this fires once).
+        ackTurnStart();
     }
 
     /**
@@ -379,6 +399,7 @@ public final class TelegramStreamingSink {
                 notifyDeliveryFailure();
             }
             clearStreamCheckpoint();
+            ackSuccess();
             return;
         }
 
@@ -396,6 +417,7 @@ public final class TelegramStreamingSink {
                 notifyDeliveryFailure();
             }
             clearStreamCheckpoint();
+            ackSuccess();
             return;
         }
         try {
@@ -415,6 +437,7 @@ public final class TelegramStreamingSink {
             }
         }
         clearStreamCheckpoint();
+        ackSuccess();
     }
 
     /** Telegram's "message is not modified" error — a benign no-op, not a
@@ -482,6 +505,7 @@ public final class TelegramStreamingSink {
                 "Sorry, an error occurred processing your message.", agent,
                 replyToMessageId, messageThreadId);
         clearStreamCheckpoint();
+        ackError();
         EventLogger.error(LOG_CATEGORY, agentName(), LOG_SOURCE,
                 "Streaming error: " + (e != null ? e.getMessage() : "(null)"));
     }
@@ -571,6 +595,33 @@ public final class TelegramStreamingSink {
             stateLock.unlock();
         }
     }
+
+    // ── JCLAW-375: ack-reaction lifecycle ──────────────────────────────
+
+    /** True when the operator opted into the ack-reaction lifecycle. */
+    static boolean ackReactionEnabled() {
+        var raw = play.Play.configuration.getProperty(CFG_ACK_REACTION, "off");
+        return raw != null && raw.trim().equalsIgnoreCase(ACK_ON);
+    }
+
+    /**
+     * Place {@code emoji} on the triggering message when the ack lifecycle is
+     * enabled and a reply target exists. Routes through the merged
+     * {@link TelegramChannel#setMessageReaction}, which already swallows API
+     * failures (returns false, logs) — so a missing {@code can_set_message_reaction}
+     * permission never throws into the streaming path. No-op when the feature is
+     * off or {@link #replyToMessageId} is null.
+     */
+    private void ackReaction(String emoji) {
+        if (!ackReactionEnabled() || replyToMessageId == null) return;
+        TelegramChannel.setMessageReaction(botToken, chatId, replyToMessageId, emoji);
+    }
+
+    private void ackTurnStart() { ackReaction(ACK_WORKING); }
+
+    private void ackSuccess() { ackReaction(ACK_SUCCESS); }
+
+    private void ackError() { ackReaction(ACK_ERROR); }
 
     private void scheduleFlushLocked() {
         if (scheduledFlush != null && !scheduledFlush.isDone()) return;

@@ -41,6 +41,19 @@ public final class TelegramPollingRunner {
     private static final String LOG_CATEGORY = "channel";
     private static final String LOG_SOURCE = "telegram";
 
+    /**
+     * JCLAW-375: the {@code allowed_updates} list requested on every
+     * {@code getUpdates} poll (see {@link #seedingGetUpdatesGenerator}). Telegram
+     * EXCLUDES {@code message_reaction} from its default set, so reactions are
+     * only delivered when the type is named explicitly. We enumerate exactly the
+     * update types JClaw dispatches — {@code message} and {@code callback_query}
+     * (the only two {@link #dispatch} acts on) plus {@code edited_message} for
+     * parity with the historical empty-list behavior — and add
+     * {@code message_reaction} so the inbound reaction-notification path fires.
+     */
+    static final java.util.List<String> ALLOWED_UPDATES = java.util.List.of(
+            "message", "edited_message", "callback_query", "message_reaction");
+
     private static final AtomicReference<TelegramBotsLongPollingApplication> APP = new AtomicReference<>();
 
     /** bindingId → active bot token. Used to detect token rotation on reconcile. */
@@ -303,9 +316,8 @@ public final class TelegramPollingRunner {
     /**
      * {@code getUpdates} generator that seeds the start offset from
      * {@code persistedOffset} (JCLAW-361). Mirrors the SDK's
-     * {@code DefaultGetUpdatesGenerator} (limit 100, timeout 50, empty
-     * allowedUpdates) but clamps the requested offset to
-     * {@code max(sdkLastReceived, persistedOffset) + 1}.
+     * {@code DefaultGetUpdatesGenerator} (limit 100, timeout 50) but clamps the
+     * requested offset to {@code max(sdkLastReceived, persistedOffset) + 1}.
      *
      * <p>The clamp is what makes seeding race-free and monotonic: the SDK passes
      * its in-memory {@code lastReceivedUpdate} (0 on a fresh session) on every
@@ -314,13 +326,20 @@ public final class TelegramPollingRunner {
      * session has advanced past {@code persistedOffset}, {@code max} picks the
      * SDK's own (now higher) value, so the persisted seed never rewinds a
      * running session.
+     *
+     * <p>JCLAW-375: {@code allowed_updates} is no longer empty. Telegram's
+     * default (empty list) excludes {@code message_reaction}, so the inbound
+     * reaction-notification handler in {@link #dispatch} would never fire.
+     * Passing {@link #ALLOWED_UPDATES} (the default set PLUS
+     * {@code message_reaction}) opts the poller into reaction deliveries while
+     * keeping every update type Telegram sends by default.
      */
     private static java.util.function.Function<Integer, GetUpdates> seedingGetUpdatesGenerator(int persistedOffset) {
         return sdkLastReceived -> GetUpdates.builder()
                 .limit(100)
                 .timeout(50)
                 .offset(Math.max(sdkLastReceived, persistedOffset) + 1)
-                .allowedUpdates(new ArrayList<>())
+                .allowedUpdates(new ArrayList<>(ALLOWED_UPDATES))
                 .build();
     }
 
@@ -534,12 +553,17 @@ public final class TelegramPollingRunner {
             // addressing THIS bot — the group access gate in handleMessage
             // reads InboundMessage.botMentioned. We only need it for the
             // message path; callbacks stay owner-only and don't consult it.
+            // JCLAW-375: an inbound message_reaction is neither a callback nor a
+            // parseable message — surface it as a gated system event before the
+            // non-message short-circuit below would drop it.
+            ReactionDelta reaction = callback == null ? parseReaction(update) : null;
+
             TelegramChannel.InboundMessage msg = null;
-            if (callback == null) {
+            if (callback == null && reaction == null) {
                 var identity = TelegramBotIdentity.resolve(ACTIVE.get(bindingId));
                 msg = TelegramChannel.parseUpdate(update, identity.username(), identity.userId());
             }
-            if (callback == null && msg == null) return;
+            if (callback == null && reaction == null && msg == null) return;
 
             Ctx ctx = loadCtx(bindingId);
             if (ctx == null || !ctx.enabled() || ctx.agent() == null) {
@@ -550,6 +574,11 @@ public final class TelegramPollingRunner {
 
             if (callback != null) {
                 handleCallback(bindingId, ctx, callback);
+                return;
+            }
+
+            if (reaction != null) {
+                handleReaction(ctx.agent(), ctx.botToken(), ctx.telegramUserId(), reaction);
                 return;
             }
 
@@ -662,6 +691,183 @@ public final class TelegramPollingRunner {
                         LOG_SOURCE, "Polling dispatch error: %s".formatted(e.getMessage()));
             }
         });
+    }
+
+    // ===== JCLAW-375: inbound reaction notifications =====
+
+    private static final String CFG_REACTIONS_NOTIFY = "telegram.reactions.notify";
+    /** Notify policy values for {@link #CFG_REACTIONS_NOTIFY}. */
+    public static final String NOTIFY_OFF = "off";
+    public static final String NOTIFY_OWN = "own";
+    public static final String NOTIFY_ALL = "all";
+    private static final String CHAT_TYPE_PRIVATE = "private";
+
+    /**
+     * JCLAW-375: a normalized inbound reaction delta extracted from a
+     * {@code message_reaction} {@link Update}. Shared by the polling runner and
+     * {@link controllers.WebhookTelegramController} so both surface reactions
+     * identically.
+     *
+     * @param chatId    the chat the reacted message lives in
+     * @param chatType  Telegram {@code chat.type} string (nullable → treated as group)
+     * @param messageId the reacted message's id
+     * @param reactorId the reacting user's id, or null (anonymous/channel actor)
+     * @param reactor   the reacting user's display label for the event text
+     * @param added     newly-added reaction emoji (new minus old); may be empty
+     * @param removed   removed reaction emoji (old minus new); may be empty
+     */
+    public record ReactionDelta(String chatId, String chatType, Integer messageId,
+                                String reactorId, String reactor,
+                                java.util.List<String> added, java.util.List<String> removed) {}
+
+    /**
+     * Resolve the configured reaction-notify policy, normalizing unknown/blank
+     * values to {@link #NOTIFY_OWN}. Public so default-package tests can assert
+     * the config-read contract (matches the {@code *ForTest} convention).
+     */
+    public static String reactionNotifyMode() {
+        var raw = play.Play.configuration.getProperty(CFG_REACTIONS_NOTIFY, NOTIFY_OWN);
+        if (raw == null) return NOTIFY_OWN;
+        var v = raw.trim().toLowerCase();
+        return switch (v) {
+            case NOTIFY_OFF, NOTIFY_OWN, NOTIFY_ALL -> v;
+            default -> NOTIFY_OWN;
+        };
+    }
+
+    /**
+     * Parse a {@code message_reaction} {@link Update} into a {@link ReactionDelta},
+     * or null when the update carries no reaction (every other update type) or no
+     * usable message id. Computes the added/removed emoji sets from the
+     * old/new reaction lists; only emoji reactions
+     * ({@code ReactionTypeEmoji}) contribute (custom/paid reactions have no emoji
+     * string to render). Never throws.
+     */
+    public static ReactionDelta parseReaction(Update update) {
+        if (update == null) return null;
+        var mr = update.getMessageReaction();
+        if (mr == null || mr.getMessageId() == null || mr.getChat() == null) return null;
+
+        var oldEmoji = emojiSet(mr.getOldReaction());
+        var newEmoji = emojiSet(mr.getNewReaction());
+        var added = new ArrayList<String>(newEmoji);
+        added.removeAll(oldEmoji);
+        var removed = new ArrayList<String>(oldEmoji);
+        removed.removeAll(newEmoji);
+        if (added.isEmpty() && removed.isEmpty()) return null; // no net change to report
+
+        var chat = mr.getChat();
+        String chatId = chat.getId() != null ? String.valueOf(chat.getId()) : null;
+        String reactorId = null;
+        String reactor = null;
+        if (mr.getUser() != null) {
+            reactorId = mr.getUser().getId() != null ? String.valueOf(mr.getUser().getId()) : null;
+            reactor = displayLabel(mr.getUser());
+        }
+        return new ReactionDelta(chatId, chat.getType(), mr.getMessageId(),
+                reactorId, reactor, added, removed);
+    }
+
+    private static java.util.LinkedHashSet<String> emojiSet(
+            java.util.List<org.telegram.telegrambots.meta.api.objects.reactions.ReactionType> reactions) {
+        var out = new java.util.LinkedHashSet<String>();
+        if (reactions == null) return out;
+        for (var r : reactions) {
+            if (r instanceof org.telegram.telegrambots.meta.api.objects.reactions.ReactionTypeEmoji emoji
+                    && emoji.getEmoji() != null && !emoji.getEmoji().isBlank()) {
+                out.add(emoji.getEmoji());
+            }
+        }
+        return out;
+    }
+
+    private static String displayLabel(org.telegram.telegrambots.meta.api.objects.User u) {
+        if (u.getUserName() != null && !u.getUserName().isBlank()) return "@" + u.getUserName();
+        if (u.getFirstName() != null && !u.getFirstName().isBlank()) return u.getFirstName();
+        return u.getId() != null ? String.valueOf(u.getId()) : "someone";
+    }
+
+    /**
+     * JCLAW-375: gate an inbound reaction delta against the notify policy and,
+     * when allowed, hand it to the bound agent as a synthetic system message.
+     *
+     * <p>Policy ({@link #reactionNotifyMode}):
+     * <ul>
+     *   <li>{@code off} — never notify.</li>
+     *   <li>{@code own} (default) — only reactions on messages the bot sent. We
+     *       can't read the reacted message's author off the update, so we use the
+     *       one signal that IS present and correct in the dominant case: a private
+     *       (DM) chat, where the only non-owner messages are the bot's, so an
+     *       owner reaction is necessarily on a bot-sent message. Group reactions
+     *       are suppressed under {@code own} (author unattributable from the
+     *       update).</li>
+     *   <li>{@code all} — every reaction delta, any chat type.</li>
+     * </ul>
+     *
+     * <p>Shared by the polling runner and {@link controllers.WebhookTelegramController}.
+     * The event is delivered through {@link AgentRunner#processInboundForAgent}
+     * (non-streaming — a reaction notification is a low-volume system event), and
+     * any agent reply is sent back via {@link TelegramChannel#sendMessage}. Runs
+     * the agent on a virtual thread so the caller's dispatch loop isn't blocked.
+     */
+    public static void handleReaction(Agent agent, String botToken, String ownerTelegramUserId,
+                                      ReactionDelta reaction) {
+        if (agent == null || reaction == null || reaction.chatId() == null) return;
+        String mode = reactionNotifyMode();
+        if (!shouldNotifyReaction(mode, reaction.chatType())) return;
+
+        final String eventText = reactionEventText(reaction);
+        final String peerId = AgentRunner.telegramConversationPeerId(
+                ownerTelegramUserId, reaction.chatType(), reaction.chatId(), null);
+        EventLogger.info(LOG_CATEGORY, agent.name, LOG_SOURCE,
+                "Reaction notification (mode=%s): %s".formatted(mode, eventText));
+        Thread.ofVirtual().name("telegram-reaction").start(() -> {
+            try {
+                AgentRunner.processInboundForAgent(agent, LOG_SOURCE, peerId, eventText,
+                        (pid, response) -> TelegramChannel.sendMessage(
+                                botToken, reaction.chatId(), response, agent));
+            } catch (Exception e) {
+                EventLogger.error(LOG_CATEGORY, agent.name, LOG_SOURCE,
+                        "Reaction dispatch error: %s".formatted(e.getMessage()));
+            }
+        });
+    }
+
+    /**
+     * The pure gate decision for an inbound reaction, split out so it's testable
+     * without standing up the agent dispatch path. {@code off} → never;
+     * {@code all} → always; {@code own} → only a private (DM) chat, where the
+     * only non-owner messages are the bot's so an owner reaction is necessarily
+     * on a bot-sent message (a group reaction's target author is unattributable
+     * from the update, so {@code own} suppresses it).
+     */
+    public static boolean shouldNotifyReaction(String mode, String chatType) {
+        if (NOTIFY_OFF.equals(mode)) return false;
+        if (NOTIFY_ALL.equals(mode)) return true;
+        // NOTIFY_OWN (and any normalized-to-own default)
+        return CHAT_TYPE_PRIVATE.equals(chatType);
+    }
+
+    /**
+     * Render a {@link ReactionDelta} into the system-event text the agent sees.
+     * Public for default-package tests. Examples:
+     * {@code "[system] @ada reacted 👍 to message 42."} /
+     * {@code "[system] @ada removed reaction 👍 from message 42."}
+     */
+    public static String reactionEventText(ReactionDelta r) {
+        var who = r.reactor() != null ? r.reactor() : "Someone";
+        var sb = new StringBuilder("[system] ").append(who).append(' ');
+        if (!r.added().isEmpty()) {
+            sb.append("reacted ").append(String.join(" ", r.added()))
+              .append(" to message ").append(r.messageId());
+            if (!r.removed().isEmpty()) {
+                sb.append(" (and removed ").append(String.join(" ", r.removed())).append(')');
+            }
+        } else {
+            sb.append("removed reaction ").append(String.join(" ", r.removed()))
+              .append(" from message ").append(r.messageId());
+        }
+        return sb.append('.').toString();
     }
 
 }

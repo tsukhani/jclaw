@@ -240,6 +240,50 @@ class WebhookTelegramControllerTest extends FunctionalTest {
     // happy path is covered end-to-end by TelegramChannelTest with a
     // MockTelegramServer harness.
 
+    // ===== JCLAW-375: inbound message_reaction handling =====
+
+    @Test
+    void reactionUpdateWithNotifyOffReturns200WithoutDispatch() {
+        // JCLAW-375: the handler is wired into the webhook dispatch path. With
+        // notify=off the reaction is parsed but gated out — no agent spawn, no
+        // network. Controller still returns 200 so Telegram stops retrying.
+        play.Play.configuration.setProperty("telegram.reactions.notify", "off");
+        try {
+            var bindingId = seedBinding(true);
+            var body = reactionBody("private", 100, 42, BOUND_USER_ID, "👍"); // 👍
+            var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+            assertEquals(200, response.status.intValue());
+        } finally {
+            play.Play.configuration.remove("telegram.reactions.notify");
+        }
+    }
+
+    @Test
+    void reactionUpdateInGroupSuppressedUnderDefaultOwnPolicy() {
+        // Default policy is 'own', which suppresses group reactions (the reacted
+        // message's author is unattributable from the update). Parsed, gated out,
+        // 200, no agent dispatch.
+        play.Play.configuration.remove("telegram.reactions.notify"); // → default 'own'
+        var bindingId = seedBinding(true);
+        var body = reactionBody("supergroup", -100, 42, BOUND_USER_ID, "👍");
+        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        assertEquals(200, response.status.intValue());
+    }
+
+    private static String reactionBody(String chatType, long chatId, int messageId,
+                                       String reactorId, String emoji) {
+        return "{"
+                + "\"update_id\":1,"
+                + "\"message_reaction\":{"
+                + "  \"chat\":{\"id\":" + chatId + ",\"type\":\"" + chatType + "\"},"
+                + "  \"message_id\":" + messageId + ","
+                + "  \"user\":{\"id\":" + reactorId + ",\"is_bot\":false,\"first_name\":\"Owner\"},"
+                + "  \"date\":1700000000,"
+                + "  \"old_reaction\":[],"
+                + "  \"new_reaction\":[{\"type\":\"emoji\",\"emoji\":\"" + emoji + "\"}]"
+                + "}}";
+    }
+
     @Test
     void silentlyDropsCallbackQueryFromOtherUser() {
         // JCLAW-109: callback parsed successfully, signature passes, but

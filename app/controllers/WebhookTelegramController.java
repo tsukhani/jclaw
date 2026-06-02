@@ -124,6 +124,18 @@ public class WebhookTelegramController extends Controller {
             handleCallback(ctx, callback, bindingId);
             return;
         }
+        // JCLAW-375: a message_reaction update is neither a callback nor a
+        // parseable message. Surface it as a gated system event (shared gate +
+        // synthesis with the polling path) before the non-message drop below.
+        // NOTE: Telegram only DELIVERS message_reaction to the webhook when the
+        // registrar (TelegramWebhookRegistrar — outside this story's file set)
+        // names it in allowed_updates; this handler is ready for that follow-up.
+        var reaction = channels.TelegramPollingRunner.parseReaction(sdkUpdate);
+        if (reaction != null) {
+            channels.TelegramPollingRunner.handleReaction(
+                    ctx.agent(), ctx.botToken(), ctx.telegramUserId(), reaction);
+            return;
+        }
         // JCLAW-371: resolve the bot's own identity so parseUpdate can flag an
         // @mention / text_mention / /cmd@botname / reply-to-bot addressing THIS
         // bot — the group access gate in handleInboundMessage reads

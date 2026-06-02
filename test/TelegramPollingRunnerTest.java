@@ -509,6 +509,137 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "registering a binding with the watchdog enabled should start the periodic tick");
     }
 
+    // ===== JCLAW-375: inbound reaction notifications =====
+
+    /** Deserialize a Telegram update JSON into an SDK {@link Update}, as production does. */
+    private static Update updateFromJson(String json) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Update.class);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static String reactionUpdateJson(String chatType, long chatId, int messageId,
+                                             long reactorId, String username, String newEmoji) {
+        return "{"
+                + "\"update_id\":1,"
+                + "\"message_reaction\":{"
+                + "  \"chat\":{\"id\":" + chatId + ",\"type\":\"" + chatType + "\"},"
+                + "  \"message_id\":" + messageId + ","
+                + "  \"user\":{\"id\":" + reactorId + ",\"is_bot\":false,"
+                + "    \"first_name\":\"React\",\"username\":\"" + username + "\"},"
+                + "  \"date\":1700000000,"
+                + "  \"old_reaction\":[],"
+                + "  \"new_reaction\":[{\"type\":\"emoji\",\"emoji\":\"" + newEmoji + "\"}]"
+                + "}}";
+    }
+
+    @Test
+    void pollingAllowedUpdatesIncludesMessageReaction() {
+        // AC1: Telegram excludes message_reaction from its default set, so the
+        // poller must name it explicitly in allowed_updates or reactions never
+        // arrive. The seeding generator carries the list on every poll.
+        String token = "880:tokReact";
+        seedPollingBinding("agent-react-allowed", token, "7", true);
+        TelegramPollingRunner.reconcile();
+
+        Function<Integer, GetUpdates> gen = fakeApp.generatorFor(token);
+        assertNotNull(gen, "runner should have registered a getUpdates generator");
+        var allowed = gen.apply(0).getAllowedUpdates();
+        assertNotNull(allowed, "allowed_updates must be set, not null/empty (= Telegram default)");
+        assertTrue(allowed.contains("message_reaction"),
+                "polling allowed_updates must include message_reaction; was " + allowed);
+        assertTrue(allowed.contains("message") && allowed.contains("callback_query"),
+                "the update types JClaw dispatches must remain in allowed_updates; was " + allowed);
+    }
+
+    @Test
+    void parseReactionExtractsAddedEmojiAndReactor() {
+        var update = updateFromJson(reactionUpdateJson("private", 100, 42, 5, "ada", "👍"));
+        var delta = TelegramPollingRunner.parseReaction(update);
+        assertNotNull(delta, "a message_reaction update must parse into a delta");
+        assertEquals("100", delta.chatId());
+        assertEquals("private", delta.chatType());
+        assertEquals(Integer.valueOf(42), delta.messageId());
+        assertEquals("@ada", delta.reactor());
+        assertEquals(java.util.List.of("👍"), delta.added());
+        assertTrue(delta.removed().isEmpty());
+    }
+
+    @Test
+    void parseReactionReturnsNullForNonReactionUpdate() {
+        // A plain text-message update carries no message_reaction → null.
+        var update = updateFromJson("{\"update_id\":1,\"message\":{\"message_id\":1,"
+                + "\"date\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"text\":\"hi\"}}");
+        assertNull(TelegramPollingRunner.parseReaction(update),
+                "a non-reaction update must not parse into a reaction delta");
+    }
+
+    @Test
+    void parseReactionReturnsNullWhenNoNetChange() {
+        // old == new (same single emoji) → no added/removed → nothing to report.
+        var update = updateFromJson("{\"update_id\":1,\"message_reaction\":{"
+                + "\"chat\":{\"id\":1,\"type\":\"private\"},\"message_id\":9,\"date\":1,"
+                + "\"old_reaction\":[{\"type\":\"emoji\",\"emoji\":\"👍\"}],"
+                + "\"new_reaction\":[{\"type\":\"emoji\",\"emoji\":\"👍\"}]}}");
+        assertNull(TelegramPollingRunner.parseReaction(update),
+                "a reaction update with no net change must produce no delta");
+    }
+
+    @Test
+    void reactionEventTextRendersAddAndRemove() {
+        var added = new TelegramPollingRunner.ReactionDelta("1", "private", 7, "5", "@ada",
+                java.util.List.of("👍"), java.util.List.of());
+        assertTrue(TelegramPollingRunner.reactionEventText(added).startsWith("[system] @ada reacted"),
+                "added-only delta must read as a 'reacted' event");
+        assertTrue(TelegramPollingRunner.reactionEventText(added).contains("message 7"));
+
+        var removed = new TelegramPollingRunner.ReactionDelta("1", "private", 7, "5", "@ada",
+                java.util.List.of(), java.util.List.of("👍"));
+        assertTrue(TelegramPollingRunner.reactionEventText(removed).contains("removed reaction"),
+                "removed-only delta must read as a 'removed reaction' event");
+    }
+
+    @Test
+    void reactionNotifyModeDefaultsToOwnAndNormalizesUnknown() {
+        play.Play.configuration.remove("telegram.reactions.notify"); // → default
+        assertEquals("own", TelegramPollingRunner.reactionNotifyMode(),
+                "missing config must default to 'own'");
+        try {
+            play.Play.configuration.setProperty("telegram.reactions.notify", "garbage");
+            assertEquals("own", TelegramPollingRunner.reactionNotifyMode(),
+                    "an unknown value must normalize to 'own'");
+            play.Play.configuration.setProperty("telegram.reactions.notify", "ALL");
+            assertEquals("all", TelegramPollingRunner.reactionNotifyMode(),
+                    "case-insensitive parse of 'all'");
+        } finally {
+            play.Play.configuration.remove("telegram.reactions.notify");
+        }
+    }
+
+    @Test
+    void reactionGateOwnAllowsDmAndSuppressesGroup() {
+        // AC1: default 'own' = reactions on messages the bot sent. We approximate
+        // that as DM-only (a DM's only non-owner messages are the bot's); a group
+        // reaction's target author is unattributable from the update, so suppress.
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "private"),
+                "own must notify on a DM reaction");
+        assertFalse(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup"),
+                "own must suppress a group reaction (author unattributable)");
+    }
+
+    @Test
+    void reactionGateOffSuppressesEverythingAndAllPassesEverything() {
+        // AC1: off suppresses entirely; all passes any chat type.
+        assertFalse(TelegramPollingRunner.shouldNotifyReaction("off", "private"),
+                "off must suppress even a DM reaction");
+        assertFalse(TelegramPollingRunner.shouldNotifyReaction("off", "supergroup"));
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "private"));
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "supergroup"),
+                "all must notify on a group reaction too");
+    }
+
     // ===== stop() =====
 
     /**

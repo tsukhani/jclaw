@@ -467,6 +467,85 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
                 "legacy sink placeholder must omit message_thread_id");
     }
 
+    // ==================== JCLAW-375: ack-reaction lifecycle ====================
+
+    @Test
+    void ackReactionSetsWorkingOnStartAndSuccessOnSealWhenEnabled() {
+        // AC2: ackReaction=on → 👀 on turn start (constructor), ✅ on seal.
+        // The triggering message is the sink's replyToMessageId (= 4321 here).
+        play.Play.configuration.setProperty("telegram.ackReaction", "on");
+        try {
+            var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 20L, "private",
+                    4321, null);
+            // Constructor already placed the working reaction.
+            assertEquals(1, server.countRequests("setMessageReaction"),
+                    "turn-start must place the working reaction");
+            assertReactionBody(server, "👀", 4321); // 👀
+
+            sink.seal("All done.");
+            assertEquals(2, server.countRequests("setMessageReaction"),
+                    "seal must replace the working reaction with a success reaction");
+            assertReactionBody(server, "✅", 4321); // ✅
+        } finally {
+            play.Play.configuration.remove("telegram.ackReaction");
+        }
+    }
+
+    @Test
+    void ackReactionSetsErrorOnErrorFallbackWhenEnabled() {
+        // AC2: ackReaction=on → ❌ on errorFallback.
+        play.Play.configuration.setProperty("telegram.ackReaction", "on");
+        try {
+            var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 21L, "private",
+                    777, null);
+            assertEquals(1, server.countRequests("setMessageReaction"),
+                    "turn-start working reaction");
+            sink.errorFallback(new RuntimeException("boom"));
+            assertEquals(2, server.countRequests("setMessageReaction"),
+                    "errorFallback must place the error reaction");
+            assertReactionBody(server, "❌", 777); // ❌
+        } finally {
+            play.Play.configuration.remove("telegram.ackReaction");
+        }
+    }
+
+    @Test
+    void ackReactionDisabledByDefaultSendsNoReaction() {
+        // AC2: default off — no setMessageReaction at any point in the lifecycle.
+        play.Play.configuration.remove("telegram.ackReaction"); // → default off
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 22L, "private",
+                999, null);
+        sink.seal("done");
+        assertEquals(0, server.countRequests("setMessageReaction"),
+                "ack lifecycle off by default — no reaction calls; requests=" + server.requests());
+    }
+
+    @Test
+    void ackReactionNoOpWhenReplyTargetIsNull() {
+        // AC2: no-op when replyToMessageId is null even if the feature is on —
+        // there is no message to react to.
+        play.Play.configuration.setProperty("telegram.ackReaction", "on");
+        try {
+            var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 23L, "private");
+            sink.seal("done");
+            assertEquals(0, server.countRequests("setMessageReaction"),
+                    "null reply target must suppress the ack lifecycle; requests=" + server.requests());
+        } finally {
+            play.Play.configuration.remove("telegram.ackReaction");
+        }
+    }
+
+    private static void assertReactionBody(MockTelegramServer server, String emojiEscape, int messageId) {
+        boolean found = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("setMessageReaction"))
+                .anyMatch(r -> r.body().contains(emojiEscape)
+                        && r.body().contains("\"message_id\":" + messageId));
+        assertTrue(found, "expected a setMessageReaction carrying " + emojiEscape
+                + " for message " + messageId + "; bodies=" + server.requests().stream()
+                        .filter(r -> r.method().equalsIgnoreCase("setMessageReaction"))
+                        .map(MockTelegramServer.RecordedRequest::body).toList());
+    }
+
     @Test
     void typingHeartbeatCarriesTopicThreadIncludingGeneral() throws Exception {
         // AC3: the typing heartbeat scopes the indicator to the topic, with
