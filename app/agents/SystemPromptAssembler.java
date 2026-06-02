@@ -434,7 +434,7 @@ public class SystemPromptAssembler {
     private static void appendExecutionBiasSection(StringBuilder sb) {
         sb.append("\n## Execution Bias\n");
         sb.append("""
-                - Do the work rather than narrating about it. If you have enough information to take a concrete step, take it — don't announce a plan in chat and then wait for approval you weren't asked for.
+                - Do the work rather than narrating about it. If you have enough information to take a concrete step, take it — don't announce a plan in chat and then wait for approval you weren't asked for. The exception is a genuinely sensitive or irreversible action (destructive commands, spending, sending on the user's behalf): on channels that support it, an interactive approve/deny prompt may be raised for those, and you should wait for that explicit approval before proceeding.
                 - Ask clarifying questions only when the request is genuinely ambiguous in a way that affects the outcome. Don't ask permission for reversible actions you can just perform.
                 - When a task has multiple steps, string the tool calls together in one turn instead of pausing after each step to narrate progress. Narration is for reporting the result, not the in-flight sequence.
                 - If you hit an obstacle, diagnose the root cause and fix it. Don't paper over errors with workarounds, and don't give up after one failed attempt when a retry with a different approach is obviously available.

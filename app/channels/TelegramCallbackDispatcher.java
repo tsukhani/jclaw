@@ -32,6 +32,16 @@ public final class TelegramCallbackDispatcher {
      */
     public static void dispatch(String botToken, Agent agent, InboundCallback cb) {
         if (cb == null) return;
+
+        // Generic approve/deny workflow (JCLAW-373). Its callback_data uses
+        // the disjoint "a:" namespace, so try it before the "m:" model
+        // selector. Resolution gates on the bound user id internally.
+        var approval = TelegramApprovalCallback.parse(cb.data());
+        if (approval.isPresent()) {
+            handleApproval(botToken, cb, approval.get());
+            return;
+        }
+
         var parsed = TelegramModelCallback.parse(cb.data());
         if (parsed.isEmpty()) {
             // Unknown or malformed callback — ack so Telegram stops showing
@@ -64,6 +74,29 @@ public final class TelegramCallbackDispatcher {
             case CANCEL -> handleCancel(botToken, cb);
             case DETAILS -> handleDetails(botToken, agent, cb, conversation);
         }
+    }
+
+    /**
+     * Resolve a generic approve/deny tap (JCLAW-373) and answer the query.
+     * Gating on the bound user happens inside
+     * {@link TelegramApprovalService#resolve}; a tap from the wrong user is
+     * rejected with an alert and the pending request stays open. On a
+     * successful resolution the originating message's keyboard is replaced
+     * with a plain confirmation so it can't be tapped twice.
+     */
+    private static void handleApproval(String botToken, InboundCallback cb,
+                                       TelegramApprovalCallback.Payload payload) {
+        var resolution = TelegramApprovalService.resolve(
+                payload.approvalId(), payload.decision(), cb.fromId());
+        if (!resolution.resolved()) {
+            TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(),
+                    resolution.userMessage(), true);
+            return;
+        }
+        TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(),
+                resolution.userMessage(), false);
+        TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
+                resolution.userMessage(), null);
     }
 
     // ── Handlers ───────────────────────────────────────────────────────
