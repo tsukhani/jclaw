@@ -662,6 +662,14 @@ public final class TelegramStreamingSink {
         try {
             if (wasFirstSend) {
                 messageId = sendPlaceholder(toShow);
+                // JCLAW-384: the placeholder message id is the streamed reply
+                // bubble — record it in the per-bot bot-sent-id cache so a later
+                // reaction on the bot's own reply is recognized (notify=own).
+                // The sink owns its send path entirely (placeholder + edits +
+                // final), bypassing TelegramChannel's direct send methods that
+                // would otherwise populate the cache. Recorded once on the first
+                // send; subsequent edits keep the same id.
+                TelegramChannel.recordSentMessage(botToken, chatId, messageId);
                 // JCLAW-95: persist the checkpoint so a crash between here and
                 // seal() leaves a recoverable breadcrumb.
                 persistStreamCheckpoint();

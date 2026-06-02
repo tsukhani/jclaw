@@ -568,4 +568,35 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
                 "typing action must carry the topic thread id (General included)");
         sink.seal("");
     }
+
+    // ==================== JCLAW-384: streamed reply lands in the bot-sent-id cache ====================
+
+    @Test
+    void streamedReplyIsRecordedInBotSentIdCache() throws Exception {
+        // The streamed reply bubble is sent by the sink's placeholder path, not
+        // TelegramChannel's direct send methods, so before JCLAW-384 it never
+        // reached the bot-sent-id cache and notify=own under-notified on it.
+        // After a placeholder send, wasSentByBot(token, chat, thatId) must be true.
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 30L, "private");
+
+        // Cold cache: the reply id is unknown before any send.
+        assertFalse(TelegramChannel.wasSentByBot(BOT_TOKEN, CHAT_ID, 1),
+                "cache must be cold before the placeholder send");
+
+        // Force the placeholder send (sets messageId from the mock response).
+        pokePending(sink, "live preview tokens");
+        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
+        flushMethod.setAccessible(true);
+        flushMethod.invoke(sink);
+
+        Integer replyId = sink.messageIdForTest();
+        assertNotNull(replyId, "placeholder send must set the reply message id");
+        assertTrue(TelegramChannel.wasSentByBot(BOT_TOKEN, CHAT_ID, replyId),
+                "the streamed reply message id must be recorded in the bot-sent-id cache");
+
+        // Sealing to the happy-path edit keeps the same id recorded.
+        sink.seal("This is the **final** response.");
+        assertTrue(TelegramChannel.wasSentByBot(BOT_TOKEN, CHAT_ID, replyId),
+                "the recorded reply id must survive seal's in-place HTML edit");
+    }
 }

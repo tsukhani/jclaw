@@ -409,6 +409,21 @@ public class TelegramChannel implements Channel {
     }
 
     /**
+     * JCLAW-384: package-private static bridge for {@link TelegramStreamingSink}.
+     * The streamed reply bubble is sent by the sink (its placeholder send +
+     * edits + final), NOT through this class's direct send methods, so without
+     * this entrypoint the streamed reply — the common case — never lands in the
+     * bot-sent-id cache and {@code notify=own} under-notifies on it. Resolves the
+     * per-token instance and feeds the private {@link #recordSentMessage} so the
+     * sink's reply message id is treated identically to a direct send. Null-safe:
+     * a null/blank token, null/blank chat id, or null message id is a no-op.
+     */
+    static void recordSentMessage(String botToken, String chatId, Integer messageId) {
+        if (botToken == null || botToken.isBlank()) return;
+        forToken(botToken).recordSentMessage(chatId, messageId);
+    }
+
+    /**
      * JCLAW-383: true when {@code messageId} in {@code chatId} is a message this
      * bot sent (and is still in the bounded cache). False on any null arg, a
      * never-seen chat, an evicted id, or a cold cache after a restart — a false
