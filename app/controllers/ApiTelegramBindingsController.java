@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import jobs.TelegramCommandsRegistrationJob;
 import models.Agent;
 import models.TelegramBinding;
 import play.mvc.Controller;
@@ -262,6 +263,12 @@ public class ApiTelegramBindingsController extends Controller {
             TelegramWebhookRegistrar.onBindingSaved(binding);
             TelegramPollingRunner.reconcile();
         }
+        // JCLAW-360: setMyCommands runs only at @OnApplicationStart otherwise, so
+        // a binding created or re-enabled mid-session would get native command
+        // autocomplete only after the next JVM restart. Register its menu now.
+        // Synchronous like the reconcile calls above — registerOne swallows its
+        // own Bot API failures, so a revoked token can't fail the save.
+        TelegramCommandsRegistrationJob.registerOne(binding);
     }
 
     /**

@@ -27,9 +27,10 @@ import java.util.List;
  * autocomplete set up. Mirrors the defensive posture of
  * {@link TelegramStreamingRecoveryJob} (JCLAW-95).
  *
- * <p><b>Scope limitation</b>: new bindings created via the admin UI
- * mid-session are not covered — they'll get autocomplete at the next
- * restart. Hooking into the binding-save path is tracked separately.
+ * <p>JCLAW-360: bindings created or re-enabled via the admin UI mid-session
+ * are covered too — {@link controllers.ApiTelegramBindingsController} calls
+ * {@link #registerOne(TelegramBinding)} on its save path, so a new/re-enabled
+ * binding gets its command menu immediately rather than at the next restart.
  */
 // DB read (TelegramBinding::findAllEnabled) is wrapped in Tx.run; the rest
 // is HTTP to api.telegram.org. @NoTransaction skips the redundant outer
@@ -50,18 +51,37 @@ public class TelegramCommandsRegistrationJob extends Job<Void> {
         if (bindings.isEmpty()) return;
 
         var botCommands = toBotCommands();
-
         for (var b : bindings) {
-            try {
-                TelegramChannel.setMyCommands(b.botToken, botCommands);
-                EventLogger.info("channel", b.agent != null ? b.agent.name : null, "telegram",
-                        "Registered %d slash command(s) for binding %d"
-                                .formatted(botCommands.size(), b.id));
-            } catch (Exception e) {
-                EventLogger.warn("channel", b.agent != null ? b.agent.name : null, "telegram",
-                        "Slash-command registration failed for binding %d: %s"
-                                .formatted(b.id, e.getMessage()));
-            }
+            register(b, botCommands);
+        }
+    }
+
+    /**
+     * JCLAW-360: register the slash-command set for a single binding, so a
+     * binding created or re-enabled via the admin UI gets native command
+     * autocomplete immediately rather than waiting for the next JVM restart.
+     *
+     * <p>No-op when the binding is null or disabled — a disabled binding has
+     * no live channel, matching {@link #registerAll}'s {@code findAllEnabled}
+     * scope. Per-binding failures are swallowed and logged (see
+     * {@link #register}).
+     */
+    public static void registerOne(TelegramBinding b) {
+        if (b == null || !b.enabled) return;
+        register(b, toBotCommands());
+    }
+
+    /** Register {@code botCommands} for one binding; swallow + log failures. */
+    private static void register(TelegramBinding b, List<BotCommand> botCommands) {
+        try {
+            TelegramChannel.setMyCommands(b.botToken, botCommands);
+            EventLogger.info("channel", b.agent != null ? b.agent.name : null, "telegram",
+                    "Registered %d slash command(s) for binding %d"
+                            .formatted(botCommands.size(), b.id));
+        } catch (Exception e) {
+            EventLogger.warn("channel", b.agent != null ? b.agent.name : null, "telegram",
+                    "Slash-command registration failed for binding %d: %s"
+                            .formatted(b.id, e.getMessage()));
         }
     }
 

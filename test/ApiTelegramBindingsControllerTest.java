@@ -1,6 +1,8 @@
 import channels.ChannelTransport;
+import channels.TelegramChannel;
 import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
+import jobs.TelegramCommandsRegistrationJob;
 import models.Agent;
 import models.TelegramBinding;
 import org.junit.jupiter.api.*;
@@ -447,6 +449,124 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
         login();
         var response = DELETE("/api/channels/telegram/bindings/9999999");
         assertEquals(404, response.status.intValue());
+    }
+
+    // ===== JCLAW-360: mid-session bot-command registration =====
+    //
+    // setMyCommands otherwise runs only at @OnApplicationStart, so a binding
+    // created or re-enabled via the admin UI would get native autocomplete
+    // only after the next JVM restart. The controller now calls
+    // TelegramCommandsRegistrationJob.registerOne on the save path; these
+    // tests point the token at MockTelegramServer and count the setMyCommands
+    // request the registration emits. WEBHOOK transport keeps the reconcile
+    // deterministic (no live polling session) — both setWebhook and
+    // setMyCommands route through the same SDK client the mock intercepts.
+
+    @Test
+    void createRegistersBotCommands() throws Exception {
+        var agentId = seedAgent("tg-agent");
+        var token = "360c:tok";
+        try (var server = new MockTelegramServer()) {
+            server.start();
+            TelegramChannel.installForTest(token, server.telegramUrl());
+            try {
+                login();
+                var body = """
+                        {"botToken": "%s", "agentId": %d, "telegramUserId": "42",
+                         "transport": "WEBHOOK", "webhookSecret": "ws", "webhookBaseUrl": "https://example.com/tg"}
+                        """.formatted(token, agentId);
+                var response = POST("/api/channels/telegram/bindings",
+                        "application/json", body);
+                assertIsOk(response);
+                assertEquals(1, server.countRequests("setMyCommands"),
+                        "create should register the slash-command menu exactly once");
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    @Test
+    void enablingBindingViaUpdateRegistersBotCommands() throws Exception {
+        var agentId = seedAgent("tg-agent");
+        var token = "360e:tok";
+        // Seed disabled so the boot-time pass wouldn't have covered it; the
+        // PUT that flips enabled=true is what must trigger registration.
+        var bindingId = commitInFreshTx(() -> {
+            var agent = (Agent) Agent.findById(agentId);
+            var b = new TelegramBinding();
+            b.agent = agent;
+            b.botToken = token;
+            b.telegramUserId = "42";
+            b.transport = ChannelTransport.WEBHOOK;
+            b.webhookSecret = "ws-secret";
+            b.webhookBaseUrl = "https://example.com/tg";
+            b.enabled = false;
+            b.save();
+            return b.id;
+        });
+        try (var server = new MockTelegramServer()) {
+            server.start();
+            TelegramChannel.installForTest(token, server.telegramUrl());
+            try {
+                login();
+                var response = PUT("/api/channels/telegram/bindings/" + bindingId,
+                        "application/json", "{\"enabled\": true}");
+                assertIsOk(response);
+                assertEquals(1, server.countRequests("setMyCommands"),
+                        "enabling a binding via update should register its slash-command menu");
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    @Test
+    void registerOneSendsSetMyCommandsForEnabledBinding() throws Exception {
+        var agentId = seedAgent("tg-agent");
+        var token = "360r:tok";
+        var bindingId = seedBinding(agentId, token, "42"); // seedBinding sets enabled=true
+        try (var server = new MockTelegramServer()) {
+            server.start();
+            TelegramChannel.installForTest(token, server.telegramUrl());
+            try {
+                var binding = commitInFreshTx(() -> (TelegramBinding) TelegramBinding.findById(bindingId));
+                TelegramCommandsRegistrationJob.registerOne(binding);
+                assertEquals(1, server.countRequests("setMyCommands"),
+                        "registerOne should send exactly one setMyCommands for an enabled binding");
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    @Test
+    void registerOneSkipsDisabledBinding() throws Exception {
+        var agentId = seedAgent("tg-agent");
+        var token = "360d:tok";
+        var bindingId = commitInFreshTx(() -> {
+            var agent = (Agent) Agent.findById(agentId);
+            var b = new TelegramBinding();
+            b.agent = agent;
+            b.botToken = token;
+            b.telegramUserId = "42";
+            b.transport = ChannelTransport.POLLING;
+            b.enabled = false;
+            b.save();
+            return b.id;
+        });
+        try (var server = new MockTelegramServer()) {
+            server.start();
+            TelegramChannel.installForTest(token, server.telegramUrl());
+            try {
+                var binding = commitInFreshTx(() -> (TelegramBinding) TelegramBinding.findById(bindingId));
+                TelegramCommandsRegistrationJob.registerOne(binding);
+                assertEquals(0, server.countRequests("setMyCommands"),
+                        "registerOne must not register commands for a disabled binding");
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
     }
 
     @Test
