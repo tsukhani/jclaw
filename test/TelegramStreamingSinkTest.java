@@ -604,4 +604,37 @@ class TelegramStreamingSinkTest extends UnitTest {
         assertFalse(sink.streamCapReachedForTest(),
                 "post-seal update must NOT mutate streamCapReached");
     }
+
+    // === JCLAW-369: reply target + topic thread carried through the sink ===
+
+    @Test
+    void legacyConstructorsDefaultReplyTargetAndThreadToNull() {
+        // AC4: existing call sites (the three pre-369 constructors) leave both
+        // new fields null → today's behavior (no reply, no topic).
+        var threeArg = new TelegramStreamingSink("tok", "chat", null);
+        assertNull(threeArg.replyToMessageIdForTest(),
+                "3-arg constructor must default replyToMessageId to null");
+        assertNull(threeArg.messageThreadIdForTest(),
+                "3-arg constructor must default messageThreadId to null");
+
+        var fourArg = new TelegramStreamingSink("tok", "chat", null, 1L);
+        assertNull(fourArg.replyToMessageIdForTest());
+        assertNull(fourArg.messageThreadIdForTest());
+
+        var fiveArg = new TelegramStreamingSink("tok", "chat", null, 1L, "supergroup");
+        assertNull(fiveArg.replyToMessageIdForTest());
+        assertNull(fiveArg.messageThreadIdForTest());
+    }
+
+    @Test
+    void fullConstructorRoundTripsReplyTargetAndThread() {
+        // The JCLAW-369 constructor stores the inbound reply target + topic so
+        // the placeholder send, planner send, and typing heartbeat can carry
+        // them. The parent wires these in after merge.
+        var sink = new TelegramStreamingSink("tok", "chat", null, 99L, "supergroup", 1234, 56);
+        assertEquals(1234, sink.replyToMessageIdForTest().intValue(),
+                "constructor must round-trip replyToMessageId");
+        assertEquals(56, sink.messageThreadIdForTest().intValue(),
+                "constructor must round-trip messageThreadId");
+    }
 }

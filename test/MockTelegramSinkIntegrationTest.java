@@ -418,4 +418,75 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         assertEquals(countAtSeal, server.countRequests("sendChatAction"),
                 "no further sendChatAction after seal — heartbeat fully cancelled");
     }
+
+    // ==================== JCLAW-369: reply target + topic-aware sink ====================
+
+    @Test
+    void placeholderSendCarriesReplyTargetAndTopicThread() throws Exception {
+        // The streaming placeholder is the turn's first message, so under the
+        // default reply mode (first) it must carry reply_parameters for the
+        // inbound message id, and message_thread_id for the (non-General) topic.
+        play.Play.configuration.remove("telegram.replyTo.mode"); // → default "first"
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 11L, "supergroup",
+                4321, 88);
+        pokePending(sink, "live preview tokens");
+        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
+        flushMethod.setAccessible(true);
+        flushMethod.invoke(sink);
+
+        assertNotNull(sink.messageIdForTest(), "first flush must send a placeholder");
+        String placeholderBody = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .reduce("", (a, b) -> a + b);
+        assertTrue(placeholderBody.contains("reply_parameters") && placeholderBody.contains("4321"),
+                "placeholder must reply to the inbound message id; body=" + placeholderBody);
+        assertTrue(placeholderBody.contains("allow_sending_without_reply"),
+                "placeholder reply must set allow_sending_without_reply");
+        assertTrue(placeholderBody.contains("message_thread_id") && placeholderBody.contains("88"),
+                "placeholder must carry the non-General topic thread id");
+    }
+
+    @Test
+    void placeholderSendOmitsReplyAndThreadForLegacySink() throws Exception {
+        // AC4 wire proof: a legacy sink (no reply target, no topic) sends a
+        // plain placeholder with neither field — unchanged behavior.
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 12L, "private");
+        pokePending(sink, "plain preview");
+        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
+        flushMethod.setAccessible(true);
+        flushMethod.invoke(sink);
+
+        String body = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .reduce("", (a, b) -> a + b);
+        assertFalse(body.contains("reply_parameters"),
+                "legacy sink placeholder must omit reply_parameters");
+        assertFalse(body.contains("message_thread_id"),
+                "legacy sink placeholder must omit message_thread_id");
+    }
+
+    @Test
+    void typingHeartbeatCarriesTopicThreadIncludingGeneral() throws Exception {
+        // AC3: the typing heartbeat scopes the indicator to the topic, with
+        // General (thread id 1) INCLUDED — unlike sends.
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 13L, "supergroup",
+                null, 1);
+        sink.startTypingHeartbeat();
+        long deadline = System.currentTimeMillis() + 1000;
+        while (server.countRequests("sendChatAction") == 0
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertTrue(server.countRequests("sendChatAction") >= 1,
+                "typing heartbeat must fire at least once");
+        String body = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendChatAction"))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .reduce("", (a, b) -> a + b);
+        assertTrue(body.contains("message_thread_id"),
+                "typing action must carry the topic thread id (General included)");
+        sink.seal("");
+    }
 }

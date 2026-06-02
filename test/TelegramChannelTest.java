@@ -26,6 +26,9 @@ class TelegramChannelTest extends UnitTest {
     @AfterEach
     void teardown() {
         TelegramChannel.TELEGRAM_API_BASE = prevBase;
+        // JCLAW-369: the reply-mode tests set this property; clear it so they
+        // can't leak into other tests in the suite.
+        play.Play.configuration.remove("telegram.replyTo.mode");
         if (mock != null) mock.close();
     }
 
@@ -599,6 +602,220 @@ class TelegramChannelTest extends UnitTest {
             mock.respondWith("deleteWebhook", 400,
                     "{\"ok\":false,\"error_code\":400,\"description\":\"nope\"}");
             assertFalse(TelegramChannel.deleteWebhook(token));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── JCLAW-369: outbound reply targeting + topic-aware sends ─────────
+    //
+    // The SDK posts text methods (sendMessage, sendChatAction) as a JSON body
+    // (objectMapper.writeValueAsString → application/json), so we assert
+    // directly on the recorded request body's snake_case JSON keys
+    // (reply_parameters / reply_to_message_id / message_thread_id).
+
+    /** Concatenate every recorded sendMessage body so multi-chunk turns are easy to scan. */
+    private String allSendMessageBodies() {
+        StringBuilder sb = new StringBuilder();
+        for (var r : mock.requests()) {
+            if (r.method().equalsIgnoreCase("sendMessage")) sb.append(r.body()).append('\n');
+        }
+        return sb.toString();
+    }
+
+    @Test
+    void sendMessage_nullReplyAndThread_omitsBothFields_backCompat() {
+        // AC4: the dormant default — existing callers pass nothing → null →
+        // no reply_parameters, no message_thread_id on the wire.
+        String token = "jclaw369-backcompat-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendMessage(token, "12345", "plain reply", null, null, null));
+            String body = allSendMessageBodies();
+            assertFalse(body.contains("reply_parameters"),
+                    "null replyToMessageId must omit reply_parameters even when mode=all");
+            assertFalse(body.contains("message_thread_id"),
+                    "null messageThreadId must omit message_thread_id");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_replyModeFirst_setsReplyOnlyOnFirstChunk() {
+        // mode=first: the reply badge lands on exactly the first chunk of the
+        // turn. Force a two-chunk turn by exceeding the 4000-char chunk size.
+        String token = "jclaw369-first-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.replyTo.mode", "first");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            String big = "A".repeat(4500);
+            assertTrue(TelegramChannel.sendMessage(token, "12345", big, null, 9001, null));
+            long sends = mock.countRequests("sendMessage");
+            assertTrue(sends >= 2, "4500 chars must split into >=2 chunks; got " + sends);
+            long withReply = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .filter(r -> r.body().contains("reply_parameters"))
+                    .count();
+            assertEquals(1, withReply,
+                    "mode=first must set reply_parameters on exactly one (the first) chunk");
+            assertTrue(allSendMessageBodies().contains("9001"),
+                    "the reply target message id must appear in the reply_parameters payload");
+            assertTrue(allSendMessageBodies().contains("allow_sending_without_reply"),
+                    "allow_sending_without_reply must be set so a deleted target degrades gracefully");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_replyModeAll_setsReplyOnEveryChunk() {
+        String token = "jclaw369-all-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            String big = "B".repeat(4500);
+            assertTrue(TelegramChannel.sendMessage(token, "12345", big, null, 7777, null));
+            long sends = mock.countRequests("sendMessage");
+            long withReply = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .filter(r -> r.body().contains("reply_parameters"))
+                    .count();
+            assertTrue(sends >= 2, "expected a multi-chunk turn; got " + sends);
+            assertEquals(sends, withReply,
+                    "mode=all must set reply_parameters on every chunk of the turn");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_replyModeOff_neverSetsReply() {
+        String token = "jclaw369-off-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendMessage(token, "12345", "hi there", null, 4242, null));
+            assertFalse(allSendMessageBodies().contains("reply_parameters"),
+                    "mode=off must never set reply_parameters even with a non-null target");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void replyToMode_defaultsToFirstWhenUnsetOrUnrecognized() {
+        // No property set → default "first".
+        play.Play.configuration.remove("telegram.replyTo.mode");
+        assertEquals("first", TelegramChannel.replyToMode(),
+                "unset telegram.replyTo.mode defaults to first");
+        // Unrecognized value normalizes to first; case-insensitive for known ones.
+        play.Play.configuration.setProperty("telegram.replyTo.mode", "garbage");
+        assertEquals("first", TelegramChannel.replyToMode(),
+                "unrecognized value normalizes to first");
+        play.Play.configuration.setProperty("telegram.replyTo.mode", "ALL");
+        assertEquals("all", TelegramChannel.replyToMode(),
+                "known value is lowercased");
+    }
+
+    @Test
+    void sendMessage_threadIdApplied_whenNotGeneral() {
+        // AC3: a non-General topic thread id is set on the send.
+        String token = "jclaw369-thread-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendMessage(token, "12345", "in topic", null, null, 42));
+            String body = allSendMessageBodies();
+            assertTrue(body.contains("message_thread_id"),
+                    "non-General topic id must set message_thread_id on the send");
+            assertTrue(body.contains("42"),
+                    "the thread id value must appear on the wire");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_threadIdOmitted_forGeneralTopic() {
+        // AC3: thread id == 1 (General) must be OMITTED on sends — naming it
+        // explicitly is rejected by the Bot API; a bare send lands in General.
+        String token = "jclaw369-general-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendMessage(token, "12345", "general topic", null, null, 1));
+            assertFalse(allSendMessageBodies().contains("message_thread_id"),
+                    "General topic (thread id 1) must be omitted on sends");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendTypingAction_threadIdIncludesGeneralTopic() {
+        // AC3: typing/chat-action carries message_thread_id when present —
+        // General topic (1) INCLUDED for typing, unlike sends.
+        String token = "jclaw369-typing-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            TelegramChannel.sendTypingAction(token, "12345", 1);
+            TelegramChannel.sendTypingAction(token, "12345", 99);
+            assertEquals(2, mock.countRequests("sendChatAction"));
+            String bodies = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendChatAction"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .reduce("", (a, b) -> a + "\n" + b);
+            assertTrue(bodies.contains("message_thread_id"),
+                    "typing action must carry message_thread_id when present");
+            assertTrue(bodies.contains("\"message_thread_id\":1") || bodies.contains("message_thread_id\":1"),
+                    "General topic (1) must be INCLUDED on the typing action");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendTypingAction_nullThreadId_omitsField_backCompat() {
+        String token = "jclaw369-typing-null-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            TelegramChannel.sendTypingAction(token, "12345"); // legacy no-thread overload
+            String body = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendChatAction"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .reduce("", (a, b) -> a + b);
+            assertFalse(body.contains("message_thread_id"),
+                    "legacy typing overload must omit message_thread_id");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessageWithKeyboard_replyAndThreadOverload_appliesBoth() {
+        // The keyboard send is a single message → treated as the turn's first
+        // chunk, so first/all both apply the reply; thread is General-stripped.
+        String token = "jclaw369-kbd-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.replyTo.mode", "first");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMessage", 200,
+                    "{\"ok\":true,\"result\":{\"message_id\":5,\"chat\":{\"id\":12345,"
+                            + "\"type\":\"supergroup\"},\"date\":1,\"text\":\"hi\"}}");
+            var keyboard = InlineKeyboardMarkup.builder()
+                    .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
+                            .text("OK").callbackData("ok").build()))
+                    .build();
+            Integer mid = TelegramChannel.sendMessageWithKeyboard(token, "12345",
+                    "<b>pick</b>", keyboard, 3030, 55);
+            assertEquals(5, mid.intValue());
+            String body = allSendMessageBodies();
+            assertTrue(body.contains("reply_parameters") && body.contains("3030"),
+                    "keyboard send must carry reply_parameters for the target");
+            assertTrue(body.contains("message_thread_id") && body.contains("55"),
+                    "keyboard send must carry the non-General thread id");
         } finally {
             TelegramChannel.clearForTest(token);
         }

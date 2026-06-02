@@ -150,6 +150,19 @@ public final class TelegramStreamingSink {
     private final String botToken;
     private final String chatId;
     private final Agent agent;
+
+    /**
+     * JCLAW-369: inbound message id to reply to (null disables reply
+     * targeting) and forum-topic thread id to scope sends into (null = no
+     * topic). Both default to null through the existing constructors so every
+     * legacy call site keeps today's behavior; the parent wires the inbound
+     * values in after merge. The reply badge is applied to the placeholder /
+     * planner-first message per {@link TelegramChannel#replyToMode()}, and the
+     * thread id is set on the placeholder send, the planner send, and the
+     * typing heartbeat (General topic included for typing, omitted on sends).
+     */
+    private final Integer replyToMessageId;
+    private final Integer messageThreadId;
     /**
      * Conversation the sink is streaming into. Kept as a nullable field so
      * tests and admin paths that construct a sink without a conversation
@@ -214,6 +227,43 @@ public final class TelegramStreamingSink {
     }
 
     /**
+     * JCLAW-369 full constructor — adds the optional inbound reply target and
+     * forum-topic thread id over
+     * {@link #TelegramStreamingSink(String, String, Agent, Long, String)}.
+     * Both null reproduces the legacy behavior exactly; the existing
+     * constructors delegate here with both null so all current call sites
+     * compile unchanged.
+     *
+     * @param botToken         the Telegram bot token
+     * @param chatId           the Telegram chat id
+     * @param agent            the bound agent
+     * @param conversationId   persisted Conversation id (enables checkpoint
+     *                         persistence); null disables it
+     * @param chatType         Telegram's {@code chat.type} string; nullable
+     * @param replyToMessageId inbound {@code message_id} to reply to per the
+     *                         {@link TelegramChannel#replyToMode()} policy;
+     *                         null disables reply targeting
+     * @param messageThreadId  forum-topic {@code message_thread_id} to scope
+     *                         sends + typing into; null = no topic
+     */
+    public TelegramStreamingSink(String botToken, String chatId, Agent agent,
+                                 Long conversationId, String chatType,
+                                 Integer replyToMessageId, Integer messageThreadId) {
+        this.botToken = botToken;
+        this.chatId = chatId;
+        this.agent = agent;
+        this.conversationId = conversationId;
+        this.replyToMessageId = replyToMessageId;
+        this.messageThreadId = messageThreadId;
+        // JCLAW-105: one-time breadcrumb so operators can attribute streaming
+        // activity to chat categories. category=channel matches the existing
+        // convention in TelegramChannel.
+        EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
+                "Streaming start (chat.type=%s)"
+                        .formatted(chatType != null ? chatType : "unknown"));
+    }
+
+    /**
      * @param botToken       the Telegram bot token
      * @param chatId         the Telegram chat id
      * @param agent          the bound agent
@@ -249,16 +299,7 @@ public final class TelegramStreamingSink {
      */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent,
                                  Long conversationId, String chatType) {
-        this.botToken = botToken;
-        this.chatId = chatId;
-        this.agent = agent;
-        this.conversationId = conversationId;
-        // JCLAW-105: one-time breadcrumb so operators can attribute streaming
-        // activity to chat categories. category=channel matches the existing
-        // convention in TelegramChannel.
-        EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
-                "Streaming start (chat.type=%s)"
-                        .formatted(chatType != null ? chatType : "unknown"));
+        this(botToken, chatId, agent, conversationId, chatType, null, null);
     }
 
     // ── Public API ─────────────────────────────────────────────────────
@@ -330,7 +371,11 @@ public final class TelegramStreamingSink {
 
         if (needsPlanner) {
             if (messageId != null) deletePlaceholderSafely();
-            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent)) {
+            // JCLAW-369: the planner delivery is the turn's real response, so
+            // forward the reply target + topic thread the same way the
+            // placeholder would have carried them.
+            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent,
+                    replyToMessageId, messageThreadId)) {
                 notifyDeliveryFailure();
             }
             clearStreamCheckpoint();
@@ -345,7 +390,9 @@ public final class TelegramStreamingSink {
             // HTML expansion (wrapping <b> / <a> / etc.) can push us past
             // the cap even when the raw markdown fit — fall back to planner.
             deletePlaceholderSafely();
-            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent)) {
+            // JCLAW-369: same reply/topic forwarding as the needsPlanner branch.
+            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent,
+                    replyToMessageId, messageThreadId)) {
                 notifyDeliveryFailure();
             }
             clearStreamCheckpoint();
@@ -429,8 +476,11 @@ public final class TelegramStreamingSink {
         // after our delete, resurrecting the placeholder with stale text.
         awaitInFlightFlush();
         if (messageId != null) deletePlaceholderSafely();
+        // JCLAW-369: the error reply replaces the placeholder for this turn, so
+        // it carries the same reply target + topic thread.
         TelegramChannel.sendMessage(botToken, chatId,
-                "Sorry, an error occurred processing your message.", agent);
+                "Sorry, an error occurred processing your message.", agent,
+                replyToMessageId, messageThreadId);
         clearStreamCheckpoint();
         EventLogger.error(LOG_CATEGORY, agentName(), LOG_SOURCE,
                 "Streaming error: " + (e != null ? e.getMessage() : "(null)"));
@@ -453,6 +503,9 @@ public final class TelegramStreamingSink {
     }
 
     public Integer messageIdForTest() { return messageId; }
+    /** JCLAW-369: round-trip accessors for the inbound reply target / topic thread. */
+    public Integer replyToMessageIdForTest() { return replyToMessageId; }
+    public Integer messageThreadIdForTest() { return messageThreadId; }
     public boolean streamCapReachedForTest() { return streamCapReached; }
     public boolean sealedForTest() { return sealed.get(); }
     public String lastSentTextForTest() { return lastSentText; }
@@ -494,8 +547,12 @@ public final class TelegramStreamingSink {
             // hasn't landed yet. Each tick spawns a VT so the scheduler
             // thread stays free for other sinks' flushes.
             typingHeartbeat = scheduler().scheduleAtFixedRate(
+                    // JCLAW-369: scope the typing indicator to the forum topic
+                    // when present. Unlike sends, the chat-action API accepts
+                    // the General topic (thread id 1), so pass messageThreadId
+                    // straight through without the General strip.
                     () -> Thread.ofVirtual().name("telegram-typing").start(() ->
-                            TelegramChannel.sendTypingAction(botToken, chatId)),
+                            TelegramChannel.sendTypingAction(botToken, chatId, messageThreadId)),
                     0L, TYPING_HEARTBEAT_MS, TimeUnit.MILLISECONDS);
         } finally {
             stateLock.unlock();
@@ -660,12 +717,20 @@ public final class TelegramStreamingSink {
 
     private Integer sendPlaceholder(String plainText) throws TelegramApiException {
         var client = TelegramChannel.forToken(botToken).client();
-        var send = SendMessage.builder()
+        var builder = SendMessage.builder()
                 .chatId(chatId)
                 .text(plainText)
-                .disableNotification(false)
-                .build();
-        var message = client.execute(send);
+                .disableNotification(false);
+        // JCLAW-369: the placeholder is the turn's first (and only live)
+        // message, so the `first`/`all` reply modes both target it; `off`
+        // returns null and the badge is omitted. The topic thread id is set
+        // on the send (General stripped); follow-up edits inherit both — the
+        // Bot API edit path can't change reply/thread anyway.
+        var reply = TelegramChannel.replyParamsForSink(replyToMessageId);
+        if (reply != null) builder.replyParameters(reply);
+        var threadId = TelegramChannel.sendThreadIdForSink(messageThreadId);
+        if (threadId != null) builder.messageThreadId(threadId);
+        var message = client.execute(builder.build());
         return message.getMessageId();
     }
 

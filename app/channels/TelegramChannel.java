@@ -17,6 +17,7 @@ import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.MessageEntity;
 import org.telegram.telegrambots.meta.api.objects.User;
+import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
@@ -350,6 +351,103 @@ public class TelegramChannel implements Channel {
      */
     public static String TELEGRAM_API_BASE = "https://api.telegram.org";
 
+    // ── JCLAW-369: outbound reply targeting + topic-aware sends ──────────
+
+    /**
+     * JCLAW-369: reply-targeting policy. Controls whether — and how often —
+     * an inbound {@code replyToMessageId} is applied to the turn's outbound
+     * messages, read from {@code telegram.replyTo.mode} via
+     * {@link play.Play#configuration} (default {@link #REPLY_MODE_FIRST} when
+     * unset/blank/unrecognized):
+     *
+     * <ul>
+     *   <li>{@link #REPLY_MODE_OFF} — never set {@code reply_parameters};</li>
+     *   <li>{@link #REPLY_MODE_FIRST} — set it on only the first chunk/message
+     *       of a turn (the natural "this is my answer to that" affordance
+     *       without spamming a reply badge on every chunk);</li>
+     *   <li>{@link #REPLY_MODE_ALL} — set it on every chunk/message.</li>
+     * </ul>
+     *
+     * <p>Dormant until a caller threads a non-null {@code replyToMessageId}
+     * into one of the send overloads; the no-arg behavior is unchanged.
+     */
+    private static final String CFG_REPLY_TO_MODE = "telegram.replyTo.mode";
+    static final String REPLY_MODE_OFF = "off";
+    static final String REPLY_MODE_FIRST = "first";
+    static final String REPLY_MODE_ALL = "all";
+
+    /**
+     * The Telegram "General" forum topic always has {@code message_thread_id == 1},
+     * and the Bot API rejects a send that names it explicitly — so JCLAW-369
+     * OMITS {@code message_thread_id} on sends to General (a bare send already
+     * lands there). Typing actions, by contrast, accept it.
+     */
+    static final int GENERAL_TOPIC_THREAD_ID = 1;
+
+    /**
+     * Resolve the configured reply mode, normalizing unknown/blank values to
+     * {@link #REPLY_MODE_FIRST}. Public so default-package tests can assert the
+     * config-read contract (matches the {@code *ForTest} convention used
+     * elsewhere in this class for test-reachable surface).
+     */
+    public static String replyToMode() {
+        var raw = play.Play.configuration.getProperty(CFG_REPLY_TO_MODE, REPLY_MODE_FIRST);
+        if (raw == null) return REPLY_MODE_FIRST;
+        var v = raw.trim().toLowerCase();
+        return switch (v) {
+            case REPLY_MODE_OFF, REPLY_MODE_FIRST, REPLY_MODE_ALL -> v;
+            default -> REPLY_MODE_FIRST;
+        };
+    }
+
+    /**
+     * Build the {@link ReplyParameters} to apply on a given outbound chunk, or
+     * null when none should be set. Honors the {@link #replyToMode()} policy:
+     * {@code off} → never; {@code first} → only when {@code firstChunk}; {@code all}
+     * → always (given a non-null target). {@code allow_sending_without_reply=true}
+     * so a since-deleted target degrades to a plain send instead of a 400.
+     */
+    private static ReplyParameters replyParamsFor(Integer replyToMessageId, boolean firstChunk) {
+        if (replyToMessageId == null) return null;
+        var mode = replyToMode();
+        boolean apply = switch (mode) {
+            case REPLY_MODE_ALL -> true;
+            case REPLY_MODE_FIRST -> firstChunk;
+            default -> false; // off
+        };
+        if (!apply) return null;
+        return ReplyParameters.builder()
+                .messageId(replyToMessageId)
+                .allowSendingWithoutReply(true)
+                .build();
+    }
+
+    /**
+     * The {@code message_thread_id} to set on an outbound send, or null to omit
+     * it. Returns null when {@code messageThreadId} is null or names the General
+     * topic ({@link #GENERAL_TOPIC_THREAD_ID}) — a bare send already lands in
+     * General, and naming it explicitly is rejected by the Bot API.
+     */
+    private static Integer sendThreadId(Integer messageThreadId) {
+        if (messageThreadId == null || messageThreadId == GENERAL_TOPIC_THREAD_ID) return null;
+        return messageThreadId;
+    }
+
+    /**
+     * JCLAW-369: package-private bridge for {@link TelegramStreamingSink}. The
+     * streaming placeholder is the turn's first (and only live) message, so the
+     * sink always evaluates the reply policy as the first chunk. Returns null
+     * when no badge should be applied ({@code off}, or a null target).
+     */
+    static ReplyParameters replyParamsForSink(Integer replyToMessageId) {
+        return replyParamsFor(replyToMessageId, true);
+    }
+
+    /** JCLAW-369: package-private bridge so the sink shares the General-topic strip rule. */
+    static Integer sendThreadIdForSink(Integer messageThreadId) {
+        return sendThreadId(messageThreadId);
+    }
+
     /**
      * Fire a "typing" chat-action so the user's Telegram client shows the
      * "• • • typing" indicator (JCLAW-98). The indicator lasts ~5 seconds
@@ -361,13 +459,24 @@ public class TelegramChannel implements Channel {
      * abort the LLM flow that owns the actual response.
      */
     public static void sendTypingAction(String botToken, String chatId) {
+        sendTypingAction(botToken, chatId, null);
+    }
+
+    /**
+     * JCLAW-369: topic-aware typing action. When {@code messageThreadId} is
+     * set the indicator is scoped to that forum topic — General (thread id 1)
+     * INCLUDED, unlike sends, because the chat-action API accepts the General
+     * thread id. Null preserves the non-topic behavior. Existing callers route
+     * through {@link #sendTypingAction(String, String)} (thread id null).
+     */
+    public static void sendTypingAction(String botToken, String chatId, Integer messageThreadId) {
         if (botToken == null || chatId == null) return;
         try {
-            forToken(botToken).client.execute(
-                    org.telegram.telegrambots.meta.api.methods.send.SendChatAction.builder()
-                            .chatId(chatId)
-                            .action("typing")
-                            .build());
+            var builder = org.telegram.telegrambots.meta.api.methods.send.SendChatAction.builder()
+                    .chatId(chatId)
+                    .action("typing");
+            if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+            forToken(botToken).client.execute(builder.build());
         } catch (Exception e) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "sendChatAction(typing) failed for chat %s: %s"
@@ -399,6 +508,30 @@ public class TelegramChannel implements Channel {
      * agent composed them.
      */
     public static boolean sendMessage(String botToken, String chatId, String text, Agent agent) {
+        return sendMessage(botToken, chatId, text, agent, null, null);
+    }
+
+    /**
+     * JCLAW-369: reply-targeting + topic-aware outbound dispatch. Adds two
+     * optional, nullable params over {@link #sendMessage(String, String, String, Agent)}:
+     *
+     * <ul>
+     *   <li>{@code replyToMessageId} — when non-null, the turn's chunks reply to
+     *       this message per the {@link #replyToMode()} policy
+     *       ({@code telegram.replyTo.mode}: {@code first} sets it on only the
+     *       first chunk, {@code all} on every chunk, {@code off} never).
+     *       {@code allow_sending_without_reply=true} so a deleted target won't
+     *       fail the send.</li>
+     *   <li>{@code messageThreadId} — when non-null and not the General topic
+     *       ({@link #GENERAL_TOPIC_THREAD_ID}), scopes every send to that forum
+     *       topic; General is omitted (a bare send already lands there).</li>
+     * </ul>
+     *
+     * <p>Both null reproduces the legacy behavior exactly — this is the dormant
+     * mechanism JCLAW-369 ships; the dispatch sites wire the values in later.
+     */
+    public static boolean sendMessage(String botToken, String chatId, String text, Agent agent,
+                                      Integer replyToMessageId, Integer messageThreadId) {
         if (botToken == null || chatId == null || text == null) {
             EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
                     "sendMessage called with null argument");
@@ -408,18 +541,26 @@ public class TelegramChannel implements Channel {
         var segments = TelegramOutboundPlanner.plan(text, agent != null ? agent.name : null);
         if (segments.isEmpty()) return true; // nothing to send
 
+        // JCLAW-369: track "first chunk of the turn" across all segments so the
+        // `first` reply-mode applies the reply badge once, not once per segment.
+        var firstChunk = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Integer threadId = sendThreadId(messageThreadId);
         boolean allOk = true;
         for (var segment : segments) {
-            if (!dispatchSegment(channel, chatId, segment)) allOk = false;
+            if (!dispatchSegment(channel, chatId, segment, replyToMessageId, threadId, firstChunk)) {
+                allOk = false;
+            }
         }
         return allOk;
     }
 
     /** Dispatch one planner segment; returns false only when a foreground send actually fails. */
     private static boolean dispatchSegment(TelegramChannel channel, String chatId,
-                                           TelegramOutboundPlanner.Segment segment) {
+                                           TelegramOutboundPlanner.Segment segment,
+                                           Integer replyToMessageId, Integer threadId,
+                                           java.util.concurrent.atomic.AtomicBoolean firstChunk) {
         if (segment instanceof TelegramOutboundPlanner.TextSegment(String markdown)) {
-            return sendTextSegment(channel, chatId, markdown);
+            return sendTextSegment(channel, chatId, markdown, replyToMessageId, threadId, firstChunk);
         }
         if (segment instanceof TelegramOutboundPlanner.FileSegment fs) {
             // JCLAW-126: the quality-duplicate document emit (same file as
@@ -431,11 +572,18 @@ public class TelegramChannel implements Channel {
             // has already been delivered by the time the background upload
             // might fail, so a late error can't retroactively fail the turn.
             if (fs.isBackground()) {
+                // JCLAW-369: snapshot whether this background segment owns the
+                // first chunk before the VT detaches — the AtomicBoolean is
+                // shared turn state and would otherwise race with later
+                // foreground segments.
+                boolean ownsFirst = firstChunk.getAndSet(false);
                 Thread.ofVirtual().name("telegram-bg-send")
-                        .start(() -> backgroundSendFile(channel, chatId, fs));
+                        .start(() -> backgroundSendFile(channel, chatId, fs,
+                                replyToMessageId, threadId, ownsFirst));
                 return true;
             }
-            return sendFileSegment(channel, chatId, fs);
+            return sendFileSegment(channel, chatId, fs, replyToMessageId, threadId,
+                    firstChunk.getAndSet(false));
         }
         return true;
     }
@@ -447,9 +595,11 @@ public class TelegramChannel implements Channel {
     // the turn's success — we just log and drop.
     @SuppressWarnings("java:S1181")
     private static void backgroundSendFile(TelegramChannel channel, String chatId,
-                                            TelegramOutboundPlanner.FileSegment fs) {
+                                            TelegramOutboundPlanner.FileSegment fs,
+                                            Integer replyToMessageId, Integer threadId,
+                                            boolean firstChunk) {
         try {
-            if (!sendFileSegment(channel, chatId, fs)) {
+            if (!sendFileSegment(channel, chatId, fs, replyToMessageId, threadId, firstChunk)) {
                 EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                         "Background file send failed (non-blocking): %s"
                                 .formatted(fs.displayName()));
@@ -465,27 +615,39 @@ public class TelegramChannel implements Channel {
      * Render a markdown text segment through the formatter and dispatch its
      * chunks. Blank segments (e.g. the whitespace between two adjacent file
      * references) are no-ops so we don't fire off empty sendMessage calls.
+     *
+     * <p>JCLAW-369: each chunk carries the turn's reply target + topic thread;
+     * {@code firstChunk} is consumed (set false) on the first non-blank chunk
+     * actually put on the wire so the {@code first} reply-mode badges exactly
+     * one message of the turn.
      */
-    private static boolean sendTextSegment(TelegramChannel channel, String chatId, String markdown) {
+    private static boolean sendTextSegment(TelegramChannel channel, String chatId, String markdown,
+                                           Integer replyToMessageId, Integer threadId,
+                                           java.util.concurrent.atomic.AtomicBoolean firstChunk) {
         if (markdown == null || markdown.isBlank()) return true;
         var html = TelegramMarkdownFormatter.toHtml(markdown);
         if (html.isBlank()) return true;
         var chunks = TelegramMarkdownFormatter.chunkHtml(html, 4000);
         boolean allOk = true;
         for (var part : chunks) {
-            if (!channel.sendWithRetry(chatId, part)) allOk = false;
+            boolean ownsFirst = firstChunk.getAndSet(false);
+            var reply = replyParamsFor(replyToMessageId, ownsFirst);
+            if (!channel.sendTextWithRetry(chatId, part, reply, threadId)) allOk = false;
         }
         return allOk;
     }
 
     /** Dispatch a file segment through sendPhoto or sendDocument depending on type. */
     private static boolean sendFileSegment(TelegramChannel channel, String chatId,
-                                            TelegramOutboundPlanner.FileSegment fs) {
+                                            TelegramOutboundPlanner.FileSegment fs,
+                                            Integer replyToMessageId, Integer threadId,
+                                            boolean firstChunk) {
+        var reply = replyParamsFor(replyToMessageId, firstChunk);
         try {
             if (fs.isImage()) {
-                return channel.trySendPhoto(chatId, fs.file(), fs.displayName());
+                return channel.trySendPhoto(chatId, fs.file(), fs.displayName(), reply, threadId);
             }
-            return channel.trySendDocument(chatId, fs.file(), fs.displayName());
+            return channel.trySendDocument(chatId, fs.file(), fs.displayName(), reply, threadId);
         } catch (Exception e) {
             EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
                     "File send failed for %s: %s".formatted(fs.displayName(), e.getMessage()));
@@ -958,10 +1120,24 @@ public class TelegramChannel implements Channel {
      * a separate text message above or below it.
      */
     public boolean trySendPhoto(String peerId, java.io.File file, String displayName) {
-        var request = SendPhoto.builder()
+        return trySendPhoto(peerId, file, displayName, null, null);
+    }
+
+    /**
+     * JCLAW-369: reply-targeting + topic-aware photo upload. {@code replyParams}
+     * (null to omit) attaches {@code reply_parameters}; {@code messageThreadId}
+     * (already General-stripped by the caller; null to omit) scopes the upload
+     * to a forum topic. The no-extra-args {@link #trySendPhoto(String, java.io.File, String)}
+     * overload preserves the legacy call sites.
+     */
+    public boolean trySendPhoto(String peerId, java.io.File file, String displayName,
+                                ReplyParameters replyParams, Integer messageThreadId) {
+        var builder = SendPhoto.builder()
                 .chatId(peerId)
-                .photo(new InputFile(file, displayName != null ? displayName : file.getName()))
-                .build();
+                .photo(new InputFile(file, displayName != null ? displayName : file.getName()));
+        if (replyParams != null) builder.replyParameters(replyParams);
+        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        var request = builder.build();
         // JCLAW-126: explicit upload timing so we can pinpoint slowdowns.
         // Format: elapsedMs, file size in bytes. Together with the matching
         // warn on failure, this bounds the upload wall-clock in the log.
@@ -991,10 +1167,24 @@ public class TelegramChannel implements Channel {
      * anything that isn't one of the image extensions Telegram renders inline.
      */
     public boolean trySendDocument(String peerId, java.io.File file, String displayName) {
-        var request = SendDocument.builder()
+        return trySendDocument(peerId, file, displayName, null, null);
+    }
+
+    /**
+     * JCLAW-369: reply-targeting + topic-aware document upload. Mirrors
+     * {@link #trySendPhoto(String, java.io.File, String, ReplyParameters, Integer)} —
+     * {@code replyParams} / {@code messageThreadId} (both null to omit) attach
+     * {@code reply_parameters} / {@code message_thread_id}. The no-extra-args
+     * overload preserves the legacy call sites.
+     */
+    public boolean trySendDocument(String peerId, java.io.File file, String displayName,
+                                   ReplyParameters replyParams, Integer messageThreadId) {
+        var builder = SendDocument.builder()
                 .chatId(peerId)
-                .document(new InputFile(file, displayName != null ? displayName : file.getName()))
-                .build();
+                .document(new InputFile(file, displayName != null ? displayName : file.getName()));
+        if (replyParams != null) builder.replyParameters(replyParams);
+        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        var request = builder.build();
         long startNs = System.nanoTime();
         long fileSize = file.length();
         try {
@@ -1018,11 +1208,25 @@ public class TelegramChannel implements Channel {
 
     @Override
     public SendResult trySend(String peerId, String text) {
-        var request = SendMessage.builder()
+        return trySend(peerId, text, null, null);
+    }
+
+    /**
+     * JCLAW-369: reply-targeting + topic-aware single text send. {@code replyParams}
+     * (null to omit) attaches {@code reply_parameters}; {@code messageThreadId}
+     * (already General-stripped by the caller; null to omit) scopes the send to a
+     * forum topic. The {@link Channel#trySend(String, String)} override delegates
+     * here with both null so the interface contract is unchanged.
+     */
+    public SendResult trySend(String peerId, String text,
+                              ReplyParameters replyParams, Integer messageThreadId) {
+        var builder = SendMessage.builder()
                 .chatId(peerId)
                 .text(text)
-                .parseMode("HTML")
-                .build();
+                .parseMode("HTML");
+        if (replyParams != null) builder.replyParameters(replyParams);
+        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        var request = builder.build();
         try {
             client.execute(request);
             EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
@@ -1046,6 +1250,38 @@ public class TelegramChannel implements Channel {
         }
     }
 
+    /**
+     * JCLAW-369: reply/topic-aware mirror of {@link Channel#sendWithRetry(String, String)}.
+     * The {@link Channel} default carries only (peerId, text), so the Telegram
+     * text path needs its own single-retry wrapper to forward
+     * {@code reply_parameters} + {@code message_thread_id} on both the first
+     * attempt and the retry. Same back-off policy: the prior
+     * {@link SendResult#retryAfterMs()} when non-zero, else 1 s, capped at 60 s,
+     * scheduled on a platform-thread carrier (JDK-8373224). When both extra args
+     * are null this is behaviorally identical to the inherited default.
+     */
+    boolean sendTextWithRetry(String chatId, String text,
+                              ReplyParameters replyParams, Integer messageThreadId) {
+        SendResult result = trySend(chatId, text, replyParams, messageThreadId);
+        if (result.ok()) return true;
+        long delayMs = Math.min(result.retryAfterMs() > 0 ? result.retryAfterMs() : 1000L, 60_000L);
+        try {
+            // 5 s slack covers the scheduler hop + the second trySend's own latency.
+            boolean ok = utils.RetryScheduler.schedule(
+                            () -> trySend(chatId, text, replyParams, messageThreadId).ok(), delayMs)
+                    .get(delayMs + 5_000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (ok) return true;
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException _) {
+            // Fall through to the error-log branch below.
+        }
+        EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
+                "Failed to send message to %s after retries".formatted(chatId));
+        return false;
+    }
+
     // ── JCLAW-109: inline-keyboard send + callback plumbing ────────────
 
     /**
@@ -1057,15 +1293,32 @@ public class TelegramChannel implements Channel {
      */
     public static Integer sendMessageWithKeyboard(String botToken, String chatId,
                                                    String htmlText, InlineKeyboardMarkup keyboard) {
+        return sendMessageWithKeyboard(botToken, chatId, htmlText, keyboard, null, null);
+    }
+
+    /**
+     * JCLAW-369: reply-targeting + topic-aware keyboard send. {@code replyToMessageId}
+     * (null to omit) is applied per the {@link #replyToMode()} policy treating this
+     * single message as the turn's first chunk ({@code off} → never; {@code first}
+     * / {@code all} → applied, since there is exactly one message). {@code messageThreadId}
+     * (null to omit) is General-stripped before being set. The four-arg overload
+     * preserves the legacy call sites.
+     */
+    public static Integer sendMessageWithKeyboard(String botToken, String chatId,
+                                                   String htmlText, InlineKeyboardMarkup keyboard,
+                                                   Integer replyToMessageId, Integer messageThreadId) {
         var channel = forToken(botToken);
-        var request = SendMessage.builder()
+        var builder = SendMessage.builder()
                 .chatId(chatId)
                 .text(htmlText)
                 .parseMode("HTML")
-                .replyMarkup(keyboard)
-                .build();
+                .replyMarkup(keyboard);
+        var reply = replyParamsFor(replyToMessageId, true);
+        if (reply != null) builder.replyParameters(reply);
+        var threadId = sendThreadId(messageThreadId);
+        if (threadId != null) builder.messageThreadId(threadId);
         try {
-            var msg = channel.client.execute(request);
+            var msg = channel.client.execute(builder.build());
             return msg.getMessageId();
         } catch (TelegramApiException e) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
