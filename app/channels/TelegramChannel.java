@@ -434,7 +434,11 @@ public class TelegramChannel implements Channel {
      */
     public static boolean wasSentByBot(String botToken, String chatId, Integer messageId) {
         if (botToken == null || botToken.isBlank()) return false;
-        return forToken(botToken).wasSentByBot(chatId, messageId);
+        // Read-only lookup: reuse the existing instance only. Do NOT forToken(...) —
+        // that constructs a TelegramChannel (+ OkHttp clients) for an unknown/garbled
+        // token, contradicting the "false on a never-seen token" contract.
+        var ch = INSTANCES.get(botToken);
+        return ch != null && ch.wasSentByBot(chatId, messageId);
     }
 
     /** Instance form of {@link #wasSentByBot(String, String, Integer)}. */

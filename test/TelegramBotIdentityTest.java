@@ -88,6 +88,22 @@ class TelegramBotIdentityTest extends FunctionalTest {
     }
 
     @Test
+    void retriesGetMeAfterAFailureRatherThanCachingTheNull() {
+        // A failed getMe must NOT be cached: a later resolve re-fetches and can pick
+        // up the username once Telegram recovers (else a startup blip permanently
+        // disables mention-by-handle for the bot).
+        server.enqueueResponse("getMe", 401, UNAUTHORIZED); // first call fails
+        server.respondWith("getMe", 200, GET_ME_OK);        // subsequent calls succeed
+        var first = TelegramBotIdentity.resolve(OK_TOKEN);
+        assertNull(first.username(), "first resolve sees the getMe failure → null username");
+        var second = TelegramBotIdentity.resolve(OK_TOKEN);
+        assertEquals("jclaw_id_bot", second.username(),
+                "the failed username must not be cached — the next resolve re-fetches");
+        assertEquals(2, server.countRequests("getMe"),
+                "the failed resolve must retry getMe, not serve a cached null");
+    }
+
+    @Test
     void blankTokenResolvesToEmptyIdentityWithoutApiCall() {
         var identity = TelegramBotIdentity.resolve("   ");
         assertNull(identity.userId());

@@ -39,11 +39,15 @@ public class ToolApprovalGrant extends Model {
      * unique key: a no-op if a row already exists.
      */
     public static void upsert(Agent agent, String toolName) {
-        if (!exists(agent.id, toolName)) {
+        if (exists(agent.id, toolName)) return;
+        try {
             var grant = new ToolApprovalGrant();
             grant.agent = agent;
             grant.toolName = toolName;
             grant.save();
+        } catch (jakarta.persistence.PersistenceException e) {
+            // A concurrent upsert inserted the same (agent, tool) first and the unique
+            // index rejected this one — idempotent, so treat the collision as success.
         }
     }
 }

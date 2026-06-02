@@ -60,6 +60,17 @@ class TelegramApprovalServiceTest extends UnitTest {
     // ── User gating ─────────────────────────────────────────────────────
 
     @Test
+    void nullAuthorizedUserCannotBeResolvedByAnyone() {
+        // A pending approval with no authorized user must FAIL CLOSED — not be
+        // resolvable by an arbitrary tapper (regression guard for the resolve gate).
+        var future = TelegramApprovalService.registerForTest("ap-null", null);
+        var resolution = TelegramApprovalService.resolve("ap-null", Decision.APPROVE_ONCE, USER);
+        assertFalse(resolution.resolved(), "null authorizedUserId must reject the tap");
+        assertFalse(future.isDone(), "the future must stay unresolved");
+        assertTrue(TelegramApprovalService.isPending("ap-null"), "the entry must remain pending");
+    }
+
+    @Test
     void rejectsTapFromWrongUser() {
         var future = TelegramApprovalService.registerForTest("ap3", USER);
 

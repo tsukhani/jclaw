@@ -49,7 +49,19 @@ public final class TelegramBotIdentity {
      */
     public static Identity resolve(String botToken) {
         if (botToken == null || botToken.isBlank()) return new Identity(null, null);
-        return CACHE.computeIfAbsent(botToken, TelegramBotIdentity::resolveUncached);
+        Identity cached = CACHE.get(botToken);
+        if (cached != null) return cached;
+        // Resolve OUTSIDE computeIfAbsent: resolveUncached makes a blocking getMe HTTP
+        // call, which must not run while holding a ConcurrentHashMap bin lock.
+        Identity fresh = resolveUncached(botToken);
+        // Only cache a fully-resolved identity. A null username means getMe failed
+        // (bots always have a username), so leave it uncached and retry next time
+        // rather than permanently disabling mention-by-handle for this token.
+        if (fresh.username() != null) {
+            CACHE.putIfAbsent(botToken, fresh);
+            return CACHE.getOrDefault(botToken, fresh);
+        }
+        return fresh;
     }
 
     /** Test-only: drop the cached identity for {@code botToken} so the next resolve re-fetches. */

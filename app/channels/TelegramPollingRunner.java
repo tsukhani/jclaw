@@ -717,7 +717,10 @@ public final class TelegramPollingRunner {
             if (resolved != null) {
                 var _ = resolved.name; // touch inside tx to avoid detached-proxy access later
             }
-            return resolved;
+            // Fall back to the binding default if a topic-override's agent FK was
+            // orphaned (agent deleted): resolveAgentForTopic returns null then, and a
+            // null agent NPEs in ConversationService downstream.
+            return resolved != null ? resolved : defaultAgent;
         });
     }
 

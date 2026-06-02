@@ -600,9 +600,18 @@ class TelegramOutboundPlannerTest extends UnitTest {
                 .filter(s -> s instanceof TelegramOutboundPlanner.MediaGroupSegment)
                 .map(s -> (TelegramOutboundPlanner.MediaGroupSegment) s)
                 .toList();
-        assertEquals(2, groups.size(), () -> "11 photos must chunk into two albums: " + segments);
-        assertEquals(10, groups.get(0).items().size(), "first album holds 10 (the Telegram cap)");
-        assertEquals(1, groups.get(1).items().size(), "second album holds the remaining 1");
+        assertEquals(1, groups.size(), () -> "11 photos -> one 10-item album + a lone 11th: " + segments);
+        assertEquals(10, groups.get(0).items().size(), "the album holds 10 (the Telegram cap)");
+        // The remaining (11th) photo is a single FOREGROUND FileSegment, NOT a 1-item
+        // group (sendMediaGroup rejects < 2). Background original-quality documents
+        // (JCLAW-123) are emitted per image separately and are excluded here.
+        var foreground = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
+                .map(s -> (TelegramOutboundPlanner.FileSegment) s)
+                .filter(f -> !f.isBackground())
+                .toList();
+        assertEquals(1, foreground.size(), () -> "the 11th photo must be a lone foreground FileSegment: " + segments);
+        assertEquals("p10.png", foreground.get(0).displayName(), "the lone send must be the 11th photo");
     }
 
     @Test

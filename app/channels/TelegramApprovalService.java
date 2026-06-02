@@ -148,7 +148,9 @@ public final class TelegramApprovalService {
             return new Resolution(false, Optional.empty(),
                     "This approval is no longer pending.");
         }
-        if (pending.authorizedUserId() != null && !pending.authorizedUserId().equals(fromId)) {
+        // Fail closed: a null authorizedUserId must reject (not allow anyone). This is
+        // the sole service-level auth check for an approval tap, so it stays a hard gate.
+        if (pending.authorizedUserId() == null || !pending.authorizedUserId().equals(fromId)) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Rejected approval %s tap from user %s: issued for user %s".formatted(
                             approvalId, fromId, pending.authorizedUserId()));
