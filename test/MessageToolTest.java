@@ -1,7 +1,9 @@
 import agents.ToolRegistry;
+import channels.TelegramChannel;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
+import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,20 +27,58 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class MessageToolTest extends UnitTest {
 
+    // JCLAW-374: action capability toggles, reset around each test so a
+    // previous test's override can't leak into the next.
+    private static final String CFG_DELETE = "telegram.actions.delete";
+    private static final String CFG_PIN = "telegram.actions.pin";
+    private static final String CFG_REACT = "telegram.actions.react";
+
+    private static final String BOT_TOKEN = "374:msg-action-bot";
+    private static final String CHAT_ID = "424242";
+
     private Agent agent;
+    private MockTelegramServer server;
 
     @BeforeEach
-    void setup() {
+    void setup() throws Exception {
         Fixtures.deleteDatabase();
         EventLogger.clear();
         ConfigService.clearCache();
+        clearActionConfig();
         new jobs.ToolRegistrationJob().doJob();
         agent = AgentService.create("msg-test", "openrouter", "gpt-4.1");
+        server = new MockTelegramServer();
+        server.start();
+        TelegramChannel.installForTest(BOT_TOKEN, server.telegramUrl());
     }
 
     @AfterEach
     void teardown() {
         EventLogger.clear();
+        clearActionConfig();
+        if (server != null) server.close();
+        TelegramChannel.clearForTest(BOT_TOKEN);
+    }
+
+    private static void clearActionConfig() {
+        play.Play.configuration.remove(CFG_DELETE);
+        play.Play.configuration.remove(CFG_PIN);
+        play.Play.configuration.remove(CFG_REACT);
+    }
+
+    /** Bind {@link #BOT_TOKEN} to {@link #agent} and seed a Telegram
+     *  conversation whose peer is {@link #CHAT_ID}, so the action's chat id
+     *  resolves by inference when no explicit target is passed. */
+    private void seedTelegramBindingAndConversation() {
+        Tx.run(() -> {
+            var b = new TelegramBinding();
+            b.agent = agent;
+            b.botToken = BOT_TOKEN;
+            b.telegramUserId = "u-1";
+            b.enabled = true;
+            b.save();
+            ConversationService.create(agent, "telegram", CHAT_ID);
+        });
     }
 
     @Test
@@ -173,6 +213,133 @@ class MessageToolTest extends UnitTest {
         // We expect a Telegram-shaped error (latest convo), not Slack.
         assertTrue(result.contains("Telegram") || result.contains("telegram"),
                 "should infer most-recent convo (telegram, 999), got: " + result);
+    }
+
+    // ──────── JCLAW-374: Telegram message actions ────────
+
+    @Test
+    void deleteActionCallsDeleteMessageWhenEnabled() throws Exception {
+        // delete defaults ON; chat id inferred from the active telegram convo.
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"delete\",\"message_id\":7}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        assertEquals("delete", parsed.get("action").getAsString());
+        assertEquals(1, server.countRequests("deleteMessage"),
+                "delete must hit the deleteMessage endpoint exactly once");
+    }
+
+    @Test
+    void pinActionCallsPinChatMessageWhenEnabled() throws Exception {
+        // pin defaults OFF — operator must opt in.
+        play.Play.configuration.setProperty(CFG_PIN, "true");
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"pin\",\"message_id\":9}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        assertEquals(1, server.countRequests("pinChatMessage"),
+                "pin must hit the pinChatMessage endpoint exactly once");
+    }
+
+    @Test
+    void unpinActionCallsUnpinChatMessageWhenEnabled() throws Exception {
+        // unpin shares the pin toggle (default OFF).
+        play.Play.configuration.setProperty(CFG_PIN, "true");
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"unpin\",\"message_id\":9}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        assertEquals(1, server.countRequests("unpinChatMessage"),
+                "unpin must hit the unpinChatMessage endpoint exactly once");
+    }
+
+    @Test
+    void reactActionCallsSetMessageReactionWithEmojiWhenEnabled() throws Exception {
+        // react defaults ON; the emoji must reach the wire body.
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"react\",\"message_id\":11,\"emoji\":\"👍\"}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        assertEquals(1, server.countRequests("setMessageReaction"),
+                "react must hit the setMessageReaction endpoint once");
+        var body = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("setMessageReaction"))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .reduce("", (a, b) -> a + b);
+        assertTrue(body.contains("👍"),
+                "the chosen emoji must appear in the setMessageReaction body: " + body);
+    }
+
+    @Test
+    void reactActionWithBlankEmojiClearsReaction() throws Exception {
+        // A blank emoji clears the bot's reaction — the SDK sends an empty
+        // reaction list; the request still hits setMessageReaction.
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"react\",\"message_id\":12,\"emoji\":\"\"}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        assertEquals(1, server.countRequests("setMessageReaction"),
+                "clear-react must still hit setMessageReaction once");
+    }
+
+    @Test
+    void disabledDeleteIsRefusedWithoutApiCall() throws Exception {
+        play.Play.configuration.setProperty(CFG_DELETE, "false");
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"delete\",\"message_id\":7}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("not-enabled", parsed.get("status").getAsString(), result);
+        assertEquals(0, server.countRequests("deleteMessage"),
+                "a disabled delete must NOT touch the Telegram API");
+    }
+
+    @Test
+    void disabledPinByDefaultIsRefusedWithoutApiCall() throws Exception {
+        // No config override — pin defaults OFF, so it should be refused.
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"pin\",\"message_id\":9}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("not-enabled", parsed.get("status").getAsString(),
+                "pin must default to disabled: " + result);
+        assertEquals(0, server.countRequests("pinChatMessage"),
+                "a disabled pin must NOT touch the Telegram API");
+    }
+
+    @Test
+    void telegramActionMissingMessageIdReturnsError() throws Exception {
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id, "{\"action\":\"delete\"}");
+        assertTrue(result.startsWith("Error: 'message_id' is required"), result);
+    }
+
+    @Test
+    void telegramActionWithExplicitTargetUsesIt() throws Exception {
+        // No conversation seeded — only the binding. Explicit target supplies
+        // the chat id, proving target overrides inference.
+        Tx.run(() -> {
+            var b = new TelegramBinding();
+            b.agent = agent;
+            b.botToken = BOT_TOKEN;
+            b.telegramUserId = "u-1";
+            b.enabled = true;
+            b.save();
+        });
+        var result = invokeTool(agent.id,
+                "{\"action\":\"delete\",\"message_id\":7,\"target\":\"" + CHAT_ID + "\"}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        assertEquals(1, server.countRequests("deleteMessage"));
+    }
+
+    @Test
+    void telegramActionWithoutBindingReturnsError() throws Exception {
+        // Conversation present (so chat id resolves) but no binding at all.
+        Tx.run(() -> ConversationService.create(agent, "telegram", CHAT_ID));
+        var result = invokeTool(agent.id, "{\"action\":\"delete\",\"message_id\":7}");
+        assertTrue(result.startsWith("Error: no Telegram bot is connected"), result);
+        assertEquals(0, server.countRequests("deleteMessage"));
     }
 
     // ──────── helpers ────────
