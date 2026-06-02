@@ -33,6 +33,17 @@ public final class TelegramCallbackDispatcher {
     public static void dispatch(String botToken, Agent agent, InboundCallback cb) {
         if (cb == null) return;
 
+        // JCLAW-387 C2: operator scope gate. When the incoming callback's chat
+        // type isn't permitted by telegram.keyboardScope, ack so Telegram
+        // dismisses the spinner (still inside the three-second SLA) and stop
+        // before any handler runs. This alone neutralizes a disallowed-scope
+        // keyboard — taps are inert and the user is told why.
+        if (!keyboardScopeAllows(cb.chatType())) {
+            TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(),
+                    "Interactive buttons are disabled in this chat.", true);
+            return;
+        }
+
         // Generic approve/deny workflow (JCLAW-373). Its callback_data uses
         // the disjoint "a:" namespace, so try it before the "m:" model
         // selector. Resolution gates on the bound user id internally.
@@ -74,6 +85,41 @@ public final class TelegramCallbackDispatcher {
             case CANCEL -> handleCancel(botToken, cb);
             case DETAILS -> handleDetails(botToken, agent, cb, conversation);
         }
+    }
+
+    /**
+     * JCLAW-387 C2: is an interactive inline keyboard permitted in a chat of
+     * the given Telegram {@code chatType}? Driven by
+     * {@code telegram.keyboardScope} (default {@code all}):
+     *
+     * <ul>
+     *   <li>{@code off}   — no chat type is permitted.</li>
+     *   <li>{@code dm}    — only {@code private} chats.</li>
+     *   <li>{@code group} — only {@code group} / {@code supergroup} chats.</li>
+     *   <li>{@code all}   — any chat type (the default; also the value used
+     *       for any unrecognized config string, so a typo fails open to the
+     *       current behavior rather than silently disabling all keyboards).</li>
+     * </ul>
+     *
+     * <p>For the restrictive scopes ({@code dm}, {@code group}) a null or
+     * unknown {@code chatType} can't be confirmed to match, so it's rejected.
+     * Under {@code all} the chat type is irrelevant and always permitted.
+     *
+     * <p>Exposed {@code public} so keyboard <em>send</em> sites
+     * (TelegramModelSelector / approval services) can suppress offering a
+     * keyboard up front; the dispatcher uses it as the inbound gate.
+     */
+    public static boolean keyboardScopeAllows(String chatType) {
+        String scope = play.Play.configuration
+                .getProperty("telegram.keyboardScope", "all")
+                .trim().toLowerCase();
+        return switch (scope) {
+            case "off" -> false;
+            case "dm" -> "private".equals(chatType);
+            case "group" -> "group".equals(chatType) || "supergroup".equals(chatType);
+            // "all" and any unrecognized value fail open to current behavior.
+            default -> true;
+        };
     }
 
     /**
