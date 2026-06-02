@@ -1,3 +1,4 @@
+import channels.TelegramChannel;
 import channels.TelegramStreamingSink;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -543,6 +544,62 @@ class TelegramStreamingSinkTest extends UnitTest {
         sink.errorFallback(new RuntimeException("boom"));
         assertFalse(sink.typingHeartbeatActiveForTest(),
                 "errorFallback must cancel the typing heartbeat");
+    }
+
+    // === JCLAW-342: typing heartbeat robustness (TTL + 401 circuit-breaker) ===
+
+    @Test
+    void typingHeartbeatSelfStopsAtTtl() throws InterruptedException {
+        // With a zero TTL the heartbeat must self-cancel on its first tick even
+        // though seal()/cancel() never fire — the safety net for a turn that
+        // hangs without ever sealing.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.setTypingHeartbeatMaxMsForTest(0);
+        sink.startTypingHeartbeat();
+
+        boolean stopped = false;
+        for (int i = 0; i < 40; i++) {
+            if (!sink.typingHeartbeatActiveForTest()) { stopped = true; break; }
+            Thread.sleep(50);
+        }
+        assertTrue(stopped, "heartbeat must self-stop once the TTL elapses, even without seal()");
+    }
+
+    @Test
+    void typingHeartbeatStopsAfterConsecutive401s() {
+        // A revoked/invalid token 401s on every sendChatAction; after
+        // TYPING_AUTH_FAILURE_LIMIT consecutive 401s the heartbeat must stop for
+        // the turn instead of spamming every ~4s. chatId=null makes the real
+        // heartbeat tick a SKIPPED no-op, so the counter seam is deterministic.
+        var sink = new TelegramStreamingSink("tok", null, null);
+        sink.startTypingHeartbeat();
+        assertTrue(sink.typingHeartbeatActiveForTest());
+
+        for (int i = 0; i < TelegramStreamingSink.TYPING_AUTH_FAILURE_LIMIT; i++) {
+            sink.recordTypingOutcome(TelegramChannel.TypingActionOutcome.UNAUTHORIZED);
+        }
+        assertFalse(sink.typingHeartbeatActiveForTest(),
+                "consecutive 401s must stop the heartbeat for the turn");
+    }
+
+    @Test
+    void successfulTypingSendResets401Counter() {
+        // A SENT outcome between 401s resets the consecutive counter, so
+        // isolated/transient 401s never trip the breaker. chatId=null keeps the
+        // real tick a SKIPPED no-op (deterministic).
+        var sink = new TelegramStreamingSink("tok", null, null);
+        sink.startTypingHeartbeat();
+
+        int belowLimit = TelegramStreamingSink.TYPING_AUTH_FAILURE_LIMIT - 1;
+        for (int i = 0; i < belowLimit; i++) {
+            sink.recordTypingOutcome(TelegramChannel.TypingActionOutcome.UNAUTHORIZED);
+        }
+        sink.recordTypingOutcome(TelegramChannel.TypingActionOutcome.SENT); // resets the run
+        for (int i = 0; i < belowLimit; i++) {
+            sink.recordTypingOutcome(TelegramChannel.TypingActionOutcome.UNAUTHORIZED);
+        }
+        assertTrue(sink.typingHeartbeatActiveForTest(),
+                "a SENT reset between 401 bursts must keep the breaker below its limit");
     }
 
     @Test

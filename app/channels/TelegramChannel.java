@@ -806,20 +806,34 @@ public class TelegramChannel implements Channel {
      * thread id. Null preserves the non-topic behavior. Existing callers route
      * through {@link #sendTypingAction(String, String)} (thread id null).
      */
-    public static void sendTypingAction(String botToken, String chatId, Integer messageThreadId) {
-        if (botToken == null || chatId == null) return;
+    public static TypingActionOutcome sendTypingAction(String botToken, String chatId, Integer messageThreadId) {
+        if (botToken == null || chatId == null) return TypingActionOutcome.SKIPPED;
         try {
             var builder = org.telegram.telegrambots.meta.api.methods.send.SendChatAction.builder()
                     .chatId(chatId)
                     .action("typing");
             if (messageThreadId != null) builder.messageThreadId(messageThreadId);
             forToken(botToken).client.execute(builder.build());
+            return TypingActionOutcome.SENT;
         } catch (Exception e) {
+            // JCLAW-342: distinguish a 401 (revoked/invalid token — the caller
+            // should stop re-firing) from a transient failure (network blip,
+            // chat deleted — safe to keep trying). Still never throws.
+            boolean unauthorized = e instanceof TelegramApiRequestException tare
+                    && tare.getErrorCode() != null && tare.getErrorCode() == 401;
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "sendChatAction(typing) failed for chat %s: %s"
                             .formatted(chatId, e.getMessage()));
+            return unauthorized ? TypingActionOutcome.UNAUTHORIZED : TypingActionOutcome.FAILED;
         }
     }
+
+    /**
+     * JCLAW-342: outcome of a {@link #sendTypingAction} call, so the streaming
+     * sink's typing heartbeat can stop re-firing after repeated 401s instead of
+     * spamming {@code sendChatAction} every tick for a revoked/invalid token.
+     */
+    public enum TypingActionOutcome { SENT, UNAUTHORIZED, FAILED, SKIPPED }
 
     @Override
     public String channelName() { return CHANNEL_NAME; }

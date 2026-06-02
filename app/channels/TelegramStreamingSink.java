@@ -20,6 +20,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
@@ -224,8 +225,32 @@ public final class TelegramStreamingSink {
      */
     private static final long TYPING_HEARTBEAT_MS = 4_000;
 
+    /**
+     * JCLAW-342: hard cap on the typing heartbeat's total lifetime. The
+     * heartbeat is normally cancelled at seal / onCancel; this TTL is the
+     * safety net for a turn that hangs without ever sealing, so the indicator
+     * can't run forever. OpenClaw's typing driver uses 60s.
+     */
+    private static final long TYPING_HEARTBEAT_MAX_MS = 60_000;
+
+    /**
+     * JCLAW-342: stop the heartbeat after this many consecutive sendChatAction
+     * 401s in one turn — a revoked/invalid token otherwise 401-spams every
+     * {@value #TYPING_HEARTBEAT_MS}ms for the whole turn. Public so the
+     * default-package unit test can reference the threshold.
+     */
+    public static final int TYPING_AUTH_FAILURE_LIMIT = 3;
+
     /** Scheduled handle for the typing-heartbeat task, or null if not running. */
     private ScheduledFuture<?> typingHeartbeat;
+
+    /** JCLAW-342: per-sink heartbeat TTL; defaults to {@link #TYPING_HEARTBEAT_MAX_MS},
+     *  lowered by tests via {@link #setTypingHeartbeatMaxMsForTest(long)}. */
+    private volatile long typingHeartbeatMaxMs = TYPING_HEARTBEAT_MAX_MS;
+
+    /** JCLAW-342: consecutive sendChatAction 401s in the current heartbeat run;
+     *  reset on (re)start and on a successful send. */
+    private final AtomicInteger consecutiveTypingAuthFailures = new AtomicInteger();
 
     /**
      * Test-friendly constructor: no conversation id, so checkpoint
@@ -565,6 +590,12 @@ public final class TelegramStreamingSink {
         stateLock.lock();
         try {
             if (typingHeartbeat != null && !typingHeartbeat.isDone()) return;
+            consecutiveTypingAuthFailures.set(0); // JCLAW-342: fresh run
+            // JCLAW-342: hard TTL — the heartbeat self-stops after
+            // typingHeartbeatMaxMs even if seal()/onCancel never fires, so a
+            // hung turn can't leave the "typing…" indicator running forever.
+            final long deadlineNanos = System.nanoTime()
+                    + TimeUnit.MILLISECONDS.toNanos(typingHeartbeatMaxMs);
             // initialDelay=0 so the indicator shows up on the first tick
             // without a 4s wait, but still lives inside the tracked future
             // (not a separate fire-and-forget VT) — so a fast-path cancel
@@ -572,12 +603,21 @@ public final class TelegramStreamingSink {
             // hasn't landed yet. Each tick spawns a VT so the scheduler
             // thread stays free for other sinks' flushes.
             typingHeartbeat = scheduler().scheduleAtFixedRate(
-                    // JCLAW-369: scope the typing indicator to the forum topic
-                    // when present. Unlike sends, the chat-action API accepts
-                    // the General topic (thread id 1), so pass messageThreadId
-                    // straight through without the General strip.
-                    () -> Thread.ofVirtual().name("telegram-typing").start(() ->
-                            TelegramChannel.sendTypingAction(botToken, chatId, messageThreadId)),
+                    () -> {
+                        if (System.nanoTime() >= deadlineNanos) {
+                            cancelTypingHeartbeatLocked(); // JCLAW-342: TTL reached
+                            return;
+                        }
+                        // JCLAW-369: scope the typing indicator to the forum
+                        // topic when present. Unlike sends, the chat-action API
+                        // accepts the General topic (thread id 1), so pass
+                        // messageThreadId straight through without the General
+                        // strip. JCLAW-342: record the outcome so repeated 401s
+                        // stop the heartbeat instead of spamming every tick.
+                        Thread.ofVirtual().name("telegram-typing").start(() ->
+                                recordTypingOutcome(TelegramChannel.sendTypingAction(
+                                        botToken, chatId, messageThreadId)));
+                    },
                     0L, TYPING_HEARTBEAT_MS, TimeUnit.MILLISECONDS);
         } finally {
             stateLock.unlock();
@@ -595,6 +635,34 @@ public final class TelegramStreamingSink {
         } finally {
             stateLock.unlock();
         }
+    }
+
+    /**
+     * JCLAW-342: react to a typing-send outcome reported by the heartbeat VT.
+     * Counts consecutive 401s and stops the heartbeat for this turn once
+     * {@link #TYPING_AUTH_FAILURE_LIMIT} is hit (a revoked/invalid token
+     * otherwise 401-spams {@code sendChatAction} every tick); a successful send
+     * resets the counter, and a transient failure leaves it unchanged.
+     * Public so the default-package unit test can drive the breaker without
+     * live Bot API calls.
+     */
+    public void recordTypingOutcome(TelegramChannel.TypingActionOutcome outcome) {
+        if (outcome == TelegramChannel.TypingActionOutcome.UNAUTHORIZED) {
+            if (consecutiveTypingAuthFailures.incrementAndGet() >= TYPING_AUTH_FAILURE_LIMIT) {
+                EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
+                        "Stopping typing heartbeat after %d consecutive sendChatAction 401s (chat %s)"
+                                .formatted(TYPING_AUTH_FAILURE_LIMIT, chatId));
+                cancelTypingHeartbeatLocked();
+            }
+        } else if (outcome == TelegramChannel.TypingActionOutcome.SENT) {
+            consecutiveTypingAuthFailures.set(0);
+        }
+    }
+
+    /** Visible for tests: lower the heartbeat TTL so the self-stop path is
+     *  exercisable without a 60s wait (JCLAW-342). */
+    public void setTypingHeartbeatMaxMsForTest(long ms) {
+        this.typingHeartbeatMaxMs = ms;
     }
 
     // ── JCLAW-375: ack-reaction lifecycle ──────────────────────────────
