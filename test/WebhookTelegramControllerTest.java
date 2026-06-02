@@ -1,8 +1,10 @@
 import channels.ChannelTransport;
 import channels.TelegramBotIdentityTestHooks;
 import channels.TelegramChannel;
+import controllers.WebhookTelegramController;
 import models.Agent;
 import models.TelegramBinding;
+import models.TelegramTopicBinding;
 import org.junit.jupiter.api.*;
 import play.test.*;
 import services.EventLogger;
@@ -304,5 +306,79 @@ class WebhookTelegramControllerTest extends FunctionalTest {
                 + "}}";
         var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
         assertEquals(200, response.status.intValue());
+    }
+
+    // ===== JCLAW-377: per-topic agent routing at the dispatch site =====
+    //
+    // The accepted-message dispatch path spawns a virtual thread that streams
+    // through TelegramChannel against api.telegram.org, so we can't assert on a
+    // full 200-dispatch here without leaking network. Instead we exercise the
+    // private helper resolveTopicAgent(token, chatId, threadId, defaultAgent) —
+    // the exact call processMessage() makes before handing off to
+    // AgentRunner.processInboundForAgentStreaming. Invoked reflectively so no
+    // production-only test seam is added.
+
+    private static Agent invokeResolveTopicAgent(String token, String chatId,
+                                                 Integer threadId, Agent defaultAgent) {
+        try {
+            var m = WebhookTelegramController.class.getDeclaredMethod(
+                    "resolveTopicAgent", String.class, String.class, Integer.class, Agent.class);
+            m.setAccessible(true);
+            return (Agent) m.invoke(null, token, chatId, threadId, defaultAgent);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Seed a (chatId, threadId) override row mapping the topic to {@code overrideAgent}. */
+    private void seedTopicOverride(Long bindingId, String chatId, Integer threadId, String overrideAgentName) {
+        commitInFreshTx(() -> {
+            var overrideAgent = new Agent();
+            overrideAgent.name = overrideAgentName;
+            overrideAgent.modelProvider = "openrouter";
+            overrideAgent.modelId = "gpt-4.1";
+            overrideAgent.enabled = true;
+            overrideAgent.save();
+
+            var t = new TelegramTopicBinding();
+            t.binding = TelegramBinding.findById(bindingId);
+            t.chatId = chatId;
+            t.threadId = threadId;
+            t.agent = overrideAgent;
+            t.save();
+            return null;
+        });
+    }
+
+    @Test
+    void resolveTopicAgentRoutesMappedTopicToOverrideAgent() {
+        var bindingId = seedBinding(true);
+        seedTopicOverride(bindingId, "-100377", 7, "webhook-topic-override");
+
+        Agent defaultAgent = commitInFreshTx(() ->
+                ((TelegramBinding) TelegramBinding.findById(bindingId)).agent);
+        Agent resolved = invokeResolveTopicAgent(BOT_TOKEN, "-100377", 7, defaultAgent);
+
+        assertEquals("webhook-topic-override", resolved.name,
+                "a mapped (chatId, threadId) must route to the per-topic override agent");
+    }
+
+    @Test
+    void resolveTopicAgentFallsBackToDefaultForUnmappedTopicAndDm() {
+        var bindingId = seedBinding(true);
+        seedTopicOverride(bindingId, "-100377", 7, "webhook-fallback-override");
+
+        Agent defaultAgent = commitInFreshTx(() ->
+                ((TelegramBinding) TelegramBinding.findById(bindingId)).agent);
+
+        // Same chat, different (unmapped) topic → default.
+        Agent unmapped = invokeResolveTopicAgent(BOT_TOKEN, "-100377", 99, defaultAgent);
+        assertEquals("tg-webhook-agent", unmapped.name,
+                "an unmapped topic must fall back to the binding default agent");
+
+        // DM / non-topic message (null threadId) → default, even with an override on the chat.
+        Agent dm = invokeResolveTopicAgent(BOT_TOKEN, "-100377", null, defaultAgent);
+        assertEquals("tg-webhook-agent", dm.name,
+                "a non-topic message (null threadId) must use the binding default agent");
     }
 }

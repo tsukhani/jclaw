@@ -680,8 +680,13 @@ public final class TelegramPollingRunner {
                         ownerKey, sendChatType, sendChatId, merged.messageThreadId());
                 final String attributedText = AgentRunner.telegramSenderAttributed(
                         merged.text(), sendChatType, merged.fromDisplayName(), merged.fromId());
+                // JCLAW-377: route a forum-topic message to its per-topic override
+                // agent when one is mapped; falls back to the binding default for
+                // non-topic / unmapped messages. peerId + sink are unchanged — only
+                // which agent runs the turn changes.
+                final Agent runAgent = resolveTopicAgent(sendToken, sendChatId, merged.messageThreadId(), sendAgent);
                 AgentRunner.processInboundForAgentStreaming(
-                        sendAgent, LOG_SOURCE, peerId, attributedText,
+                        runAgent, LOG_SOURCE, peerId, attributedText,
                         convId -> new TelegramStreamingSink(
                                 sendToken, sendChatId, sendAgent, convId, sendChatType,
                                 merged.messageId(), merged.messageThreadId()),
@@ -690,6 +695,29 @@ public final class TelegramPollingRunner {
                 EventLogger.error(LOG_CATEGORY, sendAgent != null ? sendAgent.name : null,
                         LOG_SOURCE, "Polling dispatch error: %s".formatted(e.getMessage()));
             }
+        });
+    }
+
+    /**
+     * JCLAW-377: resolve which agent should run a turn for {@code (chatId,
+     * threadId)}. Reads the binding by its bot token and delegates to
+     * {@link TelegramBinding#resolveAgentForTopic} — returning the per-topic
+     * override agent when mapped, otherwise the binding's default. The read
+     * runs in a {@link services.Tx} (the dispatch virtual thread has no ambient
+     * JPA transaction), and the resolved agent's name is touched eagerly to
+     * avoid detached-proxy access on the streaming path. Falls back to
+     * {@code defaultAgent} if the binding can't be found (e.g. removed between
+     * receive and dispatch).
+     */
+    private static Agent resolveTopicAgent(String botToken, String chatId, Integer threadId, Agent defaultAgent) {
+        return services.Tx.run(() -> {
+            TelegramBinding binding = TelegramBinding.findByBotToken(botToken);
+            if (binding == null) return defaultAgent;
+            Agent resolved = binding.resolveAgentForTopic(chatId, threadId);
+            if (resolved != null) {
+                var _ = resolved.name; // touch inside tx to avoid detached-proxy access later
+            }
+            return resolved;
         });
     }
 

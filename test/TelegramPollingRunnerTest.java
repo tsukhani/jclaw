@@ -4,6 +4,7 @@ import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
 import models.Agent;
 import models.TelegramBinding;
+import models.TelegramTopicBinding;
 import org.junit.jupiter.api.*;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
@@ -638,6 +639,99 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "private"));
         assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "supergroup"),
                 "all must notify on a group reaction too");
+    }
+
+    // ===== JCLAW-377: per-topic agent routing at the dispatch site =====
+    //
+    // dispatchMerged() runs through the SDK long-poll network path, so the
+    // turn-routing decision is exercised through its private helper
+    // resolveTopicAgent(token, chatId, threadId, defaultAgent) — the exact call
+    // dispatchMerged makes before handing off to
+    // AgentRunner.processInboundForAgentStreaming. Invoked reflectively so no
+    // production-only test seam is added.
+
+    private static Agent invokeResolveTopicAgent(String token, String chatId,
+                                                 Integer threadId, Agent defaultAgent) {
+        try {
+            var m = TelegramPollingRunner.class.getDeclaredMethod(
+                    "resolveTopicAgent", String.class, String.class, Integer.class, Agent.class);
+            m.setAccessible(true);
+            return (Agent) m.invoke(null, token, chatId, threadId, defaultAgent);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Seed a (chatId, threadId) override row mapping the topic to {@code overrideAgent}. */
+    private void seedTopicOverride(Long bindingId, String chatId, Integer threadId, String overrideAgentName) {
+        commitInFreshTx(() -> {
+            var overrideAgent = new Agent();
+            overrideAgent.name = overrideAgentName;
+            overrideAgent.modelProvider = "openrouter";
+            overrideAgent.modelId = "gpt-4.1";
+            overrideAgent.enabled = true;
+            overrideAgent.save();
+
+            var t = new TelegramTopicBinding();
+            t.binding = TelegramBinding.findById(bindingId);
+            t.chatId = chatId;
+            t.threadId = threadId;
+            t.agent = overrideAgent;
+            t.save();
+            return null;
+        });
+    }
+
+    @Test
+    void resolveTopicAgentRoutesMappedTopicToOverrideAgent() {
+        String token = "377:tokMapped";
+        Long bindingId = seedPollingBinding("poll-topic-default", token, "11", true);
+        seedTopicOverride(bindingId, "-100377", 7, "poll-topic-override");
+
+        Agent defaultAgent = commitInFreshTx(() ->
+                ((TelegramBinding) TelegramBinding.findById(bindingId)).agent);
+        Agent resolved = invokeResolveTopicAgent(token, "-100377", 7, defaultAgent);
+
+        assertEquals("poll-topic-override", resolved.name,
+                "a mapped (chatId, threadId) must route to the per-topic override agent");
+    }
+
+    @Test
+    void resolveTopicAgentFallsBackToDefaultForUnmappedTopicAndDm() {
+        String token = "377:tokFallback";
+        Long bindingId = seedPollingBinding("poll-fallback-default", token, "12", true);
+        seedTopicOverride(bindingId, "-100377", 7, "poll-fallback-override");
+
+        Agent defaultAgent = commitInFreshTx(() ->
+                ((TelegramBinding) TelegramBinding.findById(bindingId)).agent);
+
+        // Same chat, different (unmapped) topic → default.
+        Agent unmapped = invokeResolveTopicAgent(token, "-100377", 99, defaultAgent);
+        assertEquals("poll-fallback-default", unmapped.name,
+                "an unmapped topic must fall back to the binding default agent");
+
+        // DM / non-topic message (null threadId) → default, even though an override exists on the chat.
+        Agent dm = invokeResolveTopicAgent(token, "-100377", null, defaultAgent);
+        assertEquals("poll-fallback-default", dm.name,
+                "a non-topic message (null threadId) must use the binding default agent");
+    }
+
+    @Test
+    void resolveTopicAgentFallsBackToSuppliedDefaultWhenBindingMissing() {
+        // If the binding was removed between receive and dispatch, the helper
+        // must not NPE — it returns the agent the caller already has in scope.
+        Agent supplied = commitInFreshTx(() -> {
+            var a = new Agent();
+            a.name = "poll-missing-binding-default";
+            a.modelProvider = "openrouter";
+            a.modelId = "gpt-4.1";
+            a.enabled = true;
+            a.save();
+            return a;
+        });
+        Agent resolved = invokeResolveTopicAgent("377:no-such-token", "-100377", 7, supplied);
+        assertEquals("poll-missing-binding-default", resolved.name,
+                "a missing binding must fall back to the supplied default agent");
     }
 
     // ===== stop() =====

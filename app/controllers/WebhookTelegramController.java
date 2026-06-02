@@ -219,8 +219,13 @@ public class WebhookTelegramController extends Controller {
                     ctx.telegramUserId(), sendChatType, sendChatId, message.messageThreadId());
             final String attributedText = AgentRunner.telegramSenderAttributed(
                     message.text(), sendChatType, message.fromDisplayName(), message.fromId());
+            // JCLAW-377: route a forum-topic message to its per-topic override
+            // agent when one is mapped; falls back to the binding default for
+            // non-topic / unmapped messages. peerId + sink are unchanged — only
+            // which agent runs the turn changes.
+            final Agent runAgent = resolveTopicAgent(sendToken, sendChatId, message.messageThreadId(), sendAgent);
             AgentRunner.processInboundForAgentStreaming(
-                    sendAgent, CHANNEL_TELEGRAM, peerId, attributedText,
+                    runAgent, CHANNEL_TELEGRAM, peerId, attributedText,
                     convId -> new channels.TelegramStreamingSink(
                             sendToken, sendChatId, sendAgent, convId, sendChatType,
                             message.messageId(), message.messageThreadId()),
@@ -231,5 +236,28 @@ public class WebhookTelegramController extends Controller {
             TelegramChannel.sendMessage(sendToken, sendChatId,
                     "Sorry, an error occurred processing your message.");
         }
+    }
+
+    /**
+     * JCLAW-377: resolve which agent should run a turn for {@code (chatId,
+     * threadId)}. Reads the binding by its bot token and delegates to
+     * {@link TelegramBinding#resolveAgentForTopic} — returning the per-topic
+     * override agent when mapped, otherwise the binding's default. The read
+     * runs in a {@link services.Tx} (this runs on an off-request virtual
+     * thread with no ambient JPA transaction), and the resolved agent's name is
+     * touched eagerly to avoid detached-proxy access on the streaming path.
+     * Falls back to {@code defaultAgent} if the binding can't be found (e.g.
+     * removed between receive and dispatch).
+     */
+    private static Agent resolveTopicAgent(String botToken, String chatId, Integer threadId, Agent defaultAgent) {
+        return services.Tx.run(() -> {
+            TelegramBinding binding = TelegramBinding.findByBotToken(botToken);
+            if (binding == null) return defaultAgent;
+            Agent resolved = binding.resolveAgentForTopic(chatId, threadId);
+            if (resolved != null) {
+                var _ = resolved.name; // touch inside tx to avoid detached-proxy access later
+            }
+            return resolved;
+        });
     }
 }
