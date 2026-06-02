@@ -326,7 +326,16 @@ public final class TelegramPollingRunner {
             // parsing stays uncluttered. parseCallback returns null for any
             // non-callback update, so we fall through to the message path below.
             var callback = TelegramChannel.parseCallback(update);
-            var msg = callback == null ? TelegramChannel.parseUpdate(update) : null;
+            // JCLAW-371: resolve the bot's own identity so parseUpdate can
+            // detect an @mention / text_mention / /cmd@botname / reply-to-bot
+            // addressing THIS bot — the group access gate in handleMessage
+            // reads InboundMessage.botMentioned. We only need it for the
+            // message path; callbacks stay owner-only and don't consult it.
+            TelegramChannel.InboundMessage msg = null;
+            if (callback == null) {
+                var identity = TelegramBotIdentity.resolve(ACTIVE.get(bindingId));
+                msg = TelegramChannel.parseUpdate(update, identity.username(), identity.userId());
+            }
             if (callback == null && msg == null) return;
 
             Ctx ctx = loadCtx(bindingId);
@@ -377,11 +386,15 @@ public final class TelegramPollingRunner {
     }
 
     private static void handleMessage(Long bindingId, Ctx ctx, TelegramChannel.InboundMessage msg) {
-        if (!ctx.telegramUserId().equals(msg.fromId())) {
+        // JCLAW-371: DM owner-only; group/supergroup served only when the bot
+        // was directly addressed (msg.botMentioned). See TelegramAccessPolicy.
+        boolean ownerMatches = ctx.telegramUserId().equals(msg.fromId());
+        if (!TelegramAccessPolicy.isAllowed(ownerMatches, msg.chatType(), msg.botMentioned())) {
             EventLogger.warn(LOG_CATEGORY, ctx.agent().name, LOG_SOURCE,
-                    "Rejected inbound from %s (id=%s): binding %d is bound to user %s".formatted(
+                    "Rejected inbound from %s (id=%s) in %s chat: binding %d (owner %s, mentioned=%s)".formatted(
                             msg.fromUsername() != null ? msg.fromUsername() : "?",
-                            msg.fromId(), bindingId, ctx.telegramUserId()));
+                            msg.fromId(), msg.chatType(), bindingId, ctx.telegramUserId(),
+                            msg.botMentioned()));
             return;
         }
 
@@ -392,6 +405,11 @@ public final class TelegramPollingRunner {
 
         final String sendToken = ctx.botToken();
         final Agent sendAgent = ctx.agent();
+        // JCLAW-370 (next wave): for group messages this still keys the
+        // conversation off the binding owner's user id, so every allowed
+        // group turn shares one transcript. Proper per-chat/topic shared
+        // conversation keying lands there; for now we only gate access and
+        // leave the existing dispatch/peerId path unchanged.
         final String userId = ctx.telegramUserId();
         // JCLAW-136: media_group_id reassembly runs BEFORE attachment
         // download + dispatch so multi-photo albums collapse into one

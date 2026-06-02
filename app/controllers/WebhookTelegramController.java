@@ -2,9 +2,11 @@ package controllers;
 
 import agents.AgentRunner;
 import channels.TelegramChannel;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.TelegramBinding;
+import org.telegram.telegrambots.meta.api.objects.Update;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
@@ -25,6 +27,14 @@ public class WebhookTelegramController extends Controller {
 
     private static final String CHANNEL_TELEGRAM = "telegram";
     private static final String CATEGORY_CHANNEL = "channel";
+
+    /**
+     * JCLAW-371: deserialize the webhook JSON body into an SDK {@link Update}
+     * so the identity-aware {@code parseUpdate(Update, username, userId)} overload
+     * can flag whether the bot was directly addressed. The polling path already
+     * receives SDK Updates; this gives the webhook path the same shape.
+     */
+    private static final ObjectMapper JACKSON = new ObjectMapper();
 
     /** Snapshot of the fields {@link #webhook} needs off the request thread. */
     private record BindingCtx(Long bindingId, String botToken, String telegramUserId,
@@ -106,13 +116,20 @@ public class WebhookTelegramController extends Controller {
      * updates, so this falls through cleanly to the message path
      * when the update is a regular text message.
      */
-    private static void dispatchUpdate(BindingCtx ctx, com.google.gson.JsonObject update, Long bindingId) {
-        var callback = TelegramChannel.parseCallback(update);
+    private static void dispatchUpdate(BindingCtx ctx, com.google.gson.JsonObject update, Long bindingId)
+            throws com.fasterxml.jackson.core.JsonProcessingException {
+        Update sdkUpdate = JACKSON.readValue(update.toString(), Update.class);
+        var callback = TelegramChannel.parseCallback(sdkUpdate);
         if (callback != null) {
             handleCallback(ctx, callback, bindingId);
             return;
         }
-        var message = TelegramChannel.parseUpdate(update);
+        // JCLAW-371: resolve the bot's own identity so parseUpdate can flag an
+        // @mention / text_mention / /cmd@botname / reply-to-bot addressing THIS
+        // bot — the group access gate in handleInboundMessage reads
+        // InboundMessage.botMentioned.
+        var identity = channels.TelegramBotIdentity.resolve(ctx.botToken());
+        var message = TelegramChannel.parseUpdate(sdkUpdate, identity.username(), identity.userId());
         if (message == null) return; // non-message update (edited_message, etc.)
         handleInboundMessage(ctx, message, bindingId);
     }
@@ -131,13 +148,17 @@ public class WebhookTelegramController extends Controller {
     }
 
     private static void handleInboundMessage(BindingCtx ctx, TelegramChannel.InboundMessage message, Long bindingId) {
-        // Peer-level authorization: only the bound user may reach this bot.
-        if (!ctx.telegramUserId().equals(message.fromId())) {
+        // JCLAW-371 access policy: a DM is served only for the binding owner; a
+        // group/supergroup is served for any member but only when the bot was
+        // directly addressed (@mention / reply-to-bot etc.). See TelegramAccessPolicy.
+        boolean ownerMatches = ctx.telegramUserId().equals(message.fromId());
+        if (!channels.TelegramAccessPolicy.isAllowed(ownerMatches, message.chatType(), message.botMentioned())) {
             EventLogger.warn(CATEGORY_CHANNEL,
                     ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
-                    "Rejected inbound from %s (id=%s): binding %d is bound to user %s".formatted(
+                    "Rejected inbound from %s (id=%s) in %s chat: binding %d (owner %s, mentioned=%s)".formatted(
                             message.fromUsername() != null ? message.fromUsername() : "?",
-                            message.fromId(), bindingId, ctx.telegramUserId()));
+                            message.fromId(), message.chatType(), bindingId, ctx.telegramUserId(),
+                            message.botMentioned()));
             return;
         }
 
@@ -175,6 +196,10 @@ public class WebhookTelegramController extends Controller {
             // for media-rich / oversize responses. JCLAW-95: the factory
             // defers sink construction until AgentRunner has resolved the
             // conversation id so the sink can persist its checkpoint.
+            // JCLAW-370 (next wave): for an allowed group message this still
+            // keys the conversation off the binding owner's user id, so group
+            // turns share one transcript. Proper per-chat/topic conversation
+            // keying lands there; for now we only gate access here.
             final String sendChatType = message.chatType();
             AgentRunner.processInboundForAgentStreaming(
                     sendAgent, CHANNEL_TELEGRAM, ctx.telegramUserId(), message.text(),

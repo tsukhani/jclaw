@@ -1,0 +1,60 @@
+import channels.TelegramAccessPolicy;
+import org.junit.jupiter.api.*;
+import play.test.*;
+
+/**
+ * Unit coverage for the JCLAW-371 access matrix in {@link TelegramAccessPolicy}.
+ * The four canonical cases the story calls out:
+ *
+ * <ul>
+ *   <li>DM from owner → allowed</li>
+ *   <li>DM from non-owner → rejected</li>
+ *   <li>group message WITH mention → allowed (any member)</li>
+ *   <li>group message WITHOUT mention → ignored</li>
+ * </ul>
+ *
+ * <p>Exercising the pure predicate keeps these network-free; the full HTTP
+ * wiring through the webhook controller is covered (for the rejection branches)
+ * by {@code WebhookTelegramControllerTest}.
+ */
+class TelegramAccessPolicyTest extends UnitTest {
+
+    @Test
+    void dmFromOwnerIsAllowed() {
+        assertTrue(TelegramAccessPolicy.isAllowed(true, "private", false),
+                "owner DM is always served, mention irrelevant");
+    }
+
+    @Test
+    void dmFromNonOwnerIsRejected() {
+        assertFalse(TelegramAccessPolicy.isAllowed(false, "private", true),
+                "a non-owner DM is rejected even if it mentions the bot");
+    }
+
+    @Test
+    void groupMessageWithMentionIsAllowed() {
+        // ownerMatches=false: any group member may address the bot.
+        assertTrue(TelegramAccessPolicy.isAllowed(false, "group", true),
+                "a mention-addressed group message is served regardless of sender");
+        assertTrue(TelegramAccessPolicy.isAllowed(false, "supergroup", true),
+                "supergroups behave like groups");
+    }
+
+    @Test
+    void groupMessageWithoutMentionIsIgnored() {
+        assertFalse(TelegramAccessPolicy.isAllowed(true, "group", false),
+                "unaddressed group chatter is ignored even from the owner");
+        assertFalse(TelegramAccessPolicy.isAllowed(false, "supergroup", false),
+                "unaddressed supergroup chatter is ignored");
+    }
+
+    @Test
+    void unknownChatTypeDefaultsToMentionGated() {
+        // Anything that isn't "private" — including null or "channel" — is
+        // treated as a group: served only when the bot is addressed.
+        assertFalse(TelegramAccessPolicy.isAllowed(true, null, false),
+                "null chat type defaults to the restrictive mention-gated branch");
+        assertTrue(TelegramAccessPolicy.isAllowed(false, "channel", true),
+                "an addressed message in a non-private context is served");
+    }
+}

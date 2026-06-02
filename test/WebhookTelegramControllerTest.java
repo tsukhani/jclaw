@@ -1,4 +1,6 @@
 import channels.ChannelTransport;
+import channels.TelegramBotIdentityTestHooks;
+import channels.TelegramChannel;
 import models.Agent;
 import models.TelegramBinding;
 import org.junit.jupiter.api.*;
@@ -29,11 +31,32 @@ class WebhookTelegramControllerTest extends FunctionalTest {
 
     private static final String SECRET = "telegram-secret-fixture";
     private static final String BOUND_USER_ID = "42";
+    private static final String BOT_TOKEN = "999:bot-fixture";
+
+    private MockTelegramServer server;
 
     @BeforeEach
-    void setup() {
+    void setup() throws Exception {
         Fixtures.deleteDatabase();
         EventLogger.clear();
+        // JCLAW-371: the dispatch path now resolves the bot identity via getMe.
+        // Redirect that call to an embedded mock so no test hits api.telegram.org;
+        // the rejection-branch tests below never spawn the downstream agent path,
+        // but the identity resolve still fires before the gate.
+        server = new MockTelegramServer();
+        server.start();
+        server.respondWith("getMe", 200,
+                "{\"ok\":true,\"result\":{\"id\":999,\"is_bot\":true,"
+                        + "\"first_name\":\"Fixture Bot\",\"username\":\"fixture_bot\"}}");
+        TelegramChannel.installForTest(BOT_TOKEN, server.telegramUrl());
+        TelegramBotIdentityTestHooks.clear(BOT_TOKEN);
+    }
+
+    @AfterEach
+    void teardown() {
+        if (server != null) server.close();
+        TelegramChannel.clearForTest(BOT_TOKEN);
+        TelegramBotIdentityTestHooks.clear(BOT_TOKEN);
     }
 
     private static <T> T commitInFreshTx(Supplier<T> block) {
@@ -149,6 +172,27 @@ class WebhookTelegramControllerTest extends FunctionalTest {
                 + "  \"chat\":{\"id\":100,\"type\":\"private\"},"
                 + "  \"from\":{\"id\":9999999,\"is_bot\":false,\"first_name\":\"Imposter\"},"
                 + "  \"text\":\"hello\""
+                + "}"
+                + "}";
+        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        assertEquals(200, response.status.intValue());
+    }
+
+    @Test
+    void silentlyIgnoresGroupMessageWithoutMention() {
+        // JCLAW-371: a group message that does NOT address the bot is silently
+        // ignored even when it comes from the binding owner — group access is
+        // mention-gated, not owner-gated. Controller returns 200 (no retry) and
+        // never reaches the agent dispatch path.
+        var bindingId = seedBinding(true);
+        var body = "{"
+                + "\"update_id\":1,"
+                + "\"message\":{"
+                + "  \"message_id\":1,"
+                + "  \"date\":1700000000,"
+                + "  \"chat\":{\"id\":-100,\"type\":\"group\"},"
+                + "  \"from\":{\"id\":42,\"is_bot\":false,\"first_name\":\"Owner\"},"
+                + "  \"text\":\"just chatting, not addressing the bot\""
                 + "}"
                 + "}";
         var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
