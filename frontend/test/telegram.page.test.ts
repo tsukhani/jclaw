@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import { nextTick } from 'vue'
 import Telegram from '~/pages/channels/telegram.vue'
@@ -36,7 +37,7 @@ let probeResponse: Record<string, unknown> = {}
 registerEndpoint('/api/agents', () => [AGENT])
 registerEndpoint('/api/channels/telegram/bindings', () => bindingsResponse)
 registerEndpoint('/api/tailscale', () => tailscaleResponse)
-registerEndpoint('/api/channels/telegram/bindings/7/test', () => probeResponse)
+registerEndpoint('/api/channels/telegram/bindings/7/test', { method: 'POST', handler: () => probeResponse })
 
 beforeEach(() => {
   // useFetch caches by URL across mounts; clear so each test re-fetches.
@@ -106,6 +107,7 @@ describe('telegram bindings page — health probe (JCLAW-362)', () => {
     // No result before the probe runs.
     expect(c.find('[data-testid="probe-result-7"]').exists()).toBe(false)
     await c.find('[aria-label="Test binding"]').trigger('click')
+    await flushPromises()
     await nextTick()
     const result = c.find('[data-testid="probe-result-7"]')
     expect(result.exists()).toBe(true)
@@ -127,6 +129,7 @@ describe('telegram bindings page — health probe (JCLAW-362)', () => {
     }
     const c = await mountSuspended(Telegram)
     await c.find('[aria-label="Test binding"]').trigger('click')
+    await flushPromises()
     await nextTick()
     const result = c.find('[data-testid="probe-result-7"]')
     expect(result.exists()).toBe(true)
@@ -148,6 +151,7 @@ describe('telegram bindings page — health probe (JCLAW-362)', () => {
     }
     const c = await mountSuspended(Telegram)
     await c.find('[aria-label="Test binding"]').trigger('click')
+    await flushPromises()
     await nextTick()
     const result = c.find('[data-testid="probe-result-7"]')
     expect(result.text()).toContain('Webhook pending updates:')

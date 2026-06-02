@@ -166,7 +166,7 @@ public final class TelegramWebhookRegistrar {
             me = api.getMe(botToken);
         } catch (Exception e) {
             return new ProbeResult(false, t, null, null, null, null, null,
-                    "getMe failed: " + e.getMessage());
+                    safeReason("getMe", e, botToken));
         }
         String username = me != null ? me.getUserName() : null;
         Long botId = me != null ? me.getId() : null;
@@ -180,9 +180,29 @@ public final class TelegramWebhookRegistrar {
                         null);
             } catch (Exception e) {
                 return new ProbeResult(false, t, username, botId, null, null, null,
-                        "getWebhookInfo failed: " + e.getMessage());
+                        safeReason("getWebhookInfo", e, botToken));
             }
         }
         return new ProbeResult(true, t, username, botId, null, null, null, null);
+    }
+
+    /**
+     * Build a client-safe failure reason. Telegram's own API errors carry no
+     * secrets and are surfaced; any other failure (network/IO) may embed the
+     * request URL, which contains the bot token, so it is logged server-side
+     * (redacted) and replaced with a generic message.
+     */
+    private static String safeReason(String op, Exception e, String botToken) {
+        if (e instanceof org.telegram.telegrambots.meta.exceptions.TelegramApiException) {
+            return op + " failed: " + redact(e.getMessage(), botToken);
+        }
+        EventLogger.warn(CATEGORY, null, CHANNEL,
+                "Telegram probe " + op + " failed: " + redact(e.getMessage(), botToken));
+        return op + " failed: internal error (see server logs)";
+    }
+
+    /** Strip the bot token from a message before it is logged or returned. */
+    private static String redact(String s, String token) {
+        return s == null ? "" : (token == null || token.isEmpty() ? s : s.replace(token, "<token>"));
     }
 }
