@@ -77,16 +77,27 @@ public class TelegramChannel implements Channel {
      * @param mediaGroupId    Telegram media-group identifier when multiple
      *                        attachments are part of one user upload; null for
      *                        single-attachment / text-only messages
+     * @param messageId       JCLAW-368: the inbound {@code message_id}, copied
+     *                        verbatim from the Update so replies/edits can
+     *                        target the originating message. Null when the
+     *                        Update carries no message id.
+     * @param messageThreadId JCLAW-368: the forum-topic thread id
+     *                        ({@code message_thread_id}) when the message lands
+     *                        in a topic ({@code is_topic_message} true); null
+     *                        for plain non-topic messages so a thread id is
+     *                        only carried when Telegram actually scopes the
+     *                        message to a topic.
      */
     public record InboundMessage(String chatId, String chatType, String text,
                                  String fromId, String fromUsername,
                                  String fromDisplayName, boolean botMentioned,
                                  java.util.List<PendingAttachment> attachments,
-                                 String mediaGroupId) {
+                                 String mediaGroupId,
+                                 Integer messageId, Integer messageThreadId) {
         public InboundMessage(String chatId, String chatType, String text,
                               String fromId, String fromUsername) {
             this(chatId, chatType, text, fromId, fromUsername, null, false,
-                    java.util.List.of(), null);
+                    java.util.List.of(), null, null, null);
         }
 
         /**
@@ -94,14 +105,17 @@ public class TelegramChannel implements Channel {
          * carry attachments + media-group context but no per-message sender
          * display name / addressed-bot signal (e.g. the media-group reassembler)
          * use this; {@code fromDisplayName} defaults to null and
-         * {@code botMentioned} to false.
+         * {@code botMentioned} to false. JCLAW-368: {@code messageId} and
+         * {@code messageThreadId} default to null — the merge path that uses
+         * this overload synthesizes one inbound from many and has no single
+         * message id / thread id to attribute.
          */
         public InboundMessage(String chatId, String chatType, String text,
                               String fromId, String fromUsername,
                               java.util.List<PendingAttachment> attachments,
                               String mediaGroupId) {
             this(chatId, chatType, text, fromId, fromUsername, null, false,
-                    attachments, mediaGroupId);
+                    attachments, mediaGroupId, null, null);
         }
     }
 
@@ -686,12 +700,21 @@ public class TelegramChannel implements Channel {
 
         String mediaGroupId = msg.getMediaGroupId();
 
+        // JCLAW-368: capture the inbound message id verbatim, and the
+        // forum-topic thread id only when this message is actually scoped to
+        // a topic. Telegram populates message_thread_id on non-topic replies
+        // too; gating on isTopicMessage keeps the field null for plain
+        // (non-topic) messages, which is the contract this record promises.
+        Integer messageId = msg.getMessageId();
+        Integer messageThreadId = msg.isTopicMessage() ? msg.getMessageThreadId() : null;
+
         // Fully empty updates (no text, no caption, no attachments) are
         // nothing we can act on — drop as before.
         if (text.isEmpty() && attachments.isEmpty()) return null;
 
         return new InboundMessage(chatId, chatType, text, fromId, fromUsername,
-                fromDisplayName, botMentioned, attachments, mediaGroupId);
+                fromDisplayName, botMentioned, attachments, mediaGroupId,
+                messageId, messageThreadId);
     }
 
     /**

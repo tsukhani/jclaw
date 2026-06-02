@@ -259,4 +259,54 @@ class TelegramEntityParseTest extends UnitTest {
         assertTrue(m2.botMentioned(),
                 "best-effort: a reply to any bot fires when our id is unknown");
     }
+
+    // ── JCLAW-368: message_id + message_thread_id capture ────────────────
+
+    @Test
+    void capturesMessageId() throws Exception {
+        var u = update("""
+                {"update_id":1,"message":{"message_id":4242,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":1,
+                  "text":"hello"}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg);
+        assertEquals(Integer.valueOf(4242), msg.messageId(),
+                "message_id must be captured verbatim from the Update");
+    }
+
+    @Test
+    void capturesMessageThreadIdForForumTopicMessage() throws Exception {
+        // A message posted in a forum topic: is_topic_message true and
+        // message_thread_id set to the topic's root message id.
+        var u = update("""
+                {"update_id":1,"message":{"message_id":7,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":1,
+                  "is_topic_message":true,"message_thread_id":99,
+                  "text":"posting in a topic"}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg);
+        assertEquals(Integer.valueOf(7), msg.messageId());
+        assertEquals(Integer.valueOf(99), msg.messageThreadId(),
+                "message_thread_id must be captured for a forum-topic message");
+    }
+
+    @Test
+    void messageThreadIdNullForNonTopicMessage() throws Exception {
+        // Plain group message — no is_topic_message flag, no thread scope.
+        var u = update("""
+                {"update_id":1,"message":{"message_id":8,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":1,
+                  "text":"plain message, no topic"}}
+                """);
+        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
+        assertNotNull(msg);
+        assertEquals(Integer.valueOf(8), msg.messageId());
+        assertNull(msg.messageThreadId(),
+                "message_thread_id must be null for a plain non-topic message");
+    }
 }
