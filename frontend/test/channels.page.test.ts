@@ -42,6 +42,11 @@ describe('channels page — Slack guidance (JCLAW-83) + Tailscale Funnel (JCLAW-
     // JCLAW-341: Assistant feature + scope for the native typing indicator + streaming.
     expect(text).toContain('assistant:write')
     expect(text).toContain('Assistant')
+    // JCLAW-13: the green transcribable values each get a copy-to-clipboard button
+    // (Request URL + every scope/event/setting).
+    const copyButtons = component.findAll('button')
+      .filter(b => (b.attributes('aria-label') ?? '').startsWith('Copy'))
+    expect(copyButtons.length).toBeGreaterThan(5)
   })
 
   it('shows the app-level Tailscale Funnel toggle', async () => {

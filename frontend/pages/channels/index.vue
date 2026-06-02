@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { CheckIcon, ClipboardDocumentIcon } from '@heroicons/vue/24/outline'
 import type { TelegramBindingSummary } from '~/types/api'
 
 interface ChannelInfo {
@@ -172,6 +173,26 @@ const requestUrl = computed(() => {
 })
 const requestUrlViaFunnel = computed(() => requestPath.value !== '' && funnelBaseUrl.value !== '')
 
+// JCLAW-13: copy the transcribable setup values (Request URL, scopes, events) to
+// the clipboard. `copied` holds the most-recently-copied value for a brief check.
+const copied = ref('')
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    copied.value = text
+    if (copiedTimer) {
+      clearTimeout(copiedTimer)
+    }
+    copiedTimer = setTimeout(() => {
+      copied.value = ''
+    }, 1500)
+  }
+  catch {
+    // Clipboard unavailable (insecure context or denied) — no-op.
+  }
+}
+
 const telegramActiveCount = computed(() =>
   (telegramBindings.value ?? []).filter(b => b.enabled).length)
 
@@ -334,7 +355,24 @@ onActivated(() => refreshBindings())
             <span class="block mt-1 font-normal text-fg-muted">
               Set this as the Request URL under Event Subscriptions (live via Tailscale Funnel):
             </span>
-            <code class="block mt-1 font-mono break-all text-emerald-400">{{ requestUrl }}</code>
+            <div class="mt-1 flex items-start gap-2">
+              <code class="font-mono break-all text-emerald-400">{{ requestUrl }}</code>
+              <button
+                type="button"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                :aria-label="copied === requestUrl ? 'Copied' : 'Copy request URL'"
+                @click="copyText(requestUrl)"
+              >
+                <CheckIcon
+                  v-if="copied === requestUrl"
+                  class="h-4 w-4 text-emerald-400"
+                />
+                <ClipboardDocumentIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+              </button>
+            </div>
           </template>
           <template v-else>
             <span class="block mt-1 font-normal text-fg-muted">
@@ -373,7 +411,30 @@ onActivated(() => refreshBindings())
             v-if="g.hint"
             class="block font-normal text-fg-muted"
           >{{ g.hint }}</span>
-          <code class="mt-1 block whitespace-pre-line break-words font-mono text-emerald-400">{{ g.values.join('\n') }}</code>
+          <div class="mt-1 space-y-1">
+            <div
+              v-for="v in g.values"
+              :key="v"
+              class="flex items-start gap-2"
+            >
+              <code class="font-mono break-all text-emerald-400">{{ v }}</code>
+              <button
+                type="button"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                :aria-label="copied === v ? 'Copied' : `Copy ${v}`"
+                @click="copyText(v)"
+              >
+                <CheckIcon
+                  v-if="copied === v"
+                  class="h-4 w-4 text-emerald-400"
+                />
+                <ClipboardDocumentIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="space-y-3">
