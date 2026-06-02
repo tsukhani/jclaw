@@ -1,6 +1,7 @@
 package jobs;
 
 import channels.TelegramChannel;
+import channels.TelegramCommandsHashStore;
 import models.TelegramBinding;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import play.db.jpa.NoTransaction;
@@ -71,10 +72,29 @@ public class TelegramCommandsRegistrationJob extends Job<Void> {
         register(b, toBotCommands());
     }
 
-    /** Register {@code botCommands} for one binding; swallow + log failures. */
+    /**
+     * Register {@code botCommands} for one binding; swallow + log failures.
+     *
+     * <p>JCLAW-387 D1: gate the {@code setMyCommands} call on a persisted per-bot
+     * hash of the command list. The {@code @OnApplicationStart} pass re-runs for
+     * every binding on every boot, but the command set only changes when the
+     * {@code Commands.Command} enum does, so the call is almost always redundant —
+     * and the restart-time burst of redundant calls contributes to Bot API 429s.
+     * When the persisted hash matches the current list we skip the call entirely;
+     * otherwise we call {@code setMyCommands} as before and persist the new hash so
+     * the next restart can skip it. Fail-open: a missing/unreadable hash re-issues
+     * the call, never the reverse.
+     */
     private static void register(TelegramBinding b, List<BotCommand> botCommands) {
         try {
+            if (TelegramCommandsHashStore.shouldSkip(b.botToken, botCommands)) {
+                EventLogger.info("channel", b.agent != null ? b.agent.name : null, "telegram",
+                        "Slash-command set unchanged for binding %d; skipping setMyCommands"
+                                .formatted(b.id));
+                return;
+            }
             TelegramChannel.setMyCommands(b.botToken, botCommands);
+            TelegramCommandsHashStore.record(b.botToken, TelegramCommandsHashStore.hash(botCommands));
             EventLogger.info("channel", b.agent != null ? b.agent.name : null, "telegram",
                     "Registered %d slash command(s) for binding %d"
                             .formatted(botCommands.size(), b.id));
