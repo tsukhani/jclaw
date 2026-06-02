@@ -54,6 +54,12 @@ javadoc/
 .settings/
 .cache-main
 .cache-tests
+# Eclipse Buildship / JDT language-server per-source-set compiled output
+# (.class files + copied resources). Ignore only these subdirs, NOT all of
+# bin/ — bin/jacocoagent.jar, bin/jacococli.jar and bin/coverage-blend.mjs are
+# tracked and referenced by %test.javaagent.path in conf/application.conf.
+bin/main/
+bin/test/
 
 # IntelliJ IDEA
 .idea/
