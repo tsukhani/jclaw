@@ -69,6 +69,14 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final String PARAM_TARGET = "target";
     private static final String PARAM_MESSAGE_ID = "message_id";
     private static final String PARAM_EMOJI = "emoji";
+    // JCLAW-387 (A3): optional excerpt to natively quote on a reply.
+    private static final String PARAM_QUOTE = "quote";
+    // JCLAW-387 (C1): poll question + answer options + optional knobs.
+    private static final String PARAM_QUESTION = "question";
+    private static final String PARAM_OPTIONS = "options";
+    private static final String PARAM_ANONYMOUS = "anonymous";
+    private static final String PARAM_MULTIPLE = "allow_multiple";
+    private static final String PARAM_OPEN_PERIOD = "open_period";
 
     private static final String ACTION_SEND = "send";
     private static final String ACTION_DELETE = "delete";
@@ -77,9 +85,15 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final String ACTION_REACT = "react";
     private static final String ACTION_REPLY = "reply";
     private static final String ACTION_EDIT = "edit";
+    private static final String ACTION_POLL = "poll";
     private static final Set<String> ALLOWED_ACTIONS =
             Set.of(ACTION_SEND, ACTION_DELETE, ACTION_PIN, ACTION_UNPIN,
-                    ACTION_REACT, ACTION_REPLY, ACTION_EDIT);
+                    ACTION_REACT, ACTION_REPLY, ACTION_EDIT, ACTION_POLL);
+
+    // JCLAW-387 (C1): a native poll must carry 2-10 options. Telegram's own cap
+    // is 12, but a 10-option ceiling keeps the agent-facing surface conservative.
+    private static final int MIN_POLL_OPTIONS = 2;
+    private static final int MAX_POLL_OPTIONS = 10;
 
     // JCLAW-374: per-action capability toggles, read from play.Play.configuration
     // (same mechanism as TelegramChannel.replyToMode). Sensible defaults: react
@@ -95,6 +109,10 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final String CFG_ACTION_REACT = "telegram.actions.react";
     private static final String CFG_ACTION_REPLY = "telegram.actions.reply";
     private static final String CFG_ACTION_EDIT = "telegram.actions.edit";
+    // JCLAW-387 (C1): poll posts a native poll to the chat — low blast radius
+    // (it only adds the bot's own message, never mutates anyone else's content),
+    // so it defaults ON like react/delete/reply/edit.
+    private static final String CFG_ACTION_POLL = "telegram.actions.poll";
 
     @Override
     public String name() { return TOOL_NAME; }
@@ -126,7 +144,9 @@ public class MessageTool implements ToolRegistry.Tool {
                 new ToolAction(ACTION_REPLY,
                         "Send a Telegram message as a reply to an existing message_id."),
                 new ToolAction(ACTION_EDIT,
-                        "Edit the text of a bot-sent Telegram message by message_id."));
+                        "Edit the text of a bot-sent Telegram message by message_id."),
+                new ToolAction(ACTION_POLL,
+                        "Post a native Telegram poll (question + 2-10 options) to the chat."));
     }
 
     @Override
@@ -147,11 +167,17 @@ public class MessageTool implements ToolRegistry.Tool {
                 For Telegram message actions `reply` / `edit` / `delete` / `pin` / `unpin` / \
                 `react`: required `message_id` (the Telegram message to act on); the chat is \
                 taken from `target` or the active conversation's peer, and the bot token from \
-                the agent's Telegram binding. `reply` sends `message` as a reply quoting \
-                `message_id`; `edit` replaces a bot-sent message's text with `message`; both \
-                require `message`. `react` takes an optional `emoji` (a blank/omitted emoji \
-                clears the bot's reaction). These actions may be disabled by the operator, in \
-                which case you get a `not-enabled` result.""";
+                the agent's Telegram binding. `reply` sends `message` as a reply to \
+                `message_id`, with an optional `quote` excerpt (a verbatim substring of the \
+                replied-to message) that Telegram highlights above your reply — a non-matching \
+                excerpt is silently dropped and the reply still sends; `edit` replaces a \
+                bot-sent message's text with `message`; both require `message`. `react` takes \
+                an optional `emoji` (a blank/omitted emoji clears the bot's reaction). \
+                For `action="poll"` (Telegram): post a native poll with a required `question` \
+                and `options` (2-10 strings), plus optional `anonymous` (default true), \
+                `allow_multiple` (default false), and `open_period` (seconds, 5-600, before \
+                auto-close). These actions may be disabled by the operator, in which case you \
+                get a `not-enabled` result.""";
     }
 
     @Override
@@ -180,6 +206,33 @@ public class MessageTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION,
                 "Reaction emoji for action=\"react\" (e.g. \"👍\"). "
                         + "Blank or omitted clears the bot's reaction."));
+        props.put(PARAM_QUOTE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "Optional for action=\"reply\": a verbatim excerpt of the replied-to "
+                        + "message to natively quote (Telegram highlights it above your "
+                        + "reply). Must be an exact substring of the target message; if it "
+                        + "isn't, the reply is still sent without the quote. Omit to reply "
+                        + "without a highlighted excerpt."));
+        props.put(PARAM_QUESTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "Poll question for action=\"poll\" (required; 1-300 chars)."));
+        props.put(PARAM_OPTIONS, Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
+                SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
+                SchemaKeys.DESCRIPTION,
+                "Poll answer options for action=\"poll\" (required; 2-10 strings, "
+                        + "each 1-100 chars)."));
+        props.put(PARAM_ANONYMOUS, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                SchemaKeys.DESCRIPTION,
+                "Optional for action=\"poll\": whether votes are anonymous "
+                        + "(default true). Pass false to show who voted for what."));
+        props.put(PARAM_MULTIPLE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                SchemaKeys.DESCRIPTION,
+                "Optional for action=\"poll\": allow voters to pick multiple options "
+                        + "(default false)."));
+        props.put(PARAM_OPEN_PERIOD, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                SchemaKeys.DESCRIPTION,
+                "Optional for action=\"poll\": seconds (5-600) the poll stays open "
+                        + "before auto-closing. Omit to leave it open indefinitely."));
         props.put(PARAM_CHANNEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.ENUM, List.of("telegram", "slack", "whatsapp", "web"),
                 SchemaKeys.DESCRIPTION,
@@ -229,6 +282,11 @@ public class MessageTool implements ToolRegistry.Tool {
             final var finalMessage = message;
             return Tx.run(() -> dispatch(finalCallerId, finalChannel, finalTarget, finalMessage));
         }
+        // JCLAW-387 (C1): poll — a native poll, keyed on question + options
+        // rather than a message_id, so it's handled before the message_id gate.
+        if (ACTION_POLL.equals(normalized)) {
+            return executePoll(finalCallerId, args);
+        }
         // JCLAW-374/381: reply / edit / delete / pin / unpin / react — Telegram
         // message actions, all keyed on message_id.
         var messageId = optInteger(args, PARAM_MESSAGE_ID);
@@ -245,8 +303,44 @@ public class MessageTool implements ToolRegistry.Tool {
         final var finalEmoji = optString(args, PARAM_EMOJI);
         final var finalMessage = text;
         final var finalMessageId = messageId;
+        // JCLAW-387 (A3): optional verbatim excerpt to natively quote on a reply.
+        final var finalQuote = optString(args, PARAM_QUOTE);
         return Tx.run(() -> telegramAction(
-                finalCallerId, normalized, finalTarget, finalMessageId, finalEmoji, finalMessage));
+                finalCallerId, normalized, finalTarget, finalMessageId, finalEmoji,
+                finalMessage, finalQuote));
+    }
+
+    /**
+     * JCLAW-387 (C1): validate + dispatch a {@code poll} action. Gated by
+     * {@link #actionEnabled} like the other Telegram actions (a disabled poll
+     * returns the {@code not-enabled} envelope). Validates a non-blank question
+     * and {@value #MIN_POLL_OPTIONS}-{@value #MAX_POLL_OPTIONS} options before
+     * touching the API, then resolves the bot token + chat id exactly as the
+     * message actions do and calls {@link TelegramChannel#sendPoll}.
+     */
+    private static String executePoll(Long callingAgentId, JsonObject args) {
+        if (!actionEnabled(ACTION_POLL)) {
+            return resultJson(ACTION_POLL, "not-enabled",
+                    "Action '" + ACTION_POLL + "' is disabled by configuration "
+                            + "(" + cfgKeyFor(ACTION_POLL) + ").");
+        }
+        var question = optString(args, PARAM_QUESTION);
+        if (question == null || question.isBlank()) {
+            return "Error: 'question' is required for action 'poll'.";
+        }
+        var options = optStringList(args, PARAM_OPTIONS);
+        if (options.size() < MIN_POLL_OPTIONS || options.size() > MAX_POLL_OPTIONS) {
+            return "Error: 'poll' requires between " + MIN_POLL_OPTIONS + " and "
+                    + MAX_POLL_OPTIONS + " options (got " + options.size() + ").";
+        }
+        final var finalTarget = optString(args, PARAM_TARGET);
+        final var finalQuestion = question;
+        final var finalOptions = options;
+        final var finalAnonymous = optBoolean(args, PARAM_ANONYMOUS);
+        final var finalMultiple = optBoolean(args, PARAM_MULTIPLE);
+        final var finalOpenPeriod = optInteger(args, PARAM_OPEN_PERIOD);
+        return Tx.run(() -> poll(callingAgentId, finalTarget, finalQuestion, finalOptions,
+                finalAnonymous, finalMultiple, finalOpenPeriod));
     }
 
     /** Resolve channel + target (explicit overrides win; otherwise infer from
@@ -313,10 +407,16 @@ public class MessageTool implements ToolRegistry.Tool {
      * {@link TelegramChannel#editMessageText}. Gated per-action by
      * {@link #actionEnabled}: a disabled action returns a {@code not-enabled}
      * envelope without touching the API. Must run inside an active Tx.
+     *
+     * <p>JCLAW-387 (A3): when {@code action="reply"} and {@code quote} is a
+     * non-blank excerpt, the reply natively quotes that span of the target via
+     * {@link TelegramChannel#sendReplyWithQuote} (best-effort: a non-matching
+     * excerpt falls back to a plain reply rather than dropping the message). A
+     * blank/null {@code quote} reproduces today's reply behavior exactly.
      */
     private static String telegramAction(Long callingAgentId, String action,
                                           String explicitTarget, int messageId,
-                                          String emoji, String message) {
+                                          String emoji, String message, String quote) {
         if (!actionEnabled(action)) {
             return resultJson(action, "not-enabled",
                     "Action '" + action + "' is disabled by configuration "
@@ -346,8 +446,11 @@ public class MessageTool implements ToolRegistry.Tool {
             case ACTION_REACT -> TelegramChannel.setMessageReaction(binding.botToken, chatId, messageId, emoji);
             // JCLAW-381: reply = sendMessage with replyToMessageId set (null thread);
             // edit = editMessageText with the new text (null keyboard, no change to markup).
-            case ACTION_REPLY -> TelegramChannel.sendMessage(
-                    binding.botToken, chatId, message, agent, messageId, null);
+            // JCLAW-387 (A3): a non-blank `quote` routes through the quote-aware
+            // reply path (which itself falls back to a plain reply on a quote
+            // mismatch); a blank/null quote keeps the legacy sendMessage path.
+            case ACTION_REPLY -> TelegramChannel.sendReplyWithQuote(
+                    binding.botToken, chatId, message, agent, messageId, quote);
             case ACTION_EDIT -> TelegramChannel.editMessageText(
                     binding.botToken, chatId, messageId, message, null);
             default -> false;
@@ -357,6 +460,42 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         return resultJson(action, "failed",
                 "Telegram API rejected the " + action + " (see logs for details).");
+    }
+
+    /**
+     * JCLAW-387 (C1): resolve the bot token + chat id (same rules as
+     * {@link #telegramAction}) and dispatch a native poll via
+     * {@link TelegramChannel#sendPoll}. The {@code not-enabled} gate and input
+     * validation (non-blank question, 2-10 options) are already applied in
+     * {@link #executePoll} before this runs. Must run inside an active Tx.
+     */
+    private static String poll(Long callingAgentId, String explicitTarget, String question,
+                               java.util.List<String> options, Boolean isAnonymous,
+                               Boolean allowsMultiple, Integer openPeriod) {
+        var agent = (Agent) Agent.findById(callingAgentId);
+        if (agent == null) {
+            return "Error: calling agent " + callingAgentId + " not found.";
+        }
+        var binding = TelegramBinding.findByAgentOrAncestor(agent);
+        if (binding == null) {
+            return "Error: no Telegram bot is connected for agent '" + agent.name
+                    + "' (or any of its ancestors); cannot send a poll.";
+        }
+        if (!binding.enabled) {
+            return "Error: Telegram binding for agent '" + binding.agent.name + "' is disabled.";
+        }
+        String chatId = resolveChatId(agent, explicitTarget);
+        if (chatId == null || chatId.isBlank()) {
+            return "Error: no Telegram chat 'target' was passed and none could be "
+                    + "inferred from the active conversation.";
+        }
+        boolean ok = TelegramChannel.sendPoll(binding.botToken, chatId, question, options,
+                isAnonymous, allowsMultiple, openPeriod);
+        if (ok) {
+            return resultJson(ACTION_POLL, "ok", null);
+        }
+        return resultJson(ACTION_POLL, "failed",
+                "Telegram API rejected the poll (see logs for details).");
     }
 
     /** Chat id for a Telegram action: explicit {@code target} wins, else the
@@ -387,6 +526,7 @@ public class MessageTool implements ToolRegistry.Tool {
             case ACTION_REACT -> CFG_ACTION_REACT;
             case ACTION_REPLY -> CFG_ACTION_REPLY;
             case ACTION_EDIT -> CFG_ACTION_EDIT;
+            case ACTION_POLL -> CFG_ACTION_POLL;
             default -> "telegram.actions." + action;
         };
     }
@@ -415,5 +555,39 @@ public class MessageTool implements ToolRegistry.Tool {
         } catch (NumberFormatException | IllegalStateException e) {
             return null;
         }
+    }
+
+    /** Optional boolean, null when the key is absent/null (so an unset poll knob
+     *  leaves the Bot API default in {@link TelegramChannel#sendPoll}). */
+    private static Boolean optBoolean(JsonObject obj, String key) {
+        var el = obj.get(key);
+        if (el == null || el.isJsonNull()) return null;
+        try {
+            return el.getAsBoolean();
+        } catch (IllegalStateException | UnsupportedOperationException e) {
+            return null;
+        }
+    }
+
+    /**
+     * JCLAW-387 (C1): read {@code key} as a list of non-blank, trimmed strings.
+     * A missing key, a null, or a non-array value yields an empty list so the
+     * caller's 2-10 count check surfaces the clean validation error rather than
+     * a parse exception. Non-string / blank array elements are skipped.
+     */
+    private static java.util.List<String> optStringList(JsonObject obj, String key) {
+        var el = obj.get(key);
+        if (el == null || el.isJsonNull() || !el.isJsonArray()) return java.util.List.of();
+        var out = new java.util.ArrayList<String>();
+        for (var item : el.getAsJsonArray()) {
+            if (item == null || item.isJsonNull()) continue;
+            try {
+                var s = item.getAsString();
+                if (s != null && !s.isBlank()) out.add(s.strip());
+            } catch (IllegalStateException | UnsupportedOperationException ignored) {
+                // Non-primitive array element (e.g. nested object) — skip it.
+            }
+        }
+        return out;
     }
 }

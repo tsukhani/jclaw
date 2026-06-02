@@ -1093,6 +1093,200 @@ class TelegramChannelTest extends UnitTest {
         }
     }
 
+    // ─── JCLAW-387 (A3): native partial-quote reply ─────────────────────
+
+    /** Concatenate every recorded sendPoll body. */
+    private String allSendPollBodies() {
+        StringBuilder sb = new StringBuilder();
+        for (var r : mock.requests()) {
+            if (r.method().equalsIgnoreCase("sendPoll")) sb.append(r.body()).append('\n');
+        }
+        return sb.toString();
+    }
+
+    @Test
+    void sendReplyWithQuote_buildsReplyParametersCarryingQuote() {
+        // A non-blank excerpt must land in reply_parameters.quote alongside the
+        // reply target id, with allow_sending_without_reply so a deleted target
+        // degrades gracefully.
+        String token = "jclaw387-quote-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendReplyWithQuote(
+                    token, "12345", "my answer", null, 55, "the excerpt"));
+            assertEquals(1, mock.countRequests("sendMessage"),
+                    "a successful quote reply must hit sendMessage exactly once");
+            String body = allSendMessageBodies();
+            assertTrue(body.contains("reply_parameters"),
+                    "quote reply must set reply_parameters: " + body);
+            assertTrue(body.contains("\"quote\""),
+                    "reply_parameters.quote must be on the wire: " + body);
+            assertTrue(body.contains("the excerpt"),
+                    "the excerpt text must appear in the body: " + body);
+            assertTrue(body.contains("55"),
+                    "the reply target id must appear in the body: " + body);
+            assertTrue(body.contains("allow_sending_without_reply"),
+                    "allow_sending_without_reply must be set: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendReplyWithQuote_blankQuoteOmitsQuoteField() {
+        // A blank/null excerpt reproduces the ordinary reply path: a reply
+        // target may be set (per replyTo.mode) but NO quote field.
+        String token = "jclaw387-noquote-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendReplyWithQuote(
+                    token, "12345", "plain", null, 55, "   "));
+            assertEquals(1, mock.countRequests("sendMessage"));
+            assertFalse(allSendMessageBodies().contains("\"quote\""),
+                    "a blank excerpt must not put a quote field on the wire");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendReplyWithQuote_fallsBackToPlainReplyOnQuoteRejection() {
+        // Telegram 400s a quote that isn't a verbatim substring of the target.
+        // Script the first sendMessage (the quoted attempt) to 400, then let the
+        // fallback plain reply land on the default 200. The method must return
+        // true (the message landed) and fire a SECOND sendMessage with no quote.
+        String token = "jclaw387-fallback-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.enqueueResponse("sendMessage", 400,
+                    "{\"ok\":false,\"error_code\":400,"
+                            + "\"description\":\"Bad Request: message to be replied not found\"}");
+            assertTrue(TelegramChannel.sendReplyWithQuote(
+                    token, "12345", "still arrives", null, 55, "no such excerpt"),
+                    "a quote-rejection must fall back to a plain reply, not drop the message");
+            assertEquals(2, mock.countRequests("sendMessage"),
+                    "the quoted attempt (400) plus the plain-reply fallback (200) = 2 sends");
+            // The first send carried the quote; the fallback must NOT.
+            var bodies = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .toList();
+            assertTrue(bodies.get(0).contains("\"quote\""),
+                    "the first attempt must carry the quote: " + bodies.get(0));
+            assertFalse(bodies.get(1).contains("\"quote\""),
+                    "the fallback plain reply must NOT carry the quote: " + bodies.get(1));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendReplyWithQuote_nullArgsShortCircuitReturnsFalse() {
+        String token = "jclaw387-quote-null-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertFalse(TelegramChannel.sendReplyWithQuote(null, "c", "t", null, 1, "q"));
+            assertFalse(TelegramChannel.sendReplyWithQuote(token, null, "t", null, 1, "q"));
+            assertFalse(TelegramChannel.sendReplyWithQuote(token, "c", null, null, 1, "q"));
+            assertFalse(TelegramChannel.sendReplyWithQuote(token, "c", "t", null, null, "q"));
+            assertEquals(0, mock.requests().size(),
+                    "null-arg guard must short-circuit before any HTTP call");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── JCLAW-387 (C1): native poll ────────────────────────────────────
+
+    @Test
+    void sendPoll_buildsWellFormedSendPollRequest() {
+        String token = "jclaw387-poll-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendPoll(token, "12345", "Best language?",
+                    java.util.List.of("Java", "Rust", "Go"), null, null, null));
+            assertEquals(1, mock.countRequests("sendPoll"),
+                    "sendPoll must hit the sendPoll endpoint exactly once");
+            String body = allSendPollBodies();
+            assertTrue(body.contains("Best language?"),
+                    "the question must appear in the sendPoll body: " + body);
+            assertTrue(body.contains("Java") && body.contains("Rust") && body.contains("Go"),
+                    "every option must appear in the sendPoll body: " + body);
+            assertTrue(body.contains("12345"),
+                    "the chat id must appear in the sendPoll body: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendPoll_threadsOptionalKnobsOntoTheWire() {
+        String token = "jclaw387-poll-knobs-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendPoll(token, "12345", "Pick any",
+                    java.util.List.of("A", "B"), false, true, 30));
+            String body = allSendPollBodies();
+            assertTrue(body.contains("is_anonymous"),
+                    "isAnonymous must serialize as is_anonymous: " + body);
+            assertTrue(body.contains("allows_multiple_answers"),
+                    "allowsMultipleAnswers must serialize as allows_multiple_answers: " + body);
+            assertTrue(body.contains("open_period") && body.contains("30"),
+                    "openPeriod must be on the wire: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendPoll_omitsUnsetKnobs() {
+        String token = "jclaw387-poll-omit-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendPoll(token, "12345", "Q",
+                    java.util.List.of("A", "B"), null, null, null));
+            String body = allSendPollBodies();
+            assertFalse(body.contains("open_period"),
+                    "a null openPeriod must be omitted: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendPoll_rejectsOutOfRangeOptionCountWithoutApiCall() {
+        String token = "jclaw387-poll-range-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertFalse(TelegramChannel.sendPoll(token, "12345", "Q",
+                    java.util.List.of("only one"), null, null, null),
+                    "a single-option poll must be refused");
+            assertFalse(TelegramChannel.sendPoll(token, "12345", "Q", null, null, null, null),
+                    "a null options list must be refused");
+            assertEquals(0, mock.countRequests("sendPoll"),
+                    "out-of-range option counts must short-circuit before any HTTP call");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendPoll_swallowsExceptionFromServerError() {
+        // A 400 from Telegram must NOT propagate — sendPoll returns false (logged).
+        String token = "jclaw387-poll-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendPoll", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad poll\"}");
+            boolean ok = Assertions.assertDoesNotThrow(() -> TelegramChannel.sendPoll(
+                    token, "12345", "Q", java.util.List.of("A", "B"), null, null, null));
+            assertFalse(ok, "a 400 from Telegram must make sendPoll return false");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
     @Test
     void sendMessageWithKeyboard_replyAndThreadOverload_appliesBoth() {
         // The keyboard send is a single message → treated as the turn's first

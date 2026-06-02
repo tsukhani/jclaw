@@ -8,8 +8,10 @@ import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.UnpinChatMessage;
+import org.telegram.telegrambots.meta.api.methods.polls.SendPoll;
 import org.telegram.telegrambots.meta.api.methods.reactions.SetMessageReaction;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
+import org.telegram.telegrambots.meta.api.objects.polls.input.InputPollOption;
 import org.telegram.telegrambots.meta.api.methods.send.SendAudio;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -591,6 +593,106 @@ public class TelegramChannel implements Channel {
         } catch (TelegramApiException e) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "deleteMessage failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * JCLAW-387 (A3): send {@code text} as a reply to {@code replyToMessageId},
+     * natively quoting the {@code quote} excerpt of the replied-to message via
+     * {@code reply_parameters.quote}. The excerpt must be a verbatim substring of
+     * the target message (matched after entity parsing by Telegram) or the Bot
+     * API rejects the send with a 400 ({@code message to be replied not found} /
+     * {@code QUOTE_NOT_FOUND}). To stay best-effort this method falls back to a
+     * plain reply (same target, no quote) on a quote-related failure, so a
+     * stale/mistyped excerpt never drops the message.
+     *
+     * <p>A blank/null {@code quote} is treated as "no excerpt" and routes through
+     * the ordinary reply path ({@link #sendMessage(String, String, String, Agent,
+     * Integer, Integer)}) so the absent-quote behavior is exactly today's. The
+     * reply target is attached unconditionally (the caller explicitly asked to
+     * reply-with-quote) with {@code allow_sending_without_reply=true} so a since-
+     * deleted target degrades to a plain send rather than 400-ing.
+     *
+     * <p>Returns true when the message landed (with or without the quote),
+     * false when even the plain-reply fallback failed. Never throws.
+     */
+    public static boolean sendReplyWithQuote(String botToken, String chatId, String text,
+                                             Agent agent, Integer replyToMessageId, String quote) {
+        if (botToken == null || chatId == null || text == null || replyToMessageId == null) {
+            return false;
+        }
+        // No excerpt → ordinary reply path; preserves today's exact behavior.
+        if (quote == null || quote.isBlank()) {
+            return sendMessage(botToken, chatId, text, agent, replyToMessageId, null);
+        }
+        var channel = forToken(botToken);
+        var quoteParams = ReplyParameters.builder()
+                .messageId(replyToMessageId)
+                .quote(quote)
+                .allowSendingWithoutReply(true)
+                .build();
+        // First attempt: reply WITH the native quote excerpt.
+        SendResult quoted = channel.trySend(chatId, TelegramMarkdownFormatter.toHtml(text), quoteParams, null);
+        if (quoted.ok()) return true;
+        // Best-effort fallback (JCLAW-387 A3): a quote that isn't a verbatim
+        // substring of the target makes Telegram 400 the send. Retry once as a
+        // plain reply (no quote) so the user still gets the message.
+        EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                "Quote reply failed (excerpt may not match target); retrying as a plain reply");
+        return sendMessage(botToken, chatId, text, agent, replyToMessageId, null);
+    }
+
+    /**
+     * JCLAW-387 (C1): send a native Telegram poll to {@code chatId}. {@code question}
+     * (1-300 chars) and {@code options} (2-12 entries, each 1-100 chars) are
+     * required by the Bot API; the caller is expected to have validated counts
+     * before calling. Optional knobs ({@code null} to leave the Bot API default):
+     *
+     * <ul>
+     *   <li>{@code isAnonymous} — false makes voters visible; Telegram defaults
+     *       to true (anonymous);</li>
+     *   <li>{@code allowsMultipleAnswers} — true lets a voter pick several
+     *       options; defaults to false;</li>
+     *   <li>{@code openPeriod} — seconds (5-600) the poll stays open before it
+     *       auto-closes; omitted leaves the poll open indefinitely.</li>
+     * </ul>
+     *
+     * <p>Mirrors the swallow-and-log contract of the other send primitives
+     * ({@link #setMessageReaction}, {@link #pinChatMessage}): returns false
+     * (logged at warn) on any API failure or out-of-range option count — never
+     * throws — so a poll that Telegram rejects can't abort the agent's turn.
+     */
+    public static boolean sendPoll(String botToken, String chatId, String question,
+                                   java.util.List<String> options, Boolean isAnonymous,
+                                   Boolean allowsMultipleAnswers, Integer openPeriod) {
+        if (botToken == null || chatId == null || question == null || question.isBlank()
+                || options == null || options.size() < 2 || options.size() > 12) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "sendPoll requires a non-blank question and 2-12 options; got %d option(s)"
+                            .formatted(options == null ? 0 : options.size()));
+            return false;
+        }
+        var pollOptions = new java.util.ArrayList<InputPollOption>(options.size());
+        for (var opt : options) {
+            pollOptions.add(InputPollOption.builder().text(opt).build());
+        }
+        var builder = SendPoll.builder()
+                .chatId(chatId)
+                .question(question)
+                .options(pollOptions);
+        if (isAnonymous != null) builder.isAnonymous(isAnonymous);
+        if (allowsMultipleAnswers != null) builder.allowMultipleAnswers(allowsMultipleAnswers);
+        if (openPeriod != null) builder.openPeriod(openPeriod);
+        try {
+            var sent = forToken(botToken).client.execute(builder.build());
+            if (sent != null) recordSentMessage(botToken, chatId, sent.getMessageId()); // JCLAW-383
+            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "Poll sent to chat %s: %d options".formatted(chatId, pollOptions.size()));
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "sendPoll failed: %s".formatted(e.getMessage()));
             return false;
         }
     }

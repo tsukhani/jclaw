@@ -35,6 +35,8 @@ class MessageToolTest extends UnitTest {
     // JCLAW-381: reply + edit toggles (both default ON).
     private static final String CFG_REPLY = "telegram.actions.reply";
     private static final String CFG_EDIT = "telegram.actions.edit";
+    // JCLAW-387 (C1): poll toggle (default ON).
+    private static final String CFG_POLL = "telegram.actions.poll";
     // Reply-target attach policy (TelegramChannel.replyToMode); pinned to "all"
     // in the reply test so the quoted message id is deterministically on the wire.
     private static final String CFG_REPLY_TO_MODE = "telegram.replyTo.mode";
@@ -72,6 +74,7 @@ class MessageToolTest extends UnitTest {
         play.Play.configuration.remove(CFG_REACT);
         play.Play.configuration.remove(CFG_REPLY);
         play.Play.configuration.remove(CFG_EDIT);
+        play.Play.configuration.remove(CFG_POLL);
     }
 
     /** Bind {@link #BOT_TOKEN} to {@link #agent} and seed a Telegram
@@ -458,6 +461,170 @@ class MessageToolTest extends UnitTest {
         var result = invokeTool(agent.id, "{\"action\":\"edit\",\"message_id\":8}");
         assertTrue(result.startsWith("Error: 'message' is required"), result);
         assertEquals(0, server.countRequests("editMessageText"));
+    }
+
+    // ──────── JCLAW-387 (A3): reply-with-native-quote ────────
+
+    @Test
+    void replyActionWithQuoteThreadsExcerptIntoReplyParameters() throws Exception {
+        // reply defaults ON. A non-blank `quote` must reach the sendMessage
+        // body as reply_parameters.quote alongside the reply target. Pin
+        // replyTo.mode=all so the assertions are deterministic regardless of
+        // the chunk-policy default.
+        play.Play.configuration.setProperty(CFG_REPLY_TO_MODE, "all");
+        try {
+            seedTelegramBindingAndConversation();
+            var result = invokeTool(agent.id,
+                    "{\"action\":\"reply\",\"message_id\":7,\"message\":\"my answer\","
+                            + "\"quote\":\"the excerpt\"}");
+            var parsed = JsonParser.parseString(result).getAsJsonObject();
+            assertEquals("ok", parsed.get("status").getAsString(), result);
+            assertEquals("reply", parsed.get("action").getAsString());
+            assertEquals(1, server.countRequests("sendMessage"),
+                    "quote reply must hit sendMessage exactly once");
+            var body = server.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .reduce("", (a, b) -> a + b);
+            assertTrue(body.contains("quote"),
+                    "reply_parameters.quote must be on the wire: " + body);
+            assertTrue(body.contains("the excerpt"),
+                    "the quoted excerpt must appear in the sendMessage body: " + body);
+            assertTrue(body.contains("7"),
+                    "the reply target message id must appear in the body: " + body);
+        } finally {
+            play.Play.configuration.remove(CFG_REPLY_TO_MODE);
+        }
+    }
+
+    @Test
+    void replyActionWithoutQuoteOmitsQuoteFromBody() throws Exception {
+        // Absent `quote` must reproduce today's reply behavior exactly: a
+        // sendMessage with the reply target but NO reply_parameters.quote.
+        play.Play.configuration.setProperty(CFG_REPLY_TO_MODE, "all");
+        try {
+            seedTelegramBindingAndConversation();
+            var result = invokeTool(agent.id,
+                    "{\"action\":\"reply\",\"message_id\":7,\"message\":\"no excerpt here\"}");
+            var parsed = JsonParser.parseString(result).getAsJsonObject();
+            assertEquals("ok", parsed.get("status").getAsString(), result);
+            var body = server.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .reduce("", (a, b) -> a + b);
+            assertFalse(body.contains("\"quote\""),
+                    "absent quote must not put a quote field on the wire: " + body);
+        } finally {
+            play.Play.configuration.remove(CFG_REPLY_TO_MODE);
+        }
+    }
+
+    // ──────── JCLAW-387 (C1): native poll ────────
+
+    @Test
+    void pollActionSendsPollWhenEnabled() throws Exception {
+        // poll defaults ON; question + options must reach the sendPoll body.
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"poll\",\"question\":\"Best language?\","
+                        + "\"options\":[\"Java\",\"Rust\",\"Go\"]}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        assertEquals("poll", parsed.get("action").getAsString());
+        assertEquals(1, server.countRequests("sendPoll"),
+                "poll must hit the sendPoll endpoint exactly once");
+        var body = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendPoll"))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .reduce("", (a, b) -> a + b);
+        assertTrue(body.contains("Best language?"),
+                "the poll question must appear in the sendPoll body: " + body);
+        assertTrue(body.contains("Java") && body.contains("Rust") && body.contains("Go"),
+                "every option must appear in the sendPoll body: " + body);
+    }
+
+    @Test
+    void pollActionThreadsOptionalKnobs() throws Exception {
+        // anonymous=false + allow_multiple=true + open_period=30 must reach the wire.
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"poll\",\"question\":\"Pick any\","
+                        + "\"options\":[\"A\",\"B\"],\"anonymous\":false,"
+                        + "\"allow_multiple\":true,\"open_period\":30}");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("ok", parsed.get("status").getAsString(), result);
+        var body = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendPoll"))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .reduce("", (a, b) -> a + b);
+        assertTrue(body.contains("is_anonymous"),
+                "anonymous knob must serialize as is_anonymous: " + body);
+        assertTrue(body.contains("allows_multiple_answers"),
+                "allow_multiple knob must serialize as allows_multiple_answers: " + body);
+        assertTrue(body.contains("open_period") && body.contains("30"),
+                "open_period must be on the wire: " + body);
+    }
+
+    @Test
+    void pollActionRejectsTooFewOptionsWithoutApiCall() throws Exception {
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"poll\",\"question\":\"One only?\",\"options\":[\"Solo\"]}");
+        assertTrue(result.startsWith("Error: 'poll' requires between 2 and 10 options"), result);
+        assertEquals(0, server.countRequests("sendPoll"),
+                "a single-option poll must NOT touch the Telegram API");
+    }
+
+    @Test
+    void pollActionRejectsTooManyOptionsWithoutApiCall() throws Exception {
+        seedTelegramBindingAndConversation();
+        // 11 options — over the 10-option agent-facing ceiling.
+        var opts = new StringBuilder("[");
+        for (int i = 1; i <= 11; i++) {
+            if (i > 1) opts.append(',');
+            opts.append("\"opt").append(i).append("\"");
+        }
+        opts.append("]");
+        var result = invokeTool(agent.id,
+                "{\"action\":\"poll\",\"question\":\"Too many?\",\"options\":" + opts + "}");
+        assertTrue(result.startsWith("Error: 'poll' requires between 2 and 10 options"), result);
+        assertEquals(0, server.countRequests("sendPoll"),
+                "an 11-option poll must NOT touch the Telegram API");
+    }
+
+    @Test
+    void pollActionRejectsBlankQuestionWithoutApiCall() throws Exception {
+        seedTelegramBindingAndConversation();
+        var result = invokeTool(agent.id,
+                "{\"action\":\"poll\",\"question\":\"  \",\"options\":[\"A\",\"B\"]}");
+        assertTrue(result.startsWith("Error: 'question' is required"), result);
+        assertEquals(0, server.countRequests("sendPoll"),
+                "a blank-question poll must NOT touch the Telegram API");
+    }
+
+    @Test
+    void disabledPollIsRefusedWithoutApiCall() throws Exception {
+        play.Play.configuration.setProperty(CFG_POLL, "false");
+        try {
+            seedTelegramBindingAndConversation();
+            var result = invokeTool(agent.id,
+                    "{\"action\":\"poll\",\"question\":\"Disabled?\",\"options\":[\"A\",\"B\"]}");
+            var parsed = JsonParser.parseString(result).getAsJsonObject();
+            assertEquals("not-enabled", parsed.get("status").getAsString(), result);
+            assertEquals(0, server.countRequests("sendPoll"),
+                    "a disabled poll must NOT touch the Telegram API");
+        } finally {
+            play.Play.configuration.remove(CFG_POLL);
+        }
+    }
+
+    @Test
+    void pollActionIsDiscoverableInToolActions() {
+        var tool = ToolRegistry.lookupTool(MessageTool.TOOL_NAME);
+        assertNotNull(tool);
+        boolean hasPoll = tool.actions().stream()
+                .anyMatch(a -> "poll".equals(a.name()));
+        assertTrue(hasPoll, "the poll action must be advertised by the tool");
     }
 
     // ──────── helpers ────────
