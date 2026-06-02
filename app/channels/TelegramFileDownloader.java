@@ -2,14 +2,17 @@ package channels;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import okhttp3.OkHttpClient;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
 import utils.HttpFactories;
+import utils.SsrfGuard;
 import utils.Strings;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -42,6 +45,35 @@ public final class TelegramFileDownloader {
 
     private static final Duration GETFILE_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(90);
+
+    /**
+     * SSRF-hardened client for the second-step byte download. The download URL
+     * embeds Telegram's opaque, server-supplied {@code file_path}; a compromised
+     * or spoofed Bot API endpoint (or a DNS answer that resolves
+     * {@code api.telegram.org} to an internal address) could otherwise steer the
+     * GET at loopback / RFC-1918 / link-local (cloud-metadata) ranges. We derive
+     * from {@link HttpFactories#general()} so the shared connection pool,
+     * dispatcher, timeouts, and protocol-logging event listener carry over, then
+     * layer on {@link SsrfGuard#SAFE_DNS} (every hostname resolution is gated —
+     * any unsafe resolved address throws before a socket opens) and disable
+     * redirect-following so a 302 can't bounce us past the DNS gate to a blocked
+     * target. Per SsrfGuard's documented contract: the {@code Dns} callback runs
+     * at connect time and binds the resolved IP, so there is no rebinding TOCTOU
+     * window, and {@link SsrfGuard#assertSafeScheme(URI)} covers the literal-IP /
+     * non-http(s)-scheme cases the {@code Dns} hook can't see.
+     */
+    // Non-final + package-private so tests can swap a socket-free interceptor
+    // client in for the loopback happy-path leg (mirrors WebFetchTool.CLIENT).
+    static OkHttpClient DOWNLOAD_CLIENT = HttpFactories.general().newBuilder()
+            .dns(SsrfGuard.SAFE_DNS)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build();
+
+    /** Visible for testing: assert the download client carries the SSRF DNS gate. */
+    public static OkHttpClient downloadClient() {
+        return DOWNLOAD_CLIENT;
+    }
 
     // Bot API getFile response JSON keys.
     private static final String FIELD_FILE_PATH = "file_path";
@@ -171,8 +203,12 @@ public final class TelegramFileDownloader {
     private static Result streamFileToStaging(String fileBaseUrl, String filePath, Path stagedPath) {
         try {
             var downloadUrl = fileBaseUrl + "/" + filePath;
+            // Reject non-http(s) schemes and literal-IP hosts in a blocked range
+            // before opening a socket; SAFE_DNS on DOWNLOAD_CLIENT gates the
+            // hostname-resolution path the scheme check can't see.
+            SsrfGuard.assertSafeScheme(URI.create(downloadUrl));
             var req = new okhttp3.Request.Builder().url(downloadUrl).get().build();
-            var call = HttpFactories.general().newCall(req);
+            var call = DOWNLOAD_CLIENT.newCall(req);
             call.timeout().timeout(DOWNLOAD_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
             try (var resp = call.execute()) {
                 if (resp.code() != 200) {
