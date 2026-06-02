@@ -350,7 +350,7 @@ public class ConversationService {
      * already had a reset — so the effective floor is {@code max(..)}.
      */
     public static List<Message> loadRecentMessages(Conversation conversation) {
-        var maxMessages = ConfigService.getInt("chat.maxContextMessages", 50);
+        var maxMessages = effectiveHistoryLimit(conversation);
         var floor = latestOf(conversation.contextSince, conversation.compactionSince);
         // findRecent returns DESC order; reversed() returns a read-only ASC view
         // without copying — uses JDK 21 SequencedCollection.
@@ -368,6 +368,78 @@ public class ConversationService {
                 .filter(m -> m.messageKind == null
                         || MessageRole.USER.value.equals(m.role))
                 .toList();
+    }
+
+    /** Global history-limit fallback, also the default for the per-type key. */
+    static final String KEY_GLOBAL_MAX = "chat.maxContextMessages";
+    /** Per-type override for GROUP-chat conversations (JCLAW-387 B4). */
+    static final String KEY_GROUP_LIMIT = "groupChat.historyLimit";
+    // The DM per-type key ("dmHistoryLimit", JCLAW-387 B4) is documented on
+    // effectiveHistoryLimit but intentionally NOT wired here: a plain DM is not
+    // distinguishable from a plain group on the persisted row (see the method
+    // Javadoc + the report's BLOCKED note), so no resolution path can reach it
+    // yet. Adding a constant the production path can't use would be dead code.
+
+    /**
+     * Resolve the effective history-load cap for {@code conversation} (JCLAW-387 B4).
+     *
+     * <p>The global {@code chat.maxContextMessages} (default 50) is the baseline.
+     * A GROUP-chat conversation may override it via {@code groupChat.historyLimit};
+     * a DM / private conversation via {@code dmHistoryLimit}. Each per-type key
+     * defaults to the resolved global value when its own key isn't set, so a
+     * deployment that sets neither per-type key behaves exactly as before.
+     *
+     * <p><b>Chat-type resolution is partial by necessity.</b> The persisted
+     * {@link Conversation} row carries only {@code channelType} and the composite
+     * {@code peerId} — the inbound Telegram {@code chat.type} string
+     * ("private" / "group" / "supergroup") that the ingress path knows is not
+     * stored. So this method can only resolve chat type from signals that survive
+     * on the row:
+     * <ul>
+     *   <li><b>Non-Telegram channels</b> (web, slack, …) → global. No per-type
+     *       notion applies; behavior unchanged.</li>
+     *   <li><b>Telegram forum-topic conversations</b> — whose {@code peerId}
+     *       carries the structural {@code ":topic:<threadId>"} suffix that
+     *       JClaw's own keying ({@code AgentRunner.telegramConversationPeerId})
+     *       writes for group/supergroup topic chats → resolved to the GROUP
+     *       limit. This suffix is an unambiguous group marker.</li>
+     *   <li><b>Any other Telegram conversation</b> (a plain {@code peerId} with
+     *       no suffix) → global. A plain DM and a plain group are
+     *       indistinguishable on the row: a DM keys off the binding owner id and
+     *       a group keys off the chat id, both stored as opaque strings. The only
+     *       remaining differentiator is the Telegram-internal "group ids are
+     *       negative, user ids are positive" id convention, and {@code peerId}
+     *       (a free-form, operator-supplied {@code telegramUserId} for DMs) is not
+     *       a contract we can safely sniff. So these fall through to the global
+     *       default rather than risk mis-classifying.</li>
+     * </ul>
+     *
+     * @param conversation the conversation whose history cap to resolve
+     * @return the effective max number of recent messages to load
+     */
+    public static int effectiveHistoryLimit(Conversation conversation) {
+        var globalMax = ConfigService.getInt(KEY_GLOBAL_MAX, 50);
+        var perTypeKey = perTypeHistoryKey(conversation);
+        if (perTypeKey == null) return globalMax;
+        return ConfigService.getInt(perTypeKey, globalMax);
+    }
+
+    /**
+     * Pick the per-chat-type config key for {@code conversation}, or {@code null}
+     * when chat type isn't cleanly derivable from the persisted row (so the
+     * caller falls back to the global cap). See {@link #effectiveHistoryLimit}
+     * for the full resolution contract.
+     */
+    private static String perTypeHistoryKey(Conversation conversation) {
+        if (!models.ChannelType.TELEGRAM.value.equals(conversation.channelType)) {
+            return null; // non-Telegram: no per-type notion, use global
+        }
+        var peerId = conversation.peerId;
+        if (peerId != null && peerId.contains(":topic:")) {
+            return KEY_GROUP_LIMIT; // forum topic → unambiguously a group chat
+        }
+        // Plain Telegram peerId: DM vs group not safely distinguishable → global.
+        return null;
     }
 
     private static java.time.Instant latestOf(java.time.Instant a, java.time.Instant b) {

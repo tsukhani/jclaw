@@ -261,6 +261,95 @@ class ConversationServiceTest extends UnitTest {
     }
 
     // =====================
+    // effectiveHistoryLimit — per-chat-type history caps (JCLAW-387 B4)
+    // =====================
+
+    @Test
+    void effectiveHistoryLimitDefaultsToFiftyWhenNothingSet() {
+        var agent = newAgent("conv-hist-default");
+        var conv = ConversationService.create(agent, "web", "u");
+        assertEquals(50, ConversationService.effectiveHistoryLimit(conv),
+                "with no keys set, the global default (50) applies");
+    }
+
+    @Test
+    void effectiveHistoryLimitWebUsesGlobalMax() {
+        var agent = newAgent("conv-hist-web-global");
+        var conv = ConversationService.create(agent, "web", "u");
+        ConfigService.set("chat.maxContextMessages", "30");
+        assertEquals(30, ConversationService.effectiveHistoryLimit(conv),
+                "non-Telegram channels follow the global cap");
+    }
+
+    @Test
+    void effectiveHistoryLimitWebIgnoresPerTypeKeys() {
+        // Per-type keys must never leak onto a non-Telegram channel.
+        var agent = newAgent("conv-hist-web-ignores");
+        var conv = ConversationService.create(agent, "web", "u");
+        ConfigService.set("chat.maxContextMessages", "40");
+        ConfigService.set("groupChat.historyLimit", "5");
+        ConfigService.set("dmHistoryLimit", "7");
+        assertEquals(40, ConversationService.effectiveHistoryLimit(conv),
+                "web conversations stay on the global cap regardless of per-type keys");
+    }
+
+    @Test
+    void effectiveHistoryLimitTelegramGroupTopicUsesGroupLimit() {
+        // A forum-topic peerId carries the ":topic:" suffix — an unambiguous
+        // group marker — so groupChat.historyLimit applies.
+        var agent = newAgent("conv-hist-group-topic");
+        var conv = ConversationService.create(agent, "telegram", "-100:topic:1");
+        ConfigService.set("chat.maxContextMessages", "50");
+        ConfigService.set("groupChat.historyLimit", "10");
+        assertEquals(10, ConversationService.effectiveHistoryLimit(conv),
+                "a forum-topic conversation must respect groupChat.historyLimit");
+    }
+
+    @Test
+    void effectiveHistoryLimitTelegramGroupTopicFallsBackToGlobal() {
+        // groupChat.historyLimit unset → falls back to the global value.
+        var agent = newAgent("conv-hist-group-fallback");
+        var conv = ConversationService.create(agent, "telegram", "-100:topic:1");
+        ConfigService.set("chat.maxContextMessages", "25");
+        assertEquals(25, ConversationService.effectiveHistoryLimit(conv),
+                "group falls back to chat.maxContextMessages when groupChat.historyLimit is unset");
+    }
+
+    @Test
+    void effectiveHistoryLimitTelegramPlainPeerUsesGlobal() {
+        // A plain Telegram peerId (DM or group, indistinguishable on the row)
+        // resolves to the global cap rather than guessing chat type.
+        var agent = newAgent("conv-hist-plain-tg");
+        var conv = ConversationService.create(agent, "telegram", "42");
+        ConfigService.set("chat.maxContextMessages", "33");
+        ConfigService.set("groupChat.historyLimit", "5");
+        ConfigService.set("dmHistoryLimit", "7");
+        assertEquals(33, ConversationService.effectiveHistoryLimit(conv),
+                "a plain Telegram peerId falls through to the global cap (chat type not derivable)");
+    }
+
+    @Test
+    void loadRecentMessagesAppliesGroupHistoryLimit() throws Exception {
+        // End-to-end through loadRecentMessages: a tight group limit caps the
+        // number of returned rows on a forum-topic conversation.
+        var agent = newAgent("conv-load-group-cap");
+        var conv = ConversationService.create(agent, "telegram", "-100:topic:9");
+        ConfigService.set("chat.maxContextMessages", "50");
+        ConfigService.set("groupChat.historyLimit", "2");
+        ConversationService.appendUserMessage(conv, "one");
+        Thread.sleep(2);
+        ConversationService.appendUserMessage(conv, "two");
+        Thread.sleep(2);
+        ConversationService.appendUserMessage(conv, "three");
+
+        var loaded = ConversationService.loadRecentMessages(conv);
+        assertEquals(2, loaded.size(),
+                "group history limit (2) must cap loadRecentMessages to the 2 most recent");
+        assertEquals("two", loaded.get(0).content);
+        assertEquals("three", loaded.get(1).content);
+    }
+
+    // =====================
     // setModelOverride / clearModelOverride
     // =====================
 
