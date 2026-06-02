@@ -243,16 +243,20 @@ class DangerousActionGateTest extends UnitTest {
      *  pull the approval id out of its inline-keyboard callback_data. */
     private String awaitPromptAndExtractId() throws InterruptedException {
         for (int i = 0; i < 200; i++) {
+            // Return the first recorded prompt whose approval id is STILL pending.
+            // Filtering by isPending INSIDE the stream is essential: a test with two
+            // sequential prompts has the resolved first prompt in the list, so a plain
+            // findFirst() would keep returning that (never-pending) one. It also closes
+            // the race where request() sends the prompt just before registering PENDING.
             var match = server.requests().stream()
                     .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
                     .map(r -> CALLBACK_ID.matcher(r.body()))
                     .filter(java.util.regex.Matcher::find)
+                    .map(m -> m.group(1))
+                    .filter(TelegramApprovalService::isPending)
                     .findFirst();
-            // Wait until the prompt is recorded AND the pending entry is registered:
-            // request() sends the prompt before it puts the PENDING entry, so resolving
-            // off the bare mock request would race that put and miss.
-            if (match.isPresent() && TelegramApprovalService.isPending(match.get().group(1))) {
-                return match.get().group(1);
+            if (match.isPresent()) {
+                return match.get();
             }
             Thread.sleep(10);
         }
