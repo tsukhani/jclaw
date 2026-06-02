@@ -45,6 +45,50 @@ class ConversationServiceTest extends UnitTest {
     }
 
     @Test
+    void findOrCreateKeysGroupMembersOntoOneSharedConversation() {
+        // JCLAW-370: a group's composite peer key is the chat id (sender-
+        // independent), so two members posting in the same chat resolve to ONE
+        // shared conversation owned by the binding's JClaw peer — not one per
+        // member. The runner passes the chat id straight through as peerId.
+        var agent = newAgent("conv-group-shared");
+        var groupKey = "-100"; // telegramConversationPeerId(owner, "group", "-100", null)
+        var fromMemberA = ConversationService.findOrCreate(agent, "telegram", groupKey);
+        var fromMemberB = ConversationService.findOrCreate(agent, "telegram", groupKey);
+        assertEquals(fromMemberA.id, fromMemberB.id,
+                "two members in the same group must share one chat-id-keyed conversation");
+    }
+
+    @Test
+    void findOrCreateKeysForumTopicsOntoSeparateConversations() {
+        // JCLAW-370: the ":topic:<threadId>" suffix scopes each forum topic to
+        // its own conversation within the same chat, and a member in one topic
+        // shares that topic's conversation with another member in the same topic.
+        var agent = newAgent("conv-group-topics");
+        var topicOne = "-100:topic:1";
+        var topicTwo = "-100:topic:2";
+        var inTopicOne = ConversationService.findOrCreate(agent, "telegram", topicOne);
+        var inTopicTwo = ConversationService.findOrCreate(agent, "telegram", topicTwo);
+        assertNotEquals(inTopicOne.id, inTopicTwo.id,
+                "distinct forum topics in the same chat must be separate conversations");
+
+        var alsoTopicOne = ConversationService.findOrCreate(agent, "telegram", topicOne);
+        assertEquals(inTopicOne.id, alsoTopicOne.id,
+                "a second member in the same topic must share that topic's conversation");
+    }
+
+    @Test
+    void findOrCreateKeysDmOntoBindingOwner() {
+        // JCLAW-370: a DM's composite peer key stays the binding owner id, so DM
+        // conversations are byte-for-byte unchanged from the pre-JCLAW-370 path.
+        var agent = newAgent("conv-dm-owner");
+        var ownerKey = "42"; // telegramConversationPeerId("42", "private", "42", null)
+        var first = ConversationService.findOrCreate(agent, "telegram", ownerKey);
+        var second = ConversationService.findOrCreate(agent, "telegram", ownerKey);
+        assertEquals(first.id, second.id,
+                "a DM must remain a single owner-keyed conversation");
+    }
+
+    @Test
     void findOrCreateCreatesNewRowWhenTupleAbsent() {
         var agent = newAgent("conv-find-or-create-2");
         var conv = ConversationService.findOrCreate(agent, "web", "first-user");

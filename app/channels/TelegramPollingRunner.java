@@ -405,18 +405,17 @@ public final class TelegramPollingRunner {
 
         final String sendToken = ctx.botToken();
         final Agent sendAgent = ctx.agent();
-        // JCLAW-370 (next wave): for group messages this still keys the
-        // conversation off the binding owner's user id, so every allowed
-        // group turn shares one transcript. Proper per-chat/topic shared
-        // conversation keying lands there; for now we only gate access and
-        // leave the existing dispatch/peerId path unchanged.
-        final String userId = ctx.telegramUserId();
+        // JCLAW-370: a DM keys off the binding owner (unchanged); a group/
+        // supergroup keys off the chat id (one shared conversation per chat,
+        // per forum topic) so every allowed member shares one transcript owned
+        // by the binding's JClaw peer rather than fragmenting per-member.
+        final String ownerKey = ctx.telegramUserId();
         // JCLAW-136: media_group_id reassembly runs BEFORE attachment
         // download + dispatch so multi-photo albums collapse into one
         // turn. Plain-text and single-attachment messages skip the
         // buffer (null media_group_id → immediate dispatch).
         TelegramMediaGroupBuffer.add(msg, merged -> dispatchMerged(
-                sendToken, sendAgent, userId, merged));
+                sendToken, sendAgent, ownerKey, merged));
     }
 
     /**
@@ -427,7 +426,7 @@ public final class TelegramPollingRunner {
      * Runs on a virtual thread so a long download doesn't block the
      * single-threaded scheduler used by the reassembly buffer.
      */
-    private static void dispatchMerged(String sendToken, Agent sendAgent, String userId,
+    private static void dispatchMerged(String sendToken, Agent sendAgent, String ownerKey,
                                         TelegramChannel.InboundMessage merged) {
         Thread.ofVirtual().name("telegram-dispatch").start(() -> {
             try {
@@ -441,8 +440,16 @@ public final class TelegramPollingRunner {
                 // over on seal for media-rich or oversize responses. JCLAW-95:
                 // factory defers construction until the conversation id is known.
                 final String sendChatType = merged.chatType();
+                // JCLAW-370: shared chat/topic-scoped conversation key for
+                // groups (owner key for DMs), with sender attribution prefixed
+                // onto group messages so the agent can tell members apart. The
+                // outbound sink still routes to the chat id (sendChatId).
+                final String peerId = AgentRunner.telegramConversationPeerId(
+                        ownerKey, sendChatType, sendChatId, merged.messageThreadId());
+                final String attributedText = AgentRunner.telegramSenderAttributed(
+                        merged.text(), sendChatType, merged.fromDisplayName(), merged.fromId());
                 AgentRunner.processInboundForAgentStreaming(
-                        sendAgent, LOG_SOURCE, userId, merged.text(),
+                        sendAgent, LOG_SOURCE, peerId, attributedText,
                         convId -> new TelegramStreamingSink(
                                 sendToken, sendChatId, sendAgent, convId, sendChatType),
                         inputs);

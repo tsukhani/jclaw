@@ -196,13 +196,19 @@ public class WebhookTelegramController extends Controller {
             // for media-rich / oversize responses. JCLAW-95: the factory
             // defers sink construction until AgentRunner has resolved the
             // conversation id so the sink can persist its checkpoint.
-            // JCLAW-370 (next wave): for an allowed group message this still
-            // keys the conversation off the binding owner's user id, so group
-            // turns share one transcript. Proper per-chat/topic conversation
-            // keying lands there; for now we only gate access here.
+            // JCLAW-370: a DM keys off the binding owner (unchanged); an allowed
+            // group/supergroup keys off the chat id (one shared conversation per
+            // chat, per forum topic) so members share one transcript owned by the
+            // binding's JClaw peer. Sender attribution is prefixed onto group
+            // messages so the agent can tell members apart. The outbound sink
+            // still routes to the chat id (sendChatId).
             final String sendChatType = message.chatType();
+            final String peerId = AgentRunner.telegramConversationPeerId(
+                    ctx.telegramUserId(), sendChatType, sendChatId, message.messageThreadId());
+            final String attributedText = AgentRunner.telegramSenderAttributed(
+                    message.text(), sendChatType, message.fromDisplayName(), message.fromId());
             AgentRunner.processInboundForAgentStreaming(
-                    sendAgent, CHANNEL_TELEGRAM, ctx.telegramUserId(), message.text(),
+                    sendAgent, CHANNEL_TELEGRAM, peerId, attributedText,
                     convId -> new channels.TelegramStreamingSink(
                             sendToken, sendChatId, sendAgent, convId, sendChatType),
                     inputs);
