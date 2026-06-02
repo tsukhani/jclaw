@@ -130,6 +130,10 @@ public final class MockTelegramServer implements AutoCloseable {
             "{\"ok\":true,\"result\":{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":1,\"text\":\"mock\"}}";
     private static final String DEFAULT_BOOLEAN_RESPONSE =
             "{\"ok\":true,\"result\":true}";
+    // JCLAW-365: sendMediaGroup returns a List<Message> — the result must be a JSON array.
+    private static final String DEFAULT_MEDIA_GROUP_RESPONSE =
+            "{\"ok\":true,\"result\":[{\"message_id\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":1,\"text\":\"mock\"},"
+            + "{\"message_id\":2,\"chat\":{\"id\":1,\"type\":\"private\"},\"date\":1,\"text\":\"mock\"}]}";
 
     private static String defaultResponseFor(String methodName) {
         // Compare case-insensitively — the SDK lowercases method names in
@@ -152,6 +156,11 @@ public final class MockTelegramServer implements AutoCloseable {
                 || m.equals("pinchatmessage")
                 || m.equals("unpinchatmessage")) {
             return DEFAULT_BOOLEAN_RESPONSE;
+        }
+        // JCLAW-365: sendMediaGroup returns a List<Message> (JSON array), not a
+        // single Message — the default Message/Boolean shapes fail to deserialize.
+        if (m.equals("sendmediagroup")) {
+            return DEFAULT_MEDIA_GROUP_RESPONSE;
         }
         // Message-returning methods: sendMessage, sendPhoto, sendDocument,
         // sendVoice, sendAudio, sendVideo (all deserialize a Message).
