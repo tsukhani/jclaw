@@ -256,6 +256,42 @@ public class TelegramChannel implements Channel {
      */
     private final TelegramClient uploadClient;
 
+    // ── JCLAW-383: bot-sent-message-id cache ─────────────────────────────
+    //
+    // To make telegram.reactions.notify=own work in groups (where the reacted
+    // message's author is NOT carried on the message_reaction update), we
+    // remember the ids of messages THIS bot sent, per chat, so the reaction
+    // gate can ask "was this message one of ours?". The cache is bounded two
+    // ways so it can't grow without limit on a busy multi-chat bot:
+    //   - at most {@link #SENT_CHATS_CAP} chats are tracked (access-ordered
+    //     LRU: the least-recently-touched chat is evicted first);
+    //   - within each chat, at most {@link #SENT_IDS_PER_CHAT_CAP} message ids
+    //     are retained (insertion-ordered FIFO: the oldest id is evicted).
+    // It populates only from sends this process made, so it is cold after a
+    // restart — acceptable: a cold miss under-notifies (conservative), it
+    // never over-notifies. See {@link #wasSentByBot}.
+
+    /** Max number of distinct chats tracked before LRU eviction of the coldest chat. */
+    public static final int SENT_CHATS_CAP = 256;
+    /** Max bot-sent message ids retained per chat before FIFO eviction of the oldest. */
+    public static final int SENT_IDS_PER_CHAT_CAP = 512;
+
+    /**
+     * chatId → ring of recently bot-sent message ids in that chat. Outer map is
+     * access-ordered (LRU on the chat key); each inner set is a bounded
+     * insertion-ordered FIFO. All access is guarded by synchronizing on
+     * {@code sentByChat} itself — sends and the reaction-gate read happen on
+     * different threads.
+     */
+    private final java.util.LinkedHashMap<String, java.util.LinkedHashSet<Integer>> sentByChat =
+            new java.util.LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(
+                        java.util.Map.Entry<String, java.util.LinkedHashSet<Integer>> eldest) {
+                    return size() > SENT_CHATS_CAP;
+                }
+            };
+
     private TelegramChannel(String botToken) {
         this(botToken, null);
     }
@@ -340,6 +376,71 @@ public class TelegramChannel implements Channel {
 
     public String botToken() { return botToken; }
     TelegramClient client() { return client; }
+
+    // ── JCLAW-383: bot-sent-message-id cache record + query ──────────────
+
+    /**
+     * JCLAW-383: record that this bot sent {@code messageId} into {@code chatId},
+     * so a later reaction on it can be recognized as a reaction on a bot message
+     * (the signal {@code notify=own} needs in a group). No-op on null/blank chat
+     * id or null message id. The per-chat ring is bounded to
+     * {@link #SENT_IDS_PER_CHAT_CAP} (oldest id evicted) and the number of chats
+     * to {@link #SENT_CHATS_CAP} (coldest chat evicted).
+     */
+    private void recordSentMessage(String chatId, Integer messageId) {
+        if (chatId == null || chatId.isBlank() || messageId == null) return;
+        synchronized (sentByChat) {
+            var ring = sentByChat.computeIfAbsent(chatId, _ ->
+                    new java.util.LinkedHashSet<>() {
+                        @Override
+                        public boolean add(Integer id) {
+                            boolean added = super.add(id);
+                            // Insertion-ordered FIFO: drop the oldest id once over cap.
+                            if (size() > SENT_IDS_PER_CHAT_CAP) {
+                                var it = iterator();
+                                it.next();
+                                it.remove();
+                            }
+                            return added;
+                        }
+                    });
+            ring.add(messageId);
+        }
+    }
+
+    /**
+     * JCLAW-383: true when {@code messageId} in {@code chatId} is a message this
+     * bot sent (and is still in the bounded cache). False on any null arg, a
+     * never-seen chat, an evicted id, or a cold cache after a restart — a false
+     * here makes the reaction gate under-notify (conservative), never
+     * over-notify. Static convenience that resolves the per-token instance for
+     * callers (e.g. {@link TelegramPollingRunner#handleReaction}) that hold the
+     * bot token.
+     */
+    public static boolean wasSentByBot(String botToken, String chatId, Integer messageId) {
+        if (botToken == null || botToken.isBlank()) return false;
+        return forToken(botToken).wasSentByBot(chatId, messageId);
+    }
+
+    /** Instance form of {@link #wasSentByBot(String, String, Integer)}. */
+    public boolean wasSentByBot(String chatId, Integer messageId) {
+        if (chatId == null || messageId == null) return false;
+        synchronized (sentByChat) {
+            var ring = sentByChat.get(chatId);
+            return ring != null && ring.contains(messageId);
+        }
+    }
+
+    /**
+     * JCLAW-383: test-only seam to populate the bot-sent-id cache directly,
+     * mirroring {@link #installForTest} / {@link #clearForTest} — the
+     * eviction-boundary tests would otherwise need hundreds of real HTTP sends
+     * to reach the caps. Production never calls this; the real send paths feed
+     * the cache via the private {@link #recordSentMessage}.
+     */
+    public void recordSentForTest(String chatId, Integer messageId) {
+        recordSentMessage(chatId, messageId);
+    }
 
     /**
      * Public helper for callers outside the {@code channels} package that
@@ -1552,7 +1653,8 @@ public class TelegramChannel implements Channel {
             // JCLAW-122: upload via uploadClient (60 s r/w) rather than client
             // (2 s w) — a 1–2 MB screenshot reliably times out on the text-path
             // timeouts.
-            uploadClient.execute(request);
+            var sent = uploadClient.execute(request);
+            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
             long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
             EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Photo sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
@@ -1608,7 +1710,8 @@ public class TelegramChannel implements Channel {
             // JCLAW-122: upload via uploadClient (60 s r/w) rather than client
             // (2 s w). Same rationale as trySendPhoto above — document bodies
             // are often larger than photos (PDFs, reports, zips).
-            uploadClient.execute(request);
+            var sent = uploadClient.execute(request);
+            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
             long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
             EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Document sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
@@ -1657,7 +1760,8 @@ public class TelegramChannel implements Channel {
         long startNs = System.nanoTime();
         long fileSize = file.length();
         try {
-            uploadClient.execute(request);
+            var sent = uploadClient.execute(request);
+            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
             logMediaSent("Voice", peerId, displayName, startNs, fileSize);
             return true;
         } catch (TelegramApiException e) {
@@ -1690,7 +1794,8 @@ public class TelegramChannel implements Channel {
         long startNs = System.nanoTime();
         long fileSize = file.length();
         try {
-            uploadClient.execute(request);
+            var sent = uploadClient.execute(request);
+            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
             logMediaSent("Audio", peerId, displayName, startNs, fileSize);
             return true;
         } catch (TelegramApiException e) {
@@ -1723,7 +1828,8 @@ public class TelegramChannel implements Channel {
         long startNs = System.nanoTime();
         long fileSize = file.length();
         try {
-            uploadClient.execute(request);
+            var sent = uploadClient.execute(request);
+            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
             logMediaSent("Video", peerId, displayName, startNs, fileSize);
             return true;
         } catch (TelegramApiException e) {
@@ -1776,7 +1882,13 @@ public class TelegramChannel implements Channel {
         var request = builder.build();
         long startNs = System.nanoTime();
         try {
-            uploadClient.execute(request);
+            // sendMediaGroup returns a List<Message> — one per album item.
+            var sent = uploadClient.execute(request);
+            if (sent != null) {
+                for (var m : sent) {
+                    if (m != null) recordSentMessage(peerId, m.getMessageId()); // JCLAW-383
+                }
+            }
             long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
             EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Media group sent to chat %s: %d items (elapsedMs=%d)"
@@ -1896,7 +2008,10 @@ public class TelegramChannel implements Channel {
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
         var linkPreview = linkPreviewOptions();
         if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
-        client.execute(builder.build());
+        var sent = client.execute(builder.build());
+        // JCLAW-383: remember the id so notify=own recognizes a later group
+        // reaction on this message as a reaction on a bot message.
+        if (sent != null) recordSentMessage(peerId, sent.getMessageId());
     }
 
     /**
@@ -1990,6 +2105,7 @@ public class TelegramChannel implements Channel {
         if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         try {
             var msg = channel.client.execute(builder.build());
+            channel.recordSentMessage(chatId, msg.getMessageId()); // JCLAW-383
             return msg.getMessageId();
         } catch (TelegramApiException e) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,

@@ -822,13 +822,14 @@ public final class TelegramPollingRunner {
      * <p>Policy ({@link #reactionNotifyMode}):
      * <ul>
      *   <li>{@code off} — never notify.</li>
-     *   <li>{@code own} (default) — only reactions on messages the bot sent. We
-     *       can't read the reacted message's author off the update, so we use the
-     *       one signal that IS present and correct in the dominant case: a private
-     *       (DM) chat, where the only non-owner messages are the bot's, so an
-     *       owner reaction is necessarily on a bot-sent message. Group reactions
-     *       are suppressed under {@code own} (author unattributable from the
-     *       update).</li>
+     *   <li>{@code own} (default) — only reactions on messages the bot sent. In a
+     *       private (DM) chat the only non-owner messages are the bot's, so an
+     *       owner reaction is necessarily on a bot-sent message. In a group the
+     *       update doesn't carry the reacted message's author, so JCLAW-383
+     *       consults {@link TelegramChannel#wasSentByBot} (the bot-sent-id cache):
+     *       a hit notifies; a miss (non-bot message, or a cold cache after a
+     *       restart) stays suppressed — conservative under-notify, never
+     *       over-notify.</li>
      *   <li>{@code all} — every reaction delta, any chat type.</li>
      * </ul>
      *
@@ -842,7 +843,15 @@ public final class TelegramPollingRunner {
                                       ReactionDelta reaction) {
         if (agent == null || reaction == null || reaction.chatId() == null) return;
         String mode = reactionNotifyMode();
-        if (!shouldNotifyReaction(mode, reaction.chatType())) return;
+        // JCLAW-383: under mode=own in a group, the message_reaction update
+        // doesn't carry the reacted message's author — so we can't tell from the
+        // update alone whether it was a bot message. Consult the bot-sent-id
+        // cache: a hit means the reacted message is one we sent, so own should
+        // notify; a miss (or cold cache after restart) keeps own group-silent.
+        // Only own consults the cache — off/all ignore it, so skip the lookup.
+        boolean botSent = NOTIFY_OWN.equals(mode)
+                && TelegramChannel.wasSentByBot(botToken, reaction.chatId(), reaction.messageId());
+        if (!shouldNotifyReaction(mode, reaction.chatType(), botSent)) return;
 
         final String eventText = reactionEventText(reaction);
         final String peerId = AgentRunner.telegramConversationPeerId(
@@ -863,17 +872,32 @@ public final class TelegramPollingRunner {
 
     /**
      * The pure gate decision for an inbound reaction, split out so it's testable
-     * without standing up the agent dispatch path. {@code off} → never;
-     * {@code all} → always; {@code own} → only a private (DM) chat, where the
-     * only non-owner messages are the bot's so an owner reaction is necessarily
-     * on a bot-sent message (a group reaction's target author is unattributable
-     * from the update, so {@code own} suppresses it).
+     * without standing up the agent dispatch path. Two-arg form with no bot-sent
+     * signal available (the JCLAW-375 shape): delegates with {@code botSent =
+     * false}, so a group reaction stays suppressed under {@code own}. Retained for
+     * the config-contract tests and any caller that lacks the cache.
      */
     public static boolean shouldNotifyReaction(String mode, String chatType) {
+        return shouldNotifyReaction(mode, chatType, false);
+    }
+
+    /**
+     * JCLAW-383: the pure gate decision, now able to recognize a group reaction
+     * on a bot-sent message via {@code botSentMessage} (resolved from
+     * {@link TelegramChannel#wasSentByBot}). {@code off} → never; {@code all} →
+     * always; {@code own} → a private (DM) chat (its only non-owner messages are
+     * the bot's), OR a group/supergroup reaction on a message the bot actually
+     * sent. A group reaction on a non-bot message (or one missing from the cache)
+     * stays suppressed under {@code own} — conservative under-notify, never
+     * over-notify.
+     */
+    public static boolean shouldNotifyReaction(String mode, String chatType, boolean botSentMessage) {
         if (NOTIFY_OFF.equals(mode)) return false;
         if (NOTIFY_ALL.equals(mode)) return true;
-        // NOTIFY_OWN (and any normalized-to-own default)
-        return CHAT_TYPE_PRIVATE.equals(chatType);
+        // NOTIFY_OWN (and any normalized-to-own default): a DM is always the
+        // bot's conversation; a group reaction qualifies only when it lands on
+        // a message the bot sent.
+        return CHAT_TYPE_PRIVATE.equals(chatType) || botSentMessage;
     }
 
     /**

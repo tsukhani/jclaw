@@ -1460,4 +1460,131 @@ class TelegramChannelTest extends UnitTest {
             TelegramChannel.clearForTest(token);
         }
     }
+
+    // ─── JCLAW-383: bot-sent-message-id cache ───────────────────────────
+
+    /** A 200 sendMessage reply carrying a chosen message_id in the chosen chat. */
+    private static String messageResponse(int messageId, long chatId) {
+        return ("{\"ok\":true,\"result\":{\"message_id\":%d,\"chat\":{\"id\":%d,"
+                + "\"type\":\"supergroup\"},\"date\":1,\"text\":\"hi\"}}")
+                .formatted(messageId, chatId);
+    }
+
+    @Test
+    void wasSentByBot_trueAfterSend_falseForUnseenIdChatOrNullArgs() {
+        // A real text send records the returned message_id under its chat; the
+        // query is true for that (chat,id) and false for anything else.
+        String token = "jclaw383-sent-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMessage", 200, messageResponse(555, 12345));
+            assertTrue(TelegramChannel.sendMessage(token, "12345", "hi there"),
+                    "the send itself must succeed");
+
+            assertTrue(TelegramChannel.wasSentByBot(token, "12345", 555),
+                    "the just-sent message id must be recognized as bot-sent");
+            assertFalse(TelegramChannel.wasSentByBot(token, "12345", 999),
+                    "an id the bot never sent must not be recognized");
+            assertFalse(TelegramChannel.wasSentByBot(token, "67890", 555),
+                    "a different chat must not match even on the same id");
+            assertFalse(TelegramChannel.wasSentByBot(token, null, 555),
+                    "null chat id must be false");
+            assertFalse(TelegramChannel.wasSentByBot(token, "12345", null),
+                    "null message id must be false");
+            assertFalse(TelegramChannel.wasSentByBot(null, "12345", 555),
+                    "null bot token must be false");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void wasSentByBot_falseBeforeAnySend_coldCache() {
+        // A freshly-installed channel has sent nothing — every query is false
+        // (the cold-after-restart case: conservative under-notify).
+        String token = "jclaw383-cold-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertFalse(TelegramChannel.wasSentByBot(token, "12345", 1),
+                    "a cold cache must never recognize an id");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void wasSentByBot_recordedByPhotoAndMediaGroupSends() throws Exception {
+        // Coverage that the file/album send paths feed the cache too. The mock's
+        // default sendPhoto id is 1; sendMediaGroup returns ids 1 and 2.
+        String token = "jclaw383-media-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.forToken(token)
+                    .trySendPhoto("12345", tempFile(".png"), "p.png"));
+            assertTrue(TelegramChannel.wasSentByBot(token, "12345", 1),
+                    "a photo send must record its message id");
+
+            var album = java.util.List.of(
+                    photoSeg(tempFile(".png"), "a.png"),
+                    photoSeg(tempFile(".png"), "b.png"));
+            assertTrue(TelegramChannel.forToken(token)
+                    .sendMediaGroup("55555", album, null, null, null));
+            assertTrue(TelegramChannel.wasSentByBot(token, "55555", 1)
+                            && TelegramChannel.wasSentByBot(token, "55555", 2),
+                    "every album item's message id must be recorded");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void wasSentByBot_evictsOldestIdPastPerChatCap() {
+        // The per-chat ring is bounded: once more than SENT_IDS_PER_CHAT_CAP ids
+        // are recorded, the OLDEST is evicted while the newest survive.
+        String token = "jclaw383-evict-id-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var ch = TelegramChannel.forToken(token);
+            int cap = TelegramChannel.SENT_IDS_PER_CHAT_CAP;
+            // Record ids 1..cap, then one more (cap+1) to force a single eviction.
+            for (int id = 1; id <= cap + 1; id++) {
+                ch.recordSentForTest("chatA", id);
+            }
+            assertFalse(ch.wasSentByBot("chatA", 1),
+                    "the oldest id must be evicted once past the per-chat cap");
+            assertTrue(ch.wasSentByBot("chatA", 2),
+                    "the second-oldest id must still be present");
+            assertTrue(ch.wasSentByBot("chatA", cap + 1),
+                    "the newest id must be present");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void wasSentByBot_evictsColdestChatPastChatCap() {
+        // The chat map is bounded + access-ordered: tracking more than
+        // SENT_CHATS_CAP chats evicts the least-recently-touched one.
+        String token = "jclaw383-evict-chat-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var ch = TelegramChannel.forToken(token);
+            int cap = TelegramChannel.SENT_CHATS_CAP;
+            for (int c = 0; c < cap; c++) {
+                ch.recordSentForTest("chat" + c, 7);
+            }
+            // Touch chat0 (read) so it's no longer the coldest, then add one more
+            // chat to force an eviction — chat1 (now coldest) should go.
+            assertTrue(ch.wasSentByBot("chat0", 7));
+            ch.recordSentForTest("chatNew", 7);
+            assertTrue(ch.wasSentByBot("chat0", 7),
+                    "the recently-read chat0 must survive the eviction");
+            assertFalse(ch.wasSentByBot("chat1", 7),
+                    "the coldest chat (chat1) must be evicted past the chat cap");
+            assertTrue(ch.wasSentByBot("chatNew", 7),
+                    "the newest chat must be present");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
 }

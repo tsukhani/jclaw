@@ -641,6 +641,62 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "all must notify on a group reaction too");
     }
 
+    // ===== JCLAW-383: notify=own in groups via the bot-sent-id cache =====
+
+    @Test
+    void reactionGateOwnGroup_notifiesOnlyOnBotSentMessage() {
+        // The 3-arg gate: under own, a group reaction notifies ONLY when the
+        // reacted message was bot-sent; a non-bot message stays suppressed.
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup", true),
+                "own must notify on a group reaction on a bot-sent message");
+        assertFalse(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup", false),
+                "own must suppress a group reaction on a non-bot message");
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "group", true),
+                "own must notify on a plain-group reaction on a bot-sent message");
+    }
+
+    @Test
+    void reactionGateOwnDm_unchangedRegardlessOfBotSentFlag() {
+        // DM behavior is unchanged: own always notifies in a DM (its only
+        // non-owner messages are the bot's), with or without the cache hint.
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "private", false),
+                "own must still notify on a DM reaction even without a cache hit");
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "private", true),
+                "own must notify on a DM reaction with a cache hit too");
+    }
+
+    @Test
+    void reactionGateAllAndOff_unchangedByBotSentFlag() {
+        // all/off ignore the bot-sent flag entirely — unchanged from JCLAW-375.
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "supergroup", false));
+        assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "supergroup", true));
+        assertFalse(TelegramPollingRunner.shouldNotifyReaction("off", "supergroup", true));
+        assertFalse(TelegramPollingRunner.shouldNotifyReaction("off", "private", true));
+    }
+
+    @Test
+    void reactionGateOwnGroup_endToEndThroughCache() {
+        // Integration: the cache is fed exactly as production feeds it (a send
+        // records the id), and the gate consults wasSentByBot via the token.
+        // A group reaction on a bot-sent message notifies; on a non-bot id it
+        // stays suppressed. DM own is unaffected.
+        String token = "jclaw383-gate-e2e-" + System.nanoTime();
+        try {
+            channels.TelegramChannel.installForTest(token, null);
+            // Pre-populate the cache as a send would (id 4242 sent into chat 100).
+            channels.TelegramChannel.forToken(token).recordSentForTest("100", 4242);
+
+            boolean botSentHit = channels.TelegramChannel.wasSentByBot(token, "100", 4242);
+            boolean botSentMiss = channels.TelegramChannel.wasSentByBot(token, "100", 9999);
+            assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup", botSentHit),
+                    "a group reaction on the cached bot-sent id must notify under own");
+            assertFalse(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup", botSentMiss),
+                    "a group reaction on an uncached id must stay suppressed under own");
+        } finally {
+            channels.TelegramChannel.clearForTest(token);
+        }
+    }
+
     // ===== JCLAW-377: per-topic agent routing at the dispatch site =====
     //
     // dispatchMerged() runs through the SDK long-poll network path, so the
