@@ -264,7 +264,11 @@ public class WebhookTelegramController extends Controller {
         var identity = channels.TelegramBotIdentity.resolve(ctx.botToken());
         var message = TelegramChannel.parseUpdate(sdkUpdate, identity.username(), identity.userId());
         if (message == null) return; // non-message update (edited_message, etc.)
-        handleInboundMessage(ctx, message, bindingId);
+        // JCLAW-387 B1: detect a forward off the RAW update (the parsed
+        // InboundMessage drops the forward fields) so handleInboundMessage can
+        // route a forward burst through the coalesce lane.
+        handleInboundMessage(ctx, message, bindingId,
+                channels.TelegramPollingRunner.isForward(sdkUpdate));
     }
 
     private static void handleCallback(BindingCtx ctx, TelegramChannel.InboundCallback callback, Long bindingId) {
@@ -280,7 +284,8 @@ public class WebhookTelegramController extends Controller {
                         ctx.botToken(), ctx.agent(), callback));
     }
 
-    private static void handleInboundMessage(BindingCtx ctx, TelegramChannel.InboundMessage message, Long bindingId) {
+    private static void handleInboundMessage(BindingCtx ctx, TelegramChannel.InboundMessage message,
+                                             Long bindingId, boolean isForward) {
         // JCLAW-371 access policy: a DM is served only for the binding owner; a
         // group/supergroup is served for any member but only when the bot was
         // directly addressed (@mention / reply-to-bot etc.). See TelegramAccessPolicy.
@@ -314,7 +319,15 @@ public class WebhookTelegramController extends Controller {
         // immediately there, so normal messages keep today's zero-latency path.
         // Everything else (attachments / media groups) stays on the existing
         // media-group buffer unchanged.
-        if (channels.TelegramInboundTextBuffer.isEligible(message)) {
+        //
+        // JCLAW-387 B1: a FORWARD takes priority over the text/media lanes — a
+        // burst of consecutive forwards coalesces into ONE turn. Checked first
+        // because a forwarded plain text would otherwise fall into the
+        // text-reassembly lane and a forwarded photo into the media-group lane.
+        if (isForward) {
+            channels.TelegramForwardCoalesceBuffer.add(message, merged ->
+                    Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(ctx, merged)));
+        } else if (channels.TelegramInboundTextBuffer.isEligible(message)) {
             channels.TelegramInboundTextBuffer.add(message, merged ->
                     Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(ctx, merged)));
         } else {

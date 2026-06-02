@@ -790,6 +790,111 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "a missing binding must fall back to the supplied default agent");
     }
 
+    // ===== JCLAW-387 B1: forwarded-message detection =====
+
+    @Test
+    void isForwardTrueForLegacyForwardDate() {
+        // Bot API populates the legacy forward_date for backward compatibility.
+        var msg = new org.telegram.telegrambots.meta.api.objects.message.Message();
+        msg.setMessageId(1);
+        msg.setText("forwarded text");
+        msg.setForwardDate(1_700_000_000);
+        var update = new Update();
+        update.setMessage(msg);
+        assertTrue(TelegramPollingRunner.isForward(update),
+                "a message carrying forward_date must be detected as a forward");
+    }
+
+    @Test
+    void isForwardTrueForModernForwardOrigin() {
+        // Bot API 7.0+ canonical marker: forward_origin (a MessageOrigin variant).
+        var origin = org.telegram.telegrambots.meta.api.objects.messageorigin.MessageOriginHiddenUser
+                .builder()
+                .type("hidden_user")
+                .date(1_700_000_000)
+                .senderUserName("Anonymous")
+                .build();
+        var msg = new org.telegram.telegrambots.meta.api.objects.message.Message();
+        msg.setMessageId(1);
+        msg.setText("forwarded text");
+        msg.setForwardOrigin(origin);
+        var update = new Update();
+        update.setMessage(msg);
+        assertTrue(TelegramPollingRunner.isForward(update),
+                "a message carrying forward_origin must be detected as a forward");
+    }
+
+    @Test
+    void isForwardFalseForNormalMessage() {
+        var msg = new org.telegram.telegrambots.meta.api.objects.message.Message();
+        msg.setMessageId(1);
+        msg.setText("just a normal typed message");
+        var update = new Update();
+        update.setMessage(msg);
+        assertFalse(TelegramPollingRunner.isForward(update),
+                "a normal (non-forwarded) message must NOT be detected as a forward");
+    }
+
+    @Test
+    void isForwardFalseForNullUpdateOrMessage() {
+        assertFalse(TelegramPollingRunner.isForward(null),
+                "null update is not a forward");
+        assertFalse(TelegramPollingRunner.isForward(new Update()),
+                "an update with no message (e.g. callback/reaction) is not a forward");
+    }
+
+    // ===== JCLAW-387 D2: polling-error classification (NOT backoff) =====
+
+    @Test
+    void classifyPollingErrorAuthCodesAreNonRecoverable() {
+        for (int code : new int[] {401, 403, 404}) {
+            var ex = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
+                    "boom",
+                    org.telegram.telegrambots.meta.api.objects.ApiResponse.builder()
+                            .ok(false).errorCode(code).errorDescription("denied").build());
+            assertEquals(TelegramPollingRunner.ERR_NON_RECOVERABLE,
+                    TelegramPollingRunner.classifyPollingError(ex),
+                    "HTTP " + code + " is an operator-action (non-recoverable) failure");
+        }
+    }
+
+    @Test
+    void classifyPollingErrorTransientCodesAreRecoverable() {
+        // 409 (stale-poll conflict the cooldown handles), 429 (rate limit), 500 (server).
+        for (int code : new int[] {409, 429, 500, 502}) {
+            var ex = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
+                    "boom",
+                    org.telegram.telegrambots.meta.api.objects.ApiResponse.builder()
+                            .ok(false).errorCode(code).errorDescription("transient").build());
+            assertEquals(TelegramPollingRunner.ERR_RECOVERABLE,
+                    TelegramPollingRunner.classifyPollingError(ex),
+                    "HTTP " + code + " recovers on the SDK/cooldown curve (recoverable)");
+        }
+    }
+
+    @Test
+    void classifyPollingErrorPlainExceptionAndNullAreRecoverable() {
+        assertEquals(TelegramPollingRunner.ERR_RECOVERABLE,
+                TelegramPollingRunner.classifyPollingError(new java.net.SocketTimeoutException("read timed out")),
+                "a network timeout (no Telegram code) is conservatively recoverable");
+        assertEquals(TelegramPollingRunner.ERR_RECOVERABLE,
+                TelegramPollingRunner.classifyPollingError(null),
+                "a null error is conservatively recoverable");
+    }
+
+    @Test
+    void describePollingErrorCurveReflectsClassification() {
+        var auth = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
+                "boom",
+                org.telegram.telegrambots.meta.api.objects.ApiResponse.builder()
+                        .ok(false).errorCode(401).errorDescription("unauthorized").build());
+        assertTrue(TelegramPollingRunner.describePollingErrorCurve(auth).contains("non-recoverable"),
+                "an auth failure's curve description names it non-recoverable");
+        assertTrue(TelegramPollingRunner.describePollingErrorCurve(
+                        new java.net.ConnectException("refused")).contains("recoverable"),
+                "a network failure's curve description names it recoverable");
+    }
+
     // ===== stop() =====
 
     /**

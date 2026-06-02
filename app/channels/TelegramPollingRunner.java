@@ -184,8 +184,11 @@ public final class TelegramPollingRunner {
                 EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                         "Long-polling app started (%d binding(s) registered)".formatted(ACTIVE.size()));
             } catch (Exception e) {
+                // JCLAW-387 D2: classify + name the recovery curve; we do NOT add
+                // our own retry here — the SDK owns the getUpdates backoff.
                 EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
-                        "Failed to start polling app: %s".formatted(e.getMessage()));
+                        "Failed to start polling app: %s [%s]".formatted(
+                                e.getMessage(), describePollingErrorCurve(e)));
             }
         }
     }
@@ -308,8 +311,13 @@ public final class TelegramPollingRunner {
                     "Registered polling session for binding %d (offset seeded from %d)".formatted(
                             bindingId, persistedOffset));
         } catch (Exception e) {
+            // JCLAW-387 D2: classify the registration failure + name its recovery
+            // curve. A recoverable failure (network/5xx/429/409) clears on the
+            // cooldown reconcile; a non-recoverable one (401/403/404) needs an
+            // operator. No competing retry is added — the SDK + cooldown own it.
             EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
-                    "Failed to register binding %d: %s".formatted(bindingId, e.getMessage()));
+                    "Failed to register binding %d: %s [%s]".formatted(
+                            bindingId, e.getMessage(), describePollingErrorCurve(e)));
         }
     }
 
@@ -582,7 +590,10 @@ public final class TelegramPollingRunner {
                 return;
             }
 
-            handleMessage(bindingId, ctx, msg);
+            // JCLAW-387 B1: detect a forward off the RAW update (the parsed
+            // InboundMessage drops the forward fields) so handleMessage can route
+            // a forward burst through the coalesce lane.
+            handleMessage(bindingId, ctx, msg, isForward(update));
         } catch (Exception e) {
             EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
                     "Polling update processing error for binding %d: %s".formatted(
@@ -617,7 +628,8 @@ public final class TelegramPollingRunner {
         TelegramCallbackDispatcher.dispatch(ctx.botToken(), ctx.agent(), callback);
     }
 
-    private static void handleMessage(Long bindingId, Ctx ctx, TelegramChannel.InboundMessage msg) {
+    private static void handleMessage(Long bindingId, Ctx ctx, TelegramChannel.InboundMessage msg,
+                                      boolean isForward) {
         // JCLAW-371: DM owner-only; group/supergroup served only when the bot
         // was directly addressed (msg.botMentioned). See TelegramAccessPolicy.
         boolean ownerMatches = ctx.telegramUserId().equals(msg.fromId());
@@ -642,6 +654,12 @@ public final class TelegramPollingRunner {
         // per forum topic) so every allowed member shares one transcript owned
         // by the binding's JClaw peer rather than fragmenting per-member.
         final String ownerKey = ctx.telegramUserId();
+        // JCLAW-387 B1: a FORWARD takes priority over the text/media lanes — a
+        // burst of forwards (text or media) coalesces into ONE turn. Checked
+        // first because a forwarded plain text would otherwise fall into the
+        // text-reassembly lane (which targets client auto-split pastes, not
+        // forward bursts) and a forwarded photo into the media-group lane.
+        //
         // JCLAW-136: media_group_id reassembly runs BEFORE attachment
         // download + dispatch so multi-photo albums collapse into one
         // turn. Plain-text and single-attachment messages skip the
@@ -653,7 +671,10 @@ public final class TelegramPollingRunner {
         // pieces coalesces into ONE turn. Sub-threshold pieces dispatch
         // immediately there, so normal messages keep today's zero-latency
         // path. Everything else stays on the media-group buffer unchanged.
-        if (TelegramInboundTextBuffer.isEligible(msg)) {
+        if (isForward) {
+            TelegramForwardCoalesceBuffer.add(msg, merged -> dispatchMerged(
+                    sendToken, sendAgent, ownerKey, merged));
+        } else if (TelegramInboundTextBuffer.isEligible(msg)) {
             TelegramInboundTextBuffer.add(msg, merged -> dispatchMerged(
                     sendToken, sendAgent, ownerKey, merged));
         } else {
@@ -830,6 +851,32 @@ public final class TelegramPollingRunner {
         return u.getId() != null ? String.valueOf(u.getId()) : "someone";
     }
 
+    // ===== JCLAW-387 B1: forwarded-message detection =====
+
+    /**
+     * True when {@code update} carries a forwarded message. Detection reads the
+     * RAW SDK {@link org.telegram.telegrambots.meta.api.objects.message.Message}
+     * because the parsed {@link TelegramChannel.InboundMessage} does NOT retain
+     * the forward fields. Both dispatch sites
+     * ({@link controllers.WebhookTelegramController} and {@link #dispatch}) call
+     * this on the same update they pass to
+     * {@link TelegramChannel#parseUpdate(Update, String, String)} so a forward
+     * routes through {@link TelegramForwardCoalesceBuffer} instead of the
+     * text-reassembly / media-group lanes.
+     *
+     * <p>Bot API 7.0+ uses {@code forward_origin} (a {@code MessageOrigin}
+     * variant) as the canonical forward marker; the SDK still populates the
+     * legacy {@code forward_date} for backward compatibility. We treat EITHER as
+     * a forward so detection holds across both payload shapes. Public so
+     * default-package tests can assert the detection contract.
+     */
+    public static boolean isForward(Update update) {
+        if (update == null) return false;
+        var msg = update.getMessage();
+        if (msg == null) return false;
+        return msg.getForwardOrigin() != null || msg.getForwardDate() != null;
+    }
+
     /**
      * JCLAW-375: gate an inbound reaction delta against the notify policy and,
      * when allowed, hand it to the bound agent as a synthetic system message.
@@ -935,6 +982,76 @@ public final class TelegramPollingRunner {
               .append(" from message ").append(r.messageId());
         }
         return sb.append('.').toString();
+    }
+
+    // ===== JCLAW-387 D2: own the polling-error classification (NOT the backoff) =====
+    //
+    // Scope note: the pengrad/telegrambots long-polling SDK owns the getUpdates
+    // network loop AND its own backoff/retry — JClaw never sees a per-poll network
+    // error to retry. We deliberately do NOT add a competing retry loop (that would
+    // fight the SDK's own backoff and risk double-polling → HTTP 409). What JClaw
+    // CAN own cleanly is the *classification* of the polling-related errors that DO
+    // surface on its side — registration (registerInternal) and app.start() — into
+    // recoverable vs non-recoverable, plus a log line that names the recovery curve.
+    // This is observability over the SDK's curve, not a replacement for it.
+
+    /** Recoverable: a transient condition the SDK's own retry/backoff (or the
+     *  cooldown reconcile) will clear without operator action. */
+    public static final String ERR_RECOVERABLE = "recoverable";
+    /** Non-recoverable: a config/auth condition that won't clear by retrying;
+     *  needs an operator (bad token, bot blocked, binding misconfigured). */
+    public static final String ERR_NON_RECOVERABLE = "non-recoverable";
+
+    /**
+     * Classify a polling-related {@link Throwable} as {@link #ERR_RECOVERABLE} or
+     * {@link #ERR_NON_RECOVERABLE}. Non-recoverable means an operator must act —
+     * auth/permission failures (HTTP 401/403) and not-found (404) on a bad token;
+     * everything else (timeouts, connection resets, 5xx, 429 rate-limit, the
+     * 409 stale-poll conflict the cooldown already handles) is treated as
+     * recoverable. Conservative by design: when in doubt, recoverable — so we
+     * never tell an operator to act on a transient blip.
+     *
+     * <p>Pure + public so default-package tests can assert the contract without
+     * standing up the SDK poll loop.
+     */
+    public static String classifyPollingError(Throwable t) {
+        if (t == null) return ERR_RECOVERABLE;
+        Integer code = telegramErrorCode(t);
+        if (code != null && (code == 401 || code == 403 || code == 404)) {
+            return ERR_NON_RECOVERABLE;
+        }
+        return ERR_RECOVERABLE;
+    }
+
+    /**
+     * The Telegram HTTP error code carried by {@code t} (or a cause in its chain),
+     * or null when none is present. Walks the cause chain because the SDK may wrap
+     * a {@code TelegramApiRequestException} inside a registration failure.
+     */
+    private static Integer telegramErrorCode(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c instanceof org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException req) {
+                return req.getErrorCode();
+            }
+            if (c.getCause() == c) break; // self-referential chain guard
+        }
+        return null;
+    }
+
+    /**
+     * One-line description of how a classified polling error recovers, for the
+     * log. Recoverable errors recover on the SDK's own backoff curve (network /
+     * 5xx / 429) or, for registration, on the cooldown reconcile after
+     * {@link #COOLDOWN_MS}; non-recoverable errors need operator action. Public
+     * for the classification-contract test.
+     */
+    public static String describePollingErrorCurve(Throwable t) {
+        String cls = classifyPollingError(t);
+        if (ERR_NON_RECOVERABLE.equals(cls)) {
+            return "non-recoverable (auth/config) — will NOT clear on retry; operator action required";
+        }
+        return "recoverable — SDK owns the getUpdates backoff curve; "
+                + "registration retries on the cooldown reconcile (~%d ms)".formatted(COOLDOWN_MS);
     }
 
 }

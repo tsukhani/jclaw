@@ -186,6 +186,53 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         assertEquals(200, response.status.intValue());
     }
 
+    // ===== JCLAW-387 B1: forwarded-message coalescing lane =====
+
+    @Test
+    void acceptsForwardedMessageFromOwner() {
+        // A forwarded message from the binding owner passes the access gate and
+        // is routed through the forward-coalesce lane (which buffers it for the
+        // idle window). The webhook returns 200 immediately — dispatch happens
+        // off-thread after the window, so we assert ingress acceptance here.
+        var bindingId = seedBinding(true);
+        var body = "{"
+                + "\"update_id\":1,"
+                + "\"message\":{"
+                + "  \"message_id\":1,"
+                + "  \"date\":1700000100,"
+                + "  \"forward_date\":1700000000,"
+                + "  \"chat\":{\"id\":42,\"type\":\"private\"},"
+                + "  \"from\":{\"id\":42,\"is_bot\":false,\"first_name\":\"Owner\"},"
+                + "  \"text\":\"a forwarded note\""
+                + "}"
+                + "}";
+        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        assertEquals(200, response.status.intValue());
+    }
+
+    @Test
+    void forwardDetectionMatchesWebhookShapedUpdate() {
+        // The controller derives isForward from the same raw SDK Update it passes
+        // to parseUpdate; assert that detection seam directly against the shape a
+        // webhook body deserializes into (forward_date set vs absent).
+        var fwdMsg = new org.telegram.telegrambots.meta.api.objects.message.Message();
+        fwdMsg.setMessageId(1);
+        fwdMsg.setText("forwarded");
+        fwdMsg.setForwardDate(1700000000);
+        var fwdUpdate = new org.telegram.telegrambots.meta.api.objects.Update();
+        fwdUpdate.setMessage(fwdMsg);
+        assertTrue(channels.TelegramPollingRunner.isForward(fwdUpdate),
+                "a forwarded webhook message must be detected as a forward");
+
+        var normalMsg = new org.telegram.telegrambots.meta.api.objects.message.Message();
+        normalMsg.setMessageId(2);
+        normalMsg.setText("typed");
+        var normalUpdate = new org.telegram.telegrambots.meta.api.objects.Update();
+        normalUpdate.setMessage(normalMsg);
+        assertFalse(channels.TelegramPollingRunner.isForward(normalUpdate),
+                "a normal typed webhook message must NOT be detected as a forward");
+    }
+
     @Test
     void silentlyIgnoresGroupMessageWithoutMention() {
         // JCLAW-371: a group message that does NOT address the bot is silently
