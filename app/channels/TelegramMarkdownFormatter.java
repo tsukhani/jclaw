@@ -605,8 +605,11 @@ public final class TelegramMarkdownFormatter {
                 chunks.add(current.toString());
                 current.setLength(0);
             }
-            for (int off = 0; off < line.length(); off += maxLen) {
-                chunks.add(line.substring(off, Math.min(line.length(), off + maxLen)));
+            int off = 0;
+            while (off < line.length()) {
+                int end = safeCutIndex(line, off, Math.min(line.length(), off + maxLen));
+                chunks.add(line.substring(off, end));
+                off = end;
             }
             return;
         }
@@ -617,5 +620,60 @@ public final class TelegramMarkdownFormatter {
         }
         if (!current.isEmpty()) current.append("\n");
         current.append(line);
+    }
+
+    /** Longest HTML entity ({@code &amp;}, {@code &hellip;}, …) we'd ever back a cut up
+     *  to clear. Bounds the backward scan so a stray {@code &} in plain text can't drag
+     *  the cut arbitrarily far left. Telegram-safe tags are short too, but {@code <a
+     *  href="…">} can be long, so tags get a separate, generous bound below. */
+    private static final int MAX_ENTITY_LEN = 10;
+
+    /**
+     * Given a hard-cut at {@code end} on the substring {@code [from, line.length())},
+     * back the cut up so it never lands inside an HTML entity ({@code &}…{@code ;}) or
+     * a tag ({@code <}…{@code >}). A naive fixed-stride length cut can slice {@code &amp;}
+     * into {@code …&am} + {@code p;…} or {@code <b>} into {@code …<b} + {@code >…},
+     * producing markup Telegram rejects.
+     *
+     * <p>The cut is at the natural {@code end} unless an unterminated {@code &} or
+     * {@code <} opens at or before {@code end} and its closing {@code ;} / {@code >}
+     * lands at or after {@code end} — then we retreat the cut to just before that
+     * opener so the whole entity/tag rides into the next chunk. If retreating would
+     * leave nothing for this chunk (the opener sits at {@code from}, i.e. the entity
+     * or tag is itself longer than {@code maxLen}), we keep the natural cut: a broken
+     * fragment is unavoidable in that pathological case and progress must be made.
+     */
+    private static int safeCutIndex(String line, int from, int end) {
+        if (end >= line.length()) return end; // natural end-of-line; nothing to split
+        // An entity is short and self-delimiting; scan a bounded window left of the cut.
+        int entityStart = lastUnterminated(line, from, end, '&', ';', MAX_ENTITY_LEN);
+        if (entityStart < end && entityStart > from) return entityStart;
+        // A tag can be longer (e.g. an <a href="…"> open tag); allow a window up to maxLen.
+        int tagStart = lastUnterminated(line, from, end, '<', '>', end - from);
+        if (tagStart < end && tagStart > from) return tagStart;
+        return end;
+    }
+
+    /**
+     * If a cut at {@code end} would fall strictly inside an {@code open}…{@code close}
+     * run (e.g. {@code &}…{@code ;} or {@code <}…{@code >}), return the index of that
+     * {@code open} char so the caller can cut just before it; otherwise return
+     * {@code end} unchanged. Only opens within {@code window} chars of {@code end}
+     * (and not before {@code from}) are considered, so an unmatched delimiter in plain
+     * text can't drag the cut arbitrarily far.
+     */
+    private static int lastUnterminated(String line, int from, int end, char open, char close, int window) {
+        int lowerBound = Math.max(from, end - window);
+        for (int j = end - 1; j >= lowerBound; j--) {
+            char c = line.charAt(j);
+            if (c == close) return end; // closed before the cut — not inside a run
+            if (c == open) {
+                // Open with no intervening close: the cut at `end` is inside this run.
+                // Confirm the run actually extends across `end` (its close is at/after end).
+                int closeIdx = line.indexOf(close, j + 1);
+                return (closeIdx >= end) ? j : end;
+            }
+        }
+        return end;
     }
 }

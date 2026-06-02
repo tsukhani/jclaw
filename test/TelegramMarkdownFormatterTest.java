@@ -409,6 +409,73 @@ class TelegramMarkdownFormatterTest extends UnitTest {
         assertTrue(TelegramMarkdownFormatter.chunkHtml("", 100).isEmpty());
     }
 
+    @Test
+    void chunkHtmlHardCutNeverSplitsEntitiesOrTags() {
+        // A2 regression: a single line longer than maxLen takes the hard-cut path.
+        // The naive fixed-stride substring slice could land mid-entity (&amp; →
+        // "&am" + "p;") or mid-tag (<b> → "<b" + ">"). Build a >4000-char line that
+        // is dense with entities and short tags so a naive length-cut at 4000 would
+        // almost certainly slice one, then assert no chunk does.
+        var maxLen = 4000;
+        // Each unit is a small mix of an entity, a tag pair, and another entity.
+        // ~30 chars/unit → ~150 units to clear 4000 with no \n\n or \n boundaries.
+        var unit = "x &amp; <b>y</b> z &lt; ";
+        var line = unit.repeat(200); // single physical line, no newlines at all
+        assertTrue(line.length() > maxLen, "fixture line must exceed the chunk limit");
+        assertFalse(line.contains("\n"), "fixture must be a single line to hit the hard-cut path");
+
+        var chunks = TelegramMarkdownFormatter.chunkHtml(line, maxLen);
+        assertTrue(chunks.size() >= 2,
+                () -> "oversized single line should split, got " + chunks.size());
+
+        for (String c : chunks) {
+            // (b) every chunk within the size limit
+            assertTrue(c.length() <= maxLen,
+                    () -> "chunk exceeds maxLen: " + c.length());
+            // (a) no chunk splits an entity: a chunk must not end with a dangling
+            // "&…" that lacks its ';', and must not start with an orphan entity tail.
+            assertFalse(danglingEntityAtEnd(c),
+                    () -> "chunk ends mid-entity (unterminated &): "
+                            + c.substring(Math.max(0, c.length() - 12)));
+            assertFalse(orphanEntityTailAtStart(c),
+                    () -> "chunk starts with an orphan entity tail: "
+                            + c.substring(0, Math.min(12, c.length())));
+            // (a) no chunk splits a tag: balanced '<' and '>' and no open-tag
+            // straddling the chunk boundary in either direction.
+            assertEquals(countOccurrences(c, "<"), countOccurrences(c, ">"),
+                    () -> "chunk splits a tag (unbalanced < / >): " + tailHead(c));
+            assertFalse(c.endsWith("<") || hasUnterminatedTagAtEnd(c),
+                    () -> "chunk ends mid-tag: " + c.substring(Math.max(0, c.length() - 12)));
+        }
+
+        // (c) reassembly is lossless — concatenation reproduces the original line.
+        var reassembled = String.join("", chunks);
+        assertEquals(line, reassembled,
+                () -> "reassembled chunks must equal the original line");
+    }
+
+    @Test
+    void chunkHtmlHardCutMakesProgressWhenTagExceedsLimit() {
+        // Pathological guard: a single tag longer than maxLen can't be kept atomic.
+        // The splitter must still make progress (terminate, no infinite loop) rather
+        // than refusing to cut. A long <a href="…"> open tag is the realistic shape.
+        var maxLen = 50;
+        var href = "https://example.com/" + "p".repeat(200);
+        var line = "<a href=\"" + href + "\">link text here</a> trailing prose";
+        assertTrue(line.indexOf('>') > maxLen,
+                "the leading tag itself must exceed maxLen for this guard to bite");
+
+        var chunks = TelegramMarkdownFormatter.chunkHtml(line, maxLen);
+        assertTrue(chunks.size() >= 2, () -> "should split, got " + chunks.size());
+        for (String c : chunks) {
+            assertTrue(c.length() <= maxLen,
+                    () -> "chunk exceeds maxLen even in the pathological case: " + c.length());
+        }
+        // Reassembly still lossless despite the unavoidable mid-tag cut.
+        assertEquals(line, String.join("", chunks),
+                () -> "reassembly must stay lossless in the pathological case");
+    }
+
     // ── JCLAW-92: autolink, typographic, tasklist extensions ──
 
     @Test
@@ -512,5 +579,39 @@ class TelegramMarkdownFormatterTest extends UnitTest {
             idx += needle.length();
         }
         return count;
+    }
+
+    /** True if the chunk ends with an HTML entity that lost its closing ';'
+     *  (a '&' near the end with no following ';' before the chunk's end). */
+    private static boolean danglingEntityAtEnd(String chunk) {
+        int amp = chunk.lastIndexOf('&');
+        if (amp < 0) return false;
+        int semi = chunk.indexOf(';', amp + 1);
+        return semi < 0; // & with no ';' after it within this chunk
+    }
+
+    /** True if the chunk begins with an orphaned entity tail — i.e. a ';'
+     *  appears before any '&', meaning the entity opener was cut into the
+     *  previous chunk (e.g. previous chunk ended "&am", this one starts "p;"). */
+    private static boolean orphanEntityTailAtStart(String chunk) {
+        int semi = chunk.indexOf(';');
+        if (semi < 0) return false;
+        int amp = chunk.indexOf('&');
+        return amp < 0 || amp > semi;
+    }
+
+    /** True if the chunk ends mid-tag — a trailing '<' opener with no closing
+     *  '>' after it within this chunk. */
+    private static boolean hasUnterminatedTagAtEnd(String chunk) {
+        int lt = chunk.lastIndexOf('<');
+        if (lt < 0) return false;
+        int gt = chunk.indexOf('>', lt + 1);
+        return gt < 0;
+    }
+
+    /** Compact "head…tail" rendering for assertion messages on long chunks. */
+    private static String tailHead(String c) {
+        if (c.length() <= 24) return c;
+        return c.substring(0, 12) + "…" + c.substring(c.length() - 12);
     }
 }
