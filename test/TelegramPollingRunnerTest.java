@@ -388,6 +388,127 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "after the session advances past the seed, the SDK value drives the offset");
     }
 
+    // ===== JCLAW-363: liveness watchdog + transport rebuild =====
+    //
+    // These drive the watchdog through TelegramPollingRunnerTestHooks: an
+    // injectable clock (advance "now" without sleeping), a watchdog-ms override
+    // (bypass application.conf), and a synchronous tick. A rebuild manifests as
+    // the binding leaving activeBindingIds() with its token stamped into
+    // cooldown — the existing scheduled cooldown reconcile then re-registers it
+    // ~30.5s out, which never fires inside a fast test.
+
+    @Test
+    void consumingAnUpdateAdvancesLastProgress() {
+        String token = "771:tokWd";
+        seedPollingBinding("agent-wd-progress", token, "7", true);
+        // Freeze the clock at t0 so register() seeds last-progress to a known value.
+        TelegramPollingRunnerTestHooks.setClock(() -> 1_000L);
+        TelegramPollingRunner.reconcile();
+        assertEquals(Long.valueOf(1_000L), TelegramPollingRunnerTestHooks.lastProgress(token),
+                "register should seed last-progress to the current clock value");
+
+        // Advance the clock, then drive the consumer; the wrapper must restamp.
+        TelegramPollingRunnerTestHooks.setClock(() -> 5_000L);
+        var consumer = fakeApp.consumerFor(token);
+        assertNotNull(consumer);
+        Update update = new Update();
+        update.setUpdateId(11);
+        ((LongPollingSingleThreadUpdateConsumer) consumer).consume(update);
+
+        assertEquals(Long.valueOf(5_000L), TelegramPollingRunnerTestHooks.lastProgress(token),
+                "consuming an update should advance last-progress to the current clock value");
+    }
+
+    @Test
+    void watchdogRebuildsAStaleBinding() {
+        String token = "772:tokWd";
+        Long id = seedPollingBinding("agent-wd-stale", token, "7", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L); // register seeds progress at t0
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+
+        // Jump the clock well past the timeout with no intervening consume.
+        TelegramPollingRunnerTestHooks.setClock(() -> 200_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "a binding stale past the watchdog timeout should be rebuilt (unregistered)");
+        assertTrue(TelegramPollingRunner.cooldownRemainingMs(token) > 0L,
+                "the rebuild should stamp the cooldown so re-register waits out Telegram's stale poll");
+    }
+
+    @Test
+    void watchdogLeavesAFreshBindingAlone() {
+        String token = "773:tokWd";
+        Long id = seedPollingBinding("agent-wd-fresh", token, "7", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+
+        // Advance only a little — within the timeout — so the binding is healthy.
+        TelegramPollingRunnerTestHooks.setClock(() -> 1_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
+                "a binding within the watchdog timeout must not be rebuilt");
+        assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs(token),
+                "a healthy binding must not be stamped into cooldown");
+    }
+
+    @Test
+    void watchdogDisabledWhenWatchdogMsIsZero() {
+        String token = "774:tokWd";
+        Long id = seedPollingBinding("agent-wd-off", token, "7", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(0L); // disabled
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+        assertFalse(TelegramPollingRunnerTestHooks.isWatchdogRunning(),
+                "watchdogMs=0 must not schedule the periodic tick");
+
+        // Even far past any timeout, a disabled watchdog tick is a no-op.
+        TelegramPollingRunnerTestHooks.setClock(() -> 10_000_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
+                "watchdogMs=0 must never rebuild a binding, however stale");
+        assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs(token));
+    }
+
+    @Test
+    void watchdogDoesNotRebuildABindingInCooldown() {
+        String token = "775:tokWd";
+        Long id = seedPollingBinding("agent-wd-cooldown", token, "7", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+
+        // Stamp a live cooldown on the still-active token, then make it stale.
+        // The watchdog must defer to the in-flight cooldown reconcile rather than
+        // double-rebuild and fight the 409 cooldown.
+        TelegramPollingRunnerTestHooks.stampCooldown(token, 60_000L);
+        TelegramPollingRunnerTestHooks.setClock(() -> 200_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
+                "a token in cooldown must not be rebuilt by the watchdog");
+    }
+
+    @Test
+    void watchdogTickStartedOnRegisterWhenEnabled() {
+        String token = "776:tokWd";
+        seedPollingBinding("agent-wd-lifecycle", token, "7", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
+        assertFalse(TelegramPollingRunnerTestHooks.isWatchdogRunning(),
+                "no watchdog before the first registration");
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunnerTestHooks.isWatchdogRunning(),
+                "registering a binding with the watchdog enabled should start the periodic tick");
+    }
+
     // ===== stop() =====
 
     /**

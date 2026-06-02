@@ -2,6 +2,8 @@ package channels;
 
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 
+import java.util.function.LongSupplier;
+
 /**
  * Public bridge into {@link TelegramPollingRunner}'s package-private
  * {@code setAppForTest} (JCLAW-316). JClaw's tests live in the default
@@ -31,5 +33,53 @@ public final class TelegramPollingRunnerTestHooks {
      */
     public static void clear() {
         TelegramPollingRunner.clearForTest();
+    }
+
+    // ===== JCLAW-363 liveness-watchdog seams =====
+
+    /**
+     * Override the watchdog timeout (ms), bypassing {@code application.conf}.
+     * Pass {@code null} to fall back to the configured value/default. {@code 0}
+     * disables the watchdog.
+     */
+    public static void setWatchdogMs(Long ms) {
+        TelegramPollingRunner.setWatchdogMsForTest(ms);
+    }
+
+    /**
+     * Swap the watchdog/progress time source so a test can advance "now" past
+     * the timeout without sleeping. Pass {@code null} to restore the wall clock.
+     */
+    public static void setClock(LongSupplier supplier) {
+        TelegramPollingRunner.setClockForTest(supplier);
+    }
+
+    /** Stamp {@code token}'s last-progress timestamp to the current clock value. */
+    public static void markProgress(String token) {
+        TelegramPollingRunner.markProgressForTest(token);
+    }
+
+    /** Read {@code token}'s last-progress timestamp, or {@code null} if untracked. */
+    public static Long lastProgress(String token) {
+        return TelegramPollingRunner.lastProgressForTest(token);
+    }
+
+    /** Run one watchdog pass synchronously on the calling thread. */
+    public static void runWatchdogTick() {
+        TelegramPollingRunner.runWatchdogTickForTest();
+    }
+
+    /** Is the periodic watchdog tick currently scheduled? */
+    public static boolean isWatchdogRunning() {
+        return TelegramPollingRunner.isWatchdogRunningForTest();
+    }
+
+    /**
+     * Stamp a cooldown on {@code token} for {@code ms} from now without going
+     * through an unregister — lets a test put a still-active binding's token
+     * into cooldown to verify the watchdog's cooldown guard.
+     */
+    public static void stampCooldown(String token, long ms) {
+        TelegramPollingRunner.stampCooldownForTest(token, ms);
     }
 }

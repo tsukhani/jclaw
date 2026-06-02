@@ -18,9 +18,11 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 
 /**
  * Multi-bot long-polling runner for JCLAW-89 per-user Telegram bindings. Owns a
@@ -67,6 +69,45 @@ public final class TelegramPollingRunner {
      */
     @SuppressWarnings("java:S3077") // Volatile non-primitive is correct here: pure publish-then-read, no compound mutation
     private static volatile ScheduledExecutorService scheduler = newScheduler();
+
+    /**
+     * JCLAW-363 liveness watchdog. Token → epoch-millis of the last consumed
+     * update for that bot (seeded to "now" at register time). The consume path
+     * JCLAW-361 already wraps stamps this on every update; the watchdog tick
+     * compares it against {@link #watchdogMs()} to detect a wedged poller.
+     */
+    private static final ConcurrentHashMap<String, Long> LAST_PROGRESS = new ConcurrentHashMap<>();
+
+    /** Config key for the watchdog timeout in ms; 0 disables. */
+    public static final String CFG_WATCHDOG_MS = "telegram.polling.watchdogMs";
+
+    /** Default watchdog timeout: 2 minutes of no progress before a rebuild. */
+    public static final long DEFAULT_WATCHDOG_MS = 120_000L;
+
+    /**
+     * Handle to the periodic watchdog tick scheduled on {@link #scheduler}, or
+     * {@code null} when the watchdog isn't running ({@code watchdogMs == 0}, or
+     * nothing registered yet). Cancelled on {@link #stop}/{@link #clearForTest}.
+     * Volatile: published from {@link #ensureWatchdogStarted} (under the
+     * {@code reconcile}/register monitor) and read/cleared from {@link #stop}.
+     */
+    @SuppressWarnings("java:S3077") // pure publish-then-read of a single reference, no compound mutation
+    private static volatile ScheduledFuture<?> watchdogTask;
+
+    /**
+     * Test-only watchdog timeout override (ms). When non-null, {@link #watchdogMs}
+     * returns this instead of reading {@code application.conf}, so tests don't
+     * depend on the deployed config. {@code null} = use config/default.
+     */
+    private static volatile Long watchdogMsOverride;
+
+    /**
+     * Time source for progress timestamps and staleness checks. Defaults to wall
+     * clock; a test can swap in a controllable supplier via
+     * {@link #setClockForTest} to simulate a stale poller without sleeping.
+     */
+    @SuppressWarnings("java:S3077") // single-reference publish-then-read
+    private static volatile LongSupplier clock = System::currentTimeMillis;
 
     private static ScheduledExecutorService newScheduler() {
         var exec = new ScheduledThreadPoolExecutor(1,
@@ -151,6 +192,10 @@ public final class TelegramPollingRunner {
                         "Polling app shutdown error: %s".formatted(e.getMessage()));
             }
         }
+        // JCLAW-363: stop the periodic watchdog before draining the scheduler it
+        // rides on, so the shutdown awaitTermination isn't held by a fixed-delay
+        // task.
+        stopWatchdog();
         // Time-bounded drain of the cooldown-reconcile scheduler. Without this
         // the static scheduler accumulates a thread per dev hot reload.
         utils.VirtualThreads.gracefulShutdown(scheduler, "telegram-cooldown-reconcile");
@@ -192,6 +237,12 @@ public final class TelegramPollingRunner {
     static void clearForTest() {
         ACTIVE.clear();
         COOLDOWN_UNTIL.clear();
+        // JCLAW-363: drop the watchdog tick + its tracking state and restore the
+        // wall clock / config-driven timeout so each test starts clean.
+        stopWatchdog();
+        LAST_PROGRESS.clear();
+        watchdogMsOverride = null;
+        clock = System::currentTimeMillis;
         APP.set(null);
         if (scheduler.isShutdown()) {
             scheduler = newScheduler();
@@ -224,14 +275,22 @@ public final class TelegramPollingRunner {
             // re-dispatches every update Telegram still buffers.
             int persistedOffset = TelegramOffsetStore.load(token);
             LongPollingSingleThreadUpdateConsumer consumer = update -> {
+                // JCLAW-363: stamp liveness on every consumed update so the
+                // watchdog can tell a healthy poller from a wedged one.
+                markProgress(token);
                 dispatch(bindingId, update);
                 if (update.getUpdateId() != null) {
                     TelegramOffsetStore.record(token, update.getUpdateId());
                 }
             };
+            // JCLAW-363: seed last-progress to "now" so a freshly-registered
+            // (or just-rebuilt) binding isn't treated as stale before its first
+            // poll completes.
+            markProgress(token);
             app.registerBot(token, () -> TelegramUrl.DEFAULT_URL,
                     seedingGetUpdatesGenerator(persistedOffset), consumer);
             ACTIVE.put(bindingId, token);
+            ensureWatchdogStarted();
             EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                     "Registered polling session for binding %d (offset seeded from %d)".formatted(
                             bindingId, persistedOffset));
@@ -274,6 +333,7 @@ public final class TelegramPollingRunner {
                     "Unregister failed for binding %d: %s".formatted(bindingId, e.getMessage()));
         }
         ACTIVE.remove(bindingId);
+        if (token != null) LAST_PROGRESS.remove(token);
         TelegramChannel.evictToken(token);
         if (token != null) {
             COOLDOWN_UNTIL.put(token, System.currentTimeMillis() + COOLDOWN_MS);
@@ -309,6 +369,149 @@ public final class TelegramPollingRunner {
         long now = System.currentTimeMillis();
         if (until <= now) return null;
         return Instant.ofEpochMilli(until);
+    }
+
+    // ===== JCLAW-363: polling liveness watchdog + transport rebuild =====
+
+    /** Stamp {@code token}'s last-progress timestamp to the current clock value. */
+    private static void markProgress(String token) {
+        if (token != null) LAST_PROGRESS.put(token, clock.getAsLong());
+    }
+
+    /**
+     * Configured watchdog timeout in ms. Reads {@link #CFG_WATCHDOG_MS} from
+     * {@code application.conf} (default {@link #DEFAULT_WATCHDOG_MS}); a value of
+     * {@code 0} (or negative, or unparseable) disables the watchdog. A test-only
+     * override ({@link #setWatchdogMsForTest}) takes precedence so tests don't
+     * depend on the deployed config. Never throws.
+     */
+    public static long watchdogMs() {
+        Long override = watchdogMsOverride;
+        if (override != null) return Math.max(0L, override);
+        try {
+            var cfg = play.Play.configuration;
+            String raw = cfg != null ? cfg.getProperty(CFG_WATCHDOG_MS) : null;
+            if (raw == null || raw.isBlank()) return DEFAULT_WATCHDOG_MS;
+            return Math.max(0L, Long.parseLong(raw.trim()));
+        } catch (RuntimeException e) {
+            return DEFAULT_WATCHDOG_MS;
+        }
+    }
+
+    /**
+     * Start the periodic watchdog tick if it isn't already running and the
+     * watchdog is enabled ({@code watchdogMs > 0}). Idempotent and cheap to call
+     * on every register. The tick fires every {@code watchdogMs} on the shared
+     * cooldown-reconcile {@link #scheduler} (virtual-thread backed), so no new
+     * thread pool is created. Called under the {@code reconcile}/register
+     * monitor so the {@link #watchdogTask} check-then-set is single-threaded.
+     */
+    private static void ensureWatchdogStarted() {
+        long timeout = watchdogMs();
+        if (timeout <= 0 || watchdogTask != null || scheduler.isShutdown()) return;
+        watchdogTask = scheduler.scheduleWithFixedDelay(
+                TelegramPollingRunner::watchdogTick, timeout, timeout, TimeUnit.MILLISECONDS);
+        EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
+                "Polling watchdog started (timeout %d ms)".formatted(timeout));
+    }
+
+    /** Cancel the periodic watchdog tick if running. */
+    private static void stopWatchdog() {
+        var task = watchdogTask;
+        if (task != null) {
+            task.cancel(false);
+            watchdogTask = null;
+        }
+    }
+
+    /**
+     * One watchdog pass: for each active binding whose token has made no progress
+     * within {@link #watchdogMs} and is NOT currently in cooldown, rebuild the
+     * transport. The rebuild is {@link #unregisterInternal}, which stamps the
+     * cooldown and schedules a self-{@link #reconcile} ~30.5 s out on the same
+     * cooldown-aware {@link #scheduler}; that deferred reconcile re-registers the
+     * binding (cleanly, after Telegram's stale long-poll has drained) and reseeds
+     * its offset from {@link TelegramOffsetStore}. Reusing the cooldown path is
+     * what keeps the watchdog from fighting the 409 cooldown — it never
+     * re-registers inside an open cooldown window.
+     *
+     * <p>{@code synchronized} on the class monitor so it can't race a concurrent
+     * {@link #reconcile} or {@link #stop} mutating {@link #ACTIVE}. Runs on the
+     * virtual-thread-backed scheduler; it touches no JPA-managed state and never
+     * interrupts a DB-touching thread (consistent with the existing cooldown
+     * reconcile). A disabled watchdog ({@code watchdogMs == 0}) is a no-op even
+     * if a stale tick slips through after a config flip.
+     */
+    static synchronized void watchdogTick() {
+        long timeout = watchdogMs();
+        if (timeout <= 0) return;
+        long now = clock.getAsLong();
+        var app = APP.get();
+        if (app == null) return;
+        for (var entry : new HashMap<>(ACTIVE).entrySet()) {
+            Long bindingId = entry.getKey();
+            String token = entry.getValue();
+            if (token == null) continue;
+            // Don't fight the 409 cooldown: a token mid-cooldown is already being
+            // re-registered by the scheduled cooldown reconcile.
+            if (cooldownRemainingMs(token) > 0) continue;
+            Long last = LAST_PROGRESS.get(token);
+            long elapsed = last == null ? 0L : now - last;
+            if (last == null || elapsed < timeout) continue;
+            EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
+                    "Polling watchdog: binding %d stale for %d ms (>= %d) — rebuilding transport".formatted(
+                            bindingId, elapsed, timeout));
+            unregisterInternal(app, bindingId, token);
+        }
+    }
+
+    // ===== JCLAW-363 test seams (documented in TelegramPollingRunnerTestHooks) =====
+
+    /**
+     * Test-only: override the watchdog timeout, bypassing {@code application.conf}.
+     * Pass {@code null} to fall back to the configured value/default.
+     */
+    static void setWatchdogMsForTest(Long ms) {
+        watchdogMsOverride = ms;
+    }
+
+    /**
+     * Test-only: swap the time source so a test can advance "now" past the
+     * timeout without sleeping. Pass {@code null} to restore the wall clock.
+     */
+    static void setClockForTest(LongSupplier supplier) {
+        clock = supplier != null ? supplier : System::currentTimeMillis;
+    }
+
+    /** Test-only: stamp {@code token}'s last-progress to the current clock value. */
+    static void markProgressForTest(String token) {
+        markProgress(token);
+    }
+
+    /** Test-only: read {@code token}'s last-progress timestamp, or {@code null}. */
+    static Long lastProgressForTest(String token) {
+        return LAST_PROGRESS.get(token);
+    }
+
+    /** Test-only: run one watchdog pass synchronously on the calling thread. */
+    static void runWatchdogTickForTest() {
+        watchdogTick();
+    }
+
+    /** Test-only: is the periodic watchdog tick currently scheduled? */
+    static boolean isWatchdogRunningForTest() {
+        return watchdogTask != null;
+    }
+
+    /**
+     * Test-only: stamp a cooldown on {@code token} for {@code ms} from now,
+     * without going through an unregister. Lets a test put a still-active
+     * binding's token into cooldown to verify the watchdog's cooldown guard.
+     */
+    static void stampCooldownForTest(String token, long ms) {
+        // cooldownRemainingMs() reads the wall clock (it's called from the API
+        // thread), so stamp against System time, not the injectable test clock.
+        if (token != null) COOLDOWN_UNTIL.put(token, System.currentTimeMillis() + ms);
     }
 
     /** Snapshot of binding state pulled inside the transaction, then read off-thread. */
