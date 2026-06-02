@@ -691,12 +691,32 @@ public class TelegramChannel implements Channel {
      */
     public static String replyToMode() {
         var raw = play.Play.configuration.getProperty(CFG_REPLY_TO_MODE, REPLY_MODE_FIRST);
-        if (raw == null) return REPLY_MODE_FIRST;
+        return normalizeReplyMode(raw, REPLY_MODE_FIRST);
+    }
+
+    /** Normalize a raw reply-mode value (config or per-binding override) to a
+     *  known constant, falling back to {@code fallback} on null/blank/unknown. */
+    private static String normalizeReplyMode(String raw, String fallback) {
+        if (raw == null) return fallback;
         var v = raw.trim().toLowerCase();
         return switch (v) {
             case REPLY_MODE_OFF, REPLY_MODE_FIRST, REPLY_MODE_ALL -> v;
-            default -> REPLY_MODE_FIRST;
+            default -> fallback;
         };
+    }
+
+    /**
+     * JCLAW-378: the effective reply mode for a bot token: the per-binding
+     * {@link models.TelegramBinding#replyToMode} override when set (and valid),
+     * otherwise the JVM-wide {@link #replyToMode()} config default. A blank /
+     * unrecognized override is ignored and the config default applies. Public so
+     * default-package tests can assert the override-wins / null-falls-back
+     * contract, matching the {@code *ForTest} convention.
+     */
+    public static String effectiveReplyToMode(String botToken) {
+        var override = models.TelegramBinding.overridesForToken(botToken).replyToMode();
+        if (override == null || override.isBlank()) return replyToMode();
+        return normalizeReplyMode(override, replyToMode());
     }
 
     /**
@@ -706,9 +726,8 @@ public class TelegramChannel implements Channel {
      * → always (given a non-null target). {@code allow_sending_without_reply=true}
      * so a since-deleted target degrades to a plain send instead of a 400.
      */
-    private static ReplyParameters replyParamsFor(Integer replyToMessageId, boolean firstChunk) {
+    private static ReplyParameters replyParamsFor(Integer replyToMessageId, boolean firstChunk, String mode) {
         if (replyToMessageId == null) return null;
-        var mode = replyToMode();
         boolean apply = switch (mode) {
             case REPLY_MODE_ALL -> true;
             case REPLY_MODE_FIRST -> firstChunk;
@@ -738,8 +757,8 @@ public class TelegramChannel implements Channel {
      * sink always evaluates the reply policy as the first chunk. Returns null
      * when no badge should be applied ({@code off}, or a null target).
      */
-    static ReplyParameters replyParamsForSink(Integer replyToMessageId) {
-        return replyParamsFor(replyToMessageId, true);
+    static ReplyParameters replyParamsForSink(String botToken, Integer replyToMessageId) {
+        return replyParamsFor(replyToMessageId, true, effectiveReplyToMode(botToken));
     }
 
     /** JCLAW-369: package-private bridge so the sink shares the General-topic strip rule. */
@@ -844,9 +863,12 @@ public class TelegramChannel implements Channel {
         // `first` reply-mode applies the reply badge once, not once per segment.
         var firstChunk = new java.util.concurrent.atomic.AtomicBoolean(true);
         Integer threadId = sendThreadId(messageThreadId);
+        // JCLAW-378: resolve the reply mode once per turn from the binding
+        // override (?? config default) so every segment shares one decision.
+        String mode = effectiveReplyToMode(botToken);
         boolean allOk = true;
         for (var segment : segments) {
-            if (!dispatchSegment(channel, chatId, segment, replyToMessageId, threadId, firstChunk)) {
+            if (!dispatchSegment(channel, chatId, segment, replyToMessageId, threadId, firstChunk, mode)) {
                 allOk = false;
             }
         }
@@ -857,12 +879,13 @@ public class TelegramChannel implements Channel {
     private static boolean dispatchSegment(TelegramChannel channel, String chatId,
                                            TelegramOutboundPlanner.Segment segment,
                                            Integer replyToMessageId, Integer threadId,
-                                           java.util.concurrent.atomic.AtomicBoolean firstChunk) {
+                                           java.util.concurrent.atomic.AtomicBoolean firstChunk,
+                                           String mode) {
         if (segment instanceof TelegramOutboundPlanner.TextSegment(String markdown)) {
-            return sendTextSegment(channel, chatId, markdown, replyToMessageId, threadId, firstChunk);
+            return sendTextSegment(channel, chatId, markdown, replyToMessageId, threadId, firstChunk, mode);
         }
         if (segment instanceof TelegramOutboundPlanner.MediaGroupSegment mg) {
-            return sendMediaGroupSegment(channel, chatId, mg, replyToMessageId, threadId, firstChunk);
+            return sendMediaGroupSegment(channel, chatId, mg, replyToMessageId, threadId, firstChunk, mode);
         }
         if (segment instanceof TelegramOutboundPlanner.FileSegment fs) {
             // JCLAW-126: the quality-duplicate document emit (same file as
@@ -881,11 +904,11 @@ public class TelegramChannel implements Channel {
                 boolean ownsFirst = firstChunk.getAndSet(false);
                 Thread.ofVirtual().name("telegram-bg-send")
                         .start(() -> backgroundSendFile(channel, chatId, fs,
-                                replyToMessageId, threadId, ownsFirst));
+                                replyToMessageId, threadId, ownsFirst, mode));
                 return true;
             }
             return sendFileSegment(channel, chatId, fs, replyToMessageId, threadId,
-                    firstChunk.getAndSet(false));
+                    firstChunk.getAndSet(false), mode);
         }
         return true;
     }
@@ -899,9 +922,9 @@ public class TelegramChannel implements Channel {
     private static void backgroundSendFile(TelegramChannel channel, String chatId,
                                             TelegramOutboundPlanner.FileSegment fs,
                                             Integer replyToMessageId, Integer threadId,
-                                            boolean firstChunk) {
+                                            boolean firstChunk, String mode) {
         try {
-            if (!sendFileSegment(channel, chatId, fs, replyToMessageId, threadId, firstChunk)) {
+            if (!sendFileSegment(channel, chatId, fs, replyToMessageId, threadId, firstChunk, mode)) {
                 EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                         "Background file send failed (non-blocking): %s"
                                 .formatted(fs.displayName()));
@@ -925,7 +948,8 @@ public class TelegramChannel implements Channel {
      */
     private static boolean sendTextSegment(TelegramChannel channel, String chatId, String markdown,
                                            Integer replyToMessageId, Integer threadId,
-                                           java.util.concurrent.atomic.AtomicBoolean firstChunk) {
+                                           java.util.concurrent.atomic.AtomicBoolean firstChunk,
+                                           String mode) {
         if (markdown == null || markdown.isBlank()) return true;
         var html = TelegramMarkdownFormatter.toHtml(markdown);
         if (html.isBlank()) return true;
@@ -933,7 +957,7 @@ public class TelegramChannel implements Channel {
         boolean allOk = true;
         for (var part : chunks) {
             boolean ownsFirst = firstChunk.getAndSet(false);
-            var reply = replyParamsFor(replyToMessageId, ownsFirst);
+            var reply = replyParamsFor(replyToMessageId, ownsFirst, mode);
             if (!channel.sendTextWithRetry(chatId, part, reply, threadId)) allOk = false;
         }
         return allOk;
@@ -947,8 +971,8 @@ public class TelegramChannel implements Channel {
     private static boolean sendFileSegment(TelegramChannel channel, String chatId,
                                             TelegramOutboundPlanner.FileSegment fs,
                                             Integer replyToMessageId, Integer threadId,
-                                            boolean firstChunk) {
-        var reply = replyParamsFor(replyToMessageId, firstChunk);
+                                            boolean firstChunk, String mode) {
+        var reply = replyParamsFor(replyToMessageId, firstChunk, mode);
         var file = fs.file();
         var name = fs.displayName();
         var caption = fs.caption();
@@ -978,9 +1002,10 @@ public class TelegramChannel implements Channel {
     private static boolean sendMediaGroupSegment(TelegramChannel channel, String chatId,
                                                  TelegramOutboundPlanner.MediaGroupSegment mg,
                                                  Integer replyToMessageId, Integer threadId,
-                                                 java.util.concurrent.atomic.AtomicBoolean firstChunk) {
+                                                 java.util.concurrent.atomic.AtomicBoolean firstChunk,
+                                                 String mode) {
         boolean ownsFirst = firstChunk.getAndSet(false);
-        var reply = replyParamsFor(replyToMessageId, ownsFirst);
+        var reply = replyParamsFor(replyToMessageId, ownsFirst, mode);
         if (channel.sendMediaGroup(chatId, mg.items(), mg.caption(), reply, threadId)) {
             return true;
         }
@@ -995,7 +1020,7 @@ public class TelegramChannel implements Channel {
             // Each fallback item is the first (and only) message of its own send;
             // reuse ownsFirst for item 0 so the reply badge still lands once.
             boolean itemFirst = i == 0 && ownsFirst;
-            if (!sendFileSegment(channel, chatId, withCaption, replyToMessageId, threadId, itemFirst)) {
+            if (!sendFileSegment(channel, chatId, withCaption, replyToMessageId, threadId, itemFirst, mode)) {
                 allOk = false;
             }
         }
@@ -2097,7 +2122,7 @@ public class TelegramChannel implements Channel {
                 .text(htmlText)
                 .parseMode("HTML")
                 .replyMarkup(keyboard);
-        var reply = replyParamsFor(replyToMessageId, true);
+        var reply = replyParamsFor(replyToMessageId, true, effectiveReplyToMode(botToken));
         if (reply != null) builder.replyParameters(reply);
         var threadId = sendThreadId(messageThreadId);
         if (threadId != null) builder.messageThreadId(threadId);

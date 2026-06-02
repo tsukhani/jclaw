@@ -113,6 +113,94 @@ class TelegramBindingTest extends UnitTest {
         assertNull(found, "null agent must return null without NPE");
     }
 
+    // ── JCLAW-378: per-binding setting overrides ──────────────────────────
+
+    @Test
+    void perBindingOverrideFieldsPersistAndRoundTrip() {
+        // The three nullable override fields persist verbatim and reload.
+        var owner = createAgent("tb-overrides-owner");
+        Tx.run(() -> {
+            var b = new TelegramBinding();
+            b.agent = owner;
+            b.botToken = "tok-overrides";
+            b.telegramUserId = "500";
+            b.replyToMode = "all";
+            b.errorReplyPolicy = "silent";
+            b.notifierCooldownMs = 12_345L;
+            b.save();
+        });
+
+        var found = Tx.run(() -> TelegramBinding.findByBotToken("tok-overrides"));
+        assertNotNull(found);
+        assertEquals("all", found.replyToMode);
+        assertEquals("silent", found.errorReplyPolicy);
+        assertEquals(Long.valueOf(12_345L), found.notifierCooldownMs);
+    }
+
+    @Test
+    void perBindingOverrideFieldsDefaultToNull() {
+        // A binding seeded without overrides keeps all three fields null so the
+        // consumers fall back to global config (existing-binding behavior).
+        var owner = createAgent("tb-null-overrides");
+        Tx.run(() -> seedBinding(owner, "tok-null-overrides", "501", true));
+
+        var found = Tx.run(() -> TelegramBinding.findByBotToken("tok-null-overrides"));
+        assertNotNull(found);
+        assertNull(found.replyToMode);
+        assertNull(found.errorReplyPolicy);
+        assertNull(found.notifierCooldownMs);
+    }
+
+    @Test
+    void overridesForTokenSnapshotsFields() {
+        var owner = createAgent("tb-snapshot-owner");
+        Tx.run(() -> {
+            var b = new TelegramBinding();
+            b.agent = owner;
+            b.botToken = "tok-snapshot";
+            b.telegramUserId = "502";
+            b.replyToMode = "first";
+            b.errorReplyPolicy = "reply";
+            b.notifierCooldownMs = 90_000L;
+            b.save();
+        });
+
+        var ov = TelegramBinding.overridesForToken("tok-snapshot");
+        assertEquals("first", ov.replyToMode());
+        assertEquals("reply", ov.errorReplyPolicy());
+        assertEquals(Long.valueOf(90_000L), ov.cooldownMs());
+    }
+
+    @Test
+    void overridesForTokenNormalizesNonPositiveCooldownToNull() {
+        // A stored non-positive cooldown is treated as absent so the resolver
+        // falls back to config rather than rate-limiting on a 0/negative window.
+        var owner = createAgent("tb-bad-cooldown-owner");
+        Tx.run(() -> {
+            var b = new TelegramBinding();
+            b.agent = owner;
+            b.botToken = "tok-bad-cooldown";
+            b.telegramUserId = "503";
+            b.notifierCooldownMs = 0L;
+            b.save();
+        });
+
+        var ov = TelegramBinding.overridesForToken("tok-bad-cooldown");
+        assertNull(ov.cooldownMs(), "non-positive stored cooldown must snapshot as null");
+    }
+
+    @Test
+    void overridesForTokenEmptyForBlankOrMissingToken() {
+        // Blank token and unknown token both resolve to EMPTY so callers never
+        // need a null check.
+        assertSame(TelegramBinding.SettingOverrides.EMPTY,
+                TelegramBinding.overridesForToken("  "));
+        var missing = Tx.run(() -> TelegramBinding.overridesForToken("tok-does-not-exist"));
+        assertNull(missing.replyToMode());
+        assertNull(missing.errorReplyPolicy());
+        assertNull(missing.cooldownMs());
+    }
+
     private Agent createAgent(String name) {
         return Tx.run(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
     }

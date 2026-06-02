@@ -292,6 +292,99 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
                 "create response should surface telegramUserId: " + content);
     }
 
+    // ===== JCLAW-378: per-binding setting overrides =====
+
+    @Test
+    void createAcceptsAndReturnsPerBindingOverrides() {
+        var agentId = seedAgent("tg-overrides-agent");
+        login();
+        // enabled=false keeps post-mutation reconcile() off the network.
+        var body = """
+                {"botToken": "378:tok", "agentId": %d, "telegramUserId": "42",
+                 "enabled": false,
+                 "replyToMode": "all", "errorReplyPolicy": "silent", "notifierCooldownMs": 12345}
+                """.formatted(agentId);
+        var response = POST("/api/channels/telegram/bindings",
+                "application/json", body);
+        assertIsOk(response);
+        var content = getContent(response);
+        assertTrue(content.contains("\"replyToMode\":\"all\""),
+                "create response should surface replyToMode: " + content);
+        assertTrue(content.contains("\"errorReplyPolicy\":\"silent\""),
+                "create response should surface errorReplyPolicy: " + content);
+        assertTrue(content.contains("\"notifierCooldownMs\":12345"),
+                "create response should surface notifierCooldownMs: " + content);
+
+        // Persisted verbatim.
+        var persisted = commitInFreshTx(() -> TelegramBinding.findByBotToken("378:tok"));
+        assertNotNull(persisted);
+        assertEquals("all", persisted.replyToMode);
+        assertEquals("silent", persisted.errorReplyPolicy);
+        assertEquals(Long.valueOf(12345L), persisted.notifierCooldownMs);
+    }
+
+    @Test
+    void createOmittingOverridesLeavesThemNull() {
+        var agentId = seedAgent("tg-no-overrides-agent");
+        login();
+        var body = """
+                {"botToken": "378b:tok", "agentId": %d, "telegramUserId": "7", "enabled": false}
+                """.formatted(agentId);
+        var response = POST("/api/channels/telegram/bindings",
+                "application/json", body);
+        assertIsOk(response);
+        var persisted = commitInFreshTx(() -> TelegramBinding.findByBotToken("378b:tok"));
+        assertNotNull(persisted);
+        assertNull(persisted.replyToMode, "omitted replyToMode must stay null (config fallback)");
+        assertNull(persisted.errorReplyPolicy);
+        assertNull(persisted.notifierCooldownMs);
+    }
+
+    @Test
+    void updateChangesAndClearsPerBindingOverrides() {
+        var agentId = seedAgent("tg-update-overrides-agent");
+        var bindingId = seedBinding(agentId, "378c:tok", "42");
+        login();
+        // Set overrides on the existing binding (enabled=false avoids reconcile network).
+        var set = PUT("/api/channels/telegram/bindings/" + bindingId,
+                "application/json",
+                "{\"enabled\": false, \"replyToMode\": \"first\", \"errorReplyPolicy\": \"silent\", \"notifierCooldownMs\": 5000}");
+        assertIsOk(set);
+        var afterSet = commitInFreshTx(() -> TelegramBinding.findById(bindingId));
+        assertEquals("first", ((TelegramBinding) afterSet).replyToMode);
+        assertEquals("silent", ((TelegramBinding) afterSet).errorReplyPolicy);
+        assertEquals(Long.valueOf(5000L), ((TelegramBinding) afterSet).notifierCooldownMs);
+
+        // Null clears the overrides back to config fallback.
+        var clear = PUT("/api/channels/telegram/bindings/" + bindingId,
+                "application/json",
+                "{\"replyToMode\": null, \"errorReplyPolicy\": null, \"notifierCooldownMs\": null}");
+        assertIsOk(clear);
+        var afterClear = commitInFreshTx(() -> TelegramBinding.findById(bindingId));
+        assertNull(((TelegramBinding) afterClear).replyToMode, "null replyToMode must clear the override");
+        assertNull(((TelegramBinding) afterClear).errorReplyPolicy);
+        assertNull(((TelegramBinding) afterClear).notifierCooldownMs);
+    }
+
+    @ParameterizedTest(name = "createRejectsInvalidOverride[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "BadReplyMode     | {\"replyToMode\": \"sideways\"}",
+            "BadErrorPolicy   | {\"errorReplyPolicy\": \"yell\"}",
+            "NonPositiveCool  | {\"notifierCooldownMs\": 0}"
+    })
+    void createRejectsInvalidOverrideValues(String label, String overrideFragment) {
+        var agentId = seedAgent("tg-bad-override-" + label);
+        login();
+        // Splice the invalid override fragment into an otherwise-valid create body.
+        var inner = overrideFragment.substring(1, overrideFragment.length() - 1);
+        var body = ("{\"botToken\": \"378inv-" + label + ":tok\", \"agentId\": " + agentId
+                + ", \"telegramUserId\": \"42\", \"enabled\": false, " + inner + "}");
+        var response = POST("/api/channels/telegram/bindings",
+                "application/json", body);
+        assertEquals(400, response.status.intValue(),
+                label + " should be rejected: " + getContent(response));
+    }
+
     @Test
     void createDefaultsTransportToPolling() {
         var agentId = seedAgent("tg-agent");

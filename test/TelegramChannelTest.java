@@ -954,6 +954,68 @@ class TelegramChannelTest extends UnitTest {
                 "known value is lowercased");
     }
 
+    // ─── JCLAW-378: per-binding reply-mode override ─────────────────────
+
+    @Test
+    void effectiveReplyToMode_bindingOverrideWins() {
+        // The binding's stored override beats the global config default.
+        play.Play.configuration.setProperty("telegram.replyTo.mode", "first");
+        String token = "jclaw378-override-" + System.nanoTime();
+        try {
+            seedBindingOverride(token, "all", null, null);
+            assertEquals("all", TelegramChannel.effectiveReplyToMode(token),
+                    "binding override must win over the global config default");
+        } finally {
+            deleteBinding(token);
+        }
+    }
+
+    @Test
+    void effectiveReplyToMode_nullOverrideFallsBackToConfig() {
+        // No binding override → resolve to the global config default.
+        play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
+        String token = "jclaw378-fallback-" + System.nanoTime();
+        try {
+            seedBindingOverride(token, null, null, null);
+            assertEquals("all", TelegramChannel.effectiveReplyToMode(token),
+                    "null binding override must fall back to config");
+        } finally {
+            deleteBinding(token);
+        }
+    }
+
+    @Test
+    void effectiveReplyToMode_noBindingFallsBackToConfig() {
+        // An unknown token (no binding row) resolves to the config default.
+        play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
+        assertEquals("off",
+                TelegramChannel.effectiveReplyToMode("jclaw378-no-binding-" + System.nanoTime()));
+    }
+
+    /** Seed a binding carrying the given setting overrides under a unique token. */
+    private static void seedBindingOverride(String token, String replyMode,
+                                            String errPolicy, Long cooldownMs) {
+        services.Tx.run(() -> {
+            var agent = services.AgentService.create(
+                    "jclaw378-agent-" + System.nanoTime(), "openrouter", "gpt-4.1");
+            var b = new models.TelegramBinding();
+            b.agent = agent;
+            b.botToken = token;
+            b.telegramUserId = "9";
+            b.replyToMode = replyMode;
+            b.errorReplyPolicy = errPolicy;
+            b.notifierCooldownMs = cooldownMs;
+            b.save();
+        });
+    }
+
+    private static void deleteBinding(String token) {
+        services.Tx.run(() -> {
+            var b = models.TelegramBinding.findByBotToken(token);
+            if (b != null) b.delete();
+        });
+    }
+
     @Test
     void sendMessage_threadIdApplied_whenNotGeneral() {
         // AC3: a non-General topic thread id is set on the send.

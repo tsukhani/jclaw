@@ -22,6 +22,9 @@ function binding(overrides: Record<string, unknown> = {}) {
     hasWebhookSecret: false,
     effectiveWebhookUrl: null,
     enabled: false,
+    replyToMode: null,
+    errorReplyPolicy: null,
+    notifierCooldownMs: null,
     cooldownUntil: null,
     createdAt: null,
     updatedAt: null,
@@ -87,6 +90,64 @@ describe('telegram bindings page — webhook base URL + auto-secret (JCLAW-339)'
     const base = c.find('#binding-webhook-base').element as HTMLInputElement
     expect(base.value).toBe('') // jsdom origin is http://localhost → not public
     expect(c.text()).toContain('Enter your public HTTPS URL')
+  })
+})
+
+describe('telegram bindings page — per-binding settings (JCLAW-378)', () => {
+  it('renders the three override controls in the editor', async () => {
+    bindingsResponse = [binding({ id: 7, transport: 'POLLING' })]
+    const c = await mountSuspended(Telegram)
+    await c.find('[aria-label="Edit binding"]').trigger('click')
+    await nextTick()
+    expect(c.find('#binding-reply-mode').exists()).toBe(true)
+    expect(c.find('#binding-error-policy').exists()).toBe(true)
+    expect(c.find('#binding-notifier-cooldown').exists()).toBe(true)
+  })
+
+  it('pre-fills the override controls from the binding being edited', async () => {
+    bindingsResponse = [binding({
+      id: 7,
+      transport: 'POLLING',
+      replyToMode: 'all',
+      errorReplyPolicy: 'silent',
+      notifierCooldownMs: 12345,
+    })]
+    const c = await mountSuspended(Telegram)
+    await c.find('[aria-label="Edit binding"]').trigger('click')
+    await nextTick()
+    expect((c.find('#binding-reply-mode').element as HTMLSelectElement).value).toBe('all')
+    expect((c.find('#binding-error-policy').element as HTMLSelectElement).value).toBe('silent')
+    expect((c.find('#binding-notifier-cooldown').element as HTMLInputElement).value).toBe('12345')
+  })
+
+  it('submits the chosen overrides (and null for blanks) in the PUT body', async () => {
+    bindingsResponse = [binding({ id: 7, transport: 'POLLING' })]
+    let captured: unknown = null
+    registerEndpoint('/api/channels/telegram/bindings/7', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        captured = await readBody(event)
+        return binding({ id: 7, transport: 'POLLING' })
+      },
+    })
+    const c = await mountSuspended(Telegram)
+    await c.find('[aria-label="Edit binding"]').trigger('click')
+    await nextTick()
+    await c.find('#binding-reply-mode').setValue('first')
+    await c.find('#binding-notifier-cooldown').setValue('9000')
+    // errorReplyPolicy left at '' (Default) → should submit as null.
+    const saveBtn = c.findAll('button').find(b => b.text() === 'Save')
+    expect(saveBtn).toBeTruthy()
+    await saveBtn!.trigger('click')
+    await flushPromises()
+    await nextTick()
+    expect(captured).not.toBeNull()
+    expect(captured).toMatchObject({
+      replyToMode: 'first',
+      notifierCooldownMs: 9000,
+      errorReplyPolicy: null,
+    })
   })
 })
 

@@ -85,6 +85,37 @@ public class TelegramBinding extends Model {
     @Column(nullable = false)
     public boolean enabled = true;
 
+    /**
+     * JCLAW-378: per-binding override for the reply-targeting policy. NULL falls
+     * back to the JVM-wide {@code telegram.replyTo.mode} config default — so
+     * existing bindings behave unchanged. Accepted values mirror
+     * {@link channels.TelegramChannel}'s reply-mode constants:
+     * {@code off} | {@code first} | {@code all}. Resolved at the send path via
+     * {@link channels.TelegramChannel#effectiveReplyToMode(String)}.
+     */
+    @Column(name = "reply_to_mode")
+    public String replyToMode;
+
+    /**
+     * JCLAW-378: per-binding override for the delivery-failure notifier policy.
+     * NULL falls back to the JVM-wide {@code telegram.notifier.policy} config
+     * default. Accepted values: {@code reply} (send the user a "couldn't
+     * deliver" message) | {@code silent} (suppress it; the failure is still
+     * logged). Resolved in {@link channels.TelegramStreamingSink}'s
+     * delivery-failure path.
+     */
+    @Column(name = "error_reply_policy")
+    public String errorReplyPolicy;
+
+    /**
+     * JCLAW-378: per-binding override for the per-conversation delivery-failure
+     * notifier cooldown window, in milliseconds. NULL falls back to the
+     * JVM-wide {@code telegram.notifier.cooldownMs} config default. A non-positive
+     * stored value is treated as absent by the resolver (falls back to config).
+     */
+    @Column(name = "notifier_cooldown_ms")
+    public Long notifierCooldownMs;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
@@ -105,6 +136,42 @@ public class TelegramBinding extends Model {
 
     public static TelegramBinding findByBotToken(String botToken) {
         return TelegramBinding.find("botToken", botToken).first();
+    }
+
+    /**
+     * JCLAW-378: the per-binding setting overrides, as a thread-safe snapshot.
+     * Each field is the binding's override or null when the binding falls back
+     * to the global config default. {@code cooldownMs} carries a stored value
+     * only when it is strictly positive — a non-positive stored value is
+     * normalized to null here so the resolver treats it as "use the config
+     * default".
+     *
+     * @param replyToMode      reply-targeting override ({@code off|first|all}) or null
+     * @param errorReplyPolicy notifier policy override ({@code reply|silent}) or null
+     * @param cooldownMs        notifier cooldown override in ms (>0) or null
+     */
+    public record SettingOverrides(String replyToMode, String errorReplyPolicy, Long cooldownMs) {
+        /** Empty snapshot — every field null, so every consumer falls back to config. */
+        public static final SettingOverrides EMPTY = new SettingOverrides(null, null, null);
+    }
+
+    /**
+     * JCLAW-378: look up the per-binding {@link SettingOverrides} for a bot token,
+     * from any thread context. Returns {@link SettingOverrides#EMPTY} when the
+     * token is blank or no binding exists, so callers never need a null check —
+     * a missing binding resolves to "use config defaults everywhere". Wrapped in
+     * {@link services.Tx} because the streaming/send paths run on virtual threads
+     * with no ambient JPA transaction.
+     */
+    public static SettingOverrides overridesForToken(String botToken) {
+        if (botToken == null || botToken.isBlank()) return SettingOverrides.EMPTY;
+        return services.Tx.run(() -> {
+            var b = findByBotToken(botToken);
+            if (b == null) return SettingOverrides.EMPTY;
+            Long cd = (b.notifierCooldownMs != null && b.notifierCooldownMs > 0)
+                    ? b.notifierCooldownMs : null;
+            return new SettingOverrides(b.replyToMode, b.errorReplyPolicy, cd);
+        });
     }
 
     public static TelegramBinding findByAgent(Agent agent) {

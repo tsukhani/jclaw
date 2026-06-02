@@ -777,7 +777,7 @@ public final class TelegramStreamingSink {
         // returns null and the badge is omitted. The topic thread id is set
         // on the send (General stripped); follow-up edits inherit both — the
         // Bot API edit path can't change reply/thread anyway.
-        var reply = TelegramChannel.replyParamsForSink(replyToMessageId);
+        var reply = TelegramChannel.replyParamsForSink(botToken, replyToMessageId);
         if (reply != null) builder.replyParameters(reply);
         var threadId = TelegramChannel.sendThreadIdForSink(messageThreadId);
         if (threadId != null) builder.messageThreadId(threadId);
@@ -840,10 +840,37 @@ public final class TelegramStreamingSink {
         }
     }
 
+    /**
+     * JCLAW-378: effective cooldown for a bot token — the per-binding
+     * {@link models.TelegramBinding#notifierCooldownMs} override (when >0)
+     * else the {@link #notifierCooldownMs()} config default. A null/non-positive
+     * override falls back to config (the override snapshot already normalizes a
+     * non-positive stored value to null). Public for the default-package test
+     * seam, mirroring the {@code *ForTest} convention.
+     */
+    public static long effectiveNotifierCooldownMs(String botToken) {
+        var override = models.TelegramBinding.overridesForToken(botToken).cooldownMs();
+        return override != null ? override : notifierCooldownMs();
+    }
+
     /** True when the operator opted out of the user-facing delivery-failure reply. */
     static boolean notifierSilent() {
         var raw = play.Play.configuration.getProperty(CFG_NOTIFIER_POLICY, "reply");
         return raw != null && raw.trim().equalsIgnoreCase(POLICY_SILENT);
+    }
+
+    /**
+     * JCLAW-378: effective silent verdict for a bot token — the per-binding
+     * {@link models.TelegramBinding#errorReplyPolicy} override (when set) else
+     * the {@link #notifierSilent()} config default. {@code silent} suppresses the
+     * reply; any other non-blank override (e.g. {@code reply}) forces the reply
+     * on even when the config default is silent. A null/blank override falls back
+     * to config. Public for the default-package test seam.
+     */
+    public static boolean effectiveNotifierSilent(String botToken) {
+        var override = models.TelegramBinding.overridesForToken(botToken).errorReplyPolicy();
+        if (override == null || override.isBlank()) return notifierSilent();
+        return override.trim().equalsIgnoreCase(POLICY_SILENT);
     }
 
     /**
@@ -860,13 +887,13 @@ public final class TelegramStreamingSink {
      * under {@code silent} the failure is logged but no chat message is sent.
      */
     private void notifyDeliveryFailure() {
-        if (notifierSilent()) {
+        if (effectiveNotifierSilent(botToken)) {
             EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Delivery failure (policy=silent — notification suppressed for chat "
                             + chatId + ")");
             return;
         }
-        if (!tryFireNotifier(conversationId)) {
+        if (!tryFireNotifier(conversationId, effectiveNotifierCooldownMs(botToken))) {
             EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Delivery failure (rate-limited — notification suppressed for chat "
                             + chatId + ")");
@@ -901,10 +928,22 @@ public final class TelegramStreamingSink {
      * @return true when the caller is allowed to fire the notifier now
      */
     public static boolean tryFireNotifier(Long conversationId) {
+        return tryFireNotifier(conversationId, notifierCooldownMs());
+    }
+
+    /**
+     * JCLAW-378: rate-limit decision against an explicit {@code cooldownMs}
+     * window — used by {@link #notifyDeliveryFailure} so a binding's per-binding
+     * cooldown override (resolved via {@link #effectiveNotifierCooldownMs}) is
+     * honoured. The no-arg {@link #tryFireNotifier(Long)} delegates here with the
+     * config default. Null conversationIds always return false (no key to rate-
+     * limit against). Public for the test seam.
+     */
+    public static boolean tryFireNotifier(Long conversationId, long cooldownMs) {
         if (conversationId == null) return false;
         long now = System.currentTimeMillis();
         var prev = LAST_NOTIFIER_FIRE_MS.get(conversationId);
-        if (prev != null && (now - prev) < notifierCooldownMs()) return false;
+        if (prev != null && (now - prev) < cooldownMs) return false;
         LAST_NOTIFIER_FIRE_MS.put(conversationId, now);
         return true;
     }

@@ -38,6 +38,10 @@ public class ApiTelegramBindingsController extends Controller {
     private static final String KEY_WEBHOOK_BASE_URL = "webhookBaseUrl";
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_TRANSPORT = "transport";
+    // JCLAW-378: per-binding setting overrides (null = fall back to global config).
+    private static final String KEY_REPLY_TO_MODE = "replyToMode";
+    private static final String KEY_ERROR_REPLY_POLICY = "errorReplyPolicy";
+    private static final String KEY_NOTIFIER_COOLDOWN_MS = "notifierCooldownMs";
 
     // EventLogger category + channel identifier for this binding type.
     private static final String EVENT_CATEGORY_CHANNEL = "channel";
@@ -55,6 +59,8 @@ public class ApiTelegramBindingsController extends Controller {
                                 String webhookBaseUrl, boolean hasWebhookSecret,
                                 String effectiveWebhookUrl,
                                 boolean enabled,
+                                String replyToMode, String errorReplyPolicy,
+                                Long notifierCooldownMs,
                                 String cooldownUntil,
                                 String createdAt, String updatedAt) {
         static BindingView of(TelegramBinding b) {
@@ -68,6 +74,7 @@ public class ApiTelegramBindingsController extends Controller {
                     b.webhookSecret != null && !b.webhookSecret.isBlank(),
                     effectiveWebhookUrl(b),
                     b.enabled,
+                    b.replyToMode, b.errorReplyPolicy, b.notifierCooldownMs,
                     cooldown != null ? cooldown.toString() : null,
                     b.createdAt != null ? b.createdAt.toString() : null,
                     b.updatedAt != null ? b.updatedAt.toString() : null);
@@ -137,6 +144,10 @@ public class ApiTelegramBindingsController extends Controller {
         binding.webhookSecret = readOptionalString(body, KEY_WEBHOOK_SECRET);
         binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
         binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
+        // JCLAW-378: per-binding setting overrides. On create the body keys may be
+        // absent — applyBindingSettingOverrides only touches a field when its key
+        // is present, so an absent key leaves the model's null (= config fallback).
+        applyBindingSettingOverrides(binding, body);
         ensureWebhookSecret(binding);
         binding.save();
 
@@ -222,6 +233,45 @@ public class ApiTelegramBindingsController extends Controller {
         }
         if (body.has(KEY_ENABLED)) {
             binding.enabled = body.get(KEY_ENABLED).getAsBoolean();
+        }
+        applyBindingSettingOverrides(binding, body);
+    }
+
+    /**
+     * JCLAW-378: apply the three per-binding setting overrides when their keys
+     * are present. A present-but-null JSON value clears the override (back to
+     * config fallback); an absent key leaves the stored value untouched, so a
+     * partial PUT that omits these keys never disturbs them. Enum-like values
+     * are validated against the same vocabulary the consumers honour; an
+     * out-of-range value 400s rather than silently persisting a no-op.
+     */
+    private static void applyBindingSettingOverrides(TelegramBinding binding,
+                                                      com.google.gson.JsonObject body) {
+        if (body.has(KEY_REPLY_TO_MODE)) {
+            String v = readOptionalString(body, KEY_REPLY_TO_MODE);
+            if (v != null && !v.matches("off|first|all")) {
+                error(400, "replyToMode must be one of: off, first, all");
+            }
+            binding.replyToMode = v;
+        }
+        if (body.has(KEY_ERROR_REPLY_POLICY)) {
+            String v = readOptionalString(body, KEY_ERROR_REPLY_POLICY);
+            if (v != null && !v.matches("reply|silent")) {
+                error(400, "errorReplyPolicy must be one of: reply, silent");
+            }
+            binding.errorReplyPolicy = v;
+        }
+        if (body.has(KEY_NOTIFIER_COOLDOWN_MS)) {
+            var el = body.get(KEY_NOTIFIER_COOLDOWN_MS);
+            if (el.isJsonNull()) {
+                binding.notifierCooldownMs = null;
+            } else {
+                long ms = el.getAsLong();
+                if (ms <= 0) {
+                    error(400, "notifierCooldownMs must be a positive number of milliseconds");
+                }
+                binding.notifierCooldownMs = ms;
+            }
         }
     }
 

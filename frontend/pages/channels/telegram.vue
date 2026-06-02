@@ -5,6 +5,17 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { Agent, TelegramBindingSummary } from '~/types/api'
 
+// JCLAW-378: per-binding setting overrides ride on the binding summary the
+// backend returns; declared locally (rather than on the shared
+// TelegramBindingSummary) since this page is their only consumer. Each is null
+// when the binding falls back to the global config default.
+interface BindingSettingOverrides {
+  replyToMode: string | null
+  errorReplyPolicy: string | null
+  notifierCooldownMs: number | null
+}
+type BindingWithOverrides = TelegramBindingSummary & Partial<BindingSettingOverrides>
+
 // JCLAW-362: structured result of the per-binding health probe
 // (POST /api/channels/telegram/bindings/{id}/test).
 interface ProbeResult {
@@ -108,6 +119,11 @@ interface BindingForm {
   // Auto-generated client-side for a new/secretless webhook binding; '' means
   // "keep the binding's existing secret" (we never receive it).
   webhookSecret: string
+  // JCLAW-378: per-binding setting overrides. '' on a select means "use the
+  // global default"; '' on the cooldown means "use the global default".
+  replyToMode: '' | 'off' | 'first' | 'all'
+  errorReplyPolicy: '' | 'reply' | 'silent'
+  notifierCooldownMs: string
 }
 
 const emptyForm = (): BindingForm => ({
@@ -118,6 +134,9 @@ const emptyForm = (): BindingForm => ({
   transport: 'POLLING',
   webhookBaseUrl: '',
   webhookSecret: '',
+  replyToMode: '',
+  errorReplyPolicy: '',
+  notifierCooldownMs: '',
 })
 
 const form = ref<BindingForm>(emptyForm())
@@ -222,6 +241,11 @@ function openEdit(binding: TelegramBindingSummary) {
     transport: binding.transport === 'WEBHOOK' ? 'WEBHOOK' : 'POLLING',
     webhookBaseUrl: binding.webhookBaseUrl ?? '',
     webhookSecret: '',
+    replyToMode: ((binding as BindingWithOverrides).replyToMode as BindingForm['replyToMode']) ?? '',
+    errorReplyPolicy: ((binding as BindingWithOverrides).errorReplyPolicy as BindingForm['errorReplyPolicy']) ?? '',
+    notifierCooldownMs: (binding as BindingWithOverrides).notifierCooldownMs != null
+      ? String((binding as BindingWithOverrides).notifierCooldownMs)
+      : '',
   }
   errorMessage.value = ''
   editing.value = binding
@@ -259,6 +283,13 @@ async function save() {
     agentId: form.value.agentId,
     telegramUserId: form.value.telegramUserId.trim(),
     transport: form.value.transport,
+    // JCLAW-378: per-binding overrides. '' / blank means "use the global
+    // default" → send null so the backend clears any stored override.
+    replyToMode: form.value.replyToMode || null,
+    errorReplyPolicy: form.value.errorReplyPolicy || null,
+    notifierCooldownMs: form.value.notifierCooldownMs.trim()
+      ? Number(form.value.notifierCooldownMs.trim())
+      : null,
   }
   // New bindings default to enabled=true; existing enabled state is preserved
   // on edit (the card toggle is the only control for it). Only send it on
@@ -676,6 +707,74 @@ async function testBinding(binding: TelegramBindingSummary) {
               Webhook (requires public HTTPS URL)
             </option>
           </select>
+        </label>
+
+        <!-- JCLAW-378: per-binding setting overrides. Each blank/Default option
+             leaves the binding on the global config default. -->
+        <label
+          for="binding-reply-mode"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">reply mode</span>
+          <select
+            id="binding-reply-mode"
+            v-model="form.replyToMode"
+            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                   focus:outline-hidden focus:border-ring transition-colors"
+          >
+            <option value="">
+              Default (global config)
+            </option>
+            <option value="off">
+              Off — never reply-to the message
+            </option>
+            <option value="first">
+              First — reply on the first chunk only
+            </option>
+            <option value="all">
+              All — reply on every chunk
+            </option>
+          </select>
+        </label>
+
+        <label
+          for="binding-error-policy"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">error reply policy</span>
+          <select
+            id="binding-error-policy"
+            v-model="form.errorReplyPolicy"
+            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                   focus:outline-hidden focus:border-ring transition-colors"
+          >
+            <option value="">
+              Default (global config)
+            </option>
+            <option value="reply">
+              Reply — tell the user delivery failed
+            </option>
+            <option value="silent">
+              Silent — log only, no chat message
+            </option>
+          </select>
+        </label>
+
+        <label
+          for="binding-notifier-cooldown"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">notifier cooldown (ms)</span>
+          <input
+            id="binding-notifier-cooldown"
+            v-model="form.notifierCooldownMs"
+            type="number"
+            min="1"
+            inputmode="numeric"
+            placeholder="blank = global default"
+            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                   focus:outline-hidden focus:border-ring transition-colors"
+          >
         </label>
 
         <template v-if="form.transport === 'WEBHOOK'">

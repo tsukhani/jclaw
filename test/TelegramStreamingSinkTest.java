@@ -281,6 +281,119 @@ class TelegramStreamingSinkTest extends UnitTest {
                 "should fire again once the rate window has elapsed");
     }
 
+    @Test
+    void tryFireNotifierExplicitCooldownIsHonoured() {
+        // The explicit-cooldown overload rate-limits against the passed window,
+        // not the config default — so a per-binding cooldown is respected.
+        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        assertTrue(TelegramStreamingSink.tryFireNotifier(424242L, 60_000L),
+                "first call must fire");
+        assertFalse(TelegramStreamingSink.tryFireNotifier(424242L, 60_000L),
+                "second call within the explicit window must suppress");
+    }
+
+    // === JCLAW-378: per-binding notifier policy + cooldown overrides ===
+
+    @Test
+    void effectiveNotifierSilent_bindingOverrideWins() {
+        // Global default = reply (not silent); a binding override of silent wins.
+        play.Play.configuration.remove("telegram.notifier.policy");
+        String token = "jclaw378-silent-" + System.nanoTime();
+        try {
+            seedBindingNotifierOverride(token, "silent", null);
+            assertTrue(TelegramStreamingSink.effectiveNotifierSilent(token),
+                    "binding errorReplyPolicy=silent must win over config default reply");
+        } finally {
+            deleteBinding(token);
+        }
+    }
+
+    @Test
+    void effectiveNotifierSilent_overrideForcesReplyOverSilentConfig() {
+        // Config says silent, but a binding override of reply forces the reply on.
+        play.Play.configuration.setProperty("telegram.notifier.policy", "silent");
+        String token = "jclaw378-reply-" + System.nanoTime();
+        try {
+            seedBindingNotifierOverride(token, "reply", null);
+            assertFalse(TelegramStreamingSink.effectiveNotifierSilent(token),
+                    "binding errorReplyPolicy=reply must override a silent config default");
+        } finally {
+            deleteBinding(token);
+            play.Play.configuration.remove("telegram.notifier.policy");
+        }
+    }
+
+    @Test
+    void effectiveNotifierSilent_nullOverrideFallsBackToConfig() {
+        play.Play.configuration.setProperty("telegram.notifier.policy", "silent");
+        String token = "jclaw378-silent-fallback-" + System.nanoTime();
+        try {
+            seedBindingNotifierOverride(token, null, null);
+            assertTrue(TelegramStreamingSink.effectiveNotifierSilent(token),
+                    "null override falls back to silent config default");
+        } finally {
+            deleteBinding(token);
+            play.Play.configuration.remove("telegram.notifier.policy");
+        }
+    }
+
+    @Test
+    void effectiveNotifierCooldownMs_bindingOverrideWins() {
+        play.Play.configuration.setProperty("telegram.notifier.cooldownMs", "60000");
+        String token = "jclaw378-cooldown-" + System.nanoTime();
+        try {
+            seedBindingNotifierOverride(token, null, 12_345L);
+            assertEquals(12_345L, TelegramStreamingSink.effectiveNotifierCooldownMs(token),
+                    "binding cooldown override must win over config default");
+        } finally {
+            deleteBinding(token);
+            play.Play.configuration.remove("telegram.notifier.cooldownMs");
+        }
+    }
+
+    @Test
+    void effectiveNotifierCooldownMs_nullOverrideFallsBackToConfig() {
+        play.Play.configuration.setProperty("telegram.notifier.cooldownMs", "77777");
+        String token = "jclaw378-cooldown-fallback-" + System.nanoTime();
+        try {
+            seedBindingNotifierOverride(token, null, null);
+            assertEquals(77_777L, TelegramStreamingSink.effectiveNotifierCooldownMs(token),
+                    "null cooldown override falls back to config default");
+        } finally {
+            deleteBinding(token);
+            play.Play.configuration.remove("telegram.notifier.cooldownMs");
+        }
+    }
+
+    @Test
+    void effectiveNotifierCooldownMs_noBindingFallsBackToConfigDefault() {
+        // No config value and no binding → the hardcoded 60s default.
+        play.Play.configuration.remove("telegram.notifier.cooldownMs");
+        assertEquals(60_000L, TelegramStreamingSink.effectiveNotifierCooldownMs(
+                "jclaw378-cooldown-none-" + System.nanoTime()));
+    }
+
+    private static void seedBindingNotifierOverride(String token, String errPolicy, Long cooldownMs) {
+        services.Tx.run(() -> {
+            var agent = services.AgentService.create(
+                    "jclaw378-sink-agent-" + System.nanoTime(), "openrouter", "gpt-4.1");
+            var b = new models.TelegramBinding();
+            b.agent = agent;
+            b.botToken = token;
+            b.telegramUserId = "9";
+            b.errorReplyPolicy = errPolicy;
+            b.notifierCooldownMs = cooldownMs;
+            b.save();
+        });
+    }
+
+    private static void deleteBinding(String token) {
+        services.Tx.run(() -> {
+            var b = models.TelegramBinding.findByBotToken(token);
+            if (b != null) b.delete();
+        });
+    }
+
     // === JCLAW-100: adaptive throttle ratchet ===
 
     @Test
