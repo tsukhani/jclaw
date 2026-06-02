@@ -70,7 +70,7 @@ public class WebhookTelegramController extends Controller {
         // paying the constant-time secret compares on every request. The real
         // client IP is resolved for accurate logging (it does not gate).
         String clientIp = resolveClientIp();
-        if (!TelegramWebhookRateLimiter.allow(bindingId, rateLimitMax(), rateLimitWindowSeconds())) {
+        if (!channels.TelegramWebhookRateLimiter.allow(bindingId, rateLimitMax(), rateLimitWindowSeconds())) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Rate-limited webhook for binding %d from %s".formatted(bindingId, clientIp));
             error(429, "Too Many Requests");

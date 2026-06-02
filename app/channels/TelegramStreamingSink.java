@@ -782,10 +782,11 @@ public final class TelegramStreamingSink {
      * public {@link TelegramChannel#suppressLinkPreview()} accessor so the live
      * placeholder + every streaming edit honor {@code telegram.linkPreview=off}
      * the same way the non-streaming send paths do — previously the live drafts
-     * still rendered URL preview cards until the final seal edit. Package-visible
-     * so the default-package test can assert the config-read contract.
+     * still rendered URL preview cards until the final seal edit. Public so the
+     * default-package test can assert the config-read contract, mirroring
+     * {@link TelegramChannel#suppressLinkPreview()}'s own public-for-tests scope.
      */
-    static LinkPreviewOptions streamingLinkPreviewOptions() {
+    public static LinkPreviewOptions streamingLinkPreviewOptions() {
         if (!TelegramChannel.suppressLinkPreview()) return null;
         return LinkPreviewOptions.builder()
                 .isDisabled(true)
