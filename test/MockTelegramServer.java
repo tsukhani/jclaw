@@ -46,6 +46,12 @@ public final class MockTelegramServer implements AutoCloseable {
     private final HttpServer server;
     private final List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
     private final ConcurrentHashMap<String, CannedResponse> overrides = new ConcurrentHashMap<>();
+    // JCLAW-359: per-method response sequences — each request to a method pops the
+    // next canned response off its queue, so a test can script "fail then succeed".
+    // Once a queue is drained, the handler falls back to the static override (if
+    // any) and then the default response.
+    private final ConcurrentHashMap<String, java.util.Queue<CannedResponse>> sequences =
+            new ConcurrentHashMap<>();
     private volatile long globalDelayMs = 0;
 
     public MockTelegramServer() throws IOException {
@@ -119,6 +125,19 @@ public final class MockTelegramServer implements AutoCloseable {
         overrides.put(methodName.toLowerCase(), new CannedResponse(statusCode, body, delayMs));
     }
 
+    /**
+     * JCLAW-359: enqueue one scripted response for {@code methodName}. Successive
+     * requests to that method pop responses in FIFO order; after the queue drains,
+     * the handler falls back to any static {@link #respondWith} override and then
+     * the default. Use to script a "first call 400, second call 200" sequence — the
+     * plain-text-fallback path needs the second send to succeed.
+     */
+    public void enqueueResponse(String methodName, int statusCode, String body) {
+        sequences.computeIfAbsent(methodName.toLowerCase(),
+                        _ -> new java.util.concurrent.ConcurrentLinkedQueue<>())
+                .add(new CannedResponse(statusCode, body, 0));
+    }
+
     /** Global delay injected into every response. Use for the parallelism timing test. */
     public void delay(long delayMs) {
         this.globalDelayMs = delayMs;
@@ -189,7 +208,11 @@ public final class MockTelegramServer implements AutoCloseable {
 
             requests.add(new RecordedRequest(apiMethod, path, body));
 
-            var override = overrides.get(apiMethod.toLowerCase());
+            // JCLAW-359: a scripted sequence (if present and non-empty) wins over
+            // the static override for this request; once drained, fall back to it.
+            var seq = sequences.get(apiMethod.toLowerCase());
+            var override = seq != null ? seq.poll() : null;
+            if (override == null) override = overrides.get(apiMethod.toLowerCase());
             long delayMs = override != null ? override.delayMs() : globalDelayMs;
             if (delayMs > 0) {
                 try {

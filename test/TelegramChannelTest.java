@@ -30,6 +30,8 @@ class TelegramChannelTest extends UnitTest {
         // JCLAW-369: the reply-mode tests set this property; clear it so they
         // can't leak into other tests in the suite.
         play.Play.configuration.remove("telegram.replyTo.mode");
+        // JCLAW-359: same for the link-preview flag the suppression tests set.
+        play.Play.configuration.remove("telegram.linkPreview");
         if (mock != null) mock.close();
     }
 
@@ -253,6 +255,142 @@ class TelegramChannelTest extends UnitTest {
             var result = TelegramChannel.forToken(token).trySend("12345", "<b>hi</b>");
             assertTrue(result.ok());
             assertEquals(1, mock.countRequests("sendMessage"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── JCLAW-359: HTML-parse plain-text fallback + link-preview ───────
+
+    /** The exact 400 shape Telegram returns when the HTML payload is malformed. */
+    private static final String PARSE_ERROR_400 =
+            "{\"ok\":false,\"error_code\":400,\"description\":"
+                    + "\"Bad Request: can't parse entities: Unsupported start tag \\\"foo\\\" at byte offset 0\"}";
+
+    @Test
+    void trySend_htmlParseError_retriesAsPlainTextAndSucceeds() {
+        // AC1: a 400 "can't parse entities" on the HTML send retries the SAME
+        // text once without parse_mode and succeeds. Two sendMessage calls hit
+        // the wire; the second carries no parse_mode.
+        String token = "jclaw359-parse-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            // First sendMessage → parse-error 400; second → default 200 success.
+            mock.enqueueResponse("sendMessage", 400, PARSE_ERROR_400.replace("\n", ""));
+            var result = TelegramChannel.forToken(token).trySend("12345", "<b>broken");
+            assertTrue(result.ok(), "plain-text fallback must succeed → SendResult.OK");
+            assertEquals(2, mock.countRequests("sendMessage"),
+                    "exactly two sends: rejected HTML, then plain-text retry");
+            var sends = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .toList();
+            assertTrue(sends.get(0).body().contains("parse_mode"),
+                    "first (rejected) send must carry parse_mode=HTML");
+            assertFalse(sends.get(1).body().contains("parse_mode"),
+                    "plain-text retry must omit parse_mode entirely");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySend_nonParse400_failsWithoutRetry() {
+        // AC1: a non-parse 400 (genuine bad request) must NOT trigger the
+        // plain-text retry — exactly one send, result FAILED, no spin.
+        String token = "jclaw359-bad400-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMessage", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"Bad Request: chat not found\"}");
+            var result = TelegramChannel.forToken(token).trySend("12345", "<b>hi</b>");
+            assertFalse(result.ok(), "a non-parse 400 stays FAILED");
+            assertEquals(0L, result.retryAfterMs(), "non-rate-limit failure has zero retryAfterMs");
+            assertEquals(1, mock.countRequests("sendMessage"),
+                    "a non-parse 400 must not retry — exactly one send");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySend_parseFallbackAlsoFails_returnsFailed() {
+        // AC1: if the plain-text retry itself fails, the result is FAILED (not a
+        // false OK). Both scripted sends 400; only the first is a parse error.
+        String token = "jclaw359-bothfail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.enqueueResponse("sendMessage", 400, PARSE_ERROR_400.replace("\n", ""));
+            mock.enqueueResponse("sendMessage", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"Bad Request: chat not found\"}");
+            var result = TelegramChannel.forToken(token).trySend("12345", "<b>broken");
+            assertFalse(result.ok(), "plain-text fallback failing must surface as FAILED");
+            assertEquals(2, mock.countRequests("sendMessage"),
+                    "one HTML send + one plain-text retry — no third attempt");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySend_rateLimit429_unchangedByFallback() {
+        // AC1: the 429 retry_after path is untouched — still surfaces as
+        // rateLimited with the ms delay, no plain-text retry.
+        String token = "jclaw359-429-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMessage", 429,
+                    "{\"ok\":false,\"error_code\":429,\"description\":\"Too Many Requests\","
+                            + "\"parameters\":{\"retry_after\":3}}");
+            var result = TelegramChannel.forToken(token).trySend("12345", "<b>hi</b>");
+            assertFalse(result.ok());
+            assertEquals(3_000L, result.retryAfterMs(),
+                    "429 retry_after=3 must still map to 3000 ms");
+            assertEquals(1, mock.countRequests("sendMessage"),
+                    "429 must not trigger the parse fallback — one send only");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySend_linkPreviewDisabled_whenConfiguredOff() {
+        // AC2: telegram.linkPreview=off attaches link_preview_options with
+        // is_disabled=true to the send body.
+        String token = "jclaw359-lpoff-" + System.nanoTime();
+        try {
+            play.Play.configuration.setProperty("telegram.linkPreview", "off");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.forToken(token).trySend("12345", "see https://x.test").ok());
+            String body = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .findFirst().orElse("");
+            assertTrue(body.contains("link_preview_options"),
+                    "off must attach link_preview_options to the send");
+            assertTrue(body.contains("is_disabled"),
+                    "the options must carry is_disabled=true");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySend_linkPreviewAbsent_byDefault() {
+        // AC2: with the flag unset, no link_preview_options on the wire —
+        // Telegram's default preview-on behavior is preserved.
+        String token = "jclaw359-lpdefault-" + System.nanoTime();
+        try {
+            play.Play.configuration.remove("telegram.linkPreview");
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.forToken(token).trySend("12345", "see https://x.test").ok());
+            String body = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .findFirst().orElse("");
+            assertFalse(body.contains("link_preview_options"),
+                    "default (unset) must omit link_preview_options entirely");
+            assertFalse(TelegramChannel.suppressLinkPreview(),
+                    "suppressLinkPreview() must be false when the flag is unset");
         } finally {
             TelegramChannel.clearForTest(token);
         }

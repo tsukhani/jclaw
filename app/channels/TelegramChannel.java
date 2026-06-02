@@ -515,6 +515,72 @@ public class TelegramChannel implements Channel {
      */
     static final int GENERAL_TOPIC_THREAD_ID = 1;
 
+    // ── JCLAW-359: link-preview suppression ──────────────────────────────
+
+    /**
+     * JCLAW-359: link-preview policy, read from {@code telegram.linkPreview} via
+     * {@link play.Play#configuration}. Telegram auto-renders a preview card for
+     * the first URL in a message; some operators want that off so a chat full of
+     * agent-cited links stays compact. The flag is a coarse on/off:
+     *
+     * <ul>
+     *   <li>{@code on} (default; also any unset/blank/unrecognized value) — leave
+     *       {@code link_preview_options} unset, preserving Telegram's default
+     *       preview-on behavior;</li>
+     *   <li>{@code off} — attach {@code LinkPreviewOptions(is_disabled=true)} to
+     *       every text send so no preview card is generated.</li>
+     * </ul>
+     */
+    private static final String CFG_LINK_PREVIEW = "telegram.linkPreview";
+    static final String LINK_PREVIEW_ON = "on";
+    static final String LINK_PREVIEW_OFF = "off";
+
+    /**
+     * JCLAW-359: marker substring identifying a Telegram "can't parse entities"
+     * rejection. Telegram returns it inside a 400 {@code Bad Request} description
+     * (e.g. {@code Bad Request: can't parse entities: Unsupported start tag ...})
+     * when the HTML payload is malformed — typically a revoked / mangled entity
+     * the markdown formatter emitted. Matched case-insensitively so a wording
+     * tweak in the apostrophe / casing doesn't slip the detection.
+     */
+    private static final String PARSE_ENTITIES_MARKER = "can't parse entities";
+
+    /**
+     * JCLAW-359: true when link previews should be suppressed on outbound text
+     * sends ({@code telegram.linkPreview = off}). Public so default-package tests
+     * can assert the config-read contract, mirroring {@link #replyToMode()}.
+     */
+    public static boolean suppressLinkPreview() {
+        var raw = play.Play.configuration.getProperty(CFG_LINK_PREVIEW, LINK_PREVIEW_ON);
+        return raw != null && raw.trim().equalsIgnoreCase(LINK_PREVIEW_OFF);
+    }
+
+    /**
+     * JCLAW-359: the {@link org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions}
+     * to attach to a text send, or null to leave Telegram's default preview-on
+     * behavior. Returns a disabled-preview options object only when
+     * {@link #suppressLinkPreview()} is true.
+     */
+    private static org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions linkPreviewOptions() {
+        if (!suppressLinkPreview()) return null;
+        return org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions.builder()
+                .isDisabled(true)
+                .build();
+    }
+
+    /**
+     * JCLAW-359: true when {@code e} is a 400 "can't parse entities" rejection —
+     * the HTML payload was malformed and the SAME send should be retried once as
+     * plain text. Distinct from the 429 rate-limit path (handled separately) and
+     * from other 400s (genuine bad requests that a plain-text retry can't fix).
+     */
+    private static boolean isParseEntitiesError(TelegramApiRequestException e) {
+        Integer code = e.getErrorCode();
+        if (code == null || code != 400) return false;
+        var desc = e.getApiResponse();
+        return desc != null && desc.toLowerCase().contains(PARSE_ENTITIES_MARKER);
+    }
+
     /**
      * Resolve the configured reply mode, normalizing unknown/blank values to
      * {@link #REPLY_MODE_FIRST}. Public so default-package tests can assert the
@@ -1777,15 +1843,8 @@ public class TelegramChannel implements Channel {
      */
     public SendResult trySend(String peerId, String text,
                               ReplyParameters replyParams, Integer messageThreadId) {
-        var builder = SendMessage.builder()
-                .chatId(peerId)
-                .text(text)
-                .parseMode("HTML");
-        if (replyParams != null) builder.replyParameters(replyParams);
-        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
-        var request = builder.build();
         try {
-            client.execute(request);
+            executeTextSend(peerId, text, replyParams, messageThreadId, "HTML");
             EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Message sent to chat %s".formatted(peerId));
             return SendResult.OK;
@@ -1797,12 +1856,64 @@ public class TelegramChannel implements Channel {
                         "Rate-limited; retry_after=%ds".formatted(retryAfter));
                 return SendResult.rateLimited(retryAfter * 1000L);
             }
+            // JCLAW-359: a 400 "can't parse entities" means the HTML payload was
+            // malformed (a revoked/bad entity the formatter emitted). Retry the
+            // SAME send once as plain text — no parse_mode — so the user gets the
+            // content instead of nothing. Only return FAILED if the plain-text
+            // retry also fails. Other 400s (and any non-parse request error) fall
+            // straight through to FAILED with no retry, so a genuine bad request
+            // can't spin.
+            if (isParseEntitiesError(e)) {
+                EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                        "HTML parse rejected; retrying as plain text: %s".formatted(e.getMessage()));
+                return retryPlainText(peerId, text, replyParams, messageThreadId);
+            }
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Telegram API error: %s".formatted(e.getMessage()));
             return SendResult.FAILED;
         } catch (TelegramApiException e) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Send failed: %s".formatted(e.getMessage()));
+            return SendResult.FAILED;
+        }
+    }
+
+    /**
+     * JCLAW-359: build + execute one text {@code sendMessage}. {@code parseMode}
+     * null sends plain text (no {@code parse_mode}); a non-null value (e.g.
+     * {@code "HTML"}) sets it. Link-preview suppression and the reply/topic params
+     * ride along uniformly so the plain-text fallback retry is otherwise identical
+     * to the rejected HTML send. Throws on any API failure for the caller to map.
+     */
+    private void executeTextSend(String peerId, String text, ReplyParameters replyParams,
+                                 Integer messageThreadId, String parseMode) throws TelegramApiException {
+        var builder = SendMessage.builder()
+                .chatId(peerId)
+                .text(text);
+        if (parseMode != null) builder.parseMode(parseMode);
+        if (replyParams != null) builder.replyParameters(replyParams);
+        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        var linkPreview = linkPreviewOptions();
+        if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
+        client.execute(builder.build());
+    }
+
+    /**
+     * JCLAW-359: plain-text fallback after an HTML parse rejection. Re-sends the
+     * same text with no {@code parse_mode}; returns {@link SendResult#OK} when the
+     * retry lands, {@link SendResult#FAILED} otherwise (never recurses — a parse
+     * error is impossible without {@code parse_mode}).
+     */
+    private SendResult retryPlainText(String peerId, String text,
+                                      ReplyParameters replyParams, Integer messageThreadId) {
+        try {
+            executeTextSend(peerId, text, replyParams, messageThreadId, null);
+            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "Plain-text fallback sent to chat %s".formatted(peerId));
+            return SendResult.OK;
+        } catch (TelegramApiException e) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "Plain-text fallback also failed: %s".formatted(e.getMessage()));
             return SendResult.FAILED;
         }
     }
