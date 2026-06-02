@@ -120,6 +120,20 @@ public class ToolRegistry {
          *  (JCLAW-80). When in doubt, leave it {@code false}. */
         default boolean parallelSafe() { return false; }
 
+        /** JCLAW-382: does this tool perform a sensitive or irreversible
+         *  action (a shell command, a spend, sending on the user's behalf)
+         *  that warrants an interactive approve/deny gate before it runs?
+         *
+         *  <p>The default is {@code false} — the overwhelming majority of
+         *  tools are reversible reads or scoped writes that need no gate.
+         *  When a tool returns {@code true} AND the running agent is bound to
+         *  a channel that supports interactive approval (today: Telegram),
+         *  {@link DangerousActionGate} raises an approve/deny prompt and
+         *  blocks the dispatch on the user's decision. On every other channel
+         *  — and for every non-dangerous tool — the gate is a no-op, so this
+         *  flag never changes behavior outside the Telegram-bound path. */
+        default boolean dangerous() { return false; }
+
         /** Serialization-group key for the parallel tool dispatcher. Tools
          *  returning the same non-null key are placed in the same serial
          *  queue and execute in LLM-declared order on a single virtual
@@ -273,6 +287,15 @@ public class ToolRegistry {
         var tool = tools.get(toolName);
         if (tool == null) return toolName;
         return tool.serializationGroup();
+    }
+
+    /** JCLAW-382: resolve a tool's {@link Tool#dangerous()} flag by name,
+     *  defaulting to {@code false} for unknown names. Used by
+     *  {@link DangerousActionGate} to decide whether a dispatch needs an
+     *  interactive approve/deny gate. */
+    public static boolean isDangerous(String toolName) {
+        var tool = tools.get(toolName);
+        return tool != null && tool.dangerous();
     }
 
     /** JCLAW-170: resolve a tool's semantic icon key by name. Returns the

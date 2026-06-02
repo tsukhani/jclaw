@@ -94,6 +94,14 @@ public class ShellExecTool implements ToolRegistry.Tool {
     @Override
     public String category() { return "System"; }
 
+    /** JCLAW-382: shell execution is the prototypical sensitive, irreversible
+     *  action — it runs arbitrary commands at the Play process's OS
+     *  privileges (see the security-posture Javadoc above). When the agent is
+     *  Telegram-bound, {@link agents.DangerousActionGate} surfaces an
+     *  approve/deny prompt before each {@code exec} runs. */
+    @Override
+    public boolean dangerous() { return true; }
+
     @Override
     public String icon() { return "terminal"; }
 

@@ -84,6 +84,15 @@ public final class ParallelToolExecutor {
                                 displayArgs.length() > 200
                                         ? displayArgs.substring(0, 200) + "..."
                                         : displayArgs));
+        // JCLAW-382: gate sensitive/irreversible actions (today: exec) behind
+        // an interactive Telegram approve/deny prompt when the agent is bound
+        // to a Telegram bot. No-op for non-dangerous tools and non-Telegram
+        // agents — DangerousActionGate returns PROCEED before any I/O in those
+        // cases. Uses the raw (wire-format) name so the gate's dangerous()
+        // lookup matches the registered tool.
+        if (DangerousActionGate.guard(agent, rawName, rawArgs) == DangerousActionGate.Decision.ABORT) {
+            return ToolRegistry.ToolResult.text(DangerousActionGate.abortResult(displayName));
+        }
         // JCLAW-170: use the rich-output path so search-style tools can emit a
         // structured JSON payload alongside the LLM-visible text. Non-rich
         // tools fall through the default and return a text-only ToolResult.
