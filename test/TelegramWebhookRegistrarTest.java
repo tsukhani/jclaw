@@ -1,6 +1,10 @@
 import channels.ChannelTransport;
+import channels.TelegramChannel;
 import channels.TelegramWebhookRegistrar;
 import channels.TelegramWebhookRegistrar.WebhookApi;
+import models.TelegramBinding;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
@@ -95,5 +99,58 @@ class TelegramWebhookRegistrarTest extends UnitTest {
         assertFalse(TelegramWebhookRegistrar.registerOne(7L, "tok", "sek", BASE, api));
         api.setResult = true;
         assertTrue(TelegramWebhookRegistrar.registerOne(7L, "tok", "sek", BASE, api));
+    }
+
+    // ── JCLAW-376: webhook allowed_updates must include message_reaction ──
+    //
+    // The injected FakeApi above only sees (token, url, secret); allowed_updates
+    // lives in the real default WebhookApi's SetWebhook builder call. So this
+    // test drives the production path (onBindingSaved → the default impl) against
+    // MockTelegramServer and asserts on the recorded setWebhook request body.
+
+    private MockTelegramServer mock;
+
+    @BeforeEach
+    void startMock() throws Exception {
+        mock = new MockTelegramServer();
+        mock.start();
+    }
+
+    @AfterEach
+    void stopMock() {
+        if (mock != null) mock.close();
+    }
+
+    @Test
+    void webhookRegistrationRequestsMessageReaction() {
+        String token = "wh-react-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+
+            var b = new TelegramBinding();
+            b.botToken = token;
+            b.webhookSecret = "sek";
+            b.webhookBaseUrl = BASE;
+            b.transport = ChannelTransport.WEBHOOK;
+            b.enabled = true;
+
+            TelegramWebhookRegistrar.onBindingSaved(b);
+
+            // The SDK posts setWebhook as a JSON body; allowed_updates is the
+            // snake_case key carrying the requested update types.
+            String body = mock.requests().stream()
+                    .filter(r -> r.method().equalsIgnoreCase("setWebhook"))
+                    .map(MockTelegramServer.RecordedRequest::body)
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("no setWebhook request recorded"));
+
+            assertTrue(body.contains("message_reaction"),
+                    "webhook allowed_updates must opt into message_reaction; body=" + body);
+            // Parity with the polling path's set (JCLAW-375).
+            assertTrue(body.contains("callback_query") && body.contains("edited_message"),
+                    "allowed_updates should mirror the polling set; body=" + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
     }
 }

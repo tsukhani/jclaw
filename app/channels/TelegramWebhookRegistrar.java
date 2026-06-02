@@ -28,6 +28,16 @@ public final class TelegramWebhookRegistrar {
     private static final String CATEGORY = "channel";
     private static final String CHANNEL = "telegram";
 
+    /**
+     * JCLAW-376: the {@code allowed_updates} list requested when registering a
+     * webhook. Telegram EXCLUDES {@code message_reaction} from its default set,
+     * so the webhook reaction handler added in JCLAW-375 only fires when the
+     * type is named explicitly. This mirrors the polling path's
+     * {@link TelegramPollingRunner#ALLOWED_UPDATES} so a binding receives the
+     * same update types on either transport.
+     */
+    static final java.util.List<String> ALLOWED_UPDATES = TelegramPollingRunner.ALLOWED_UPDATES;
+
     /** Telegram-facing operations, injectable so tests don't hit the API. */
     public interface WebhookApi {
         boolean setWebhook(String botToken, String url, String secretToken);
@@ -36,7 +46,21 @@ public final class TelegramWebhookRegistrar {
 
     private static final WebhookApi TELEGRAM = new WebhookApi() {
         @Override public boolean setWebhook(String token, String url, String secretToken) {
-            return TelegramChannel.setWebhook(token, url, secretToken);
+            if (token == null || url == null) return false;
+            var builder = org.telegram.telegrambots.meta.api.methods.updates.SetWebhook.builder()
+                    .url(url)
+                    .allowedUpdates(new java.util.ArrayList<>(ALLOWED_UPDATES));
+            if (secretToken != null) builder.secretToken(secretToken);
+            try {
+                TelegramChannel.forToken(token).client().execute(builder.build());
+                EventLogger.info(CATEGORY, null, CHANNEL,
+                        "Webhook registered: %s".formatted(url));
+                return true;
+            } catch (org.telegram.telegrambots.meta.exceptions.TelegramApiException e) {
+                EventLogger.error(CATEGORY, null, CHANNEL,
+                        "Webhook registration failed: %s".formatted(e.getMessage()));
+                return false;
+            }
         }
         @Override public boolean deleteWebhook(String token) {
             return TelegramChannel.deleteWebhook(token);
