@@ -76,7 +76,7 @@ public final class McpServerService {
      * fields are exploded out of {@code configJson} so forms can bind
      * directly without re-parsing.
      */
-    public record View(Long id, String name, boolean enabled, String transport,
+    public record View(Long id, String name, boolean enabled, boolean requiresApproval, String transport,
                        String command, List<String> args, Map<String, String> env,
                        String url, Map<String, String> headers,
                        String status, String lastError,
@@ -112,7 +112,7 @@ public final class McpServerService {
             var liveLastError = McpConnectionManager.lastError(row.name);
             var effectiveLastError = liveLastError != null ? liveLastError : row.lastError;
             return new View(
-                    row.id, row.name, row.enabled, row.transport.name(),
+                    row.id, row.name, row.enabled, row.requiresApproval, row.transport.name(),
                     cfg.command, cfg.args, cfg.env,
                     cfg.url, cfg.headers,
                     liveStatus,

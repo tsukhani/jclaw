@@ -121,6 +121,12 @@ public final class McpConnectionManager {
         stop(server.name);
         var entry = new Entry(server.name);
         entry.firstAttemptFuture = firstAttemptFuture;
+        // JCLAW-388: capture the approval flag from the row now so the
+        // dispatch-path lookup (McpServerTool.dangerous → requiresApproval)
+        // never touches the DB. A subsequent toggle re-runs connectInternal
+        // (McpServerService.syncRuntime → connect replaces the entry), so the
+        // captured value tracks the persisted flag across edits.
+        entry.requiresApproval = server.requiresApproval;
         connections.put(server.name, entry);
         scheduleConnect(entry, server, 0);
     }
@@ -174,6 +180,20 @@ public final class McpConnectionManager {
     public static String lastError(String serverName) {
         var e = connections.get(serverName);
         return e != null ? e.lastError : null;
+    }
+
+    /**
+     * JCLAW-388: does this server require an interactive approve/deny prompt
+     * before each of its tool calls? Resolved from the in-memory connection
+     * {@link Entry} (captured from the {@link McpServer} row at connect time),
+     * so the dispatch-path lookup in {@link McpServerTool#dangerous()} costs a
+     * single {@link ConcurrentHashMap} read with no DB round-trip. Returns
+     * {@code false} for any server without a live entry — a disconnected
+     * server has no tools to gate, and the default is opt-out anyway.
+     */
+    public static boolean requiresApproval(String serverName) {
+        var e = connections.get(serverName);
+        return e != null && e.requiresApproval;
     }
 
     public static List<McpToolDef> tools(String serverName) {
@@ -551,6 +571,11 @@ public final class McpConnectionManager {
         volatile McpServer.Status status = McpServer.Status.DISCONNECTED;
         volatile String lastError;
         volatile int attempts;
+        /** JCLAW-388: per-server interactive-approval flag, captured from the
+         *  {@link McpServer} row at connect time. Read on the tool-dispatch
+         *  path via {@link #requiresApproval(String)}; volatile so a
+         *  reconnect that replaces the entry publishes a fresh value. */
+        volatile boolean requiresApproval;
         @SuppressWarnings("java:S3077")
         volatile ScheduledFuture<?> scheduledRetry;
         /** JCLAW-288: when non-null, completed on the FIRST attempt's

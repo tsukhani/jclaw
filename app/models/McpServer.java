@@ -58,6 +58,23 @@ public class McpServer extends Model {
     @Column(nullable = false)
     public boolean enabled;
 
+    /**
+     * JCLAW-388: per-server interactive approval flag. When {@code true},
+     * every tool call routed through this server's {@code mcp_<server>}
+     * handle is treated as a {@linkplain agents.ToolRegistry.Tool#dangerous()
+     * dangerous action} — {@link agents.DangerousActionGate} raises the same
+     * approve/deny prompt it raises for {@code exec} when the running agent
+     * is bound to a channel that supports interactive approval. Default
+     * {@code false} (opt-in): until an operator flips this on, the server's
+     * tools dispatch with no gate, exactly as before this flag existed.
+     *
+     * <p>Non-nullable with a {@code false} default so existing rows and
+     * inserts that don't set it don't break — H2 backfills the column and
+     * Java initializes the field to {@code false} before {@link #onCreate}.
+     */
+    @Column(name = "requires_approval", nullable = false)
+    public boolean requiresApproval = false;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 10)
     public Transport transport;

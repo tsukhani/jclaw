@@ -154,4 +154,17 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
      *  its own schema. */
     @Override
     public String group() { return serverName; }
+
+    /** JCLAW-388: inherit the server's {@code requiresApproval} flag, same as
+     *  {@link McpServerTool#dangerous()}. Defense-in-depth: the LLM normally
+     *  invokes the server-level handle ({@code mcp_<server>}), so the gate
+     *  resolves the flag through {@link McpServerTool}; but if any path ever
+     *  dispatches a per-action adapter ({@code mcp_<server>_<tool>}) directly
+     *  through {@link agents.DangerousActionGate}, it must gate identically rather
+     *  than slip past as a non-dangerous tool. The lookup is the same cheap
+     *  in-memory connection-entry read. */
+    @Override
+    public boolean dangerous() {
+        return McpConnectionManager.requiresApproval(serverName);
+    }
 }

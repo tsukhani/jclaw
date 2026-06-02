@@ -131,7 +131,15 @@ public class ToolRegistry {
          *  {@link DangerousActionGate} raises an approve/deny prompt and
          *  blocks the dispatch on the user's decision. On every other channel
          *  — and for every non-dangerous tool — the gate is a no-op, so this
-         *  flag never changes behavior outside the Telegram-bound path. */
+         *  flag never changes behavior outside the Telegram-bound path.
+         *
+         *  <p>Native {@code exec} ({@code ShellExecTool}) is the canonical
+         *  always-dangerous tool. JCLAW-388 extends the gate to MCP: a
+         *  server-level handle ({@code mcp.McpServerTool}) and its per-action
+         *  adapters ({@code mcp.McpToolAdapter}) resolve this flag from their
+         *  {@link models.McpServer#requiresApproval} column, so an operator can
+         *  opt a whole MCP server into the same approve/deny prompt. The flag
+         *  defaults off per server, so unflagged servers stay un-gated. */
         default boolean dangerous() { return false; }
 
         /** Serialization-group key for the parallel tool dispatcher. Tools

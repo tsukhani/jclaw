@@ -124,6 +124,19 @@ public final class McpServerTool implements ToolRegistry.Tool {
     @Override
     public boolean parallelSafe() { return true; }
 
+    /** JCLAW-388: surface the server's {@code requiresApproval} flag as this
+     *  handle's {@link ToolRegistry.Tool#dangerous() dangerous} state. This is
+     *  the live LLM-facing entry for the server (per JCLAW-281 the per-action
+     *  adapters are hidden from the function-calling defs), so the wire-format
+     *  name {@link agents.DangerousActionGate} sees is {@code mcp_<server>} — resolving
+     *  the flag here is what makes an approval-flagged server's calls raise the
+     *  same approve/deny prompt as {@code exec}. The lookup reads the in-memory
+     *  connection entry (no DB hit on the dispatch path). */
+    @Override
+    public boolean dangerous() {
+        return McpConnectionManager.requiresApproval(serverName);
+    }
+
     @Override
     public String execute(String argsJson, Agent agent) {
         return executeRich(argsJson, agent).text();

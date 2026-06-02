@@ -45,6 +45,7 @@ public class ApiMcpServersController extends Controller {
     // JSON body keys reused across create/update parsers.
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_TRANSPORT = "transport";
+    private static final String KEY_REQUIRES_APPROVAL = "requiresApproval";
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
     @ChatSafe(summary = "List MCP servers with status and tool count")
@@ -61,7 +62,7 @@ public class ApiMcpServersController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
-    @ChatSafe(summary = "Add an MCP server (STDIO or HTTP)", body = "name, enabled, transport (STDIO or HTTP), then command/args/env or url/headers")
+    @ChatSafe(summary = "Add an MCP server (STDIO or HTTP)", body = "name, enabled, requiresApproval, transport (STDIO or HTTP), then command/args/env or url/headers")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -77,6 +78,11 @@ public class ApiMcpServersController extends Controller {
         // honor the user-supplied boolean.
         row.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).isJsonNull()
                 || body.get(KEY_ENABLED).getAsBoolean();
+        // JCLAW-388: per-server approval gate. Defaults false (opt-in) when the
+        // key is absent or null; honors the supplied boolean otherwise.
+        row.requiresApproval = body.has(KEY_REQUIRES_APPROVAL)
+                && !body.get(KEY_REQUIRES_APPROVAL).isJsonNull()
+                && body.get(KEY_REQUIRES_APPROVAL).getAsBoolean();
         row.transport = transport;
         row.configJson = McpServerService.composeConfigJson(transport, body);
         try {
@@ -93,7 +99,7 @@ public class ApiMcpServersController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
-    @ChatSafe(summary = "Update an MCP server by id; it reconnects automatically", body = "fields to change: transport, command, args, env, url, headers, enabled")
+    @ChatSafe(summary = "Update an MCP server by id; it reconnects automatically", body = "fields to change: transport, command, args, env, url, headers, enabled, requiresApproval")
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
@@ -106,6 +112,11 @@ public class ApiMcpServersController extends Controller {
         applyRenameIfPresent(row, body);
         if (body.has(KEY_ENABLED) && !body.get(KEY_ENABLED).isJsonNull()) {
             row.enabled = body.get(KEY_ENABLED).getAsBoolean();
+        }
+        // JCLAW-388: only mutate the approval flag when the key is present —
+        // a partial update that omits it leaves the persisted value intact.
+        if (body.has(KEY_REQUIRES_APPROVAL) && !body.get(KEY_REQUIRES_APPROVAL).isJsonNull()) {
+            row.requiresApproval = body.get(KEY_REQUIRES_APPROVAL).getAsBoolean();
         }
         if (body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()) {
             row.transport = readTransport(body);

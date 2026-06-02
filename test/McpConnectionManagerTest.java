@@ -321,6 +321,52 @@ class McpConnectionManagerTest extends UnitTest {
         assertFalse(toolRegistered("mcp_fix2_echo"));
     }
 
+    // ==================== JCLAW-388: per-server approval flag → isDangerous ====================
+
+    @Test
+    void approvalFlaggedServerMakesHandleAndAdapterDangerous() throws Exception {
+        // Seed a server opted into the approval gate, connect it, and confirm
+        // the wire-format name the LLM emits (the server-level handle
+        // mcp_<server>) resolves dangerous=true via ToolRegistry.isDangerous —
+        // which is exactly what DangerousActionGate reads. The per-action
+        // adapter (mcp_<server>_<tool>) must gate identically as defense-in-depth.
+        var server = seedStdioServer("flagged", FIXTURE_SCRIPT, true);
+        McpConnectionManager.connect(server);
+        awaitState("flagged", McpServer.Status.CONNECTED, 10);
+
+        assertTrue(McpConnectionManager.requiresApproval("flagged"),
+                "manager must report the captured approval flag for the live entry");
+        assertTrue(ToolRegistry.isDangerous("mcp_flagged"),
+                "server-level handle of an approval-flagged server must be dangerous "
+                        + "(this is the name the LLM emits, so the gate fires)");
+        assertTrue(ToolRegistry.isDangerous("mcp_flagged_echo"),
+                "per-action adapter of an approval-flagged server must be dangerous too");
+    }
+
+    @Test
+    void unflaggedServerLeavesHandleAndAdapterNonDangerous() throws Exception {
+        // Default requiresApproval=false ⇒ behavior unchanged from before the
+        // flag existed: the MCP handle and adapters bypass the gate entirely.
+        var server = seedStdioServer("plain", FIXTURE_SCRIPT, false);
+        McpConnectionManager.connect(server);
+        awaitState("plain", McpServer.Status.CONNECTED, 10);
+
+        assertFalse(McpConnectionManager.requiresApproval("plain"),
+                "default-off server must not require approval");
+        assertFalse(ToolRegistry.isDangerous("mcp_plain"),
+                "unflagged server's handle must stay non-dangerous (no prompt)");
+        assertFalse(ToolRegistry.isDangerous("mcp_plain_echo"),
+                "unflagged server's adapter must stay non-dangerous (no prompt)");
+    }
+
+    @Test
+    void requiresApprovalIsFalseForUnknownServer() {
+        // No live entry ⇒ false. A disconnected server has no tools to gate,
+        // and the dispatch-path lookup must never NPE on a missing entry.
+        assertFalse(McpConnectionManager.requiresApproval("never-connected"),
+                "a server with no in-memory entry must resolve to no-approval");
+    }
+
     // ==================== JCLAW-288: synchronous first-attempt connect ====================
 
     /** Variant of {@link #FIXTURE_SCRIPT} that sleeps {@code DELAY_MS} ms
@@ -461,6 +507,10 @@ class McpConnectionManagerTest extends UnitTest {
     }
 
     private McpServer seedStdioServer(String name, String script) throws IOException {
+        return seedStdioServer(name, script, false);
+    }
+
+    private McpServer seedStdioServer(String name, String script, boolean requiresApproval) throws IOException {
         var path = Files.createTempFile("mcp-srv-" + name + "-", ".js");
         Files.writeString(path, script);
         path.toFile().deleteOnExit();
@@ -469,16 +519,22 @@ class McpConnectionManagerTest extends UnitTest {
         var args = new com.google.gson.JsonArray();
         args.add(path.toString());
         cfg.add("args", args);
-        return seedServer(name, McpServer.Transport.STDIO, cfg.toString());
+        return seedServer(name, McpServer.Transport.STDIO, cfg.toString(), requiresApproval);
     }
 
     private McpServer seedServer(String name, McpServer.Transport transport, String cfgJson) {
+        return seedServer(name, transport, cfgJson, false);
+    }
+
+    private McpServer seedServer(String name, McpServer.Transport transport, String cfgJson,
+                                 boolean requiresApproval) {
         return Tx.run(() -> {
             var srv = new McpServer();
             srv.name = name;
             srv.enabled = true;
             srv.transport = transport;
             srv.configJson = cfgJson;
+            srv.requiresApproval = requiresApproval;
             srv.save();
             return srv;
         });

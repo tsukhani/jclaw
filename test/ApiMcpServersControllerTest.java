@@ -210,6 +210,65 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 "delete must cascade through stop() and clear allowlist rows");
     }
 
+    // ==================== JCLAW-388: requiresApproval flag round-trip ====================
+
+    @Test
+    void createDefaultsRequiresApprovalToFalseWhenOmitted() {
+        login();
+        var resp = POST("/api/mcp-servers", "application/json", """
+                {"name":"noflag","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp"}
+                """);
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"requiresApproval\":false"),
+                "absent flag must default to false in the response: " + getContent(resp));
+    }
+
+    @Test
+    void createPersistsRequiresApprovalTrue() {
+        login();
+        var resp = POST("/api/mcp-servers", "application/json", """
+                {"name":"gated","enabled":false,"requiresApproval":true,
+                 "transport":"HTTP","url":"http://127.0.0.1:1/mcp"}
+                """);
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"requiresApproval\":true"),
+                "supplied flag must round-trip true: " + getContent(resp));
+        // Confirm it really persisted by re-reading via GET.
+        var listing = getContent(GET("/api/mcp-servers"));
+        assertTrue(listing.contains("\"name\":\"gated\"") && listing.contains("\"requiresApproval\":true"),
+                "persisted flag must surface on a fresh read: " + listing);
+    }
+
+    @Test
+    void updateTogglesRequiresApproval() {
+        login();
+        var id = createHttpServer("toggle-approval", "http://127.0.0.1:1/mcp", false);
+        var on = PUT("/api/mcp-servers/" + id, "application/json", "{\"requiresApproval\":true}");
+        assertIsOk(on);
+        assertTrue(getContent(on).contains("\"requiresApproval\":true"));
+        var off = PUT("/api/mcp-servers/" + id, "application/json", "{\"requiresApproval\":false}");
+        assertIsOk(off);
+        assertTrue(getContent(off).contains("\"requiresApproval\":false"));
+    }
+
+    @Test
+    void updateOmittingRequiresApprovalLeavesItIntact() {
+        login();
+        // Create with the flag on, then PUT an unrelated field; the flag must
+        // survive (partial update must not silently reset it to default).
+        var resp = POST("/api/mcp-servers", "application/json", """
+                {"name":"keepflag","enabled":false,"requiresApproval":true,
+                 "transport":"HTTP","url":"http://127.0.0.1:1/mcp"}
+                """);
+        assertIsOk(resp);
+        var id = java.util.regex.Pattern.compile("\"id\":(\\d+)")
+                .matcher(getContent(resp)).results().findFirst().orElseThrow().group(1);
+        var put = PUT("/api/mcp-servers/" + id, "application/json", "{\"enabled\":true}");
+        assertIsOk(put);
+        assertTrue(getContent(put).contains("\"requiresApproval\":true"),
+                "a PUT that omits requiresApproval must not reset it: " + getContent(put));
+    }
+
     // ==================== test connection ====================
 
     @Test
