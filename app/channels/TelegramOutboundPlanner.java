@@ -90,10 +90,30 @@ public final class TelegramOutboundPlanner {
 
     private TelegramOutboundPlanner() {}
 
+    /**
+     * Telegram caps a single {@code sendMediaGroup} album at 10 items
+     * (JCLAW-365). Runs longer than this chunk into successive groups of
+     * {@link #MEDIA_GROUP_MAX}.
+     */
+    private static final int MEDIA_GROUP_MAX = 10;
+
     /** Ordered piece of an outbound response — text to format and send, or a file to upload. */
-    public sealed interface Segment permits TextSegment, FileSegment {}
+    public sealed interface Segment permits TextSegment, FileSegment, MediaGroupSegment {}
 
     public record TextSegment(String markdown) implements Segment {}
+
+    /**
+     * JCLAW-365: a run of 2–10 photo/video {@link FileSegment}s the channel
+     * dispatches as a single {@code sendMediaGroup} album instead of N
+     * individual sends. The caption (if any) rides the first item only;
+     * {@link #caption()} folds the lead-in prose of the first grouped file.
+     * Built only for genuinely groupable runs — a lone media item keeps its
+     * standalone {@link FileSegment} so the single-send path is unchanged.
+     *
+     * @param items   2–10 foreground PHOTO/VIDEO segments, in order
+     * @param caption prose to attach to the album (first item); null when none
+     */
+    public record MediaGroupSegment(List<FileSegment> items, String caption) implements Segment {}
 
     /**
      * File segment dispatched via the matching {@code trySend*} method per
@@ -165,7 +185,87 @@ public final class TelegramOutboundPlanner {
         // No file references found — hand back a single-segment list so the
         // caller has a single uniform code path.
         if (segments.isEmpty()) return List.of(new TextSegment(markdown));
-        return foldCaptions(segments);
+        return coalesceMediaGroups(foldCaptions(segments));
+    }
+
+    /**
+     * JCLAW-365: collapse a run of 2+ consecutive foreground photo/video
+     * {@link FileSegment}s into a {@link MediaGroupSegment} so the channel sends
+     * one Telegram album ({@code sendMediaGroup}) instead of N individual
+     * uploads. Telegram only groups photos + videos — documents, voice, and
+     * audio are never group-eligible and stay individual.
+     *
+     * <p>Interplay with the JCLAW-123 photo+document pair: an image emits a
+     * foreground PHOTO immediately followed by a <em>background</em> DOCUMENT
+     * (the original-quality re-upload). A run of N images therefore reads
+     * {@code PHOTO, bgDOC, PHOTO, bgDOC, ...}. The grouped run absorbs the
+     * foreground photos into one album; the interleaved background documents are
+     * preserved and re-emitted <em>after</em> the album so the
+     * background-original-document behavior is unchanged.
+     *
+     * <p>A lone media item (run of 1) keeps its standalone {@link FileSegment} —
+     * the single-send path is untouched. Runs longer than {@link #MEDIA_GROUP_MAX}
+     * chunk into successive albums of 10.
+     *
+     * <p>A blank (whitespace-only) {@link TextSegment} between two media files —
+     * the no-op separator the regex leaves between back-to-back links — is
+     * transparent to a run: it would never put bytes on the wire
+     * ({@code sendTextSegment} short-circuits on blank), so it neither breaks the
+     * run nor survives into the output. A non-blank text segment DOES break the
+     * run (it is real prose the user must see between the media).
+     */
+    private static List<Segment> coalesceMediaGroups(List<Segment> segments) {
+        var out = new ArrayList<Segment>(segments.size());
+        int i = 0;
+        while (i < segments.size()) {
+            var run = new ArrayList<FileSegment>();        // foreground photos/videos
+            var trailingBg = new ArrayList<FileSegment>(); // interleaved background docs
+            int j = i;
+            while (j < segments.size()) {
+                var seg = segments.get(j);
+                if (seg instanceof FileSegment fs
+                        && (isGroupEligible(fs) || (fs.isBackground() && !run.isEmpty()))) {
+                    if (fs.isBackground()) trailingBg.add(fs); else run.add(fs);
+                    j++;
+                } else if (seg instanceof TextSegment(String prose)
+                        && prose.isBlank() && !run.isEmpty()) {
+                    // No-op separator between two media files — skip it (drop it,
+                    // since it produces no wire traffic) without breaking the run.
+                    j++;
+                } else {
+                    break;
+                }
+            }
+            if (run.size() >= 2) {
+                emitGroups(out, run);
+                out.addAll(trailingBg);
+                i = j;
+            } else {
+                // Not a groupable run — emit this single segment as-is and advance one.
+                out.add(segments.get(i));
+                i++;
+            }
+        }
+        return out;
+    }
+
+    /** A foreground photo or video FileSegment — the only kinds Telegram bundles into an album. */
+    private static boolean isGroupEligible(FileSegment fs) {
+        return !fs.isBackground()
+                && (fs.kind() == MediaKind.PHOTO || fs.kind() == MediaKind.VIDEO);
+    }
+
+    /**
+     * Emit {@code run} as one or more {@link MediaGroupSegment}s, chunked at
+     * {@link #MEDIA_GROUP_MAX}. The first item's folded caption becomes the
+     * album caption (Telegram surfaces the first item's caption as the album's).
+     */
+    private static void emitGroups(List<Segment> out, List<FileSegment> run) {
+        for (int start = 0; start < run.size(); start += MEDIA_GROUP_MAX) {
+            int end = Math.min(start + MEDIA_GROUP_MAX, run.size());
+            var chunk = List.copyOf(run.subList(start, end));
+            out.add(new MediaGroupSegment(chunk, chunk.get(0).caption()));
+        }
     }
 
     /**

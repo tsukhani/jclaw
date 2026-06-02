@@ -664,6 +664,9 @@ public class TelegramChannel implements Channel {
         if (segment instanceof TelegramOutboundPlanner.TextSegment(String markdown)) {
             return sendTextSegment(channel, chatId, markdown, replyToMessageId, threadId, firstChunk);
         }
+        if (segment instanceof TelegramOutboundPlanner.MediaGroupSegment mg) {
+            return sendMediaGroupSegment(channel, chatId, mg, replyToMessageId, threadId, firstChunk);
+        }
         if (segment instanceof TelegramOutboundPlanner.FileSegment fs) {
             // JCLAW-126: the quality-duplicate document emit (same file as
             // a just-sent photo) fires on a virtual thread so slow Telegram
@@ -765,6 +768,41 @@ public class TelegramChannel implements Channel {
                     "File send failed for %s: %s".formatted(name, e.getMessage()));
             return false;
         }
+    }
+
+    /**
+     * JCLAW-365: dispatch a coalesced photo/video run as a single Telegram album
+     * via {@link #sendMediaGroup}. The album reply badge / topic follows the same
+     * first-chunk policy as the other segment paths: the group counts as one
+     * chunk of the turn. On a media-group failure, fall back to individual sends
+     * (one per item) so the user still receives every file — preserving the
+     * caption on the first item to mirror the album's caption convention.
+     */
+    private static boolean sendMediaGroupSegment(TelegramChannel channel, String chatId,
+                                                 TelegramOutboundPlanner.MediaGroupSegment mg,
+                                                 Integer replyToMessageId, Integer threadId,
+                                                 java.util.concurrent.atomic.AtomicBoolean firstChunk) {
+        boolean ownsFirst = firstChunk.getAndSet(false);
+        var reply = replyParamsFor(replyToMessageId, ownsFirst);
+        if (channel.sendMediaGroup(chatId, mg.items(), mg.caption(), reply, threadId)) {
+            return true;
+        }
+        // Album send failed — fall back to one individual send per item so the
+        // user still gets the media. The album caption rides the first item only.
+        EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                "Media group failed; falling back to %d individual sends".formatted(mg.items().size()));
+        boolean allOk = true;
+        for (int i = 0; i < mg.items().size(); i++) {
+            var item = mg.items().get(i);
+            var withCaption = i == 0 ? item.withCaption(mg.caption()) : item.withCaption(null);
+            // Each fallback item is the first (and only) message of its own send;
+            // reuse ownsFirst for item 0 so the reply badge still lands once.
+            boolean itemFirst = i == 0 && ownsFirst;
+            if (!sendFileSegment(channel, chatId, withCaption, replyToMessageId, threadId, itemFirst)) {
+                allOk = false;
+            }
+        }
+        return allOk;
     }
 
     /**
@@ -1451,6 +1489,86 @@ public class TelegramChannel implements Channel {
             logMediaFailed("Video", displayName, startNs, e);
             return false;
         }
+    }
+
+    /**
+     * JCLAW-365: bundle 2–10 photos/videos into a single Telegram album via
+     * {@code sendMediaGroup}. Each item in {@code items} becomes an
+     * {@link org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto}
+     * (for {@link TelegramOutboundPlanner.MediaKind#PHOTO}) or
+     * {@link org.telegram.telegrambots.meta.api.objects.media.InputMediaVideo}
+     * (everything else the caller passes — the planner only ever groups PHOTO
+     * and VIDEO). The {@code caption} (null/blank to omit) rides on the FIRST
+     * item only, matching Telegram's album-caption convention. {@code replyParams}
+     * / {@code messageThreadId} (both null to omit) mirror the single-send
+     * methods for JCLAW-369 reply/thread consistency.
+     *
+     * <p>Returns false (logged) on any API failure or an out-of-range item count
+     * — never throws — so the caller can fall back to individual sends. Uploads
+     * via {@link #uploadClient} (60 s r/w) like the other file paths.
+     */
+    public boolean sendMediaGroup(String peerId,
+                                  java.util.List<TelegramOutboundPlanner.FileSegment> items,
+                                  String caption, ReplyParameters replyParams, Integer messageThreadId) {
+        if (items == null || items.size() < 2 || items.size() > 10) {
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "sendMediaGroup requires 2-10 items; got %d"
+                            .formatted(items == null ? 0 : items.size()));
+            return false;
+        }
+        var medias = new java.util.ArrayList<
+                org.telegram.telegrambots.meta.api.objects.media.InputMedia>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            var fs = items.get(i);
+            var file = fs.file();
+            var name = fs.displayName() != null ? fs.displayName() : file.getName();
+            // Caption rides the first item only — Telegram surfaces it as the
+            // album caption. Subsequent items carry none.
+            String itemCaption = i == 0 && caption != null && !caption.isBlank() ? caption : null;
+            medias.add(buildInputMedia(fs.kind(), file, name, itemCaption));
+        }
+        var builder = org.telegram.telegrambots.meta.api.methods.send.SendMediaGroup.builder()
+                .chatId(peerId)
+                .medias(medias);
+        if (replyParams != null) builder.replyParameters(replyParams);
+        if (messageThreadId != null) builder.messageThreadId(messageThreadId);
+        var request = builder.build();
+        long startNs = System.nanoTime();
+        try {
+            uploadClient.execute(request);
+            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "Media group sent to chat %s: %d items (elapsedMs=%d)"
+                            .formatted(peerId, medias.size(), elapsedMs));
+            return true;
+        } catch (TelegramApiException e) {
+            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
+                    "Media group send failed for %d items after %dms: %s"
+                            .formatted(medias.size(), elapsedMs, e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * Build the {@link org.telegram.telegrambots.meta.api.objects.media.InputMedia}
+     * for one album item: a photo for {@link TelegramOutboundPlanner.MediaKind#PHOTO},
+     * otherwise a video (the planner only groups photos + videos). The local file
+     * is attached via {@code media(File, name)} so the SDK streams it in the
+     * multipart body. {@code caption} null to omit.
+     */
+    private static org.telegram.telegrambots.meta.api.objects.media.InputMedia buildInputMedia(
+            TelegramOutboundPlanner.MediaKind kind, java.io.File file, String name, String caption) {
+        if (kind == TelegramOutboundPlanner.MediaKind.PHOTO) {
+            var b = org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto.builder()
+                    .media(file, name);
+            if (caption != null) b.caption(caption);
+            return b.build();
+        }
+        var b = org.telegram.telegrambots.meta.api.objects.media.InputMediaVideo.builder()
+                .media(file, name);
+        if (caption != null) b.caption(caption);
+        return b.build();
     }
 
     /** Shared success-log for the native media send methods. {@code kind} labels the line. */

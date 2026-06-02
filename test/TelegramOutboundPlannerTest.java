@@ -375,12 +375,19 @@ class TelegramOutboundPlannerTest extends UnitTest {
         // shouldn't cause a zero-length send.
         var md = "[a.png](<a.png>) [b.png](<b.png>)";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
-        assertTrue(segments.size() >= 2);
-        int fileCount = (int) segments.stream()
-                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
+        // JCLAW-365: the two adjacent photos coalesce into one album; the
+        // single-space separator is a no-op and is dropped (never emitted as a
+        // zero-length text segment). Each image still keeps its background
+        // original document, emitted after the album.
+        var group = onlyMediaGroup(segments);
+        assertEquals(2, group.items().size(), () -> "both photos must group into one album: " + segments);
+        long bgDocs = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment fs && fs.isBackground())
                 .count();
-        // JCLAW-123: each image produces photo+document, so two images → 4 segments.
-        assertEquals(4, fileCount, "both images should produce photo + document pairs");
+        assertEquals(2, bgDocs, () -> "both background original documents preserved: " + segments);
+        boolean blankText = segments.stream()
+                .anyMatch(s -> s instanceof TelegramOutboundPlanner.TextSegment ts && ts.markdown().isBlank());
+        assertFalse(blankText, () -> "the single-space separator must not survive as a blank text segment: " + segments);
     }
 
     // ── JCLAW-104: dedupe same-file references ──
@@ -471,6 +478,149 @@ class TelegramOutboundPlannerTest extends UnitTest {
         assertEquals(2, fileCount, "image must emit photo + document: " + segments);
     }
 
+    // ── JCLAW-365: media-group coalescing ──
+
+    /** Count MediaGroupSegments in {@code segments}. */
+    private static long mediaGroupCount(java.util.List<TelegramOutboundPlanner.Segment> segments) {
+        return segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.MediaGroupSegment)
+                .count();
+    }
+
+    /** The single MediaGroupSegment in {@code segments}, failing if not exactly one. */
+    private static TelegramOutboundPlanner.MediaGroupSegment onlyMediaGroup(
+            java.util.List<TelegramOutboundPlanner.Segment> segments) {
+        var groups = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.MediaGroupSegment)
+                .map(s -> (TelegramOutboundPlanner.MediaGroupSegment) s)
+                .toList();
+        assertEquals(1, groups.size(), () -> "expected exactly one MediaGroupSegment: " + segments);
+        return groups.get(0);
+    }
+
+    @Test
+    void threeImagesCoalesceIntoOneMediaGroup() {
+        var agent = AgentService.create("planner-album-3", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "a.png", "a");
+        AgentService.writeWorkspaceFile(agent.name, "b.png", "b");
+        AgentService.writeWorkspaceFile(agent.name, "c.png", "c");
+
+        var md = "[a.png](<a.png>) [b.png](<b.png>) [c.png](<c.png>)";
+        var segments = TelegramOutboundPlanner.plan(md, agent.name);
+
+        var group = onlyMediaGroup(segments);
+        assertEquals(3, group.items().size(), () -> "three photos must group into one album: " + segments);
+        for (var item : group.items()) {
+            assertEquals(TelegramOutboundPlanner.MediaKind.PHOTO, item.kind());
+        }
+        // JCLAW-123 background-original documents must survive — one per image,
+        // emitted after the album.
+        long bgDocs = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment fs
+                        && fs.isBackground())
+                .count();
+        assertEquals(3, bgDocs, () -> "each image keeps its background original document: " + segments);
+    }
+
+    @Test
+    void mediaGroupCaptionRidesFirstItem() {
+        var agent = AgentService.create("planner-album-cap", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "a.png", "a");
+        AgentService.writeWorkspaceFile(agent.name, "b.png", "b");
+
+        // Lead-in prose folds into the first photo's caption, which becomes the
+        // album caption.
+        var md = "Here are the shots: [a.png](<a.png>) [b.png](<b.png>)";
+        var segments = TelegramOutboundPlanner.plan(md, agent.name);
+
+        var group = onlyMediaGroup(segments);
+        assertEquals(2, group.items().size());
+        assertEquals("Here are the shots:", group.caption(),
+                "lead-in prose must become the album caption (first item)");
+    }
+
+    @Test
+    void singleImageDoesNotCoalesce() {
+        var agent = AgentService.create("planner-album-1", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "solo.png", "x");
+        var segments = TelegramOutboundPlanner.plan("[solo.png](<solo.png>)", agent.name);
+        // A lone image keeps the existing single-send path: photo + background
+        // document, no MediaGroupSegment.
+        assertEquals(0, mediaGroupCount(segments),
+                () -> "a single image must not coalesce into a media group: " + segments);
+        long photos = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment fs && fs.isImage())
+                .count();
+        assertEquals(1, photos, () -> "single image keeps its standalone photo segment: " + segments);
+    }
+
+    @Test
+    void photoDocumentMixGroupsOnlyThePhotos() {
+        var agent = AgentService.create("planner-album-mix", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "a.png", "a");
+        AgentService.writeWorkspaceFile(agent.name, "doc.pdf", "d");
+        AgentService.writeWorkspaceFile(agent.name, "b.png", "b");
+
+        // a.png and b.png are separated by a document — they are NOT a
+        // consecutive photo run, so neither side reaches 2 and no album forms.
+        var md = "[a.png](<a.png>) [doc.pdf](<doc.pdf>) [b.png](<b.png>)";
+        var segments = TelegramOutboundPlanner.plan(md, agent.name);
+        assertEquals(0, mediaGroupCount(segments),
+                () -> "a document between two photos breaks the run; no album: " + segments);
+
+        // Now two photos truly adjacent + a trailing document → the photos group,
+        // the document stays individual.
+        var agent2 = AgentService.create("planner-album-mix2", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent2.name, "a.png", "a");
+        AgentService.writeWorkspaceFile(agent2.name, "b.png", "b");
+        AgentService.writeWorkspaceFile(agent2.name, "doc.pdf", "d");
+        var md2 = "[a.png](<a.png>) [b.png](<b.png>) [doc.pdf](<doc.pdf>)";
+        var segments2 = TelegramOutboundPlanner.plan(md2, agent2.name);
+        var group = onlyMediaGroup(segments2);
+        assertEquals(2, group.items().size(), () -> "the two adjacent photos must group: " + segments2);
+        long standaloneDocs = segments2.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment fs
+                        && !fs.isImage() && !fs.isBackground())
+                .count();
+        assertEquals(1, standaloneDocs,
+                () -> "the pdf must stay an individual foreground document, not grouped: " + segments2);
+    }
+
+    @Test
+    void elevenPhotosChunkIntoTwoGroups() {
+        var agent = AgentService.create("planner-album-11", "openrouter", "gpt-4.1");
+        var md = new StringBuilder();
+        for (int i = 0; i < 11; i++) {
+            AgentService.writeWorkspaceFile(agent.name, "p" + i + ".png", "x");
+            md.append("[p").append(i).append(".png](<p").append(i).append(".png>) ");
+        }
+        var segments = TelegramOutboundPlanner.plan(md.toString(), agent.name);
+
+        var groups = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.MediaGroupSegment)
+                .map(s -> (TelegramOutboundPlanner.MediaGroupSegment) s)
+                .toList();
+        assertEquals(2, groups.size(), () -> "11 photos must chunk into two albums: " + segments);
+        assertEquals(10, groups.get(0).items().size(), "first album holds 10 (the Telegram cap)");
+        assertEquals(1, groups.get(1).items().size(), "second album holds the remaining 1");
+    }
+
+    @Test
+    void videoAndPhotoGroupTogether() {
+        var agent = AgentService.create("planner-album-av", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "clip.mp4", "v");
+        AgentService.writeWorkspaceFile(agent.name, "shot.png", "p");
+
+        // Telegram groups photos AND videos in one album — a video followed by a
+        // photo is a valid 2-item group.
+        var md = "[clip.mp4](<clip.mp4>) [shot.png](<shot.png>)";
+        var segments = TelegramOutboundPlanner.plan(md, agent.name);
+        var group = onlyMediaGroup(segments);
+        assertEquals(2, group.items().size(), () -> "video + photo must group together: " + segments);
+        assertEquals(TelegramOutboundPlanner.MediaKind.VIDEO, group.items().get(0).kind());
+        assertEquals(TelegramOutboundPlanner.MediaKind.PHOTO, group.items().get(1).kind());
+    }
+
     @Test
     void differentFilesProduceMultipleFileSegments() {
         // Dedupe is per-canonical-file, not per-URL-string: different files
@@ -485,13 +635,24 @@ class TelegramOutboundPlannerTest extends UnitTest {
                 + "![Second](/api/agents/1/files/second.png).";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
 
-        int fileCount = (int) segments.stream()
-                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
+        // JCLAW-123: each image produces a foreground photo + a background
+        // document. JCLAW-365: the lead-in/connector prose folds into the
+        // captions (the " and " connector folds into second.png's caption),
+        // leaving the two foreground photos consecutive — so they now coalesce
+        // into ONE media-group album. Dedupe correctness is still the point of
+        // this test: both DISTINCT files must survive (the album carries two
+        // distinct items, and each keeps its own background original document).
+        var group = onlyMediaGroup(segments);
+        assertEquals(2, group.items().size(),
+                () -> "two distinct images must group into a 2-item album: " + segments);
+        assertEquals("First", group.items().get(0).displayName(),
+                () -> "first distinct file preserved in album order: " + segments);
+        assertEquals("Second", group.items().get(1).displayName(),
+                () -> "second distinct file preserved in album order: " + segments);
+        long bgDocs = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment fs && fs.isBackground())
                 .count();
-        // JCLAW-123: each image produces photo + document, so two distinct
-        // images now produce four FileSegments (2 photo + 2 document).
-        assertEquals(4, fileCount,
-                "two distinct images should produce two photo + two document segments: "
-                        + segments);
+        assertEquals(2, bgDocs,
+                () -> "each distinct image keeps its background original document: " + segments);
     }
 }

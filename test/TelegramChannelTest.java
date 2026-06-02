@@ -1,4 +1,5 @@
 import channels.TelegramChannel;
+import channels.TelegramOutboundPlanner;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.*;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -1035,6 +1036,192 @@ class TelegramChannelTest extends UnitTest {
                     "{\"ok\":false,\"error_code\":400,\"description\":\"bad\"}");
             assertFalse(TelegramChannel.pinChatMessage(token, "12345", 1),
                     "pin server error must surface as false");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── JCLAW-365: outbound albums (sendMediaGroup) ────────────────────
+
+    /** A foreground PHOTO FileSegment wrapping {@code file} with the given display name. */
+    private static TelegramOutboundPlanner.FileSegment photoSeg(java.io.File file, String name) {
+        return new TelegramOutboundPlanner.FileSegment(
+                name, file, true, false, TelegramOutboundPlanner.MediaKind.PHOTO);
+    }
+
+    /** A foreground VIDEO FileSegment wrapping {@code file} with the given display name. */
+    private static TelegramOutboundPlanner.FileSegment videoSeg(java.io.File file, String name) {
+        return new TelegramOutboundPlanner.FileSegment(
+                name, file, false, false, TelegramOutboundPlanner.MediaKind.VIDEO);
+    }
+
+    @Test
+    void sendMediaGroup_threeItemsHitSendMediaGroupOnceWithThreeItems() throws Exception {
+        String token = "album-3-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var items = java.util.List.of(
+                    photoSeg(tempFile(".png"), "a.png"),
+                    photoSeg(tempFile(".png"), "b.png"),
+                    photoSeg(tempFile(".png"), "c.png"));
+            boolean ok = TelegramChannel.forToken(token)
+                    .sendMediaGroup("12345", items, null, null, null);
+            assertTrue(ok, "album send should succeed against the mock");
+            assertEquals(1, mock.countRequests("sendMediaGroup"),
+                    "three photos must dispatch exactly one sendMediaGroup");
+            assertEquals(0, mock.countRequests("sendPhoto"),
+                    "grouped photos must not also fire individual sendPhoto");
+            String body = firstBodyFor("sendMediaGroup");
+            int photoEntries = body.split("\"type\":\"photo\"", -1).length - 1;
+            assertEquals(3, photoEntries,
+                    "media-group body must describe three photo items: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMediaGroup_captionRidesFirstItemOnly() throws Exception {
+        String token = "album-cap-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var items = java.util.List.of(
+                    photoSeg(tempFile(".png"), "a.png"),
+                    photoSeg(tempFile(".png"), "b.png"));
+            boolean ok = TelegramChannel.forToken(token)
+                    .sendMediaGroup("12345", items, "look at these", null, null);
+            assertTrue(ok);
+            String body = firstBodyFor("sendMediaGroup");
+            assertTrue(body.contains("look at these"),
+                    "album caption must be on the wire: " + body);
+            // The caption text must ride exactly one item (the first) — it must
+            // not be duplicated onto the second item.
+            int captionTextCount = body.split("look at these", -1).length - 1;
+            assertEquals(1, captionTextCount,
+                    "caption text must appear on exactly one (the first) album item: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMediaGroup_videoAndPhotoGroupTogether() throws Exception {
+        String token = "album-av-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var items = java.util.List.of(
+                    videoSeg(tempFile(".mp4"), "clip.mp4"),
+                    photoSeg(tempFile(".png"), "shot.png"));
+            boolean ok = TelegramChannel.forToken(token)
+                    .sendMediaGroup("12345", items, null, null, null);
+            assertTrue(ok);
+            assertEquals(1, mock.countRequests("sendMediaGroup"));
+            String body = firstBodyFor("sendMediaGroup");
+            assertTrue(body.contains("\"type\":\"video\""), "video item must be present: " + body);
+            assertTrue(body.contains("\"type\":\"photo\""), "photo item must be present: " + body);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMediaGroup_rejectsOutOfRangeItemCounts() throws Exception {
+        String token = "album-range-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var ch = TelegramChannel.forToken(token);
+            assertFalse(ch.sendMediaGroup("12345", null, null, null, null),
+                    "null items must return false");
+            assertFalse(ch.sendMediaGroup("12345", java.util.List.of(), null, null, null),
+                    "empty items must return false");
+            assertFalse(ch.sendMediaGroup("12345",
+                            java.util.List.of(photoSeg(tempFile(".png"), "solo.png")),
+                            null, null, null),
+                    "a single item must return false (use the single-send path instead)");
+            assertEquals(0, mock.countRequests("sendMediaGroup"),
+                    "out-of-range counts must short-circuit before any HTTP call");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMediaGroup_returnsFalseOnServerError() throws Exception {
+        String token = "album-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMediaGroup", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad album\"}");
+            var items = java.util.List.of(
+                    photoSeg(tempFile(".png"), "a.png"),
+                    photoSeg(tempFile(".png"), "b.png"));
+            boolean ok = TelegramChannel.forToken(token)
+                    .sendMediaGroup("12345", items, null, null, null);
+            assertFalse(ok, "a 400 from Telegram must surface as false, not throw");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_threeImagesDispatchOneAlbum_endToEnd() {
+        // Drive the realistic planner→dispatch path: an agent response with
+        // three adjacent images must produce exactly one sendMediaGroup.
+        String token = "album-e2e-" + System.nanoTime();
+        var agent = services.AgentService.create("album-e2e-agent", "openrouter", "gpt-4.1");
+        services.AgentService.writeWorkspaceFile(agent.name, "a.png", "a");
+        services.AgentService.writeWorkspaceFile(agent.name, "b.png", "b");
+        services.AgentService.writeWorkspaceFile(agent.name, "c.png", "c");
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var md = "[a.png](<a.png>) [b.png](<b.png>) [c.png](<c.png>)";
+            assertTrue(TelegramChannel.sendMessage(token, "12345", md, agent));
+            assertEquals(1, mock.countRequests("sendMediaGroup"),
+                    "three adjacent images must coalesce into one album send");
+            assertEquals(0, mock.countRequests("sendPhoto"),
+                    "no individual sendPhoto when the photos are grouped");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_singleImageStillUsesSinglePhotoSend_endToEnd() {
+        // A lone image must keep the existing single-send path: one sendPhoto,
+        // no sendMediaGroup.
+        String token = "single-img-e2e-" + System.nanoTime();
+        var agent = services.AgentService.create("single-img-agent", "openrouter", "gpt-4.1");
+        services.AgentService.writeWorkspaceFile(agent.name, "solo.png", "x");
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.sendMessage(token, "12345", "[solo.png](<solo.png>)", agent));
+            assertEquals(0, mock.countRequests("sendMediaGroup"),
+                    "a single image must not use an album send");
+            assertEquals(1, mock.countRequests("sendPhoto"),
+                    "the lone image rides the single sendPhoto path");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMediaGroupFailure_fallsBackToIndividualSends_endToEnd() {
+        // When the album send fails, every item must still reach the user via
+        // individual sends (one sendPhoto per grouped photo).
+        String token = "album-fallback-" + System.nanoTime();
+        var agent = services.AgentService.create("album-fallback-agent", "openrouter", "gpt-4.1");
+        services.AgentService.writeWorkspaceFile(agent.name, "a.png", "a");
+        services.AgentService.writeWorkspaceFile(agent.name, "b.png", "b");
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMediaGroup", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"album rejected\"}");
+            assertTrue(TelegramChannel.sendMessage(token, "12345",
+                    "[a.png](<a.png>) [b.png](<b.png>)", agent));
+            assertEquals(1, mock.countRequests("sendMediaGroup"),
+                    "the album was attempted once");
+            assertEquals(2, mock.countRequests("sendPhoto"),
+                    "album failure must fall back to one individual sendPhoto per item");
         } finally {
             TelegramChannel.clearForTest(token);
         }
