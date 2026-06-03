@@ -270,7 +270,13 @@ public final class TelegramInboundParser {
      * when the source is unchanged. An invalid regex is skipped (logged once at
      * compile time), never thrown on the matching hot path.
      */
-    private static volatile CompiledPatterns wakeWordCache = null;
+    // AtomicReference (not a volatile field) per java:S3077: volatile only
+    // publishes the reference, not the referent's internals — a thread-safe
+    // holder makes the intent explicit. CompiledPatterns is a record holding an
+    // immutable pattern list (compileWakeWords returns List.copyOf), so the
+    // cached value is genuinely immutable and safely published.
+    private static final java.util.concurrent.atomic.AtomicReference<CompiledPatterns> wakeWordCache =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     /** Immutable (raw-config, compiled-patterns) pair for the wake-word cache. */
     private record CompiledPatterns(String source, java.util.List<java.util.regex.Pattern> patterns) {}
@@ -305,17 +311,17 @@ public final class TelegramInboundParser {
     private static java.util.List<java.util.regex.Pattern> compiledWakeWords() {
         var raw = play.Play.configuration.getProperty(CFG_MENTION_PATTERNS, "");
         if (raw == null) raw = "";
-        var cached = wakeWordCache;
+        var cached = wakeWordCache.get();
         if (cached != null && cached.source().equals(raw)) return cached.patterns();
         var compiled = compileWakeWords(raw);
-        wakeWordCache = new CompiledPatterns(raw, compiled);
+        wakeWordCache.set(new CompiledPatterns(raw, compiled));
         return compiled;
     }
 
     /** Split, trim, and compile the raw wake-word config into patterns, skipping invalid regexes. */
     private static java.util.List<java.util.regex.Pattern> compileWakeWords(String raw) {
         var out = new java.util.ArrayList<java.util.regex.Pattern>();
-        if (raw.isBlank()) return out;
+        if (raw.isBlank()) return java.util.List.of();
         for (var token : raw.split("[\\n,]")) {
             var trimmed = token.trim();
             if (trimmed.isEmpty()) continue;
@@ -327,7 +333,8 @@ public final class TelegramInboundParser {
                                 .formatted(trimmed, e.getMessage()));
             }
         }
-        return out;
+        // Immutable so the cached CompiledPatterns can't be mutated post-publish.
+        return java.util.List.copyOf(out);
     }
 
     /** Scan one text/entity pair for a mention, text_mention, or bot_command suffix addressing the bot. */

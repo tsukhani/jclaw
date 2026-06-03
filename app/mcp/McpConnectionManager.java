@@ -520,14 +520,24 @@ public final class McpConnectionManager {
         } catch (RuntimeException _) { /* best effort persistence */ }
     }
 
-    /** Stamp a timestamp column to now(). {@code column} is always a fixed
-     *  literal (never user input), so the string-built JPQL carries no injection
-     *  risk. Best-effort — swallows persistence failures like its siblings. */
+    /** Stamp a timestamp column to now(). {@code column} is a fixed,
+     *  caller-supplied literal (never user input) — mapped here to a fully-static
+     *  JPQL string so nothing is ever concatenated into the query. That removes
+     *  the injection surface entirely (and stays safe even if a future caller
+     *  passed a tainted value — an unknown column is rejected). Best-effort —
+     *  swallows persistence failures (and an unsupported column) like its
+     *  siblings. */
     private static void persistTimestamp(Long serverId, String column) {
         if (serverId == null) return;
         try {
-            Tx.run(() -> play.db.jpa.JPA.em().createQuery(
-                        "UPDATE McpServer s SET s." + column + " = :now, s.updatedAt = :now WHERE s.id = :id")
+            String jpql = switch (column) {
+                case "lastConnectedAt" ->
+                        "UPDATE McpServer s SET s.lastConnectedAt = :now, s.updatedAt = :now WHERE s.id = :id";
+                case "lastDisconnectedAt" ->
+                        "UPDATE McpServer s SET s.lastDisconnectedAt = :now, s.updatedAt = :now WHERE s.id = :id";
+                default -> throw new IllegalArgumentException("Unsupported timestamp column: " + column);
+            };
+            Tx.run(() -> play.db.jpa.JPA.em().createQuery(jpql)
                         .setParameter("now", Instant.now())
                         .setParameter("id", serverId)
                         .executeUpdate());
