@@ -151,6 +151,40 @@ class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
+    void coldStartAccessSeedsSynchronously() throws Exception {
+        // JCLAW-408: on a cold registry (never refreshed, lastRefresh == 0), a
+        // get()/listAll() must block until a populated snapshot is published
+        // rather than returning null/empty while an async refresh is in flight.
+        // We force the cold-start state via reflection (no public reset seam),
+        // then assert the very first get() — with no preceding explicit
+        // refresh() — already finds the configured provider.
+        ConfigService.set("provider.coldstart-test.baseUrl", "https://test.ai/v1");
+        ConfigService.set("provider.coldstart-test.apiKey", "sk-test");
+
+        forceColdStart();
+        try {
+            // First touch: refreshIfNeeded() must seed synchronously here.
+            var provider = ProviderRegistry.get("coldstart-test");
+            assertNotNull(provider,
+                    "cold-start get() must seed the cache synchronously, not return null");
+            assertEquals("https://test.ai/v1", provider.config().baseUrl());
+        } finally {
+            // Restore a warm, non-zero lastRefresh so we don't leave the shared
+            // static registry in the cold-start state for sibling tests.
+            ProviderRegistry.refresh();
+        }
+    }
+
+    private static void forceColdStart() throws Exception {
+        var cacheField = ProviderRegistry.class.getDeclaredField("cache");
+        cacheField.setAccessible(true);
+        cacheField.set(null, java.util.Map.of());
+        var lastRefreshField = ProviderRegistry.class.getDeclaredField("lastRefresh");
+        lastRefreshField.setAccessible(true);
+        lastRefreshField.setLong(null, 0L);
+    }
+
+    @Test
     void doubleCheckedLockingPreventsStampede() throws Exception {
         ConfigService.set("provider.stampede-test.baseUrl", "https://test.ai/v1");
         ConfigService.set("provider.stampede-test.apiKey", "sk-test");

@@ -176,6 +176,33 @@ class McpServerCatalogCoverageTest extends UnitTest {
     }
 
     @Test
+    void batchLoadedRowsMatchedPerServer() {
+        // JCLAW-408: the manifest now batch-loads all McpServer rows once and
+        // looks each server up by name, instead of one findByName per row.
+        // Verify the per-server matching is still correct: the server WITH a
+        // persisted row renders its transport hint; the server WITHOUT one
+        // falls back to its handle summary. A stale all-rows map must not
+        // cross-contaminate descriptions.
+        var jira = new McpServer();
+        jira.name = "jira";
+        jira.enabled = true;
+        jira.transport = McpServer.Transport.STDIO;
+        jira.configJson = "{\"command\":\"jira-mcp\"}";
+        jira.save();
+
+        ToolRegistry.publish(List.of(
+                stubMcpServerHandle("mcp_jira", "jira"),
+                stubMcpServerHandleWithSummary("mcp_github", "github", "GitHub MCP server")
+        ));
+        var out = McpServerCatalog.formatCatalogForPrompt(Set.<String>of());
+
+        assertTrue(out.contains("MCP server via stdio"),
+                "row-backed jira server must render transport hint: " + out);
+        assertTrue(out.contains("GitHub MCP server"),
+                "row-less github server must fall back to its summary: " + out);
+    }
+
+    @Test
     void serversForAgentReturnsEmptyWhenNoHandles() {
         ToolRegistry.publish(List.of(stubTool("filesystem", null, false)));
         assertEquals(List.of(), McpServerCatalog.serversForAgent(Set.<String>of()),

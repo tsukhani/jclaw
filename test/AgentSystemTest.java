@@ -332,6 +332,27 @@ class AgentSystemTest extends UnitTest {
     }
 
     @Test
+    void extractYamlListCommandsInlineAndBlock() {
+        // JCLAW-408: the pre-compiled COMMANDS_* patterns must parse identically
+        // to the dynamic default they replaced, in both inline and block form.
+        assertEquals(java.util.List.of("deploy", "rollback"),
+                SkillLoader.extractYamlList("commands: [deploy, rollback]", "commands"));
+        var block = "commands:\n  - deploy\n  - rollback\n";
+        assertEquals(java.util.List.of("deploy", "rollback"),
+                SkillLoader.extractYamlList(block, "commands"));
+    }
+
+    @Test
+    void extractYamlListMcpServersInlineAndBlock() {
+        // JCLAW-408: same parity check for the pre-compiled MCP_SERVERS_* patterns.
+        assertEquals(java.util.List.of("filesystem", "context7"),
+                SkillLoader.extractYamlList("mcp_servers: [filesystem, context7]", "mcp_servers"));
+        var block = "mcp_servers:\n  - filesystem\n  - context7\n";
+        assertEquals(java.util.List.of("filesystem", "context7"),
+                SkillLoader.extractYamlList(block, "mcp_servers"));
+    }
+
+    @Test
     void formatSkillsXmlReturnsEmptyStringForEmptyList() {
         // Early-return branch at line 303 of SkillLoader.
         assertEquals("", SkillLoader.formatSkillsXml(java.util.List.of()));

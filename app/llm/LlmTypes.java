@@ -136,13 +136,7 @@ public final class LlmTypes {
             int reasoningTokens,
             int cachedTokens,
             int cacheCreationTokens
-    ) {
-        /** Backwards-compatible factory for callers that don't have cache-creation data. */
-        public static Usage of(int promptTokens, int completionTokens, int totalTokens,
-                               int reasoningTokens, int cachedTokens) {
-            return new Usage(promptTokens, completionTokens, totalTokens, reasoningTokens, cachedTokens, 0);
-        }
-    }
+    ) {}
 
     // --- Streaming types ---
 
@@ -206,9 +200,9 @@ public final class LlmTypes {
             PaymentModality paymentModality,
             BigDecimal subscriptionMonthlyUsd
     ) {
-        /** Back-compat constructor: defaults the modality to the provider's
-         *  default and leaves the subscription price at zero. Used by older
-         *  call sites and tests that don't care about billing shape. */
+        /** Convenience constructor — defaults the modality to the provider's
+         *  default ({@link PaymentModality#defaultFor}) and the subscription
+         *  price to zero. For call sites that don't carry a billing shape. */
         public ProviderConfig(String name, String baseUrl, String apiKey, List<ModelInfo> models) {
             this(name, baseUrl, apiKey, models,
                     PaymentModality.defaultFor(name), BigDecimal.ZERO);
@@ -280,12 +274,15 @@ public final class LlmTypes {
             List<String> thinkingLevels,
             boolean alwaysThinks
     ) {
-        /** Backwards-compatible factory for callers that don't have pricing data. */
+        /** Convenience constructor — capabilities only; defaults all pricing to
+         *  the {@code -1} unknown sentinel, vision/audio off, and no explicit
+         *  thinking levels. */
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking) {
             this(id, name, contextWindow, maxTokens, supportsThinking, false, false, -1, -1, -1, -1, null, false);
         }
 
-        /** Backwards-compatible factory for callers that have pricing but no explicit thinking levels. */
+        /** Convenience constructor — capabilities plus the four pricing fields;
+         *  defaults vision/audio off and leaves thinking levels unset. */
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking,
                          double promptPrice, double completionPrice,
                          double cachedReadPrice, double cacheWritePrice) {

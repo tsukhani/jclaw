@@ -85,7 +85,12 @@ public final class McpStdioTransport implements McpTransport {
     @Override
     public void close() {
         closed = true;
+        // Close both pipes before destroying the process so the reader/writer
+        // buffers release their underlying streams. Ordered stream-close →
+        // process-destroy so the subprocess sees EOF on its stdin before the
+        // forced kill, giving well-behaved servers a chance to exit cleanly.
         try { if (stdin != null) stdin.close(); } catch (IOException _) { /* best effort */ }
+        try { if (stdout != null) stdout.close(); } catch (IOException _) { /* best effort */ }
         if (process != null) {
             process.destroy();
             try {

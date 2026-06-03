@@ -109,7 +109,10 @@ public final class McpStreamableHttpTransport implements McpTransport {
         Thread.ofVirtual().name("mcp-http-" + name + "-" + token).start(() -> {
             try (var resp = call.execute()) {
                 handleResponse(resp);
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
+                // RuntimeException too: an unexpected parse/dereference failure
+                // on this reader VT would otherwise vanish silently — route it
+                // to onError so the connection manager can react.
                 if (!closed) onError.accept(e);
             } finally {
                 inFlight.remove(token);
@@ -144,12 +147,15 @@ public final class McpStreamableHttpTransport implements McpTransport {
         }
         if (resp.code() == 202) return;  // notification accepted, no body
 
+        var rb = resp.body();
+        if (rb == null) return;  // success status with no body — nothing to deliver
+
         var contentType = resp.header(HttpKeys.CONTENT_TYPE, "");
         if (contentType.contains("text/event-stream")) {
-            consumeSseStream(resp.body().source());
+            consumeSseStream(rb.source());
             return;
         }
-        var bodyStr = resp.body().string();
+        var bodyStr = rb.string();
         if (bodyStr.isBlank()) return;
         try {
             onMessage.accept(JsonRpc.decode(bodyStr));
@@ -167,7 +173,12 @@ public final class McpStreamableHttpTransport implements McpTransport {
     private void consumeSseStream(BufferedSource source) throws IOException {
         var data = new StringBuilder();
         String line;
-        while (!closed && !source.exhausted() && (line = source.readUtf8Line()) != null) {
+        // Loop on readUtf8Line alone — it returns null on EOF, which is the
+        // clean teardown signal. Calling source.exhausted() here would block
+        // until the next byte (or EOF) arrives, defeating the close() path's
+        // call.cancel(): cancellation surfaces as an IOException out of the
+        // blocked read, which is what tears the loop down.
+        while ((line = source.readUtf8Line()) != null) {
             if (line.isEmpty()) {
                 flushSseEvent(data);
             } else if (line.startsWith("data:")) {

@@ -986,7 +986,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         }
 
         /** Returns the aggregated reasoning text, or {@code null} if nothing was streamed. */
-        public String reasoningText() {
+        public synchronized String reasoningText() {
             return reasoningText.isEmpty() ? null : reasoningText.toString();
         }
 

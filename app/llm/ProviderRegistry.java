@@ -61,6 +61,24 @@ public final class ProviderRegistry {
     }
 
     private static void refreshIfNeeded() {
+        // Cold start: the cache has never been refreshed (lastRefresh == 0).
+        // The async-refresh path below lets the CAS loser fall through to read
+        // an empty cache while the winner is still mid-refresh, so get()/
+        // listAll() would briefly return null/empty for a provider that is
+        // actually configured. Seed synchronously under double-checked
+        // refreshLock so the very first access blocks until a populated
+        // snapshot is published. Keyed on lastRefresh (not cache.isEmpty()) so
+        // a legitimately provider-less registry doesn't re-run the DB read on
+        // every call — one refresh stamps lastRefresh non-zero and we revert to
+        // the interval-gated async path.
+        if (lastRefresh == 0L) {
+            synchronized (refreshLock) {
+                if (lastRefresh == 0L) {
+                    services.Tx.run(ProviderRegistry::refreshInner);
+                    return;
+                }
+            }
+        }
         if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS) {
             refresh();
         }

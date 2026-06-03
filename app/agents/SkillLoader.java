@@ -109,6 +109,10 @@ public class SkillLoader {
     private static final String KEY_DESCRIPTION = "description";
     /** YAML key holding the skill's semver version. */
     private static final String KEY_VERSION = "version";
+    /** YAML key listing slash-commands the skill registers. */
+    private static final String KEY_COMMANDS = "commands";
+    /** YAML key (JCLAW-281) listing MCP server dependencies the skill needs. */
+    private static final String KEY_MCP_SERVERS = "mcp_servers";
 
     /** Compare two semver strings. Delegates to {@link SkillVersionManager}. */
     public static int compareVersions(String a, String b) {
@@ -410,6 +414,10 @@ public class SkillLoader {
     private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern TOOLS_INLINE_LIST = Pattern.compile("^tools:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
     private static final Pattern TOOLS_BLOCK_LIST = Pattern.compile("^tools:\\s*\\n((?:\\s*-\\s*.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern COMMANDS_INLINE_LIST = Pattern.compile("^commands:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
+    private static final Pattern COMMANDS_BLOCK_LIST = Pattern.compile("^commands:\\s*\\n((?:\\s*-\\s*.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern MCP_SERVERS_INLINE_LIST = Pattern.compile("^mcp_servers:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
+    private static final Pattern MCP_SERVERS_BLOCK_LIST = Pattern.compile("^mcp_servers:\\s*\\n((?:\\s*-\\s*.*\\n?)++)", Pattern.MULTILINE);
 
     public static SkillInfo parseSkillFile(Path path) {
         try {
@@ -447,10 +455,10 @@ public class SkillLoader {
                 extractYamlList(frontmatter, KEY_TOOLS),
                 TOOLS_KEY_PRESENT.matcher(frontmatter).find(),
                 version != null ? version : DEFAULT_SKILL_VERSION,
-                extractYamlList(frontmatter, "commands"),
+                extractYamlList(frontmatter, KEY_COMMANDS),
                 author != null ? author : "",
                 icon != null ? icon : "",
-                extractYamlList(frontmatter, "mcp_servers"));
+                extractYamlList(frontmatter, KEY_MCP_SERVERS));
     }
 
     /**
@@ -463,15 +471,24 @@ public class SkillLoader {
      * </pre>
      */
     public static List<String> extractYamlList(String yaml, String key) {
-        // Inline form: key: [a, b, c]
-        var inlinePattern = KEY_TOOLS.equals(key) ? TOOLS_INLINE_LIST
-                : Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
+        // Inline form: key: [a, b, c]. Pre-compiled for the known closed-set
+        // keys; only an unrecognised custom key pays the per-call compile.
+        var inlinePattern = switch (key) {
+            case KEY_TOOLS -> TOOLS_INLINE_LIST;
+            case KEY_COMMANDS -> COMMANDS_INLINE_LIST;
+            case KEY_MCP_SERVERS -> MCP_SERVERS_INLINE_LIST;
+            default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
+        };
         var inlineMatcher = inlinePattern.matcher(yaml);
         if (inlineMatcher.find()) return parseInlineYamlList(inlineMatcher.group(1));
 
         // Block form: key:\n  - a\n  - b
-        var blockPattern = KEY_TOOLS.equals(key) ? TOOLS_BLOCK_LIST
-                : Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\n((?:\\s*-\\s*.*\\n?)+)", Pattern.MULTILINE);
+        var blockPattern = switch (key) {
+            case KEY_TOOLS -> TOOLS_BLOCK_LIST;
+            case KEY_COMMANDS -> COMMANDS_BLOCK_LIST;
+            case KEY_MCP_SERVERS -> MCP_SERVERS_BLOCK_LIST;
+            default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\n((?:\\s*-\\s*.*\\n?)+)", Pattern.MULTILINE);
+        };
         var blockMatcher = blockPattern.matcher(yaml);
         if (blockMatcher.find()) return parseBlockYamlList(blockMatcher.group(1));
 

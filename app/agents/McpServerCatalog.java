@@ -5,8 +5,10 @@ import mcp.McpServerTool;
 import models.Agent;
 import models.McpServer;
 
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -57,6 +59,10 @@ public final class McpServerCatalog {
         }
         if (serverHandles.isEmpty()) return "";
 
+        // Load all McpServer rows once instead of one findByName per row while
+        // building the manifest — a single DB roundtrip keyed by name.
+        var serverRows = loadServerRows();
+
         var sb = new StringBuilder();
         sb.append("| Server | Actions | Description |\n");
         sb.append("|---|---|---|\n");
@@ -66,10 +72,19 @@ public final class McpServerCatalog {
             var actionCount = countActions(serverName);
             sb.append("| `").append(handle.name()).append("` | ")
               .append(actionCountLabel(actionCount)).append(" | ")
-              .append(describeServer(serverName, handle))
+              .append(describeServer(serverRows.get(serverName), handle))
               .append(" |\n");
         }
         return sb.toString();
+    }
+
+    /** Snapshot every {@link McpServer} row into a name→row map in one query. */
+    private static Map<String, McpServer> loadServerRows() {
+        var rows = new HashMap<String, McpServer>();
+        for (McpServer s : McpServer.<McpServer>findAll()) {
+            rows.put(s.name, s);
+        }
+        return rows;
     }
 
     /** {@code <0} means "not yet enumerated"; the server is connected but
@@ -87,10 +102,10 @@ public final class McpServerCatalog {
 
     /**
      * Per-server description for the catalog row. Falls back to a generic
-     * line for servers without an admin-supplied description.
+     * line for servers without an admin-supplied description. The {@code server}
+     * row is looked up once by the caller from a batch-loaded map.
      */
-    private static String describeServer(String serverName, ToolRegistry.Tool handle) {
-        var server = McpServer.findByName(serverName);
+    private static String describeServer(McpServer server, ToolRegistry.Tool handle) {
         if (server != null && server.transport != null) {
             // No description column on McpServer today; render transport
             // shape as a hint so the operator can still tell HTTP vs stdio
