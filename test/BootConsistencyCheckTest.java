@@ -5,6 +5,7 @@ import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import jobs.BootConsistencyCheck;
 import models.Agent;
 import models.Task;
+import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -187,7 +188,80 @@ class BootConsistencyCheckTest extends UnitTest {
                 "reArmOrphans must not reconcile RUNNING -> LOST");
     }
 
+    // === JCLAW-410: orphaned task_run reconciliation ===
+
+    @Test
+    void reconcileOrphanedRunsFailsStaleRunningRun() {
+        // A run left RUNNING by a prior JVM generation (started an hour ago).
+        var task = persistTask("orphaned-run", Task.Status.ACTIVE);
+        var runId = persistRun(task, Instant.now().minusSeconds(3600),
+                TaskRun.Status.RUNNING, null);
+
+        int reconciled = BootConsistencyCheck.reconcileOrphanedRuns(Instant.now());
+
+        assertEquals(1, reconciled, "stale RUNNING run should be reconciled");
+        var closed = (TaskRun) TaskRun.findById(runId);
+        assertEquals(TaskRun.Status.FAILED, closed.status, "orphaned run must be FAILED");
+        assertNotNull(closed.completedAt, "completedAt must be stamped");
+        assertNotNull(closed.durationMs, "durationMs must be stamped");
+        assertNotNull(closed.error, "an error reason must be recorded");
+    }
+
+    @Test
+    void reconcileOrphanedRunsLeavesInFlightRunsRunning() {
+        // A run started AFTER the cutoff belongs to the current JVM generation
+        // and is genuinely in-flight — it must not be failed out from under it.
+        var task = persistTask("live-run", Task.Status.ACTIVE);
+        var runId = persistRun(task, Instant.now(), TaskRun.Status.RUNNING, null);
+        var cutoff = Instant.now().minusSeconds(60);
+
+        int reconciled = BootConsistencyCheck.reconcileOrphanedRuns(cutoff);
+
+        assertEquals(0, reconciled, "a run started after the cutoff is in-flight, not orphaned");
+        assertEquals(TaskRun.Status.RUNNING,
+                ((TaskRun) TaskRun.findById(runId)).status,
+                "in-flight run must stay RUNNING");
+    }
+
+    @Test
+    void reconcileOrphanedRunsIgnoresTerminalRuns() {
+        var task = persistTask("done-run", Task.Status.ACTIVE);
+        var runId = persistRun(task, Instant.now().minusSeconds(3600),
+                TaskRun.Status.COMPLETED, Instant.now().minusSeconds(3500));
+
+        int reconciled = BootConsistencyCheck.reconcileOrphanedRuns(Instant.now());
+
+        assertEquals(0, reconciled, "terminal runs are out of scope");
+        assertEquals(TaskRun.Status.COMPLETED,
+                ((TaskRun) TaskRun.findById(runId)).status);
+    }
+
+    @Test
+    void sweepReconcilesOrphanedRunFromPriorJvm() {
+        // A run whose startedAt predates this JVM's start is unambiguously
+        // orphaned; the full boot sweep must close it out (wiring check).
+        var task = persistTask("ancient-run", Task.Status.ACTIVE);
+        var runId = persistRun(task, Instant.parse("2020-01-01T00:00:00Z"),
+                TaskRun.Status.RUNNING, null);
+
+        BootConsistencyCheck.sweep(stub.proxy());
+
+        assertEquals(TaskRun.Status.FAILED,
+                ((TaskRun) TaskRun.findById(runId)).status,
+                "boot sweep must reconcile a run orphaned by a prior JVM generation");
+    }
+
     // === Helpers ===
+
+    private Long persistRun(Task task, Instant startedAt, TaskRun.Status status, Instant completedAt) {
+        var r = new TaskRun();
+        r.task = task;
+        r.startedAt = startedAt;
+        r.status = status;
+        r.completedAt = completedAt;
+        r.save();
+        return r.id;
+    }
 
     private Agent persistAgent() {
         var a = new Agent();

@@ -3,6 +3,7 @@ package jobs;
 import com.github.kagkarlsson.scheduler.SchedulerClient;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Task;
+import models.TaskRun;
 import play.jobs.Job;
 import services.EventLogger;
 import services.LostTaskDetector;
@@ -10,6 +11,9 @@ import services.TaskExecutionHandler;
 import services.TaskSchedulingService;
 import services.Tx;
 
+import java.lang.management.ManagementFactory;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.HashSet;
 
 /**
@@ -111,7 +115,66 @@ public class BootConsistencyCheck extends Job<Void> {
                             .formatted(lost));
         }
 
+        // JCLAW-410: close out per-fire run-history rows orphaned in RUNNING by a
+        // prior JVM generation (a fire that died mid-execution before stamping a
+        // terminal status). The LOST/re-arm steps heal the Task; without this the
+        // task_run row shows "RUNNING" with an ever-growing elapsed timer forever
+        // for a run that isn't executing. Cutoff is the JVM start instant, so a
+        // fire that began in THIS JVM is treated as in-flight and left alone.
+        reconcileOrphanedRuns(jvmStartInstant());
+
         return reArmOrphans(scheduler);
+    }
+
+    /**
+     * Flip every {@link TaskRun} left {@link TaskRun.Status#RUNNING} by a prior
+     * JVM generation to {@link TaskRun.Status#FAILED}, stamping {@code completedAt},
+     * {@code durationMs}, and an {@code error} reason. A fire that dies mid-execution
+     * (JVM crash/restart before it writes a terminal status) leaves its run-history
+     * row RUNNING with {@code completedAt == null} — Task-level recovery never
+     * touches it, so the UI shows an ever-growing "RUNNING" timer for a run that is
+     * not executing (and nothing ever clears it: {@link TaskCleanupJob} only deletes
+     * terminal Task trees past retention).
+     *
+     * <p>{@code jvmStart} is the cutoff: only RUNNING runs whose {@code startedAt}
+     * is strictly before it are reconciled. A fire that opened its row within THIS
+     * JVM necessarily started after JVM boot, so it is genuinely in-flight and
+     * skipped — this is what makes the sweep safe to run alongside db-scheduler's
+     * first poll without racing a freshly-opened run to FAILED.
+     *
+     * @param jvmStart cutoff instant; runs started before it are considered orphaned
+     * @return number of run rows flipped to FAILED
+     */
+    public static int reconcileOrphanedRuns(Instant jvmStart) {
+        return Tx.run(() -> {
+            var now = Instant.now();
+            int count = 0;
+            for (Object o : TaskRun.find("status = ?1 and startedAt < ?2",
+                    TaskRun.Status.RUNNING, jvmStart).fetch()) {
+                var run = (TaskRun) o;
+                run.status = TaskRun.Status.FAILED;
+                run.completedAt = now;
+                run.durationMs = Duration.between(run.startedAt, now).toMillis();
+                if (run.error == null || run.error.isBlank()) {
+                    run.error = "Run orphaned by a JVM restart/crash before completion; "
+                            + "reconciled to FAILED at startup.";
+                }
+                run.save();
+                count++;
+            }
+            if (count > 0) {
+                EventLogger.info("task", null, null,
+                        "BootConsistencyCheck: reconciled %d orphaned RUNNING task_run row(s) to FAILED"
+                                .formatted(count));
+            }
+            return count;
+        });
+    }
+
+    /** JVM start instant — the cutoff dividing prior-generation runs from runs
+     *  opened by the current JVM. */
+    private static Instant jvmStartInstant() {
+        return Instant.ofEpochMilli(ManagementFactory.getRuntimeMXBean().getStartTime());
     }
 
     /**
