@@ -334,17 +334,29 @@ public class ApiSubagentRunsController extends Controller {
         }
         if (ids.isEmpty()) return Map.of();
 
-        // Pull every SUBAGENT_SPAWN event whose details JSON has a matching
-        // run_id. We accept a wide LIKE plus an in-Java filter because the
-        // run_id values in the payload are quoted strings; constructing a
-        // JPQL IN-clause that matches "run_id":"<numeric>" for many ids
-        // requires N OR-ed LIKEs and gets ugly fast. The event count for
-        // this page is bounded (limit param caps the run-list size), and
-        // SUBAGENT_SPAWN is a slim category — the scan is cheap.
+        // JCLAW-400: bound the SUBAGENT_SPAWN scan to this page's run-ids
+        // instead of fetching a 500-row category slice and discarding the
+        // rows that aren't on the page. The details payload renders the run
+        // id as a quoted string (`"run_id":"<id>"`, see
+        // EventLogger.subagentDetails), so one `details LIKE` per page run-id
+        // ANDed onto the category filter narrows the DB result to only the
+        // rows that can match. The run-id literals are numeric — they carry
+        // no LIKE wildcards or special chars — so the only `%` are our own
+        // anchoring ones, and the trailing quote in `"run_id":"<id>"` keeps
+        // id 5 from matching id 50. The in-Java idSet/most-recent-wins parse
+        // below is preserved verbatim so the run→mode mapping is identical.
+        var likeClauses = new java.util.ArrayList<String>(ids.size());
+        var params = new java.util.ArrayList<Object>(ids.size() + 1);
+        params.add("SUBAGENT_SPAWN");
+        int idx = 2;
+        for (var id : ids) {
+            likeClauses.add("details LIKE ?" + idx++);
+            params.add("%\"" + KEY_RUN_ID + "\":\"" + id + "\"%");
+        }
+        String jpql = "category = ?1 AND (" + String.join(" OR ", likeClauses)
+                + ") ORDER BY timestamp DESC";
         @SuppressWarnings("unchecked")
-        List<EventLog> events = EventLog.find(
-                "category = ?1 ORDER BY timestamp DESC",
-                "SUBAGENT_SPAWN").fetch(Math.max(500, ids.size() * 4));
+        List<EventLog> events = EventLog.find(jpql, params.toArray()).fetch();
         var idSet = new java.util.HashSet<>(ids);
         var result = new HashMap<Long, String>();
         for (var ev : events) {

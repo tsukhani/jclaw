@@ -501,6 +501,91 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
                 "older mode (session) should not appear: " + body);
     }
 
+    @Test
+    void listEnrichesEachPageRunWithItsOwnMode() {
+        // JCLAW-400: the per-run scan is now bounded to the page's run-ids
+        // via per-id details-LIKE predicates. Assert the bounded query still
+        // attaches the correct mode to EACH distinct run on the page (not
+        // just one), so the LIKE-narrowing didn't cross-wire run→mode.
+        login();
+        var ids = commitInFreshTx(() -> {
+            var p = AgentService.create("api-each-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-each-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            var inlineId = persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+            var sessionId = persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+            return new long[]{inlineId, sessionId};
+        });
+        commitInFreshTx(() -> {
+            EventLogger.recordSubagentSpawn("api-each-p", "api-each-c",
+                    String.valueOf(ids[0]), "inline", "ctx-inline");
+            EventLogger.recordSubagentSpawn("api-each-p", "api-each-c",
+                    String.valueOf(ids[1]), "session", "ctx-session");
+            EventLogger.flush();
+            return null;
+        });
+        var resp = GET("/api/subagent-runs");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        // Each run object must carry its own mode. Parse out the per-id slice
+        // and confirm the mode that immediately follows each id matches.
+        assertModeForRun(body, ids[0], "inline");
+        assertModeForRun(body, ids[1], "session");
+    }
+
+    @Test
+    void listResolvesModeWhenSpawnHistoryExceedsOldFloor() {
+        // JCLAW-400 regression: previously the scan fetched at most ~500
+        // SUBAGENT_SPAWN rows and the target run's event could be crowded
+        // out once history grew past the floor. Seed > 500 unrelated spawn
+        // events plus one for the listed run; the bounded LIKE query must
+        // still find this run's mode regardless of history depth.
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-floor-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-floor-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+        });
+        commitInFreshTx(() -> {
+            // The real spawn event for the listed run, recorded FIRST so it
+            // becomes the OLDEST by timestamp — i.e. would sort last and be
+            // dropped by a 500-row DESC slice. The bounded query ignores age.
+            EventLogger.recordSubagentSpawn("api-floor-p", "api-floor-c",
+                    String.valueOf(runId), "inline", "real");
+            // 600 newer, unrelated spawn events for run ids that aren't on
+            // the page (offset far past any real run id to avoid collision).
+            for (int i = 0; i < 600; i++) {
+                EventLogger.recordSubagentSpawn("other-p", "other-c",
+                        String.valueOf(900_000L + i), "session", "noise");
+            }
+            EventLogger.flush();
+            return null;
+        });
+        var resp = GET("/api/subagent-runs");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertModeForRun(body, runId, "inline");
+    }
+
+    /**
+     * Assert that the run object with {@code id} in the JSON array carries
+     * {@code "mode":"<expected>"}. Locates the id token then scans forward
+     * to that object's mode field, so it can't be fooled by another run's
+     * matching mode elsewhere in the array.
+     */
+    private static void assertModeForRun(String body, long id, String expectedMode) {
+        var marker = "\"id\":" + id + ",";
+        int at = body.indexOf(marker);
+        assertTrue(at >= 0, "run id " + id + " present in body: " + body);
+        int modeAt = body.indexOf("\"mode\":", at);
+        assertTrue(modeAt >= 0, "mode field after id " + id + ": " + body);
+        assertTrue(body.startsWith("\"mode\":\"" + expectedMode + "\"", modeAt),
+                "run " + id + " should carry mode '" + expectedMode + "': " + body);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────
 
     private static long persistRun(Agent p, Agent c, Conversation pc, Conversation cc,
