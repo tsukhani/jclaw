@@ -54,6 +54,34 @@ class DateTimeToolTest extends UnitTest {
     }
 
     @Test
+    void missingActionDefaultsToNowInsteadOfThrowing() {
+        // Regression: the LLM sometimes calls datetime with no "action" key.
+        // Previously args.get("action").getAsString() NPE'd; it must now fall
+        // back to "now" and return a valid time rather than crash the tool.
+        var result = tool.execute("{}", agent);
+        assertTrue(result.contains("timezone:"), "Empty-args call should return current time");
+        assertTrue(result.contains("iso:"), "Empty-args call should return an ISO timestamp");
+    }
+
+    @Test
+    void timezoneOnlyWithoutActionReturnsCurrentTimeInThatZone() {
+        // The exact payload observed failing in production: a timezone but no action.
+        var result = tool.execute("""
+                {"timezone": "Asia/Kuala_Lumpur"}
+                """, agent);
+        assertTrue(result.contains("Asia/Kuala_Lumpur"), "Should honor the timezone and default to now");
+        assertTrue(result.contains("iso:"), "Should return an ISO timestamp");
+    }
+
+    @Test
+    void nullActionDefaultsToNow() {
+        var result = tool.execute("""
+                {"action": null}
+                """, agent);
+        assertTrue(result.contains("timezone:"), "Explicit null action should default to now");
+    }
+
+    @Test
     void nowWithExplicitTimezone() {
         var result = tool.execute("""
                 {"action": "now", "timezone": "America/New_York"}

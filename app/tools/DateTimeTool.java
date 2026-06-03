@@ -116,7 +116,13 @@ public class DateTimeTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var action = args.get(ARG_ACTION).getAsString();
+        // The LLM sometimes calls datetime without the (schema-required) "action"
+        // — e.g. {} or just a timezone — which unambiguously means "give me the
+        // current time". Default to "now" rather than NPE on the missing key
+        // (a missing-action NPE otherwise traps the agent in a retry loop).
+        var action = args.has(ARG_ACTION) && !args.get(ARG_ACTION).isJsonNull()
+                ? args.get(ARG_ACTION).getAsString()
+                : ACTION_NOW;
 
         return switch (action) {
             case ACTION_NOW -> now(args);
