@@ -200,14 +200,30 @@ public class JpaMemoryStore implements MemoryStore {
                     .build());
 
     /**
-     * Cache key for {@link #embeddingCache}. The {@code (model, text)} tuple
-     * prevents cross-model collision — switching the configured model
-     * implicitly invalidates because keys no longer match.
+     * Cache key for {@link #embeddingCache}. The {@code (model, textHash)} tuple
+     * prevents cross-model collision — switching the configured model implicitly
+     * invalidates because keys no longer match. {@code textHash} is the SHA-256
+     * hex of the source text, so the key is a fixed 64-char string regardless of
+     * text length: this keeps the documented heap bound accurate (the unbounded
+     * {@code @Column TEXT} is no longer retained as the key) and stops pinning the
+     * text of deleted {@code Memory} rows for the 24h {@code expireAfterWrite}
+     * window. SHA-256 (256-bit) makes a collision — which would silently return
+     * the wrong embedding for a different text — astronomically unlikely.
      */
-    private record EmbeddingKey(String model, String text) {}
+    private record EmbeddingKey(String model, String textHash) {}
+
+    private static String hashText(String text) {
+        try {
+            var md = java.security.MessageDigest.getInstance("SHA-256");
+            return java.util.HexFormat.of()
+                    .formatHex(md.digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable — JDK install broken?", e);
+        }
+    }
 
     private float[] generateEmbedding(String text) {
-        return embeddingCache.get(new EmbeddingKey(vectorModel, text), k -> {
+        return embeddingCache.get(new EmbeddingKey(vectorModel, hashText(text)), k -> {
             try {
                 var provider = llm.ProviderRegistry.getPrimary();
                 if (provider == null) return null;
@@ -216,7 +232,9 @@ public class JpaMemoryStore implements MemoryStore {
                 // available here, so the call records under "unknown" channel
                 // for dispatcher_wait. Acceptable: embeddings hit a different
                 // provider endpoint than chat and are typically cheap.
-                return provider.embeddings(k.model(), k.text(), null);
+                // The key carries only a hash of the text, so the raw text is
+                // captured from the enclosing scope rather than read off the key.
+                return provider.embeddings(k.model(), text, null);
             } catch (Exception e) {
                 EventLogger.warn(EVENT_CATEGORY_MEMORY, "Embedding generation failed: %s".formatted(e.getMessage()));
                 return null;
