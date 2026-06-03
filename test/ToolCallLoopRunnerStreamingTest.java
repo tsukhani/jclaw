@@ -616,7 +616,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                 "callWithToolLoop",
                 Agent.class, Conversation.class, Long.class,
                 List.class, List.class, LlmProvider.class, LlmProvider.class,
-                List.class, AgentExecutionSink.class);
+                List.class, AgentExecutionSink.class, Long.class);  // JCLAW-414: trailing taskRunId
         m.setAccessible(true);
 
         var sink = new ConversationSink(conversation);
@@ -627,7 +627,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                 resultRef.set((ToolCallLoopRunner.LoopOutcome) m.invoke(null,
                         agent, conversation, conversationId,
                         new ArrayList<>(messages), tools, primary, secondary,
-                        audioBearers, sink));
+                        audioBearers, sink, (Long) null));  // JCLAW-414: taskRunId null (chat path)
             } catch (Exception e) {
                 errorRef.set(e);
             }

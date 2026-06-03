@@ -101,7 +101,7 @@ public final class ToolCallLoopRunner {
                                          List<ChatMessage> messages, List<ToolDef> tools,
                                          LlmProvider primary, LlmProvider secondary,
                                          List<VisionAudioAssembler.AudioBearer> audioBearers,
-                                         AgentExecutionSink sink) {
+                                         AgentExecutionSink sink, Long taskRunId) {
         // Helpers like effectiveModelId / effectiveMaxTokens accept a nullable
         // conversation for use elsewhere, but this loop dereferences
         // conversation.channelType when handing off to the LLM provider —
@@ -122,6 +122,7 @@ public final class ToolCallLoopRunner {
             // never check inside a streaming chunk handler (too chatty)
             // or mid-tool-call (would orphan partial side effects).
             AgentRunner.checkSubagentCancel(conversation);
+            AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
             var attempt = invokeOneRound(agent, conversation, primary, secondary, effectiveModelId, thinkingMode,
                     currentMessages, tools, audioBearers, audioState);
             if (attempt.retry()) {
@@ -141,7 +142,7 @@ public final class ToolCallLoopRunner {
             }
 
             var roundOutcome = handleSyncRoundResponse(attempt.response(), agent, conversation, conversationId, primary,
-                    currentMessages, tools, sink, round);
+                    currentMessages, tools, sink, round, taskRunId);
             if (roundOutcome != null) return roundOutcome;
         }
 
@@ -261,10 +262,11 @@ public final class ToolCallLoopRunner {
      * yield) or execute the tool calls and return {@code null} so the
      * caller continues to the next round.
      */
+    @SuppressWarnings("java:S107") // round-response dispatcher mirrors the loop's per-round state + the JCLAW-414 task-run id
     private static LoopOutcome handleSyncRoundResponse(ChatResponse response, Agent agent, Conversation conversation,
                                                        Long conversationId, LlmProvider primary,
                                                        ArrayList<ChatMessage> currentMessages, List<ToolDef> tools,
-                                                       AgentExecutionSink sink, int round) {
+                                                       AgentExecutionSink sink, int round, Long taskRunId) {
         var choice = response.choices().getFirst();
         var assistantMsg = choice.message();
         boolean toolCallsEmpty = assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty();
@@ -305,6 +307,7 @@ public final class ToolCallLoopRunner {
         // tool-call batch, abort here rather than spending another
         // round on the now-stale plan.
         AgentRunner.checkSubagentCancel(conversation);
+        AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
 
         // JCLAW-273: detect a successful subagent_yield call and bail
         // out of the tool-call loop without continuing to the next LLM

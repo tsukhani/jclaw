@@ -135,6 +135,27 @@ public class TaskRunSink implements AgentExecutionSink {
         });
     }
 
+    /**
+     * JCLAW-414: close the run as {@link TaskRun.Status#CANCELLED} when the tool
+     * loop bailed on an operator cancel ({@link agents.RunCancelledException}).
+     * Idempotent on the terminal status: only a still-RUNNING row is transitioned,
+     * so this never clobbers the CANCELLED stamp the cancel endpoint already wrote
+     * (it sets the row CANCELLED immediately for instant UI feedback). Whichever
+     * writer reaches a RUNNING row first sets the timing.
+     */
+    public void onCancelled(String note) {
+        Tx.run(() -> {
+            var fresh = (TaskRun) TaskRun.findById(taskRunId);
+            if (fresh == null || fresh.status != TaskRun.Status.RUNNING) return null;
+            fresh.completedAt = Instant.now();
+            fresh.durationMs = Duration.between(fresh.startedAt, fresh.completedAt).toMillis();
+            fresh.status = TaskRun.Status.CANCELLED;
+            fresh.outputSummary = note;
+            fresh.save();
+            return null;
+        });
+    }
+
     @Override
     public String executionLabel() {
         return "task-run:" + taskRunId;

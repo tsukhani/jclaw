@@ -79,35 +79,45 @@ public final class TaskExecutor {
             return null;
         }
 
-        // JCLAW-21: lifecycle audit — TASK_STARTED bookmark. Operator
-        // monitoring (JCLAW-22) reads these to render "running" pills
-        // without depending on the heartbeat to catch up. Sibling
-        // events COMPLETED (below) and FAILED (in JClawFailureHandler)
-        // bracket the fire.
-        TaskLifecycleEvents.recordStarted(task, run);
+        // JCLAW-414: register the in-flight run so an operator cancel
+        // (POST /api/task-runs/{id}/cancel) can flip its cooperative-
+        // cancellation flag, which the tool loop polls at its checkpoints.
+        // The finally below clears the slot on every terminal outcome —
+        // normal completion, failure (rethrown), or cancel.
+        TaskRunRegistry.register(run.id);
+        try {
+            // JCLAW-21: lifecycle audit — TASK_STARTED bookmark. Operator
+            // monitoring (JCLAW-22) reads these to render "running" pills
+            // without depending on the heartbeat to catch up. Sibling
+            // events COMPLETED (below) and FAILED (in JClawFailureHandler)
+            // bracket the fire.
+            TaskLifecycleEvents.recordStarted(task, run);
 
-        var sink = new TaskRunSink(run);
-        sink.onStart();
+            var sink = new TaskRunSink(run);
+            sink.onStart();
 
-        // Reminder short-circuit: payloadType="reminder" tasks are
-        // operator-visible nudges, not agent work. The description IS the
-        // delivered text verbatim — no LLM round, no tool loop, no
-        // transcript turns. Closing the TaskRun with the description as
-        // outputSummary keeps the monitoring UI consistent (a one-row run
-        // whose content is the reminder body) and lets dispatchDelivery
-        // route the same string through {@link ReminderDispatcher}.
-        if (isReminder(task)) {
-            String body = task.description != null && !task.description.isBlank()
-                    ? task.description : task.name;
-            sink.onComplete(body);
+            // Reminder short-circuit: payloadType="reminder" tasks are
+            // operator-visible nudges, not agent work. The description IS the
+            // delivered text verbatim — no LLM round, no tool loop, no
+            // transcript turns. Closing the TaskRun with the description as
+            // outputSummary keeps the monitoring UI consistent (a one-row run
+            // whose content is the reminder body) and lets dispatchDelivery
+            // route the same string through {@link ReminderDispatcher}.
+            if (isReminder(task)) {
+                String body = task.description != null && !task.description.isBlank()
+                        ? task.description : task.name;
+                sink.onComplete(body);
+                return finalizeRun(task, run);
+            }
+
+            if (!driveAgentLoop(task, sink)) {
+                return run;
+            }
+
             return finalizeRun(task, run);
+        } finally {
+            TaskRunRegistry.unregister(run.id);
         }
-
-        if (!driveAgentLoop(task, sink)) {
-            return run;
-        }
-
-        return finalizeRun(task, run);
     }
 
     /**
@@ -198,6 +208,18 @@ public final class TaskExecutor {
             // operators see at a glance.
             sink.onComplete(outcome.content());
             return true;
+        } catch (agents.RunCancelledException e) {
+            // JCLAW-414: operator cancelled this fire mid-run. The cancel
+            // endpoint already flipped the flag and stamps the run CANCELLED
+            // for instant UI; close here too (idempotent — onCancelled only
+            // acts on a still-RUNNING row) so the run is terminal even if the
+            // endpoint's write lagged. Do NOT rethrow — a clean operator
+            // action, not a failure for JClawFailureHandler to classify, and
+            // not a reschedule trigger.
+            sink.onCancelled("Cancelled by operator");
+            EventLogger.info("task", null, null,
+                    "TaskExecutor.runTask: task run %d cancelled by operator".formatted(sink.taskRunId()));
+            return false;
         } catch (RuntimeException e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             sink.onFailure(msg);

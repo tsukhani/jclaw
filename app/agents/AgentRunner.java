@@ -216,6 +216,23 @@ public class AgentRunner {
     }
 
     /**
+     * JCLAW-414: cooperative-cancellation checkpoint for task fires, the task
+     * counterpart of {@link #checkSubagentCancel}. If the operator cancelled
+     * this run via {@code POST /api/task-runs/{id}/cancel} — which flips the
+     * {@link services.TaskRunRegistry} flag — throws {@link RunCancelledException}
+     * so the tool loop bails at the next safe boundary. No-op when
+     * {@code taskRunId} is null (the chat / subagent paths) or no cancel was
+     * requested. Like the subagent path, this is cooperative (no
+     * {@code Thread.interrupt()}); see {@link services.SubagentRegistry} for the
+     * H2-corruption post-mortem.
+     */
+    public static void checkTaskRunCancel(Long taskRunId) {
+        if (taskRunId != null && services.TaskRunRegistry.isCancelled(taskRunId)) {
+            throw new RunCancelledException(taskRunId, "Task");
+        }
+    }
+
+    /**
      * Run the agent synchronously. Returns the final assistant response.
      * JPA transactions are scoped to short Tx.run() blocks — no JDBC connection
      * is held during LLM HTTP calls or tool execution.
@@ -417,9 +434,13 @@ public class AgentRunner {
                         primary.config().name(),
                         ModelResolver.effectiveModelId(agent, stubConv)));
 
+        // JCLAW-414: a task fire is the one path that can be operator-cancelled
+        // mid-run; hand the TaskRun id to the loop so its checkpoints can poll
+        // the cancel flag. null for any non-task sink (no-op checkpoint).
+        Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;
         var outcome = ToolCallLoopRunner.callWithToolLoop(
                 agent, stubConv, null, messages, tools, primary, secondary,
-                new ArrayList<>(), sink);
+                new ArrayList<>(), sink, taskRunId);
 
         final var response = outcome.content();
         final var truncated = outcome.truncated();
@@ -535,7 +556,7 @@ public class AgentRunner {
             // LLM call loop — no transaction open, JDBC connection back in pool
             var outcome = ToolCallLoopRunner.callWithToolLoop(agent, conversation, conversationId,
                     prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary(),
-                    prepared.audioBearers(), sink);
+                    prepared.audioBearers(), sink, null);  // JCLAW-414: chat path is not task-cancellable
             var response = outcome.content();
             var truncated = outcome.truncated();
             trace.mark(LatencyTrace.STREAM_BODY_END);

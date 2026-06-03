@@ -14,6 +14,7 @@ import {
   PencilSquareIcon,
   PlayIcon,
   PlusIcon,
+  StopIcon,
   TableCellsIcon,
   TrashIcon,
   XMarkIcon,
@@ -204,6 +205,15 @@ async function retryTask(id: number) {
 // because a paused task's fire body is skipped, which would make this a no-op.
 async function runNowTask(id: number) {
   await mutate(`/api/tasks/${id}/run`, { method: 'POST' })
+  refresh()
+}
+
+// Cancel an in-progress run (JCLAW-414). Flips the run's cooperative-cancel
+// flag server-side so the agent tool loop bails at its next checkpoint; the
+// endpoint marks the run CANCELLED immediately, and the SSE task.* events
+// refresh the row so the icon swaps back to the bolt.
+async function cancelRunningRun(runId: number) {
+  await mutate(`/api/task-runs/${runId}/cancel`, { method: 'POST' })
   refresh()
 }
 
@@ -1405,9 +1415,9 @@ const statusBg: Record<string, string> = {
               </td>
               <td class="px-4 py-2.5 text-right">
                 <div class="inline-flex items-center gap-1">
-                  <!-- Recurring + live + running → Run now (fire immediately; cadence kept). -->
+                  <!-- Recurring + live + idle → Run now (fire immediately; cadence kept). -->
                   <button
-                    v-if="!selectMode && isRecurring(task) && isLive(task) && !task.paused"
+                    v-if="!selectMode && isRecurring(task) && isLive(task) && !task.paused && !task.runningRunId"
                     type="button"
                     class="p-1 text-fg-muted hover:text-emerald-400 transition-colors"
                     :title="`Run “${task.name}” now — fires immediately, next scheduled run unchanged`"
@@ -1415,6 +1425,20 @@ const statusBg: Record<string, string> = {
                     @click.stop="runNowTask(task.id)"
                   >
                     <BoltIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <!-- Recurring + live + a run in flight → Cancel this run (JCLAW-414). -->
+                  <button
+                    v-else-if="!selectMode && isRecurring(task) && isLive(task) && task.runningRunId"
+                    type="button"
+                    class="p-1 text-red-400 hover:text-red-300 transition-colors"
+                    :title="`Cancel the running fire of “${task.name}” — stops at the next safe point; schedule unchanged`"
+                    :aria-label="`Cancel the running fire of ${task.name}`"
+                    @click.stop="task.runningRunId && cancelRunningRun(task.runningRunId)"
+                  >
+                    <StopIcon
                       class="w-4 h-4"
                       aria-hidden="true"
                     />

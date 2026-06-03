@@ -39,6 +39,7 @@ POST    /api/tasks/{id}/cancel                  ApiTasksController.cancel
 DELETE  /api/tasks/{id}                         ApiTasksController.delete
 POST    /api/tasks/{id}/retry                   ApiTasksController.retry
 POST    /api/tasks/{id}/run                     ApiTasksController.run
+POST    /api/task-runs/{runId}/cancel           ApiTasksController.cancelRun
 POST    /api/tasks/{id}/pause                   ApiTasksController.pause
 POST    /api/tasks/{id}/resume                  ApiTasksController.resume
 POST    /api/tasks/{id}/reenable                ApiTasksController.reenable
@@ -107,6 +108,8 @@ GET     /api/events                             ApiEventsController.stream
 # Providers API
 GET     /api/providers                          ApiProvidersController.list
 POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
+GET     /api/providers/{name}/models            ApiProvidersController.models
+POST    /api/providers/{name}/models            ApiProvidersController.addModel
 POST    /api/providers/refresh-prices           ApiProvidersController.refreshPrices
 
 # OCR backends — availability + enabled state for the Settings page

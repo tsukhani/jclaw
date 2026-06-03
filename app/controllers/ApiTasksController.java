@@ -74,20 +74,31 @@ public class ApiTasksController extends Controller {
                             String enabledToolNames, String workdir,
                             String preCheck, String script, boolean noAgent,
                             String contextFromTaskIds, Integer repeatLimit,
-                            String timezone, String effectiveTimezone) {
+                            String timezone, String effectiveTimezone,
+                            Long runningRunId) {
         static TaskView of(Task t) {
-            return of(t, null);
+            return of(t, null, null);
+        }
+
+        static TaskView of(Task t, Instant lastFiredAt) {
+            return of(t, lastFiredAt, null);
         }
 
         /**
-         * Variant that carries the latest {@link TaskRun#completedAt} for
-         * this task (populated in {@link #list} via a single bulk SQL
-         * pass). Used by the Reminders page's "Fired" column so the
-         * operator can see when the reminder actually landed without
-         * round-tripping to {@code /runs}. {@code null} when the task
-         * has never produced a completed run.
+         * Fullest variant, populated by {@link #list} via two single bulk SQL
+         * passes:
+         * <ul>
+         *   <li>{@code lastFiredAt} — the latest {@link TaskRun#completedAt} for
+         *       this task. Drives the Reminders "Fired" column without an N+1
+         *       round-trip; {@code null} when the task has no completed run.</li>
+         *   <li>{@code runningRunId} (JCLAW-414) — the id of this task's
+         *       currently-RUNNING {@link TaskRun}, or {@code null} when none is
+         *       in flight. Lets the Tasks Actions column swap the "Run now" bolt
+         *       for a cancel control (POST /api/task-runs/{id}/cancel) whether
+         *       the row is collapsed or expanded.</li>
+         * </ul>
          */
-        static TaskView of(Task t, Instant lastFiredAt) {
+        static TaskView of(Task t, Instant lastFiredAt, Long runningRunId) {
             return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
                     t.cronExpression, t.intervalSeconds, t.scheduleDisplay,
                     t.retryCount, t.maxRetries, t.lastError,
@@ -108,7 +119,8 @@ public class ApiTasksController extends Controller {
                     // without re-running the resolver client-side. Returns
                     // a stable IANA id even when t.timezone is null
                     // (falls back through Config / conf / JVM default).
-                    services.TimezoneResolver.resolve(t).getId());
+                    services.TimezoneResolver.resolve(t).getId(),
+                    runningRunId);
         }
 
     }
@@ -546,7 +558,30 @@ public class ApiTasksController extends Controller {
             lastFiredAt = map;
         }
         final var fired = lastFiredAt;
-        renderJSON(gson.toJson(tasks.stream().map(t -> TaskView.of(t, fired.get(t.id))).toList()));
+
+        // JCLAW-414: bulk-fetch each task's currently-RUNNING TaskRun id (one
+        // query, no N+1) so the Actions column can show a cancel control while
+        // a run is in flight. A task has at most one RUNNING run in practice;
+        // MAX(id) is a stable pick if a stale row ever overlaps.
+        java.util.Map<Long, Long> runningByTask = java.util.Map.of();
+        if (!taskIds.isEmpty()) {
+            @SuppressWarnings("unchecked")
+            var runningRows = (List<Object[]>) JPA.em().createQuery(
+                    "SELECT r.task.id, MAX(r.id) FROM TaskRun r "
+                            + "WHERE r.task.id IN :ids AND r.status = :running "
+                            + "GROUP BY r.task.id")
+                    .setParameter("ids", taskIds)
+                    .setParameter("running", TaskRun.Status.RUNNING)
+                    .getResultList();
+            var rmap = java.util.HashMap.<Long, Long>newHashMap(runningRows.size());
+            for (var row : runningRows) {
+                rmap.put((Long) row[0], (Long) row[1]);
+            }
+            runningByTask = rmap;
+        }
+        final var running = runningByTask;
+        renderJSON(gson.toJson(tasks.stream()
+                .map(t -> TaskView.of(t, fired.get(t.id), running.get(t.id))).toList()));
     }
 
     /**
@@ -1035,6 +1070,45 @@ public class ApiTasksController extends Controller {
                         .formatted(task.name, task.id));
 
         renderJSON(gson.toJson(TaskView.of(task)));
+    }
+
+    /**
+     * JCLAW-414: cancel an in-progress task run. Flips the run's cooperative-
+     * cancellation flag ({@link services.TaskRunRegistry}) so the agent tool
+     * loop bails at its next safe checkpoint (between LLM rounds / tool calls —
+     * cooperative, never {@code Thread.interrupt}), and stamps the run CANCELLED
+     * immediately for instant UI feedback. The recurring schedule and next-run
+     * time are untouched — only this one fire is cancelled. 404 when no such
+     * run; 400 when the run is not currently RUNNING (already terminal).
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskRunView.class)))
+    public static void cancelRun(Long runId) {
+        TaskRun run = TaskRun.findById(runId);
+        if (run == null) notFound();
+        if (run.status != TaskRun.Status.RUNNING) {
+            // Only an in-flight run can be cancelled; a terminal run has nothing
+            // to stop. (S2259: notFound() above halts on null, so run is non-null.)
+            badRequest();
+        }
+
+        // Flip the cooperative flag first so the loop's next checkpoint observes
+        // it (no-op if the run isn't in-flight on this JVM), then stamp the row
+        // CANCELLED so the UI reflects it at once. The tool loop's onCancelled is
+        // idempotent and won't double-write once this terminal status lands.
+        services.TaskRunRegistry.requestCancel(runId);
+        run.completedAt = java.time.Instant.now();
+        run.durationMs = run.startedAt != null
+                ? java.time.Duration.between(run.startedAt, run.completedAt).toMillis() : null;
+        run.status = TaskRun.Status.CANCELLED;
+        run.outputSummary = "Cancelled by operator";
+        run.save();
+
+        EventLogger.info("TASK_MGMT_RUN_CANCEL",
+                run.task != null && run.task.agent != null ? run.task.agent.name : null, null,
+                "Task run id %d cancelled by operator".formatted(runId));
+
+        renderJSON(gson.toJson(TaskRunView.of(run)));
     }
 
     @SuppressWarnings("java:S2259")
