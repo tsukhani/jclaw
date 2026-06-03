@@ -84,7 +84,7 @@ public final class TelegramApprovalService {
         var approvalId = newId();
         var future = new CompletableFuture<Outcome>();
         var keyboard = keyboard(approvalId, allowScopes);
-        var messageId = TelegramChannel.sendMessageWithKeyboard(botToken, chatId, prompt, keyboard);
+        var messageId = TelegramChannel.forToken(botToken).sendMessageWithKeyboard(chatId, prompt, keyboard);
         if (messageId == null) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "Approval prompt failed to send to chat %s; resolving as EXPIRED".formatted(chatId));

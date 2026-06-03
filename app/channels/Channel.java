@@ -3,6 +3,7 @@ package channels;
 import services.EventLogger;
 import utils.RetryScheduler;
 
+import java.io.File;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -85,5 +86,53 @@ public interface Channel {
         EventLogger.error("channel", null, channelName(),
                 "Failed to send message to %s after retries".formatted(peerId));
         return false;
+    }
+
+    /**
+     * JCLAW-141: generic cross-channel text send. This is the OCP send entry
+     * point dispatch sites (e.g. {@code AgentRunner.dispatchToChannel}) call
+     * instead of branching on the channel type. The default applies the
+     * shared single-retry {@link #sendWithRetry} policy on top of {@link #trySend},
+     * surfacing the outcome as a {@link SendResult}; implementations that need
+     * channel-specific formatting or chunking (e.g. Telegram's markdown→HTML
+     * planner path) override this. Must not throw.
+     */
+    default SendResult sendText(String peerId, String text) {
+        return sendWithRetry(peerId, text) ? SendResult.OK : SendResult.FAILED;
+    }
+
+    /**
+     * JCLAW-141: agent-aware generic text send. The agent context lets a channel
+     * resolve workspace-relative file links into native file uploads (Telegram's
+     * outbound planner) and apply agent-scoped formatting. The default ignores
+     * {@code agent} and delegates to {@link #sendText(String, String)}, so
+     * channels without agent-specific behavior (Slack, WhatsApp, web) need no
+     * override. Dispatch sites that hold an agent (queue-drain, webhook reply)
+     * call this so the resolved channel — whatever its type — does the right
+     * thing without the caller branching. Must not throw.
+     */
+    default SendResult sendText(String peerId, String text, models.Agent agent) {
+        return sendText(peerId, text);
+    }
+
+    /**
+     * JCLAW-141: generic cross-channel photo send. {@code caption} (null/blank to
+     * omit) rides with the image. Channels without a native photo-upload path
+     * return {@link SendResult#FAILED} via this default so a caller can detect
+     * the no-op uniformly; channels that support it (Telegram) override. Must not
+     * throw.
+     */
+    default SendResult sendPhoto(String peerId, File file, String caption) {
+        return SendResult.FAILED;
+    }
+
+    /**
+     * JCLAW-141: generic cross-channel document send. {@code caption} (null/blank
+     * to omit) rides with the file. Channels without a native document-upload
+     * path return {@link SendResult#FAILED} via this default; channels that
+     * support it (Telegram) override. Must not throw.
+     */
+    default SendResult sendDocument(String peerId, File file, String caption) {
+        return SendResult.FAILED;
     }
 }

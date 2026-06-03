@@ -1278,8 +1278,8 @@ public class AgentRunner {
             String chatType) {
         // JCLAW-26: intercept slash commands before the LLM round. Reuse the
         // existing sink machinery to deliver the canned response — an unused
-        // sink's seal() path falls through to TelegramChannel.sendMessage,
-        // which keeps the bot-token / chat-id routing owned by the caller.
+        // sink's seal() path falls through to the per-binding TelegramChannel's
+        // sendTurn, which keeps the bot-token / chat-id routing owned by the caller.
         var slashCmd = slash.Commands.parse(text);
         if (slashCmd.isPresent()) {
             var cmd = slashCmd.get();
@@ -1406,33 +1406,32 @@ public class AgentRunner {
      * them on next conversation load or refresh. External channels need explicit
      * dispatch because there is no persistent connection to push through.
      *
-     * <p>Telegram is special: outbound needs a specific bot token, so we look up
-     * the matching {@link models.TelegramBinding} by (agent, peerId) instead of
-     * using the generic {@link Channel} interface.
+     * <p>JCLAW-141: resolves the right {@link channels.Channel} via
+     * {@link channels.ChannelRegistry#forChannel} (which carries Telegram's
+     * per-binding bot token, looked up from (agent, peerId)) and calls the generic
+     * {@link channels.Channel#sendText(String, String, Agent)} — no channel-type
+     * switch.
+     * The agent-aware overload lets Telegram's planner resolve workspace file
+     * links; the other channels ignore the agent. A null channel (unknown type,
+     * or a Telegram conversation with no enabled binding) drops the dispatch,
+     * matching the prior null-branch behavior.
      */
     // Package-private so QueueDrainOrchestrator (JCLAW-299) can dispatch
     // queued replies back through the originating channel.
     static void dispatchToChannel(Agent agent, String channelType, String peerId, String text) {
         if (peerId == null || text == null) return;
         try {
-            var type = ChannelType.fromValue(channelType);
-            if (type == null) return;
-            if (type == ChannelType.TELEGRAM) {
-                var binding = services.Tx.run(() ->
-                        models.TelegramBinding.findEnabledByAgentAndUser(agent, peerId));
-                if (binding == null) {
+            var channel = services.Tx.run(() ->
+                    channels.ChannelRegistry.forChannel(channelType, agent, peerId));
+            if (channel == null) {
+                if (ChannelType.TELEGRAM == ChannelType.fromValue(channelType)) {
                     EventLogger.warn("channel", agent != null ? agent.name : null, "telegram",
                             "No enabled binding for (agent=%s, userId=%s); dropping queued response"
                                     .formatted(agent != null ? agent.name : "?", peerId));
-                    return;
                 }
-                channels.TelegramChannel.sendMessage(binding.botToken, peerId, text, agent);
                 return;
             }
-            var channel = type.resolve();
-            if (channel != null) {
-                channel.sendWithRetry(peerId, text);
-            }
+            channel.sendText(peerId, text, agent);
         } catch (Exception e) {
             EventLogger.error("channel", null, channelType,
                     "Failed to dispatch queued response to %s/%s: %s"

@@ -420,7 +420,7 @@ public final class TelegramStreamingSink {
             // JCLAW-369: the planner delivery is the turn's real response, so
             // forward the reply target + topic thread the same way the
             // placeholder would have carried them.
-            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent,
+            if (!TelegramChannel.forToken(botToken).sendTurn(chatId, finalResponse, agent,
                     replyToMessageId, messageThreadId)) {
                 notifyDeliveryFailure();
             }
@@ -438,7 +438,7 @@ public final class TelegramStreamingSink {
             // the cap even when the raw markdown fit — fall back to planner.
             deletePlaceholderSafely();
             // JCLAW-369: same reply/topic forwarding as the needsPlanner branch.
-            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent,
+            if (!TelegramChannel.forToken(botToken).sendTurn(chatId, finalResponse, agent,
                     replyToMessageId, messageThreadId)) {
                 notifyDeliveryFailure();
             }
@@ -527,7 +527,7 @@ public final class TelegramStreamingSink {
         if (messageId != null) deletePlaceholderSafely();
         // JCLAW-369: the error reply replaces the placeholder for this turn, so
         // it carries the same reply target + topic thread.
-        TelegramChannel.sendMessage(botToken, chatId,
+        TelegramChannel.forToken(botToken).sendTurn(chatId,
                 "Sorry, an error occurred processing your message.", agent,
                 replyToMessageId, messageThreadId);
         clearStreamCheckpoint();
@@ -1000,9 +1000,9 @@ public final class TelegramStreamingSink {
         }
         boolean sent = false;
         try {
-            sent = TelegramChannel.sendMessage(botToken, chatId,
+            sent = TelegramChannel.forToken(botToken).sendText(chatId,
                     "I finished generating a response but couldn't deliver it to this chat. "
-                            + "Please try again.");
+                            + "Please try again.").ok();
         } catch (Exception e) {
             EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                     "Delivery-failure notifier itself failed: " + e.getMessage());

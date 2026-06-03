@@ -49,8 +49,8 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
 
     @Test
     void mockServerReceivesSendMessageWhenChannelTargetsIt() {
-        boolean ok = TelegramChannel.sendMessage(BOT_TOKEN, CHAT_ID, "ping");
-        assertTrue(ok, "sendMessage should succeed against the default-ok mock");
+        boolean ok = TelegramChannel.forToken(BOT_TOKEN).sendText(CHAT_ID, "ping").ok();
+        assertTrue(ok, "sendText should succeed against the default-ok mock");
         assertEquals(1, server.countRequests("sendMessage"),
                 "exactly one sendMessage request should have landed on the mock server");
     }
@@ -185,7 +185,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // file twice — once as image, once as plain link — exactly the
         // smoke-test bug JCLAW-104's dedupe fixed.
         String content = "![Screenshot](" + url + ")\n\nHere is the page.\n\n[screenshot](" + url + ")";
-        boolean ok = TelegramChannel.sendMessage(BOT_TOKEN, CHAT_ID, content, agent);
+        boolean ok = TelegramChannel.forToken(BOT_TOKEN).sendText(CHAT_ID, content, agent).ok();
 
         assertTrue(ok, "send should succeed");
         assertEquals(1, server.countRequests("sendPhoto"),

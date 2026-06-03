@@ -884,23 +884,102 @@ class ChannelTest extends UnitTest {
         Assertions.assertDoesNotThrow(() -> TelegramChannel.evictToken(null));
     }
 
-    // === ChannelType generic dispatch (Phase 3) ===
+    // === ChannelRegistry generic dispatch (JCLAW-141) ===
 
     @Test
-    void channelTypeResolveReturnsNullForTelegramAndWeb() {
-        // Contract documented at ChannelType.resolve: TELEGRAM needs a bot
-        // token (carried by TelegramBinding, not the generic Channel), and
-        // WEB is DB-polled not pushed. Callers rely on null to branch.
-        assertNull(models.ChannelType.TELEGRAM.resolve());
-        assertNull(models.ChannelType.WEB.resolve());
+    void channelRegistryResolvesWebToWebChannel() {
+        // JCLAW-141: WEB is no longer a null branch — it resolves to a real
+        // WebChannel whose sends are no-ops (replies are DB-persisted), so
+        // dispatch needs no special-casing. No agent/binding lookup needed.
+        var web = ChannelRegistry.forChannel("web", null, "admin");
+        assertNotNull(web);
+        assertInstanceOf(WebChannel.class, web);
+        assertEquals("web", web.channelName());
     }
 
     @Test
-    void channelTypeResolveReturnsConcreteChannelsForSlackAndWhatsApp() {
-        assertNotNull(models.ChannelType.SLACK.resolve());
-        assertNotNull(models.ChannelType.WHATSAPP.resolve());
-        assertTrue(models.ChannelType.SLACK.resolve() instanceof SlackChannel);
-        assertTrue(models.ChannelType.WHATSAPP.resolve() instanceof WhatsAppChannel);
+    void channelRegistryReturnsNullForTelegramWithoutAnEnabledBinding() {
+        // TELEGRAM needs a per-binding bot token; with no enabled binding for
+        // (agent, peerId) the registry returns null so the caller drops the
+        // dispatch — the same effect the old resolve()==null branch had, but
+        // now resolved through the binding lookup instead of a hardcoded null.
+        var tg = ChannelRegistry.forChannel("telegram", null, "no-such-user");
+        assertNull(tg);
+    }
+
+    @Test
+    void channelRegistryResolvesConcreteChannelsForSlackAndWhatsApp() {
+        var slack = ChannelRegistry.forChannel("slack", null, "C-chan");
+        var whatsapp = ChannelRegistry.forChannel("whatsapp", null, "12025550000");
+        assertInstanceOf(SlackChannel.class, slack);
+        assertInstanceOf(WhatsAppChannel.class, whatsapp);
+    }
+
+    @Test
+    void channelRegistryForConversationResolvesFromTheConversationRow() {
+        // forConversation pulls (channelType, agent, peerId) off the row and
+        // delegates to the same resolution as forChannel; a web conversation
+        // yields a WebChannel without needing an agent/binding.
+        var convo = new models.Conversation();
+        convo.channelType = "web";
+        convo.peerId = "admin";
+        var ch = ChannelRegistry.forConversation(convo);
+        assertInstanceOf(WebChannel.class, ch);
+        // Null conversation is a safe null (callers drop the dispatch).
+        assertNull(ChannelRegistry.forConversation(null));
+    }
+
+    @Test
+    void channelRegistryReturnsNullForUnknownChannelType() {
+        // Unknown wire value → no Channel; caller drops the dispatch rather
+        // than throwing (mirrors ChannelType.fromValue returning null).
+        assertNull(ChannelRegistry.forChannel("discord", null, "x"));
+        assertNull(ChannelRegistry.forChannel(null, null, "x"));
+    }
+
+    // === Channel interface send methods (JCLAW-141) ===
+
+    @Test
+    void webChannelSendsAreNoOpSuccesses() {
+        // WebChannel has no outbound transport (replies are DB-persisted), so
+        // every generic send reports OK without touching any wire.
+        var web = new WebChannel();
+        assertTrue(web.sendText("admin", "hi").ok(),
+                "web sendText is a DB-backed no-op success");
+        assertTrue(web.sendText("admin", "hi", null).ok(),
+                "web agent-aware sendText is a no-op success");
+        assertTrue(web.sendPhoto("admin", null, "cap").ok(),
+                "web sendPhoto is a no-op success");
+        assertTrue(web.sendDocument("admin", null, null).ok(),
+                "web sendDocument is a no-op success");
+    }
+
+    @Test
+    void slackAndWhatsAppHaveNoNativeFileSend() {
+        // Neither channel has a native media-upload path today, so the generic
+        // sendPhoto / sendDocument report FAILED (the no-op the interface default
+        // documents). Text sends are config-gated; with no channel config loaded
+        // they fail too — but the assertion here is the file-send contract.
+        var slack = new SlackChannel();
+        assertFalse(slack.sendPhoto("C-x", null, null).ok(),
+                "Slack has no native photo send");
+        assertFalse(slack.sendDocument("C-x", null, null).ok(),
+                "Slack has no native document send");
+
+        var whatsapp = new WhatsAppChannel();
+        assertFalse(whatsapp.sendPhoto("12025550000", null, null).ok(),
+                "WhatsApp has no native photo send");
+        assertFalse(whatsapp.sendDocument("12025550000", null, null).ok(),
+                "WhatsApp has no native document send");
+    }
+
+    @Test
+    void channelNamesAreStable() {
+        // The channelName() identifiers are used as log sources + the registry's
+        // type keys; pin them so a rename can't silently break dispatch logging.
+        assertEquals("web", new WebChannel().channelName());
+        assertEquals("slack", new SlackChannel().channelName());
+        assertEquals("whatsapp", new WhatsAppChannel().channelName());
     }
 
     @Test

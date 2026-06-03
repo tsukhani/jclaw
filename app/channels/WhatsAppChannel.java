@@ -42,6 +42,33 @@ public class WhatsAppChannel implements Channel {
     @Override
     public String channelName() { return WHATSAPP; }
 
+    /**
+     * JCLAW-141: generic cross-channel text send. WhatsApp's Cloud API text
+     * messages carry no markup, so this delegates to the shared retry policy
+     * unchanged (the static {@link #sendMessage} path does the same).
+     */
+    @Override
+    public SendResult sendText(String peerId, String text) {
+        return sendWithRetry(peerId, text) ? SendResult.OK : SendResult.FAILED;
+    }
+
+    /**
+     * JCLAW-141: JClaw's WhatsApp outbound is the text-message path only — there
+     * is no native media-message send wired today, so a photo delivery isn't
+     * supported. Returns {@link SendResult#FAILED} (the interface default)
+     * explicitly so the no-op is unambiguous at this call site.
+     */
+    @Override
+    public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
+        return SendResult.FAILED;
+    }
+
+    /** JCLAW-141: no native WhatsApp media send — see {@link #sendPhoto}. */
+    @Override
+    public SendResult sendDocument(String peerId, java.io.File file, String caption) {
+        return SendResult.FAILED;
+    }
+
     public static boolean sendMessage(String to, String text) {
         var config = WhatsAppConfig.load();
         if (config == null) {

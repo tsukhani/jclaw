@@ -92,15 +92,17 @@ class TelegramChannelTest extends UnitTest {
     }
 
     @Test
-    void sendMessage_nullArgumentsShortCircuitReturnsFalse() {
-        // Defensive nullability gate at line 355: any null arg fails fast
-        // with a single error log; no HTTP traffic.
+    void sendText_nullArgumentsShortCircuitReturnsFalse() {
+        // JCLAW-141: the null-token guard now lives on forToken (throws); the
+        // null chatId/text guard lives on the instance sendText, failing fast
+        // with a single error log and no HTTP traffic.
         String token = "null-args-" + System.nanoTime();
         try {
             TelegramChannel.installForTest(token, mock.telegramUrl());
-            assertFalse(TelegramChannel.sendMessage(null, "chat", "hi"));
-            assertFalse(TelegramChannel.sendMessage(token, null, "hi"));
-            assertFalse(TelegramChannel.sendMessage(token, "chat", null));
+            assertThrows(IllegalArgumentException.class,
+                    () -> TelegramChannel.forToken(null));
+            assertFalse(TelegramChannel.forToken(token).sendText(null, "hi").ok());
+            assertFalse(TelegramChannel.forToken(token).sendText("chat", null).ok());
             assertEquals(0, mock.requests().size(),
                     "null-guard must short-circuit before any HTTP call");
         } finally {
@@ -118,7 +120,7 @@ class TelegramChannelTest extends UnitTest {
             TelegramChannel.installForTest(token, mock.telegramUrl());
             // Empty text produces an empty TextSegment → sendTextSegment
             // short-circuits at the isBlank check, no wire traffic.
-            assertTrue(TelegramChannel.sendMessage(token, "12345", ""),
+            assertTrue(TelegramChannel.forToken(token).sendText("12345", "").ok(),
                     "empty text is a no-op success");
             assertEquals(0, mock.requests().size(),
                     "blank text must not produce any sendMessage on the wire");
@@ -438,6 +440,59 @@ class TelegramChannelTest extends UnitTest {
         }
     }
 
+    // ─── JCLAW-141: generic Channel interface methods ──────────────────────
+
+    @Test
+    void sendText_interface_returnsOkSendResultOnSuccess() {
+        // The Channel#sendText(peerId, text) override routes through the planner
+        // path and reports OK as a SendResult — the cross-channel dispatch shape.
+        String token = "jclaw141-sendtext-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var result = TelegramChannel.forToken(token).sendText("12345", "via interface");
+            assertTrue(result.ok(), "interface sendText must report OK on a clean send");
+            assertEquals(1, mock.countRequests("sendMessage"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendPhoto_interface_uploadsViaUploadClient() throws Exception {
+        // The Channel#sendPhoto(peerId, file, caption) override uploads through the
+        // dedicated upload client (sendPhoto endpoint) and reports OK.
+        String token = "jclaw141-sendphoto-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var tmp = java.nio.file.Files.createTempFile("jclaw141-photo-", ".png");
+            java.nio.file.Files.write(tmp, new byte[]{(byte) 0x89, 'P', 'N', 'G'});
+            var result = TelegramChannel.forToken(token).sendPhoto("12345", tmp.toFile(), "a caption");
+            assertTrue(result.ok(), "interface sendPhoto must report OK on a clean upload");
+            assertEquals(1, mock.countRequests("sendPhoto"));
+            java.nio.file.Files.deleteIfExists(tmp);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendDocument_interface_uploadsViaUploadClient() throws Exception {
+        // The Channel#sendDocument(peerId, file, caption) override uploads through
+        // the upload client (sendDocument endpoint) and reports OK.
+        String token = "jclaw141-senddoc-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var tmp = java.nio.file.Files.createTempFile("jclaw141-doc-", ".txt");
+            java.nio.file.Files.writeString(tmp, "body");
+            var result = TelegramChannel.forToken(token).sendDocument("12345", tmp.toFile(), null);
+            assertTrue(result.ok(), "interface sendDocument must report OK on a clean upload");
+            assertEquals(1, mock.countRequests("sendDocument"));
+            java.nio.file.Files.deleteIfExists(tmp);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
     @Test
     void trySendPhoto_failurePathReturnsFalse() throws Exception {
         // Drives lines 731-736: photo upload error catch.
@@ -471,7 +526,7 @@ class TelegramChannelTest extends UnitTest {
                     .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
                             .text("OK").callbackData("ok").build()))
                     .build();
-            Integer mid = TelegramChannel.sendMessageWithKeyboard(token, "12345",
+            Integer mid = TelegramChannel.forToken(token).sendMessageWithKeyboard("12345",
                     "<b>pick</b>", keyboard);
             assertNotNull(mid);
             assertEquals(99, mid.intValue(),
@@ -493,7 +548,7 @@ class TelegramChannelTest extends UnitTest {
                     .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
                             .text("OK").callbackData("ok").build()))
                     .build();
-            assertNull(TelegramChannel.sendMessageWithKeyboard(token, "12345", "x", keyboard));
+            assertNull(TelegramChannel.forToken(token).sendMessageWithKeyboard("12345", "x", keyboard));
         } finally {
             TelegramChannel.clearForTest(token);
         }
@@ -569,7 +624,7 @@ class TelegramChannelTest extends UnitTest {
                     .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
                             .text("OK").callbackData("ok").build()))
                     .build();
-            assertNotNull(TelegramChannel.sendMessageWithKeyboard(token, "12345",
+            assertNotNull(TelegramChannel.forToken(token).sendMessageWithKeyboard("12345",
                     "<b>see https://x.test</b>", keyboard));
             String body = mock.requests().stream()
                     .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
@@ -596,7 +651,7 @@ class TelegramChannelTest extends UnitTest {
                     .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
                             .text("OK").callbackData("ok").build()))
                     .build();
-            assertNotNull(TelegramChannel.sendMessageWithKeyboard(token, "12345",
+            assertNotNull(TelegramChannel.forToken(token).sendMessageWithKeyboard("12345",
                     "<b>see https://x.test</b>", keyboard));
             String body = mock.requests().stream()
                     .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
@@ -869,7 +924,7 @@ class TelegramChannelTest extends UnitTest {
         try {
             play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
             TelegramChannel.installForTest(token, mock.telegramUrl());
-            assertTrue(TelegramChannel.sendMessage(token, "12345", "plain reply", null, null, null));
+            assertTrue(TelegramChannel.forToken(token).sendTurn("12345", "plain reply", null, null, null));
             String body = allSendMessageBodies();
             assertFalse(body.contains("reply_parameters"),
                     "null replyToMessageId must omit reply_parameters even when mode=all");
@@ -889,7 +944,7 @@ class TelegramChannelTest extends UnitTest {
             play.Play.configuration.setProperty("telegram.replyTo.mode", "first");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             String big = "A".repeat(4500);
-            assertTrue(TelegramChannel.sendMessage(token, "12345", big, null, 9001, null));
+            assertTrue(TelegramChannel.forToken(token).sendTurn("12345", big, null, 9001, null));
             long sends = mock.countRequests("sendMessage");
             assertTrue(sends >= 2, "4500 chars must split into >=2 chunks; got " + sends);
             long withReply = mock.requests().stream()
@@ -914,7 +969,7 @@ class TelegramChannelTest extends UnitTest {
             play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             String big = "B".repeat(4500);
-            assertTrue(TelegramChannel.sendMessage(token, "12345", big, null, 7777, null));
+            assertTrue(TelegramChannel.forToken(token).sendTurn("12345", big, null, 7777, null));
             long sends = mock.countRequests("sendMessage");
             long withReply = mock.requests().stream()
                     .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
@@ -934,7 +989,7 @@ class TelegramChannelTest extends UnitTest {
         try {
             play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
-            assertTrue(TelegramChannel.sendMessage(token, "12345", "hi there", null, 4242, null));
+            assertTrue(TelegramChannel.forToken(token).sendTurn("12345", "hi there", null, 4242, null));
             assertFalse(allSendMessageBodies().contains("reply_parameters"),
                     "mode=off must never set reply_parameters even with a non-null target");
         } finally {
@@ -1026,7 +1081,7 @@ class TelegramChannelTest extends UnitTest {
         try {
             play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
-            assertTrue(TelegramChannel.sendMessage(token, "12345", "in topic", null, null, 42));
+            assertTrue(TelegramChannel.forToken(token).sendTurn("12345", "in topic", null, null, 42));
             String body = allSendMessageBodies();
             assertTrue(body.contains("message_thread_id"),
                     "non-General topic id must set message_thread_id on the send");
@@ -1045,7 +1100,7 @@ class TelegramChannelTest extends UnitTest {
         try {
             play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
-            assertTrue(TelegramChannel.sendMessage(token, "12345", "general topic", null, null, 1));
+            assertTrue(TelegramChannel.forToken(token).sendTurn("12345", "general topic", null, null, 1));
             assertFalse(allSendMessageBodies().contains("message_thread_id"),
                     "General topic (thread id 1) must be omitted on sends");
         } finally {
@@ -1302,7 +1357,7 @@ class TelegramChannelTest extends UnitTest {
                     .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
                             .text("OK").callbackData("ok").build()))
                     .build();
-            Integer mid = TelegramChannel.sendMessageWithKeyboard(token, "12345",
+            Integer mid = TelegramChannel.forToken(token).sendMessageWithKeyboard("12345",
                     "<b>pick</b>", keyboard, 3030, 55);
             assertEquals(5, mid.intValue());
             String body = allSendMessageBodies();
@@ -1668,7 +1723,7 @@ class TelegramChannelTest extends UnitTest {
         try {
             TelegramChannel.installForTest(token, mock.telegramUrl());
             var md = "[a.png](<a.png>) [b.png](<b.png>) [c.png](<c.png>)";
-            assertTrue(TelegramChannel.sendMessage(token, "12345", md, agent));
+            assertTrue(TelegramChannel.forToken(token).sendText("12345", md, agent).ok());
             assertEquals(1, mock.countRequests("sendMediaGroup"),
                     "three adjacent images must coalesce into one album send");
             assertEquals(0, mock.countRequests("sendPhoto"),
@@ -1687,7 +1742,7 @@ class TelegramChannelTest extends UnitTest {
         services.AgentService.writeWorkspaceFile(agent.name, "solo.png", "x");
         try {
             TelegramChannel.installForTest(token, mock.telegramUrl());
-            assertTrue(TelegramChannel.sendMessage(token, "12345", "[solo.png](<solo.png>)", agent));
+            assertTrue(TelegramChannel.forToken(token).sendText("12345", "[solo.png](<solo.png>)", agent).ok());
             assertEquals(0, mock.countRequests("sendMediaGroup"),
                     "a single image must not use an album send");
             assertEquals(1, mock.countRequests("sendPhoto"),
@@ -1709,8 +1764,8 @@ class TelegramChannelTest extends UnitTest {
             TelegramChannel.installForTest(token, mock.telegramUrl());
             mock.respondWith("sendMediaGroup", 400,
                     "{\"ok\":false,\"error_code\":400,\"description\":\"album rejected\"}");
-            assertTrue(TelegramChannel.sendMessage(token, "12345",
-                    "[a.png](<a.png>) [b.png](<b.png>)", agent));
+            assertTrue(TelegramChannel.forToken(token).sendText("12345",
+                    "[a.png](<a.png>) [b.png](<b.png>)", agent).ok());
             assertEquals(1, mock.countRequests("sendMediaGroup"),
                     "the album was attempted once");
             assertEquals(2, mock.countRequests("sendPhoto"),
@@ -1737,7 +1792,7 @@ class TelegramChannelTest extends UnitTest {
         try {
             TelegramChannel.installForTest(token, mock.telegramUrl());
             mock.respondWith("sendMessage", 200, messageResponse(555, 12345));
-            assertTrue(TelegramChannel.sendMessage(token, "12345", "hi there"),
+            assertTrue(TelegramChannel.forToken(token).sendText("12345", "hi there").ok(),
                     "the send itself must succeed");
 
             assertTrue(TelegramChannel.wasSentByBot(token, "12345", 555),
@@ -1877,7 +1932,7 @@ class TelegramChannelTest extends UnitTest {
         try {
             TelegramChannel.installForTest(token, mock.telegramUrl());
             String big = "A".repeat(4500);
-            assertTrue(TelegramChannel.sendMessage(token, "12345", big));
+            assertTrue(TelegramChannel.forToken(token).sendText("12345", big).ok());
             long sends = mock.countRequests("sendMessage");
             assertTrue(sends >= 2, "4500 chars must split into >=2 chunks; got " + sends);
             String bodies = allSendMessageBodies();
@@ -1896,7 +1951,7 @@ class TelegramChannelTest extends UnitTest {
         String token = "jclaw387-single-" + System.nanoTime();
         try {
             TelegramChannel.installForTest(token, mock.telegramUrl());
-            assertTrue(TelegramChannel.sendMessage(token, "12345", "just one short line"));
+            assertTrue(TelegramChannel.forToken(token).sendText("12345", "just one short line").ok());
             assertEquals(1, mock.countRequests("sendMessage"),
                     "a short reply is a single send");
             String body = allSendMessageBodies();
@@ -1919,7 +1974,7 @@ class TelegramChannelTest extends UnitTest {
         try {
             TelegramChannel.installForTest(token, mock.telegramUrl());
             String big = "A".repeat(12000);
-            assertTrue(TelegramChannel.sendMessage(token, "12345", big));
+            assertTrue(TelegramChannel.forToken(token).sendText("12345", big).ok());
             long sends = mock.countRequests("sendMessage");
             assertTrue(sends >= 3, "12000 chars must split into >=3 chunks; got " + sends);
             // Every recorded sendMessage body (JSON, includes the text + marker)

@@ -47,11 +47,13 @@ import java.util.concurrent.TimeUnit;
  * {@link #forToken(String)} and evicted via {@link #evictToken(String)} when the
  * polling runner unregisters a binding.
  *
- * <p>{@link models.ChannelType#resolve()} returns {@code null} for Telegram because
- * the outbound path needs a per-binding bot token that the generic Channel contract
- * can't carry. Dispatch flows through {@link #sendMessage(String, String, String)}
- * or {@link #forToken(String)} directly, with the binding looked up from the
- * conversation's (agent, peerId) pair at queue-dispatch time.
+ * <p>JCLAW-141: each instance is per-binding (the bot token is bound at
+ * construction), so the generic {@link Channel} send methods — {@link #sendText},
+ * {@link #sendPhoto}, {@link #sendDocument} — carry the token implicitly and need
+ * no token argument. Dispatch resolves the instance via
+ * {@link ChannelRegistry#forConversation} (which looks the binding up from the
+ * conversation's (agent, peerId) pair) or {@link #forToken(String)} directly,
+ * then calls the interface methods — no per-type branching.
  */
 public class TelegramChannel implements Channel {
 
@@ -622,11 +624,11 @@ public class TelegramChannel implements Channel {
         if (botToken == null || chatId == null || text == null || replyToMessageId == null) {
             return false;
         }
+        var channel = forToken(botToken);
         // No excerpt → ordinary reply path; preserves today's exact behavior.
         if (quote == null || quote.isBlank()) {
-            return sendMessage(botToken, chatId, text, agent, replyToMessageId, null);
+            return channel.sendTurn(chatId, text, agent, replyToMessageId, null);
         }
-        var channel = forToken(botToken);
         var quoteParams = ReplyParameters.builder()
                 .messageId(replyToMessageId)
                 .quote(quote)
@@ -640,7 +642,7 @@ public class TelegramChannel implements Channel {
         // plain reply (no quote) so the user still gets the message.
         EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                 "Quote reply failed (excerpt may not match target); retrying as a plain reply");
-        return sendMessage(botToken, chatId, text, agent, replyToMessageId, null);
+        return channel.sendTurn(chatId, text, agent, replyToMessageId, null);
     }
 
     /**
@@ -943,30 +945,30 @@ public class TelegramChannel implements Channel {
     // ── Outbound sends ──
 
     /**
-     * Text-only send path. Agent markdown converts to Telegram-safe HTML via
-     * {@link TelegramMarkdownFormatter} and chunks at 4000 chars with HTML-tag-aware
-     * splitting. No workspace file resolution is attempted — use the
-     * {@code Agent}-aware overload when the caller has that context.
+     * JCLAW-141: generic cross-channel text send (the {@link Channel} contract).
+     * Delegates to the agent-aware planner path with no agent context, returning a
+     * {@link SendResult} ({@code OK} when the whole turn landed, {@code FAILED}
+     * otherwise). The token is the instance's bound token — no token argument.
      */
-    public static boolean sendMessage(String botToken, String chatId, String text) {
-        return sendMessage(botToken, chatId, text, null);
+    @Override
+    public SendResult sendText(String peerId, String text) {
+        return sendTurn(peerId, text, null, null, null) ? SendResult.OK : SendResult.FAILED;
     }
 
     /**
-     * Agent-aware outbound dispatch (JCLAW-93). {@link TelegramOutboundPlanner}
-     * splits the markdown into text and file segments; text segments flow through
-     * the HTML formatter as before, while file segments are uploaded via
-     * {@link #trySendPhoto} (images) or {@link #trySendDocument} (everything else).
-     * Segments emit in order so prose, photo, prose sequences arrive the way the
-     * agent composed them.
+     * JCLAW-141: agent-aware generic text send (the {@link Channel} contract).
+     * {@link TelegramOutboundPlanner} uses the agent name to resolve
+     * workspace-relative file links into native uploads, so passing the agent is
+     * what makes prose, photo, prose sequences arrive as the agent composed them.
      */
-    public static boolean sendMessage(String botToken, String chatId, String text, Agent agent) {
-        return sendMessage(botToken, chatId, text, agent, null, null);
+    @Override
+    public SendResult sendText(String peerId, String text, Agent agent) {
+        return sendTurn(peerId, text, agent, null, null) ? SendResult.OK : SendResult.FAILED;
     }
 
     /**
      * JCLAW-369: reply-targeting + topic-aware outbound dispatch. Adds two
-     * optional, nullable params over {@link #sendMessage(String, String, String, Agent)}:
+     * optional, nullable params over {@link #sendText(String, String, Agent)}:
      *
      * <ul>
      *   <li>{@code replyToMessageId} — when non-null, the turn's chunks reply to
@@ -980,17 +982,20 @@ public class TelegramChannel implements Channel {
      *       topic; General is omitted (a bare send already lands there).</li>
      * </ul>
      *
-     * <p>Both null reproduces the legacy behavior exactly — this is the dormant
-     * mechanism JCLAW-369 ships; the dispatch sites wire the values in later.
+     * <p>JCLAW-141: was the static {@code sendMessage(botToken, ...)} 6-arg entry
+     * point; now an instance method on the per-binding channel (token bound at
+     * construction). Distinct name from the generic {@link #sendText} interface
+     * methods because it carries Telegram-specific reply/topic params and returns
+     * the per-chunk boolean the streaming-sink / planner callers expect. Returns
+     * true when the whole turn landed.
      */
-    public static boolean sendMessage(String botToken, String chatId, String text, Agent agent,
-                                      Integer replyToMessageId, Integer messageThreadId) {
-        if (botToken == null || chatId == null || text == null) {
+    public boolean sendTurn(String chatId, String text, Agent agent,
+                            Integer replyToMessageId, Integer messageThreadId) {
+        if (chatId == null || text == null) {
             EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "sendMessage called with null argument");
+                    "sendTurn called with null argument");
             return false;
         }
-        var channel = forToken(botToken);
         var segments = TelegramOutboundPlanner.plan(text, agent != null ? agent.name : null);
         if (segments.isEmpty()) return true; // nothing to send
 
@@ -1003,11 +1008,34 @@ public class TelegramChannel implements Channel {
         String mode = effectiveReplyToMode(botToken);
         boolean allOk = true;
         for (var segment : segments) {
-            if (!dispatchSegment(channel, chatId, segment, replyToMessageId, threadId, firstChunk, mode)) {
+            if (!dispatchSegment(this, chatId, segment, replyToMessageId, threadId, firstChunk, mode)) {
                 allOk = false;
             }
         }
         return allOk;
+    }
+
+    /**
+     * JCLAW-141: generic cross-channel photo send (the {@link Channel} contract).
+     * Delegates to {@link #trySendPhoto(String, java.io.File, String, ReplyParameters,
+     * Integer, String)} (no reply/topic context) so a caller routing through the
+     * uniform interface still uploads via the dedicated upload client.
+     */
+    @Override
+    public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
+        return trySendPhoto(peerId, file, file != null ? file.getName() : null, null, null, caption)
+                ? SendResult.OK : SendResult.FAILED;
+    }
+
+    /**
+     * JCLAW-141: generic cross-channel document send (the {@link Channel} contract).
+     * Delegates to {@link #trySendDocument(String, java.io.File, String,
+     * ReplyParameters, Integer, String)} (no reply/topic context).
+     */
+    @Override
+    public SendResult sendDocument(String peerId, java.io.File file, String caption) {
+        return trySendDocument(peerId, file, file != null ? file.getName() : null, null, null, caption)
+                ? SendResult.OK : SendResult.FAILED;
     }
 
     /** Dispatch one planner segment; returns false only when a foreground send actually fails. */
@@ -1291,7 +1319,7 @@ public class TelegramChannel implements Channel {
         boolean hasImage = message.attachments().stream().anyMatch(
                 a -> models.MessageAttachment.KIND_IMAGE.equalsIgnoreCase(a.kind()));
         if (hasImage && !services.AgentService.supportsVision(sendAgent)) {
-            sendMessage(sendToken, sendChatId,
+            forToken(sendToken).sendText(sendChatId,
                     "I can't handle images with the current model. Try a vision-capable model.");
             EventLogger.warn(LOG_CATEGORY, sendAgent.name, CHANNEL_NAME,
                     "Rejected image upload: model does not support vision");
@@ -1308,14 +1336,14 @@ public class TelegramChannel implements Channel {
             if (result instanceof TelegramFileDownloader.Ok(var input)) {
                 inputs.add(input);
             } else if (result instanceof TelegramFileDownloader.SizeExceeded(var actualBytes, var limit)) {
-                sendMessage(sendToken, sendChatId,
+                forToken(sendToken).sendText(sendChatId,
                         "That file is too large — Telegram bots can only accept up to %d MB.".formatted(
                                 TelegramFileDownloader.MAX_FILE_BYTES / (1024 * 1024)));
                 EventLogger.warn(LOG_CATEGORY, sendAgent.name, CHANNEL_NAME,
                         "Rejected upload: %d bytes exceeds %d limit".formatted(actualBytes, limit));
                 return null;
             } else if (result instanceof TelegramFileDownloader.DownloadFailed(var reason)) {
-                sendMessage(sendToken, sendChatId,
+                forToken(sendToken).sendText(sendChatId,
                         "Sorry, I couldn't download your file from Telegram.");
                 EventLogger.warn(LOG_CATEGORY, sendAgent.name, CHANNEL_NAME,
                         "Download failed: %s".formatted(reason));
@@ -2353,9 +2381,9 @@ public class TelegramChannel implements Channel {
      * Bot API call — no chunking or planner pass, because keyboard
      * messages stay well under the 4096-char limit by construction.
      */
-    public static Integer sendMessageWithKeyboard(String botToken, String chatId,
-                                                   String htmlText, InlineKeyboardMarkup keyboard) {
-        return sendMessageWithKeyboard(botToken, chatId, htmlText, keyboard, null, null);
+    public Integer sendMessageWithKeyboard(String chatId,
+                                            String htmlText, InlineKeyboardMarkup keyboard) {
+        return sendMessageWithKeyboard(chatId, htmlText, keyboard, null, null);
     }
 
     /**
@@ -2363,13 +2391,17 @@ public class TelegramChannel implements Channel {
      * (null to omit) is applied per the {@link #replyToMode()} policy treating this
      * single message as the turn's first chunk ({@code off} → never; {@code first}
      * / {@code all} → applied, since there is exactly one message). {@code messageThreadId}
-     * (null to omit) is General-stripped before being set. The four-arg overload
+     * (null to omit) is General-stripped before being set. The shorter overload
      * preserves the legacy call sites.
+     *
+     * <p>JCLAW-141: was a static {@code sendMessageWithKeyboard(botToken, ...)}
+     * entry point; now an instance method on the per-binding channel (token bound
+     * at construction). The inline-keyboard markup itself is Telegram-specific and
+     * out of scope for the generic {@link Channel} contract.
      */
-    public static Integer sendMessageWithKeyboard(String botToken, String chatId,
-                                                   String htmlText, InlineKeyboardMarkup keyboard,
-                                                   Integer replyToMessageId, Integer messageThreadId) {
-        var channel = forToken(botToken);
+    public Integer sendMessageWithKeyboard(String chatId,
+                                           String htmlText, InlineKeyboardMarkup keyboard,
+                                           Integer replyToMessageId, Integer messageThreadId) {
         var builder = SendMessage.builder()
                 .chatId(chatId)
                 .text(htmlText)
@@ -2382,8 +2414,8 @@ public class TelegramChannel implements Channel {
         var linkPreview = linkPreviewOptions();
         if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         try {
-            var msg = channel.client.execute(builder.build());
-            channel.recordSentMessage(chatId, msg.getMessageId()); // JCLAW-383
+            var msg = client.execute(builder.build());
+            recordSentMessage(chatId, msg.getMessageId()); // JCLAW-383
             return msg.getMessageId();
         } catch (TelegramApiException e) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,

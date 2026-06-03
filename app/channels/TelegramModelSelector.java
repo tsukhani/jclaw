@@ -60,15 +60,15 @@ public final class TelegramModelSelector {
             var notice = text + "\n\n<i>Inline keyboards are disabled in this chat.</i>";
             // Plain text-only send (no keyboard), mirroring the keyboard path's
             // single-message dispatch — no agent/workspace resolution needed here.
-            var sent = TelegramChannel.sendMessage(botToken, conversation.peerId, notice);
+            var sent = TelegramChannel.forToken(botToken).sendText(conversation.peerId, notice).ok();
             if (!sent) return false;
             persistSummaryAck(conversation.id, text);
             return true;
         }
         var keyboard = TelegramModelKeyboard.providersKeyboard(
                 conversation.id, currentProviderName(agent, conversation));
-        var messageId = TelegramChannel.sendMessageWithKeyboard(
-                botToken, conversation.peerId, text, keyboard);
+        var messageId = TelegramChannel.forToken(botToken).sendMessageWithKeyboard(
+                conversation.peerId, text, keyboard);
         if (messageId == null) return false;
         persistSummaryAck(conversation.id, text);
         return true;

@@ -351,8 +351,8 @@ public class WebhookTelegramController extends Controller {
 
             // JCLAW-94: stream the response as it's generated. The sink owns
             // send/edit/delete of the preview message; on completion it
-            // delegates to TelegramChannel.sendMessage (via the planner path)
-            // for media-rich / oversize responses. JCLAW-95: the factory
+            // delegates to the per-binding TelegramChannel's sendTurn (the planner
+            // path) for media-rich / oversize responses. JCLAW-95: the factory
             // defers sink construction until AgentRunner has resolved the
             // conversation id so the sink can persist its checkpoint.
             // JCLAW-370: a DM keys off the binding owner (unchanged); an allowed
@@ -382,7 +382,7 @@ public class WebhookTelegramController extends Controller {
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                     "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));
-            TelegramChannel.sendMessage(sendToken, sendChatId,
+            TelegramChannel.forToken(sendToken).sendText(sendChatId,
                     "Sorry, an error occurred processing your message.");
         }
     }

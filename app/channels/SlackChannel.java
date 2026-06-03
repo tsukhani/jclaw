@@ -60,6 +60,37 @@ public class SlackChannel implements Channel {
     @Override
     public String channelName() { return SLACK; }
 
+    /**
+     * JCLAW-141: generic cross-channel text send (the {@link Channel} contract).
+     * Posts {@code text} at channel level via the shared retry policy, behaviorally
+     * identical to the {@code sendWithRetry} path the queue-drain dispatcher used
+     * before this refactor — so no formatting is applied here. The mrkdwn-formatting
+     * + thread-aware reply path is the static {@link #sendMessage(String, String,
+     * String)}, which the live webhook/streaming-fallback path uses and which is
+     * outside the generic Channel contract (it carries Slack's {@code thread_ts}).
+     */
+    @Override
+    public SendResult sendText(String peerId, String text) {
+        return sendWithRetry(peerId, text) ? SendResult.OK : SendResult.FAILED;
+    }
+
+    /**
+     * JCLAW-141: Slack outbound here is the Web API {@code chat.postMessage} text
+     * path only — JClaw has no native Slack file-upload send today, so a photo
+     * delivery isn't supported. Returns {@link SendResult#FAILED} (the interface
+     * default) explicitly so the no-op is unambiguous at this call site.
+     */
+    @Override
+    public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
+        return SendResult.FAILED;
+    }
+
+    /** JCLAW-141: no native Slack file-upload send — see {@link #sendPhoto}. */
+    @Override
+    public SendResult sendDocument(String peerId, java.io.File file, String caption) {
+        return SendResult.FAILED;
+    }
+
     public static boolean sendMessage(String channelId, String text) {
         return sendMessage(channelId, text, null);
     }

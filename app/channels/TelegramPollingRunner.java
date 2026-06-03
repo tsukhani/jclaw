@@ -1063,8 +1063,8 @@ public final class TelegramPollingRunner {
         Thread.ofVirtual().name("telegram-reaction").start(() -> {
             try {
                 AgentRunner.processInboundForAgent(agent, LOG_SOURCE, peerId, eventText,
-                        (pid, response) -> TelegramChannel.sendMessage(
-                                botToken, reaction.chatId(), response, agent));
+                        (pid, response) -> TelegramChannel.forToken(botToken).sendText(
+                                reaction.chatId(), response, agent));
             } catch (Exception e) {
                 EventLogger.error(LOG_CATEGORY, agent.name, LOG_SOURCE,
                         "Reaction dispatch error: %s".formatted(e.getMessage()));

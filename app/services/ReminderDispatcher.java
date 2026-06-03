@@ -110,8 +110,8 @@ public final class ReminderDispatcher {
             return DeliveryDispatcher.DispatchResult.noConfig(TELEGRAM,
                     "Telegram binding for agent '" + binding.agent.name + "' is disabled.");
         }
-        return TelegramChannel.sendMessage(binding.botToken, chatId,
-                TELEGRAM_FRAMING + content, task.agent)
+        return TelegramChannel.forToken(binding.botToken)
+                .sendText(chatId, TELEGRAM_FRAMING + content, task.agent).ok()
                 ? DeliveryDispatcher.DispatchResult.delivered()
                 : DeliveryDispatcher.DispatchResult.failedDelivery(
                         "Telegram API rejected the reminder (see logs for details).");

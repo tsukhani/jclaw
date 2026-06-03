@@ -132,7 +132,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         // Preparation: trip the cap first. This sink never sent a
         // placeholder (messageId stayed null), so the planner path won't
         // try to delete anything — it'll just send the final response as
-        // a fresh message via TelegramChannel.sendMessage.
+        // a fresh message via the per-binding TelegramChannel's sendTurn.
         //
         // We can't assert the Telegram API was called here without a mock,
         // so this test documents the precondition: the sink reaches
