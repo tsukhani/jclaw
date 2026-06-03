@@ -200,6 +200,19 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     }
 
     /**
+     * Shared "top-level then OpenAI-nested" reasoning-token read: prefer a
+     * top-level {@code usage.reasoning_tokens}, else fall back to
+     * {@code usage.completion_tokens_details.reasoning_tokens}. OpenRouter,
+     * Together, and OpenAI-routed usage all fit this chain — OpenAI never emits
+     * the top-level field, so it resolves to the nested path. Mirrors
+     * {@link #extractCacheCreationTokens}'s top-then-nested shape.
+     */
+    protected int readReasoningTokens(JsonObject usageObj) {
+        int top = readUsageInt(usageObj, "reasoning_tokens");
+        return top > 0 ? top : readUsageInt(usageObj, "completion_tokens_details", "reasoning_tokens");
+    }
+
+    /**
      * Extract the count of prompt tokens that were served from a provider-side
      * prompt cache (cache <em>reads</em>). Defaults to the OpenAI-compat path
      * ({@code usage.prompt_tokens_details.cached_tokens}) which is also what

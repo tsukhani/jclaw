@@ -55,11 +55,9 @@ public final class TogetherAiProvider extends LlmProvider {
 
     @Override
     protected int extractReasoningTokens(JsonObject usageObj) {
-        // Together puts reasoning_tokens at the top level of the usage
-        // object, matching OpenRouter's shape. Fall back to OpenAI's
-        // nested completion_tokens_details path defensively in case
-        // Together begins proxying OpenAI-style usage for some models.
-        int top = readUsageInt(usageObj, "reasoning_tokens");
-        return top > 0 ? top : readUsageInt(usageObj, "completion_tokens_details", "reasoning_tokens");
+        // Together puts reasoning_tokens at the top level of the usage object,
+        // matching OpenRouter's shape, with the OpenAI nested path as a
+        // defensive fallback — the shared top-then-nested chain.
+        return readReasoningTokens(usageObj);
     }
 }

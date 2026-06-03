@@ -23,7 +23,8 @@ public final class OpenAiProvider extends LlmProvider {
 
     @Override
     protected int extractReasoningTokens(JsonObject usageObj) {
-        // OpenAI nests reasoning tokens under completion_tokens_details
-        return readUsageInt(usageObj, "completion_tokens_details", "reasoning_tokens");
+        // OpenAI nests reasoning tokens under completion_tokens_details; the
+        // shared top-then-nested chain resolves to that (no top-level field).
+        return readReasoningTokens(usageObj);
     }
 }

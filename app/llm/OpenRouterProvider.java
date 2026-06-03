@@ -58,10 +58,9 @@ public final class OpenRouterProvider extends LlmProvider {
 
     @Override
     protected int extractReasoningTokens(JsonObject usageObj) {
-        // OpenRouter puts reasoning_tokens at the top level of usage. Fallback
-        // to OpenAI nested format (for models proxied from OpenAI).
-        int top = readUsageInt(usageObj, "reasoning_tokens");
-        return top > 0 ? top : readUsageInt(usageObj, "completion_tokens_details", "reasoning_tokens");
+        // OpenRouter puts reasoning_tokens at the top level of usage, falling
+        // back to the OpenAI nested format for proxied models — the shared chain.
+        return readReasoningTokens(usageObj);
     }
 
     @Override
