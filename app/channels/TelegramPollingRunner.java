@@ -398,13 +398,12 @@ public final class TelegramPollingRunner {
                     "Unregister failed for binding %d: %s".formatted(bindingId, e.getMessage()));
         }
         ACTIVE.remove(bindingId);
-        if (token != null) {
-            LAST_PROGRESS.remove(token);
-            // Drop the rebuild backoff bookkeeping too, so a wedged binding's
-            // entries don't outlive the binding itself.
-            REBUILD_COUNT.remove(token);
-            LAST_REBUILD_AT.remove(token);
-        }
+        // NOTE (JCLAW-408): do NOT evict REBUILD_COUNT / LAST_REBUILD_AT here.
+        // The watchdog rebuild path tears the binding down via this method and
+        // then re-registers; the consecutive-rebuild backoff counter must
+        // survive that teardown, so evicting it on unregister breaks the backoff
+        // (audit finding reverted — the bounded leak is not worth that regression).
+        if (token != null) LAST_PROGRESS.remove(token);
         TelegramChannel.evictToken(token);
         if (token != null) {
             COOLDOWN_UNTIL.put(token, System.currentTimeMillis() + COOLDOWN_MS);
