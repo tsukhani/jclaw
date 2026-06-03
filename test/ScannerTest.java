@@ -204,6 +204,76 @@ class ScannerTest extends UnitTest {
                 "connect/read timeout must fail-open to clean");
     }
 
+    /**
+     * JCLAW-408: pins the shared {@code collectLabels}/{@code optString}
+     * behavior through VirusTotal. The reason names engines in
+     * "engine: threat" form, caps at three labels, and skips engines whose
+     * category is not malicious or whose result is null/blank.
+     */
+    @Test
+    void virusTotal_labelsAreEngineThreatCappedAtThreeAndCategoryGated() {
+        wireVirusTotal();
+        respond(200, """
+                {"data":{"attributes":{
+                    "last_analysis_stats":{"malicious":4},
+                    "last_analysis_results":{
+                        "ESET":{"category":"malicious","result":"Win32/Foo"},
+                        "Kaspersky":{"category":"malicious","result":"Trojan.X"},
+                        "Sophos":{"category":"malicious","result":"Mal/Generic"},
+                        "Avira":{"category":"malicious","result":"Win32/Bar"},
+                        "Clean1":{"category":"undetected","result":"ignored"},
+                        "Blank1":{"category":"malicious","result":""},
+                        "Null1":{"category":"malicious","result":null}
+                    }
+                }}}
+                """);
+        var v = new VirusTotalScanner().lookup(SHA);
+        assertTrue(v.malicious());
+        // "engine: threat" format on a malicious, non-blank engine.
+        assertTrue(v.reason().contains("ESET: Win32/Foo"),
+                "reason must use 'engine: threat' format; got: " + v.reason());
+        // Cap: exactly three labels are joined after the prefix's em-dash.
+        var labels = v.reason().substring(v.reason().indexOf("— ") + 2).split(", ");
+        assertEquals(3, labels.length, "labels must cap at 3; got: " + v.reason());
+        // Category gate + blank/null result are skipped — never named.
+        assertFalse(v.reason().contains("Clean1"), "non-malicious engine must be skipped");
+        assertFalse(v.reason().contains("Blank1"), "blank result must be skipped");
+        assertFalse(v.reason().contains("Null1"), "null result must be skipped");
+    }
+
+    /**
+     * JCLAW-408: parity check that MetaDefender uses the same shared
+     * helpers — "engine: threat" labels, capped at three, skipping
+     * engines whose threat_found is absent / null / blank.
+     */
+    @Test
+    void metaDefender_labelsAreEngineThreatCappedAtThreeSkippingBlankThreats() {
+        wireMetaDefender();
+        respond(200, """
+                {"scan_results":{
+                    "scan_all_result_i":1,
+                    "scan_details":{
+                        "ESET":{"threat_found":"Win32/EICAR"},
+                        "Kaspersky":{"threat_found":"EICAR-Test-File"},
+                        "Sophos":{"threat_found":"Mal/Generic"},
+                        "Avira":{"threat_found":"Win32/Bar"},
+                        "Clean1":{"threat_found":""},
+                        "Null1":{"threat_found":null},
+                        "Absent1":{}
+                    }
+                }}
+                """);
+        var v = new MetaDefenderCloudScanner().lookup(SHA);
+        assertTrue(v.malicious());
+        assertTrue(v.reason().contains("ESET: Win32/EICAR"),
+                "reason must use 'engine: threat' format; got: " + v.reason());
+        var labels = v.reason().split(", ");
+        assertEquals(3, labels.length, "labels must cap at 3; got: " + v.reason());
+        assertFalse(v.reason().contains("Clean1"), "blank threat must be skipped");
+        assertFalse(v.reason().contains("Null1"), "null threat must be skipped");
+        assertFalse(v.reason().contains("Absent1"), "absent threat_found must be skipped");
+    }
+
     private void wireVirusTotal() {
         ConfigService.set("scanner.virustotal.url", baseUrl());
         ConfigService.set("scanner.virustotal.apiKey", "test-key");

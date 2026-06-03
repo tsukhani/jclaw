@@ -42,6 +42,26 @@ import java.util.List;
  */
 public final class DirectLuceneMessageSearchRepository implements MessageSearchRepository {
 
+    /**
+     * Per-scope backfill descriptor: the JPQL that loads the rows, the row's
+     * id accessor (null id → skip), and the indexed-content extractor. One
+     * entry per {@link LuceneIndexer.Scope}; {@link #init()} drives them all
+     * through {@link #backfill(Backfiller)}.
+     */
+    private record Backfiller(LuceneIndexer.Scope scope, String jpql,
+                              java.util.function.Function<Object, Long> id,
+                              java.util.function.Function<Object, String> content) {}
+
+    private static final List<Backfiller> BACKFILLERS = List.of(
+            new Backfiller(LuceneIndexer.Scope.TASK_RUN_MESSAGE, "SELECT m FROM TaskRunMessage m",
+                    row -> ((TaskRunMessage) row).id, row -> ((TaskRunMessage) row).content),
+            new Backfiller(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "SELECT m FROM Message m",
+                    row -> ((models.Message) row).id, row -> ((models.Message) row).content),
+            new Backfiller(LuceneIndexer.Scope.TASK, "SELECT t FROM Task t",
+                    row -> ((models.Task) row).id, row -> taskContent((models.Task) row)),
+            new Backfiller(LuceneIndexer.Scope.SUBAGENT_RUN, "SELECT r FROM SubagentRun r",
+                    row -> ((models.SubagentRun) row).id, row -> subagentRunContent((models.SubagentRun) row)));
+
     /** {@inheritDoc} */
     @Override
     public void init() throws IOException {
@@ -51,86 +71,40 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         // Either way, the right move is to backfill from the JPA store
         // — slow on a huge transcript history, but JClaw at pre-v1 has
         // hundreds-to-low-thousands of rows.
-        if (LuceneIndexer.docCount(LuceneIndexer.Scope.TASK_RUN_MESSAGE) == 0) {
-            backfillTaskRunMessages();
+        for (var b : BACKFILLERS) {
+            if (LuceneIndexer.docCount(b.scope()) == 0) {
+                backfill(b);
+            }
         }
-        if (LuceneIndexer.docCount(LuceneIndexer.Scope.CONVERSATION_MESSAGE) == 0) {
-            backfillConversationMessages();
-        }
-        if (LuceneIndexer.docCount(LuceneIndexer.Scope.TASK) == 0) {
-            backfillTasks();
-        }
-        if (LuceneIndexer.docCount(LuceneIndexer.Scope.SUBAGENT_RUN) == 0) {
-            backfillSubagentRuns();
-        }
-    }
-
-    private static void backfillTaskRunMessages() {
-        backfill(LuceneIndexer.Scope.TASK_RUN_MESSAGE,
-                "SELECT m FROM TaskRunMessage m",
-                row -> {
-                    var m = (TaskRunMessage) row;
-                    if (m.id == null) return;
-                    LuceneIndexer.upsert(LuceneIndexer.Scope.TASK_RUN_MESSAGE, m.id, m.content);
-                });
-    }
-
-    private static void backfillConversationMessages() {
-        backfill(LuceneIndexer.Scope.CONVERSATION_MESSAGE,
-                "SELECT m FROM Message m",
-                row -> {
-                    var m = (models.Message) row;
-                    if (m.id == null) return;
-                    LuceneIndexer.upsert(LuceneIndexer.Scope.CONVERSATION_MESSAGE, m.id, m.content);
-                });
-    }
-
-    private static void backfillTasks() {
-        backfill(LuceneIndexer.Scope.TASK,
-                "SELECT t FROM Task t",
-                row -> {
-                    var t = (models.Task) row;
-                    if (t.id == null) return;
-                    LuceneIndexer.upsert(LuceneIndexer.Scope.TASK, t.id, taskContent(t));
-                });
-    }
-
-    private static void backfillSubagentRuns() {
-        backfill(LuceneIndexer.Scope.SUBAGENT_RUN,
-                "SELECT r FROM SubagentRun r",
-                row -> {
-                    var r = (models.SubagentRun) row;
-                    if (r.id == null) return;
-                    LuceneIndexer.upsert(LuceneIndexer.Scope.SUBAGENT_RUN, r.id, subagentRunContent(r));
-                });
     }
 
     /**
-     * Bulk indexing helper. Runs the JPQL inside a single Tx, iterates
-     * the result list calling the per-row indexer, and logs the count
-     * when it's positive. Empty JPA tables produce zero log lines so
-     * fresh installs stay quiet.
+     * Bulk indexing helper for one {@link Backfiller} descriptor. Runs the
+     * descriptor's JPQL inside a single Tx, upserts each row whose id is
+     * non-null, and logs the count when it's positive. Empty JPA tables
+     * produce zero log lines so fresh installs stay quiet.
      *
      * <p>The per-row {@link LuceneIndexer#upsert} no longer fsyncs, so the
-     * whole loop is committed ONCE at the end via
+     * whole loop is committed ONCE per scope at the end via
      * {@link LuceneIndexer#commit(LuceneIndexer.Scope)} — backfilling
      * thousands of rows pays one fsync instead of one per row.
      */
-    private static void backfill(LuceneIndexer.Scope scope, String jpql,
-                                  java.util.function.Consumer<Object> indexRow) {
+    private static void backfill(Backfiller b) {
         services.Tx.run(() -> {
             @SuppressWarnings("unchecked")
-            var rows = play.db.jpa.JPA.em().createQuery(jpql).getResultList();
+            var rows = play.db.jpa.JPA.em().createQuery(b.jpql()).getResultList();
             int n = 0;
             for (var row : rows) {
-                indexRow.accept(row);
                 n++;
+                var id = b.id().apply(row);
+                if (id == null) continue;
+                LuceneIndexer.upsert(b.scope(), id, b.content().apply(row));
             }
             if (n > 0) {
-                LuceneIndexer.commit(scope);
+                LuceneIndexer.commit(b.scope());
                 EventLogger.info("search", null, null,
                         "Lucene index backfilled: scope=%s rows=%d"
-                                .formatted(scope.name(), n));
+                                .formatted(b.scope().name(), n));
             }
             return null;
         });

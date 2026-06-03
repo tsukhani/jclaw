@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import okhttp3.Request;
 import utils.HttpKeys;
 
-import java.util.ArrayList;
+import java.util.List;
 
 /**
  * VirusTotal SHA-256 hash lookup. Queries
@@ -143,31 +143,20 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
     }
 
     /** Walk last_analysis_results, collecting up to 3 "engine: threat" labels for the reason string. */
-    private static ArrayList<String> collectMaliciousThreats(JsonObject attributes) {
-        var threats = new ArrayList<String>();
+    private static List<String> collectMaliciousThreats(JsonObject attributes) {
         if (!attributes.has(FIELD_LAST_ANALYSIS_RESULTS) || !attributes.get(FIELD_LAST_ANALYSIS_RESULTS).isJsonObject()) {
-            return threats;
+            return List.of();
         }
-        var results = attributes.getAsJsonObject(FIELD_LAST_ANALYSIS_RESULTS);
-        for (var engineEntry : results.entrySet()) {
-            var label = extractMaliciousLabel(engineEntry.getKey(), engineEntry.getValue());
-            if (label != null) {
-                threats.add(label);
-                if (threats.size() >= 3) break;
-            }
-        }
-        return threats;
+        return collectLabels(attributes.getAsJsonObject(FIELD_LAST_ANALYSIS_RESULTS),
+                VirusTotalScanner::extractMaliciousLabel, 3);
     }
 
     /** Returns "engine: threat" only when the engine reported category=malicious + a non-blank result. */
     private static String extractMaliciousLabel(String engineName, com.google.gson.JsonElement engineResult) {
         if (!engineResult.isJsonObject()) return null;
         var engineObj = engineResult.getAsJsonObject();
-        var category = engineObj.has(FIELD_CATEGORY) && !engineObj.get(FIELD_CATEGORY).isJsonNull()
-                ? engineObj.get(FIELD_CATEGORY).getAsString() : "";
-        if (!"malicious".equals(category)) return null;
-        var threat = engineObj.has(FIELD_RESULT) && !engineObj.get(FIELD_RESULT).isJsonNull()
-                ? engineObj.get(FIELD_RESULT).getAsString() : "";
+        if (!"malicious".equals(optString(engineObj, FIELD_CATEGORY, ""))) return null;
+        var threat = optString(engineObj, FIELD_RESULT, "");
         if (threat.isBlank()) return null;
         return engineName + ": " + threat;
     }

@@ -246,6 +246,44 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         assertEquals("lucene", repo.dialectName());
     }
 
+    @Test
+    void backfillRebuildsEveryScopeFromJpaWhenIndexIsEmpty() throws Exception {
+        // JCLAW-408: pins the table-driven backfill path. Seed one row per
+        // scope into JPA (the @PostPersist hooks index them), then wipe the
+        // index so it's empty across all scopes. init() must detect each
+        // empty scope and re-index it from the JPA store, producing the
+        // same searchable docs the live hooks would have.
+        var msgId = seedConversationMessage("backfillconvtoken");
+        var taskId = seedTaskRow("task-name", "backfilltasktoken");
+        var runId = seedSubagentRunRow("run-label", "backfillruntoken");
+        var trmId = seedMessage("backfilltrmtoken brown fox");
+
+        // Drop everything from the index — JPA rows survive.
+        wipeIndex();
+        for (var scope : LuceneIndexer.Scope.values()) {
+            assertEquals(0, LuceneIndexer.docCount(scope),
+                    "scope " + scope + " must be empty before backfill");
+        }
+
+        repo.init(); // backfill fires for every now-empty scope
+
+        var convHits = repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "backfillconvtoken", 10);
+        assertEquals(1, convHits.size(), "conversation message must be backfilled");
+        assertEquals(msgId, convHits.getFirst());
+
+        var taskHits = repo.searchIds(LuceneIndexer.Scope.TASK, "backfilltasktoken", 10);
+        assertEquals(1, taskHits.size(), "task must be backfilled (name+description content)");
+        assertEquals(taskId, taskHits.getFirst());
+
+        var runHits = repo.searchIds(LuceneIndexer.Scope.SUBAGENT_RUN, "backfillruntoken", 10);
+        assertEquals(1, runHits.size(), "subagent run must be backfilled (label+outcome content)");
+        assertEquals(runId, runHits.getFirst());
+
+        var trmHits = repo.search("backfilltrmtoken", 10);
+        assertEquals(1, trmHits.size(), "task-run message must be backfilled");
+        assertEquals(trmId, trmHits.getFirst().id);
+    }
+
     // ── JCLAW-328: per-scope coverage ─────────────────────────────────
 
     /**

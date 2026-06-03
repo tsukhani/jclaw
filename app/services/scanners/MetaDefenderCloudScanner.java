@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import okhttp3.Request;
 import utils.HttpKeys;
 
-import java.util.ArrayList;
+import java.util.List;
 
 /**
  * MetaDefender Cloud (OPSWAT) SHA-256 hash lookup. Queries
@@ -122,28 +122,19 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
     }
 
     /** Walk scan_details, collecting up to 3 "engine: threat" labels for the reason string. */
-    private static ArrayList<String> collectThreats(JsonObject scanResults) {
-        var threats = new ArrayList<String>();
+    private static List<String> collectThreats(JsonObject scanResults) {
         if (!scanResults.has(FIELD_SCAN_DETAILS) || !scanResults.get(FIELD_SCAN_DETAILS).isJsonObject()) {
-            return threats;
+            return List.of();
         }
-        var scanDetails = scanResults.getAsJsonObject(FIELD_SCAN_DETAILS);
-        for (var engineEntry : scanDetails.entrySet()) {
-            var threat = extractThreatLabel(engineEntry.getKey(), engineEntry.getValue());
-            if (threat != null) {
-                threats.add(threat);
-                if (threats.size() >= 3) break; // cap the reason string
-            }
-        }
-        return threats;
+        return collectLabels(scanResults.getAsJsonObject(FIELD_SCAN_DETAILS),
+                MetaDefenderCloudScanner::extractThreatLabel, 3);
     }
 
     /** Returns "engine: threat" when the engine reported a non-blank threat, null otherwise. */
     private static String extractThreatLabel(String engineName, com.google.gson.JsonElement engineResult) {
         if (!engineResult.isJsonObject()) return null;
         var engineObj = engineResult.getAsJsonObject();
-        if (!engineObj.has(FIELD_THREAT_FOUND) || engineObj.get(FIELD_THREAT_FOUND).isJsonNull()) return null;
-        var threat = engineObj.get(FIELD_THREAT_FOUND).getAsString();
+        var threat = optString(engineObj, FIELD_THREAT_FOUND, "");
         if (threat.isBlank()) return null;
         return engineName + ": " + threat;
     }
