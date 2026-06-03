@@ -48,14 +48,12 @@ class JpaMemoryStoreTest extends UnitTest {
     }
 
     private static Constructor<?> embeddingKeyCtor() throws Exception {
-        for (var dc : JpaMemoryStore.class.getDeclaredClasses()) {
-            if ("EmbeddingKey".equals(dc.getSimpleName())) {
-                var c = dc.getDeclaredConstructor(String.class, String.class);
-                c.setAccessible(true);
-                return c;
-            }
-        }
-        throw new AssertionError("EmbeddingKey record not found on JpaMemoryStore");
+        // Load the private nested record by binary name — avoids matching on
+        // getSimpleName(), which Sonar flags as a brittle class-name comparison.
+        var c = Class.forName("memory.JpaMemoryStore$EmbeddingKey")
+                .getDeclaredConstructor(String.class, String.class);
+        c.setAccessible(true);
+        return c;
     }
 
     private static Object key(String model, String text) throws Exception {

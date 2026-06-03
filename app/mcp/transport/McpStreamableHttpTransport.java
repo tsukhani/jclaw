@@ -147,9 +147,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
         }
         if (resp.code() == 202) return;  // notification accepted, no body
 
+        // OkHttp 5 Response.body() is non-null; an empty body yields "" (handled below).
         var rb = resp.body();
-        if (rb == null) return;  // success status with no body — nothing to deliver
-
         var contentType = resp.header(HttpKeys.CONTENT_TYPE, "");
         if (contentType.contains("text/event-stream")) {
             consumeSseStream(rb.source());

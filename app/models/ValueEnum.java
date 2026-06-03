@@ -10,13 +10,15 @@ import java.util.Map;
  *
  * <p>Centralizes the reverse-lookup that each enum used to hand-write as a
  * {@code fromValue} switch, so a new constant only has to declare its
- * {@code value()} once instead of also appearing in a parallel switch arm
+ * {@code wireValue()} once instead of also appearing in a parallel switch arm
  * that a later edit could forget.
  */
 public interface ValueEnum {
 
-    /** The lowercase string this constant is stored/transmitted as. */
-    String value();
+    /** The lowercase string this constant is stored/transmitted as. Named
+     *  {@code wireValue()} rather than {@code value()} so it doesn't clash with
+     *  the implementing enums' public {@code value} field (java:S1845). */
+    String wireValue();
 
     /**
      * Build a {@code value -> constant} lookup over an enum's constants, for
@@ -27,7 +29,7 @@ public interface ValueEnum {
     static <E extends Enum<E> & ValueEnum> Map<String, E> indexOf(E[] constants) {
         var index = new HashMap<String, E>(constants.length * 2);
         for (var c : constants) {
-            index.put(c.value(), c);
+            index.put(c.wireValue(), c);
         }
         return index;
     }

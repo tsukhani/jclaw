@@ -55,8 +55,8 @@ final class OkHttpLlmHttpDriver {
         // Per-call timeout via Call.timeout() — no per-call client allocation.
         call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
         try (var resp = call.execute()) {
-            var rb = resp.body();
-            var body = rb != null ? rb.string() : "";
+            // OkHttp 5 Response.body() is non-null (an empty body yields ""), so no null guard.
+            var body = resp.body().string();
             var retryAfter = Optional.ofNullable(resp.header("Retry-After"))
                     .flatMap(OkHttpLlmHttpDriver::parseRetryAfter);
             return new HttpReply(resp.code(), body, retryAfter);

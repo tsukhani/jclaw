@@ -21,7 +21,7 @@ public enum MessageRole implements ValueEnum {
     }
 
     @Override
-    public String value() {
+    public String wireValue() {
         return value;
     }
 
