@@ -117,72 +117,91 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * Task between the fire start and the failure surface).
      */
     public static Decision decide(Long jclawTaskId, Throwable throwable) {
-        Task task = Tx.run(() -> (Task) Task.findById(jclawTaskId));
-        if (task == null) {
+        boolean isTransient = TransientErrorClassifier.isTransient(throwable);
+        String errorMessage = describeError(throwable);
+
+        var outcome = Tx.run(() -> mutateAndDecide(jclawTaskId, isTransient, errorMessage));
+        if (outcome == null) {
             EventLogger.warn("task", null, null,
                     "JClawFailureHandler: Task id %d disappeared mid-fire; failing"
                             .formatted(jclawTaskId));
             return new Decision.Fail("Task row missing");
         }
 
-        boolean isTransient = TransientErrorClassifier.isTransient(throwable);
-        String errorMessage = describeError(throwable);
+        switch (outcome.decision()) {
+            case Decision.Reschedule r ->
+                    EventLogger.warn("task", outcome.agentName(), null,
+                            "Task '%s' transient failure %d/%d, retry in %ds: %s"
+                                    .formatted(outcome.taskName(), r.newRetryCount(),
+                                            outcome.budget(), outcome.backoffSecs(), errorMessage));
+            case Decision.Fail f -> {
+                EventLogger.error("task", outcome.agentName(), null,
+                        "Task '%s' failed (%s) after %d attempt(s): %s"
+                                .formatted(outcome.taskName(), f.reason(),
+                                        outcome.attempts(), errorMessage));
+                // JCLAW-21 lifecycle audit: TASK_FAILED bookmark. Sibling
+                // to TASK_STARTED / TASK_COMPLETED emitted by TaskExecutor.
+                // Fired only when the failure is terminal — transient
+                // retries emit the WARN under "task" category above.
+                // Pass both the classification (permanent vs exhausted) and
+                // the raw error message so dashboards can group by class
+                // while still showing the operator what actually happened.
+                TaskLifecycleEvents.recordFailed(outcome.task(), outcome.runForLifecycle(),
+                        f.reason(), errorMessage);
+            }
+        }
+        return outcome.decision();
+    }
+
+    /**
+     * Logging/lifecycle data surfaced out of the single {@link #decide}
+     * transaction. The {@link Task} and {@link TaskRun} are loaded inside the
+     * transaction; logging and {@link TaskLifecycleEvents#recordFailed} run
+     * after it commits, off the detached entities. {@code budget},
+     * {@code backoffSecs}, and {@code attempts} carry the precomputed values
+     * the log lines need so the post-commit code doesn't re-read the row.
+     */
+    private record DecideOutcome(Decision decision, Task task, TaskRun runForLifecycle,
+                                 String taskName, String agentName,
+                                 int budget, long backoffSecs, int attempts) {}
+
+    /**
+     * Single read+write step run inside one transaction: load the Task,
+     * classify, mutate (retryCount bump on retry, status=FAILED on permanent),
+     * and on the terminal path also load the latest TaskRun for the lifecycle
+     * event — all against the same persistence context. Returns {@code null}
+     * when the Task row is gone.
+     */
+    private static DecideOutcome mutateAndDecide(Long jclawTaskId, boolean isTransient, String errorMessage) {
+        var task = (Task) Task.findById(jclawTaskId);
+        if (task == null) return null;
+
         int currentRetry = task.retryCount;
         int budget = Math.min(task.maxRetries, BACKOFF_SECONDS.length);
+        String agentName = task.agent != null ? task.agent.name : null;
 
         if (isTransient && currentRetry < budget) {
             long backoffSecs = BACKOFF_SECONDS[currentRetry];
             Instant nextRunAt = Instant.now().plusSeconds(backoffSecs);
-
             int newRetryCount = currentRetry + 1;
-            Tx.run(() -> {
-                var fresh = (Task) Task.findById(jclawTaskId);
-                if (fresh != null) {
-                    fresh.retryCount = newRetryCount;
-                    fresh.lastError = errorMessage;
-                    fresh.nextRunAt = nextRunAt;
-                    fresh.save();
-                }
-                return null;
-            });
-
-            EventLogger.warn("task",
-                    task.agent != null ? task.agent.name : null, null,
-                    "Task '%s' transient failure %d/%d, retry in %ds: %s"
-                            .formatted(task.name, newRetryCount, budget,
-                                    backoffSecs, errorMessage));
-            return new Decision.Reschedule(nextRunAt, newRetryCount);
+            task.retryCount = newRetryCount;
+            task.lastError = errorMessage;
+            task.nextRunAt = nextRunAt;
+            task.save();
+            return new DecideOutcome(new Decision.Reschedule(nextRunAt, newRetryCount),
+                    task, null, task.name, agentName, budget, backoffSecs, newRetryCount);
         }
 
         // Permanent OR transient-but-exhausted
-        Tx.run(() -> {
-            var fresh = (Task) Task.findById(jclawTaskId);
-            if (fresh != null) {
-                fresh.status = Task.Status.FAILED;
-                fresh.lastError = errorMessage;
-                fresh.save();
-            }
-            return null;
-        });
+        task.status = Task.Status.FAILED;
+        task.lastError = errorMessage;
+        task.save();
 
+        var runForLifecycle =
+                (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", jclawTaskId).first();
         String reason = isTransient ? "retries exhausted" : "permanent error";
-        EventLogger.error("task",
-                task.agent != null ? task.agent.name : null, null,
-                "Task '%s' failed (%s) after %d attempt(s): %s"
-                        .formatted(task.name, reason, currentRetry + 1, errorMessage));
-
-        // JCLAW-21 lifecycle audit: TASK_FAILED bookmark. Sibling
-        // to TASK_STARTED / TASK_COMPLETED emitted by TaskExecutor.
-        // Fired only when the failure is terminal — transient
-        // retries emit the WARN under "task" category above.
-        // Pass both the classification (permanent vs exhausted) and
-        // the raw error message so dashboards can group by class
-        // while still showing the operator what actually happened.
-        var runForLifecycle = Tx.run(() ->
-                (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", jclawTaskId).first());
-        TaskLifecycleEvents.recordFailed(task, runForLifecycle, reason, errorMessage);
-
-        return new Decision.Fail(reason);
+        return new DecideOutcome(new Decision.Fail(reason), task, runForLifecycle,
+                task.name, agentName, budget, 0L, currentRetry + 1);
     }
 
     /**

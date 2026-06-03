@@ -2,10 +2,13 @@ package services;
 
 import models.Task;
 import models.TaskRun;
+import utils.GsonHolder;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * The structured {@code event_log} entries that bracket a JClaw
@@ -231,34 +234,22 @@ public final class TaskLifecycleEvents {
     }
 
     /**
-     * Minimal hand-rolled JSON for the {@code details} column.
-     * Used by the info-level events; the structured payload makes
-     * dashboard rendering and downstream tooling parsing
-     * straightforward. {@code null} values are emitted as JSON
-     * null rather than skipped so the schema stays consistent.
+     * Build the JSON {@code details} payload from key/value pairs, mirroring
+     * {@link services.EventLogger}'s {@code subagentDetails}: a
+     * {@link LinkedHashMap} (so field order in the rendered JSON matches the
+     * argument order) serialized via the shared {@link GsonHolder#INSTANCE}.
+     * Gson's {@code serializeNulls()} emits {@code null} values as JSON
+     * {@code null} rather than skipping them, keeping the schema consistent.
      */
-    @SuppressWarnings("java:S2629") // String concat is fine; details payloads are tiny
     private static String detailsJson(Object... kvPairs) {
         if (kvPairs == null || kvPairs.length == 0) return "{}";
         if (kvPairs.length % 2 != 0) {
             throw new IllegalArgumentException("kvPairs must have even length");
         }
-        var sb = new StringBuilder("{");
+        var payload = new LinkedHashMap<String, Object>();
         for (int i = 0; i < kvPairs.length; i += 2) {
-            if (i > 0) sb.append(",");
-            sb.append("\"").append(kvPairs[i]).append("\":");
-            Object value = kvPairs[i + 1];
-            if (value == null) {
-                sb.append("null");
-            } else if (value instanceof Number) {
-                sb.append(value);
-            } else {
-                // Strings and enums — JSON-escape the bare minimum
-                // (just the double quote and backslash).
-                sb.append("\"").append(value.toString().replace("\\", "\\\\").replace("\"", "\\\"")).append("\"");
-            }
+            payload.put(kvPairs[i].toString(), kvPairs[i + 1]);
         }
-        sb.append("}");
-        return sb.toString();
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 }

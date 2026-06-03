@@ -37,19 +37,27 @@ public class AgentService {
      * @return true when the agent's default model declares image-input support
      */
     public static boolean supportsVision(Agent agent) {
-        return hasModelCapability(agent, llm.LlmTypes.ModelInfo::supportsVision);
+        if (agent == null) return false;
+        return findModel(agent.modelProvider, agent.modelId)
+                .map(llm.LlmTypes.ModelInfo::supportsVision)
+                .orElse(false);
     }
 
-    private static boolean hasModelCapability(Agent agent,
-                                              java.util.function.Predicate<llm.LlmTypes.ModelInfo> test) {
-        if (agent == null || agent.modelProvider == null || agent.modelId == null) return false;
-        var provider = ProviderRegistry.get(agent.modelProvider);
-        if (provider == null) return false;
+    /**
+     * Resolve a {@code provider:modelId} pair to its registered
+     * {@link llm.LlmTypes.ModelInfo}. Empty when either id is null, the
+     * provider isn't registered, or the model isn't in that provider's list.
+     * Centralises the {@code ProviderRegistry.get → models().stream().filter}
+     * lookup shared by {@link #supportsVision}, {@link #normalizeThinkingMode},
+     * and {@link #isProviderConfigured}.
+     */
+    private static java.util.Optional<llm.LlmTypes.ModelInfo> findModel(String providerName, String modelId) {
+        if (providerName == null || modelId == null) return java.util.Optional.empty();
+        var provider = ProviderRegistry.get(providerName);
+        if (provider == null) return java.util.Optional.empty();
         return provider.config().models().stream()
-                .filter(m -> m.id().equals(agent.modelId))
-                .findFirst()
-                .map(test::test)
-                .orElse(false);
+                .filter(m -> m.id().equals(modelId))
+                .findFirst();
     }
 
     /**
@@ -212,12 +220,7 @@ public class AgentService {
      */
     private static String normalizeThinkingMode(String requested, String modelProvider, String modelId) {
         if (requested == null || requested.isBlank()) return null;
-        var provider = ProviderRegistry.get(modelProvider);
-        if (provider == null) return null;
-        var model = provider.config().models().stream()
-                .filter(m -> m.id().equals(modelId))
-                .findFirst()
-                .orElse(null);
+        var model = findModel(modelProvider, modelId).orElse(null);
         if (model == null) return null;
         var levels = model.effectiveThinkingLevels();
         return levels.contains(requested) ? requested : null;
@@ -232,9 +235,7 @@ public class AgentService {
      * @return true when the provider is registered and lists this model id
      */
     public static boolean isProviderConfigured(String providerName, String modelId) {
-        var provider = ProviderRegistry.get(providerName);
-        return provider != null
-                && provider.config().models().stream().anyMatch(m -> m.id().equals(modelId));
+        return findModel(providerName, modelId).isPresent();
     }
 
     /**

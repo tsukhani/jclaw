@@ -119,11 +119,10 @@ public class SkillPromotionService {
         var stagingDir = agentSkillsDir.resolve(skillName + ".copying-" + System.currentTimeMillis());
         var backupDir = agentSkillsDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
 
-        try {
-            Files.createDirectories(stagingDir);
+        stageAndSwap(targetDir, stagingDir, backupDir, replacing, staging -> {
             try (var walk = Files.walk(globalDir)) {
                 walk.forEach(source -> {
-                    var staged = stagingDir.resolve(globalDir.relativize(source));
+                    var staged = staging.resolve(globalDir.relativize(source));
                     try {
                         if (Files.isDirectory(source)) {
                             Files.createDirectories(staged);
@@ -143,22 +142,48 @@ public class SkillPromotionService {
                     }
                 });
             }
+        });
 
+        // ── Snapshot per-agent allowlist contribution from the registry ──
+        // AgentSkillAllowedTool rows for this (agent, skill) are the canonical
+        // allowlist source consulted by ShellExecTool at call time. They are
+        // sourced from the registry *once* at install — subsequent registry
+        // un-promotion does NOT retroactively revoke, and workspace SKILL.md
+        // edits do NOT expand the set. Both properties are load-bearing for
+        // the threat model. Runs after the swap, so a sync failure leaves the
+        // installed skill in place (staging is already gone).
+        syncAgentAllowlistFromRegistry(agent, skillName);
+    }
+
+    /** A {@link Path}-consuming step that may throw {@link IOException}. */
+    @FunctionalInterface
+    private interface StagingPopulator {
+        void populate(Path stagingDir) throws IOException;
+    }
+
+    /**
+     * Shared staging spine for both install (copy) and promote: create the
+     * staging directory, let {@code populate} fill it, then atomically swap it
+     * into {@code targetDir}, backing up any existing target and refreshing the
+     * skill cache. On any failure the partially-built staging directory is
+     * removed and the cause is rethrown as an {@link IOException}; an
+     * {@link java.io.UncheckedIOException} from {@code populate} is unwrapped to
+     * its cause so callers see the underlying I/O error. Post-swap work (registry
+     * sync, notifications) belongs at the call site — by then staging no longer
+     * exists, so a later failure has nothing to clean up.
+     */
+    private static void stageAndSwap(Path targetDir, Path stagingDir, Path backupDir,
+                                     boolean replacing, StagingPopulator populate) throws IOException {
+        try {
+            Files.createDirectories(stagingDir);
+            populate.populate(stagingDir);
             atomicSwap(targetDir, stagingDir, backupDir, replacing);
             SkillLoader.clearCache();
-
-            // ── Snapshot per-agent allowlist contribution from the registry ──
-            // AgentSkillAllowedTool rows for this (agent, skill) are the canonical
-            // allowlist source consulted by ShellExecTool at call time. They are
-            // sourced from the registry *once* at install — subsequent registry
-            // un-promotion does NOT retroactively revoke, and workspace SKILL.md
-            // edits do NOT expand the set. Both properties are load-bearing for
-            // the threat model.
-            syncAgentAllowlistFromRegistry(agent, skillName);
         } catch (IOException | RuntimeException e) {
             if (Files.exists(stagingDir)) {
                 try { deleteRecursive(stagingDir); } catch (IOException _) {}
             }
+            if (e instanceof java.io.UncheckedIOException uioe) throw uioe.getCause();
             throw e instanceof IOException ioe ? ioe : new IOException(e.getMessage(), e);
         }
     }
@@ -362,7 +387,7 @@ public class SkillPromotionService {
             if (binFile.startsWith(TOOLS_DIR_PREFIX)) {
                 binaryFiles.add(binFile);
             } else {
-                var fileName = binFile.contains("/") ? binFile.substring(binFile.lastIndexOf('/') + 1) : binFile;
+                var fileName = baseName(binFile);
                 binaryFiles.add(TOOLS_DIR_PREFIX + fileName);
                 EventLogger.info(EVENT_CATEGORY_SKILLS, "Relocated binary '%s' → 'tools/%s'".formatted(binFile, fileName));
             }
@@ -467,16 +492,13 @@ public class SkillPromotionService {
         var replacingExisting = Files.isDirectory(targetDir);
 
         try {
-            Files.createDirectories(stagingDir);
-            Files.createDirectories(stagingDir.resolve("credentials"));
-            Files.createDirectories(stagingDir.resolve("tools"));
-
-            writeSanitizedTextFiles(stagingDir, sanitized);
-            stageBinaryFiles(skillDir, stagingDir, binaryFiles);
-            pruneEmptyConventionDirs(stagingDir);
-
-            atomicSwap(targetDir, stagingDir, backupDir, replacingExisting);
-            SkillLoader.clearCache();
+            stageAndSwap(targetDir, stagingDir, backupDir, replacingExisting, staging -> {
+                Files.createDirectories(staging.resolve("credentials"));
+                Files.createDirectories(staging.resolve("tools"));
+                writeSanitizedTextFiles(staging, sanitized);
+                stageBinaryFiles(skillDir, staging, binaryFiles);
+                pruneEmptyConventionDirs(staging);
+            });
 
             // ── Update registry allowlist blessings ──
             // Rewrite SkillRegistryTool rows from the just-promoted SKILL.md's
@@ -493,9 +515,7 @@ public class SkillPromotionService {
                     "replaced", replacingExisting
             ));
         } catch (IOException e) {
-            if (Files.exists(stagingDir)) {
-                try { deleteRecursive(stagingDir); } catch (IOException _) {}
-            }
+            // stageAndSwap already removed the staging dir on failure.
             EventLogger.error(EVENT_CATEGORY_SKILLS, "Failed to write promoted skill: " + e.getMessage());
             NotificationBus.publish(NOTIFICATION_PROMOTE_FAILED, Map.of(
                     KEY_SKILL_NAME, skillName,
@@ -533,7 +553,7 @@ public class SkillPromotionService {
     private static Path resolveBinarySource(Path skillDir, String sourceName) throws IOException {
         var source = skillDir.resolve(sourceName);
         if (Files.exists(source)) return source;
-        var fileName = sourceName.contains("/") ? sourceName.substring(sourceName.lastIndexOf('/') + 1) : sourceName;
+        var fileName = baseName(sourceName);
         try (var srcWalk = Files.walk(skillDir)) {
             return srcWalk.filter(Files::isRegularFile)
                     .filter(f -> f.getFileName().toString().equals(fileName))
@@ -601,6 +621,16 @@ public class SkillPromotionService {
         if (replacing && Files.isDirectory(backupDir)) {
             deleteRecursive(backupDir);
         }
+    }
+
+    /**
+     * Last path segment of a {@code /}-separated relative path.
+     * {@code lastIndexOf('/')} returns -1 when there's no slash, so
+     * {@code +1} yields 0 and the whole string is returned — no
+     * {@code contains("/")} guard needed.
+     */
+    private static String baseName(String path) {
+        return path.substring(path.lastIndexOf('/') + 1);
     }
 
     public static void deleteRecursive(Path dir) throws IOException {

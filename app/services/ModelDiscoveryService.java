@@ -627,15 +627,19 @@ public class ModelDiscoveryService {
     }
 
     static void applyRankings(List<Map<String, Object>> models, List<String> rankings) {
+        // stripVersionSuffix(ranked) is invariant across the inner loop's
+        // model iterations, so precompute it once rather than per model×ranking.
+        var strippedRankings = rankings.stream().map(ModelDiscoveryService::stripVersionSuffix).toList();
         for (var model : models) {
             var modelId = model.get(KEY_ID).toString().toLowerCase();
             var modelBase = stripVariant(modelId);
+            var modelBaseStripped = stripVersionSuffix(modelBase);
             int bestRank = Integer.MAX_VALUE;
 
             for (int i = 0; i < rankings.size(); i++) {
                 var ranked = rankings.get(i);
                 if (modelBase.equals(ranked) || modelId.equals(ranked)
-                        || stripVersionSuffix(modelBase).equals(stripVersionSuffix(ranked))) {
+                        || modelBaseStripped.equals(strippedRankings.get(i))) {
                     if (i + 1 < bestRank) bestRank = i + 1;
                     break;
                 }

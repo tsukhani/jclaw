@@ -107,7 +107,7 @@ public final class AttachmentService {
         // frontend unchanged; re-sanitizing here would be defensive but empty
         // (uploadChatFiles already rejects unsafe leaves).
         att.originalFilename = input.originalFilename() != null ? input.originalFilename() : leaf;
-        att.storagePath = agent.name + "/attachments/" + message.conversation.id + "/" + leaf;
+        att.storagePath = toStoragePath(agent.name, message.conversation.id, leaf);
         att.mimeType = sniffedMime;
         att.sizeBytes = sizeBytes;
         att.kind = kind;
@@ -131,9 +131,7 @@ public final class AttachmentService {
      * which takes raw base64 without the {@code data:...} URL prefix.
      */
     public static String readAsBase64(MessageAttachment att) {
-        var path = AgentService.acquireWorkspacePath(
-                att.message.conversation.agent.name,
-                att.storagePath.substring(att.message.conversation.agent.name.length() + 1));
+        var path = resolveOnDisk(att);
         byte[] bytes;
         try {
             bytes = Files.readAllBytes(path);
@@ -141,6 +139,29 @@ public final class AttachmentService {
             throw new java.io.UncheckedIOException("Failed to read attachment bytes: " + e.getMessage(), e);
         }
         return Base64.getEncoder().encodeToString(bytes);
+    }
+
+    /**
+     * Canonical {@code storagePath} layout for a finalized attachment:
+     * {@code {agentName}/attachments/{conversationId}/{leaf}}. The
+     * {@code agentName} prefix is what {@link #resolveOnDisk} strips back off
+     * to recover the workspace-relative path — defining the format here once
+     * keeps the writer and reader from drifting apart on the prefix shape.
+     */
+    static String toStoragePath(String agentName, long conversationId, String leaf) {
+        return agentName + "/attachments/" + conversationId + "/" + leaf;
+    }
+
+    /**
+     * Resolve a finalized attachment's {@code storagePath} to its on-disk
+     * location. The {@code storagePath} is {@code {agentName}/...}; strip the
+     * agent-name prefix (the workspace root already keys on the agent) and
+     * re-validate the remainder through the workspace path guard.
+     */
+    static Path resolveOnDisk(MessageAttachment att) {
+        var agentName = att.message.conversation.agent.name;
+        return AgentService.acquireWorkspacePath(
+                agentName, att.storagePath.substring(agentName.length() + 1));
     }
 
     /**
