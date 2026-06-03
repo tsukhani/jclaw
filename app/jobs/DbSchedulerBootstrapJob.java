@@ -165,6 +165,16 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
 
         var built = builder.build();
 
+        // JCLAW-411: publish the built-in tools BEFORE the scheduler can fire.
+        // ToolRegistrationJob is a sibling @OnApplicationStart job and Play 1.x
+        // doesn't order siblings, so an overdue task fired on db-scheduler's
+        // first poll could build its system prompt (and entire tool array)
+        // against an empty ToolRegistry — excluding tool-requiring skills and
+        // running the fire tool-less. registerAll() is idempotent (atomic
+        // publish), so the sibling job's later run is a harmless re-publish.
+        // Same inline-from-bootstrap pattern as BootConsistencyCheck.sweep below.
+        ToolRegistrationJob.registerAll();
+
         TaskExecutionHandler.setSchedulerClient(built);
         scheduler = built;
         built.start();

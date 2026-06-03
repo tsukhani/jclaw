@@ -190,6 +190,30 @@ class ToolCatalogTest extends UnitTest {
     }
 
     @Test
+    void registerAllMakesSkillRequiredBuiltinsKnown() {
+        // JCLAW-411 regression for the boot-ordering race: when an overdue task
+        // fires before ToolRegistrationJob publishes, the ToolRegistry is empty,
+        // so a skill's required built-ins all read as "unknown" and the skill is
+        // excluded (and the firing task runs tool-less). The bootstrap fix calls
+        // ToolRegistrationJob.registerAll() before starting the scheduler.
+        var required = java.util.List.of("datetime", "web_search", "web_fetch");
+
+        // Simulate the not-yet-registered boot window.
+        ToolRegistry.publish(List.of());
+        var beforeReg = ToolCatalog.validateSkillTools(Set.of(), required);
+        assertFalse(beforeReg.isOk(), "empty registry must report the skill's tools as missing");
+        assertEquals(3, beforeReg.unknown().size(),
+                "all three required built-ins are unknown when the registry is empty");
+
+        // What the bootstrap now does before built.start().
+        jobs.ToolRegistrationJob.registerAll();
+        var afterReg = ToolCatalog.validateSkillTools(Set.of(), required);
+        assertTrue(afterReg.isOk(),
+                "after registerAll the daily-briefing skill's required tools are all known");
+        assertTrue(afterReg.unknown().isEmpty(), "no required tool should be unknown after registerAll");
+    }
+
+    @Test
     void validateSkillToolsReportsDisabledKnownTools() {
         // filesystem is registered; pretending the agent has it disabled.
         var result = agents.ToolCatalog.validateSkillTools(
