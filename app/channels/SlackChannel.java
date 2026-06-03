@@ -30,7 +30,7 @@ public class SlackChannel implements Channel {
     /** Slack's snake_case Gson for deserializing inbound event POJOs. */
     private static final Gson SLACK_GSON = GsonFactory.createSnakeCase();
 
-    private static final String SLACK = "slack";
+    private static final String CHANNEL_NAME = "slack";
     private static final String CHANNEL = "channel";
 
     /** Optional Slack {@code thread_ts} this instance replies into (JCLAW-83);
@@ -47,7 +47,7 @@ public class SlackChannel implements Channel {
 
     public record SlackConfig(String botToken, String signingSecret) {
         public static SlackConfig load() {
-            var cc = ChannelConfig.findByType(SLACK);
+            var cc = ChannelConfig.findByType(CHANNEL_NAME);
             if (cc == null || !cc.enabled) return null;
             var json = JsonParser.parseString(cc.configJson).getAsJsonObject();
             return new SlackConfig(
@@ -58,7 +58,7 @@ public class SlackChannel implements Channel {
     }
 
     @Override
-    public String channelName() { return SLACK; }
+    public String channelName() { return CHANNEL_NAME; }
 
     /**
      * JCLAW-141: generic cross-channel text send (the {@link Channel} contract).
@@ -100,7 +100,7 @@ public class SlackChannel implements Channel {
     public static boolean sendMessage(String channelId, String text, String threadTs) {
         var config = SlackConfig.load();
         if (config == null) {
-            EventLogger.error(CHANNEL, null, SLACK, "Slack not configured");
+            EventLogger.error(CHANNEL, null, CHANNEL_NAME, "Slack not configured");
             return false;
         }
         // JCLAW-341: agents emit CommonMark; convert to Slack mrkdwn so it renders
@@ -135,32 +135,32 @@ public class SlackChannel implements Channel {
             var resp = slack.methods(config.botToken())
                     .chatPostMessage(postRequest(channelId, text, threadTs));
             if (resp.isOk()) {
-                EventLogger.info(CHANNEL, null, SLACK,
+                EventLogger.info(CHANNEL, null, CHANNEL_NAME,
                         "Message sent to channel %s".formatted(channelId));
                 return SendResult.OK;
             }
             // The synchronous client surfaces a 429 as SlackApiException (below);
             // a "ratelimited" body error is rare but handled defensively.
             if ("ratelimited".equals(resp.getError())) {
-                EventLogger.warn(CHANNEL, null, SLACK, "Rate-limited (API error)");
+                EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "Rate-limited (API error)");
                 return SendResult.rateLimited(0L);
             }
-            EventLogger.warn(CHANNEL, null, SLACK,
+            EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                     "Slack API error: %s".formatted(resp.getError()));
             return SendResult.FAILED;
         } catch (SlackApiException e) {
             var http = e.getResponse();
             if (http != null && http.code() == 429) {
                 long retryAfterMs = parseRetryAfterMs(http.header("Retry-After"));
-                EventLogger.warn(CHANNEL, null, SLACK,
+                EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                         "Rate-limited; Retry-After=%sms".formatted(retryAfterMs));
                 return SendResult.rateLimited(retryAfterMs);
             }
-            EventLogger.warn(CHANNEL, null, SLACK,
+            EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                     "Slack API error: %s".formatted(e.getResponseBody()));
             return SendResult.FAILED;
         } catch (IOException e) {
-            EventLogger.warn(CHANNEL, null, SLACK,
+            EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                     "Send failed: %s".formatted(e.getMessage()));
             return SendResult.FAILED;
         }
@@ -182,10 +182,10 @@ public class SlackChannel implements Channel {
                     .channel(channelId).threadTs(threadTs).recipientUserId(recipientUserId)
                     .markdownText(initialMarkdown));
             if (resp.isOk()) return resp.getTs();
-            EventLogger.warn(CHANNEL, null, SLACK, "startStream not ok: %s".formatted(resp.getError()));
+            EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "startStream not ok: %s".formatted(resp.getError()));
             return null;
         } catch (SlackApiException | IOException e) {
-            EventLogger.warn(CHANNEL, null, SLACK, "startStream failed: %s".formatted(e.getMessage()));
+            EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "startStream failed: %s".formatted(e.getMessage()));
             return null;
         }
     }
@@ -228,7 +228,7 @@ public class SlackChannel implements Channel {
             slack.methods(config.botToken()).assistantThreadsSetStatus(r -> r
                     .channelId(channelId).threadTs(threadTs).status(status));
         } catch (SlackApiException | IOException e) {
-            EventLogger.warn(CHANNEL, null, SLACK, "setStatus failed: %s".formatted(e.getMessage()));
+            EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "setStatus failed: %s".formatted(e.getMessage()));
         }
     }
 
