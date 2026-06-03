@@ -110,6 +110,11 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * the result list calling the per-row indexer, and logs the count
      * when it's positive. Empty JPA tables produce zero log lines so
      * fresh installs stay quiet.
+     *
+     * <p>The per-row {@link LuceneIndexer#upsert} no longer fsyncs, so the
+     * whole loop is committed ONCE at the end via
+     * {@link LuceneIndexer#commit(LuceneIndexer.Scope)} — backfilling
+     * thousands of rows pays one fsync instead of one per row.
      */
     private static void backfill(LuceneIndexer.Scope scope, String jpql,
                                   java.util.function.Consumer<Object> indexRow) {
@@ -122,6 +127,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
                 n++;
             }
             if (n > 0) {
+                LuceneIndexer.commit(scope);
                 EventLogger.info("search", null, null,
                         "Lucene index backfilled: scope=%s rows=%d"
                                 .formatted(scope.name(), n));

@@ -19,6 +19,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * JVM-wide owner of the Lucene 10 IndexWriter + SearcherManager instances
@@ -106,6 +109,27 @@ public final class LuceneIndexer {
     private static final Map<Scope, IndexWriter> WRITERS = new EnumMap<>(Scope.class);
     private static final Map<Scope, SearcherManager> SEARCHERS = new EnumMap<>(Scope.class);
 
+    /**
+     * Seconds between periodic background commits. Search visibility comes
+     * from {@code maybeRefresh} on the writer-NRT SearcherManager (sees
+     * in-RAM uncommitted segments), so per-write commit only bought
+     * durability at the cost of an fsync on every entity hook. We relax
+     * that to a periodic fsync cadence; the index is DERIVED from DB rows
+     * (re-backfillable on a wiped/stale boot), so a small window of
+     * uncommitted segments lost in a crash is recoverable. Override via
+     * {@value #COMMIT_INTERVAL_PROPERTY}.
+     */
+    private static final String COMMIT_INTERVAL_PROPERTY = "jclaw.search.commitIntervalSeconds";
+    private static final long DEFAULT_COMMIT_INTERVAL_SECONDS = 30L;
+
+    /**
+     * Single daemon thread that fsyncs every scope's writer on the
+     * {@link #COMMIT_INTERVAL_PROPERTY} cadence. Created in {@link #open()},
+     * stopped in {@link #close()}. Guarded by the class monitor along with
+     * the writer/searcher maps.
+     */
+    private static ScheduledExecutorService commitScheduler;
+
     private LuceneIndexer() {}
 
     /**
@@ -118,6 +142,7 @@ public final class LuceneIndexer {
             for (var scope : Scope.values()) {
                 openScope(scope);
             }
+            startCommitScheduler();
         } catch (IOException | RuntimeException e) {
             // Partial-open rollback: any scope opened before the failure
             // is closed so the next retry starts clean. Without this, a
@@ -125,6 +150,46 @@ public final class LuceneIndexer {
             // next open() can't grab them.
             closeQuietly();
             throw e;
+        }
+    }
+
+    private static void startCommitScheduler() {
+        var interval = commitIntervalSeconds();
+        commitScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            var t = new Thread(r, "jclaw-lucene-commit");
+            t.setDaemon(true);
+            return t;
+        });
+        commitScheduler.scheduleWithFixedDelay(
+                LuceneIndexer::commitAll, interval, interval, TimeUnit.SECONDS);
+    }
+
+    private static long commitIntervalSeconds() {
+        var raw = Play.configuration.getProperty(COMMIT_INTERVAL_PROPERTY);
+        if (raw == null || raw.isBlank()) return DEFAULT_COMMIT_INTERVAL_SECONDS;
+        try {
+            var v = Long.parseLong(raw.trim());
+            return v > 0 ? v : DEFAULT_COMMIT_INTERVAL_SECONDS;
+        } catch (NumberFormatException e) {
+            return DEFAULT_COMMIT_INTERVAL_SECONDS;
+        }
+    }
+
+    /**
+     * Fsync every open scope's writer. Runs on the commit-scheduler daemon
+     * thread and (synchronously) from {@link #closeQuietly()} before close.
+     * Per-scope failures are logged, never propagated, so one bad writer
+     * doesn't starve the others' cadence.
+     */
+    private static void commitAll() {
+        for (var entry : WRITERS.entrySet()) {
+            try {
+                entry.getValue().commit();
+            } catch (IOException | RuntimeException e) {
+                EventLogger.warn(CATEGORY, null, null,
+                        "Lucene periodic commit failed: scope=%s: %s"
+                                .formatted(entry.getKey().name(), e.getMessage()));
+            }
         }
     }
 
@@ -165,6 +230,14 @@ public final class LuceneIndexer {
     }
 
     private static void closeQuietly() {
+        // Stop the periodic-commit daemon before closing writers so it
+        // doesn't fire a commit into a half-closed writer. IndexWriter.close()
+        // below flushes and commits any segments buffered since the last
+        // cadence tick, so durability is preserved across the shutdown.
+        if (commitScheduler != null) {
+            commitScheduler.shutdownNow();
+            commitScheduler = null;
+        }
         for (var entry : SEARCHERS.entrySet()) {
             try {
                 entry.getValue().close();
@@ -210,10 +283,10 @@ public final class LuceneIndexer {
             doc.add(new StringField(ID_FIELD, String.valueOf(id), Field.Store.YES));
             doc.add(new TextField(CONTENT_FIELD, content != null ? content : "", Field.Store.NO));
             writer.updateDocument(new Term(ID_FIELD, String.valueOf(id)), doc);
-            // Commit per-write keeps the index durable across crashes.
-            // 50-conc, 50-turn loadtest @ ~9 req/s for real provider showed
-            // no contention pressure on the writer's per-commit fsync.
-            writer.commit();
+            // No per-write commit: the write is searchable via the writer-NRT
+            // SearcherManager's maybeRefresh (called on every query). Durability
+            // comes from the periodic commit cadence plus close(), not an fsync
+            // on every entity hook — see the COMMIT_INTERVAL_PROPERTY rationale.
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, null, null,
                     "Lucene upsert failed: scope=%s id=%d: %s"
@@ -242,7 +315,7 @@ public final class LuceneIndexer {
         if (writer == null) return;
         try {
             writer.deleteDocuments(new Term(ID_FIELD, String.valueOf(id)));
-            writer.commit();
+            // No per-write commit — same cadence-based durability as upsert.
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, null, null,
                     "Lucene remove failed: scope=%s id=%d: %s"
@@ -261,6 +334,25 @@ public final class LuceneIndexer {
     /** Internal accessor for a scope's SearcherManager. */
     static SearcherManager searcherManager(Scope scope) {
         return SEARCHERS.get(scope);
+    }
+
+    /**
+     * Fsync one scope's writer. Used by the backfill path to commit the
+     * whole row loop ONCE at the end instead of one fsync per row (the
+     * per-write {@link #upsert} no longer commits). No-op if the scope
+     * isn't open. Failures are logged, never propagated — same no-throw
+     * contract as {@link #upsert}.
+     */
+    public static void commit(Scope scope) {
+        var writer = WRITERS.get(scope);
+        if (writer == null) return;
+        try {
+            writer.commit();
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, null, null,
+                    "Lucene commit failed: scope=%s: %s"
+                            .formatted(scope.name(), e.getMessage()));
+        }
     }
 
     /** Whether the indexes have been opened. */
