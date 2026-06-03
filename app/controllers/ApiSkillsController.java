@@ -148,20 +148,20 @@ public class ApiSkillsController extends Controller {
      * list is empty, which is the correct answer for pure-reasoning skills. Falls back
      * to the body-text heuristic only for legacy skills that predate the declaration.
      */
-    private static java.util.List<java.util.Map<String, String>> resolveSkillTools(Path skillDir, String allContent) {
+    private static java.util.List<SkillToolRef> resolveSkillTools(Path skillDir, String allContent) {
         var skillFile = skillDir.resolve(SKILL_MD);
         if (Files.exists(skillFile)) {
             var info = SkillLoader.parseSkillFile(skillFile);
             if (info != null && info.toolsDeclared()) {
-                var result = new java.util.ArrayList<java.util.Map<String, String>>();
+                var result = new java.util.ArrayList<SkillToolRef>();
                 for (var name : info.tools()) {
                     var tool = agents.ToolRegistry.listTools().stream()
                             .filter(t -> t.name().equals(name))
                             .findFirst()
                             .orElse(null);
-                    result.add(java.util.Map.of(
-                            "name", name,
-                            KEY_DESCRIPTION, tool != null && tool.description() != null ? tool.description() : ""
+                    result.add(new SkillToolRef(
+                            name,
+                            tool != null && tool.description() != null ? tool.description() : ""
                     ));
                 }
                 return result;
@@ -171,8 +171,8 @@ public class ApiSkillsController extends Controller {
         return detectTools(allContent);
     }
 
-    private static java.util.List<java.util.Map<String, String>> detectTools(String content) {
-        var detectedTools = new java.util.ArrayList<java.util.Map<String, String>>();
+    private static java.util.List<SkillToolRef> detectTools(String content) {
+        var detectedTools = new java.util.ArrayList<SkillToolRef>();
         var seen = new java.util.HashSet<String>();
 
         scanRegisteredToolNames(content, detectedTools, seen);
@@ -184,31 +184,31 @@ public class ApiSkillsController extends Controller {
 
     /** Scan every live tool name from the registry against the body text. */
     private static void scanRegisteredToolNames(String content,
-            java.util.List<java.util.Map<String, String>> detectedTools, java.util.Set<String> seen) {
+            java.util.List<SkillToolRef> detectedTools, java.util.Set<String> seen) {
         for (var tool : agents.ToolRegistry.listTools()) {
             if (content.contains(tool.name()) && seen.add(tool.name())) {
-                detectedTools.add(java.util.Map.of("name", tool.name(),
-                        KEY_DESCRIPTION, tool.description() != null ? tool.description() : ""));
+                detectedTools.add(new SkillToolRef(tool.name(),
+                        tool.description() != null ? tool.description() : ""));
             }
         }
     }
 
     /** Informal aliases (readFile, shell, writeFile) → map to the canonical tool. */
     private static void scanToolAliases(String content,
-            java.util.List<java.util.Map<String, String>> detectedTools, java.util.Set<String> seen) {
+            java.util.List<SkillToolRef> detectedTools, java.util.Set<String> seen) {
         for (var entry : TOOL_ALIASES.entrySet()) {
             if (content.contains(entry.getKey()) && seen.add(entry.getValue())) {
                 var canonical = entry.getValue();
                 var tool = lookupToolByName(canonical);
-                detectedTools.add(java.util.Map.of("name", canonical,
-                        KEY_DESCRIPTION, tool != null && tool.description() != null ? tool.description() : ""));
+                detectedTools.add(new SkillToolRef(canonical,
+                        tool != null && tool.description() != null ? tool.description() : ""));
             }
         }
     }
 
     /** Implicit shell usage — bash/sh code fences. */
     private static void scanImplicitShellUsage(String content,
-            java.util.List<java.util.Map<String, String>> detectedTools, java.util.Set<String> seen) {
+            java.util.List<SkillToolRef> detectedTools, java.util.Set<String> seen) {
         if (!seen.add("exec")) return;
         if (!(content.contains("```bash") || content.contains("```sh")
                 || content.contains("```shell") || content.contains("run the command")
@@ -216,8 +216,8 @@ public class ApiSkillsController extends Controller {
             return;
         }
         var tool = lookupToolByName("exec");
-        detectedTools.add(java.util.Map.of("name", "exec",
-                KEY_DESCRIPTION, tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
+        detectedTools.add(new SkillToolRef("exec",
+                tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
     }
 
     private static agents.ToolRegistry.Tool lookupToolByName(String name) {

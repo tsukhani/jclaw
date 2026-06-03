@@ -1031,6 +1031,41 @@ class ApiSkillsControllerTest extends FunctionalTest {
                 "listFiles alias must resolve to filesystem: " + body);
     }
 
+    /**
+     * Wire-shape guard for the SkillToolRef refactor (JCLAW-398): each entry in
+     * the "tools" array must serialize to the {name, description} object shape,
+     * whether it comes from declared frontmatter or the body-text heuristic.
+     * Gson serializes the record identically to the prior Map&lt;String,String&gt;,
+     * so this asserts the contract that proves the wire format is unchanged.
+     */
+    @Test
+    void listGlobalSkillFilesToolsEntriesCarryNameAndDescriptionKeys() throws Exception {
+        login();
+        // Declared-tools branch: 'exec' is a canonical ToolRegistry tool name.
+        var declared = globalSkillsDir.resolve("ref-declared");
+        Files.createDirectories(declared);
+        Files.writeString(declared.resolve("SKILL.md"), """
+                ---
+                name: ref-declared
+                description: declared tools wire-shape test
+                version: 1.0.0
+                tools: [exec]
+                ---
+                # body
+                """);
+        SkillLoader.clearCache();
+        var declaredBody = getContent(GET("/api/skills/ref-declared/files"));
+        assertTrue(declaredBody.contains("\"tools\":[{\"name\":\"exec\",\"description\":"),
+                "declared tool must serialize as {name,description} object: " + declaredBody);
+
+        // Heuristic branch: a bash fence implies exec via scanImplicitShellUsage.
+        seedHeuristicSkill("ref-heuristic", "```bash\necho hi\n```\n");
+        var heuristicBody = getContent(GET("/api/skills/ref-heuristic/files"));
+        assertTrue(heuristicBody.contains("\"name\":\"exec\"")
+                        && heuristicBody.contains("\"description\":"),
+                "heuristic tool entry must carry both name and description keys: " + heuristicBody);
+    }
+
     // ==================== readSkillFileFrom — global traversal ====================
 
     @Test
