@@ -516,8 +516,15 @@ public class FileSystemTools implements ToolRegistry.Tool {
         var normalizedOld = oldText.replace("\r\n", "\n");
         var normalizedCount = countOccurrences(normalizedWorking, normalizedOld);
         if (normalizedCount == 1) {
+            // The match was found only after normalizing the whole buffer, but we
+            // splice newText into the ORIGINAL buffer at the matched span so that
+            // CRLFs outside the edited region keep their original line endings —
+            // mirroring the EOL-preservation convention of the editLines path.
+            int normStart = normalizedWorking.indexOf(normalizedOld);
+            int origStart = originalIndexForNormalized(working, normStart);
+            int origEnd = originalIndexForNormalized(working, normStart + normalizedOld.length());
             return EditResult.okWithNote(
-                    normalizedWorking.replace(normalizedOld, newText),
+                    working.substring(0, origStart) + newText + working.substring(origEnd),
                     "(edit #%d matched after normalizing CRLF→LF)".formatted(editIndex));
         }
         if (normalizedCount > 1) {
@@ -531,6 +538,27 @@ public class FileSystemTools implements ToolRegistry.Tool {
         var snippet = nearestPartialMatchSnippet(working, oldText);
         return EditResult.err(capSnippet("Error: edit #%d oldText not found in file.\n%s"
                 .formatted(editIndex, snippet)));
+    }
+
+    /**
+     * Map an index into the CRLF→LF-normalized form of {@code original} back to the
+     * corresponding index in {@code original}. Normalization only drops the {@code \r}
+     * of each {@code \r\n} pair, so we walk the original, advancing a normalized counter
+     * by one per emitted char, and stop once it reaches {@code normalizedIndex}. A bare
+     * {@code \r} (CR not followed by LF) is preserved by normalization and so counts as
+     * one normalized char like any other.
+     */
+    private static int originalIndexForNormalized(String original, int normalizedIndex) {
+        int norm = 0;
+        int i = 0;
+        while (i < original.length() && norm < normalizedIndex) {
+            if (original.charAt(i) == '\r' && i + 1 < original.length() && original.charAt(i + 1) == '\n') {
+                i++; // skip the \r; the following \n is the single normalized char
+            }
+            i++;
+            norm++;
+        }
+        return i;
     }
 
     private static int countOccurrences(String haystack, String needle) {
