@@ -3,6 +3,7 @@ package models;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.ColumnDefault;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -68,11 +69,15 @@ public class McpServer extends Model {
      * {@code false} (opt-in): until an operator flips this on, the server's
      * tools dispatch with no gate, exactly as before this flag existed.
      *
-     * <p>Non-nullable with a {@code false} default so existing rows and
-     * inserts that don't set it don't break — H2 backfills the column and
-     * Java initializes the field to {@code false} before {@link #onCreate}.
+     * <p>Non-nullable with a {@code false} default. The {@link ColumnDefault}
+     * is load-bearing: it makes the auto-DDL {@code ALTER TABLE ... ADD COLUMN}
+     * emit {@code DEFAULT false}, so H2 can backfill the column on existing
+     * {@code mcp_server} rows. Without it the migration fails with "NULL not
+     * allowed" because the Java field default applies only to in-memory
+     * instances, not to the DDL that runs against pre-existing rows.
      */
     @Column(name = "requires_approval", nullable = false)
+    @ColumnDefault("false")
     public boolean requiresApproval = false;
 
     @Enumerated(EnumType.STRING)
