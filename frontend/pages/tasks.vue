@@ -4,6 +4,7 @@ import {
   ArrowDownIcon,
   ArrowPathIcon,
   ArrowUpIcon,
+  BoltIcon,
   CalendarDaysIcon,
   CheckIcon,
   ChevronLeftIcon,
@@ -194,6 +195,15 @@ async function reenableTask(id: number) {
 
 async function retryTask(id: number) {
   await mutate(`/api/tasks/${id}/retry`, { method: 'POST' })
+  refresh()
+}
+
+// Run now — fire a recurring task's next occurrence immediately, out of band.
+// The backend reschedules the existing scheduler row to now (TaskSchedulingService
+// .runNow), so the cron/interval cadence is untouched; gated to !paused below
+// because a paused task's fire body is skipped, which would make this a no-op.
+async function runNowTask(id: number) {
+  await mutate(`/api/tasks/${id}/run`, { method: 'POST' })
   refresh()
 }
 
@@ -1395,6 +1405,20 @@ const statusBg: Record<string, string> = {
               </td>
               <td class="px-4 py-2.5 text-right">
                 <div class="inline-flex items-center gap-1">
+                  <!-- Recurring + live + running → Run now (fire immediately; cadence kept). -->
+                  <button
+                    v-if="!selectMode && isRecurring(task) && isLive(task) && !task.paused"
+                    type="button"
+                    class="p-1 text-fg-muted hover:text-emerald-400 transition-colors"
+                    :title="`Run “${task.name}” now — fires immediately, next scheduled run unchanged`"
+                    :aria-label="`Run ${task.name} now`"
+                    @click.stop="runNowTask(task.id)"
+                  >
+                    <BoltIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
                   <!-- Recurring + live + running → Pause (reversible suspend). -->
                   <button
                     v-if="!selectMode && isRecurring(task) && isLive(task) && !task.paused"
