@@ -477,6 +477,88 @@ class ShellExecToolTest extends UnitTest {
         }
     }
 
+    @Test
+    void multiChunkPlainOutputDoesNotFalseTriggerImage() {
+        // JCLAW-404 parity: ordinary output large enough to span several 4096-char
+        // read() chunks (no block art) must complete normally — exitCode 0,
+        // timedOut false, and NO early-return "still running in background" marker.
+        // The incremental scanner must reach the same not-detected verdict the old
+        // full-buffer rescan did, without re-scanning the whole buffer each chunk.
+        ConfigService.set("shell.allowlist",
+                "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep,seq,yes,printf");
+        ConfigService.clearCache();
+        try {
+            // ~30 KB of plain numeric lines, comfortably over several read chunks.
+            var result = tool.execute("""
+                    {"command": "seq 1 4000"}
+                    """, agent);
+            assertTrue(result.contains("\"exitCode\":0"),
+                    "plain multi-chunk output must exit normally; got: " + result);
+            assertTrue(result.contains("\"timedOut\":false"),
+                    "plain multi-chunk output must not time out; got: " + result);
+            assertFalse(result.contains("still running in background"),
+                    "plain output must NOT trip the terminal-image early return; got: " + result);
+        } finally {
+            ConfigService.set("shell.allowlist",
+                    "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
+            ConfigService.clearCache();
+        }
+    }
+
+    @Test
+    void terminalImageAfterPlainPrefixStillDetected() {
+        // JCLAW-404 parity: a block-art image preceded by a chunk of ordinary
+        // output (so the block-art lines accumulate across read() boundaries and
+        // a non-block prefix resets the run first) must still trip the early
+        // return. Exercises the incremental scanner's cross-chunk carry-over and
+        // its run-reset on non-block-art lines.
+        var line = "████████████";
+        // A non-block-art prefix line, then 6 block-art lines.
+        var cmd = "printf 'hello world prefix line\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n' "
+                + "'" + line + "' '" + line + "' '" + line + "' "
+                + "'" + line + "' '" + line + "' '" + line + "'";
+        ConfigService.set("shell.allowlist",
+                "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep,printf");
+        ConfigService.clearCache();
+        try {
+            var result = tool.execute(
+                    "{\"command\":\"" + cmd.replace("\\", "\\\\") + "\"}", agent);
+            assertTrue(result.contains("\"exitCode\":-1"),
+                    "image after a plain prefix should still report exitCode=-1; got: " + result);
+            assertTrue(result.contains("still running in background"),
+                    "image after a plain prefix should still trip the early return; got: " + result);
+        } finally {
+            ConfigService.set("shell.allowlist",
+                    "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
+            ConfigService.clearCache();
+        }
+    }
+
+    @Test
+    void fourBlockArtLinesDoNotTriggerImage() {
+        // JCLAW-404 parity: the threshold is 5 consecutive block-art lines.
+        // Four such lines must NOT trip the early return — the incremental
+        // scanner's run count must agree with the old <5 verdict.
+        var line = "████████████";
+        var cmd = "printf '%s\\n%s\\n%s\\n%s\\n' "
+                + "'" + line + "' '" + line + "' '" + line + "' '" + line + "'";
+        ConfigService.set("shell.allowlist",
+                "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep,printf");
+        ConfigService.clearCache();
+        try {
+            var result = tool.execute(
+                    "{\"command\":\"" + cmd.replace("\\", "\\\\") + "\"}", agent);
+            assertTrue(result.contains("\"exitCode\":0"),
+                    "four block-art lines must exit normally (below threshold); got: " + result);
+            assertFalse(result.contains("still running in background"),
+                    "four block-art lines must NOT trip the early return; got: " + result);
+        } finally {
+            ConfigService.set("shell.allowlist",
+                    "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
+            ConfigService.clearCache();
+        }
+    }
+
     // ==================== Helpers ====================
 
     private static void deleteDir(Path dir) {

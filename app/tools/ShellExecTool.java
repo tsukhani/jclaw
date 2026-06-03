@@ -475,18 +475,79 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 java.nio.charset.StandardCharsets.UTF_8);
         var cbuf = new char[4096];
         int n;
+        // JCLAW-404: scan for terminal-image block art incrementally rather than
+        // re-toString()-ing and re-scanning the whole accumulated buffer on every
+        // chunk (which was O(N²)). The detector only sees the chars actually
+        // appended to `out` this iteration and carries the consecutive-block-run
+        // state across chunks, yielding the same detection result as a full rescan.
+        var imageScan = new TerminalImageScanner();
         while ((n = reader.read(cbuf)) != -1) {
             totalRead += n;
+            int before = out.length();
             truncated = appendBounded(out, cbuf, n, maxOutputBytes, truncated);
 
             // Check for terminal image — if found, return early but keep process alive
-            if (hasTerminalImage(out.toString())) {
+            if (imageScan.acceptAppended(out, before)) {
                 return new ReadResult(out, totalRead, truncated,
                         buildTerminalImageEarlyReturn(out.toString(), agent, timeoutSec,
                                 startTime, truncated));
             }
         }
         return new ReadResult(out, totalRead, truncated, null);
+    }
+
+    /**
+     * Incremental terminal-image (QR block-art) detector. Equivalent to
+     * re-scanning the entire accumulated buffer for {@code >= 5} consecutive
+     * block-art lines after each chunk, but it inspects only the newly-appended
+     * chars and carries the consecutive-block-art-line run across chunks —
+     * avoiding the quadratic {@code out.toString()} + full rescan (JCLAW-404).
+     *
+     * <p>Parity with the full-buffer scan is preserved by mirroring its two
+     * line-counting cases:
+     * <ul>
+     *   <li><strong>Newline-terminated lines</strong> bump or reset the run as
+     *       they complete (the {@code charAt(i) == '\n'} branch).</li>
+     *   <li>The <strong>final unterminated tail</strong> is evaluated
+     *       provisionally without being consumed (mirroring the {@code i == len}
+     *       branch the full scan applies on every call), so a 5th block-art line
+     *       that is still mid-line triggers detection at the same moment.</li>
+     * </ul>
+     * Block-art-ness of each line is decided by {@link #isBlockArtLine}, the
+     * same predicate the full scan used.
+     */
+    private final class TerminalImageScanner {
+        /** Completed consecutive block-art lines seen so far. */
+        private int blockRun = 0;
+        /** The current not-yet-newline-terminated line, accumulated across chunks. */
+        private final StringBuilder lineBuf = new StringBuilder();
+
+        /**
+         * Feed the chars appended to {@code out} since offset {@code from}.
+         * Returns {@code true} as soon as {@code >= 5} consecutive block-art
+         * lines have been observed.
+         */
+        boolean acceptAppended(StringBuilder out, int from) {
+            int len = out.length();
+            for (int i = from; i < len; i++) {
+                char ch = out.charAt(i);
+                if (ch == '\n') {
+                    if (isBlockArtLine(lineBuf.toString())) {
+                        if (++blockRun >= 5) return true;
+                    } else {
+                        blockRun = 0;
+                    }
+                    lineBuf.setLength(0);
+                } else {
+                    lineBuf.append(ch);
+                }
+            }
+            // Provisional check on the unterminated tail — mirrors the full
+            // scan's i==len branch, which counts the trailing segment on every
+            // invocation. The run is left unconsumed so the same line isn't
+            // double-counted when its newline finally arrives.
+            return blockRun + (isBlockArtLine(lineBuf.toString()) ? 1 : 0) >= 5;
+        }
     }
 
     /**
@@ -574,26 +635,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
             for (var ql : qrLines) result.append(ql).append("\n");
         }
         qrLines.clear();
-    }
-
-    /** Quick check if the output contains enough consecutive block art lines to constitute a terminal image. */
-    private boolean hasTerminalImage(String output) {
-        int blockLines = 0;
-        int lineStart = 0;
-        int len = output.length();
-        for (int i = 0; i <= len; i++) {
-            if (i == len || output.charAt(i) == '\n') {
-                var line = output.substring(lineStart, i);
-                if (isBlockArtLine(line)) {
-                    blockLines++;
-                    if (blockLines >= 5) return true;
-                } else {
-                    blockLines = 0;
-                }
-                lineStart = i + 1;
-            }
-        }
-        return false;
     }
 
     private boolean isBlockArtLine(String line) {
