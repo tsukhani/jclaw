@@ -77,7 +77,11 @@ public final class LuceneIndexer {
         TASK("task"),
         /** SubagentRun virtual doc: label + outcome for the admin
          *  subagent-runs search. */
-        SUBAGENT_RUN("subagent_run");
+        SUBAGENT_RUN("subagent_run"),
+        /** Memory.text — per-agent memories. The only scope that carries an
+         *  {@link #AGENT_FIELD} so search can be filtered to one agent
+         *  (memories never cross agents). */
+        MEMORY("memory");
 
         private final String dirName;
 
@@ -95,6 +99,9 @@ public final class LuceneIndexer {
     /** Field names exposed in indexed Documents. */
     static final String ID_FIELD = "id";
     static final String CONTENT_FIELD = "content";
+    /** Exact-match filter field, set only on scopes that need per-owner
+     *  filtering (currently {@link Scope#MEMORY}, keyed by agent id). */
+    static final String AGENT_FIELD = "agent";
 
     /** EventLogger category for all messages emitted from this indexer. */
     private static final String CATEGORY = "search";
@@ -276,12 +283,24 @@ public final class LuceneIndexer {
      * empty TaskRunMessage rows were still indexed.
      */
     public static void upsert(Scope scope, long id, String content) {
+        upsert(scope, id, content, null);
+    }
+
+    /**
+     * As {@link #upsert(Scope, long, String)} but also indexes an exact-match
+     * {@link #AGENT_FIELD} when {@code agentKey} is non-null, so the scope can
+     * be searched filtered to a single owner (the {@link Scope#MEMORY} scope
+     * keys this on the agent id). A null {@code agentKey} writes no agent field,
+     * matching every other scope.
+     */
+    public static void upsert(Scope scope, long id, String content, String agentKey) {
         var writer = WRITERS.get(scope);
         if (writer == null) return;
         try {
             var doc = new Document();
             doc.add(new StringField(ID_FIELD, String.valueOf(id), Field.Store.YES));
             doc.add(new TextField(CONTENT_FIELD, content != null ? content : "", Field.Store.NO));
+            if (agentKey != null) doc.add(new StringField(AGENT_FIELD, agentKey, Field.Store.NO));
             writer.updateDocument(new Term(ID_FIELD, String.valueOf(id)), doc);
             // No per-write commit: the write is searchable via the writer-NRT
             // SearcherManager's maybeRefresh (called on every query). Durability

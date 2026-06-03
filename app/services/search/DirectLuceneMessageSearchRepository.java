@@ -2,10 +2,15 @@ package services.search;
 
 import models.TaskRunMessage;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SearcherManager;
+import org.apache.lucene.search.TermQuery;
 import services.EventLogger;
 
 import java.io.IOException;
@@ -50,7 +55,15 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      */
     private record Backfiller(LuceneIndexer.Scope scope, String jpql,
                               java.util.function.Function<Object, Long> id,
-                              java.util.function.Function<Object, String> content) {}
+                              java.util.function.Function<Object, String> content,
+                              java.util.function.Function<Object, String> agent) {
+        /** Most scopes carry no per-owner filter field. */
+        Backfiller(LuceneIndexer.Scope scope, String jpql,
+                   java.util.function.Function<Object, Long> id,
+                   java.util.function.Function<Object, String> content) {
+            this(scope, jpql, id, content, null);
+        }
+    }
 
     private static final List<Backfiller> BACKFILLERS = List.of(
             new Backfiller(LuceneIndexer.Scope.TASK_RUN_MESSAGE, "SELECT m FROM TaskRunMessage m",
@@ -60,7 +73,10 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
             new Backfiller(LuceneIndexer.Scope.TASK, "SELECT t FROM Task t",
                     row -> ((models.Task) row).id, row -> taskContent((models.Task) row)),
             new Backfiller(LuceneIndexer.Scope.SUBAGENT_RUN, "SELECT r FROM SubagentRun r",
-                    row -> ((models.SubagentRun) row).id, row -> subagentRunContent((models.SubagentRun) row)));
+                    row -> ((models.SubagentRun) row).id, row -> subagentRunContent((models.SubagentRun) row)),
+            new Backfiller(LuceneIndexer.Scope.MEMORY, "SELECT m FROM Memory m",
+                    row -> ((models.Memory) row).id, row -> ((models.Memory) row).text,
+                    row -> ((models.Memory) row).agentId));
 
     /** {@inheritDoc} */
     @Override
@@ -98,7 +114,8 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
                 n++;
                 var id = b.id().apply(row);
                 if (id == null) continue;
-                LuceneIndexer.upsert(b.scope(), id, b.content().apply(row));
+                LuceneIndexer.upsert(b.scope(), id, b.content().apply(row),
+                        b.agent() != null ? b.agent().apply(row) : null);
             }
             if (n > 0) {
                 LuceneIndexer.commit(b.scope());
@@ -153,16 +170,44 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         return collectMatchingIds(sm, query, limit);
     }
 
+    /** {@inheritDoc} */
+    @Override
+    public List<Long> searchMemoryIds(String agentId, String query, int limit) throws IOException {
+        if (query == null || query.isBlank() || agentId == null) return List.of();
+        var sm = LuceneIndexer.searcherManager(LuceneIndexer.Scope.MEMORY);
+        if (sm == null) return List.of();
+        return collectMatchingIds(sm, query, agentId, limit);
+    }
+
     private static List<Long> collectMatchingIds(SearcherManager sm, String query, int limit) throws IOException {
+        return collectMatchingIds(sm, query, null, limit);
+    }
+
+    /**
+     * As the 3-arg overload, but when {@code agentKey} is non-null the parsed
+     * content query is AND-ed with an exact-match term on
+     * {@link LuceneIndexer#AGENT_FIELD}, so only that owner's docs match (the
+     * per-agent {@link LuceneIndexer.Scope#MEMORY} scope). A null
+     * {@code agentKey} searches unfiltered.
+     */
+    private static List<Long> collectMatchingIds(SearcherManager sm, String query,
+                                                 String agentKey, int limit) throws IOException {
         // QueryParser.parse throws on malformed input. Treat parse
         // failure as an empty result rather than propagating —
         // operators typing free-form text shouldn't 500 the UI.
         var parser = new QueryParser(LuceneIndexer.CONTENT_FIELD, new StandardAnalyzer());
-        org.apache.lucene.search.Query q;
+        Query q;
         try {
             q = parser.parse(query);
         } catch (ParseException _) {
             return List.of();
+        }
+        if (agentKey != null) {
+            q = new BooleanQuery.Builder()
+                    .add(q, BooleanClause.Occur.MUST)
+                    .add(new TermQuery(new Term(LuceneIndexer.AGENT_FIELD, agentKey)),
+                            BooleanClause.Occur.MUST)
+                    .build();
         }
 
         // Refresh the reader so writes from the same Tx (post-commit) are

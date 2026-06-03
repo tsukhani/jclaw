@@ -96,6 +96,18 @@ public final class MessageSearch {
     }
 
     /**
+     * JCLAW-415: agent-scoped id search for the per-agent {@code MEMORY} scope.
+     * Routes to the active backend's {@link MessageSearchRepository#searchMemoryIds}
+     * (the Lucene backend filters on the indexed agent field). Same pre-init
+     * no-throw contract as {@link #searchIds}.
+     */
+    public static List<Long> searchMemoryIds(String agentId, String query, int limit) throws IOException {
+        var current = repo;
+        if (current == null) return List.of();
+        return current.searchMemoryIds(agentId, query, limit);
+    }
+
+    /**
      * Short name of the active backend: {@code "h2"}, {@code "postgres"},
      * or {@code "none"} when {@link #init} hasn't run.
      */

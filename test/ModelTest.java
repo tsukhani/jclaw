@@ -176,6 +176,33 @@ class ModelTest extends UnitTest {
     }
 
     @Test
+    void memorySearchIsAgentScoped() {
+        Fixtures.deleteDatabase();
+        var a = new Memory();
+        a.agentId = "agentA";
+        a.text = "shared widget knowledge";
+        a.save();
+        var b = new Memory();
+        b.agentId = "agentB";
+        b.text = "shared widget knowledge";
+        b.save();
+
+        // The shared "widget" term is in both agents' memories, but search is
+        // agent-scoped (privacy invariant, JCLAW-415) — each agent sees only
+        // its own, never the other's. Holds across both the Lucene and the
+        // LIKE-fallback backends.
+        var aResults = Memory.searchByText("agentA", "widget", 10);
+        assertEquals(1, aResults.size(), "search must be scoped to the calling agent");
+        assertEquals("agentA", aResults.get(0).agentId);
+
+        var bResults = Memory.searchByText("agentB", "widget", 10);
+        assertEquals(1, bResults.size());
+        assertEquals("agentB", bResults.get(0).agentId);
+
+        assertEquals(0, Memory.searchByText("agentA", "nonexistent", 10).size());
+    }
+
+    @Test
     void canDeleteOldEventLogs() {
         Fixtures.deleteDatabase();
         var old = new EventLog();

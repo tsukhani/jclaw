@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.List;
 import java.util.stream.Stream;
 
 /**
@@ -165,6 +166,32 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
             msg.save();
             return msg.id;
         });
+    }
+
+    private Long seedMemory(String agentId, String text) {
+        return commitInFreshTx(() -> {
+            var m = new models.Memory();
+            m.agentId = agentId;
+            m.text = text;
+            m.save();
+            return m.id;
+        });
+    }
+
+    @Test
+    void memorySearchIsScopedToAgent() throws Exception {
+        // JCLAW-415: the MEMORY scope indexes an agent field so search is
+        // filtered to one owner. Both agents store the same "widget" term.
+        var aId = seedMemory("agentA", "shared widget knowledge");
+        var bId = seedMemory("agentB", "shared widget knowledge");
+
+        // Each agent sees only its own memory id — never the other's, even
+        // though the content query alone would match both (privacy invariant).
+        assertEquals(List.of(aId), repo.searchMemoryIds("agentA", "widget", 10));
+        assertEquals(List.of(bId), repo.searchMemoryIds("agentB", "widget", 10));
+
+        // A term in neither memory matches nothing.
+        assertTrue(repo.searchMemoryIds("agentA", "nonexistent", 10).isEmpty());
     }
 
     @Test

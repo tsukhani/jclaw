@@ -102,6 +102,17 @@ public interface MessageSearchRepository {
     List<Long> searchIds(LuceneIndexer.Scope scope, String query, int limit) throws IOException;
 
     /**
+     * JCLAW-415: agent-scoped id search over the per-agent {@code MEMORY}
+     * scope — returns only {@code agentId}'s matching memory ids, relevance
+     * ordered and capped at {@code limit}. The Lucene backend filters on the
+     * indexed agent field; the default returns empty (Memory-on-Postgres
+     * searches via {@code to_tsvector} in {@code JpaMemoryStore}, not here).
+     */
+    default List<Long> searchMemoryIds(String agentId, String query, int limit) throws IOException {
+        return List.of();
+    }
+
+    /**
      * Short identifier for log lines. {@code "h2"} or {@code "postgres"}.
      */
     String dialectName();
