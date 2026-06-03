@@ -7,7 +7,7 @@ package models;
  * keeps the column as a plain VARCHAR and conversion goes through the accessors
  * on this enum.
  */
-public enum MessageRole {
+public enum MessageRole implements ValueEnum {
 
     USER("user"),
     ASSISTANT("assistant"),
@@ -20,20 +20,21 @@ public enum MessageRole {
         this.value = value;
     }
 
+    @Override
+    public String value() {
+        return value;
+    }
+
+    private static final java.util.Map<String, MessageRole> BY_VALUE =
+            ValueEnum.indexOf(values());
+
     /**
      * Resolve a raw database/wire string to the corresponding enum constant.
      * Returns {@code null} for unrecognised values so callers can fall through
      * to a default branch without throwing.
      */
     public static MessageRole fromValue(String value) {
-        if (value == null) return null;
-        return switch (value) {
-            case "user" -> USER;
-            case "assistant" -> ASSISTANT;
-            case "tool" -> TOOL;
-            case "system" -> SYSTEM;
-            default -> null;
-        };
+        return ValueEnum.fromValue(BY_VALUE, value);
     }
 
     @Override

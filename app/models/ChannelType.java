@@ -13,7 +13,7 @@ package models;
  * Telegram token and returns a real {@link channels.WebChannel}, so dispatch
  * never branches on the type.
  */
-public enum ChannelType {
+public enum ChannelType implements ValueEnum {
 
     WEB("web"),
     SLACK("slack"),
@@ -26,20 +26,21 @@ public enum ChannelType {
         this.value = value;
     }
 
+    @Override
+    public String value() {
+        return value;
+    }
+
+    private static final java.util.Map<String, ChannelType> BY_VALUE =
+            ValueEnum.indexOf(values());
+
     /**
      * Resolve a raw database/wire string to the corresponding enum constant.
      * Returns {@code null} for unrecognised values so callers can fall through
      * to a default branch without throwing.
      */
     public static ChannelType fromValue(String value) {
-        if (value == null) return null;
-        return switch (value) {
-            case "web" -> WEB;
-            case "slack" -> SLACK;
-            case "telegram" -> TELEGRAM;
-            case "whatsapp" -> WHATSAPP;
-            default -> null;
-        };
+        return ValueEnum.fromValue(BY_VALUE, value);
     }
 
     @Override

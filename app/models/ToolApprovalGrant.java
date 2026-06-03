@@ -45,7 +45,7 @@ public class ToolApprovalGrant extends Model {
             grant.agent = agent;
             grant.toolName = toolName;
             grant.save();
-        } catch (jakarta.persistence.PersistenceException e) {
+        } catch (jakarta.persistence.PersistenceException _) {
             // A concurrent upsert inserted the same (agent, tool) first and the unique
             // index rejected this one — idempotent, so treat the collision as success.
         }
