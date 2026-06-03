@@ -236,11 +236,9 @@ public class ConversationSendTool implements ToolRegistry.Tool {
     /** Most-recent RUNNING SubagentRun where this agent is the child, or null
      *  if there isn't one. */
     private static SubagentRun findCallerActiveChildRun(Long callingAgentId) {
-        var agent = (Agent) Agent.findById(callingAgentId);
-        if (agent == null) return null;
         return SubagentRun.find(
-                "childAgent = ?1 AND status = ?2 ORDER BY startedAt DESC",
-                agent, SubagentRun.Status.RUNNING).first();
+                "childAgent.id = ?1 AND status = ?2 ORDER BY startedAt DESC",
+                callingAgentId, SubagentRun.Status.RUNNING).first();
     }
 
     /** Parent→child: append USER message to the child conversation. */

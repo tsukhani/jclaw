@@ -496,6 +496,46 @@ class TaskToolTest extends UnitTest {
     }
 
     @Test
+    void updateTaskScheduleChangeRearmsSchedulerForSavedTask() {
+        // JCLAW-408: the patch + reschedule now share one Tx — the saved Task
+        // is reused for TaskSchedulingService.update instead of a second
+        // re-read Tx. Assert the scheduler is re-armed (cancel + register) for
+        // the correct task id when the schedule changes.
+        tool.execute("""
+                {"action":"createTask","name":"u-rearm","schedule":"every 1h"}""", agent);
+        var taskId = findTaskByName("u-rearm").id;
+        stub.cancels.clear();
+        stub.schedules.clear();
+        stub.reschedules.clear();
+
+        var result = tool.execute("""
+                {"action":"updateTask","name":"u-rearm","schedule":"every 2h"}""", agent);
+        assertTrue(result.contains("updated"), result);
+
+        // update() cancels the existing scheduler row then registers a fresh one.
+        assertEquals(1, stub.cancels.size(), "schedule change must cancel the old row");
+        assertEquals(taskId.toString(), stub.cancels.getFirst().getId());
+        assertEquals(1, stub.schedules.size(), "schedule change must register a fresh row");
+        assertEquals(taskId.toString(), stub.schedules.getFirst().instance.getId());
+    }
+
+    @Test
+    void updateTaskNonScheduleChangeDoesNotRearmScheduler() {
+        // A non-schedule patch must NOT touch the scheduler (scheduleChanged=false).
+        tool.execute("""
+                {"action":"createTask","name":"u-no-rearm","schedule":"every 1h"}""", agent);
+        stub.cancels.clear();
+        stub.schedules.clear();
+        stub.reschedules.clear();
+
+        var result = tool.execute("""
+                {"action":"updateTask","name":"u-no-rearm","description":"new desc"}""", agent);
+        assertTrue(result.contains("updated"), result);
+        assertEquals(0, stub.cancels.size(), "description-only update must not re-arm the scheduler");
+        assertEquals(0, stub.schedules.size(), "description-only update must not re-arm the scheduler");
+    }
+
+    @Test
     void updateTaskRequiresName() {
         var result = tool.execute("""
                 {"action":"updateTask","description":"x"}""", agent);

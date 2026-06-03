@@ -568,11 +568,12 @@ public class TaskTool implements ToolRegistry.Tool {
         if (!patch.anyChange()) {
             return "Error: No patchable fields provided in updateTask.";
         }
-        if (patch.scheduleChanged()) {
-            // Re-read the saved task for the reschedule. Need a fresh Tx
-            // because the previous one committed when its lambda returned.
-            var refreshed = services.Tx.run(() -> (Task) Task.findById(taskId));
-            if (refreshed != null) services.TaskSchedulingService.update(refreshed);
+        if (patch.scheduleChanged() && patch.task() != null) {
+            // The Task was loaded, patched, and saved inside the patch Tx; its
+            // EAGER agent relation is initialized so it stays usable after the
+            // Tx closes. Reuse it for the reschedule instead of re-reading in a
+            // second Tx.
+            services.TaskSchedulingService.update(patch.task());
         }
 
         EventLogger.info("TASK_MGMT_UPDATE", agent.name, null,
@@ -580,9 +581,11 @@ public class TaskTool implements ToolRegistry.Tool {
         return "Task '%s' updated.".formatted(name);
     }
 
-    /** Outcome of {@link #applyPatch}: whether anything changed and whether the
-     *  change touched the schedule (so the caller knows to re-arm the run). */
-    private record PatchResult(boolean anyChange, boolean scheduleChanged) {}
+    /** Outcome of {@link #applyPatch}: whether anything changed, whether the
+     *  change touched the schedule (so the caller knows to re-arm the run), and
+     *  the saved {@link Task} (null when the task was gone) so the caller can
+     *  reschedule without a second Tx re-read. */
+    private record PatchResult(boolean anyChange, boolean scheduleChanged, Task task) {}
 
     /**
      * Apply the patch surface to the addressed Task inside the calling Tx.
@@ -591,7 +594,7 @@ public class TaskTool implements ToolRegistry.Tool {
     private static PatchResult applyPatch(JsonObject args, Long taskId,
                                           ScheduleShorthandParser.ScheduleSpec spec) {
         var task = (Task) Task.findById(taskId);
-        if (task == null) return new PatchResult(false, false);
+        if (task == null) return new PatchResult(false, false, null);
         boolean scheduleChanged = false;
         boolean anyChange = false;
 
@@ -610,7 +613,7 @@ public class TaskTool implements ToolRegistry.Tool {
         anyChange |= applyFlagPatches(args, task);
 
         if (anyChange) task.save();
-        return new PatchResult(anyChange, scheduleChanged);
+        return new PatchResult(anyChange, scheduleChanged, task);
     }
 
     /** Copy a parsed ScheduleSpec onto a Task (5 derived fields + nextRunAt). */

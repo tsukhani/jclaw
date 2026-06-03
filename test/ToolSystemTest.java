@@ -1093,6 +1093,45 @@ class ToolSystemTest extends UnitTest {
     }
 
     @Test
+    void editLinesMixedReplaceInsertDeleteSinglePass() throws Exception {
+        // Parity guard for the single-forward-pass apply: replace + insert + delete in one
+        // call, all referencing ORIGINAL line numbers, regardless of request order. Mirrors
+        // the prior bottom-up result.
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-mixed.txt"), "a\nb\nc\nd\ne\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-mixed.txt",
+                 "operations": [
+                   {"op": "delete",  "startLine": 4, "endLine": 4},
+                   {"op": "insert",  "startLine": 1, "content": "TOP"},
+                   {"op": "replace", "startLine": 2, "endLine": 3, "content": "B\\nC"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        // insert before line 1 -> TOP; lines 2-3 replaced with B,C; line 4 deleted; line 5 kept.
+        assertEquals("TOP\na\nB\nC\ne\n", Files.readString(workspace.resolve("lr-mixed.txt")));
+    }
+
+    @Test
+    void editLinesSameLineInsertsKeepRequestOrder() throws Exception {
+        // Two inserts anchored at the same original line must apply in request order.
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-sameline.txt"), "one\ntwo\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-sameline.txt",
+                 "operations": [
+                   {"op": "insert", "startLine": 2, "content": "FIRST"},
+                   {"op": "insert", "startLine": 2, "content": "SECOND"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertEquals("one\nFIRST\nSECOND\ntwo\n",
+                Files.readString(workspace.resolve("lr-sameline.txt")));
+    }
+
+    @Test
     void editLinesPreservesCrlfLineEndings() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         // Windows-authored file: CRLF everywhere.

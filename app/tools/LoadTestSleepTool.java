@@ -4,8 +4,10 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * Load-test fixture tool. Sleeps for a deterministic duration so the
@@ -64,10 +66,21 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
             // Fall back to default on malformed args — harness caller only.
         }
         int clamped = Math.clamp(ms, 0, MAX_MS);
-        try {
-            Thread.sleep(clamped);
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
+        // LockSupport.parkNanos instead of Thread.sleep: this tool runs on a
+        // per-call virtual thread under exactly the concurrency a load test
+        // generates, and JDK 25's Thread.sleep on many concurrent VTs triggers
+        // FJP work-queue starvation (JDK-8373224). parkNanos unmounts the VT
+        // cleanly and is unaffected by that regression. parkNanos can return
+        // spuriously or on interrupt, so loop to the deadline and preserve the
+        // original interrupt semantics (stop early, re-assert the flag).
+        long deadline = System.nanoTime() + Duration.ofMillis(clamped).toNanos();
+        long remaining;
+        while ((remaining = deadline - System.nanoTime()) > 0) {
+            LockSupport.parkNanos(remaining);
+            if (Thread.interrupted()) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
         return "slept " + clamped + "ms";
     }

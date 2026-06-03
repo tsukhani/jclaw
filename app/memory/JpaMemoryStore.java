@@ -55,10 +55,10 @@ public class JpaMemoryStore implements MemoryStore {
 
     @Override
     public List<MemoryEntry> search(String agentId, String query, int limit) {
-        if (vectorEnabled && isPostgreSQL()) {
+        if (vectorEnabled && isPostgres) {
             return hybridSearch(agentId, query, limit);
         }
-        if (isPostgreSQL()) {
+        if (isPostgres) {
             return fullTextSearch(agentId, query, limit);
         }
         return likeSearch(agentId, query, limit);
@@ -253,10 +253,6 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     // --- Helpers ---
-
-    private boolean isPostgreSQL() {
-        return isPostgres;
-    }
 
     private MemoryEntry toEntry(Memory m) {
         return new MemoryEntry(

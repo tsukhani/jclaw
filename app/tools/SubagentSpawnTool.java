@@ -291,6 +291,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (bootstrap.error() != null) return bootstrap.error();
         var childAgentId = bootstrap.childAgentId();
         var childConvId = bootstrap.childConvId();
+        var childAgentName = bootstrap.childAgentName();
 
         // Step 3: insert the SubagentRun audit row (RUNNING + startedAt) in
         // its own short Tx so the row commits and is visible from any thread
@@ -300,7 +301,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 parsed.label());
         var runIdStr = String.valueOf(runId);
         EventLogger.recordSubagentSpawn(
-                parentAgent.name, lookupAgentName(childAgentId),
+                parentAgent.name, childAgentName,
                 runIdStr, parsed.mode(), parsed.context());
 
         // JCLAW-268: surface inherit-mode summarization failure as a SUBAGENT_ERROR
@@ -311,7 +312,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // itself once it finishes.
         if (summary.errorReason() != null) {
             EventLogger.recordSubagentError(
-                    parentAgent.name, lookupAgentName(childAgentId),
+                    parentAgent.name, childAgentName,
                     runIdStr, parsed.mode(), parsed.context(), summary.errorReason());
         }
 
@@ -352,7 +353,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // Step 6: emit the terminal lifecycle event. JCLAW-291: kill path
         // already emitted SUBAGENT_KILL — don't duplicate as SUBAGENT_ERROR.
         if (!runOutcome.killedByOperator()) {
-            emitTerminalEvent(parentAgent.name, childAgentId, runIdStr,
+            emitTerminalEvent(parentAgent.name, childAgentName, runIdStr,
                     parsed.mode(), parsed.context(),
                     runOutcome.terminalStatus(), runOutcome.errorReason());
         }
@@ -701,10 +702,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         });
     }
 
-    private static void emitTerminalEvent(String parentAgentName, Long childAgentId,
+    private static void emitTerminalEvent(String parentAgentName, String childName,
                                            String runIdStr, String mode, String context,
                                            SubagentRun.Status status, String errorReason) {
-        var childName = lookupAgentName(childAgentId);
         switch (status) {
             case COMPLETED -> EventLogger.recordSubagentComplete(
                     parentAgentName, childName, runIdStr, mode, context, "ok");
@@ -719,9 +719,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** Result of bootstrapping the child rows. {@code error} non-null means the
      *  caller should bail and surface the message verbatim. */
-    private record Bootstrap(Long childAgentId, Long childConvId, String error) {
-        static Bootstrap ok(Long agentId, Long convId) { return new Bootstrap(agentId, convId, null); }
-        static Bootstrap fail(String msg) { return new Bootstrap(null, null, msg); }
+    private record Bootstrap(Long childAgentId, Long childConvId, String childAgentName, String error) {
+        static Bootstrap ok(Long agentId, Long convId, String agentName) {
+            return new Bootstrap(agentId, convId, agentName, null);
+        }
+        static Bootstrap fail(String msg) { return new Bootstrap(null, null, null, msg); }
     }
 
     /**
@@ -818,7 +820,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 modelProviderOverride, modelIdOverride,
                 applyInheritGrants ? parentContextSummary : null, inlineMode);
 
-        return Bootstrap.ok(childAgent.id, childConv.id);
+        return Bootstrap.ok(childAgent.id, childConv.id, childAgent.name);
     }
 
     /** {@code error} non-null short-circuits {@link #bootstrapChild}. */
@@ -1178,7 +1180,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var yieldedFlag = postAnnounceAndReadYieldFlag(runId, childConvId, parentConvId,
                 label, outcome);
 
-        emitTerminalEvent(parentAgentName, childAgentId, String.valueOf(runId),
+        emitTerminalEvent(parentAgentName, lookupAgentName(childAgentId), String.valueOf(runId),
                 mode, context, outcome.terminalStatus(), outcome.errorReason());
         EventLogger.flush();
 

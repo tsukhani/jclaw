@@ -974,28 +974,24 @@ public final class Commands {
         var space = indexOfWhitespace(trimmed);
         var head = (space < 0 ? trimmed : trimmed.substring(0, space)).toLowerCase();
         var rest = space < 0 ? "" : trimmed.substring(space + 1).strip();
-        switch (head) {
-            case "list" -> {
-                return new SubagentArgs("list", null, null);
-            }
+        return switch (head) {
+            case "list" -> new SubagentArgs("list", null, null);
             case "info", "log", "kill", "history" -> {
                 if (rest.isEmpty()) {
-                    return new SubagentArgs(head, null,
+                    yield new SubagentArgs(head, null,
                             "Missing run id. Usage: /subagent " + head + " <run-id>");
                 }
                 try {
-                    return new SubagentArgs(head, Long.parseLong(rest), null);
+                    yield new SubagentArgs(head, Long.parseLong(rest), null);
                 } catch (NumberFormatException _) {
-                    return new SubagentArgs(head, null,
+                    yield new SubagentArgs(head, null,
                             "Invalid run id '" + rest + "' — expected a numeric SubagentRun id.");
                 }
             }
-            default -> {
-                return new SubagentArgs(null, null,
-                        "Unknown subcommand '" + head + "'. "
-                                + "Available: list, info <id>, log <id>, kill <id>, history <id>.");
-            }
-        }
+            default -> new SubagentArgs(null, null,
+                    "Unknown subcommand '" + head + "'. "
+                            + "Available: list, info <id>, log <id>, kill <id>, history <id>.");
+        };
     }
 
     /** Build the response text for a parsed {@code /subagent} call. Must run

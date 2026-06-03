@@ -728,39 +728,55 @@ public class FileSystemTools implements ToolRegistry.Tool {
     }
 
     /**
-     * Apply the validated line ops to the mutable line list bottom-up so earlier ops don't
-     * shift line indices referenced by later ones. Ties on startLine break by original array
-     * order (later entries apply first).
+     * Apply the validated line ops in a single forward pass: ops are sorted by their
+     * (original 1-indexed) {@code startLine} so a cursor can walk the source lines once,
+     * copying untouched ranges and splicing in each op's effect into a fresh list. Ops
+     * reference <em>original</em> coordinates (they never see each other's edits), so this
+     * is O(lines + content) rather than the O(ops × lines) array-shifting of repeated
+     * {@code subList().clear()/addAll}. Ties on startLine break by original array order, so
+     * inserts at the same line keep their request order. The result replaces {@code lines}
+     * in place to preserve the caller's reference.
      */
     private static OpCounts applyParsedLineOps(List<LineOp> parsed, List<String> lines) {
-        var indexed = new ArrayList<int[]>();
-        for (int i = 0; i < parsed.size(); i++) indexed.add(new int[]{i});
-        indexed.sort((a, b) -> {
-            int cmp = Integer.compare(parsed.get(b[0]).startLine(), parsed.get(a[0]).startLine());
-            if (cmp != 0) return cmp;
-            return Integer.compare(b[0], a[0]);
-        });
+        var ordered = new ArrayList<>(parsed);
+        // Stable sort by startLine; Collections.sort is stable so equal-startLine ops
+        // retain their original (request) order — matching the prior tie semantics.
+        ordered.sort(java.util.Comparator.comparingInt(LineOp::startLine));
 
+        var merged = new ArrayList<String>(lines.size());
+        int cursor = 0; // 0-indexed position in the original lines not yet emitted
         int replaced = 0;
         int inserted = 0;
         int deleted = 0;
-        for (var entry : indexed) {
-            switch (parsed.get(entry[0])) {
-                case LineOp.Replace(var startLine, var endLine, var content) -> {
-                    lines.subList(startLine - 1, endLine).clear();
-                    lines.addAll(startLine - 1, splitContentLines(content));
+        for (var op : ordered) {
+            int start = op.startLine() - 1; // 0-indexed anchor in original coordinates
+            // Emit the untouched original lines before this op's anchor. Guarded so an
+            // op whose start falls inside an earlier op's consumed range copies nothing.
+            if (start > cursor) {
+                merged.addAll(lines.subList(cursor, start));
+                cursor = start;
+            }
+            switch (op) {
+                case LineOp.Replace(var _, var endLine, var content) -> {
+                    merged.addAll(splitContentLines(content));
+                    cursor = Math.max(cursor, endLine); // skip the replaced original lines
                     replaced++;
                 }
-                case LineOp.Insert(var startLine, var content) -> {
-                    lines.addAll(startLine - 1, splitContentLines(content));
+                case LineOp.Insert(var _, var content) -> {
+                    merged.addAll(splitContentLines(content)); // insert before line `start`
                     inserted++;
                 }
-                case LineOp.Delete(var startLine, var endLine) -> {
-                    lines.subList(startLine - 1, endLine).clear();
+                case LineOp.Delete(var _, var endLine) -> {
+                    cursor = Math.max(cursor, endLine); // skip the deleted original lines
                     deleted++;
                 }
             }
         }
+        if (cursor < lines.size()) {
+            merged.addAll(lines.subList(cursor, lines.size()));
+        }
+        lines.clear();
+        lines.addAll(merged);
         return new OpCounts(replaced, inserted, deleted);
     }
 
