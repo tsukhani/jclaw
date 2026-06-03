@@ -137,4 +137,24 @@ class EventLoggerTest extends UnitTest {
     // process-global shuttingDown flag in a test races any functional test that
     // persists via EventLogger (e.g. ApiLogsControllerTest), making it no-op and
     // flaky. The guard is verified by the live restart -> stop check instead.
+
+    // JCLAW-402: the shutdown path must flush the pending tail before going
+    // file-only, instead of discarding it. flushPendingForShutdown() (the path
+    // markShuttingDown() runs before flipping the flag) is exercised directly so
+    // we never touch the process-global shuttingDown flag — keeping the test
+    // race-free per the JCLAW-334 note above.
+    @Test
+    void flushPendingForShutdownPersistsTail() {
+        EventLogger.record("INFO", "shutdown-tail", "queued but not yet batched", null);
+
+        // Tail is still in memory — below BATCH_SIZE, no boundary flush yet.
+        assertEquals(0, EventLog.findRecent(10).size());
+
+        EventLogger.flushPendingForShutdown();
+
+        var events = EventLog.findRecent(10);
+        assertEquals(1, events.size());
+        assertEquals("shutdown-tail", events.getFirst().category);
+        assertEquals("queued but not yet batched", events.getFirst().message);
+    }
 }

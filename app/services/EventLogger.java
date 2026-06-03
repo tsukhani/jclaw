@@ -49,8 +49,35 @@ public class EventLogger {
      *  compareAndSet keeps the banner to exactly one line even if two hooks
      *  race. */
     public static void markShuttingDown() {
+        // Flush the pending tail to the DB BEFORE flipping the flag: once
+        // shuttingDown is set, both record() and flush() go file-only, so any
+        // events queued by the scheduled @Every("30s") flush window but not yet
+        // batched would otherwise be lost on a clean stop (JCLAW-402). This
+        // bypasses flush()'s shuttingDown early-return via flushPendingForShutdown().
+        flushPendingForShutdown();
         if (shuttingDown.compareAndSet(false, true)) {
             info("shutdown", "Shutting down JClaw");
+        }
+    }
+
+    /**
+     * Drain and persist the pending queue regardless of the shuttingDown flag.
+     * Used by {@link #markShuttingDown()} to write the tail before the
+     * file-only flip; flush() itself early-returns once shuttingDown is set.
+     * Public so the shutdown-tail behavior is unit-testable without flipping
+     * the process-global flag (which would race concurrent tests — see
+     * EventLoggerTest's JCLAW-334 note).
+     */
+    public static void flushPendingForShutdown() {
+        var batch = new ArrayList<EventLog>();
+        EventLog e;
+        while ((e = pending.poll()) != null) batch.add(e);
+        if (batch.isEmpty()) return;
+
+        try {
+            Tx.run(() -> { for (var ev : batch) ev.save(); });
+        } catch (Exception ex) {
+            Logger.warn("Failed to flush %d event logs on shutdown: %s", batch.size(), ex.getMessage());
         }
     }
 
