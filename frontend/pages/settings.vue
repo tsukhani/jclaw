@@ -118,6 +118,7 @@ const MANAGED_PREFIXES = [
   'pricing.', // LiteLLM nightly price-refresh toggle (JCLAW-28 follow-up) — Settings (LLM Providers section)
   'subagent.', // JCLAW-266: subagent recursion caps — Settings (Subagents section)
   'tasks.', // JCLAW-259: task retention TTL — Settings (Tasks section)
+  'tailscale.', // Funnel enable/port (tailscale.funnel.*) — managed on the Channels page
   'jtokkit.', // Token-count safety multipliers — `jtokkit.safetyMultiplier.unmatched`
   // is the operator-tunable global in the Advanced subsection of Chat, and the
   // per-(provider, model) `jtokkit.safetyMultiplier.<provider>.<modelId>`
