@@ -33,6 +33,26 @@ class JpqlFilterTest extends UnitTest {
     }
 
     @Test
+    void notEqOrNullAddsIsNullOrNotEqualPredicate() {
+        var filter = new JpqlFilter().notEqOrNull("payloadType", "reminder");
+        assertEquals("(payloadType IS NULL OR payloadType <> ?1)", filter.toWhereClause());
+        assertArrayEquals(new Object[]{"reminder"}, filter.params());
+    }
+
+    @Test
+    void notEqOrNullSkipsBlankAndIncrementsIndexInChain() {
+        var skipped = new JpqlFilter().notEqOrNull("payloadType", "   ");
+        assertFalse(skipped.hasFilters());
+
+        var chained = new JpqlFilter()
+                .eq("status", "active")
+                .notEqOrNull("payloadType", "reminder");
+        assertEquals("status = ?1 AND (payloadType IS NULL OR payloadType <> ?2)",
+                chained.toWhereClause());
+        assertArrayEquals(new Object[]{"active", "reminder"}, chained.params());
+    }
+
+    @Test
     void multipleClauses() {
         var filter = new JpqlFilter()
                 .eq("status", "active")

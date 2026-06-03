@@ -27,11 +27,7 @@ public final class JpqlFilter {
 
     /** Add an equality predicate if the value is non-null (and non-blank for strings). */
     public JpqlFilter eq(String field, Object value) {
-        if (isPresent(value)) {
-            clauses.add("%s = ?%d".formatted(field, idx++));
-            params.add(value);
-        }
-        return this;
+        return add("%1$s = ?%2$d", field, value);
     }
 
     /**
@@ -46,38 +42,22 @@ public final class JpqlFilter {
      * @return this filter for chaining
      */
     public JpqlFilter notEqOrNull(String field, Object value) {
-        if (isPresent(value)) {
-            clauses.add("(%s IS NULL OR %s <> ?%d)".formatted(field, field, idx++));
-            params.add(value);
-        }
-        return this;
+        return add("(%1$s IS NULL OR %1$s <> ?%2$d)", field, value);
     }
 
     /** Add a LIKE predicate if the value is non-null and non-blank. */
     public JpqlFilter like(String field, String value) {
-        if (isPresent(value)) {
-            clauses.add("%s LIKE ?%d".formatted(field, idx++));
-            params.add(value);
-        }
-        return this;
+        return add("%1$s LIKE ?%2$d", field, value);
     }
 
     /** Add a >= predicate if the value is non-null. */
     public JpqlFilter gte(String field, Object value) {
-        if (isPresent(value)) {
-            clauses.add("%s >= ?%d".formatted(field, idx++));
-            params.add(value);
-        }
-        return this;
+        return add("%1$s >= ?%2$d", field, value);
     }
 
     /** Add a {@code <=} predicate if the value is non-null. */
     public JpqlFilter lte(String field, Object value) {
-        if (isPresent(value)) {
-            clauses.add("%s <= ?%d".formatted(field, idx++));
-            params.add(value);
-        }
-        return this;
+        return add("%1$s <= ?%2$d", field, value);
     }
 
     /** Returns the WHERE clause body (without the "WHERE" keyword), or empty string if no filters. */
@@ -98,6 +78,21 @@ public final class JpqlFilter {
     /** Returns the parameter values as a list. */
     public List<Object> paramList() {
         return List.copyOf(params);
+    }
+
+    /**
+     * Shared predicate skeleton: when {@code value} is present, append the
+     * positional-parameter clause and record the value, consuming one index.
+     * {@code template} uses {@code %1$s} for the field and {@code %2$d} for the
+     * positional index, so multi-field predicates (e.g. {@code IS NULL OR <>})
+     * can reference the field more than once without repeating it as an arg.
+     */
+    private JpqlFilter add(String template, String field, Object value) {
+        if (isPresent(value)) {
+            clauses.add(template.formatted(field, idx++));
+            params.add(value);
+        }
+        return this;
     }
 
     private static boolean isPresent(Object value) {

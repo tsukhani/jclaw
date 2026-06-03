@@ -112,7 +112,15 @@ public final class LatencyStats {
         };
     }
 
-    /** Immutable per-segment snapshot used by {@link #captureResetPoint()}. */
+    /**
+     * Single-use per-segment snapshot used by {@link #captureResetPoint()}. Not
+     * immutable: {@code hdr} is a mutable {@link AtomicHistogram} (a deep copy
+     * taken at capture time via {@link AtomicHistogram#copy()}). It is owned by
+     * the restore closure {@code captureResetPoint} returns — read once during
+     * {@link Histogram#restoreFrom} and never mutated or shared — so the
+     * effective immutability the snapshot relies on holds by single-use, not by
+     * the field type.
+     */
     private record HistogramCopy(AtomicHistogram hdr, long sumMs) {}
 
     private static final class Histogram {

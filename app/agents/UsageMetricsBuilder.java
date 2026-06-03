@@ -1,6 +1,7 @@
 package agents;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import models.Agent;
@@ -98,7 +99,7 @@ public final class UsageMetricsBuilder {
         }
 
         var providerUsage = turnUsage.hasProviderUsage;
-        var usageMap = new com.google.gson.JsonObject();
+        var usageMap = new JsonObject();
         usageMap.addProperty("prompt", providerUsage ? turnUsage.promptTokens : turnUsage.jtokkitPromptTokens);
         usageMap.addProperty("completion", providerUsage ? turnUsage.completionTokens : turnUsage.jtokkitCompletionTokens);
         usageMap.addProperty("total", providerUsage ? turnUsage.totalTokens : turnUsage.jtokkitTotalTokens);
@@ -122,7 +123,7 @@ public final class UsageMetricsBuilder {
      * usage so operators can compare the two. When the provider omits usage,
      * these fields also document where the primary token counts came from.
      */
-    private static void addJtokkitFields(com.google.gson.JsonObject usageMap,
+    private static void addJtokkitFields(JsonObject usageMap,
                                          LlmProvider.TurnUsage turnUsage,
                                          boolean providerUsage) {
         if (!turnUsage.hasJtokkitUsage) return;
@@ -156,7 +157,7 @@ public final class UsageMetricsBuilder {
     }
 
     /** Append non-negative pricing fields and the context window when {@code modelInfo} is present. */
-    private static void addModelInfoFields(com.google.gson.JsonObject usageMap, ModelInfo modelInfo) {
+    private static void addModelInfoFields(JsonObject usageMap, ModelInfo modelInfo) {
         if (modelInfo == null) return;
         if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());
         if (modelInfo.completionPrice() >= 0) usageMap.addProperty("completionPrice", modelInfo.completionPrice());
@@ -173,7 +174,7 @@ public final class UsageMetricsBuilder {
      * the identity of the model that actually ran the turn, which
      * is what cost attribution needs.
      */
-    private static void addResolvedModelIdentity(com.google.gson.JsonObject usageMap, Agent agent, Conversation conversation) {
+    private static void addResolvedModelIdentity(JsonObject usageMap, Agent agent, Conversation conversation) {
         var resolvedProvider = ModelResolver.effectiveModelProvider(agent, conversation);
         var resolvedModelId = ModelResolver.effectiveModelId(agent, conversation);
         if (resolvedProvider != null) usageMap.addProperty("modelProvider", resolvedProvider);
