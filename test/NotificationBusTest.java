@@ -175,4 +175,59 @@ class NotificationBusTest extends UnitTest {
         assertTrue(publishElapsed < NotificationBus.LISTENER_TIMEOUT_MS + 1_000L,
                 "publish() should not block past the per-listener timeout (elapsed=" + publishElapsed + "ms)");
     }
+
+    // --- concurrent fan-out: many slow listeners do NOT serialize the publisher ---
+
+    @Test
+    void manySlowListenersDoNotSerializeThePublisher() throws Exception {
+        int before = NotificationBus.listenerCount();
+
+        // One healthy listener that records the event — must still be delivered.
+        var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        subscribe(received::add);
+
+        // Several listeners that each stall well past the per-listener timeout. On a
+        // fixed 2-thread pool with a fresh per-future budget the publisher would block
+        // for roughly ceil(N/2) x LISTENER_TIMEOUT_MS; with concurrent dispatch and a
+        // single shared deadline it must stay bounded to ~one cap no matter how many.
+        int slowCount = 6;
+        var allEntered = new java.util.concurrent.CountDownLatch(slowCount);
+        for (int i = 0; i < slowCount; i++) {
+            subscribe(msg -> {
+                allEntered.countDown();
+                try {
+                    Thread.sleep(NotificationBus.LISTENER_TIMEOUT_MS + 5_000L);
+                } catch (InterruptedException _) {
+                    // Future.cancel(true) interrupts us — expected.
+                    Thread.currentThread().interrupt();
+                }
+            });
+        }
+
+        assertEquals(before + 1 + slowCount, NotificationBus.listenerCount(),
+                "All listeners should be subscribed before publish");
+
+        var publishStart = System.currentTimeMillis();
+        NotificationBus.publish("concurrent.test", Map.of("k", "v"));
+        var publishElapsed = System.currentTimeMillis() - publishStart;
+
+        // Healthy listener was delivered to despite the crowd of slow ones.
+        assertEquals(1, received.size(), "Healthy listener should have received the event");
+        assertTrue(received.getFirst().contains("concurrent.test"));
+
+        // Every slow listener was actually dispatched concurrently (not queued behind a
+        // small worker count): all entered their bodies.
+        assertTrue(allEntered.await(NotificationBus.LISTENER_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS),
+                "All slow listeners should have been dispatched concurrently");
+
+        // Crucially: total publish time stayed near ONE per-listener cap, not the sum.
+        // ceil(6/2) x 3s = 9s would be the old worst case; we assert well under 2 caps.
+        assertTrue(publishElapsed < (2L * NotificationBus.LISTENER_TIMEOUT_MS),
+                "publish() must not serialize behind slow listeners (elapsed=" + publishElapsed
+                        + "ms, " + slowCount + " slow listeners)");
+
+        // All slow listeners timed out and were removed; the healthy one remains.
+        assertEquals(before + 1, NotificationBus.listenerCount(),
+                "All slow listeners should have been removed after exceeding the timeout");
+    }
 }
