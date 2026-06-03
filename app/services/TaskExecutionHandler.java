@@ -197,17 +197,47 @@ public final class TaskExecutionHandler {
         for (int i = 0; i < FIND_TASK_ATTEMPTS; i++) {
             Task t = Tx.run(() -> (Task) Task.findById(taskId));
             if (t != null) return t;
-            // Skip the sleep after the last attempt; we've done all we can.
-            if (i < FIND_TASK_ATTEMPTS - 1) {
-                try {
-                    Thread.sleep(FIND_TASK_BACKOFF_MS);
-                } catch (InterruptedException _) {
-                    Thread.currentThread().interrupt();
-                    return null;
-                }
+            // Skip the wait after the last attempt; we've done all we can.
+            if (i < FIND_TASK_ATTEMPTS - 1 && !backoffWait()) {
+                return null;
             }
         }
         return null;
+    }
+
+    /**
+     * Off-carrier backoff wait of {@link #FIND_TASK_BACKOFF_MS} ms.
+     *
+     * <p>This runs inside the db-scheduler {@code .execute()} body on a
+     * virtual thread, and a burst of newly-scheduled tasks firing
+     * near-simultaneously (the exact INSERT/poll race the retry guards)
+     * parks many VTs here at once. {@link Thread#sleep} would route those
+     * waits through the ForkJoinPool delay-scheduler queue and trip
+     * JDK-8373224's work-queue starvation (multi-second tail latency).
+     * {@link java.util.concurrent.locks.LockSupport#parkNanos} unmounts
+     * the carrier the same way but does NOT use that timer path, so it is
+     * unaffected by the regression — the same reasoning LoadTestHarness
+     * relies on for its untimed park.
+     *
+     * <p>Loops against an absolute deadline because {@code parkNanos} may
+     * return early on a spurious wakeup; this preserves the full
+     * {@link #FIND_TASK_BACKOFF_MS}-ms budget between attempts unchanged.
+     * Returns {@code false} if the thread was interrupted (mirroring the
+     * prior {@code Thread.sleep} catch: re-assert the interrupt and let
+     * the caller bail to {@code null}).
+     */
+    private static boolean backoffWait() {
+        long deadlineNanos = System.nanoTime()
+                + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(FIND_TASK_BACKOFF_MS);
+        long remaining;
+        while ((remaining = deadlineNanos - System.nanoTime()) > 0) {
+            java.util.concurrent.locks.LockSupport.parkNanos(remaining);
+            if (Thread.interrupted()) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

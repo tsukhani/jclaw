@@ -471,6 +471,86 @@ class TaskExecutionHandlerTest extends UnitTest {
         assertEquals(taskId, found.id);
     }
 
+    @Test
+    void concurrentRaceBackoffsAllResolveWhenRowsCommitMidRetry() throws Exception {
+        // JCLAW-401: the backoff wait runs on the db-scheduler's virtual
+        // thread, and the failure mode it guards (an INSERT/poll race)
+        // is precisely the burst case — many newly-scheduled tasks firing
+        // near-simultaneously, each parking in the backoff at once. That
+        // is the JDK-8373224 many-VTs-in-Thread.sleep starvation scenario.
+        // After the off-carrier LockSupport.parkNanos fix, a fleet of
+        // concurrent backoff loops must each still resolve once their row
+        // commits mid-retry — no fire is starved into the missing-Task
+        // skip path. We assert the eventual resolution, not the timing.
+        int fleet = 24;
+        var agent = createAgent("race-fleet-agent");
+        commitAndReopen();
+        var agentId = agent.id;
+
+        // Stage `fleet` Tasks in one Tx, hold it open ~30ms so every
+        // finder's first attempt misses (rows uncommitted), then commit so
+        // a later attempt sees them. Mirrors the production single-Tx
+        // INSERT-then-commit the poll thread races against.
+        var ids = new java.util.concurrent.CopyOnWriteArrayList<Long>();
+        var rowsStaged = new java.util.concurrent.CountDownLatch(1);
+        var inserter = Thread.ofVirtual().start(() -> services.Tx.run(() -> {
+            for (int i = 0; i < fleet; i++) {
+                var t = new Task();
+                t.agent = (Agent) Agent.findById(agentId);
+                t.name = "fleet-" + i;
+                t.description = "irrelevant";
+                t.type = Task.Type.IMMEDIATE;
+                t.status = Task.Status.PENDING;
+                t.nextRunAt = Instant.now();
+                t.createdAt = Instant.now();
+                t.updatedAt = Instant.now();
+                t.save();
+                play.db.jpa.JPA.em().flush();
+                ids.add(t.id);
+            }
+            rowsStaged.countDown();
+            // Hold the Tx open so the finders' first attempts miss, then
+            // let the commit make the rows visible mid-retry.
+            try {
+                Thread.sleep(30);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        }));
+
+        assertTrue(rowsStaged.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                "inserter must stage all fleet rows within 5s");
+
+        var m = invokeFindWithBackoff();
+        var firstError = new AtomicReference<Throwable>();
+        var resolved = new java.util.concurrent.atomic.AtomicInteger();
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var finishers = new ArrayList<Thread>(fleet);
+        for (long id : ids) {
+            finishers.add(Thread.ofVirtual().start(() -> {
+                try {
+                    start.await();
+                    Task t = (Task) m.invoke(null, id);
+                    if (t != null && id == t.id) resolved.incrementAndGet();
+                } catch (Throwable ex) {
+                    firstError.compareAndSet(null, ex);
+                }
+            }));
+        }
+        // Release the whole fleet at once so they all park in the backoff
+        // concurrently — the burst the fix is about.
+        start.countDown();
+        for (var f : finishers) f.join(15_000);
+        inserter.join(15_000);
+
+        if (firstError.get() != null) throw new RuntimeException(firstError.get());
+        assertEquals(fleet, resolved.get(),
+                "every concurrent race-backoff must resolve its row once the "
+                        + "inserter's Tx commits mid-retry — a starved/early-bailed "
+                        + "finder would leave resolved < fleet");
+    }
+
     private static java.lang.reflect.Method invokeFindWithBackoff() throws Exception {
         var m = TaskExecutionHandler.class.getDeclaredMethod(
                 "findTaskWithRaceBackoff", long.class);
