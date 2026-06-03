@@ -1,12 +1,9 @@
 package jobs;
 
-import play.Logger;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
-import services.ConfigService;
 import services.OllamaLocalProbe;
-import services.Tx;
 
 /**
  * JCLAW-178: probe the configured local Ollama instance once at boot. Logs
@@ -33,26 +30,13 @@ public class OllamaLocalProbeJob extends Job<Void> {
         // for external-state flakiness (Ollama busy/slow → slow boot).
         // Mirrors the test-mode skip in DbSchedulerBootstrapJob.
         if (play.Play.runningInTestMode()) return;
-        // Read config in its own short tx so the JPA carrier is released
-        // before the HTTP probe call — the response timeout is several
-        // seconds and we don't want the boot-time tx held open across a
-        // network round trip.
-        var baseUrl = Tx.run(() -> ConfigService.get("provider.ollama-local.baseUrl"));
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return;
-        }
-        var r = OllamaLocalProbe.probe(baseUrl);
-        if (r.available()) {
-            Logger.info("ollama-local: reachable at %s — %d model%s available",
-                    baseUrl, r.modelCount(), r.modelCount() == 1 ? "" : "s");
-        } else if (r.connectionRefused()) {
-            Logger.debug("ollama-local: %s", r.reason());
-        } else {
-            Logger.warn("ollama-local: %s. Agents bound to ollama-local will fail to send messages. "
-                    + "Install Ollama with: brew install ollama (macOS), "
-                    + "curl https://ollama.com/install.sh | sh (Linux), or download "
-                    + "the Windows installer from ollama.com.",
-                    r.reason());
-        }
+        ProbeJobs.run("ollama-local", "provider.ollama-local.baseUrl",
+                "Install Ollama with: brew install ollama (macOS), "
+                        + "curl https://ollama.com/install.sh | sh (Linux), or download "
+                        + "the Windows installer from ollama.com.",
+                baseUrl -> {
+                    var r = OllamaLocalProbe.probe(baseUrl);
+                    return new ProbeJobs.Outcome(r.available(), r.modelCount(), r.reason(), r.connectionRefused());
+                });
     }
 }

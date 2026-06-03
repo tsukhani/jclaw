@@ -14,11 +14,14 @@ import services.scanners.ScannerRegistry;
  * Seeds default runtime configuration and default agent on first startup.
  * Only writes values that don't already exist.
  *
- * <p>Runs FIRST among {@code @OnApplicationStart} jobs ({@code priority = -100};
- * play1 1.13.27+ runs startup jobs in ascending priority order). Config is the
- * boot foundation: {@code ToolRegistrationJob}, the Ollama/LM-Studio probes, and
- * {@code TelegramStreamingRecoveryJob} all read config at startup, so seeding it
- * before they run makes those previously-implicit ordering dependencies explicit.
+ * <p>Runs near-FIRST among {@code @OnApplicationStart} jobs ({@code priority =
+ * -100}; play1 1.13.27+ runs startup jobs in ascending priority order). Config
+ * is the boot foundation: {@code ToolRegistrationJob}, the Ollama/LM-Studio
+ * probes, and {@code TelegramStreamingRecoveryJob} all read config at startup,
+ * so seeding it before they run makes those previously-implicit ordering
+ * dependencies explicit. Raw-DDL schema migration is handled separately by
+ * {@link SchemaMigrationJob} (priority {@code -200}), which runs strictly
+ * before this job so the columns those readers touch already exist.
  */
 @OnApplicationStart(priority = -100)
 public class DefaultConfigJob extends Job<Void> {
@@ -28,7 +31,6 @@ public class DefaultConfigJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        applySchemaAdditions();
         seedProviders();
         seedToolConfig();
         seedDefaultAgent();
@@ -78,60 +80,6 @@ public class DefaultConfigJob extends Job<Void> {
         int defaultMax = 2 * defaultPerHost;
         seedIfAbsent("dispatcher.llm.maxRequestsPerHost", String.valueOf(defaultPerHost));
         seedIfAbsent("dispatcher.llm.maxRequests", String.valueOf(defaultMax));
-    }
-
-    /**
-     * Add columns and tables introduced in this release that Hibernate's
-     * {@code jpa.ddl=update} wouldn't patch onto a hot-reloaded dev server
-     * (DDL only runs at SessionFactory init, not on class reload). Uses
-     * the idempotent {@code IF NOT EXISTS} form so a server that's already
-     * in the right state does nothing.
-     */
-    private void applySchemaAdditions() {
-        try (var conn = play.db.DB.getDataSource("default").getConnection();
-             var stmt = conn.createStatement()) {
-            stmt.execute("ALTER TABLE message ADD COLUMN IF NOT EXISTS reasoning TEXT");
-            // JCLAW-95: Telegram streaming checkpoint. Non-null rows indicate
-            // a placeholder message left dangling by a prior JVM crash — the
-            // recovery job edits them on startup.
-            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS active_stream_message_id INT");
-            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS active_stream_chat_id VARCHAR(255)");
-            // JCLAW-26: /reset watermark. Messages older than this timestamp
-            // are excluded from the LLM context window. Null = no reset has
-            // occurred, full history is eligible.
-            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS context_since TIMESTAMP");
-            // JCLAW-38: session-compaction watermark. Messages older than
-            // this timestamp have been summarized into a session_compaction
-            // row; loadRecentMessages skips them on subsequent turns. Null
-            // = conversation has never been compacted. Independent of
-            // context_since so /reset and compaction compose cleanly.
-            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS compaction_since TIMESTAMP");
-            // JCLAW-38: session_compaction history table. The current
-            // summary for a conversation is the most recent row by
-            // compacted_at. Older rows are retained as an audit trail of
-            // how the conversation was progressively summarized.
-            stmt.execute("""
-                    CREATE TABLE IF NOT EXISTS session_compaction (
-                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        conversation_id BIGINT NOT NULL,
-                        turn_count INT NOT NULL,
-                        summary_tokens INT NOT NULL,
-                        model VARCHAR(255) NOT NULL,
-                        summary CLOB NOT NULL,
-                        compacted_at TIMESTAMP NOT NULL,
-                        created_at TIMESTAMP NOT NULL,
-                        CONSTRAINT fk_session_compaction_conversation
-                            FOREIGN KEY (conversation_id) REFERENCES conversation(id) ON DELETE CASCADE
-                    )""");
-            stmt.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_session_compaction_conversation
-                        ON session_compaction(conversation_id)""");
-            stmt.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_session_compaction_conv_compacted_at
-                        ON session_compaction(conversation_id, compacted_at)""");
-        } catch (Exception e) {
-            play.Logger.warn("Schema migration: %s", e.getMessage());
-        }
     }
 
     private void seedProviders() {

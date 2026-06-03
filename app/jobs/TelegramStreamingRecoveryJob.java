@@ -10,6 +10,8 @@ import services.EventLogger;
 import services.Tx;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * JCLAW-95: finalize Telegram streaming placeholders left orphaned by a JVM
@@ -61,9 +63,16 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         EventLogger.info(EVENT_CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                 "Recovery: %d orphaned streaming placeholder(s) found".formatted(orphans.size()));
 
+        // Fetch all enabled bindings once (agent_id is unique → at most one
+        // binding per agent) instead of a per-orphan findByAgent lookup. A
+        // disabled binding is simply absent here, which the per-orphan check
+        // below treats the same as before (no enabled binding → skip).
+        Map<Long, String> tokensByAgentId = Tx.run(() -> TelegramBinding.findAllEnabled().stream()
+                .collect(Collectors.toMap(b -> b.agent.id, b -> b.botToken, (first, dup) -> first)));
+
         for (var orphan : orphans) {
             try {
-                recoverOne(orphan);
+                recoverOne(orphan, tokensByAgentId);
             } catch (Exception e) {
                 // Per-row failures must not stop the batch. Most commonly the
                 // user deleted the chat / message and Telegram 400s us.
@@ -75,7 +84,8 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         }
     }
 
-    private static void recoverOne(Conversation orphan) throws TelegramApiException {
+    private static void recoverOne(Conversation orphan, Map<Long, String> tokensByAgentId)
+            throws TelegramApiException {
         // Clear the checkpoint first in a separate transaction. If the
         // editMessageText below fails, we still want the column cleared so
         // the next boot doesn't re-try indefinitely on a placeholder
@@ -96,19 +106,20 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
 
         if (messageId == null || chatId == null || agent == null) return;
 
-        // Look up the binding to get the bot token. Disabled bindings are
-        // skipped — the placeholder stays visible but we can't edit it
-        // without a live token, and re-enabling the binding later won't
-        // help (messageId is long gone).
-        var binding = Tx.run(() -> TelegramBinding.findByAgent(agent));
-        if (binding == null || !binding.enabled) {
+        // Resolve the bot token from the pre-fetched enabled-binding map.
+        // A missing entry means the agent has no enabled binding — the
+        // placeholder stays visible but we can't edit it without a live
+        // token, and re-enabling the binding later won't help (messageId is
+        // long gone).
+        var botToken = tokensByAgentId.get(agent.id);
+        if (botToken == null) {
             EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                     "Recovery: skipping orphan for conversation %d — no enabled binding"
                             .formatted(convId));
             return;
         }
 
-        TelegramChannel.editMessageText(binding.botToken, chatId, messageId, INTERRUPT_NOTE);
+        TelegramChannel.editMessageText(botToken, chatId, messageId, INTERRUPT_NOTE);
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                 "Recovery: interrupted-note written to orphan messageId=%d for conversation %d"

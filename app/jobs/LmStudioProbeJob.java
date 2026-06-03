@@ -1,12 +1,9 @@
 package jobs;
 
-import play.Logger;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
-import services.ConfigService;
 import services.LmStudioProbe;
-import services.Tx;
 
 /**
  * JCLAW-182: probe the configured LM Studio instance once at boot. Same shape
@@ -26,21 +23,12 @@ public class LmStudioProbeJob extends Job<Void> {
         // autotest (which points providers at 127.0.0.1 mock servers),
         // and creates a path for external-state flakiness.
         if (play.Play.runningInTestMode()) return;
-        var baseUrl = Tx.run(() -> ConfigService.get("provider.lm-studio.baseUrl"));
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return;
-        }
-        var r = LmStudioProbe.probe(baseUrl);
-        if (r.available()) {
-            Logger.info("lm-studio: reachable at %s — %d model%s available",
-                    baseUrl, r.modelCount(), r.modelCount() == 1 ? "" : "s");
-        } else if (r.connectionRefused()) {
-            Logger.debug("lm-studio: %s", r.reason());
-        } else {
-            Logger.warn("lm-studio: %s. Agents bound to lm-studio will fail to send messages. "
-                    + "Download LM Studio from https://lmstudio.ai, load a model in the My Models "
-                    + "tab, then start the local server from the Server tab (default port 1234).",
-                    r.reason());
-        }
+        ProbeJobs.run("lm-studio", "provider.lm-studio.baseUrl",
+                "Download LM Studio from https://lmstudio.ai, load a model in the My Models "
+                        + "tab, then start the local server from the Server tab (default port 1234).",
+                baseUrl -> {
+                    var r = LmStudioProbe.probe(baseUrl);
+                    return new ProbeJobs.Outcome(r.available(), r.modelCount(), r.reason(), r.connectionRefused());
+                });
     }
 }

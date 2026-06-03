@@ -44,6 +44,21 @@ class BootOrderingTest extends UnitTest {
     }
 
     @Test
+    void schemaMigrationRunsBeforeConfigAndItsColumnReaders() {
+        int schema = priority(jobs.SchemaMigrationJob.class);
+        // Strictly before DefaultConfigJob (-100): the raw-DDL additions must
+        // land before any startup job touches the new columns/tables.
+        assertTrue(schema < priority(jobs.DefaultConfigJob.class),
+                "SchemaMigrationJob must run before DefaultConfigJob");
+        // TelegramStreamingRecoveryJob scans conversation.active_stream_message_id,
+        // one of the columns this migration adds.
+        assertTrue(schema < priority(jobs.TelegramStreamingRecoveryJob.class),
+                "SchemaMigrationJob must run before TelegramStreamingRecoveryJob reads active_stream_message_id");
+        assertTrue(isSync(jobs.SchemaMigrationJob.class),
+                "SchemaMigrationJob must be synchronous so its DDL completes before later jobs");
+    }
+
+    @Test
     void orderedBootJobsAreSynchronous() {
         // Async jobs are only *submitted* in priority order; the before/after
         // guarantee these orderings depend on requires the jobs to be synchronous.
