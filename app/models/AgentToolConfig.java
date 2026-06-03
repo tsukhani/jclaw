@@ -3,7 +3,6 @@ package models;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
-import play.db.jpa.Model;
 
 /**
  * Tracks which tools are enabled for each agent.
@@ -17,17 +16,10 @@ import play.db.jpa.Model;
 // JCLAW-205: Hibernate L2 cache via Caffeine. Per-agent tool overrides
 // are read on every chat turn to compute the disabled-tool set.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
-public class AgentToolConfig extends Model {
-
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "agent_id", nullable = false)
-    public Agent agent;
+public class AgentToolConfig extends AgentFeatureConfig {
 
     @Column(name = "tool_name", nullable = false)
     public String toolName;
-
-    @Column(nullable = false)
-    public boolean enabled = true;
 
     public static java.util.List<AgentToolConfig> findByAgent(Agent agent) {
         return AgentToolConfig.find("agent = ?1", agent).fetch();

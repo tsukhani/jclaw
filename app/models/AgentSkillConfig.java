@@ -3,7 +3,6 @@ package models;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
-import play.db.jpa.Model;
 
 import java.util.List;
 
@@ -20,17 +19,10 @@ import java.util.List;
 // are read on every chat turn (SkillLoader uses these to filter the
 // on-disk skill scan).
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
-public class AgentSkillConfig extends Model {
-
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "agent_id", nullable = false)
-    public Agent agent;
+public class AgentSkillConfig extends AgentFeatureConfig {
 
     @Column(name = "skill_name", nullable = false)
     public String skillName;
-
-    @Column(nullable = false)
-    public boolean enabled = true;
 
     public static List<AgentSkillConfig> findByAgent(Agent agent) {
         return AgentSkillConfig.find("agent = ?1", agent).fetch();
