@@ -139,6 +139,65 @@ class JClawApiToolTest extends UnitTest {
                 "/api/agents should clear the path-prefix check; got: " + result);
     }
 
+    // ============ allowlist enforcement on call (default-deny) ============
+
+    @Test
+    void callRejectsUnannotatedEndpoint() {
+        // /api/status is a real route but not @ChatSafe. Previously callable
+        // (only the blocklist gated `call`); now refused by the allowlist.
+        var result = tool.execute(
+                "{\"method\":\"GET\",\"path\":\"/api/status\"}", null);
+        assertTrue(result.contains("is not a chat-safe endpoint"),
+                "unannotated endpoint must be denied; got: " + result);
+    }
+
+    @Test
+    void callRejectsUnannotatedVerbOnAnnotatedPath() {
+        // GET /api/config/{key} is @ChatSafe, but DELETE on the same path
+        // (delete) is not — the allowlist is verb-specific.
+        var result = tool.execute(
+                "{\"method\":\"DELETE\",\"path\":\"/api/config/some-key\"}", null);
+        assertTrue(result.contains("is not a chat-safe endpoint"),
+                "unannotated verb must be denied even on an annotated path; got: " + result);
+    }
+
+    @Test
+    void isChatSafeCallMatchesAnnotatedConcretePath() {
+        // Concrete paths resolve against the route patterns
+        // (/api/providers/{name}/models, /api/agents).
+        assertTrue(JClawApiTool.isChatSafeCall("GET", "/api/providers/openrouter/models"),
+                "GET providers/{name}/models is @ChatSafe");
+        assertTrue(JClawApiTool.isChatSafeCall("GET", "/api/agents"),
+                "GET agents is @ChatSafe");
+    }
+
+    @Test
+    void providerModelMutationsAreChatSafe() {
+        // Both provider model-management endpoints are @ChatSafe so the agent
+        // can discover a catalog and add a model through chat.
+        assertTrue(JClawApiTool.isChatSafeCall("POST", "/api/providers/openrouter/models"),
+                "addModel must be @ChatSafe");
+        assertTrue(JClawApiTool.isChatSafeCall("POST", "/api/providers/openrouter/discover-models"),
+                "discoverModels must be @ChatSafe");
+    }
+
+    @Test
+    void isChatSafeCallRejectsUnannotatedAndWrongVerb() {
+        assertFalse(JClawApiTool.isChatSafeCall("GET", "/api/status"),
+                "unannotated route must not be allowlisted");
+        assertFalse(JClawApiTool.isChatSafeCall("POST", "/api/providers/refresh-prices"),
+                "refreshPrices (POST) is not @ChatSafe");
+        assertFalse(JClawApiTool.isChatSafeCall("DELETE", "/api/agents/5"),
+                "delete agent is not @ChatSafe");
+    }
+
+    @Test
+    void isChatSafeCallIgnoresQueryString() {
+        // A query string in the path must not defeat the pattern match.
+        assertTrue(JClawApiTool.isChatSafeCall("GET", "/api/config?foo=bar"),
+                "query string should be stripped before matching");
+    }
+
     // ==================== discover (JCLAW-329) ====================
 
     @Test

@@ -34,6 +34,7 @@ class ApiProvidersControllerTest extends FunctionalTest {
         // behind that would leak into the next test's view.
         ConfigService.delete("provider.test-provider.baseUrl");
         ConfigService.delete("provider.test-provider.apiKey");
+        ConfigService.delete("provider.test-provider.models");
         ConfigService.clearCache();
     }
 
@@ -124,6 +125,124 @@ class ApiProvidersControllerTest extends FunctionalTest {
         var body = getContent(resp);
         assertTrue(body.contains("\"openrouter\""),
                 "seeded provider must appear in listing: " + body);
+    }
+
+    // --- models (GET) + addModel (POST) ---
+
+    /** Mark test-provider configured so the {name} guard passes. */
+    private void configureProvider() {
+        ConfigService.set("provider.test-provider.baseUrl", "https://example.invalid/v1");
+        ConfigService.set("provider.test-provider.apiKey", "sk-test");
+    }
+
+    @Test
+    void modelsRequiresAuth() {
+        assertEquals(401, GET("/api/providers/test-provider/models").status.intValue());
+    }
+
+    @Test
+    void addModelRequiresAuth() {
+        var resp = POST("/api/providers/test-provider/models",
+                "application/json", "{\"id\":\"gpt-x\"}");
+        assertEquals(401, resp.status.intValue());
+    }
+
+    @Test
+    void modelsReturns404WhenProviderNotConfigured() {
+        login();
+        assertEquals(404, GET("/api/providers/test-provider/models").status.intValue());
+    }
+
+    @Test
+    void addModelReturns404WhenProviderNotConfigured() {
+        login();
+        var resp = POST("/api/providers/test-provider/models",
+                "application/json", "{\"id\":\"gpt-x\"}");
+        assertEquals(404, resp.status.intValue());
+    }
+
+    @Test
+    void modelsReturnsEmptyForConfiguredProviderWithNoModels() {
+        login();
+        configureProvider();
+        var resp = GET("/api/providers/test-provider/models");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"count\":0"), "expected count 0: " + body);
+        assertTrue(body.contains("\"models\":[]"), "expected empty models: " + body);
+    }
+
+    @Test
+    void addModelThenModelsListsIt() {
+        login();
+        configureProvider();
+
+        var add = POST("/api/providers/test-provider/models",
+                "application/json",
+                "{\"id\":\"vendor/gpt-x\",\"name\":\"GPT X\"}");
+        assertIsOk(add);
+        var addBody = getContent(add);
+        assertTrue(addBody.contains("\"vendor/gpt-x\""), "add response missing id: " + addBody);
+        assertTrue(addBody.contains("\"count\":1"), "add response missing count: " + addBody);
+
+        var list = GET("/api/providers/test-provider/models");
+        assertIsOk(list);
+        var listBody = getContent(list);
+        assertTrue(listBody.contains("\"id\":\"vendor/gpt-x\""), "list missing id: " + listBody);
+        assertTrue(listBody.contains("\"name\":\"GPT X\""), "list missing name: " + listBody);
+    }
+
+    @Test
+    void addModelDerivesNameFromIdWhenOmitted() {
+        login();
+        configureProvider();
+
+        var add = POST("/api/providers/test-provider/models",
+                "application/json", "{\"id\":\"vendor/gpt-x\"}");
+        assertIsOk(add);
+        // name defaults to the last path segment of the id.
+        assertTrue(getContent(add).contains("\"name\":\"gpt-x\""),
+                "expected derived name 'gpt-x': " + getContent(add));
+    }
+
+    @Test
+    void addModelReturns400WhenIdMissing() {
+        login();
+        configureProvider();
+        var resp = POST("/api/providers/test-provider/models",
+                "application/json", "{\"name\":\"no id here\"}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void addModelReturns409OnDuplicateId() {
+        login();
+        configureProvider();
+        ConfigService.set("provider.test-provider.models",
+                "[{\"id\":\"gpt-x\",\"name\":\"GPT X\"}]");
+
+        var resp = POST("/api/providers/test-provider/models",
+                "application/json", "{\"id\":\"gpt-x\"}");
+        assertEquals(409, resp.status.intValue());
+    }
+
+    @Test
+    void addModelPersistsOptionalFieldsAndStripsUnsetPrices() {
+        login();
+        configureProvider();
+
+        var add = POST("/api/providers/test-provider/models",
+                "application/json",
+                "{\"id\":\"gpt-x\",\"contextWindow\":128000,\"supportsVision\":true,\"promptPrice\":1.5}");
+        assertIsOk(add);
+
+        // Verify the persisted JSON: contextWindow + supportsVision + the one set
+        // price are present; the three unset prices are omitted entirely.
+        var saved = ConfigService.get("provider.test-provider.models");
+        assertTrue(saved.contains("\"contextWindow\":128000"), "missing contextWindow: " + saved);
+        assertTrue(saved.contains("\"supportsVision\":true"), "missing supportsVision: " + saved);
+        assertTrue(saved.contains("\"promptPrice\":1.5"), "missing promptPrice: " + saved);
+        assertFalse(saved.contains("completionPrice"), "unset price should be stripped: " + saved);
     }
 
     // --- refreshPrices ---

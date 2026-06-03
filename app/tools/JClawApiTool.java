@@ -46,13 +46,19 @@ import java.util.Map;
  * to the token-CRUD or password-reset routes — the {@link #PATH_BLOCKLIST}
  * below catches the rest defensively before the request is even made.
  *
- * <p><b>Why a blocklist alongside a curated SKILL.md.</b> The SKILL.md
- * tells the model which endpoints to use; this blocklist refuses the
- * dangerous ones at the tool layer regardless of what the model tries.
- * Belt and suspenders against prompt-injection or model error: chat-send
- * endpoints (recursion risk), auth endpoints (privilege escalation),
- * token CRUD (lockout risk), webhooks (verified by callers, not by us),
- * and SSE endpoints (this tool buffers full responses).
+ * <p><b>Default-deny allowlist + blocklist deny-floor.</b> Invocation is
+ * gated by two independent layers. The primary gate is an <em>allowlist</em>:
+ * {@code call} only invokes endpoints whose route is annotated
+ * {@link controllers.ChatSafe} — the same set {@link #discover} advertises —
+ * so a path that exists but carries no marker is refused even though nothing
+ * blocklists it (see {@link #isChatSafeCall}). On top of that, the
+ * {@link #PATH_BLOCKLIST} is an unconditional <em>deny-floor</em> applied
+ * first: belt-and-suspenders against prompt-injection or a mis-annotation,
+ * refusing chat-send endpoints (recursion risk), auth endpoints (privilege
+ * escalation), token CRUD (lockout risk), webhooks (verified by callers, not
+ * by us), and SSE endpoints (this tool buffers full responses) regardless of
+ * any marker. The SKILL.md steers the model toward useful endpoints in prose,
+ * but the security boundary is these two code-enforced layers, not the prose.
  */
 public class JClawApiTool implements ToolRegistry.Tool {
 
@@ -174,6 +180,15 @@ public class JClawApiTool implements ToolRegistry.Tool {
                         + "See the jclaw-api SKILL.md for the allowed endpoint catalog.";
             }
         }
+        // Allowlist enforcement (default-deny): only endpoints whose route is
+        // annotated @ChatSafe may be invoked — the same set `discover` lists.
+        // The PATH_BLOCKLIST above is an independent deny-floor that runs first,
+        // so a path that were ever both annotated and blocklisted stays blocked.
+        if (!isChatSafeCall(method, path)) {
+            return "Error: %s %s is not a chat-safe endpoint and cannot be invoked through jclaw_api. "
+                    .formatted(method, path)
+                    + "Use action=\"discover\" to list the callable endpoints.";
+        }
 
         var url = buildUrl(path, args);
         if (url == null) {
@@ -289,6 +304,36 @@ public class JClawApiTool implements ToolRegistry.Tool {
                 + ". Invoke one by calling this tool with method + path (and body for mutating verbs); "
                 + "never call an endpoint that is not listed here.\n\n"
                 + String.join("\n", entries);
+    }
+
+    /**
+     * Allowlist gate for {@code action="call"}: returns {@code true} only when a
+     * route matching {@code method} + the concrete {@code path} resolves to a
+     * {@link ChatSafe}-annotated action — i.e. the very set {@link #discover}
+     * advertises. This makes invocation default-deny: an endpoint that exists but
+     * carries no marker cannot be called even though it isn't blocklisted.
+     *
+     * <p>{@code discover} compares against route <em>patterns</em>; {@code call}
+     * receives a <em>concrete</em> path, so we delegate the pattern match to the
+     * router's own compiled regex via {@link Router.Route#matches(String, String)}.
+     * The annotation is checked first so {@code matches()} is only ever evaluated
+     * on {@code @ChatSafe} routes — never the static-dir / 404 routes whose
+     * {@code matches()} can throw {@code NotFound}/{@code RenderStatic}.
+     */
+    public static boolean isChatSafeCall(String method, String path) {
+        var matchPath = path;
+        int q = matchPath.indexOf('?');
+        if (q >= 0) matchPath = matchPath.substring(0, q);
+        for (var route : Router.routes) {
+            if (annotationFor(route.action) == null) continue;
+            try {
+                if (route.matches(method, matchPath) != null) return true;
+            } catch (RuntimeException ignored) {
+                // Defensive: a @ChatSafe action should never be a static/404 route,
+                // but if matches() throws we treat it as a non-match and keep scanning.
+            }
+        }
+        return false;
     }
 
     /**
