@@ -618,6 +618,44 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    void unregisterClearsTheRebuildBackoffBookkeeping() {
+        // JCLAW-408: a binding that is unregistered (disabled / removed) must not
+        // leave its REBUILD_COUNT / LAST_REBUILD_AT entries behind. Drive one
+        // watchdog rebuild to seed a non-zero count, then disable + reconcile so
+        // unregisterInternal runs, and assert the count is back to 0.
+        String token = "792:tokUnregClears";
+        Long id = seedPollingBinding("agent-unreg-clears", token, "7", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(1_000L);
+
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+        assertEquals(0, TelegramPollingRunner.rebuildCount(token));
+
+        // t=10_000: stale (>= 1_000), no prior rebuild → rebuild #1 (count → 1).
+        TelegramPollingRunnerTestHooks.setClock(() -> 10_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        assertEquals(1, TelegramPollingRunner.rebuildCount(token),
+                "a watchdog rebuild must seed a non-zero count");
+
+        // Re-register, then disable so the next reconcile unregisters the binding.
+        TelegramPollingRunnerTestHooks.stampCooldown(token, -1L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+        commitInFreshTx(() -> {
+            TelegramBinding b = TelegramBinding.findById(id);
+            b.enabled = false;
+            b.save();
+            return null;
+        });
+        TelegramPollingRunner.reconcile();
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "disabled binding should be unregistered");
+        assertEquals(0, TelegramPollingRunner.rebuildCount(token),
+                "unregister must drop the binding's rebuild-backoff bookkeeping");
+    }
+
+    @Test
     void consumingAnUpdateResetsTheRebuildBackoff() {
         // A genuine consume (the poller recovered) must reset the backoff so a
         // later wedge starts from the floor again.

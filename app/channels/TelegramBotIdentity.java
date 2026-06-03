@@ -58,8 +58,8 @@ public final class TelegramBotIdentity {
         // (bots always have a username), so leave it uncached and retry next time
         // rather than permanently disabling mention-by-handle for this token.
         if (fresh.username() != null) {
-            CACHE.putIfAbsent(botToken, fresh);
-            return CACHE.getOrDefault(botToken, fresh);
+            Identity prior = CACHE.putIfAbsent(botToken, fresh);
+            return prior != null ? prior : fresh;
         }
         return fresh;
     }

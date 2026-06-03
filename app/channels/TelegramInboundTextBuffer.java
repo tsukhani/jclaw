@@ -165,7 +165,7 @@ public final class TelegramInboundTextBuffer {
     /** Idle window in ms before a buffered group flushes, read from
      *  {@code telegram.inbound.coalesce-window-ms} (default 750). */
     static long coalesceWindowMs() {
-        return readInt(CFG_WINDOW_MS, (int) DEFAULT_COALESCE_WINDOW_MS);
+        return readLong(CFG_WINDOW_MS, DEFAULT_COALESCE_WINDOW_MS);
     }
 
     private static int readInt(String key, int fallback) {
@@ -173,6 +173,16 @@ public final class TelegramInboundTextBuffer {
         if (raw == null || raw.isBlank()) return fallback;
         try {
             return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static long readLong(String key, long fallback) {
+        var raw = play.Play.configuration.getProperty(key);
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            return Long.parseLong(raw.trim());
         } catch (NumberFormatException e) {
             return fallback;
         }

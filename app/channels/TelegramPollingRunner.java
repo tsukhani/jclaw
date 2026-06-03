@@ -398,7 +398,13 @@ public final class TelegramPollingRunner {
                     "Unregister failed for binding %d: %s".formatted(bindingId, e.getMessage()));
         }
         ACTIVE.remove(bindingId);
-        if (token != null) LAST_PROGRESS.remove(token);
+        if (token != null) {
+            LAST_PROGRESS.remove(token);
+            // Drop the rebuild backoff bookkeeping too, so a wedged binding's
+            // entries don't outlive the binding itself.
+            REBUILD_COUNT.remove(token);
+            LAST_REBUILD_AT.remove(token);
+        }
         TelegramChannel.evictToken(token);
         if (token != null) {
             COOLDOWN_UNTIL.put(token, System.currentTimeMillis() + COOLDOWN_MS);
@@ -704,19 +710,21 @@ public final class TelegramPollingRunner {
             // non-message short-circuit below would drop it.
             ReactionDelta reaction = callback == null ? parseReaction(update) : null;
 
-            InboundMessage msg = null;
-            if (callback == null && reaction == null) {
-                var identity = TelegramBotIdentity.resolve(ACTIVE.get(bindingId));
-                msg = TelegramChannel.parseUpdate(update, identity.username(), identity.userId());
-            }
-            if (callback == null && reaction == null && msg == null) return;
-
             Ctx ctx = loadCtx(bindingId);
             if (ctx == null || !ctx.enabled() || ctx.agent() == null) {
                 EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
                         "Dropping update for missing/disabled binding %d".formatted(bindingId));
                 return;
             }
+
+            InboundMessage msg = null;
+            if (callback == null && reaction == null) {
+                // Resolve the bot's identity from the same Ctx snapshot owner/agent
+                // derive from, rather than ACTIVE — keeps token/owner/agent consistent.
+                var identity = TelegramBotIdentity.resolve(ctx.botToken());
+                msg = TelegramChannel.parseUpdate(update, identity.username(), identity.userId());
+            }
+            if (callback == null && reaction == null && msg == null) return;
 
             if (callback != null) {
                 handleCallback(bindingId, ctx, callback);

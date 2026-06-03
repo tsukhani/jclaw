@@ -1043,6 +1043,13 @@ public final class TelegramStreamingSink {
         long now = System.currentTimeMillis();
         var prev = LAST_NOTIFIER_FIRE_MS.get(conversationId);
         if (prev != null && (now - prev) < cooldownMs) return false;
+        // Opportunistic sweep: a stamp older than the cooldown can never block a
+        // future fire (it would pass the check above and be overwritten), so it's
+        // dead weight. Evict it here to keep the map bounded — one entry per
+        // conversation otherwise lives until JVM restart. Behavior is unchanged:
+        // a surviving stamp for this conversation is already stale, and we re-put
+        // it immediately below.
+        LAST_NOTIFIER_FIRE_MS.entrySet().removeIf(e -> (now - e.getValue()) >= cooldownMs);
         LAST_NOTIFIER_FIRE_MS.put(conversationId, now);
         return true;
     }
