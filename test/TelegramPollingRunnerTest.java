@@ -510,6 +510,151 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "registering a binding with the watchdog enabled should start the periodic tick");
     }
 
+    // ===== JCLAW-363 follow-up: bounded backoff on the watchdog rebuild path =====
+    //
+    // The backoff governs ONLY the watchdog REBUILD action — never the SDK's
+    // getUpdates poll loop (that already backs off; competing there risks a 409
+    // double-poll). The curve is min << consecutiveRebuilds, capped at max, reset
+    // when the poller consumes an update again. Backoff timestamps use the
+    // injectable test clock, so these are deterministic without sleeping.
+
+    @Test
+    void rebuildBackoffCurveDoublesAndCapsAtMax() {
+        services.ConfigService.set(
+                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MIN_MS, "5000");
+        services.ConfigService.set(
+                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MAX_MS, "300000");
+        // count 0 → floor (the first rebuild is never delayed beyond watchdogMs).
+        assertEquals(5000L, TelegramPollingRunner.rebuildBackoffIntervalMs(0));
+        // doubles per consecutive rebuild …
+        assertEquals(10000L, TelegramPollingRunner.rebuildBackoffIntervalMs(1));
+        assertEquals(20000L, TelegramPollingRunner.rebuildBackoffIntervalMs(2));
+        assertEquals(40000L, TelegramPollingRunner.rebuildBackoffIntervalMs(3));
+        // … until it saturates at the configured cap.
+        assertEquals(300000L, TelegramPollingRunner.rebuildBackoffIntervalMs(20));
+        // A pathologically large count must clamp at max, never overflow.
+        assertEquals(300000L, TelegramPollingRunner.rebuildBackoffIntervalMs(1000));
+    }
+
+    @Test
+    void rebuildBackoffMaxIsNeverBelowMin() {
+        // A misconfigured max < min must not invert the curve.
+        services.ConfigService.set(
+                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MIN_MS, "30000");
+        services.ConfigService.set(
+                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MAX_MS, "1000");
+        assertEquals(30000, TelegramPollingRunner.rebuildBackoffMinMs());
+        assertEquals(30000, TelegramPollingRunner.rebuildBackoffMaxMs(),
+                "max must clamp up to the floor when misconfigured below it");
+    }
+
+    @Test
+    void rebuildBackoffDefaultsWhenUnset() {
+        // No config set → documented defaults (5 s floor, 5 min cap). The DB was
+        // wiped by Fixtures.deleteDatabase in @BeforeEach; clear the in-memory
+        // ConfigService cache so a prior test's set values don't leak in.
+        services.ConfigService.clearCache();
+        assertEquals(TelegramPollingRunner.DEFAULT_REBUILD_BACKOFF_MIN_MS,
+                TelegramPollingRunner.rebuildBackoffMinMs());
+        assertEquals(TelegramPollingRunner.DEFAULT_REBUILD_BACKOFF_MAX_MS,
+                TelegramPollingRunner.rebuildBackoffMaxMs());
+    }
+
+    @Test
+    void consecutiveWatchdogRebuildsBackOffWithIncreasingInterval() {
+        // Drive the watchdog through two rebuilds and assert the second one is
+        // DEFERRED while inside the backoff window, then allowed once it elapses.
+        String token = "790:tokBackoff";
+        Long id = seedPollingBinding("agent-backoff", token, "7", true);
+        // Small watchdog timeout, large backoff floor: a binding goes stale fast
+        // but a second rebuild must wait out the (doubled) backoff window.
+        TelegramPollingRunnerTestHooks.setWatchdogMs(1_000L);
+        services.ConfigService.set(
+                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MIN_MS, "50000");
+        services.ConfigService.set(
+                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MAX_MS, "300000");
+
+        // t0: register (seeds progress at 0).
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+        assertEquals(0, TelegramPollingRunner.rebuildCount(token));
+
+        // t=10_000: stale (>= 1_000) and no prior rebuild → rebuild #1.
+        TelegramPollingRunnerTestHooks.setClock(() -> 10_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "first stale tick must rebuild");
+        assertEquals(1, TelegramPollingRunner.rebuildCount(token),
+                "rebuild #1 must bump the consecutive-rebuild count");
+
+        // Re-register so the binding is rebuildable again. Clear the wall-clock
+        // cooldown the rebuild stamped, and seed register-progress at t=10_000.
+        TelegramPollingRunnerTestHooks.stampCooldown(token, -1L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
+                "binding must re-register for the next watchdog evaluation");
+        assertEquals(1, TelegramPollingRunner.rebuildCount(token),
+                "re-register must NOT reset the backoff count (only a consume does)");
+
+        // count=1 → interval 50_000 << 1 = 100_000 ms. A tick at t=15_000 is
+        // stale (elapsed since progress 5_000 >= 1_000) but only 5_000 ms past
+        // the last rebuild → DEFERRED by backoff.
+        TelegramPollingRunnerTestHooks.setClock(() -> 15_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
+                "a stale tick inside the backoff window must NOT rebuild");
+        assertEquals(1, TelegramPollingRunner.rebuildCount(token),
+                "a deferred tick must leave the rebuild count unchanged");
+
+        // Past the 100_000 ms window (last rebuild was at 10_000): t=110_001.
+        TelegramPollingRunnerTestHooks.stampCooldown(token, -1L); // keep cooldown clear
+        TelegramPollingRunnerTestHooks.setClock(() -> 110_001L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "once the backoff window elapses, the watchdog must rebuild again");
+        assertEquals(2, TelegramPollingRunner.rebuildCount(token),
+                "rebuild #2 must bump the count to 2 (longer next window)");
+    }
+
+    @Test
+    void consumingAnUpdateResetsTheRebuildBackoff() {
+        // A genuine consume (the poller recovered) must reset the backoff so a
+        // later wedge starts from the floor again.
+        String token = "791:tokBackoffReset";
+        Long id = seedPollingBinding("agent-backoff-reset", token, "7", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(1_000L);
+        services.ConfigService.set(
+                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MIN_MS, "50000");
+        services.ConfigService.set(
+                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MAX_MS, "300000");
+
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
+        TelegramPollingRunner.reconcile();
+
+        // Force one rebuild so the backoff count is non-zero.
+        TelegramPollingRunnerTestHooks.setClock(() -> 10_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        assertEquals(1, TelegramPollingRunner.rebuildCount(token));
+
+        // Re-register and drive a REAL consume through the runner's consumer —
+        // that calls the production reset path (noteProgressForBackoff).
+        TelegramPollingRunnerTestHooks.stampCooldown(token, -1L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+        var consumer = fakeApp.consumerFor(token);
+        assertNotNull(consumer, "re-register must leave a live consumer");
+        Update update = new Update();
+        update.setUpdateId(99);
+        ((LongPollingSingleThreadUpdateConsumer) consumer).consume(update);
+
+        assertEquals(0, TelegramPollingRunner.rebuildCount(token),
+                "a consumed update must reset the consecutive-rebuild count to 0");
+        // And the backoff gate is open again (no recorded last-rebuild stamp).
+        assertTrue(TelegramPollingRunner.rebuildBackoffElapsed(token, 10_001L),
+                "after a reset, the next rebuild is immediately allowed");
+    }
+
     // ===== JCLAW-375: inbound reaction notifications =====
 
     /** Deserialize a Telegram update JSON into an SDK {@link Update}, as production does. */

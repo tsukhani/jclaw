@@ -371,12 +371,14 @@ public class WebhookTelegramController extends Controller {
             // non-topic / unmapped messages. peerId + sink are unchanged — only
             // which agent runs the turn changes.
             final Agent runAgent = resolveTopicAgent(sendToken, sendChatId, message.messageThreadId(), sendAgent);
+            // JCLAW-387 B4 follow-up: pass the Telegram chat.type so the new
+            // conversation is stamped with it (plain DM vs group history caps).
             AgentRunner.processInboundForAgentStreaming(
                     runAgent, CHANNEL_TELEGRAM, peerId, attributedText,
                     convId -> new channels.TelegramStreamingSink(
                             sendToken, sendChatId, sendAgent, convId, sendChatType,
                             message.messageId(), message.messageThreadId()),
-                    inputs);
+                    inputs, sendChatType);
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                     "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));

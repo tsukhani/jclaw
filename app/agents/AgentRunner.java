@@ -1220,7 +1220,7 @@ public class AgentRunner {
             Agent agent, String channelType, String peerId, String text,
             java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory) {
         processInboundForAgentStreaming(agent, channelType, peerId, text, sinkFactory,
-                java.util.List.of());
+                java.util.List.of(), null);
     }
 
     /**
@@ -1245,6 +1245,37 @@ public class AgentRunner {
             Agent agent, String channelType, String peerId, String text,
             java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory,
             java.util.List<services.AttachmentService.Input> attachments) {
+        processInboundForAgentStreaming(agent, channelType, peerId, text, sinkFactory,
+                attachments, null);
+    }
+
+    /**
+     * Chat-type-aware variant: stamps the Telegram {@code chat.type} onto the
+     * conversation at creation so {@link ConversationService#effectiveHistoryLimit}
+     * (and any other chat-type-scoped behavior) can distinguish a plain DM from a
+     * plain group. Only the two Telegram ingress call sites
+     * ({@link controllers.WebhookTelegramController} and
+     * {@link channels.TelegramPollingRunner}) pass a real value; every other
+     * overload delegates with {@code chatType=null}, leaving the column null and
+     * behavior unchanged. The chat type is stamped once at creation — an existing
+     * conversation row is never re-stamped.
+     *
+     * @param agent       the bound agent
+     * @param channelType channel identifier
+     * @param peerId      channel-specific peer id
+     * @param text        inbound message text
+     * @param sinkFactory factory that returns a streaming sink for the given
+     *                    message id
+     * @param attachments staged file metadata to finalize; empty list is the
+     *                    text-only path
+     * @param chatType    Telegram {@code chat.type} ("private"/"group"/
+     *                    "supergroup"), or null
+     */
+    public static void processInboundForAgentStreaming(
+            Agent agent, String channelType, String peerId, String text,
+            java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory,
+            java.util.List<services.AttachmentService.Input> attachments,
+            String chatType) {
         // JCLAW-26: intercept slash commands before the LLM round. Reuse the
         // existing sink machinery to deliver the canned response — an unused
         // sink's seal() path falls through to TelegramChannel.sendMessage,
@@ -1254,7 +1285,7 @@ public class AgentRunner {
             var cmd = slashCmd.get();
             Conversation current = cmd == slash.Commands.Command.NEW
                     ? null
-                    : services.Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
+                    : services.Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId, chatType));
             var result = slash.Commands.execute(cmd, agent, channelType, peerId, current,
                     slash.Commands.extractArgs(text));
             var slashSink = sinkFactory.apply(
@@ -1290,7 +1321,7 @@ public class AgentRunner {
             // conversation already exists → fall through to the normal LLM turn
         }
         var conversation = services.Tx.run(() ->
-                ConversationService.findOrCreate(agent, channelType, peerId));
+                ConversationService.findOrCreate(agent, channelType, peerId, chatType));
         // The sink needs the conversation id so it can persist / clear the
         // stream checkpoint (JCLAW-95). Callers supply a factory — they own
         // botToken / chatId, we own conversation lookup.

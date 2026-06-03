@@ -110,6 +110,48 @@ class ConversationServiceTest extends UnitTest {
     }
 
     @Test
+    void createWithChatTypePersistsIt() {
+        // JCLAW-387 B4 follow-up: the 4-arg create stamps chat.type on the row.
+        var agent = newAgent("conv-create-chattype");
+        var conv = ConversationService.create(agent, "telegram", "tg-99", "supergroup");
+        assertEquals("supergroup", conv.chatType);
+        Conversation refreshed = Conversation.findById(conv.id);
+        assertEquals("supergroup", refreshed.chatType,
+                "chat_type must be persisted on the row");
+    }
+
+    @Test
+    void createWithoutChatTypeLeavesItNull() {
+        // The 3-arg create (every non-Telegram caller) leaves chat_type null.
+        var agent = newAgent("conv-create-no-chattype");
+        var conv = ConversationService.create(agent, "web", "u-1");
+        assertNull(conv.chatType, "non-Telegram create must leave chat_type null");
+        Conversation refreshed = Conversation.findById(conv.id);
+        assertNull(refreshed.chatType);
+    }
+
+    @Test
+    void createWithNullChatTypeLeavesItNull() {
+        // Passing an explicit null chatType must not write anything.
+        var agent = newAgent("conv-create-explicit-null");
+        var conv = ConversationService.create(agent, "telegram", "tg-7", null);
+        assertNull(conv.chatType);
+    }
+
+    @Test
+    void findOrCreateStampsChatTypeOnlyOnCreation() {
+        // First call creates + stamps; a later call returns the existing row and
+        // never re-stamps (even with a different chatType).
+        var agent = newAgent("conv-foc-chattype");
+        var first = ConversationService.findOrCreate(agent, "telegram", "tg-555", "group");
+        assertEquals("group", first.chatType);
+        var second = ConversationService.findOrCreate(agent, "telegram", "tg-555", "private");
+        assertEquals(first.id, second.id, "same tuple must resolve to one row");
+        assertEquals("group", second.chatType,
+                "chat type is stamped once at creation, never overwritten");
+    }
+
+    @Test
     void findByIdReturnsConversationOrNull() {
         var agent = newAgent("conv-find-by-id");
         var conv = ConversationService.create(agent, "web", "p-1");
@@ -291,6 +333,67 @@ class ConversationServiceTest extends UnitTest {
         ConfigService.set("dmHistoryLimit", "7");
         assertEquals(40, ConversationService.effectiveHistoryLimit(conv),
                 "web conversations stay on the global cap regardless of per-type keys");
+    }
+
+    @Test
+    void effectiveHistoryLimitTelegramPrivateUsesDmLimit() {
+        // A stored chatType="private" resolves to the DM per-type key.
+        var agent = newAgent("conv-hist-dm");
+        var conv = ConversationService.create(agent, "telegram", "42", "private");
+        ConfigService.set("chat.maxContextMessages", "50");
+        ConfigService.set("dmHistoryLimit", "8");
+        assertEquals(8, ConversationService.effectiveHistoryLimit(conv),
+                "a private (DM) conversation must respect dmHistoryLimit");
+    }
+
+    @Test
+    void effectiveHistoryLimitTelegramPrivateFallsBackToGlobal() {
+        // dmHistoryLimit unset → DM falls back to the global value.
+        var agent = newAgent("conv-hist-dm-fallback");
+        var conv = ConversationService.create(agent, "telegram", "42", "private");
+        ConfigService.set("chat.maxContextMessages", "27");
+        assertEquals(27, ConversationService.effectiveHistoryLimit(conv),
+                "DM falls back to chat.maxContextMessages when dmHistoryLimit is unset");
+    }
+
+    @Test
+    void effectiveHistoryLimitTelegramStoredGroupUsesGroupLimit() {
+        // A stored chatType="group" resolves to the group per-type key even
+        // without a forum-topic suffix on the peerId.
+        var agent = newAgent("conv-hist-stored-group");
+        var conv = ConversationService.create(agent, "telegram", "-100", "group");
+        ConfigService.set("chat.maxContextMessages", "50");
+        ConfigService.set("groupChat.historyLimit", "6");
+        ConfigService.set("dmHistoryLimit", "9");
+        assertEquals(6, ConversationService.effectiveHistoryLimit(conv),
+                "a stored-group conversation must respect groupChat.historyLimit");
+    }
+
+    @Test
+    void effectiveHistoryLimitTelegramStoredSupergroupUsesGroupLimit() {
+        var agent = newAgent("conv-hist-stored-supergroup");
+        var conv = ConversationService.create(agent, "telegram", "-100", "supergroup");
+        ConfigService.set("chat.maxContextMessages", "50");
+        ConfigService.set("groupChat.historyLimit", "4");
+        assertEquals(4, ConversationService.effectiveHistoryLimit(conv),
+                "a stored-supergroup conversation must respect groupChat.historyLimit");
+    }
+
+    @Test
+    void effectiveHistoryLimitStoredChatTypeBeatsPlainPeerFallthrough() {
+        // The whole point of the column: a plain (no :topic:) peerId that WOULD
+        // fall through to global now resolves correctly when chatType is stored.
+        var agentDm = newAgent("conv-hist-stored-dm-vs-plain");
+        var dm = ConversationService.create(agentDm, "telegram", "777", "private");
+        var agentGrp = newAgent("conv-hist-stored-grp-vs-plain");
+        var grp = ConversationService.create(agentGrp, "telegram", "-777", "group");
+        ConfigService.set("chat.maxContextMessages", "50");
+        ConfigService.set("dmHistoryLimit", "11");
+        ConfigService.set("groupChat.historyLimit", "3");
+        assertEquals(11, ConversationService.effectiveHistoryLimit(dm),
+                "stored private chatType must resolve DM limit despite a plain peerId");
+        assertEquals(3, ConversationService.effectiveHistoryLimit(grp),
+                "stored group chatType must resolve group limit despite a plain peerId");
     }
 
     @Test

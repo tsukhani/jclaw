@@ -44,6 +44,27 @@ public final class TelegramModelSelector {
         var botToken = botTokenForAgent(agent);
         if (botToken == null) return false;
         var text = summaryText(agent, conversation);
+        // JCLAW-387 C2: respect the inline-keyboard scope at the SEND site. When
+        // the conversation's chat type isn't permitted by telegram.keyboardScope
+        // (default "all" → always permitted, so default behavior is unchanged),
+        // don't render the providers grid — send the summary body as a plain text
+        // notice instead. The user still sees the current model + the typed
+        // "/model <provider/model>" path documented in the body; only the tappable
+        // keyboard is withheld.
+        //
+        // NOTE: this deliberately does NOT cover the approval prompt
+        // (TelegramApprovalService). The approve/deny keyboard is a SECURITY
+        // control sent to the owner DM and must never be suppressed by this UX
+        // scope toggle.
+        if (!TelegramCallbackDispatcher.keyboardScopeAllows(conversation.chatType)) {
+            var notice = text + "\n\n<i>Inline keyboards are disabled in this chat.</i>";
+            // Plain text-only send (no keyboard), mirroring the keyboard path's
+            // single-message dispatch — no agent/workspace resolution needed here.
+            var sent = TelegramChannel.sendMessage(botToken, conversation.peerId, notice);
+            if (!sent) return false;
+            persistSummaryAck(conversation.id, text);
+            return true;
+        }
         var keyboard = TelegramModelKeyboard.providersKeyboard(
                 conversation.id, currentProviderName(agent, conversation));
         var messageId = TelegramChannel.sendMessageWithKeyboard(

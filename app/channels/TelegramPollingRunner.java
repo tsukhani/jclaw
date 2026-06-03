@@ -98,6 +98,35 @@ public final class TelegramPollingRunner {
     public static final long DEFAULT_WATCHDOG_MS = 120_000L;
 
     /**
+     * JCLAW-363 follow-up: bounded exponential backoff on the watchdog REBUILD
+     * action (NOT the SDK's getUpdates poll loop — that already backs off, and a
+     * competing curve there would risk a 409 double-poll). Token → count of
+     * consecutive watchdog rebuilds with no intervening progress. Drives the
+     * minimum interval between rebuilds so a persistently-failing bot can't
+     * rebuild-storm. Reset to 0 when the poller makes progress again
+     * ({@link #noteProgressForBackoff}).
+     */
+    private static final ConcurrentHashMap<String, Integer> REBUILD_COUNT = new ConcurrentHashMap<>();
+
+    /**
+     * Token → clock timestamp (from the injectable {@link #clock}) of the last
+     * watchdog rebuild. Compared against the backoff interval in
+     * {@link #watchdogTick} so a rebuild is deferred until the doubling window
+     * elapses. Uses the test clock (not wall time) so the backoff is
+     * deterministically testable without sleeping.
+     */
+    private static final ConcurrentHashMap<String, Long> LAST_REBUILD_AT = new ConcurrentHashMap<>();
+
+    /** Config key: minimum interval between consecutive watchdog rebuilds (ms). */
+    public static final String CFG_REBUILD_BACKOFF_MIN_MS = "telegram.polling.rebuild-backoff-min-ms";
+    /** Config key: cap on the watchdog rebuild backoff interval (ms). */
+    public static final String CFG_REBUILD_BACKOFF_MAX_MS = "telegram.polling.rebuild-backoff-max-ms";
+    /** Default floor for the rebuild backoff: 5 s between consecutive rebuilds. */
+    public static final int DEFAULT_REBUILD_BACKOFF_MIN_MS = 5_000;
+    /** Default ceiling for the rebuild backoff: 5 min between consecutive rebuilds. */
+    public static final int DEFAULT_REBUILD_BACKOFF_MAX_MS = 300_000;
+
+    /**
      * Handle to the periodic watchdog tick scheduled on {@link #scheduler}, or
      * {@code null} when the watchdog isn't running ({@code watchdogMs == 0}, or
      * nothing registered yet). Cancelled on {@link #stop}/{@link #clearForTest}.
@@ -257,6 +286,9 @@ public final class TelegramPollingRunner {
         // wall clock / config-driven timeout so each test starts clean.
         stopWatchdog();
         LAST_PROGRESS.clear();
+        // JCLAW-363 follow-up: clear the rebuild-backoff bookkeeping too.
+        REBUILD_COUNT.clear();
+        LAST_REBUILD_AT.clear();
         watchdogMsOverride = null;
         clock = System::currentTimeMillis;
         APP.set(null);
@@ -294,6 +326,12 @@ public final class TelegramPollingRunner {
                 // JCLAW-363: stamp liveness on every consumed update so the
                 // watchdog can tell a healthy poller from a wedged one.
                 markProgress(token);
+                // JCLAW-363 follow-up: a genuine consume means the poller
+                // recovered — reset the rebuild backoff so a later wedge starts
+                // from the floor again. Reset here (consume path) and NOT in the
+                // register-time markProgress seed below, so a rebuild's
+                // re-register doesn't falsely clear the backoff.
+                noteProgressForBackoff(token);
                 dispatch(bindingId, update);
                 if (update.getUpdateId() != null) {
                     TelegramOffsetStore.record(token, update.getUpdateId());
@@ -485,11 +523,111 @@ public final class TelegramPollingRunner {
             Long last = LAST_PROGRESS.get(token);
             long elapsed = last == null ? 0L : now - last;
             if (last == null || elapsed < timeout) continue;
+            // JCLAW-363 follow-up: bounded exponential backoff on the rebuild
+            // action itself. A token that keeps wedging without ever making
+            // progress must not rebuild every tick — that would rebuild-storm a
+            // persistently-failing bot. Enforce a minimum interval between
+            // consecutive rebuilds that doubles (capped) until a consume resets
+            // it. The 30 s cooldown stamped by unregisterInternal already blocks
+            // an immediate re-rebuild; this curve governs the cadence AFTER the
+            // cooldown drains and the binding re-registers but keeps failing.
+            if (!rebuildBackoffElapsed(token, now)) {
+                EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
+                        "Polling watchdog: binding %d stale but rebuild deferred by backoff (%d consecutive)".formatted(
+                                bindingId, rebuildCount(token)));
+                continue;
+            }
             EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
-                    "Polling watchdog: binding %d stale for %d ms (>= %d) — rebuilding transport".formatted(
-                            bindingId, elapsed, timeout));
+                    "Polling watchdog: binding %d stale for %d ms (>= %d) — rebuilding transport (rebuild #%d)".formatted(
+                            bindingId, elapsed, timeout, rebuildCount(token) + 1));
+            recordRebuild(token, now);
             unregisterInternal(app, bindingId, token);
         }
+    }
+
+    /**
+     * Configured floor for the rebuild backoff in ms ({@link #CFG_REBUILD_BACKOFF_MIN_MS},
+     * default {@link #DEFAULT_REBUILD_BACKOFF_MIN_MS}). Read via
+     * {@link services.ConfigService} so it never touches {@code application.conf}
+     * directly. Clamped to {@code >= 0}.
+     */
+    public static int rebuildBackoffMinMs() {
+        return Math.max(0, services.ConfigService.getInt(
+                CFG_REBUILD_BACKOFF_MIN_MS, DEFAULT_REBUILD_BACKOFF_MIN_MS));
+    }
+
+    /**
+     * Configured ceiling for the rebuild backoff in ms ({@link #CFG_REBUILD_BACKOFF_MAX_MS},
+     * default {@link #DEFAULT_REBUILD_BACKOFF_MAX_MS}). Never less than the floor.
+     */
+    public static int rebuildBackoffMaxMs() {
+        return Math.max(rebuildBackoffMinMs(), services.ConfigService.getInt(
+                CFG_REBUILD_BACKOFF_MAX_MS, DEFAULT_REBUILD_BACKOFF_MAX_MS));
+    }
+
+    /**
+     * Backoff interval (ms) required before the next rebuild of {@code token},
+     * given how many consecutive rebuilds it has already had with no progress.
+     * {@code min << count}, saturating at the configured max (and guarding the
+     * shift against overflow). With {@code count == 0} (no prior rebuild) the
+     * interval is the floor, so the first rebuild of a freshly-wedged binding is
+     * never delayed beyond the watchdog timeout that already gated it.
+     *
+     * <p>Public so default-package tests can assert the curve directly (matches
+     * the {@code watchdogMs()} / {@code cooldownRemainingMs()} convention).
+     */
+    public static long rebuildBackoffIntervalMs(int count) {
+        long min = rebuildBackoffMinMs();
+        long max = rebuildBackoffMaxMs();
+        if (count <= 0) return min;
+        // Cap the shift so a large count can't overflow the long; 40 shifts of a
+        // 5 s floor already dwarfs any sane max, so the min() clamps it anyway.
+        int shift = Math.min(count, 40);
+        long scaled = min << shift;
+        if (scaled < 0 || scaled > max) return max; // overflow or over-cap → clamp
+        return scaled;
+    }
+
+    /**
+     * Consecutive-rebuild count for {@code token} (0 when none / after a reset).
+     * Public for default-package test assertions.
+     */
+    public static int rebuildCount(String token) {
+        if (token == null) return 0;
+        return REBUILD_COUNT.getOrDefault(token, 0);
+    }
+
+    /**
+     * True when enough time has elapsed since {@code token}'s last rebuild for
+     * the next one to fire, per {@link #rebuildBackoffIntervalMs}. The first-ever
+     * rebuild (no recorded timestamp) is always allowed. Public so tests can
+     * assert the gate without re-driving a full watchdog tick.
+     */
+    public static boolean rebuildBackoffElapsed(String token, long now) {
+        if (token == null) return true;
+        Long lastAt = LAST_REBUILD_AT.get(token);
+        if (lastAt == null) return true; // never rebuilt → allowed
+        long interval = rebuildBackoffIntervalMs(rebuildCount(token));
+        return (now - lastAt) >= interval;
+    }
+
+    /** Stamp a rebuild of {@code token} at {@code now} and bump its consecutive count. */
+    private static void recordRebuild(String token, long now) {
+        if (token == null) return;
+        LAST_REBUILD_AT.put(token, now);
+        REBUILD_COUNT.merge(token, 1, Integer::sum);
+    }
+
+    /**
+     * Reset {@code token}'s rebuild backoff after genuine progress (a consumed
+     * update). Drops the consecutive-rebuild count and the last-rebuild stamp so
+     * the next wedge starts from the floor again. Called only from the consume
+     * path — never from the register-time progress seed.
+     */
+    private static void noteProgressForBackoff(String token) {
+        if (token == null) return;
+        REBUILD_COUNT.remove(token);
+        LAST_REBUILD_AT.remove(token);
     }
 
     // ===== JCLAW-363 test seams (documented in TelegramPollingRunnerTestHooks) =====
@@ -718,12 +856,14 @@ public final class TelegramPollingRunner {
                 // non-topic / unmapped messages. peerId + sink are unchanged — only
                 // which agent runs the turn changes.
                 final Agent runAgent = resolveTopicAgent(sendToken, sendChatId, merged.messageThreadId(), sendAgent);
+                // JCLAW-387 B4 follow-up: pass the Telegram chat.type so the new
+                // conversation is stamped with it (plain DM vs group history caps).
                 AgentRunner.processInboundForAgentStreaming(
                         runAgent, LOG_SOURCE, peerId, attributedText,
                         convId -> new TelegramStreamingSink(
                                 sendToken, sendChatId, sendAgent, convId, sendChatType,
                                 merged.messageId(), merged.messageThreadId()),
-                        inputs);
+                        inputs, sendChatType);
             } catch (Exception e) {
                 EventLogger.error(LOG_CATEGORY, sendAgent != null ? sendAgent.name : null,
                         LOG_SOURCE, "Polling dispatch error: %s".formatted(e.getMessage()));

@@ -22,6 +22,19 @@ public class Conversation extends Model {
     @Column(name = "peer_id")
     public String peerId;
 
+    /**
+     * Telegram {@code chat.type} ("private" / "group" / "supergroup") captured at
+     * conversation-creation time (JCLAW-387 B4 follow-up). Null for non-Telegram
+     * channels, for legacy rows created before this column existed, and for any
+     * Telegram conversation whose creation site didn't pass a chat type. Lets
+     * {@link services.ConversationService#effectiveHistoryLimit} resolve the
+     * per-chat-type history cap for a plain DM vs group — which the composite
+     * {@code peerId} alone can't disambiguate (a forum-topic suffix is the only
+     * structural group marker on the peerId).
+     */
+    @Column(name = "chat_type")
+    public String chatType;
+
     @Column(name = "message_count", nullable = false)
     public int messageCount = 0;
 

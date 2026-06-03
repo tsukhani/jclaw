@@ -56,9 +56,28 @@ public class ConversationService {
     }
 
     public static Conversation findOrCreate(Agent agent, String channelType, String peerId) {
+        return findOrCreate(agent, channelType, peerId, null);
+    }
+
+    /**
+     * Chat-type-aware {@link #findOrCreate}. When a new row is created, its
+     * {@link Conversation#chatType} is set to {@code chatType} (when non-null);
+     * an existing row is returned unchanged — chat type is stamped once at
+     * creation, never overwritten on subsequent turns. Only the Telegram ingress
+     * paths pass a real value; every other caller delegates with {@code null}
+     * via the 3-arg overload, leaving chatType null and behavior unchanged.
+     *
+     * @param agent       the owning agent
+     * @param channelType the channel identifier
+     * @param peerId      the channel-specific peer key
+     * @param chatType    Telegram {@code chat.type}, or null for non-Telegram /
+     *                    unknown
+     * @return the existing or newly-created conversation
+     */
+    public static Conversation findOrCreate(Agent agent, String channelType, String peerId, String chatType) {
         var existing = Conversation.findByAgentChannelPeer(agent, channelType, peerId);
         if (existing != null) return existing;
-        return create(agent, channelType, peerId);
+        return create(agent, channelType, peerId, chatType);
     }
 
     /**
@@ -102,10 +121,26 @@ public class ConversationService {
     }
 
     public static Conversation create(Agent agent, String channelType, String peerId) {
+        return create(agent, channelType, peerId, null);
+    }
+
+    /**
+     * Chat-type-aware {@link #create}. Sets {@link Conversation#chatType} only
+     * when {@code chatType} is non-null, so non-Telegram channels and callers
+     * without a chat type leave the column null (the pre-existing behavior).
+     *
+     * @param agent       the owning agent
+     * @param channelType the channel identifier
+     * @param peerId      the channel-specific peer key
+     * @param chatType    Telegram {@code chat.type}, or null
+     * @return the newly-created conversation
+     */
+    public static Conversation create(Agent agent, String channelType, String peerId, String chatType) {
         var convo = new Conversation();
         convo.agent = agent;
         convo.channelType = channelType;
         convo.peerId = peerId;
+        if (chatType != null) convo.chatType = chatType;
         convo.save();
 
         EventLogger.info("agent", agent.name, channelType,
@@ -374,11 +409,19 @@ public class ConversationService {
     static final String KEY_GLOBAL_MAX = "chat.maxContextMessages";
     /** Per-type override for GROUP-chat conversations (JCLAW-387 B4). */
     static final String KEY_GROUP_LIMIT = "groupChat.historyLimit";
-    // The DM per-type key ("dmHistoryLimit", JCLAW-387 B4) is documented on
-    // effectiveHistoryLimit but intentionally NOT wired here: a plain DM is not
-    // distinguishable from a plain group on the persisted row (see the method
-    // Javadoc + the report's BLOCKED note), so no resolution path can reach it
-    // yet. Adding a constant the production path can't use would be dead code.
+    /**
+     * Per-type override for DM / private conversations (JCLAW-387 B4). Now
+     * reachable: the persisted {@link Conversation#chatType} distinguishes a
+     * plain DM from a plain group, which the composite {@code peerId} alone
+     * could not.
+     */
+    static final String KEY_DM_LIMIT = "dmHistoryLimit";
+
+    /** Telegram {@code chat.type} for a one-on-one DM. */
+    private static final String CHAT_TYPE_PRIVATE = "private";
+    /** Telegram {@code chat.type} values that denote a multi-member group. */
+    private static final String CHAT_TYPE_GROUP = "group";
+    private static final String CHAT_TYPE_SUPERGROUP = "supergroup";
 
     /**
      * Resolve the effective history-load cap for {@code conversation} (JCLAW-387 B4).
@@ -389,29 +432,26 @@ public class ConversationService {
      * defaults to the resolved global value when its own key isn't set, so a
      * deployment that sets neither per-type key behaves exactly as before.
      *
-     * <p><b>Chat-type resolution is partial by necessity.</b> The persisted
-     * {@link Conversation} row carries only {@code channelType} and the composite
-     * {@code peerId} — the inbound Telegram {@code chat.type} string
-     * ("private" / "group" / "supergroup") that the ingress path knows is not
-     * stored. So this method can only resolve chat type from signals that survive
-     * on the row:
+     * <p><b>Chat-type resolution.</b> The persisted {@link Conversation} now
+     * carries the inbound Telegram {@code chat.type} on {@link Conversation#chatType}
+     * (stamped at creation by the Telegram ingress paths), so a plain DM and a
+     * plain group are distinguishable on the row:
      * <ul>
      *   <li><b>Non-Telegram channels</b> (web, slack, …) → global. No per-type
      *       notion applies; behavior unchanged.</li>
+     *   <li><b>Telegram, stored {@code chatType="private"}</b> → the DM limit.</li>
+     *   <li><b>Telegram, stored {@code chatType="group"}/"supergroup"</b> → the
+     *       GROUP limit.</li>
      *   <li><b>Telegram forum-topic conversations</b> — whose {@code peerId}
      *       carries the structural {@code ":topic:<threadId>"} suffix that
      *       JClaw's own keying ({@code AgentRunner.telegramConversationPeerId})
-     *       writes for group/supergroup topic chats → resolved to the GROUP
-     *       limit. This suffix is an unambiguous group marker.</li>
-     *   <li><b>Any other Telegram conversation</b> (a plain {@code peerId} with
-     *       no suffix) → global. A plain DM and a plain group are
-     *       indistinguishable on the row: a DM keys off the binding owner id and
-     *       a group keys off the chat id, both stored as opaque strings. The only
-     *       remaining differentiator is the Telegram-internal "group ids are
-     *       negative, user ids are positive" id convention, and {@code peerId}
-     *       (a free-form, operator-supplied {@code telegramUserId} for DMs) is not
-     *       a contract we can safely sniff. So these fall through to the global
-     *       default rather than risk mis-classifying.</li>
+     *       writes for group/supergroup topic chats → GROUP limit. Retained as a
+     *       secondary signal so legacy rows created before {@code chatType}
+     *       existed still resolve a forum topic to the group cap.</li>
+     *   <li><b>Telegram, no stored {@code chatType} and no {@code :topic:}
+     *       suffix</b> (a legacy plain peerId) → global. A plain DM and a plain
+     *       group can't be told apart on such a row, so it falls through to the
+     *       global default rather than risk mis-classifying.</li>
      * </ul>
      *
      * @param conversation the conversation whose history cap to resolve
@@ -434,11 +474,24 @@ public class ConversationService {
         if (!models.ChannelType.TELEGRAM.value.equals(conversation.channelType)) {
             return null; // non-Telegram: no per-type notion, use global
         }
+        // Primary signal: the chat.type stamped at creation. Distinguishes a
+        // plain DM from a plain group, which the peerId alone cannot.
+        var stored = conversation.chatType;
+        if (CHAT_TYPE_PRIVATE.equals(stored)) {
+            return KEY_DM_LIMIT;
+        }
+        if (CHAT_TYPE_GROUP.equals(stored) || CHAT_TYPE_SUPERGROUP.equals(stored)) {
+            return KEY_GROUP_LIMIT;
+        }
+        // Secondary signal for legacy rows created before chat_type existed: a
+        // forum-topic peerId carries the ":topic:" suffix — an unambiguous group
+        // marker — so resolve it to the group cap.
         var peerId = conversation.peerId;
         if (peerId != null && peerId.contains(":topic:")) {
-            return KEY_GROUP_LIMIT; // forum topic → unambiguously a group chat
+            return KEY_GROUP_LIMIT;
         }
-        // Plain Telegram peerId: DM vs group not safely distinguishable → global.
+        // No stored chatType and no topic suffix: DM vs group not safely
+        // distinguishable → global.
         return null;
     }
 

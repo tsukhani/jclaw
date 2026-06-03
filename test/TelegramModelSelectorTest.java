@@ -84,6 +84,88 @@ class TelegramModelSelectorTest extends UnitTest {
         assertTrue(body.contains("Cancel"), "cancel button present: " + body);
     }
 
+    // ── Keyboard scope suppression at the send site (JCLAW-387 C2) ────
+
+    /** Stamp the conversation's chat type so keyboardScopeAllows can evaluate it. */
+    private void setConversationChatType(String chatType) {
+        services.Tx.run(() -> {
+            var conv = (Conversation) Conversation.findById(conversation.id);
+            conv.chatType = chatType;
+            conv.save();
+        });
+        conversation = services.Tx.run(() -> (Conversation) Conversation.findById(conversation.id));
+    }
+
+    @Test
+    void sendSummaryRendersKeyboardWhenScopeAllowsChatType() {
+        // scope=group + a supergroup conversation → keyboard permitted.
+        setConversationChatType("supergroup");
+        play.Play.configuration.setProperty("telegram.keyboardScope", "group");
+        try {
+            boolean ok = TelegramModelSelector.sendSummary(agent, conversation);
+            assertTrue(ok, "send should succeed when the keyboard is allowed");
+            var body = firstRequestBody("sendMessage");
+            assertTrue(body.contains("reply_markup"),
+                    "keyboard must be rendered when scope permits the chat type: " + body);
+            assertFalse(body.contains("Inline keyboards are disabled"),
+                    "no suppression notice when the keyboard is allowed: " + body);
+        } finally {
+            play.Play.configuration.remove("telegram.keyboardScope");
+        }
+    }
+
+    @Test
+    void sendSummarySuppressesKeyboardWhenScopeDisallowsChatType() {
+        // scope=dm but the conversation is a group → keyboard suppressed; a plain
+        // text notice goes out instead (no reply_markup).
+        setConversationChatType("group");
+        play.Play.configuration.setProperty("telegram.keyboardScope", "dm");
+        try {
+            boolean ok = TelegramModelSelector.sendSummary(agent, conversation);
+            assertTrue(ok, "send should still succeed via the plain-text path");
+            assertEquals(1, server.countRequests("sendMessage"),
+                    "exactly one sendMessage (the plain notice)");
+            var body = firstRequestBody("sendMessage");
+            assertFalse(body.contains("reply_markup"),
+                    "no inline keyboard when scope disallows the chat type: " + body);
+            assertTrue(body.contains("Inline keyboards are disabled"),
+                    "a plain notice must explain the suppression: " + body);
+        } finally {
+            play.Play.configuration.remove("telegram.keyboardScope");
+        }
+    }
+
+    @Test
+    void sendSummaryScopeOffSuppressesEvenForDm() {
+        // scope=off → no chat type gets a keyboard, including a DM.
+        setConversationChatType("private");
+        play.Play.configuration.setProperty("telegram.keyboardScope", "off");
+        try {
+            TelegramModelSelector.sendSummary(agent, conversation);
+            var body = firstRequestBody("sendMessage");
+            assertFalse(body.contains("reply_markup"),
+                    "scope=off must suppress the keyboard even in a DM: " + body);
+            assertTrue(body.contains("Inline keyboards are disabled"), body);
+        } finally {
+            play.Play.configuration.remove("telegram.keyboardScope");
+        }
+    }
+
+    @Test
+    void sendSummaryDefaultScopeAllRendersKeyboardRegardlessOfChatType() {
+        // Default (no telegram.keyboardScope set → "all"): the keyboard renders
+        // for any chat type, including a group — confirming default behavior is
+        // unchanged by the suppression guard.
+        play.Play.configuration.remove("telegram.keyboardScope");
+        setConversationChatType("group");
+        boolean ok = TelegramModelSelector.sendSummary(agent, conversation);
+        assertTrue(ok);
+        var body = firstRequestBody("sendMessage");
+        assertTrue(body.contains("reply_markup"),
+                "default scope 'all' must render the keyboard for any chat type: " + body);
+        assertFalse(body.contains("Inline keyboards are disabled"), body);
+    }
+
     // ── Browse flow ───────────────────────────────────────────────────
 
     @Test
