@@ -200,4 +200,36 @@ class ApiToolsControllerTest extends FunctionalTest {
                 "application/json", "{\"enabled\":false}");
         assertEquals(404, resp.status.intValue());
     }
+
+    // --- Bulk per-action cleanup delete (JCLAW-408) ---
+
+    @Test
+    void bulkDeleteByToolNameInClauseRemovesOnlyNamedRows() {
+        // updateGroupForAgent's legacy-cleanup path issues one bulk
+        // AgentToolConfig.delete("... toolName IN (?2)", agent, names). Verify
+        // Hibernate expands the List-valued positional parameter inside IN (?2):
+        // only the named rows are removed; an unrelated row survives.
+        login();
+        var id = createAgent("bulk-delete-agent");
+        Integer deleted = fetchInFreshTx(() -> {
+            Agent agent = Agent.findById(id);
+            for (var n : java.util.List.of("mcp_jira_create", "mcp_jira_search", "keep_me")) {
+                var c = new AgentToolConfig();
+                c.agent = agent;
+                c.toolName = n;
+                c.enabled = true;
+                c.save();
+            }
+            return AgentToolConfig.delete("agent = ?1 AND toolName IN (?2)",
+                    agent, java.util.List.of("mcp_jira_create", "mcp_jira_search"));
+        });
+        assertEquals(2, deleted.intValue(), "both named rows must be deleted in one statement");
+        Boolean survivorIntact = fetchInFreshTx(() -> {
+            Agent agent = Agent.findById(id);
+            return AgentToolConfig.findByAgentAndTool(agent, "mcp_jira_create") == null
+                    && AgentToolConfig.findByAgentAndTool(agent, "mcp_jira_search") == null
+                    && AgentToolConfig.findByAgentAndTool(agent, "keep_me") != null;
+        });
+        assertTrue(survivorIntact, "only the named rows are removed; the unrelated row survives");
+    }
 }

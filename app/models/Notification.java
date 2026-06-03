@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import play.db.jpa.Model;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * User-visible notification, surfaced through the global notification bar
@@ -92,5 +93,15 @@ public class Notification extends Model {
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
+    }
+
+    /** Un-acknowledged notifications, newest first, capped at {@code limit}. */
+    public static List<Notification> findUnread(int limit) {
+        return Notification.find("acknowledgedAt IS NULL ORDER BY createdAt DESC").fetch(limit);
+    }
+
+    /** All notifications, newest first, capped at {@code limit}. */
+    public static List<Notification> findAllNewestFirst(int limit) {
+        return Notification.find("ORDER BY createdAt DESC").fetch(limit);
     }
 }

@@ -21,11 +21,25 @@ public final class JsonBodyReader {
      * {@code badRequest()} when null.
      */
     public static JsonObject readJsonBody() {
-        try {
-            var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
+        try (var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8)) {
             return JsonParser.parseReader(reader).getAsJsonObject();
         } catch (Exception _) {
             return null;
         }
+    }
+
+    /**
+     * Read an optional string field. Returns {@code null} when the key is
+     * absent, JSON-null, or resolves to a blank string. When {@code trim} is
+     * true the returned value is trimmed (blank-after-trim still collapses to
+     * {@code null}); when false the raw value is returned verbatim.
+     */
+    public static String optString(JsonObject body, String key, boolean trim) {
+        if (!body.has(key)) return null;
+        var el = body.get(key);
+        if (el.isJsonNull()) return null;
+        var s = el.getAsString();
+        if (s == null || s.isBlank()) return null;
+        return trim ? s.trim() : s;
     }
 }

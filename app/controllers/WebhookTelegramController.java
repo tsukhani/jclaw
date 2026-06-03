@@ -5,7 +5,6 @@ import channels.InboundCallback;
 import channels.InboundMessage;
 import channels.TelegramChannel;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.gson.JsonParser;
 import models.Agent;
 import models.TelegramBinding;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -101,8 +100,7 @@ public class WebhookTelegramController extends Controller {
                         "Oversized webhook body (read length) for binding %d from %s".formatted(bindingId, clientIp));
                 error(413, "Payload Too Large");
             }
-            var update = JsonParser.parseString(rawBody).getAsJsonObject();
-            dispatchUpdate(ctx, update, bindingId);
+            dispatchUpdate(ctx, rawBody, bindingId);
         } catch (play.mvc.results.Result r) {
             // 413 from the read-length backstop above: rethrow so Play renders
             // it; do not swallow it as a generic parse error.
@@ -239,9 +237,9 @@ public class WebhookTelegramController extends Controller {
      * updates, so this falls through cleanly to the message path
      * when the update is a regular text message.
      */
-    private static void dispatchUpdate(BindingCtx ctx, com.google.gson.JsonObject update, Long bindingId)
+    private static void dispatchUpdate(BindingCtx ctx, String rawBody, Long bindingId)
             throws com.fasterxml.jackson.core.JsonProcessingException {
-        Update sdkUpdate = JACKSON.readValue(update.toString(), Update.class);
+        Update sdkUpdate = JACKSON.readValue(rawBody, Update.class);
         var callback = TelegramChannel.parseCallback(sdkUpdate);
         if (callback != null) {
             handleCallback(ctx, callback, bindingId);
@@ -281,9 +279,17 @@ public class WebhookTelegramController extends Controller {
                             callback.fromId(), bindingId, ctx.telegramUserId()));
             return;
         }
-        Thread.ofVirtual().name("webhook-telegram-callback").start(() ->
+        dispatchOffThread("webhook-telegram-callback", () ->
                 channels.TelegramCallbackDispatcher.dispatch(
                         ctx.botToken(), ctx.agent(), callback));
+    }
+
+    /**
+     * Spawn an off-request virtual thread so the webhook handler can return
+     * HTTP 200 immediately while the agent turn / callback runs asynchronously.
+     */
+    private static void dispatchOffThread(String name, Runnable r) {
+        Thread.ofVirtual().name(name).start(r);
     }
 
     private static void handleInboundMessage(BindingCtx ctx, InboundMessage message,
@@ -328,13 +334,13 @@ public class WebhookTelegramController extends Controller {
         // text-reassembly lane and a forwarded photo into the media-group lane.
         if (isForward) {
             channels.TelegramForwardCoalesceBuffer.add(message, merged ->
-                    Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(ctx, merged)));
+                    dispatchOffThread("webhook-telegram-process", () -> processMessage(ctx, merged)));
         } else if (channels.TelegramInboundTextBuffer.isEligible(message)) {
             channels.TelegramInboundTextBuffer.add(message, merged ->
-                    Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(ctx, merged)));
+                    dispatchOffThread("webhook-telegram-process", () -> processMessage(ctx, merged)));
         } else {
             channels.TelegramMediaGroupBuffer.add(message, merged ->
-                    Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(ctx, merged)));
+                    dispatchOffThread("webhook-telegram-process", () -> processMessage(ctx, merged)));
         }
     }
 

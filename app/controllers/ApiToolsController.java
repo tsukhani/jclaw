@@ -224,13 +224,15 @@ public class ApiToolsController extends Controller {
         // longer have any read effect now that loadDisabledTools is
         // server-level-only, but leaving them around would (a) confuse
         // an operator inspecting the DB, and (b) leave noise for a
-        // future refactor. One DELETE per group toggle keeps the table
-        // tidy as the operator naturally cycles through their servers.
-        for (var tool : ToolRegistry.listTools()) {
-            if (group.equals(tool.group()) && !tool.isServerLevel()) {
-                AgentToolConfig.delete("agent = ?1 AND toolName = ?2",
-                        agent, tool.name());
-            }
+        // future refactor. One bulk DELETE per group toggle (rather than
+        // one per action) keeps the table tidy as the operator naturally
+        // cycles through their servers.
+        var perActionNames = ToolRegistry.listTools().stream()
+                .filter(t -> group.equals(t.group()) && !t.isServerLevel())
+                .map(ToolRegistry.Tool::name)
+                .toList();
+        if (!perActionNames.isEmpty()) {
+            AgentToolConfig.delete("agent = ?1 AND toolName IN (?2)", agent, perActionNames);
         }
 
         SkillLoader.clearCache();

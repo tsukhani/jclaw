@@ -449,30 +449,46 @@ public class ApiTasksController extends Controller {
      * </ul>
      * {@code limit} defaults to 200, capped at 500.
      */
+    /**
+     * The startedAt window {@link #recentRuns} queries over: {@code since} is
+     * always set; {@code until} is null in rolling mode (no upper bound) and
+     * set in range mode.
+     */
+    private record RunWindow(Instant since, Instant until) {}
+
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = RecentRunView.class))))
     public static void recentRuns(Integer hours, Integer limit, String from, String to) {
         int lim = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
-        Instant since;
-        Instant until = null;
-        if (from != null && !from.isBlank()) {
-            try {
-                since = Instant.parse(from);
-                until = (to != null && !to.isBlank()) ? Instant.parse(to) : Instant.now();
-            } catch (java.time.DateTimeException e) {
-                error(400, "from/to must be ISO-8601 instants");
-                return; // unreachable — error() throws
-            }
-        } else {
-            int h = (hours != null && hours > 0) ? Math.min(hours, 24 * 30) : 24;
-            since = Instant.now().minusSeconds((long) h * 3600);
-        }
-        var query = (until != null)
-                ? TaskRun.find("startedAt >= ?1 AND startedAt < ?2 ORDER BY startedAt DESC", since, until)
-                : TaskRun.find("startedAt >= ?1 ORDER BY startedAt DESC", since);
+        var window = resolveRunWindow(hours, from, to);
+        var query = (window.until() != null)
+                ? TaskRun.find("startedAt >= ?1 AND startedAt < ?2 ORDER BY startedAt DESC", window.since(), window.until())
+                : TaskRun.find("startedAt >= ?1 ORDER BY startedAt DESC", window.since());
         @SuppressWarnings("unchecked")
         List<TaskRun> rows = (List<TaskRun>) (List<?>) query.fetch(lim);
         renderJSON(gson.toJson(rows.stream().map(RecentRunView::of).toList()));
+    }
+
+    /**
+     * Resolve the {@link RunWindow} from the request: an ISO-8601 {@code from}
+     * (with optional {@code to}, default now) yields a bounded range; an absent
+     * {@code from} yields a rolling window of the last {@code hours} (default
+     * 24, capped at 30 days) with no upper bound. A malformed instant 400s.
+     */
+    @SuppressWarnings("java:S2259")
+    private static RunWindow resolveRunWindow(Integer hours, String from, String to) {
+        if (from != null && !from.isBlank()) {
+            try {
+                var since = Instant.parse(from);
+                var until = (to != null && !to.isBlank()) ? Instant.parse(to) : Instant.now();
+                return new RunWindow(since, until);
+            } catch (java.time.DateTimeException e) {
+                error(400, "from/to must be ISO-8601 instants");
+                throw new AssertionError("unreachable: error() throws");
+            }
+        }
+        int h = (hours != null && hours > 0) ? Math.min(hours, 24 * 30) : 24;
+        return new RunWindow(Instant.now().minusSeconds((long) h * 3600), null);
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))

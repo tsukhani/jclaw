@@ -155,10 +155,7 @@ public class ApiSkillsController extends Controller {
             if (info != null && info.toolsDeclared()) {
                 var result = new java.util.ArrayList<SkillToolRef>();
                 for (var name : info.tools()) {
-                    var tool = agents.ToolRegistry.listTools().stream()
-                            .filter(t -> t.name().equals(name))
-                            .findFirst()
-                            .orElse(null);
+                    var tool = lookupToolByName(name);
                     result.add(new SkillToolRef(
                             name,
                             tool != null && tool.description() != null ? tool.description() : ""
@@ -221,10 +218,7 @@ public class ApiSkillsController extends Controller {
     }
 
     private static agents.ToolRegistry.Tool lookupToolByName(String name) {
-        return agents.ToolRegistry.listTools().stream()
-                .filter(t -> t.name().equals(name))
-                .findFirst()
-                .orElse(null);
+        return agents.ToolRegistry.lookupTool(name);
     }
 
     private static boolean isTextFile(Path p) {

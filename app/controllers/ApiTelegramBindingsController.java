@@ -374,11 +374,7 @@ public class ApiTelegramBindingsController extends Controller {
     }
 
     private static String readOptionalString(com.google.gson.JsonObject body, String key) {
-        if (!body.has(key)) return null;
-        var el = body.get(key);
-        if (el.isJsonNull()) return null;
-        var s = el.getAsString();
-        return (s == null || s.isBlank()) ? null : s.trim();
+        return JsonBodyReader.optString(body, key, true);
     }
 
     private static ChannelTransport parseTransport(com.google.gson.JsonObject body,

@@ -13,7 +13,6 @@ public class Application extends Controller {
         // Serve the SPA if it's been built
         File spaIndex = Play.getFile("public/spa/index.html");
         if (spaIndex.exists()) {
-            response.setContentTypeIfNotSet(HTML_CONTENT_TYPE_PREFIX + play.Play.defaultWebEncoding);
             renderBinary(spaIndex);
         }
         // SPA not built — return a simple HTML page instead of the legacy Groovy template

@@ -66,17 +66,15 @@ public class ApiNotificationsController extends Controller {
     public static void list(String status, Integer limit) {
         int cap = limit != null && limit > 0 ? Math.min(limit, 500) : 50;
         var mode = status == null || status.isBlank() ? "unread" : status.toLowerCase();
-        @SuppressWarnings("unchecked")
-        List<Object> raw = (List<Object>) (List<?>) switch (mode) {
-            case "unread" -> Notification.find(
-                    "acknowledgedAt IS NULL ORDER BY createdAt DESC").fetch(cap);
-            case "all" -> Notification.find("ORDER BY createdAt DESC").fetch(cap);
+        List<Notification> rows = switch (mode) {
+            case "unread" -> Notification.findUnread(cap);
+            case "all" -> Notification.findAllNewestFirst(cap);
             default -> {
                 badRequest();
                 yield List.of();
             }
         };
-        var views = raw.stream().map(o -> NotificationView.of((Notification) o)).toList();
+        var views = rows.stream().map(NotificationView::of).toList();
         renderJSON(gson.toJson(views));
     }
 
