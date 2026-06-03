@@ -1,4 +1,5 @@
-import channels.TelegramChannel;
+import channels.InboundMessage;
+import channels.PendingAttachment;
 import channels.TelegramInboundTextBuffer;
 import org.junit.jupiter.api.*;
 import play.test.UnitTest;
@@ -25,11 +26,11 @@ class TelegramInboundTextBufferTest extends UnitTest {
         TelegramInboundTextBuffer.resetForTest();
     }
 
-    private static TelegramChannel.InboundMessage textMsg(String chatId, Integer threadId,
+    private static InboundMessage textMsg(String chatId, Integer threadId,
                                                           String fromId, String text,
                                                           Integer messageId, boolean botMentioned,
                                                           String replyContext) {
-        return new TelegramChannel.InboundMessage(
+        return new InboundMessage(
                 chatId, "private", text,
                 fromId, "handle", "Display Name", botMentioned,
                 List.of(), null, messageId, threadId, replyContext);
@@ -37,7 +38,7 @@ class TelegramInboundTextBufferTest extends UnitTest {
 
     @Test
     void subThresholdMessageDispatchesImmediately() {
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatched = new AtomicReference<InboundMessage>();
         var count = new AtomicInteger();
         var msg = textMsg("chat", null, "user", "a short normal message", 1, false, null);
 
@@ -54,7 +55,7 @@ class TelegramInboundTextBufferTest extends UnitTest {
 
     @Test
     void twoAboveThresholdPiecesCoalesceIntoOneDispatch() {
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatched = new AtomicReference<InboundMessage>();
         var count = new AtomicInteger();
 
         var first = textMsg("chat", 7, "user", longText('a', 4096), 100, true, "in reply to: hi");
@@ -93,9 +94,9 @@ class TelegramInboundTextBufferTest extends UnitTest {
 
     @Test
     void subThresholdTailPieceAppendsToOpenBuffer() {
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatched = new AtomicReference<InboundMessage>();
         var count = new AtomicInteger();
-        java.util.function.Consumer<TelegramChannel.InboundMessage> sink =
+        java.util.function.Consumer<InboundMessage> sink =
                 m -> { count.incrementAndGet(); dispatched.set(m); };
 
         // A ~9000-char paste the Telegram client auto-splits into 4096 + 4096 +
@@ -125,8 +126,8 @@ class TelegramInboundTextBufferTest extends UnitTest {
 
     @Test
     void differentKeysDoNotMerge() {
-        var dispatchedUserA = new AtomicReference<TelegramChannel.InboundMessage>();
-        var dispatchedUserB = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatchedUserA = new AtomicReference<InboundMessage>();
+        var dispatchedUserB = new AtomicReference<InboundMessage>();
 
         // Same chat + thread, different sender → distinct keys.
         var userA = textMsg("chat", 7, "userA", longText('a', 4096), 100, false, null);
@@ -152,21 +153,21 @@ class TelegramInboundTextBufferTest extends UnitTest {
         assertTrue(TelegramInboundTextBuffer.isEligible(plain),
                 "plain text with no attachments and no media group is eligible");
 
-        var withAttachment = new TelegramChannel.InboundMessage(
+        var withAttachment = new InboundMessage(
                 "chat", "private", "caption", "user", "handle",
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "F1", null, "image/jpeg", 100L, models.MessageAttachment.KIND_IMAGE)),
                 null);
         assertFalse(TelegramInboundTextBuffer.isEligible(withAttachment),
                 "a message carrying attachments is NOT eligible for text reassembly");
 
-        var withMediaGroup = new TelegramChannel.InboundMessage(
+        var withMediaGroup = new InboundMessage(
                 "chat", "private", "caption", "user", "handle",
                 List.of(), "group-A");
         assertFalse(TelegramInboundTextBuffer.isEligible(withMediaGroup),
                 "a message with a media_group_id is NOT eligible for text reassembly");
 
-        var nullText = new TelegramChannel.InboundMessage(
+        var nullText = new InboundMessage(
                 "chat", "private", null, "user", "handle",
                 List.of(), null);
         assertFalse(TelegramInboundTextBuffer.isEligible(nullText),

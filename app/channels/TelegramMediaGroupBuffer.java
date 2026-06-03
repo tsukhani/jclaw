@@ -11,7 +11,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JCLAW-136: reassembles {@link TelegramChannel.InboundMessage} updates that
+ * JCLAW-136: reassembles {@link InboundMessage} updates that
  * share a {@code media_group_id} into a single merged inbound. Telegram
  * delivers one Update per photo in a multi-photo album; each carries its
  * own photo array plus (on the first Update only) the shared caption.
@@ -47,11 +47,11 @@ public final class TelegramMediaGroupBuffer {
 
     private static final class Bucket {
         final String mediaGroupId;
-        final List<TelegramChannel.PendingAttachment> attachments = new ArrayList<>();
+        final List<PendingAttachment> attachments = new ArrayList<>();
         String text = "";
-        TelegramChannel.InboundMessage firstMessage;
+        InboundMessage firstMessage;
         ScheduledFuture<?> flushTask;
-        java.util.function.Consumer<TelegramChannel.InboundMessage> dispatcher;
+        java.util.function.Consumer<InboundMessage> dispatcher;
         Bucket(String mediaGroupId) { this.mediaGroupId = mediaGroupId; }
     }
 
@@ -66,8 +66,8 @@ public final class TelegramMediaGroupBuffer {
      * to reassemble — the message dispatches immediately through the same
      * callback.
      */
-    public static void add(TelegramChannel.InboundMessage incoming,
-                           java.util.function.Consumer<TelegramChannel.InboundMessage> dispatcher) {
+    public static void add(InboundMessage incoming,
+                           java.util.function.Consumer<InboundMessage> dispatcher) {
         var groupId = incoming.mediaGroupId();
         if (groupId == null) {
             dispatcher.accept(incoming);
@@ -102,7 +102,7 @@ public final class TelegramMediaGroupBuffer {
         var bucket = buffers.remove(groupId);
         if (bucket == null || bucket.firstMessage == null || bucket.dispatcher == null) return;
         var first = bucket.firstMessage;
-        var merged = new TelegramChannel.InboundMessage(
+        var merged = new InboundMessage(
                 first.chatId(), first.chatType(), bucket.text,
                 first.fromId(), first.fromUsername(),
                 List.copyOf(bucket.attachments), null);

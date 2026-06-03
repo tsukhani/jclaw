@@ -99,7 +99,7 @@ public final class TelegramFileDownloader {
      * codebase.
      */
     public static Result download(String botToken,
-                                  TelegramChannel.PendingAttachment pending,
+                                  PendingAttachment pending,
                                   String agentName) {
         return download(botToken, pending, agentName,
                 "https://api.telegram.org/bot" + botToken,
@@ -108,7 +108,7 @@ public final class TelegramFileDownloader {
 
     /**
      * Overload exposing the API and file base URLs for tests (mock HTTP
-     * server). Production callers use {@link #download(String, TelegramChannel.PendingAttachment, String)}.
+     * server). Production callers use {@link #download(String, PendingAttachment, String)}.
      * Public because jclaw tests live in the default package and can't see
      * package-private channel methods.
      */
@@ -117,7 +117,7 @@ public final class TelegramFileDownloader {
     // unrelated logic when toggling between real and mocked HTTP base URLs.
     @SuppressWarnings("java:S1172")
     public static Result download(String botToken,
-                                  TelegramChannel.PendingAttachment pending,
+                                  PendingAttachment pending,
                                   String agentName,
                                   String apiBaseUrl,
                                   String fileBaseUrl) {
@@ -160,7 +160,7 @@ public final class TelegramFileDownloader {
      * caller is responsible for staging directory setup and the byte transfer.
      */
     private static MetaResult fetchFileMetadata(String apiBaseUrl,
-                                                TelegramChannel.PendingAttachment pending) {
+                                                PendingAttachment pending) {
         JsonObject getFileResp;
         try {
             var url = apiBaseUrl + "/getFile?file_id=" + pending.telegramFileId();

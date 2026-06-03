@@ -1,6 +1,5 @@
 package channels;
 
-import channels.TelegramChannel.InboundCallback;
 import channels.TelegramModelCallback.Payload;
 import models.Agent;
 import models.Conversation;

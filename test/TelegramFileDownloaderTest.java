@@ -1,4 +1,4 @@
-import channels.TelegramChannel;
+import channels.PendingAttachment;
 import channels.TelegramFileDownloader;
 import com.sun.net.httpserver.HttpServer;
 import models.MessageAttachment;
@@ -104,7 +104,7 @@ class TelegramFileDownloaderTest extends UnitTest {
             exchange.close();
         });
 
-        var pending = new TelegramChannel.PendingAttachment(
+        var pending = new PendingAttachment(
                 "FID", "my-photo.jpg", "image/jpeg", payload.length,
                 MessageAttachment.KIND_IMAGE);
         // getFile hits the loopback mock (unguarded leg); the byte download
@@ -142,7 +142,7 @@ class TelegramFileDownloaderTest extends UnitTest {
             exchange.close();
         });
 
-        var pending = new TelegramChannel.PendingAttachment(
+        var pending = new PendingAttachment(
                 "BIG", "huge.mp4", "video/mp4", 0L, MessageAttachment.KIND_FILE);
         var result = TelegramFileDownloader.download("TOKEN", pending, agent.name,
                 "http://127.0.0.1:" + port + "/botTOKEN",
@@ -167,7 +167,7 @@ class TelegramFileDownloaderTest extends UnitTest {
             exchange.close();
         });
 
-        var pending = new TelegramChannel.PendingAttachment(
+        var pending = new PendingAttachment(
                 "MISSING", null, null, 0L, MessageAttachment.KIND_FILE);
         var result = TelegramFileDownloader.download("TOKEN", pending, agent.name,
                 "http://127.0.0.1:" + port + "/botTOKEN",
@@ -211,7 +211,7 @@ class TelegramFileDownloaderTest extends UnitTest {
             exchange.close();
         });
 
-        var pending = new TelegramChannel.PendingAttachment(
+        var pending = new PendingAttachment(
                 "FID", "my-photo.jpg", "image/jpeg", payload.length,
                 MessageAttachment.KIND_IMAGE);
         // file base points at loopback — assertSafeScheme rejects the literal IP.

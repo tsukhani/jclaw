@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
  * flag the caller derives from the raw SDK {@code Message}) and the merge rule.
  *
  * <p>Detection lives at the dispatch site, not here: the parsed
- * {@link TelegramChannel.InboundMessage} doesn't carry the forward fields, so
+ * {@link InboundMessage} doesn't carry the forward fields, so
  * the caller passes an explicit {@code isForward} boolean derived from
  * {@code message.getForwardOrigin()} / {@code getForwardDate()} on the raw SDK
  * {@code Message}. A non-forward message NEVER enters this buffer — it stays on
@@ -76,10 +76,10 @@ public final class TelegramForwardCoalesceBuffer {
     private static final class Bucket {
         final String key;
         final StringBuilder text = new StringBuilder();
-        final List<TelegramChannel.PendingAttachment> attachments = new ArrayList<>();
-        TelegramChannel.InboundMessage firstMessage;
+        final List<PendingAttachment> attachments = new ArrayList<>();
+        InboundMessage firstMessage;
         ScheduledFuture<?> flushTask;
-        java.util.function.Consumer<TelegramChannel.InboundMessage> dispatcher;
+        java.util.function.Consumer<InboundMessage> dispatcher;
         Bucket(String key) { this.key = key; }
     }
 
@@ -87,7 +87,7 @@ public final class TelegramForwardCoalesceBuffer {
      * Buffer key for {@code (chatId, messageThreadId, fromId)}. Threads and
      * senders are kept distinct so concurrent forward bursts don't merge.
      */
-    static String bufferKey(TelegramChannel.InboundMessage m) {
+    static String bufferKey(InboundMessage m) {
         return m.chatId() + "|" + m.messageThreadId() + "|" + m.fromId();
     }
 
@@ -104,8 +104,8 @@ public final class TelegramForwardCoalesceBuffer {
      * media-group path. The decide-then-append runs inside {@code compute()} so
      * concurrent burst pieces (the receive path is virtual-threaded) can't race.
      */
-    public static void add(TelegramChannel.InboundMessage incoming,
-                           java.util.function.Consumer<TelegramChannel.InboundMessage> dispatcher) {
+    public static void add(InboundMessage incoming,
+                           java.util.function.Consumer<InboundMessage> dispatcher) {
         var key = bufferKey(incoming);
         buffers.compute(key, (k, existing) -> {
             if (existing == null) existing = new Bucket(k);
@@ -128,7 +128,7 @@ public final class TelegramForwardCoalesceBuffer {
     /**
      * Remove + dispatch the bucket for {@code key}. Normally fired by the
      * scheduler after the idle window; exposed package-private for tests via
-     * {@link #flushForTest(TelegramChannel.InboundMessage)}.
+     * {@link #flushForTest(InboundMessage)}.
      */
     // Catches Throwable on purpose: this runs on the scheduler thread, so an
     // unhandled Error from the dispatcher would kill the timer's worker and
@@ -142,7 +142,7 @@ public final class TelegramForwardCoalesceBuffer {
         // botMentioned, replyContext, sender + chat fields); text is the joined
         // forwarded bodies, attachments the accumulation of the whole burst.
         // No media-group id: a forward burst is not a single album.
-        var merged = new TelegramChannel.InboundMessage(
+        var merged = new InboundMessage(
                 first.chatId(), first.chatType(), bucket.text.toString(),
                 first.fromId(), first.fromUsername(), first.fromDisplayName(),
                 first.botMentioned(), List.copyOf(bucket.attachments), null,
@@ -161,7 +161,7 @@ public final class TelegramForwardCoalesceBuffer {
     /** Visible for tests: flush immediately without waiting for the idle timer.
      *  Keyed by a representative message (same {@code (chatId, threadId,
      *  fromId)} as the buffered pieces). */
-    public static void flushForTest(TelegramChannel.InboundMessage representative) {
+    public static void flushForTest(InboundMessage representative) {
         flush(bufferKey(representative));
     }
 

@@ -76,9 +76,9 @@ public final class TelegramInboundTextBuffer {
     private static final class Bucket {
         final String key;
         final StringBuilder text = new StringBuilder();
-        TelegramChannel.InboundMessage firstMessage;
+        InboundMessage firstMessage;
         ScheduledFuture<?> flushTask;
-        java.util.function.Consumer<TelegramChannel.InboundMessage> dispatcher;
+        java.util.function.Consumer<InboundMessage> dispatcher;
         Bucket(String key) { this.key = key; }
     }
 
@@ -86,13 +86,13 @@ public final class TelegramInboundTextBuffer {
      * Buffer key for {@code (chatId, messageThreadId, fromId)}. Threads and
      * senders are kept distinct so concurrent long pastes don't merge.
      */
-    static String bufferKey(TelegramChannel.InboundMessage m) {
+    static String bufferKey(InboundMessage m) {
         return m.chatId() + "|" + m.messageThreadId() + "|" + m.fromId();
     }
 
     /** True when {@code m} is a plain-text message eligible for reassembly:
      *  non-null text, no attachments, no media-group id. */
-    public static boolean isEligible(TelegramChannel.InboundMessage m) {
+    public static boolean isEligible(InboundMessage m) {
         return m.text() != null
                 && (m.attachments() == null || m.attachments().isEmpty())
                 && m.mediaGroupId() == null;
@@ -112,11 +112,11 @@ public final class TelegramInboundTextBuffer {
      * one merged inbound (first piece's metadata + joined text) and
      * {@code dispatcher} is invoked ONCE.
      *
-     * <p>Callers must already have confirmed {@link #isEligible(TelegramChannel.InboundMessage)};
+     * <p>Callers must already have confirmed {@link #isEligible(InboundMessage)};
      * non-eligible messages belong on the {@link TelegramMediaGroupBuffer} path.
      */
-    public static void add(TelegramChannel.InboundMessage incoming,
-                           java.util.function.Consumer<TelegramChannel.InboundMessage> dispatcher) {
+    public static void add(InboundMessage incoming,
+                           java.util.function.Consumer<InboundMessage> dispatcher) {
         var key = bufferKey(incoming);
         int threshold = coalesceThreshold();
         // dispatchNow flips true ONLY when there is no open bucket for this key
@@ -153,7 +153,7 @@ public final class TelegramInboundTextBuffer {
     /**
      * Remove + dispatch the bucket for {@code key}. Normally fired by the
      * scheduler after the idle window; exposed package-private for tests via
-     * {@link #flushForTest(TelegramChannel.InboundMessage)}.
+     * {@link #flushForTest(InboundMessage)}.
      */
     // Catches Throwable on purpose: this runs on the scheduler thread, so an
     // unhandled Error from the dispatcher would kill the timer's worker and
@@ -168,10 +168,10 @@ public final class TelegramInboundTextBuffer {
         // text is the concatenation of all buffered pieces. Attachments are
         // empty by construction (eligible pieces carry none) and there is no
         // media-group id.
-        var merged = new TelegramChannel.InboundMessage(
+        var merged = new InboundMessage(
                 first.chatId(), first.chatType(), bucket.text.toString(),
                 first.fromId(), first.fromUsername(), first.fromDisplayName(),
-                first.botMentioned(), List.<TelegramChannel.PendingAttachment>of(), null,
+                first.botMentioned(), List.<PendingAttachment>of(), null,
                 first.messageId(), first.messageThreadId(), first.replyContext());
         EventLogger.info("channel", null, "telegram",
                 "Inbound text buffer flushing %d chars as one inbound".formatted(
@@ -187,7 +187,7 @@ public final class TelegramInboundTextBuffer {
     /** Visible for tests: flush immediately without waiting for the idle timer.
      *  Keyed by a representative message (same {@code (chatId, threadId,
      *  fromId)} as the buffered pieces). */
-    public static void flushForTest(TelegramChannel.InboundMessage representative) {
+    public static void flushForTest(InboundMessage representative) {
         flush(bufferKey(representative));
     }
 

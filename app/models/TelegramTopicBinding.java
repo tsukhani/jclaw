@@ -43,7 +43,7 @@ public class TelegramTopicBinding extends Model {
     /**
      * Telegram chat id the topic lives in. String-typed to match the rest of
      * the Telegram stack ({@code chatId} is a String everywhere — see
-     * {@link channels.TelegramChannel.InboundMessage}).
+     * {@link channels.InboundMessage}).
      */
     @Column(name = "chat_id", nullable = false)
     public String chatId;

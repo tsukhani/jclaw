@@ -1,4 +1,5 @@
-import channels.TelegramChannel;
+import channels.InboundMessage;
+import channels.PendingAttachment;
 import channels.TelegramForwardCoalesceBuffer;
 import org.junit.jupiter.api.*;
 import play.test.UnitTest;
@@ -20,11 +21,11 @@ class TelegramForwardCoalesceBufferTest extends UnitTest {
         TelegramForwardCoalesceBuffer.resetForTest();
     }
 
-    private static TelegramChannel.InboundMessage fwd(String chatId, Integer threadId,
+    private static InboundMessage fwd(String chatId, Integer threadId,
                                                       String fromId, String text,
                                                       Integer messageId, boolean botMentioned,
                                                       String replyContext) {
-        return new TelegramChannel.InboundMessage(
+        return new InboundMessage(
                 chatId, "private", text,
                 fromId, "handle", "Display Name", botMentioned,
                 List.of(), null, messageId, threadId, replyContext);
@@ -32,9 +33,9 @@ class TelegramForwardCoalesceBufferTest extends UnitTest {
 
     @Test
     void twoForwardsSameKeyWithinWindowMergeIntoOneDispatch() {
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatched = new AtomicReference<InboundMessage>();
         var count = new AtomicInteger();
-        java.util.function.Consumer<TelegramChannel.InboundMessage> sink =
+        java.util.function.Consumer<InboundMessage> sink =
                 m -> { count.incrementAndGet(); dispatched.set(m); };
 
         var first = fwd("chat", 7, "user", "forwarded one", 100, true, "in reply to: hi");
@@ -72,8 +73,8 @@ class TelegramForwardCoalesceBufferTest extends UnitTest {
 
     @Test
     void differentKeysDoNotMerge() {
-        var dispatchedA = new AtomicReference<TelegramChannel.InboundMessage>();
-        var dispatchedB = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatchedA = new AtomicReference<InboundMessage>();
+        var dispatchedB = new AtomicReference<InboundMessage>();
 
         // Same chat + thread, different forwarding sender → distinct keys.
         var userA = fwd("chat", 7, "userA", "A forward", 100, false, null);
@@ -95,7 +96,7 @@ class TelegramForwardCoalesceBufferTest extends UnitTest {
 
     @Test
     void singleForwardFlushesAsOne() {
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatched = new AtomicReference<InboundMessage>();
         var count = new AtomicInteger();
         var only = fwd("chat", null, "user", "lone forward", 1, false, null);
 
@@ -110,17 +111,17 @@ class TelegramForwardCoalesceBufferTest extends UnitTest {
 
     @Test
     void forwardBurstAccumulatesAttachments() {
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
-        java.util.function.Consumer<TelegramChannel.InboundMessage> sink = dispatched::set;
+        var dispatched = new AtomicReference<InboundMessage>();
+        java.util.function.Consumer<InboundMessage> sink = dispatched::set;
 
-        var photo1 = new TelegramChannel.InboundMessage(
+        var photo1 = new InboundMessage(
                 "chat", "private", "cap one", "user", "handle", "Display Name", false,
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "F1", null, "image/jpeg", 100L, models.MessageAttachment.KIND_IMAGE)),
                 null, 100, 7, null);
-        var photo2 = new TelegramChannel.InboundMessage(
+        var photo2 = new InboundMessage(
                 "chat", "private", null, "user", "handle", "Display Name", false,
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "F2", null, "image/jpeg", 200L, models.MessageAttachment.KIND_IMAGE)),
                 null, 101, 7, null);
 

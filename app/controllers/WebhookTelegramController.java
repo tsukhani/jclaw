@@ -1,6 +1,8 @@
 package controllers;
 
 import agents.AgentRunner;
+import channels.InboundCallback;
+import channels.InboundMessage;
 import channels.TelegramChannel;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonParser;
@@ -271,7 +273,7 @@ public class WebhookTelegramController extends Controller {
                 channels.TelegramPollingRunner.isForward(sdkUpdate));
     }
 
-    private static void handleCallback(BindingCtx ctx, TelegramChannel.InboundCallback callback, Long bindingId) {
+    private static void handleCallback(BindingCtx ctx, InboundCallback callback, Long bindingId) {
         if (!ctx.telegramUserId().equals(callback.fromId())) {
             EventLogger.warn(CATEGORY_CHANNEL,
                     ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
@@ -284,7 +286,7 @@ public class WebhookTelegramController extends Controller {
                         ctx.botToken(), ctx.agent(), callback));
     }
 
-    private static void handleInboundMessage(BindingCtx ctx, TelegramChannel.InboundMessage message,
+    private static void handleInboundMessage(BindingCtx ctx, InboundMessage message,
                                              Long bindingId, boolean isForward) {
         // JCLAW-371 access policy: a DM is served only for the binding owner; a
         // group/supergroup is served for any member but only when the bot was
@@ -336,7 +338,7 @@ public class WebhookTelegramController extends Controller {
         }
     }
 
-    private static void processMessage(BindingCtx ctx, TelegramChannel.InboundMessage message) {
+    private static void processMessage(BindingCtx ctx, InboundMessage message) {
         final String sendToken = ctx.botToken();
         final String sendChatId = message.chatId();
         final Agent sendAgent = ctx.agent();

@@ -704,7 +704,7 @@ public final class TelegramPollingRunner {
             // non-message short-circuit below would drop it.
             ReactionDelta reaction = callback == null ? parseReaction(update) : null;
 
-            TelegramChannel.InboundMessage msg = null;
+            InboundMessage msg = null;
             if (callback == null && reaction == null) {
                 var identity = TelegramBotIdentity.resolve(ACTIVE.get(bindingId));
                 msg = TelegramChannel.parseUpdate(update, identity.username(), identity.userId());
@@ -756,7 +756,7 @@ public final class TelegramPollingRunner {
         });
     }
 
-    private static void handleCallback(Long bindingId, Ctx ctx, TelegramChannel.InboundCallback callback) {
+    private static void handleCallback(Long bindingId, Ctx ctx, InboundCallback callback) {
         if (!ctx.telegramUserId().equals(callback.fromId())) {
             EventLogger.warn(LOG_CATEGORY, ctx.agent().name, LOG_SOURCE,
                     "Rejected callback from user %s: binding %d is bound to user %s".formatted(
@@ -766,7 +766,7 @@ public final class TelegramPollingRunner {
         TelegramCallbackDispatcher.dispatch(ctx.botToken(), ctx.agent(), callback);
     }
 
-    private static void handleMessage(Long bindingId, Ctx ctx, TelegramChannel.InboundMessage msg,
+    private static void handleMessage(Long bindingId, Ctx ctx, InboundMessage msg,
                                       boolean isForward) {
         // JCLAW-371: DM owner-only; group/supergroup served only when the bot
         // was directly addressed (msg.botMentioned). See TelegramAccessPolicy.
@@ -830,7 +830,7 @@ public final class TelegramPollingRunner {
      * single-threaded scheduler used by the reassembly buffer.
      */
     private static void dispatchMerged(String sendToken, Agent sendAgent, String ownerKey,
-                                        TelegramChannel.InboundMessage merged) {
+                                        InboundMessage merged) {
         Thread.ofVirtual().name("telegram-dispatch").start(() -> {
             try {
                 final String sendChatId = merged.chatId();
@@ -996,7 +996,7 @@ public final class TelegramPollingRunner {
     /**
      * True when {@code update} carries a forwarded message. Detection reads the
      * RAW SDK {@link org.telegram.telegrambots.meta.api.objects.message.Message}
-     * because the parsed {@link TelegramChannel.InboundMessage} does NOT retain
+     * because the parsed {@link InboundMessage} does NOT retain
      * the forward fields. Both dispatch sites
      * ({@link controllers.WebhookTelegramController} and {@link #dispatch}) call
      * this on the same update they pass to

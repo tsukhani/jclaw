@@ -1,4 +1,5 @@
-import channels.TelegramChannel;
+import channels.InboundMessage;
+import channels.PendingAttachment;
 import channels.TelegramMediaGroupBuffer;
 import models.MessageAttachment;
 import org.junit.jupiter.api.*;
@@ -15,8 +16,8 @@ class TelegramMediaGroupBufferTest extends UnitTest {
 
     @Test
     void passesThroughMessagesWithoutMediaGroupId() {
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
-        var msg = new TelegramChannel.InboundMessage(
+        var dispatched = new AtomicReference<InboundMessage>();
+        var msg = new InboundMessage(
                 "chat", "private", "hello", "user", "user",
                 List.of(), null);
 
@@ -29,21 +30,21 @@ class TelegramMediaGroupBufferTest extends UnitTest {
 
     @Test
     void reassemblesPhotosInSameMediaGroup() {
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatched = new AtomicReference<InboundMessage>();
 
-        var first = new TelegramChannel.InboundMessage(
+        var first = new InboundMessage(
                 "chat", "private", "album caption", "user", "user",
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "F1", null, "image/jpeg", 100L, MessageAttachment.KIND_IMAGE)),
                 "group-A");
-        var second = new TelegramChannel.InboundMessage(
+        var second = new InboundMessage(
                 "chat", "private", "", "user", "user",
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "F2", null, "image/jpeg", 200L, MessageAttachment.KIND_IMAGE)),
                 "group-A");
-        var third = new TelegramChannel.InboundMessage(
+        var third = new InboundMessage(
                 "chat", "private", "", "user", "user",
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "F3", null, "image/jpeg", 300L, MessageAttachment.KIND_IMAGE)),
                 "group-A");
 
@@ -71,16 +72,16 @@ class TelegramMediaGroupBufferTest extends UnitTest {
         // Telegram usually puts the caption on the first message in an album,
         // but operators have observed it occasionally arriving on a later one.
         // The buffer picks whichever arrives first with non-empty text.
-        var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatched = new AtomicReference<InboundMessage>();
 
-        var noCaption = new TelegramChannel.InboundMessage(
+        var noCaption = new InboundMessage(
                 "chat", "private", "", "user", "user",
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "F1", null, "image/jpeg", 100L, MessageAttachment.KIND_IMAGE)),
                 "group-B");
-        var withCaption = new TelegramChannel.InboundMessage(
+        var withCaption = new InboundMessage(
                 "chat", "private", "describe these", "user", "user",
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "F2", null, "image/jpeg", 200L, MessageAttachment.KIND_IMAGE)),
                 "group-B");
 
@@ -93,17 +94,17 @@ class TelegramMediaGroupBufferTest extends UnitTest {
 
     @Test
     void distinctGroupsDoNotInterfere() {
-        var dispatchedA = new AtomicReference<TelegramChannel.InboundMessage>();
-        var dispatchedB = new AtomicReference<TelegramChannel.InboundMessage>();
+        var dispatchedA = new AtomicReference<InboundMessage>();
+        var dispatchedB = new AtomicReference<InboundMessage>();
 
-        var groupA = new TelegramChannel.InboundMessage(
+        var groupA = new InboundMessage(
                 "chat", "private", "A-caption", "user", "user",
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "A1", null, "image/jpeg", 100L, MessageAttachment.KIND_IMAGE)),
                 "group-C");
-        var groupB = new TelegramChannel.InboundMessage(
+        var groupB = new InboundMessage(
                 "chat", "private", "B-caption", "user", "user",
-                List.of(new TelegramChannel.PendingAttachment(
+                List.of(new PendingAttachment(
                         "B1", null, "image/jpeg", 100L, MessageAttachment.KIND_IMAGE)),
                 "group-D");
 

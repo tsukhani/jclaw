@@ -1,6 +1,6 @@
 import channels.TelegramCallbackDispatcher;
 import channels.TelegramChannel;
-import channels.TelegramChannel.InboundCallback;
+import channels.InboundCallback;
 import channels.TelegramModelCallback;
 import models.Agent;
 import models.Conversation;
