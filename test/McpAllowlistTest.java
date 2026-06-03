@@ -62,6 +62,28 @@ class McpAllowlistTest extends UnitTest {
     }
 
     @Test
+    void registerWithIdenticalToolSetIsZeroWriteNoOp() {
+        Tx.run(() -> {
+            newAgent("alpha");
+            newAgent("beta");
+        });
+        var tools = List.of(toolDef("a"), toolDef("b"));
+        Tx.run(() -> McpAllowlist.registerForAllAgents("svc", tools));
+
+        // Capture the row IDs written by the first publish.
+        var idsBefore = Tx.run(() -> rowIds("mcp:svc"));
+        assertEquals(4, idsBefore.size(), "2 agents x 2 tools");
+
+        // Re-publish the identical tool set: a delete+reinsert would assign new
+        // IDs, so unchanged IDs prove the short-circuit fired (zero writes).
+        var written = Tx.run(() -> McpAllowlist.registerForAllAgents("svc", tools));
+        assertEquals(4, written, "no-op returns the existing row count");
+        var idsAfter = Tx.run(() -> rowIds("mcp:svc"));
+        assertEquals(idsBefore, idsAfter,
+                "identical tool set must leave the existing rows in place (no delete+reinsert)");
+    }
+
+    @Test
     void registerWithEmptyListClearsRows() {
         Tx.run(() -> newAgent("alpha"));
         Tx.run(() -> McpAllowlist.registerForAllAgents("svc",
@@ -144,6 +166,14 @@ class McpAllowlistTest extends UnitTest {
 
     private static long countRows(String skillName) {
         return AgentSkillAllowedTool.count("skillName = ?1", skillName);
+    }
+
+    private static java.util.Set<Long> rowIds(String skillName) {
+        var ids = new java.util.HashSet<Long>();
+        for (Object row : AgentSkillAllowedTool.find("skillName = ?1", skillName).fetch()) {
+            ids.add(((AgentSkillAllowedTool) row).id);
+        }
+        return ids;
     }
 
     private static boolean allowed(Long agentId, String server, String tool) {

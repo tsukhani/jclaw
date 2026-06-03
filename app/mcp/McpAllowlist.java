@@ -3,7 +3,9 @@ package mcp;
 import models.Agent;
 import models.AgentSkillAllowedTool;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Per-agent MCP tool allowlist (JCLAW-32).
@@ -42,12 +44,32 @@ public final class McpAllowlist {
      * current tool list. Idempotent — clears prior rows for this server
      * scope first, then inserts fresh. Safe to call on every reconnect or
      * when the server's tool list changes via {@code tools/list_changed}.
+     *
+     * <p>No-op short-circuit: an unchanged reconnect (or a {@code list_changed}
+     * that didn't actually change anything) is the common case. When the
+     * incoming tool-name set already matches the broadcast we last wrote — same
+     * distinct tools, and exactly {@code agents × tools} rows still present —
+     * we skip the delete+reinsert entirely and return the existing row count.
+     * The {@code agents × tools} guard keeps this strictly behavior-preserving:
+     * if a future per-agent toggle (JCLAW-33) selectively deleted rows, the
+     * count won't match and we fall through to a full rewrite as before.
      */
     public static int registerForAllAgents(String serverName, List<McpToolDef> tools) {
         var skillName = SKILL_PREFIX + serverName;
+
+        List<Agent> agents = Agent.findAll();
+        Set<String> incoming = new HashSet<>();
+        for (var tool : tools) incoming.add(tool.name());
+
+        List<AgentSkillAllowedTool> existing = AgentSkillAllowedTool.find("skillName = ?1", skillName).fetch();
+        Set<String> current = new HashSet<>();
+        for (var row : existing) current.add(row.toolName);
+        if (current.equals(incoming) && existing.size() == agents.size() * incoming.size()) {
+            return existing.size();
+        }
+
         AgentSkillAllowedTool.delete("skillName = ?1", skillName);
         if (tools.isEmpty()) return 0;
-        List<Agent> agents = Agent.findAll();
         int written = 0;
         for (var agent : agents) {
             for (var tool : tools) {
