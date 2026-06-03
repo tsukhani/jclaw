@@ -2,13 +2,7 @@ package channels;
 
 import services.EventLogger;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * M2 inbound long-message reassembly: Telegram clients auto-split a long paste
@@ -17,10 +11,9 @@ import java.util.concurrent.TimeUnit;
  * single pasted block becomes N disjoint prompts. This buffer coalesces those
  * pieces back into one inbound.
  *
- * <p>Mirrors {@link TelegramMediaGroupBuffer}'s structure: an in-memory map of
- * buckets, a single-threaded daemon {@link ScheduledExecutorService} that fires
- * an idle-timeout flush, and the same {@code add(message, dispatch)} callback
- * shape. The differences are the key and the eligibility/threshold rules below.
+ * <p>The map / scheduler / idle-timer / flush machinery lives in the shared
+ * {@link IdleDebounceBuffer} (JCLAW-397); this lane supplies only the text-merge
+ * policy and the eligibility/threshold rules below.
  *
  * <p>Eligibility: ONLY plain-text messages — {@code text != null}, no
  * attachments, and no {@code media_group_id}. Messages with attachments or a
@@ -62,25 +55,19 @@ public final class TelegramInboundTextBuffer {
     private static final String CFG_THRESHOLD = "telegram.inbound.coalesce-threshold";
     private static final String CFG_WINDOW_MS = "telegram.inbound.coalesce-window-ms";
 
-    private static final ConcurrentHashMap<String, Bucket> buffers = new ConcurrentHashMap<>();
-
-    private static final ScheduledExecutorService scheduler =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                var t = new Thread(r, "telegram-inbound-text-flush");
-                t.setDaemon(true);
-                return t;
-            });
-
-    private TelegramInboundTextBuffer() {}
-
     private static final class Bucket {
-        final String key;
         final StringBuilder text = new StringBuilder();
         InboundMessage firstMessage;
-        ScheduledFuture<?> flushTask;
-        java.util.function.Consumer<InboundMessage> dispatcher;
-        Bucket(String key) { this.key = key; }
     }
+
+    private static final IdleDebounceBuffer<Bucket> BUFFER = new IdleDebounceBuffer<>(
+            "telegram-inbound-text-flush", "Inbound text",
+            Bucket::new,
+            TelegramInboundTextBuffer::accumulate,
+            TelegramInboundTextBuffer::merge,
+            TelegramInboundTextBuffer::coalesceWindowMs);
+
+    private TelegramInboundTextBuffer() {}
 
     /**
      * Buffer key for {@code (chatId, messageThreadId, fromId)}. Threads and
@@ -117,52 +104,29 @@ public final class TelegramInboundTextBuffer {
      */
     public static void add(InboundMessage incoming,
                            java.util.function.Consumer<InboundMessage> dispatcher) {
-        var key = bufferKey(incoming);
-        int threshold = coalesceThreshold();
-        // dispatchNow flips true ONLY when there is no open bucket for this key
-        // AND the piece is below threshold — a normal short message needing no
-        // reassembly. A short piece that arrives while a bucket IS already open
-        // is the TAIL of an in-progress client split (the last split piece is
-        // the remainder, almost always < threshold) and MUST append, not
-        // dispatch on its own — otherwise the tail becomes a separate turn and
-        // the reassembly drops the end of the user's message. The decide-then-
-        // append runs inside compute() so concurrent split pieces (the receive
-        // path is virtual-threaded) can't race the check against the append.
-        boolean[] dispatchNow = {false};
-        buffers.compute(key, (k, existing) -> {
-            if (existing == null && incoming.text().length() < threshold) {
-                dispatchNow[0] = true;
-                return null; // no bucket created; dispatched immediately below
-            }
-            if (existing == null) existing = new Bucket(k);
-            if (existing.firstMessage == null) existing.firstMessage = incoming;
-            existing.text.append(incoming.text());
-            existing.dispatcher = dispatcher;
-            if (existing.flushTask != null) existing.flushTask.cancel(false);
-            existing.flushTask = scheduler.schedule(() -> flush(k),
-                    coalesceWindowMs(), TimeUnit.MILLISECONDS);
-            return existing;
-        });
-        if (dispatchNow[0]) {
-            // Normal-length message, no open buffer: dispatch immediately,
-            // exactly as today (zero added latency for ordinary traffic).
-            dispatcher.accept(incoming);
-        }
+        BUFFER.offer(bufferKey(incoming), incoming, dispatcher);
     }
 
-    /**
-     * Remove + dispatch the bucket for {@code key}. Normally fired by the
-     * scheduler after the idle window; exposed package-private for tests via
-     * {@link #flushForTest(InboundMessage)}.
-     */
-    // Catches Throwable on purpose: this runs on the scheduler thread, so an
-    // unhandled Error from the dispatcher would kill the timer's worker and
-    // permanently stop inbound-text flushes for the JVM lifetime.
-    @SuppressWarnings("java:S1181")
-    private static void flush(String key) {
-        var bucket = buffers.remove(key);
-        if (bucket == null || bucket.firstMessage == null || bucket.dispatcher == null) return;
+    // dispatchNow is "no open bucket AND below threshold" — a normal short
+    // message needing no reassembly. A short piece that arrives while a bucket
+    // IS already open is the TAIL of an in-progress client split (the last split
+    // piece is the remainder, almost always < threshold) and MUST append, not
+    // dispatch on its own — otherwise the tail becomes a separate turn and the
+    // reassembly drops the end of the user's message. Running inside the shared
+    // buffer's compute() keeps the decide-then-append atomic against concurrent
+    // split pieces on the virtual-threaded receive path.
+    private static boolean accumulate(Bucket bucket, InboundMessage incoming, boolean freshBucket) {
+        if (freshBucket && incoming.text().length() < coalesceThreshold()) {
+            return false; // dispatched immediately by the shared buffer
+        }
+        if (bucket.firstMessage == null) bucket.firstMessage = incoming;
+        bucket.text.append(incoming.text());
+        return true;
+    }
+
+    private static InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
+        if (first == null) return null;
         // Keep the FIRST piece's metadata verbatim (messageId, threadId,
         // botMentioned, replyContext, sender fields, chat fields); only the
         // text is the concatenation of all buffered pieces. Attachments are
@@ -176,24 +140,19 @@ public final class TelegramInboundTextBuffer {
         EventLogger.info("channel", null, "telegram",
                 "Inbound text buffer flushing %d chars as one inbound".formatted(
                         merged.text().length()));
-        try {
-            bucket.dispatcher.accept(merged);
-        } catch (Throwable t) {
-            EventLogger.error("channel", null, "telegram",
-                    "Inbound text dispatcher error: %s".formatted(t.getMessage()));
-        }
+        return merged;
     }
 
     /** Visible for tests: flush immediately without waiting for the idle timer.
      *  Keyed by a representative message (same {@code (chatId, threadId,
      *  fromId)} as the buffered pieces). */
     public static void flushForTest(InboundMessage representative) {
-        flush(bufferKey(representative));
+        BUFFER.flushForTest(bufferKey(representative));
     }
 
     /** Visible for tests: clear all buffered state between test cases. */
     public static void resetForTest() {
-        buffers.clear();
+        BUFFER.resetForTest();
     }
 
     /** Threshold below which a message dispatches immediately, read from

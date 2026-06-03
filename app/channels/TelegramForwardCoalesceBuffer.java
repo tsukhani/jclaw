@@ -4,11 +4,6 @@ import services.EventLogger;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * JCLAW-387 B1: forwarded-message coalescing lane. When a user forwards a
@@ -18,12 +13,9 @@ import java.util.concurrent.TimeUnit;
  * buffer debounces a burst of consecutive forwards from the SAME sender into
  * ONE agent turn.
  *
- * <p>Mirrors {@link TelegramInboundTextBuffer} / {@link TelegramMediaGroupBuffer}:
- * an in-memory {@link ConcurrentHashMap} of buckets, a single-threaded daemon
- * {@link ScheduledExecutorService} firing an idle-timeout flush, and the same
- * {@code add(message, dispatch)} callback shape. The differences are the
- * eligibility signal (the message must be a FORWARD — see the {@code isForward}
- * flag the caller derives from the raw SDK {@code Message}) and the merge rule.
+ * <p>The map / scheduler / idle-timer / flush machinery lives in the shared
+ * {@link IdleDebounceBuffer} (JCLAW-397); this lane supplies only the merge rule
+ * and the eligibility signal below.
  *
  * <p>Detection lives at the dispatch site, not here: the parsed
  * {@link InboundMessage} doesn't carry the forward fields, so
@@ -62,26 +54,20 @@ public final class TelegramForwardCoalesceBuffer {
 
     private static final String CFG_WINDOW_MS = "telegram.inbound.forward-coalesce-window-ms";
 
-    private static final ConcurrentHashMap<String, Bucket> buffers = new ConcurrentHashMap<>();
-
-    private static final ScheduledExecutorService scheduler =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                var t = new Thread(r, "telegram-forward-coalesce-flush");
-                t.setDaemon(true);
-                return t;
-            });
-
-    private TelegramForwardCoalesceBuffer() {}
-
     private static final class Bucket {
-        final String key;
         final StringBuilder text = new StringBuilder();
         final List<PendingAttachment> attachments = new ArrayList<>();
         InboundMessage firstMessage;
-        ScheduledFuture<?> flushTask;
-        java.util.function.Consumer<InboundMessage> dispatcher;
-        Bucket(String key) { this.key = key; }
     }
+
+    private static final IdleDebounceBuffer<Bucket> BUFFER = new IdleDebounceBuffer<>(
+            "telegram-forward-coalesce-flush", "Forward coalesce",
+            Bucket::new,
+            TelegramForwardCoalesceBuffer::accumulate,
+            TelegramForwardCoalesceBuffer::merge,
+            TelegramForwardCoalesceBuffer::forwardCoalesceWindowMs);
+
+    private TelegramForwardCoalesceBuffer() {}
 
     /**
      * Buffer key for {@code (chatId, messageThreadId, fromId)}. Threads and
@@ -101,43 +87,28 @@ public final class TelegramForwardCoalesceBuffer {
      *
      * <p>Callers MUST only route forwarded messages here (see the dispatch-site
      * {@code isForward} gate); non-forwarded messages belong on the text /
-     * media-group path. The decide-then-append runs inside {@code compute()} so
-     * concurrent burst pieces (the receive path is virtual-threaded) can't race.
+     * media-group path.
      */
     public static void add(InboundMessage incoming,
                            java.util.function.Consumer<InboundMessage> dispatcher) {
-        var key = bufferKey(incoming);
-        buffers.compute(key, (k, existing) -> {
-            if (existing == null) existing = new Bucket(k);
-            if (existing.firstMessage == null) existing.firstMessage = incoming;
-            if (incoming.text() != null && !incoming.text().isEmpty()) {
-                // Forwards are distinct messages, not one split blob — separate
-                // them with a blank line so the agent reads them as a list.
-                if (existing.text.length() > 0) existing.text.append("\n\n");
-                existing.text.append(incoming.text());
-            }
-            if (incoming.attachments() != null) existing.attachments.addAll(incoming.attachments());
-            existing.dispatcher = dispatcher;
-            if (existing.flushTask != null) existing.flushTask.cancel(false);
-            existing.flushTask = scheduler.schedule(() -> flush(k),
-                    forwardCoalesceWindowMs(), TimeUnit.MILLISECONDS);
-            return existing;
-        });
+        BUFFER.offer(bufferKey(incoming), incoming, dispatcher);
     }
 
-    /**
-     * Remove + dispatch the bucket for {@code key}. Normally fired by the
-     * scheduler after the idle window; exposed package-private for tests via
-     * {@link #flushForTest(InboundMessage)}.
-     */
-    // Catches Throwable on purpose: this runs on the scheduler thread, so an
-    // unhandled Error from the dispatcher would kill the timer's worker and
-    // permanently stop forward-coalesce flushes for the JVM lifetime.
-    @SuppressWarnings("java:S1181")
-    private static void flush(String key) {
-        var bucket = buffers.remove(key);
-        if (bucket == null || bucket.firstMessage == null || bucket.dispatcher == null) return;
+    private static boolean accumulate(Bucket bucket, InboundMessage incoming, boolean freshBucket) {
+        if (bucket.firstMessage == null) bucket.firstMessage = incoming;
+        if (incoming.text() != null && !incoming.text().isEmpty()) {
+            // Forwards are distinct messages, not one split blob — separate
+            // them with a blank line so the agent reads them as a list.
+            if (bucket.text.length() > 0) bucket.text.append("\n\n");
+            bucket.text.append(incoming.text());
+        }
+        if (incoming.attachments() != null) bucket.attachments.addAll(incoming.attachments());
+        return true;
+    }
+
+    private static InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
+        if (first == null) return null;
         // Keep the FIRST piece's metadata verbatim (messageId, threadId,
         // botMentioned, replyContext, sender + chat fields); text is the joined
         // forwarded bodies, attachments the accumulation of the whole burst.
@@ -150,24 +121,19 @@ public final class TelegramForwardCoalesceBuffer {
         EventLogger.info("channel", null, "telegram",
                 "Forward coalesce buffer flushing burst as one inbound (%d chars, %d attachments)".formatted(
                         merged.text().length(), bucket.attachments.size()));
-        try {
-            bucket.dispatcher.accept(merged);
-        } catch (Throwable t) {
-            EventLogger.error("channel", null, "telegram",
-                    "Forward coalesce dispatcher error: %s".formatted(t.getMessage()));
-        }
+        return merged;
     }
 
     /** Visible for tests: flush immediately without waiting for the idle timer.
      *  Keyed by a representative message (same {@code (chatId, threadId,
      *  fromId)} as the buffered pieces). */
     public static void flushForTest(InboundMessage representative) {
-        flush(bufferKey(representative));
+        BUFFER.flushForTest(bufferKey(representative));
     }
 
     /** Visible for tests: clear all buffered state between test cases. */
     public static void resetForTest() {
-        buffers.clear();
+        BUFFER.resetForTest();
     }
 
     /** Idle window in ms before a buffered forward burst flushes, read from

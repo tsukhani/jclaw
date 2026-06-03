@@ -4,11 +4,6 @@ import services.EventLogger;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * JCLAW-136: reassembles {@link InboundMessage} updates that
@@ -18,10 +13,11 @@ import java.util.concurrent.TimeUnit;
  * Without reassembly the bot would reply N times to an N-photo album —
  * once per Update — which is visibly broken UX.
  *
- * <p>Implementation: in-memory map keyed by {@code media_group_id}. Each
- * bucket accumulates pending attachments and the first-seen caption, and
- * carries a scheduled flush task that dispatches after a short idle
- * window. Later arrivals for the same group append and reset the timer.
+ * <p>The map / scheduler / idle-timer / flush machinery lives in the shared
+ * {@link IdleDebounceBuffer} (JCLAW-397); this lane supplies only the
+ * media-group merge policy. Each bucket accumulates pending attachments and the
+ * first-seen caption; later arrivals for the same group append and reset the
+ * idle timer.
  *
  * <p>Trade-off: a very slow network could split an album across the idle
  * window, producing two dispatches. Good enough for v1 — the cost of a
@@ -34,26 +30,21 @@ public final class TelegramMediaGroupBuffer {
      *  tolerate webhook delivery jitter on typical networks. */
     static final long IDLE_TIMEOUT_MS = 1500;
 
-    private static final ConcurrentHashMap<String, Bucket> buffers = new ConcurrentHashMap<>();
-
-    private static final ScheduledExecutorService scheduler =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                var t = new Thread(r, "telegram-media-group-flush");
-                t.setDaemon(true);
-                return t;
-            });
-
-    private TelegramMediaGroupBuffer() {}
-
     private static final class Bucket {
-        final String mediaGroupId;
         final List<PendingAttachment> attachments = new ArrayList<>();
+        String mediaGroupId;
         String text = "";
         InboundMessage firstMessage;
-        ScheduledFuture<?> flushTask;
-        java.util.function.Consumer<InboundMessage> dispatcher;
-        Bucket(String mediaGroupId) { this.mediaGroupId = mediaGroupId; }
     }
+
+    private static final IdleDebounceBuffer<Bucket> BUFFER = new IdleDebounceBuffer<>(
+            "telegram-media-group-flush", "Media group",
+            Bucket::new,
+            TelegramMediaGroupBuffer::accumulate,
+            TelegramMediaGroupBuffer::merge,
+            () -> IDLE_TIMEOUT_MS);
+
+    private TelegramMediaGroupBuffer() {}
 
     /**
      * Buffer {@code incoming} against its {@code media_group_id}. The first
@@ -73,52 +64,46 @@ public final class TelegramMediaGroupBuffer {
             dispatcher.accept(incoming);
             return;
         }
-        buffers.compute(groupId, (k, existing) -> {
-            if (existing == null) existing = new Bucket(k);
-            if (existing.firstMessage == null) existing.firstMessage = incoming;
-            existing.attachments.addAll(incoming.attachments());
-            if ((existing.text == null || existing.text.isEmpty())
-                    && incoming.text() != null && !incoming.text().isEmpty()) {
-                existing.text = incoming.text();
-            }
-            existing.dispatcher = dispatcher;
-            if (existing.flushTask != null) existing.flushTask.cancel(false);
-            existing.flushTask = scheduler.schedule(() -> flush(k),
-                    IDLE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            return existing;
-        });
+        BUFFER.offer(groupId, incoming, dispatcher);
     }
 
-    /**
-     * Remove + dispatch the bucket for {@code groupId}. Normally fired by
-     * the scheduler after the idle window; exposed package-private for
-     * tests via {@link #flushForTest(String)}.
-     */
-    // Catches Throwable on purpose: this runs on the scheduler thread, so an
-    // unhandled Error from the dispatcher would kill the timer's worker and
-    // permanently stop media-group flushes for the JVM lifetime.
-    @SuppressWarnings("java:S1181")
-    private static void flush(String groupId) {
-        var bucket = buffers.remove(groupId);
-        if (bucket == null || bucket.firstMessage == null || bucket.dispatcher == null) return;
+    private static boolean accumulate(Bucket bucket, InboundMessage incoming, boolean freshBucket) {
+        if (bucket.firstMessage == null) bucket.firstMessage = incoming;
+        if (bucket.mediaGroupId == null) bucket.mediaGroupId = incoming.mediaGroupId();
+        bucket.attachments.addAll(incoming.attachments());
+        if ((bucket.text == null || bucket.text.isEmpty())
+                && incoming.text() != null && !incoming.text().isEmpty()) {
+            bucket.text = incoming.text();
+        }
+        return true;
+    }
+
+    private static InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
+        if (first == null) return null;
+        // JCLAW-397: build the merged inbound with the FULL sender/message shape
+        // so an album keeps the first piece's fromDisplayName / botMentioned /
+        // messageId / messageThreadId / replyContext. The previous 7-arg ctor
+        // silently dropped them, diverging from the text and forward lanes.
+        // mediaGroupId is null — the group has been consumed into one inbound.
         var merged = new InboundMessage(
                 first.chatId(), first.chatType(), bucket.text,
-                first.fromId(), first.fromUsername(),
-                List.copyOf(bucket.attachments), null);
+                first.fromId(), first.fromUsername(), first.fromDisplayName(),
+                first.botMentioned(), List.copyOf(bucket.attachments), null,
+                first.messageId(), first.messageThreadId(), first.replyContext());
         EventLogger.info("channel", null, "telegram",
                 "Media group %s flushing %d attachments as one inbound".formatted(
-                        groupId, bucket.attachments.size()));
-        try {
-            bucket.dispatcher.accept(merged);
-        } catch (Throwable t) {
-            EventLogger.error("channel", null, "telegram",
-                    "Media group dispatcher error: %s".formatted(t.getMessage()));
-        }
+                        bucket.mediaGroupId, bucket.attachments.size()));
+        return merged;
     }
 
     /** Visible for tests: flush immediately without waiting for the idle timer. */
     public static void flushForTest(String groupId) {
-        flush(groupId);
+        BUFFER.flushForTest(groupId);
+    }
+
+    /** Visible for tests: clear all buffered state between test cases. */
+    public static void resetForTest() {
+        BUFFER.resetForTest();
     }
 }
