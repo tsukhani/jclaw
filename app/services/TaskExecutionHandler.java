@@ -274,29 +274,56 @@ public final class TaskExecutionHandler {
     private static CompletionHandler<Void> scheduleIntervalNextCompletion(Task task) {
         return (executionComplete, executionOperations) -> {
             executionOperations.stop();
-            try {
-                SchedulerClient client = schedulerClient;
-                if (client == null) {
-                    EventLogger.warn("task",
-                            task.agent != null ? task.agent.name : null, null,
-                            "SchedulerClient not wired; cannot reschedule Task '%s' next INTERVAL fire"
-                                    .formatted(task.name));
-                    return;
-                }
-                Instant next = Instant.now().plusSeconds(task.intervalSeconds);
-                String instanceId = task.id.toString();
-                client.schedule(new TaskInstance<>(TASK_NAME, instanceId), next);
-                EventLogger.info("task",
-                        task.agent != null ? task.agent.name : null, null,
-                        "Rescheduled Task '%s' next INTERVAL fire for %s (every %ds)"
-                                .formatted(task.name, next, task.intervalSeconds));
-            } catch (Exception e) {
-                EventLogger.error("task",
-                        task.agent != null ? task.agent.name : null, null,
-                        "Failed to reschedule next INTERVAL fire for Task '%s': %s"
-                                .formatted(task.name, e.getMessage()));
-            }
+            rescheduleNext(task, () -> Instant.now().plusSeconds(task.intervalSeconds),
+                    "INTERVAL", " (every %ds)".formatted(task.intervalSeconds));
         };
+    }
+
+    /**
+     * Shared stop-already-done body for the recurring completion handlers.
+     * Both INTERVAL and CRON callers have already invoked
+     * {@code executionOperations.stop()} on the current row; this computes
+     * the next-fire instant via {@code nextFire}, null-checks the wired
+     * {@link #schedulerClient}, schedules the next row under the same
+     * {@code task_instance}, and emits the symmetric INFO/ERROR logging.
+     * {@code kind} names the recurrence type in the log lines and
+     * {@code detailSuffix} appends a type-specific tail (e.g. the interval
+     * cadence) to the success message. A {@code null} next-fire (malformed
+     * CRON expression) is logged and the self-reschedule is paused — the
+     * current row is already dropped, so the Task picks back up on the next
+     * {@code BootConsistencyCheck} sweep.
+     */
+    private static void rescheduleNext(Task task, java.util.function.Supplier<Instant> nextFire,
+                                       String kind, String detailSuffix) {
+        try {
+            Instant next = nextFire.get();
+            if (next == null) {
+                EventLogger.warn("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "Task '%s' %s expression yielded no next fire; pausing self-reschedule"
+                                .formatted(task.name, kind));
+                return;
+            }
+            SchedulerClient client = schedulerClient;
+            if (client == null) {
+                EventLogger.warn("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "SchedulerClient not wired; cannot reschedule Task '%s' next %s fire"
+                                .formatted(task.name, kind));
+                return;
+            }
+            String instanceId = task.id.toString();
+            client.schedule(new TaskInstance<>(TASK_NAME, instanceId), next);
+            EventLogger.info("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "Rescheduled Task '%s' next %s fire for %s%s"
+                            .formatted(task.name, kind, next, detailSuffix));
+        } catch (Exception e) {
+            EventLogger.error("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "Failed to reschedule next %s fire for Task '%s': %s"
+                            .formatted(kind, task.name, e.getMessage()));
+        }
     }
 
     /**
@@ -316,43 +343,13 @@ public final class TaskExecutionHandler {
     private static CompletionHandler<Void> scheduleCronNextCompletion(Task task) {
         return (executionComplete, executionOperations) -> {
             executionOperations.stop();
-            rescheduleCronFire(task);
+            rescheduleNext(task, () -> {
+                // JCLAW-261: same zone resolution as the first-fire computation
+                // in TaskSchedulingService so the next fire matches the user's
+                // intent ("9 am NYC") regardless of the JVM's default zone.
+                var zone = TimezoneResolver.resolve(task);
+                return JClawCronUtils.nextExecution(task.cronExpression, zone);
+            }, "CRON", "");
         };
-    }
-
-    private static void rescheduleCronFire(Task task) {
-        try {
-            // JCLAW-261: same zone resolution as the first-fire computation
-            // in TaskSchedulingService so the next fire matches the user's
-            // intent ("9 am NYC") regardless of the JVM's default zone.
-            var zone = TimezoneResolver.resolve(task);
-            Instant next = JClawCronUtils.nextExecution(task.cronExpression, zone);
-            if (next == null) {
-                EventLogger.warn("task",
-                        task.agent != null ? task.agent.name : null, null,
-                        "Task '%s' CRON expression '%s' yielded no next fire; pausing self-reschedule"
-                                .formatted(task.name, task.cronExpression));
-                return;
-            }
-            SchedulerClient client = schedulerClient;
-            if (client == null) {
-                EventLogger.warn("task",
-                        task.agent != null ? task.agent.name : null, null,
-                        "SchedulerClient not wired; cannot reschedule Task '%s' next CRON fire"
-                                .formatted(task.name));
-                return;
-            }
-            String instanceId = task.id.toString();
-            client.schedule(new TaskInstance<>(TASK_NAME, instanceId), next);
-            EventLogger.info("task",
-                    task.agent != null ? task.agent.name : null, null,
-                    "Rescheduled Task '%s' next CRON fire for %s"
-                            .formatted(task.name, next));
-        } catch (Exception e) {
-            EventLogger.error("task",
-                    task.agent != null ? task.agent.name : null, null,
-                    "Failed to reschedule next CRON fire for Task '%s': %s"
-                            .formatted(task.name, e.getMessage()));
-        }
     }
 }

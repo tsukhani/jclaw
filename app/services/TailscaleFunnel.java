@@ -304,14 +304,26 @@ public final class TailscaleFunnel {
             // Binary not found / not executable — treated as "not available".
             return new ExecResult(-1, "", e.getMessage() != null ? e.getMessage() : "exec failed", false);
         }
-        var out = new StringBuilder();
-        var err = new StringBuilder();
+        // StringBuffer (not StringBuilder): the drain virtual threads write
+        // concurrently with the waiter's toString() read on the timeout path,
+        // where joinQuietly's 2s cap can elapse before a wedged drainer
+        // finishes. The synchronized append/toString closes that data-race
+        // window — without it the read is not guaranteed to see the writes.
+        var out = new StringBuffer();
+        var err = new StringBuffer();
         var tOut = Thread.ofVirtual().start(() -> drain(proc.getInputStream(), out));
         var tErr = Thread.ofVirtual().start(() -> drain(proc.getErrorStream(), err));
         try {
             boolean finished = proc.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
             if (!finished) {
+                // destroyForcibly closes the process's stdout/stderr, which
+                // normally unblocks the drainers' readAllBytes(). Close them
+                // explicitly too so a drainer can't stay parked on the pipe
+                // holding an FD past joinQuietly's cap (best effort — drain's
+                // try-with-resources also closes on its own exit).
                 proc.destroyForcibly();
+                closeQuietly(proc.getInputStream());
+                closeQuietly(proc.getErrorStream());
                 joinQuietly(tOut);
                 joinQuietly(tErr);
                 return new ExecResult(-1, out.toString(), err.toString(), true);
@@ -322,11 +334,13 @@ public final class TailscaleFunnel {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             proc.destroyForcibly();
+            closeQuietly(proc.getInputStream());
+            closeQuietly(proc.getErrorStream());
             return new ExecResult(-1, out.toString(), err.toString(), true);
         }
     }
 
-    private static void drain(InputStream in, StringBuilder sink) {
+    private static void drain(InputStream in, StringBuffer sink) {
         try (in) {
             sink.append(new String(in.readAllBytes(), StandardCharsets.UTF_8));
         } catch (IOException _) {
@@ -334,9 +348,22 @@ public final class TailscaleFunnel {
         }
     }
 
+    private static void closeQuietly(java.io.Closeable c) {
+        try {
+            c.close();
+        } catch (IOException _) {
+            // best effort — we're already tearing the process down
+        }
+    }
+
     private static void joinQuietly(Thread t) {
         try {
-            t.join(Duration.ofSeconds(2));
+            if (!t.join(Duration.ofSeconds(2))) {
+                // A drainer outliving the cap means the pipe never closed —
+                // log so the FD/VT leak is observable rather than silent.
+                EventLogger.warn(CATEGORY, null, null,
+                        "tailscale drain thread did not finish within 2s; output may be truncated");
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }

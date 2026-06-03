@@ -240,8 +240,26 @@ public final class TaskExecutor {
      */
     private static TaskRun finalizeRun(Task task, TaskRun run) {
         // Re-read the closed TaskRun so durationMs reflects the
-        // sink.onComplete-written value rather than recomputing.
-        var closed = Tx.run(() -> (TaskRun) TaskRun.findById(run.id));
+        // sink.onComplete-written value rather than recomputing. When a
+        // delivery spec is configured (and this isn't a reminder, which
+        // never invokes the message tool), fold the dedup signal — did the
+        // fire push via the `message` tool? — into this same Tx so it
+        // shares the connection with the re-read instead of opening a
+        // second transaction in dispatchDelivery.
+        boolean deliveryConfigured = task.delivery != null && !task.delivery.isBlank()
+                && !isReminder(task);
+        var resolved = Tx.run(() -> {
+            var c = (TaskRun) TaskRun.findById(run.id);
+            if (c == null) return new Resolved(null, false);
+            // Only when we'll actually dispatch delivery below — keeps the
+            // LIKE count off the no-delivery / non-COMPLETED paths exactly
+            // as before, when it lived inside dispatchDelivery.
+            boolean dedup = deliveryConfigured
+                    && c.status == TaskRun.Status.COMPLETED
+                    && deliveredViaMessageTool(c.id);
+            return new Resolved(c, dedup);
+        });
+        var closed = resolved.run();
         if (closed != null && closed.status == TaskRun.Status.COMPLETED) {
             // Mark one-shot Tasks (IMMEDIATE/SCHEDULED) as COMPLETED so
             // the operator UI shows the terminal state. Recurring Tasks
@@ -256,10 +274,18 @@ public final class TaskExecutor {
             }
             TaskLifecycleEvents.recordCompleted(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
-            dispatchDelivery(task, closed);
+            dispatchDelivery(task, closed, resolved.deliveredViaMessageTool());
         }
         return closed;
     }
+
+    /**
+     * Carries the re-read TaskRun plus the dedup signal computed in the
+     * same Tx (whether the fire pushed via the {@code message} tool), so
+     * {@link #dispatchDelivery} doesn't have to open a second transaction
+     * for the LIKE count.
+     */
+    private record Resolved(TaskRun run, boolean deliveredViaMessageTool) {}
 
     /**
      * Push the closed TaskRun's {@link TaskRun#outputSummary} through
@@ -278,7 +304,7 @@ public final class TaskExecutor {
      * {@link TaskRun#deliveryStatus} / {@link TaskRun#deliveryError}
      * columns plus the TASK_DELIVERY_FAILED lifecycle event.
      */
-    private static void dispatchDelivery(Task task, TaskRun closed) {
+    private static void dispatchDelivery(Task task, TaskRun closed, boolean deliveredViaMessageTool) {
         var spec = task.delivery;
         if (spec == null || spec.isBlank()) {
             stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_REQUESTED, null, null);
@@ -294,8 +320,10 @@ public final class TaskExecutor {
         // another tool literally named "message", which the registry disallows
         // since tool names are uniqued. Reminders skip the dedup — their
         // fire path doesn't invoke the message tool, so the scan can't
-        // produce a meaningful signal.
-        if (!isReminder(task) && alreadyDeliveredViaMessageTool(closed.id)) {
+        // produce a meaningful signal. The signal is precomputed in
+        // finalizeRun's re-read Tx (see {@link Resolved}) so the LIKE count
+        // shares that transaction rather than opening its own.
+        if (deliveredViaMessageTool) {
             stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_REQUESTED, spec,
                     "Skipped auto-delivery: fire called the 'message' tool directly");
             return;
@@ -327,22 +355,25 @@ public final class TaskExecutor {
         }
     }
 
-    private static boolean alreadyDeliveredViaMessageTool(Long runId) {
-        return Boolean.TRUE.equals(Tx.run(() -> {
-            var em = play.db.jpa.JPA.em();
-            // Match the JSON substring produced by GSON's compact encoding of
-            // the FunctionCall record: `"name":"message"`. Single-call rows
-            // dominate (MessageHydrator.parseToolCalls deserialises into a
-            // single ToolCall), so the LIKE wildcard count is bounded.
-            var count = (Long) em.createQuery(
-                    "SELECT COUNT(m) FROM TaskRunMessage m "
-                            + "WHERE m.taskRun.id = :runId "
-                            + "AND m.toolCalls LIKE :pattern")
-                    .setParameter("runId", runId)
-                    .setParameter("pattern", "%\"name\":\"" + tools.MessageTool.TOOL_NAME + "\"%")
-                    .getSingleResult();
-            return count != null && count > 0;
-        }));
+    /**
+     * Whether the fire pushed via the {@code message} tool. Runs inside the
+     * caller's transaction (finalizeRun's re-read Tx) — no own {@code Tx.run}
+     * wrapper — so the LIKE count shares that connection.
+     */
+    private static boolean deliveredViaMessageTool(Long runId) {
+        var em = play.db.jpa.JPA.em();
+        // Match the JSON substring produced by GSON's compact encoding of
+        // the FunctionCall record: `"name":"message"`. Single-call rows
+        // dominate (MessageHydrator.parseToolCalls deserialises into a
+        // single ToolCall), so the LIKE wildcard count is bounded.
+        var count = (Long) em.createQuery(
+                "SELECT COUNT(m) FROM TaskRunMessage m "
+                        + "WHERE m.taskRun.id = :runId "
+                        + "AND m.toolCalls LIKE :pattern")
+                .setParameter("runId", runId)
+                .setParameter("pattern", "%\"name\":\"" + tools.MessageTool.TOOL_NAME + "\"%")
+                .getSingleResult();
+        return count != null && count > 0;
     }
 
     private static void stampDelivery(Long runId, TaskRun.DeliveryStatus status,

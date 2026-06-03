@@ -174,14 +174,25 @@ public final class LoadTestHarness {
             var scn = scenario;
             boolean continuation = isToolResultContinuation(body);
 
+            // Snapshot the scheduler once. A concurrent stop() nulls the
+            // AtomicReference and shutdownNow()s the pool; reading it per-chunk
+            // could NPE mid-stream, and scheduling onto a shut-down pool throws
+            // RejectedExecutionException. Bail with 503 if it's already gone so
+            // the caller sees a clean "harness stopped" rather than a 500.
+            var sch = scheduler.get();
+            if (sch == null) {
+                ex.sendResponseHeaders(503, -1);
+                return;
+            }
+
             ex.getResponseHeaders().add(HttpKeys.CONTENT_TYPE, "text/event-stream");
             ex.getResponseHeaders().add("Cache-Control", "no-cache");
             ex.sendResponseHeaders(200, 0);
             try (var out = ex.getResponseBody()) {
                 if (!continuation && scn.simulatedToolCalls() > 0) {
-                    streamToolCalls(out, scn);
+                    streamToolCalls(sch, out, scn);
                 } else {
-                    streamResponse(out, scn);
+                    streamResponse(sch, out, scn);
                 }
             }
         } catch (InterruptedException _) {
@@ -225,7 +236,7 @@ public final class LoadTestHarness {
         }
     }
 
-    private static void streamToolCalls(OutputStream out, Scenario scn)
+    private static void streamToolCalls(ScheduledExecutorService sch, OutputStream out, Scenario scn)
             throws IOException, InterruptedException {
         // tool_calls path is one-shot: at TTFT, write all simulated tool calls
         // back-to-back and the terminator. No per-chunk cadence because the
@@ -233,7 +244,7 @@ public final class LoadTestHarness {
         // round. The scheduler still drives the wait so the handler VT
         // stays off Thread.sleep.
         var done = new CompletableFuture<Void>();
-        scheduler.get().schedule(() -> {
+        Runnable task = () -> {
             try {
                 for (int i = 0; i < scn.simulatedToolCalls(); i++) {
                     var callId = "call-mock-" + i;
@@ -254,11 +265,17 @@ public final class LoadTestHarness {
             } catch (IOException e) {
                 done.completeExceptionally(e);
             }
-        }, Math.max(0, scn.ttftMs()), TimeUnit.MILLISECONDS);
+        };
+        try {
+            sch.schedule(task, Math.max(0, scn.ttftMs()), TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.RejectedExecutionException rejected) {
+            // Concurrent stop() shut the pool down between the snapshot and here.
+            done.completeExceptionally(new IOException("loadtest harness stopped", rejected));
+        }
         awaitDone(done);
     }
 
-    private static void streamResponse(OutputStream out, Scenario scn)
+    private static void streamResponse(ScheduledExecutorService sch, OutputStream out, Scenario scn)
             throws IOException, InterruptedException {
         int delayMs = scn.tokensPerSecond() > 0
                 ? Math.max(1, 1000 / scn.tokensPerSecond())
@@ -290,7 +307,7 @@ public final class LoadTestHarness {
         for (int i = 0; i < n; i++) {
             int idx = i;
             boolean isLast = (i == n - 1);
-            scheduler.get().schedule(() -> {
+            Runnable chunkTask = () -> {
                 try {
                     var tok = (idx == 0 ? "Hello" : " tok" + idx);
                     var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
@@ -322,7 +339,17 @@ public final class LoadTestHarness {
                 } catch (IOException e) {
                     done.completeExceptionally(e);
                 }
-            }, cumDelayMs, TimeUnit.MILLISECONDS);
+            };
+            try {
+                sch.schedule(chunkTask, cumDelayMs, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException rejected) {
+                // Concurrent stop() shut the pool down mid-schedule. Complete
+                // exceptionally so awaitDone unblocks instead of parking forever
+                // (the already-scheduled earlier chunks may still fire, but the
+                // terminal-chunk task that completes `done` may never be queued).
+                done.completeExceptionally(new IOException("loadtest harness stopped", rejected));
+                break;
+            }
             // 1-ms floor: even when delayMs=1 (tps=1000), consecutive deadlines
             // strictly increase. Without the floor, integer division gives
             // jitter=0 for delayMs=1 and every chunk lands at the same instant.

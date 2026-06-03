@@ -117,23 +117,22 @@ public final class LostTaskDetector {
         int flipped = 0;
         var now = Instant.now();
         for (var row : rows) {
+            long staleSeconds = row.lastHeartbeat() != null
+                    ? Math.max(0L, Duration.between(row.lastHeartbeat(), now).getSeconds())
+                    : STALE_THRESHOLD.getSeconds();
+            // Flip and record the event in one transaction. recordLost
+            // traverses lazy-loaded agent.name, so it must run while the
+            // Task is still attached — hoisting the entity out to a second
+            // Tx would detach it and risk a LazyInitializationException.
             boolean changed = Boolean.TRUE.equals(Tx.run(() -> {
                 var task = (Task) Task.findById(row.taskId());
                 if (task == null || task.status != Task.Status.RUNNING) return false;
                 task.status = Task.Status.LOST;
                 task.save();
+                TaskLifecycleEvents.recordLost(task, staleSeconds);
                 return true;
             }));
-            if (changed) {
-                flipped++;
-                var task = Tx.run(() -> (Task) Task.findById(row.taskId()));
-                if (task != null) {
-                    long staleSeconds = row.lastHeartbeat() != null
-                            ? Math.max(0L, Duration.between(row.lastHeartbeat(), now).getSeconds())
-                            : STALE_THRESHOLD.getSeconds();
-                    TaskLifecycleEvents.recordLost(task, staleSeconds);
-                }
-            }
+            if (changed) flipped++;
         }
         return flipped;
     }
