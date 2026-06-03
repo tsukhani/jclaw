@@ -291,7 +291,13 @@ public final class VisionAudioAssembler {
         var future = PendingTranscripts.lookup(attId);
         if (future.isEmpty()) return true;
         try {
+            // A resolved value (transcript or the empty-string failure
+            // sentinel) has now been read under the single-reader
+            // contract, so evict the entry to bound heap growth
+            // (JCLAW-405). Timeout leaves the still-unresolved future in
+            // the map; interrupt bails before consuming.
             future.get().get(TRANSCRIPT_AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            PendingTranscripts.consume(attId);
         } catch (TimeoutException _) {
             EventLogger.warn("transcription",
                     "Transcript await timeout for attachment %d after %ds"
@@ -302,7 +308,9 @@ public final class VisionAudioAssembler {
         } catch (Exception _) {
             // ExecutionException — the dispatcher's silent-failure
             // contract means this shouldn't fire, but treat any
-            // surprise as "use the fallback note."
+            // surprise as "use the fallback note." The future resolved
+            // exceptionally, so it is safe to evict here too.
+            PendingTranscripts.consume(attId);
         }
         return true;
     }

@@ -12,11 +12,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code agents.VisionAudioAssembler.userMessageFor} text-only branch and the
  * provider-rejection retry branch look up the future to await it.
  *
- * <p>Lookup semantics: completed futures stay in the map after
- * resolution so late lookups still return the result instantly. Memory
- * footprint is one {@link CompletableFuture} of a transcript string
- * per audio attachment ever processed by this JVM — small enough that
- * we don't need eviction. JVM restarts naturally clean the map.
+ * <p>Lookup semantics: completed futures stay in the map until a
+ * consumer awaits and {@linkplain #consume(Long) consumes} them. Keys
+ * are monotonic attachment ids under a single-reader contract, so the
+ * consumer removes its entry once it has read the resolved value
+ * (JCLAW-405) — preventing an otherwise unbounded heap growth
+ * proportional to lifetime audio volume on a long-lived backend.
  *
  * <p>Failure contract: on any exception during transcription, the
  * future resolves with the empty-string sentinel {@code ""}. Callers
@@ -41,6 +42,18 @@ public final class PendingTranscripts {
     public static Optional<CompletableFuture<String>> lookup(Long attachmentId) {
         if (attachmentId == null) return Optional.empty();
         return Optional.ofNullable(futures.get(attachmentId));
+    }
+
+    /** Drop the entry for {@code attachmentId} once its resolved value
+     *  has been read. The single-reader contract means each id is
+     *  awaited exactly once; calling this after a successful await
+     *  (covering both the transcript and the empty-string failure
+     *  sentinel) releases the retained {@link CompletableFuture} so the
+     *  map doesn't grow without bound (JCLAW-405). No-op for a null id
+     *  or an id never registered. */
+    public static void consume(Long attachmentId) {
+        if (attachmentId == null) return;
+        futures.remove(attachmentId);
     }
 
     /** Test seam — drop all in-flight state between tests. */
