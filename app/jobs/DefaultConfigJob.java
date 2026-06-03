@@ -13,8 +13,14 @@ import services.scanners.ScannerRegistry;
 /**
  * Seeds default runtime configuration and default agent on first startup.
  * Only writes values that don't already exist.
+ *
+ * <p>Runs FIRST among {@code @OnApplicationStart} jobs ({@code priority = -100};
+ * play1 1.13.27+ runs startup jobs in ascending priority order). Config is the
+ * boot foundation: {@code ToolRegistrationJob}, the Ollama/LM-Studio probes, and
+ * {@code TelegramStreamingRecoveryJob} all read config at startup, so seeding it
+ * before they run makes those previously-implicit ordering dependencies explicit.
  */
-@OnApplicationStart
+@OnApplicationStart(priority = -100)
 public class DefaultConfigJob extends Job<Void> {
 
     private static final String EVENT_CATEGORY_AGENT = "agent";

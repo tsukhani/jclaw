@@ -19,12 +19,15 @@ import java.util.concurrent.Executors;
  * JCLAW-21: build the db-scheduler {@link Scheduler}, register
  * {@link TaskExecutionHandler}, and start polling.
  *
- * <p>Runs on {@code @OnApplicationStart} but is ordered after
- * {@link DbSchedulerSchemaInitJob} only by virtue of explicitly
- * calling {@link DbSchedulerSchemaInitJob#ensureSchema} as its first
- * step — Play 1.x doesn't guarantee startup-job ordering, so we
- * make the dependency explicit instead of relying on declaration
- * order.
+ * <p>Runs LAST among {@code @OnApplicationStart} jobs
+ * ({@code priority = 100}; play1 1.13.27+ runs startup jobs in ascending
+ * priority order). Starting the scheduler last guarantees that everything an
+ * overdue boot-time fire might touch is already in place before any task can
+ * fire: seeded config ({@link DefaultConfigJob}, priority -100), the built-in
+ * tool registry ({@link ToolRegistrationJob}), and the {@code scheduled_tasks}
+ * schema ({@link DbSchedulerSchemaInitJob}) all run at lower priorities. The
+ * {@link DbSchedulerSchemaInitJob#ensureSchema} call below is retained as a
+ * cheap defensive re-assert.
  *
  * <h2>Configuration</h2>
  * <ul>
@@ -59,7 +62,7 @@ import java.util.concurrent.Executors;
  * {@link services.TaskSchedulingService} can read it for
  * {@code SchedulerClient.schedule}-style operations.
  */
-@OnApplicationStart
+@OnApplicationStart(priority = 100)
 public class DbSchedulerBootstrapJob extends Job<Void> {
 
     /**
@@ -96,10 +99,10 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
             return;
         }
 
-        // Defense-in-depth: re-run the DDL idempotency check. The schema-init
-        // job runs in the same @OnApplicationStart phase but the framework
-        // doesn't strictly order siblings, so we re-assert the schema rather
-        // than depend on it.
+        // Defense-in-depth: re-assert the scheduled_tasks DDL. Priority ordering
+        // (this job runs last) already means DbSchedulerSchemaInitJob has run,
+        // but the idempotency check is cheap and keeps the bootstrap robust if
+        // the schema job is ever reordered or removed.
         DbSchedulerSchemaInitJob.ensureSchema();
 
         var datasource = DB.getDataSource();
@@ -165,16 +168,11 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
 
         var built = builder.build();
 
-        // JCLAW-411: publish the built-in tools BEFORE the scheduler can fire.
-        // ToolRegistrationJob is a sibling @OnApplicationStart job and Play 1.x
-        // doesn't order siblings, so an overdue task fired on db-scheduler's
-        // first poll could build its system prompt (and entire tool array)
-        // against an empty ToolRegistry — excluding tool-requiring skills and
-        // running the fire tool-less. registerAll() is idempotent (atomic
-        // publish), so the sibling job's later run is a harmless re-publish.
-        // Same inline-from-bootstrap pattern as BootConsistencyCheck.sweep below.
-        ToolRegistrationJob.registerAll();
-
+        // JCLAW-411/413: built-in tools are guaranteed registered before this
+        // point — ToolRegistrationJob runs at default priority (0), this job at
+        // 100 — so an overdue boot-time fire no longer races an empty
+        // ToolRegistry. (Pre-1.13.27 this job called ToolRegistrationJob.registerAll()
+        // inline as a workaround for the lack of startup-job ordering.)
         TaskExecutionHandler.setSchedulerClient(built);
         scheduler = built;
         built.start();
@@ -183,13 +181,12 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                 "db-scheduler started (polling 2s, virtual-thread executor, "
                 + "registered task '%s')".formatted(TaskExecutionHandler.TASK_NAME));
 
-        // Run the consistency sweep inline now that the scheduler is
-        // alive. Pre-fix this was a standalone @OnApplicationStart
-        // job, but Play 1.x doesn't order startup jobs deterministically
-        // — on some restarts BootConsistencyCheck fired BEFORE this
-        // bootstrap and logged "scheduler not bootstrapped; skipping
-        // sweep", stranding existing PENDING Tasks. Calling sweep
-        // here makes the ordering explicit and removes that race.
+        // Run the consistency sweep inline now that the scheduler is alive.
+        // Even with startup-job priority ordering (1.13.27+), the sweep stays
+        // inline because it needs the live SchedulerClient ('built') we just
+        // created — not merely a guarantee of running after this job. (Pre-1.13.27
+        // it was also the only way to dodge the unordered-sibling race that left
+        // it logging "scheduler not bootstrapped; skipping sweep".)
         try {
             BootConsistencyCheck.sweep(built);
         } catch (Exception e) {
