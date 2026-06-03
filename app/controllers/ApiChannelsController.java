@@ -16,7 +16,7 @@ import play.mvc.With;
 import services.ChannelStatusService;
 
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
 @With(AuthCheck.class)
 public class ApiChannelsController extends Controller {
@@ -48,12 +48,13 @@ public class ApiChannelsController extends Controller {
      *
      * <p>Response: {@code {"count": N, "channelTypes": ["telegram", "web", ...]}}.
      */
+    /** Dashboard summary of the channel kinds currently doing work. */
+    private record ActiveChannelsResponse(int count, Set<String> channelTypes) {}
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ActiveChannelsResponse.class)))
     public static void active() {
         var types = ChannelStatusService.activeChannelTypes();
-        renderJSON(gson.toJson(Map.of(
-                "count", types.size(),
-                "channelTypes", types
-        )));
+        renderJSON(gson.toJson(new ActiveChannelsResponse(types.size(), types)));
     }
 
     @SuppressWarnings("java:S2259")

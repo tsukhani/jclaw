@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 /**
@@ -20,12 +21,14 @@ import java.util.function.Consumer;
  *
  * <p>Per the MCP stdio spec each message is a single UTF-8 JSON line terminated
  * by {@code \n}. Servers may write logs to stderr; we forward those to SLF4J
- * at INFO so they're visible without polluting the protocol stream.
+ * at DEBUG so they're visible on demand without drowning the application log
+ * (many servers print multi-line boot banners on every connect).
  *
  * <p><b>Threading.</b> Two virtual threads per connection: one reads stdout
  * and dispatches every received line as a {@link JsonRpc.Message}; one drains
- * stderr to the log. {@link #send} is synchronized so concurrent writes can't
- * interleave bytes within a single JSON line.
+ * stderr to the log. {@link #send} is guarded by a {@link ReentrantLock} (not
+ * {@code synchronized}) so a virtual-thread writer blocked on the subprocess
+ * pipe releases its carrier instead of pinning it.
  */
 public final class McpStdioTransport implements McpTransport {
 
@@ -41,6 +44,7 @@ public final class McpStdioTransport implements McpTransport {
     private Consumer<JsonRpc.Message> onMessage;
     private Consumer<Throwable> onError;
     private volatile boolean closed;
+    private final ReentrantLock sendLock = new ReentrantLock();
 
     public McpStdioTransport(String name, List<String> command, Map<String, String> env) {
         if (command == null || command.isEmpty()) {
@@ -66,11 +70,16 @@ public final class McpStdioTransport implements McpTransport {
     }
 
     @Override
-    public synchronized void send(JsonRpc.Message msg) throws IOException {
-        if (closed) throw new IOException("transport closed");
-        stdin.write(JsonRpc.encode(msg));
-        stdin.write('\n');
-        stdin.flush();
+    public void send(JsonRpc.Message msg) throws IOException {
+        sendLock.lock();
+        try {
+            if (closed) throw new IOException("transport closed");
+            stdin.write(JsonRpc.encode(msg));
+            stdin.write('\n');
+            stdin.flush();
+        } finally {
+            sendLock.unlock();
+        }
     }
 
     @Override

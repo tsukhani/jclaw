@@ -77,7 +77,9 @@ public class SkillPromotionService {
 
     /**
      * Validate that the agent has every tool this skill declares it needs.
-     * Returns null if validation passes, or an error message if it fails.
+     * Always returns a {@link ToolValidationResult}: {@code ok()} is true with a
+     * null message on success; false with a message naming the missing tool(s)
+     * on failure.
      */
     public static ToolValidationResult validateToolRequirements(Agent agent, String skillName) {
         var globalDir = SkillLoader.globalSkillsPath().resolve(skillName);

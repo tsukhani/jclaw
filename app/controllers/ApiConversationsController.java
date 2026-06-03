@@ -197,7 +197,29 @@ public class ApiConversationsController extends Controller {
 
         setPaginationHeaders(total);
 
-        var result = convos.stream().map(ApiConversationsController::conversationToMap).toList();
+        // Bulk-fetch SessionCompaction counts for the page in one GROUP BY pass
+        // so conversationToMap doesn't fire a per-row COUNT (N+1, up to 100/call).
+        // Mirrors the lastFiredAt bulk pattern in ApiTasksController.list;
+        // conversations with no compactions are absent from the map (default 0).
+        var convIds = convos.stream().map(c -> c.id).filter(java.util.Objects::nonNull).toList();
+        java.util.Map<Long, Long> compactionCounts = java.util.Map.of();
+        if (!convIds.isEmpty()) {
+            @SuppressWarnings("unchecked")
+            var rows = (List<Object[]>) JPA.em().createQuery(
+                    "SELECT sc.conversation.id, COUNT(sc) FROM SessionCompaction sc "
+                            + "WHERE sc.conversation.id IN :ids GROUP BY sc.conversation.id")
+                    .setParameter("ids", convIds)
+                    .getResultList();
+            var m = java.util.HashMap.<Long, Long>newHashMap(rows.size());
+            for (var row : rows) {
+                m.put((Long) row[0], (Long) row[1]);
+            }
+            compactionCounts = m;
+        }
+        final var counts = compactionCounts;
+        var result = convos.stream()
+                .map(c -> conversationToMap(c, counts.getOrDefault(c.id, 0L)))
+                .toList();
 
         renderJSON(gson.toJson(result));
     }
@@ -251,7 +273,8 @@ public class ApiConversationsController extends Controller {
     public static void getConversation(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
-        renderJSON(gson.toJson(conversationToMap(conversation)));
+        renderJSON(gson.toJson(conversationToMap(conversation,
+                models.SessionCompaction.count("conversation = ?1", conversation))));
     }
 
     /**
@@ -542,7 +565,7 @@ public class ApiConversationsController extends Controller {
      * was the kind of subtle drift this codebase has accumulated bug fixes
      * for elsewhere.
      */
-    private static Map<String, Object> conversationToMap(Conversation c) {
+    private static Map<String, Object> conversationToMap(Conversation c, long compactionCount) {
         var map = new HashMap<String, Object>();
         map.put("id", c.id);
         map.put("agentId", c.agent.id);
@@ -573,7 +596,7 @@ public class ApiConversationsController extends Controller {
         // see at a glance whether the displayed "current context" reading
         // is a fresh prompt or has been reset by compaction (and how many
         // times). Cheap COUNT on an indexed column; no need to denormalize.
-        map.put("compactionCount", models.SessionCompaction.count("conversation = ?1", c));
+        map.put("compactionCount", compactionCount);
         return map;
     }
 

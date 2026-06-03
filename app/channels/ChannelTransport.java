@@ -1,5 +1,7 @@
 package channels;
 
+import java.util.Locale;
+
 /**
  * Inbound transport mode a channel uses to receive updates from the upstream
  * platform. Defaults to {@link #POLLING} when the config field is absent.
@@ -26,7 +28,7 @@ public enum ChannelTransport {
     public static ChannelTransport parse(String value, ChannelTransport fallback) {
         if (value == null || value.isBlank()) return fallback;
         try {
-            return ChannelTransport.valueOf(value.trim().toUpperCase());
+            return ChannelTransport.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException _) {
             return fallback;
         }

@@ -360,10 +360,16 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * kill the application server.
      */
     private static volatile boolean browserInstalled = false;
+    // ReentrantLock, not synchronized: the install holds the lock across a
+    // (potentially minutes-long) Chromium-download waitFor(); on a virtual
+    // thread an intrinsic monitor would pin the carrier, whereas a ReentrantLock
+    // releases it while blocked.
+    private static final ReentrantLock INSTALL_LOCK = new ReentrantLock();
 
     private static void ensureBrowserInstalled() {
         if (browserInstalled) return;
-        synchronized (PlaywrightBrowserTool.class) {
+        INSTALL_LOCK.lock();
+        try {
             if (browserInstalled) return;
             // Skip the CLI install when an external installer (e.g. the Docker
             // image's chromium-stage) has already placed Chromium under
@@ -397,6 +403,8 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 browserInstalled = true; // don't retry on every session
                 EventLogger.warn("tool", "Playwright chromium install failed: %s".formatted(e.getMessage()));
             }
+        } finally {
+            INSTALL_LOCK.unlock();
         }
     }
 

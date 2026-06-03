@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.HexFormat;
 
 /**
  * Mint and hash bearer tokens for the in-process {@code jclaw_api} tool
@@ -48,10 +49,7 @@ public final class TokenHasher {
         if (token == null) throw new IllegalArgumentException("token required");
         try {
             var md = MessageDigest.getInstance("SHA-256");
-            var digest = md.digest(token.getBytes(StandardCharsets.UTF_8));
-            var sb = new StringBuilder(digest.length * 2);
-            for (var b : digest) sb.append(String.format("%02x", b));
-            return sb.toString();
+            return HexFormat.of().formatHex(md.digest(token.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable — JDK install broken?", e);
         }

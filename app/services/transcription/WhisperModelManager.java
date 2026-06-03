@@ -207,7 +207,14 @@ public final class WhisperModelManager {
         var tmp = root.resolve(model.filename() + ".part");
         var digest = newSha256();
         long downloaded = 0;
-        try (Response resp = client.newCall(new Request.Builder().url(url).build()).execute();
+        // Model files run ~75 MB–1 GB; general()'s 60s callTimeout bounds the
+        // ENTIRE call including the body read, so a large stream would abort
+        // mid-download (and delete the .part). Clear the per-call deadline and
+        // let readTimeout bound forward progress instead — the same callTimeout(0)
+        // posture llmStreaming() uses for unbounded streams. The HEAD keeps 60s.
+        var getCall = client.newCall(new Request.Builder().url(url).build());
+        getCall.timeout().clearTimeout();
+        try (Response resp = getCall.execute();
              var sink = Files.newOutputStream(tmp)) {
             if (!resp.isSuccessful()) {
                 throw new IOException("GET %s failed: %d %s".formatted(url, resp.code(), resp.message()));

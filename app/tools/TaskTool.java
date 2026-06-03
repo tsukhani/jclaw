@@ -556,19 +556,19 @@ public class TaskTool implements ToolRegistry.Tool {
             spec = null;
         }
 
-        final boolean[] changeFlags;
+        final PatchResult patch;
         try {
-            changeFlags = services.Tx.run(() -> applyPatch(args, taskId, spec));
+            patch = services.Tx.run(() -> applyPatch(args, taskId, spec));
         } catch (IllegalArgumentException e) {
             // JCLAW-261: surface invalid-timezone (or any other validated
             // field) as a clean tool error.
             return "Error: " + e.getMessage();
         }
 
-        if (!changeFlags[0]) {
+        if (!patch.anyChange()) {
             return "Error: No patchable fields provided in updateTask.";
         }
-        if (changeFlags[1]) {
+        if (patch.scheduleChanged()) {
             // Re-read the saved task for the reschedule. Need a fresh Tx
             // because the previous one committed when its lambda returned.
             var refreshed = services.Tx.run(() -> (Task) Task.findById(taskId));
@@ -580,15 +580,18 @@ public class TaskTool implements ToolRegistry.Tool {
         return "Task '%s' updated.".formatted(name);
     }
 
+    /** Outcome of {@link #applyPatch}: whether anything changed and whether the
+     *  change touched the schedule (so the caller knows to re-arm the run). */
+    private record PatchResult(boolean anyChange, boolean scheduleChanged) {}
+
     /**
      * Apply the patch surface to the addressed Task inside the calling Tx.
-     * Returns {@code [anyChange, scheduleChanged]}; both false when the
-     * task is gone or no patchable field was provided.
+     * Both flags false when the task is gone or no patchable field was provided.
      */
-    private static boolean[] applyPatch(JsonObject args, Long taskId,
-                                        ScheduleShorthandParser.ScheduleSpec spec) {
+    private static PatchResult applyPatch(JsonObject args, Long taskId,
+                                          ScheduleShorthandParser.ScheduleSpec spec) {
         var task = (Task) Task.findById(taskId);
-        if (task == null) return new boolean[] { false, false };
+        if (task == null) return new PatchResult(false, false);
         boolean scheduleChanged = false;
         boolean anyChange = false;
 
@@ -607,7 +610,7 @@ public class TaskTool implements ToolRegistry.Tool {
         anyChange |= applyFlagPatches(args, task);
 
         if (anyChange) task.save();
-        return new boolean[] { anyChange, scheduleChanged };
+        return new PatchResult(anyChange, scheduleChanged);
     }
 
     /** Copy a parsed ScheduleSpec onto a Task (5 derived fields + nextRunAt). */

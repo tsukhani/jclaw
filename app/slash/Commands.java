@@ -1094,10 +1094,9 @@ public final class Commands {
         // small set of rows is cheap; we filter further in Java to extract
         // the canonical run_id field rather than matching string prefixes
         // that could collide with a substring elsewhere in the payload.
-        var marker = "\"run_id\":\"" + runId + "\"";
         List<models.EventLog> rows = models.EventLog.<models.EventLog>find(
                 "details LIKE ?1 AND category LIKE 'SUBAGENT_%' ORDER BY timestamp ASC",
-                "%" + marker + "%").fetch(SUBAGENT_LOG_LIMIT);
+                runIdLikePattern(runId)).fetch(SUBAGENT_LOG_LIMIT);
         if (rows.isEmpty()) {
             return "No events for run " + runId + ".";
         }
@@ -1232,13 +1231,19 @@ public final class Commands {
         return sb.toString();
     }
 
+    /** LIKE pattern matching the canonical {@code "run_id":"<id>"} marker inside
+     *  an EventLog.details JSON blob. Single owner for the marker shape so the
+     *  two finders can't drift from the EventLogger writer's contract. */
+    private static String runIdLikePattern(Long runId) {
+        return "%\"run_id\":\"" + runId + "\"%";
+    }
+
     /** Find the most recent SUBAGENT_SPAWN event for a given run id and
      *  return its {@code details} JSON, or null when no event exists yet. */
     private static String findSpawnEventDetails(Long runId) {
-        var marker = "\"run_id\":\"" + runId + "\"";
         List<models.EventLog> rows = models.EventLog.<models.EventLog>find(
                 "category = ?1 AND details LIKE ?2 ORDER BY timestamp DESC",
-                "SUBAGENT_SPAWN", "%" + marker + "%").fetch(1);
+                "SUBAGENT_SPAWN", runIdLikePattern(runId)).fetch(1);
         return rows.isEmpty() ? null : rows.getFirst().details;
     }
 

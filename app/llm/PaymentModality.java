@@ -1,5 +1,6 @@
 package llm;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -55,7 +56,7 @@ public enum PaymentModality {
      */
     public static Set<PaymentModality> supportedFor(String providerName) {
         if (providerName == null) return Set.of();
-        var lower = providerName.toLowerCase();
+        var lower = providerName.toLowerCase(Locale.ROOT);
         var exact = SUPPORTED.get(lower);
         if (exact != null) return exact;
         return Set.of();
@@ -81,7 +82,7 @@ public enum PaymentModality {
     public static PaymentModality parseOrDefault(String value, String providerName) {
         if (value == null || value.isBlank()) return defaultFor(providerName);
         try {
-            return valueOf(value.trim().toUpperCase());
+            return valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException _) {
             return defaultFor(providerName);
         }

@@ -112,7 +112,7 @@ public final class TelegramCallbackDispatcher {
     public static boolean keyboardScopeAllows(String chatType) {
         String scope = play.Play.configuration
                 .getProperty("telegram.keyboardScope", "all")
-                .trim().toLowerCase();
+                .trim().toLowerCase(java.util.Locale.ROOT);
         return switch (scope) {
             case "off" -> false;
             case "dm" -> "private".equals(chatType);

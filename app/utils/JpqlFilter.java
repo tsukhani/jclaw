@@ -19,7 +19,7 @@ import java.util.List;
  *   Object[] params = filter.params();
  * </pre>
  */
-public class JpqlFilter {
+public final class JpqlFilter {
 
     private final List<String> clauses = new ArrayList<>();
     private final List<Object> params = new ArrayList<>();

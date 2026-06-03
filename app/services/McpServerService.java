@@ -246,7 +246,7 @@ public final class McpServerService {
             // the manager, and JCLAW-288 extends that to lastError so the
             // response reflects the just-completed first attempt without
             // risking Hibernate flushing stale fields (e.g. lastConnectedAt)
-            // back over what persistConnectedAt just wrote in its own tx.
+            // back over what persistTimestamp just wrote in its own tx.
             var future = McpConnectionManager.connectAndAwait(row);
             try {
                 future.get(syncRuntimeAwait.toMillis(), TimeUnit.MILLISECONDS);

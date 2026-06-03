@@ -315,7 +315,7 @@ public final class McpConnectionManager {
             entry.lastError = null;
             entry.attempts = 0;
             persistStatus(server.id, McpServer.Status.CONNECTED, null);
-            persistConnectedAt(server.id);
+            persistTimestamp(server.id, "lastConnectedAt");
             EventLogger.info(CATEGORY_CONNECT,
                     "MCP server '%s' connected (%d tools)".formatted(server.name, client.tools().size()));
             // Watch for transport-driven disconnects: after connect returns,
@@ -364,7 +364,7 @@ public final class McpConnectionManager {
             entry.status = McpServer.Status.DISCONNECTED;
             entry.lastError = client.lastError();
             persistStatus(server.id, McpServer.Status.DISCONNECTED, client.lastError());
-            persistDisconnectedAt(server.id);
+            persistTimestamp(server.id, "lastDisconnectedAt");
             scheduleConnect(entry, server, entry.attempts + 1);
         });
     }
@@ -384,7 +384,7 @@ public final class McpConnectionManager {
         if (hadConnection) {
             EventLogger.warn(CATEGORY_DISCONNECT,
                     "MCP server '%s' disconnected: %s".formatted(server.name, error));
-            persistDisconnectedAt(server.id);
+            persistTimestamp(server.id, "lastDisconnectedAt");
         } else {
             EventLogger.warn(CATEGORY_CONNECT,
                     "MCP server '%s' connect attempt %d failed: %s".formatted(
@@ -520,26 +520,18 @@ public final class McpConnectionManager {
         } catch (RuntimeException _) { /* best effort persistence */ }
     }
 
-    private static void persistConnectedAt(Long serverId) {
+    /** Stamp a timestamp column to now(). {@code column} is always a fixed
+     *  literal (never user input), so the string-built JPQL carries no injection
+     *  risk. Best-effort — swallows persistence failures like its siblings. */
+    private static void persistTimestamp(Long serverId, String column) {
         if (serverId == null) return;
         try {
             Tx.run(() -> play.db.jpa.JPA.em().createQuery(
-                        "UPDATE McpServer s SET s.lastConnectedAt = :now, s.updatedAt = :now WHERE s.id = :id")
+                        "UPDATE McpServer s SET s." + column + " = :now, s.updatedAt = :now WHERE s.id = :id")
                         .setParameter("now", Instant.now())
                         .setParameter("id", serverId)
                         .executeUpdate());
-        } catch (RuntimeException _) {}
-    }
-
-    private static void persistDisconnectedAt(Long serverId) {
-        if (serverId == null) return;
-        try {
-            Tx.run(() -> play.db.jpa.JPA.em().createQuery(
-                        "UPDATE McpServer s SET s.lastDisconnectedAt = :now, s.updatedAt = :now WHERE s.id = :id")
-                        .setParameter("now", Instant.now())
-                        .setParameter("id", serverId)
-                        .executeUpdate());
-        } catch (RuntimeException _) {}
+        } catch (RuntimeException _) { /* best effort persistence */ }
     }
 
     private static synchronized void ensureScheduler() {

@@ -178,6 +178,9 @@ public class DocumentWriter {
         private static final int CODE_BLOCK_INDENT = 200;
         private static final int LIST_INDENT_PER_LEVEL = 360;
         private static final int BLOCKQUOTE_INDENT = 360;
+    /** Hyperlink run color (Office default link blue) and muted/secondary text color. */
+    private static final String LINK_COLOR = "0563C1";
+    private static final String MUTED_COLOR = "888888";
         // Table width in DXA (~6.25" of Letter/A4 content area at 1440 DXA/inch)
         private static final int TABLE_TOTAL_WIDTH = 9000;
 
@@ -291,7 +294,7 @@ public class DocumentWriter {
                     visit(child);
                     // Subsequent siblings of the nested list stay in a fresh item paragraph.
                     var cont = doc.createParagraph();
-                    cont.setIndentationLeft(360 * listDepth);
+                    cont.setIndentationLeft(LIST_INDENT_PER_LEVEL * listDepth);
                     currentParagraph = cont;
                 } else {
                     emitInline(child, false, false, false, false, BODY_FONT_SIZE, null);
@@ -336,7 +339,7 @@ public class DocumentWriter {
             var p = doc.createParagraph();
             var r = p.createRun();
             r.setText("────────────────────────────────────");
-            r.setColor("888888");
+            r.setColor(MUTED_COLOR);
         }
 
         /** Row/column dimensions of a markdown table. */
@@ -449,8 +452,8 @@ public class DocumentWriter {
                     case Strikethrough _ ->
                             emitInline(child, bold, italic, code, true, fontSize, color);
                     case Link l -> {
-                        emitInline(child, bold, italic, code, strike, fontSize, "0563C1");
-                        addRun(" (" + l.getUrl() + ")", bold, italic, code, strike, fontSize, "888888");
+                        emitInline(child, bold, italic, code, strike, fontSize, LINK_COLOR);
+                        addRun(" (" + l.getUrl() + ")", bold, italic, code, strike, fontSize, MUTED_COLOR);
                     }
                     case SoftLineBreak _ when currentParagraph != null ->
                             currentParagraph.createRun().setText(" ");

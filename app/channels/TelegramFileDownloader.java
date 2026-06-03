@@ -182,6 +182,11 @@ public final class TelegramFileDownloader {
             return new MetaFailed("getFile error: " + Strings.truncate(getFileResp.toString(), 200));
         }
         var result = getFileResp.getAsJsonObject("result");
+        if (result == null) {
+            // ok:true with no/non-object "result" is non-contractual, but guard
+            // it so download() returns a sealed MetaFailed instead of NPE-ing out.
+            return new MetaFailed("getFile response missing result");
+        }
         String filePath = result.has(FIELD_FILE_PATH) && !result.get(FIELD_FILE_PATH).isJsonNull()
                 ? result.get(FIELD_FILE_PATH).getAsString() : null;
         if (filePath == null || filePath.isBlank()) {
