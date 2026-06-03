@@ -240,13 +240,7 @@ public final class TelegramCallbackDispatcher {
         // — uses encodeBrowse since the providers list IS the new "summary"
         // state. Old encodeBack callbacks resolve through the same path
         // thanks to the BROWSE/BACK switch alias above.
-        var keyboard = org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup.builder()
-                .keyboardRow(new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow(
-                        org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton.builder()
-                                .text("◀ Back")
-                                .callbackData(TelegramModelCallback.encodeBrowse(conv.id))
-                                .build()))
-                .build();
+        var keyboard = TelegramModelKeyboard.backButton(conv.id);
         TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
                 toHtmlSafe(details), keyboard);
     }

@@ -21,6 +21,7 @@ import org.telegram.telegrambots.meta.api.methods.updates.DeleteWebhook;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.reactions.ReactionType;
 import org.telegram.telegrambots.meta.api.objects.reactions.ReactionTypeEmoji;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
@@ -1054,29 +1055,9 @@ class TelegramSender {
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
         if (caption != null && !caption.isBlank()) builder.caption(caption);
         var request = builder.build();
-        // JCLAW-126: explicit upload timing so we can pinpoint slowdowns.
-        // Format: elapsedMs, file size in bytes. Together with the matching
-        // warn on failure, this bounds the upload wall-clock in the log.
-        long startNs = System.nanoTime();
-        long fileSize = file.length();
-        try {
-            // JCLAW-122: upload via uploadClient (60 s r/w) rather than client
-            // (2 s w) — a 1–2 MB screenshot reliably times out on the text-path
-            // timeouts.
-            var sent = uploadClient.execute(request);
-            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
-            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Photo sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
-                            .formatted(peerId, displayName, elapsedMs, fileSize));
-            return true;
-        } catch (TelegramApiException e) {
-            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Photo send failed for %s after %dms: %s"
-                            .formatted(displayName, elapsedMs, e.getMessage()));
-            return false;
-        }
+        // JCLAW-122: upload via uploadClient (60 s r/w) rather than client (2 s w)
+        // — a 1–2 MB screenshot reliably times out on the text-path timeouts.
+        return uploadVia("Photo", peerId, file, displayName, () -> uploadClient.execute(request));
     }
 
     /**
@@ -1114,26 +1095,9 @@ class TelegramSender {
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
         if (caption != null && !caption.isBlank()) builder.caption(caption);
         var request = builder.build();
-        long startNs = System.nanoTime();
-        long fileSize = file.length();
-        try {
-            // JCLAW-122: upload via uploadClient (60 s r/w) rather than client
-            // (2 s w). Same rationale as trySendPhoto above — document bodies
-            // are often larger than photos (PDFs, reports, zips).
-            var sent = uploadClient.execute(request);
-            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
-            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Document sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
-                            .formatted(peerId, displayName, elapsedMs, fileSize));
-            return true;
-        } catch (TelegramApiException e) {
-            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Document send failed for %s after %dms: %s"
-                            .formatted(displayName, elapsedMs, e.getMessage()));
-            return false;
-        }
+        // JCLAW-122: upload via uploadClient (60 s r/w) — document bodies are
+        // often larger than photos (PDFs, reports, zips).
+        return uploadVia("Document", peerId, file, displayName, () -> uploadClient.execute(request));
     }
 
     // ── JCLAW-364: native media send paths ──
@@ -1167,17 +1131,7 @@ class TelegramSender {
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
         if (caption != null && !caption.isBlank()) builder.caption(caption);
         var request = builder.build();
-        long startNs = System.nanoTime();
-        long fileSize = file.length();
-        try {
-            var sent = uploadClient.execute(request);
-            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
-            logMediaSent("Voice", peerId, displayName, startNs, fileSize);
-            return true;
-        } catch (TelegramApiException e) {
-            logMediaFailed("Voice", displayName, startNs, e);
-            return false;
-        }
+        return uploadVia("Voice", peerId, file, displayName, () -> uploadClient.execute(request));
     }
 
     /** Upload {@code file} as a Telegram audio track (.mp3 and other audio). */
@@ -1201,17 +1155,7 @@ class TelegramSender {
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
         if (caption != null && !caption.isBlank()) builder.caption(caption);
         var request = builder.build();
-        long startNs = System.nanoTime();
-        long fileSize = file.length();
-        try {
-            var sent = uploadClient.execute(request);
-            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
-            logMediaSent("Audio", peerId, displayName, startNs, fileSize);
-            return true;
-        } catch (TelegramApiException e) {
-            logMediaFailed("Audio", displayName, startNs, e);
-            return false;
-        }
+        return uploadVia("Audio", peerId, file, displayName, () -> uploadClient.execute(request));
     }
 
     /** Upload {@code file} as a Telegram video. */
@@ -1235,17 +1179,7 @@ class TelegramSender {
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
         if (caption != null && !caption.isBlank()) builder.caption(caption);
         var request = builder.build();
-        long startNs = System.nanoTime();
-        long fileSize = file.length();
-        try {
-            var sent = uploadClient.execute(request);
-            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
-            logMediaSent("Video", peerId, displayName, startNs, fileSize);
-            return true;
-        } catch (TelegramApiException e) {
-            logMediaFailed("Video", displayName, startNs, e);
-            return false;
-        }
+        return uploadVia("Video", peerId, file, displayName, () -> uploadClient.execute(request));
     }
 
     /**
@@ -1332,6 +1266,42 @@ class TelegramSender {
                 .media(file, name);
         if (caption != null) b.caption(caption);
         return b.build();
+    }
+
+    /**
+     * Upload call for the single-file trySend* paths. The SDK exposes a distinct
+     * concretely-typed {@code execute()} per send class (no shared
+     * {@code PartialBotApiMethod} entry point), so each caller supplies its own
+     * {@code () -> uploadClient.execute(typedRequest)}; the checked
+     * {@link TelegramApiException} is why this isn't a plain {@code Supplier}.
+     */
+    @FunctionalInterface
+    private interface UploadCall {
+        Message execute() throws TelegramApiException;
+    }
+
+    /**
+     * JCLAW-408: shared upload tail for the five single-file trySend* methods —
+     * times the upload, runs {@code exec}, records the sent message id for
+     * reactions (JCLAW-383), and logs success/failure uniformly via
+     * {@link #logMediaSent}/{@link #logMediaFailed}. Returns false (never throws)
+     * on {@link TelegramApiException} so callers can fall back. Each trySend*
+     * builds its typed request (chat/file/reply/thread/caption) and passes the
+     * execute lambda here.
+     */
+    private boolean uploadVia(String kind, String peerId, java.io.File file,
+                              String displayName, UploadCall exec) {
+        long startNs = System.nanoTime();
+        long fileSize = file.length();
+        try {
+            var sent = exec.execute();
+            if (sent != null) recordSentMessage(peerId, sent.getMessageId()); // JCLAW-383
+            logMediaSent(kind, peerId, displayName, startNs, fileSize);
+            return true;
+        } catch (TelegramApiException e) {
+            logMediaFailed(kind, displayName, startNs, e);
+            return false;
+        }
     }
 
     /** Shared success-log for the native media send methods. {@code kind} labels the line. */

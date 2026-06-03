@@ -114,6 +114,23 @@ public final class TelegramModelKeyboard {
     }
 
     /**
+     * JCLAW-408: single-row "◀ Back" keyboard for the model-details view,
+     * returning to the providers grid. Centralizes the inline-keyboard
+     * construction the callback dispatcher previously open-coded. Back reuses
+     * {@code encodeBrowse} because the providers list IS the summary state to
+     * return to.
+     */
+    public static InlineKeyboardMarkup backButton(long conversationId) {
+        var back = InlineKeyboardButton.builder()
+                .text("◀ Back")
+                .callbackData(TelegramModelCallback.encodeBrowse(conversationId))
+                .build();
+        return InlineKeyboardMarkup.builder()
+                .keyboardRow(new InlineKeyboardRow(back))
+                .build();
+    }
+
+    /**
      * Models list for a specific provider index, paginated. Models render in a
      * 2-per-row grid; pagination row beneath shows {@code ◀ Prev} / page
      * indicator / {@code Next ▶}, with Prev hidden on the first page and Next
