@@ -990,6 +990,24 @@ class WebSearchToolHttpTest extends UnitTest {
     }
 
     @Test
+    void ollamaNullResultsYieldsNoResultsFound() {
+        // Regression: Ollama's /api/web_search returns {"results":null} for some
+        // queries (nothing found). has("results") is true for a JSON-null value,
+        // so the old topLevelArray cast threw "JsonNull cannot be cast to
+        // JsonArray" and the whole tool call failed. It must degrade to the same
+        // clean no-results reply as an empty array — never an Error/crash.
+        enableOllamaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"results\":null}")
+                .build());
+        var result = tool.execute("{\"query\":\"nothing here\"}", null);
+        assertEquals("No results found.", result);
+        assertFalse(result.contains("JsonNull"), "must not surface the cast error: " + result);
+    }
+
+    @Test
     void ollama500SurfacesAsToolError() {
         enableOllamaAtMock();
         server.enqueue(new MockResponse.Builder().code(500).body("fail").build());

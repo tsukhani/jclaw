@@ -318,7 +318,16 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
     private static JsonArray topLevelArray(String responseJson, String key) {
         var json = JsonParser.parseString(responseJson).getAsJsonObject();
-        return json.has(key) && !json.getAsJsonArray(key).isEmpty() ? json.getAsJsonArray(key) : null;
+        // Providers — notably Ollama's /api/web_search — return the array key
+        // present but JSON-null for a query that found nothing. has(key) is
+        // true for a null value, so a bare getAsJsonArray(key) throws
+        // "JsonNull cannot be cast to JsonArray". Type-check first: a missing,
+        // null, or non-array value all mean "no results".
+        if (!json.has(key)) return null;
+        var el = json.get(key);
+        if (!el.isJsonArray()) return null;
+        var arr = el.getAsJsonArray();
+        return arr.isEmpty() ? null : arr;
     }
 
     // --- Provider interface ---
