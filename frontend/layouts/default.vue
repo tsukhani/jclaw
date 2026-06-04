@@ -200,7 +200,6 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Chat', to: '/chat', icon: ChatBubbleOvalLeftEllipsisIcon },
       { label: 'Channels', to: '/channels', icon: LinkIcon },
-      { label: 'Reminders', to: '/reminders', icon: BellAlertIcon },
       { label: 'Conversations', to: '/conversations', icon: ChatBubbleLeftRightIcon },
     ],
   },
@@ -215,6 +214,9 @@ const navGroups: NavGroup[] = [
       // workforce, Subagents shows what that workforce is currently doing.
       { label: 'Subagents', to: '/subagents', icon: UsersRound },
       { label: 'Tasks', to: '/tasks', icon: ClipboardDocumentCheckIcon },
+      // Reminders are payloadType=reminder Tasks, surfaced on their own page;
+      // placed directly below Tasks since they're the same underlying entity.
+      { label: 'Reminders', to: '/reminders', icon: BellAlertIcon },
       { label: 'Skills', to: '/skills', icon: BoltIcon },
       // WrenchScrewdriverIcon (not Cog) — disambiguates Tools from Settings,
       // which was previously broken: both rendered the same gear glyph.
