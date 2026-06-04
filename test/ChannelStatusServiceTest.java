@@ -9,10 +9,12 @@ import services.Tx;
 
 /**
  * Tests for {@link services.ChannelStatusService}'s aggregation across
- * the three sources of truth that govern channel activity (web from
- * Agent state, telegram from TelegramBinding, slack/whatsapp from
- * ChannelConfig). The dashboard's "Channels active" stat depends on
- * every cell of this matrix being right; before this service the
+ * the two transport-backed sources of truth that govern channel activity
+ * (telegram from TelegramBinding, slack/whatsapp from ChannelConfig). The
+ * in-app "web" chat is deliberately not counted — enabled agents must not
+ * inflate the dashboard's "Channels active" stat above the channel cards
+ * the operator sees on the /channels page. The dashboard's stat depends
+ * on every cell of this matrix being right; before this service the
  * Telegram cell silently returned no result and the dashboard showed 0
  * while messages were flowing through the polling runner.
  */
@@ -29,26 +31,21 @@ class ChannelStatusServiceTest extends UnitTest {
         assertTrue(active.isEmpty(), "expected empty set, got: " + active);
     }
 
-    // ─── web ─────────────────────────────────────────────────────────
+    // ─── web (deliberately not a channel) ────────────────────────────
 
     @Test
-    void webIsActiveWhenAtLeastOneAgentEnabled() {
+    void enabledAgentsDoNotCountAsAChannel() {
+        // "web" is the in-app SPA chat — implicit in having enabled
+        // agents, with no transport row and no card on /channels. It must
+        // not appear in the active set, so an operator's agents never
+        // inflate the dashboard's "Channels active" stat on their own.
         Tx.run(() -> {
             seedAgent("main", true);
             return null;
         });
         var active = ChannelStatusService.activeChannelTypes();
-        assertTrue(active.contains("web"), "web should be active: " + active);
-    }
-
-    @Test
-    void webNotActiveWhenAllAgentsDisabled() {
-        Tx.run(() -> {
-            seedAgent("inactive", false);
-            return null;
-        });
-        var active = ChannelStatusService.activeChannelTypes();
-        assertFalse(active.contains("web"));
+        assertFalse(active.contains("web"), "web must not be counted: " + active);
+        assertTrue(active.isEmpty(), "enabled agents alone yield no channels: " + active);
     }
 
     // ─── telegram ────────────────────────────────────────────────────
@@ -128,18 +125,17 @@ class ChannelStatusServiceTest extends UnitTest {
 
     @Test
     void mixedFleetCountsEveryActiveChannelOnce() {
-        // Reproduces the exact scenario the user reported: a Telegram
-        // binding works (polling runner active), a few agents are
-        // enabled, and the dashboard previously showed 0. Should now
-        // count web + telegram = 2.
+        // A Telegram binding works (polling runner active) and agents are
+        // enabled. Only the transport-backed channel counts: telegram = 1.
+        // The enabled agent does NOT add a "web" entry.
         Tx.run(() -> {
             var agent = seedAgent("main", true);
             seedTelegramBinding(agent, "1234:abc", "1001", true);
             return null;
         });
         var active = ChannelStatusService.activeChannelTypes();
-        assertEquals(2, active.size(), "expected web + telegram, got: " + active);
-        assertTrue(active.contains("web"));
+        assertEquals(1, active.size(), "expected telegram only, got: " + active);
+        assertFalse(active.contains("web"), "web must not be counted: " + active);
         assertTrue(active.contains("telegram"));
     }
 

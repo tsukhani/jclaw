@@ -48,13 +48,14 @@ const [
   { data: conversationCount },
 ] = await Promise.all([
   useFetch<Agent[]>('/api/agents'),
-  // /api/channels/active aggregates the three sources of truth (web,
-  // telegram bindings, slack/whatsapp ChannelConfig) into a single
-  // count. The plain /api/channels endpoint reads only ChannelConfig
-  // and silently misses Telegram bindings — that's why the previous
-  // dashboard showed "0 channels active" while Telegram polled
-  // messages live. See ChannelStatusService.activeChannelTypes for
-  // the per-channel logic.
+  // /api/channels/active aggregates the transport-backed channels
+  // (telegram bindings + slack/whatsapp ChannelConfig) into a single
+  // count. The in-app "web" chat is deliberately excluded so this number
+  // matches the channel cards on /channels. The plain /api/channels
+  // endpoint reads only ChannelConfig and silently misses Telegram
+  // bindings — that's why the previous dashboard showed "0 channels
+  // active" while Telegram polled messages live. See
+  // ChannelStatusService.activeChannelTypes for the per-channel logic.
   useFetch<ActiveChannelsResponse>('/api/channels/active',
     { default: () => ({ count: 0, channelTypes: [] }) }),
   // Three task-status buckets surfaced as separate sub-stats in the

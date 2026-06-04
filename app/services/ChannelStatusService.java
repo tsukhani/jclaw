@@ -1,6 +1,5 @@
 package services;
 
-import models.Agent;
 import models.ChannelConfig;
 import models.TelegramBinding;
 
@@ -9,12 +8,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Aggregates the operator's "what channels are doing work right now" view
- * across the three different sources of truth in the system:
+ * Aggregates the operator's "what messaging channels are doing work right
+ * now" view across the two transport-backed sources of truth in the
+ * system:
  *
  * <ul>
- *   <li><b>web</b> — the in-app SPA chat. Always available when at least
- *       one Agent is enabled; doesn't have a transport row of its own.</li>
  *   <li><b>telegram</b> — multi-tenant by design (one bot per agent per
  *       user, JCLAW-89). The bot token + enabled flag live on
  *       {@link TelegramBinding}, NOT {@link ChannelConfig}. The polling
@@ -24,6 +22,13 @@ import java.util.Set;
  *       {@link ChannelConfig#enabled}. The transport reads
  *       {@code ChannelConfig.findByType(...)} on each request.</li>
  * </ul>
+ *
+ * <p>The in-app SPA chat ("web") is intentionally NOT counted here: it
+ * has no transport row of its own and is implicit in "you have enabled
+ * agents," so counting it made the dashboard's "Channels active" stat
+ * exceed the channel cards shown on the /channels page (which has no web
+ * card). The stat now matches the externally-configured channels the
+ * operator can actually see and toggle.
  *
  * <p>The dashboard's "Channels active" stat depends on this aggregation
  * existing in one place — before this service the dashboard was reading
@@ -38,21 +43,14 @@ public final class ChannelStatusService {
     private ChannelStatusService() {}
 
     /**
-     * Set of channel types currently doing work. Insertion order is web,
+     * Set of channel types currently doing work. Insertion order is
      * telegram, then anything from {@code ChannelConfig} — gives a stable
-     * order for the dashboard's display purposes.
+     * order for the dashboard's display purposes. The in-app "web" chat is
+     * deliberately excluded (see the class Javadoc).
      */
     public static Set<String> activeChannelTypes() {
         return Tx.run(() -> {
             var active = new LinkedHashSet<String>();
-
-            // Web is the built-in in-app transport. The SPA chat works
-            // for any enabled agent without needing a per-channel row;
-            // counting it here matches the operator's mental model that
-            // "I have agents I can talk to in the browser."
-            if (Agent.count(ENABLED_TRUE) > 0) {
-                active.add("web");
-            }
 
             // Telegram: per-binding source of truth. The polling runner
             // iterates TelegramBinding rows; ChannelConfig is never

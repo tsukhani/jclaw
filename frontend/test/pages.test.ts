@@ -16,8 +16,8 @@ function setupMockApi() {
     { channelType: 'slack', enabled: true },
   ])
   registerEndpoint('/api/channels/active', () => ({
-    count: 2,
-    channelTypes: ['web', 'slack'],
+    count: 1,
+    channelTypes: ['slack'],
   }))
   registerEndpoint('/api/tasks', () => [])
   registerEndpoint('/api/logs', () => ({ events: [
