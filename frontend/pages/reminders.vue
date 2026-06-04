@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task } from '~/types/api'
+import type { Task, TaskStats } from '~/types/api'
 import { BellAlertIcon, TrashIcon } from '@heroicons/vue/24/outline'
 
 // BellAlertIcon retained for the empty-state placeholder; the header no
@@ -13,6 +13,11 @@ definePageMeta({ title: 'Reminders' })
 // task row never appears on both pages.
 const url = '/api/tasks?payloadType=reminder&limit=200'
 const { data: reminders, refresh } = await useFetch<Task[]>(url)
+
+// Reminder-scoped KPI strip — the same aggregate the /tasks page shows, but
+// filtered to payloadType=reminder so reminder counts + run KPIs live here
+// (and stay out of the Tasks page, which excludes them).
+const { data: reminderStats } = await useFetch<TaskStats>('/api/tasks/stats?payloadType=reminder')
 
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
@@ -117,6 +122,69 @@ function statusVariant(status: string): string {
       (or via Telegram if you've configured it). They never go through the LLM —
       the description is what you'll see.
     </p>
+
+    <!-- Reminder KPI strip — mirrors the /tasks header but scoped to
+         payloadType=reminder so reminder counts/run KPIs live on their own
+         page rather than leaking into the automation-tasks stats. -->
+    <div
+      v-if="reminderStats"
+      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-6"
+    >
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Runs today
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ reminderStats.runsToday }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Success rate
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ reminderStats.successRate != null ? `${Math.round(reminderStats.successRate * 100)}%` : '—' }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Avg duration
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ reminderStats.avgDurationMs != null ? `${(reminderStats.avgDurationMs / 1000).toFixed(1)}s` : '—' }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Pending
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ reminderStats.pendingCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Running
+        </div>
+        <div
+          class="text-lg font-semibold"
+          :class="reminderStats.runningCount > 0 ? 'text-blue-400' : 'text-fg-strong'"
+        >
+          {{ reminderStats.runningCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Failed
+        </div>
+        <div
+          class="text-lg font-semibold"
+          :class="reminderStats.failedCount > 0 ? 'text-red-400' : 'text-fg-strong'"
+        >
+          {{ reminderStats.failedCount }}
+        </div>
+      </div>
+    </div>
 
     <!-- Empty state -->
     <section

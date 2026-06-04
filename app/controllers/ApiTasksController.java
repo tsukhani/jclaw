@@ -375,20 +375,20 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
-    public static void stats() {
+    public static void stats(String payloadType, String excludePayloadType) {
         var zone = services.TimezoneResolver.currentDefault();
         var since = java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant();
 
-        long runsToday = countRunsSince(since, null);
-        long completedToday = countRunsSince(since, TaskRun.Status.COMPLETED);
-        long failedRunsToday = countRunsSince(since, TaskRun.Status.FAILED);
+        // payloadType / excludePayloadType scope these aggregates exactly the
+        // way they scope GET /api/tasks: the /tasks page passes
+        // excludePayloadType=reminder so reminder tasks AND their runs never
+        // inflate the automation KPIs, and /reminders passes payloadType=reminder
+        // for the inverse. Both null/blank counts everything (headless callers).
+        long runsToday = countRunsSince(since, null, payloadType, excludePayloadType);
+        long completedToday = countRunsSince(since, TaskRun.Status.COMPLETED, payloadType, excludePayloadType);
+        long failedRunsToday = countRunsSince(since, TaskRun.Status.FAILED, payloadType, excludePayloadType);
 
-        Double avgDurationMs = (Double) JPA.em().createQuery(
-                "SELECT AVG(r.durationMs) FROM TaskRun r "
-                        + "WHERE r.startedAt >= ?1 AND r.status = ?2 AND r.durationMs IS NOT NULL")
-                .setParameter(1, since)
-                .setParameter(2, TaskRun.Status.COMPLETED)
-                .getSingleResult();
+        Double avgDurationMs = avgCompletedDuration(since, payloadType, excludePayloadType);
 
         long terminalToday = completedToday + failedRunsToday;
         Double successRate = terminalToday > 0
@@ -397,24 +397,66 @@ public class ApiTasksController extends Controller {
 
         var payload = new TaskStatsView(
                 runsToday, successRate, avgDurationMs,
-                countTasks(Task.Status.PENDING),
-                countTasks(Task.Status.RUNNING),
-                countTasks(Task.Status.FAILED));
+                countTasks(Task.Status.PENDING, payloadType, excludePayloadType),
+                countTasks(Task.Status.RUNNING, payloadType, excludePayloadType),
+                countTasks(Task.Status.FAILED, payloadType, excludePayloadType));
         renderJSON(gson.toJson(payload));
     }
 
-    private static long countRunsSince(Instant since, TaskRun.Status status) {
-        var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.startedAt >= ?1"
-                + (status != null ? " AND r.status = ?2" : "");
-        var q = JPA.em().createQuery(jpql, Long.class).setParameter(1, since);
-        if (status != null) q.setParameter(2, status);
+    private static long countRunsSince(Instant since, TaskRun.Status status,
+                                       String payloadType, String excludePayloadType) {
+        var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.startedAt >= :since"
+                + (status != null ? " AND r.status = :rstatus" : "")
+                + payloadTypeWhere("r.task", payloadType, excludePayloadType);
+        var q = JPA.em().createQuery(jpql, Long.class).setParameter("since", since);
+        if (status != null) q.setParameter("rstatus", status);
+        bindPayloadType(q, payloadType, excludePayloadType);
         return q.getSingleResult();
     }
 
-    private static long countTasks(Task.Status status) {
-        return JPA.em().createQuery("SELECT COUNT(t) FROM Task t WHERE t.status = ?1", Long.class)
-                .setParameter(1, status)
-                .getSingleResult();
+    private static Double avgCompletedDuration(Instant since, String payloadType, String excludePayloadType) {
+        var jpql = "SELECT AVG(r.durationMs) FROM TaskRun r "
+                + "WHERE r.startedAt >= :since AND r.status = :rstatus AND r.durationMs IS NOT NULL"
+                + payloadTypeWhere("r.task", payloadType, excludePayloadType);
+        var q = JPA.em().createQuery(jpql)
+                .setParameter("since", since)
+                .setParameter("rstatus", TaskRun.Status.COMPLETED);
+        bindPayloadType(q, payloadType, excludePayloadType);
+        return (Double) q.getSingleResult();
+    }
+
+    private static long countTasks(Task.Status status, String payloadType, String excludePayloadType) {
+        var jpql = "SELECT COUNT(t) FROM Task t WHERE t.status = :status"
+                + payloadTypeWhere("t", payloadType, excludePayloadType);
+        var q = JPA.em().createQuery(jpql, Long.class).setParameter("status", status);
+        bindPayloadType(q, payloadType, excludePayloadType);
+        return q.getSingleResult();
+    }
+
+    /**
+     * JPQL fragment scoping an aggregate by payloadType, mirroring the
+     * {@code GET /api/tasks} list filter: {@code payloadType} pins to one kind
+     * (e.g. reminder); {@code excludePayloadType} excludes it while still
+     * matching the NULL payloadType of ordinary automation tasks. {@code alias}
+     * is the entity path to the column ({@code "t"} for Task, {@code "r.task"}
+     * for a TaskRun join).
+     */
+    private static String payloadTypeWhere(String alias, String payloadType, String excludePayloadType) {
+        var sb = new StringBuilder();
+        if (payloadType != null && !payloadType.isBlank()) {
+            sb.append(" AND ").append(alias).append(".payloadType = :pt");
+        }
+        if (excludePayloadType != null && !excludePayloadType.isBlank()) {
+            sb.append(" AND (").append(alias).append(".payloadType <> :ept OR ")
+              .append(alias).append(".payloadType IS NULL)");
+        }
+        return sb.toString();
+    }
+
+    private static void bindPayloadType(jakarta.persistence.Query q,
+                                        String payloadType, String excludePayloadType) {
+        if (payloadType != null && !payloadType.isBlank()) q.setParameter("pt", payloadType);
+        if (excludePayloadType != null && !excludePayloadType.isBlank()) q.setParameter("ept", excludePayloadType);
     }
 
     /**

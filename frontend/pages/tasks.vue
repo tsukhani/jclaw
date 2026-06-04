@@ -85,7 +85,11 @@ const url = computed(() => {
 const { data: tasks, refresh } = await useFetch<Task[]>(url)
 // JCLAW-22 (slice K): dashboard KPI aggregate. Refetched live on task
 // lifecycle events (see scheduleLiveRefresh) so the counts stay current.
-const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/tasks/stats')
+// Exclude reminders from the KPI strip so it matches this page's table (which
+// passes excludePayloadType=reminder) and the dashboard Tasks tile. Reminder
+// counts + run KPIs live on /reminders. Without this, a pending reminder showed
+// up as "Pending 1" here while never appearing in the list below.
+const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/tasks/stats?excludePayloadType=reminder')
 // JCLAW-22: the calendar's week/day grids place real run blocks onto an hourly
 // axis. We fetch the runs that fall inside the currently-visible calendar range
 // (driven by the granularity + anchor below) and refetch reactively as the
