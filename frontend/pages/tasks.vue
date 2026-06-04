@@ -85,10 +85,10 @@ const url = computed(() => {
 const { data: tasks, refresh } = await useFetch<Task[]>(url)
 // JCLAW-22 (slice K): dashboard KPI aggregate. Refetched live on task
 // lifecycle events (see scheduleLiveRefresh) so the counts stay current.
-// Exclude reminders from the KPI strip so it matches this page's table (which
-// passes excludePayloadType=reminder) and the dashboard Tasks tile. Reminder
-// counts + run KPIs live on /reminders. Without this, a pending reminder showed
-// up as "Pending 1" here while never appearing in the list below.
+// Exclude reminders so the KPI strip matches this page's table (which passes
+// excludePayloadType=reminder) and the dashboard Tasks tile; reminder counts +
+// run KPIs live on /reminders. Without this, a pending reminder showed as
+// "Pending 1" here while never appearing in the list below.
 const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/tasks/stats?excludePayloadType=reminder')
 // JCLAW-22: the calendar's week/day grids place real run blocks onto an hourly
 // axis. We fetch the runs that fall inside the currently-visible calendar range
@@ -292,7 +292,8 @@ const expandedTask = computed(() => tasks.value?.find(t => t.id === expandedId.v
 const expandedSteps = computed(() => parseTaskSteps(expandedTask.value?.description))
 
 // colspan for the expanded detail row: every visible column, including the
-// leading checkbox column when bulk-select is active.
+// leading checkbox column when bulk-select is active. JCLAW-420 added the
+// Channel column, so the base count is 9 (10 with the checkbox column).
 const tableColspan = computed(() => (selectMode.value ? 10 : 9))
 
 // ── JCLAW-22 (slice E): inline step editor ──
@@ -352,6 +353,50 @@ async function saveSteps(task: Task) {
   }
   finally {
     savingSteps.value = false
+  }
+}
+
+// ── JCLAW-420: inline delivery (output channel) editor ──
+// Same shape as the step editor above, scoped to the expanded row. The text
+// input takes a raw grammar string (`tool:send_gmail_message`, `telegram:123`,
+// `none`, …); the backend re-validates it (JCLAW-417) and returns 400 with a
+// message on a bad value, which we surface verbatim. On success we refresh so
+// the read-only deliveryLabel reflects the new value.
+const editingDeliveryId = ref<number | null>(null)
+const editDelivery = ref('')
+const savingDelivery = ref(false)
+const deliveryError = ref<string | null>(null)
+
+function startEditDelivery(task: Task) {
+  editDelivery.value = typeof task.delivery === 'string' ? task.delivery : ''
+  deliveryError.value = null
+  editingDeliveryId.value = task.id
+}
+
+function cancelEditDelivery() {
+  editingDeliveryId.value = null
+  editDelivery.value = ''
+  deliveryError.value = null
+}
+
+async function saveDelivery(task: Task) {
+  savingDelivery.value = true
+  deliveryError.value = null
+  try {
+    const delivery = editDelivery.value.trim()
+    await $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { delivery } })
+    editingDeliveryId.value = null
+    editDelivery.value = ''
+    refresh()
+  }
+  catch (e) {
+    // $fetch surfaces the backend's 400 body on e.data; prefer its message so
+    // the operator sees the validation reason rather than a generic "400".
+    const data = (e as { data?: { error?: string } }).data
+    deliveryError.value = data?.error ?? (e instanceof Error ? e.message : 'Failed to save channel')
+  }
+  finally {
+    savingDelivery.value = false
   }
 }
 
@@ -531,7 +576,7 @@ let liveRefreshHandle: ReturnType<typeof setTimeout> | undefined
 function scheduleLiveRefresh() {
   if (liveRefreshHandle) clearTimeout(liveRefreshHandle)
   liveRefreshHandle = setTimeout(() => {
-    if (editingId.value != null) return
+    if (editingId.value != null || editingDeliveryId.value != null) return
     refresh()
     refreshStats()
     refreshRecent()
@@ -563,19 +608,22 @@ const statusColors: Record<string, string> = {
 // (one-shot waiting) and ACTIVE (recurring ongoing).
 
 /**
- * Short label for a Task's declarative output channel (Task.delivery —
- * "telegram:<id>", "email:<addr>", "web:<…>"). Null/blank → em-dash: the task
- * either has no post-run delivery route (operator reads the run directly) or
- * the agent self-delivers via a tool during the run. delivery arrives through
- * the Task type's open index signature, so narrow it before reading.
+ * JCLAW-420: humanize a task's `delivery` (output channel) for display,
+ * mirroring the JCLAW-417 backend grammar 3 states:
+ *   - `tool:<name>`               → the tool name (agent self-delivers inline)
+ *   - null / blank / `none`       → "none" (no delivery)
+ *   - `<channel>:<target>` / bare → the channel name (telegram/slack/whatsapp/web;
+ *                                    `email:` kept as a legacy-row alias)
+ * The `delivery` field rides the Task index signature (not a declared
+ * property), so it's narrowed to a string before parsing.
  */
 function deliveryLabel(task: Task): string {
-  const d = typeof task.delivery === 'string' ? task.delivery : ''
-  if (!d) return '—'
-  if (d.startsWith('web:')) return 'web'
-  if (d.startsWith('telegram:')) return 'telegram'
-  if (d.startsWith('email:')) return 'email'
-  return d
+  const raw = typeof task.delivery === 'string' ? task.delivery.trim() : ''
+  if (!raw || raw.toLowerCase() === 'none') return 'none'
+  if (raw.startsWith('tool:')) return raw.slice('tool:'.length)
+  const colon = raw.indexOf(':')
+  const channel = colon === -1 ? raw : raw.slice(0, colon)
+  return channel
 }
 
 /**
@@ -1565,159 +1613,232 @@ const statusBg: Record<string, string> = {
                 :colspan="tableColspan"
                 class="px-4 py-3"
               >
-                <!-- Output channel (Task.delivery). Em-dash when there's no
-                     declarative route — the agent self-delivers via a tool. -->
-                <div class="mb-4 flex items-center gap-1.5 text-xs">
-                  <span class="uppercase tracking-wider font-medium text-fg-muted">Channel</span>
-                  <span class="text-fg-primary font-mono">{{ deliveryLabel(task) }}</span>
-                </div>
                 <div class="grid gap-6 md:grid-cols-2">
-                  <!-- Instructions: the JCLAW-260 step list, read-only by
+                  <!-- Left column: Instructions stacked over the JCLAW-420
+                       Channel editor; Run history fills the right column. -->
+                  <div class="space-y-6">
+                    <!-- Instructions: the JCLAW-260 step list, read-only by
                      default with an inline editor (slice E) behind Edit. -->
-                  <section>
-                    <div class="flex items-center justify-between mb-1.5">
-                      <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
-                        Instructions
-                      </h3>
-                      <button
-                        v-if="editingId !== task.id"
-                        type="button"
-                        class="inline-flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
-                        @click="startEditSteps(task)"
-                      >
-                        <PencilSquareIcon
-                          class="h-3 w-3"
-                          aria-hidden="true"
-                        />
-                        Edit
-                      </button>
-                    </div>
-
-                    <!-- Read-only view (numbered when multi-step, verbatim for one). -->
-                    <template v-if="editingId !== task.id">
-                      <ol
-                        v-if="expandedSteps.length > 1"
-                        class="list-decimal list-inside space-y-0.5 text-xs text-fg-primary"
-                      >
-                        <li
-                          v-for="(step, i) in expandedSteps"
-                          :key="i"
+                    <section>
+                      <div class="flex items-center justify-between mb-1.5">
+                        <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
+                          Instructions
+                        </h3>
+                        <button
+                          v-if="editingId !== task.id"
+                          type="button"
+                          class="inline-flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+                          @click="startEditSteps(task)"
                         >
-                          {{ step }}
-                        </li>
-                      </ol>
-                      <p
-                        v-else-if="expandedSteps.length === 1"
-                        class="text-xs text-fg-primary whitespace-pre-wrap"
-                      >
-                        {{ expandedSteps[0] }}
-                      </p>
-                      <p
-                        v-else
-                        class="text-xs text-fg-muted italic"
-                      >
-                        No instructions
-                      </p>
-                    </template>
+                          <PencilSquareIcon
+                            class="h-3 w-3"
+                            aria-hidden="true"
+                          />
+                          Edit
+                        </button>
+                      </div>
 
-                    <!-- Inline editor: add / edit / reorder / remove → PATCH. -->
-                    <div
-                      v-else
-                      class="space-y-2"
-                    >
+                      <!-- Read-only view (numbered when multi-step, verbatim for one). -->
+                      <template v-if="editingId !== task.id">
+                        <ol
+                          v-if="expandedSteps.length > 1"
+                          class="list-decimal list-inside space-y-0.5 text-xs text-fg-primary"
+                        >
+                          <li
+                            v-for="(step, i) in expandedSteps"
+                            :key="i"
+                          >
+                            {{ step }}
+                          </li>
+                        </ol>
+                        <p
+                          v-else-if="expandedSteps.length === 1"
+                          class="text-xs text-fg-primary whitespace-pre-wrap"
+                        >
+                          {{ expandedSteps[0] }}
+                        </p>
+                        <p
+                          v-else
+                          class="text-xs text-fg-muted italic"
+                        >
+                          No instructions
+                        </p>
+                      </template>
+
+                      <!-- Inline editor: add / edit / reorder / remove → PATCH. -->
                       <div
-                        v-for="(step, i) in editSteps"
-                        :key="i"
-                        class="flex items-start gap-1.5"
+                        v-else
+                        class="space-y-2"
                       >
-                        <span class="text-[10px] text-fg-muted font-mono mt-1.5 w-4 text-right shrink-0">{{ i + 1 }}</span>
-                        <textarea
-                          v-model="editSteps[i]"
-                          rows="2"
-                          :aria-label="`Step ${i + 1}`"
-                          placeholder="Step instruction…"
-                          class="flex-1 px-2 py-1 bg-muted border border-input text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors resize-y"
-                        />
-                        <div class="flex flex-col gap-0.5 shrink-0">
+                        <div
+                          v-for="(step, i) in editSteps"
+                          :key="i"
+                          class="flex items-start gap-1.5"
+                        >
+                          <span class="text-[10px] text-fg-muted font-mono mt-1.5 w-4 text-right shrink-0">{{ i + 1 }}</span>
+                          <textarea
+                            v-model="editSteps[i]"
+                            rows="2"
+                            :aria-label="`Step ${i + 1}`"
+                            placeholder="Step instruction…"
+                            class="flex-1 px-2 py-1 bg-muted border border-input text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors resize-y"
+                          />
+                          <div class="flex flex-col gap-0.5 shrink-0">
+                            <button
+                              type="button"
+                              :disabled="i === 0"
+                              :aria-label="`Move step ${i + 1} up`"
+                              class="p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
+                              @click="moveStep(i, -1)"
+                            >
+                              <ArrowUpIcon
+                                class="h-3 w-3"
+                                aria-hidden="true"
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              :disabled="i === editSteps.length - 1"
+                              :aria-label="`Move step ${i + 1} down`"
+                              class="p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
+                              @click="moveStep(i, 1)"
+                            >
+                              <ArrowDownIcon
+                                class="h-3 w-3"
+                                aria-hidden="true"
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              :aria-label="`Remove step ${i + 1}`"
+                              class="p-0.5 text-fg-muted hover:text-red-400"
+                              @click="removeStep(i)"
+                            >
+                              <XMarkIcon
+                                class="h-3 w-3"
+                                aria-hidden="true"
+                              />
+                            </button>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-2 pt-0.5">
                           <button
                             type="button"
-                            :disabled="i === 0"
-                            :aria-label="`Move step ${i + 1} up`"
-                            class="p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
-                            @click="moveStep(i, -1)"
+                            class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong bg-transparent border-0 cursor-pointer"
+                            @click="addStep"
                           >
-                            <ArrowUpIcon
-                              class="h-3 w-3"
+                            <PlusIcon
+                              class="h-3.5 w-3.5"
                               aria-hidden="true"
                             />
+                            Add step
+                          </button>
+                          <span class="flex-1" />
+                          <button
+                            type="button"
+                            :disabled="savingSteps"
+                            class="px-2 py-1 text-xs bg-muted border border-input text-fg-muted hover:text-fg-strong disabled:opacity-50 cursor-pointer"
+                            @click="cancelEditSteps"
+                          >
+                            Cancel
                           </button>
                           <button
                             type="button"
-                            :disabled="i === editSteps.length - 1"
-                            :aria-label="`Move step ${i + 1} down`"
-                            class="p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
-                            @click="moveStep(i, 1)"
+                            :disabled="savingSteps"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
+                            @click="saveSteps(task)"
                           >
-                            <ArrowDownIcon
-                              class="h-3 w-3"
+                            <CheckIcon
+                              class="h-3.5 w-3.5"
                               aria-hidden="true"
                             />
-                          </button>
-                          <button
-                            type="button"
-                            :aria-label="`Remove step ${i + 1}`"
-                            class="p-0.5 text-fg-muted hover:text-red-400"
-                            @click="removeStep(i)"
-                          >
-                            <XMarkIcon
-                              class="h-3 w-3"
-                              aria-hidden="true"
-                            />
+                            {{ savingSteps ? 'Saving…' : 'Save' }}
                           </button>
                         </div>
-                      </div>
-                      <div class="flex items-center gap-2 pt-0.5">
-                        <button
-                          type="button"
-                          class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong bg-transparent border-0 cursor-pointer"
-                          @click="addStep"
+                        <p
+                          v-if="stepsError"
+                          class="text-xs text-red-400"
                         >
-                          <PlusIcon
-                            class="h-3.5 w-3.5"
+                          {{ stepsError }}
+                        </p>
+                      </div>
+                    </section>
+                    <!-- JCLAW-420: delivery (output channel), read-only with an
+                     inline editor behind Edit. The text input takes a raw
+                     JCLAW-417 grammar string (tool:NAME, telegram:ID, none, …);
+                     the backend re-validates on PATCH and 400s with a message. -->
+                    <section>
+                      <div class="flex items-center justify-between mb-1.5">
+                        <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
+                          Channel
+                        </h3>
+                        <button
+                          v-if="editingDeliveryId !== task.id"
+                          type="button"
+                          class="inline-flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+                          @click="startEditDelivery(task)"
+                        >
+                          <PencilSquareIcon
+                            class="h-3 w-3"
                             aria-hidden="true"
                           />
-                          Add step
-                        </button>
-                        <span class="flex-1" />
-                        <button
-                          type="button"
-                          :disabled="savingSteps"
-                          class="px-2 py-1 text-xs bg-muted border border-input text-fg-muted hover:text-fg-strong disabled:opacity-50 cursor-pointer"
-                          @click="cancelEditSteps"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          :disabled="savingSteps"
-                          class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
-                          @click="saveSteps(task)"
-                        >
-                          <CheckIcon
-                            class="h-3.5 w-3.5"
-                            aria-hidden="true"
-                          />
-                          {{ savingSteps ? 'Saving…' : 'Save' }}
+                          Edit
                         </button>
                       </div>
+
+                      <!-- Read-only view: the humanized 3-state label. -->
                       <p
-                        v-if="stepsError"
-                        class="text-xs text-red-400"
+                        v-if="editingDeliveryId !== task.id"
+                        class="text-xs text-fg-primary font-mono"
                       >
-                        {{ stepsError }}
+                        {{ deliveryLabel(task) }}
                       </p>
-                    </div>
-                  </section>
+
+                      <!-- Inline editor: raw grammar string → PATCH delivery. -->
+                      <div
+                        v-else
+                        class="space-y-2"
+                      >
+                        <input
+                          v-model="editDelivery"
+                          type="text"
+                          aria-label="Delivery channel"
+                          placeholder="e.g. tool:send_gmail_message, telegram:123, none"
+                          class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors"
+                          @keydown.enter.prevent="saveDelivery(task)"
+                        >
+                        <div class="flex items-center gap-2 pt-0.5">
+                          <span class="flex-1" />
+                          <button
+                            type="button"
+                            :disabled="savingDelivery"
+                            class="px-2 py-1 text-xs bg-muted border border-input text-fg-muted hover:text-fg-strong disabled:opacity-50 cursor-pointer"
+                            @click="cancelEditDelivery"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            :disabled="savingDelivery"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
+                            @click="saveDelivery(task)"
+                          >
+                            <CheckIcon
+                              class="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                            {{ savingDelivery ? 'Saving…' : 'Save' }}
+                          </button>
+                        </div>
+                        <p
+                          v-if="deliveryError"
+                          class="text-xs text-red-400"
+                        >
+                          {{ deliveryError }}
+                        </p>
+                      </div>
+                    </section>
+                  </div>
                   <!-- Run history: lazy-loaded TaskRuns, most-recent first. -->
                   <section>
                     <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted mb-1.5">

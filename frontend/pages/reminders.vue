@@ -88,7 +88,12 @@ function firedAtLabel(r: Task): string {
 
 function deliveryLabel(r: Task): string {
   const d = reminderDelivery(r)
+  // Null/blank delivery means "auto-route to the calling chat" for reminders —
+  // distinct from tasks' "none" (JCLAW-420). Keep that behavior.
   if (!d) return 'web (auto)'
+  // JCLAW-420: `tool:<name>` self-delivery — show the tool name, not the raw
+  // `tool:` prefix, mirroring the Tasks page's deliveryLabel.
+  if (d.startsWith('tool:')) return d.slice('tool:'.length)
   if (d.startsWith('web:')) return 'web'
   if (d.startsWith('telegram:')) return 'telegram'
   return d
