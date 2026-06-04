@@ -133,6 +133,14 @@ public final class DeliveryDispatcher {
         if (deliverySpec == null || deliverySpec.isBlank()) {
             return DispatchResult.unsupported("(null)");
         }
+        // JCLAW-419: tool:<name> and 'none' are not dispatcher specs — tool
+        // delivery is performed by the agent in-run, 'none' is no delivery.
+        // Reject them here so a mis-routed spec never lands on the channel
+        // switch (TaskExecutor already routes only CHANNEL kinds here).
+        if (DeliverySpec.parse(deliverySpec).kind() != DeliverySpec.Kind.CHANNEL) {
+            return DispatchResult.failedDelivery(
+                    "Delivery '" + deliverySpec + "' is not a channel spec.");
+        }
         var idx = deliverySpec.indexOf(':');
         if (idx <= 0 || idx == deliverySpec.length() - 1) {
             return DispatchResult.failedDelivery(

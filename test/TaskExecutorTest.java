@@ -117,6 +117,33 @@ class TaskExecutorTest extends UnitTest {
         assertEquals("fallback-name", TaskExecutor.resolveAgentPrompt(t));
     }
 
+    @Test
+    void resolveAgentPromptAppendsToolDeliveryDirective() {
+        // JCLAW-419: tool: delivery injects a directive so the agent actually
+        // calls the tool — the typed field DRIVES execution.
+        var t = new Task();
+        t.name = "email-report";
+        t.description = "Generate the report";
+        t.noAgent = false;
+        t.delivery = "tool:send_gmail_message";
+        var prompt = TaskExecutor.resolveAgentPrompt(t);
+        assertTrue(prompt.startsWith("Generate the report"), prompt);
+        assertTrue(prompt.contains("send_gmail_message"), prompt);
+        assertTrue(prompt.contains("deliver it by calling"), prompt);
+    }
+
+    @Test
+    void resolveAgentPromptNoDirectiveForChannelDelivery() {
+        // Channel delivery is handled post-run by the dispatcher — no in-prompt
+        // directive (would be noise; the agent doesn't deliver it itself).
+        var t = new Task();
+        t.name = "x";
+        t.description = "Do the thing";
+        t.noAgent = false;
+        t.delivery = "telegram:12345";
+        assertEquals("Do the thing", TaskExecutor.resolveAgentPrompt(t));
+    }
+
     // === Happy path: description-as-prompt + assistant reply ===
 
     @Test

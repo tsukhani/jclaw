@@ -127,6 +127,19 @@ class DeliveryDispatcherTest extends UnitTest {
     }
 
     @Test
+    void dispatchSpecRejectsToolDelivery() {
+        // JCLAW-419: tool:<name> is not a channel spec — the agent self-delivers
+        // in-run, so the dispatcher must reject it rather than route "tool" to
+        // the channel switch.
+        var parent = createAgent("ds-tool");
+        var result = Tx.run(() -> DeliveryDispatcher.dispatchSpec(parent, "tool:send_gmail_message", "hi"));
+        assertFalse(result.ok());
+        assertEquals(DispatchResult.Status.FAILED_DELIVERY, result.status());
+        assertTrue(result.reason().contains("not a channel spec"),
+                "error must explain it's not a channel spec, got: " + result.reason());
+    }
+
+    @Test
     void dispatchSpecRejectsMissingColon() {
         var parent = createAgent("ds-no-colon");
         var result = Tx.run(() -> DeliveryDispatcher.dispatchSpec(parent, "telegram12345", "hi"));

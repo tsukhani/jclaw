@@ -143,7 +143,25 @@ public final class TaskExecutor {
      */
     public static String resolveAgentPrompt(Task task) {
         if (task.description == null || task.description.isBlank()) return task.name;
-        return task.noAgent ? task.description : TaskSteps.flattenForPrompt(task.description);
+        var prompt = task.noAgent ? task.description : TaskSteps.flattenForPrompt(task.description);
+        return appendToolDeliveryDirective(prompt, task);
+    }
+
+    /**
+     * JCLAW-419: when the task declares {@code tool:<name>} delivery, append a
+     * deterministic instruction so the agent actually calls that tool to deliver
+     * its output — making the typed {@code delivery} field <em>drive</em>
+     * execution rather than merely label it. Only agent tasks are affected:
+     * {@code noAgent} tasks (script / verbatim) and reminders don't run a tool
+     * loop, and CHANNEL / NONE delivery are handled post-run by
+     * {@link #dispatchDelivery} (the dispatcher) or not at all.
+     */
+    private static String appendToolDeliveryDirective(String prompt, Task task) {
+        if (task.noAgent || isReminder(task)) return prompt;
+        var spec = DeliverySpec.parse(task.delivery);
+        if (spec.kind() != DeliverySpec.Kind.TOOL || spec.tool().isBlank()) return prompt;
+        return prompt + "\n\nWhen you have produced the final output, deliver it by calling the `"
+                + spec.tool() + "` tool.";
     }
 
     /**
@@ -307,6 +325,15 @@ public final class TaskExecutor {
     private static void dispatchDelivery(Task task, TaskRun closed, boolean deliveredViaMessageTool) {
         var spec = task.delivery;
         if (spec == null || spec.isBlank()) {
+            stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_REQUESTED, null, null);
+            return;
+        }
+        // JCLAW-419: only CHANNEL delivery is routed through the dispatcher.
+        // TOOL delivery is performed by the agent in-run (resolveAgentPrompt
+        // injects a directive to call the tool), and the explicit "none"
+        // literal is no-delivery — both leave the run NOT_REQUESTED here so a
+        // tool: spec never reaches the channel switch and mis-dispatches.
+        if (DeliverySpec.parse(spec).kind() != DeliverySpec.Kind.CHANNEL) {
             stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_REQUESTED, null, null);
             return;
         }
