@@ -4,6 +4,7 @@ import channels.TelegramApprovalService;
 import channels.TelegramApprovalService.Outcome;
 import channels.TelegramMarkdownFormatter;
 import models.Agent;
+import models.Conversation;
 import models.TelegramBinding;
 import models.ToolApprovalGrant;
 import services.ConfigService;
@@ -27,7 +28,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>the tool is marked {@link ToolRegistry.Tool#dangerous() dangerous}
  *       (today: {@code exec}); AND</li>
  *   <li>the running agent (or an ancestor, for sub-agents) is bound to a
- *       Telegram bot via {@link TelegramBinding#findByAgentOrAncestor}.</li>
+ *       Telegram bot via {@link TelegramBinding#findByAgentOrAncestor}; AND</li>
+ *   <li>JCLAW-423: the conversation that triggered the action is itself on
+ *       Telegram — the only channel with an interactive approve/deny surface,
+ *       and the only one where a prompt actually reaches the operator.</li>
  * </ol>
  *
  * <p>When both hold, the gate raises an interactive approve/deny prompt in
@@ -36,8 +40,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * request times out. {@code APPROVED_*} proceeds; {@code DENIED} /
  * {@code TIMED_OUT} / {@code EXPIRED} aborts.
  *
- * <p>Non-Telegram channels and non-dangerous tools never reach the prompt —
- * the gate returns {@link Decision#PROCEED} before any I/O.
+ * <p>JCLAW-423: a dangerous tool on any other channel (web, Slack) has no
+ * interactive approval surface, so the gate applies the configured off-channel
+ * policy ({@value #CFG_OFF_CHANNEL_POLICY}, default {@code allow}) instead of
+ * routing a prompt to a Telegram chat the operator may not be watching — which
+ * used to leave web-initiated turns blocking on a prompt nobody saw. A standing
+ * grant still proceeds under either policy. Non-dangerous tools never reach the
+ * gate — it returns {@link Decision#PROCEED} before any I/O.
  *
  * <h2>Session / always scope</h2>
  * <p>An {@code APPROVED_SESSION} or {@code APPROVED_ALWAYS} tap records a
@@ -69,6 +78,16 @@ public final class DangerousActionGate {
     private static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
     /**
+     * JCLAW-423: policy for a dangerous tool dispatched on a channel with no
+     * interactive approval surface (anything but Telegram). {@code allow}
+     * (default) runs it ungated, preserving the pre-423 behavior where non-
+     * Telegram channels never gated dangerous tools; {@code deny} fails closed.
+     * An explicit standing grant still proceeds under either policy.
+     */
+    public static final String CFG_OFF_CHANNEL_POLICY = "tool.approval.offChannelPolicy";
+    private static final String DEFAULT_OFF_CHANNEL_POLICY = "allow";
+
+    /**
      * Per-{@code (agentId, toolName)} standing grants from an
      * {@code APPROVED_SESSION} / {@code APPROVED_ALWAYS} tap. Presence of a
      * key means "don't re-prompt for this agent+tool". Process-local and
@@ -80,41 +99,94 @@ public final class DangerousActionGate {
     public enum Decision { PROCEED, ABORT }
 
     /**
-     * Decide whether {@code toolName} may run for {@code agent}.
+     * Decide whether {@code toolName} may run for {@code agent} on the
+     * conversation identified by {@code conversationId}.
      *
-     * @param agent    the executing agent (sub-agents resolve their binding
-     *                  via the parent chain)
-     * @param toolName the tool about to dispatch
-     * @param argsJson the raw JSON arguments the model sent — surfaced in the
-     *                  prompt so the user sees what they're approving
+     * @param agent          the executing agent (sub-agents resolve their
+     *                        binding via the parent chain)
+     * @param conversationId the originating conversation — its
+     *                        {@code channelType} decides whether an interactive
+     *                        prompt can reach the operator; {@code null} when no
+     *                        conversation context is available
+     * @param toolName       the tool about to dispatch
+     * @param argsJson       the raw JSON arguments the model sent — surfaced in
+     *                        the prompt so the user sees what they're approving
      * @return {@link Decision#PROCEED} to run the tool, {@link Decision#ABORT}
      *         to skip it and return a denial result to the model
      */
-    public static Decision guard(Agent agent, String toolName, String argsJson) {
+    public static Decision guard(Agent agent, Long conversationId, String toolName, String argsJson) {
         if (agent == null || !ToolRegistry.isDangerous(toolName)) {
             return Decision.PROCEED;
         }
 
-        // Resolve the Telegram binding (own or inherited from an ancestor).
-        // The lookup queries the DB, so run it inside a transaction — the
-        // tool-dispatch carrier thread is not otherwise in one.
-        var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
-        if (binding == null || !binding.enabled) {
-            // Not Telegram-bound (web, Slack, an unbound agent, …): no gate.
-            return Decision.PROCEED;
-        }
-
-        // Suppress the prompt if a standing grant exists in either the
-        // in-process session set or the persisted always-store (JCLAW-385).
-        // The persisted lookup hits the DB, so it shares the gate's tx.
-        if (GRANTS.contains(grantKey(agent, toolName))
-                || Tx.run(() -> ToolApprovalGrant.exists(agent.id, toolName))) {
+        // A standing grant (in-process session set or the JCLAW-385 persisted
+        // always-store) is an explicit operator approval for this (agent, tool)
+        // — honor it on ANY channel without prompting.
+        if (hasStandingGrant(agent, toolName)) {
             EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
                     "Dangerous tool '%s' pre-approved for this agent; skipping prompt".formatted(toolName));
             return Decision.PROCEED;
         }
 
-        return promptAndAwait(agent, toolName, argsJson, binding);
+        // JCLAW-423: the interactive approve/deny prompt only exists on Telegram,
+        // and only reaches the operator when THIS conversation is the Telegram
+        // one. Route the prompt only for a Telegram conversation that also has a
+        // usable binding; every other channel (web, Slack, or no conversation)
+        // has no approval surface and must NOT silently route to a bound chat.
+        var channelType = resolveChannelType(conversationId);
+        if (CHANNEL_NAME.equals(channelType)) {
+            var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
+            if (binding != null && binding.enabled) {
+                return promptAndAwait(agent, toolName, argsJson, binding);
+            }
+            // A Telegram conversation with no usable binding can't be prompted;
+            // fall through to the off-channel policy rather than block forever.
+        }
+
+        return offChannelDecision(agent, toolName, channelType);
+    }
+
+    /**
+     * Off-Telegram fallback: there is no interactive approval surface for this
+     * dispatch, so apply the operator-configured policy
+     * ({@value #CFG_OFF_CHANNEL_POLICY}, default {@code allow}). {@code allow}
+     * proceeds ungated (the pre-JCLAW-423 behavior); {@code deny} fails closed.
+     * A standing grant has already short-circuited before this point.
+     */
+    private static Decision offChannelDecision(Agent agent, String toolName, String channelType) {
+        var chan = channelType == null ? "none" : channelType;
+        var policy = ConfigService.get(CFG_OFF_CHANNEL_POLICY, DEFAULT_OFF_CHANNEL_POLICY);
+        if ("deny".equalsIgnoreCase(policy)) {
+            EventLogger.warn(LOG_CATEGORY, agent.name, chan,
+                    "Dangerous tool '%s' on non-Telegram channel '%s' has no approval surface — denying (%s=deny)"
+                            .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
+            return Decision.ABORT;
+        }
+        EventLogger.info(LOG_CATEGORY, agent.name, chan,
+                "Dangerous tool '%s' on non-Telegram channel '%s' — proceeding ungated (%s=allow)"
+                        .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
+        return Decision.PROCEED;
+    }
+
+    /**
+     * True when an in-process session grant or a persisted always-grant
+     * (JCLAW-385) covers {@code (agent, toolName)}. The persisted lookup hits
+     * the DB, so it runs in its own transaction.
+     */
+    private static boolean hasStandingGrant(Agent agent, String toolName) {
+        return GRANTS.contains(grantKey(agent, toolName))
+                || Tx.run(() -> ToolApprovalGrant.exists(agent.id, toolName));
+    }
+
+    /** The conversation's {@code channelType}, or {@code null} when unknown. */
+    private static String resolveChannelType(Long conversationId) {
+        if (conversationId == null) {
+            return null;
+        }
+        return Tx.run(() -> {
+            Conversation c = Conversation.findById(conversationId);
+            return c == null ? null : c.channelType;
+        });
     }
 
     private static Decision promptAndAwait(Agent agent, String toolName, String argsJson,

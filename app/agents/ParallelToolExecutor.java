@@ -64,7 +64,8 @@ public final class ParallelToolExecutor {
      * effects on shared state (message lists, image collector, DB). Safe
      * to call from multiple virtual threads concurrently.
      */
-    static ToolRegistry.ToolResult runToolCall(ToolCall toolCall, Agent agent, Consumer<String> onStatus) {
+    static ToolRegistry.ToolResult runToolCall(ToolCall toolCall, Agent agent, Long conversationId,
+                                               Consumer<String> onStatus) {
         var rawName = toolCall.function().name();
         var rawArgs = toolCall.function().arguments();
         // JCLAW-281: when the model invokes a server-level mcp_<server> handle
@@ -90,7 +91,7 @@ public final class ParallelToolExecutor {
         // agents — DangerousActionGate returns PROCEED before any I/O in those
         // cases. Uses the raw (wire-format) name so the gate's dangerous()
         // lookup matches the registered tool.
-        if (DangerousActionGate.guard(agent, rawName, rawArgs) == DangerousActionGate.Decision.ABORT) {
+        if (DangerousActionGate.guard(agent, conversationId, rawName, rawArgs) == DangerousActionGate.Decision.ABORT) {
             return ToolRegistry.ToolResult.text(DangerousActionGate.abortResult(displayName));
         }
         // JCLAW-170: use the rich-output path so search-style tools can emit a
@@ -164,10 +165,10 @@ public final class ParallelToolExecutor {
 
         if (n == 1) {
             if (isCancelled == null || !isCancelled.get()) {
-                results[0] = runToolCall(toolCalls.getFirst(), agent, onStatus);
+                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, onStatus);
             }
         } else {
-            dispatchMultiToolCalls(toolCalls, agent, results, onStatus, isCancelled);
+            dispatchMultiToolCalls(toolCalls, agent, conversationId, results, onStatus, isCancelled);
         }
 
         commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink);
@@ -189,7 +190,7 @@ public final class ParallelToolExecutor {
      * LinkedHashMap preserves first-occurrence order so the unsafe groups,
      * like the safe singletons, see their declared positions.
      */
-    private static void dispatchMultiToolCalls(List<ToolCall> toolCalls, Agent agent,
+    private static void dispatchMultiToolCalls(List<ToolCall> toolCalls, Agent agent, Long conversationId,
                                                ToolRegistry.ToolResult[] results,
                                                Consumer<String> onStatus, AtomicBoolean isCancelled) {
         var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
@@ -211,14 +212,14 @@ public final class ParallelToolExecutor {
         for (int idx : safeCalls) {
             final int i = idx;
             Thread.ofVirtual().name("agent-tool-parallel").start(() ->
-                    runSafeCall(toolCalls, i, agent, results, onStatus, isCancelled, latch));
+                    runSafeCall(toolCalls, i, agent, conversationId, results, onStatus, isCancelled, latch));
         }
 
         // One virtual thread per non-parallel-safe tool-name group —
         // calls within execute sequentially in declared order.
         for (var group : unsafeGroups.values()) {
             Thread.ofVirtual().name("agent-tool-serial").start(() ->
-                    runSerialGroup(toolCalls, group, agent, results, onStatus, isCancelled, latch));
+                    runSerialGroup(toolCalls, group, agent, conversationId, results, onStatus, isCancelled, latch));
         }
 
         try {
@@ -229,12 +230,12 @@ public final class ParallelToolExecutor {
     }
 
     /** Body of one parallel-safe work unit: dispatch a single call. */
-    private static void runSafeCall(List<ToolCall> toolCalls, int i, Agent agent,
+    private static void runSafeCall(List<ToolCall> toolCalls, int i, Agent agent, Long conversationId,
                                     ToolRegistry.ToolResult[] results, Consumer<String> onStatus,
                                     AtomicBoolean isCancelled, CountDownLatch latch) {
         try {
             if (isCancelled != null && isCancelled.get()) return;
-            results[i] = runToolCallSafely(toolCalls.get(i), agent, onStatus);
+            results[i] = runToolCallSafely(toolCalls.get(i), agent, conversationId, onStatus);
         } finally {
             latch.countDown();
         }
@@ -242,12 +243,13 @@ public final class ParallelToolExecutor {
 
     /** Body of one serial work unit: dispatch calls in declared order. */
     private static void runSerialGroup(List<ToolCall> toolCalls, List<Integer> group, Agent agent,
-                                       ToolRegistry.ToolResult[] results, Consumer<String> onStatus,
+                                       Long conversationId, ToolRegistry.ToolResult[] results,
+                                       Consumer<String> onStatus,
                                        AtomicBoolean isCancelled, CountDownLatch latch) {
         try {
             for (int idx : group) {
                 if (isCancelled != null && isCancelled.get()) break;
-                results[idx] = runToolCallSafely(toolCalls.get(idx), agent, onStatus);
+                results[idx] = runToolCallSafely(toolCalls.get(idx), agent, conversationId, onStatus);
             }
         } finally {
             latch.countDown();
@@ -258,9 +260,10 @@ public final class ParallelToolExecutor {
      * Dispatch one call and convert any thrown exception into an
      * {@code Error executing tool} {@link ToolRegistry.ToolResult}.
      */
-    private static ToolRegistry.ToolResult runToolCallSafely(ToolCall tc, Agent agent, Consumer<String> onStatus) {
+    private static ToolRegistry.ToolResult runToolCallSafely(ToolCall tc, Agent agent, Long conversationId,
+                                                             Consumer<String> onStatus) {
         try {
-            return runToolCall(tc, agent, onStatus);
+            return runToolCall(tc, agent, conversationId, onStatus);
         } catch (Exception e) {
             EventLogger.error("tool", agent.name, null,
                     "Tool '%s' threw: %s"
