@@ -293,7 +293,7 @@ const expandedSteps = computed(() => parseTaskSteps(expandedTask.value?.descript
 
 // colspan for the expanded detail row: every visible column, including the
 // leading checkbox column when bulk-select is active.
-const tableColspan = computed(() => (selectMode.value ? 9 : 8))
+const tableColspan = computed(() => (selectMode.value ? 10 : 9))
 
 // ── JCLAW-22 (slice E): inline step editor ──
 // Editing is tied to the expanded row, one task at a time. editSteps is a
@@ -561,6 +561,22 @@ const statusColors: Record<string, string> = {
 // "ACTIVE" directly from the API, so we no longer need a per-row mapping
 // helper. statusColors[task.status] resolves correctly for both PENDING
 // (one-shot waiting) and ACTIVE (recurring ongoing).
+
+/**
+ * Short label for a Task's declarative output channel (Task.delivery —
+ * "telegram:<id>", "email:<addr>", "web:<…>"). Null/blank → em-dash: the task
+ * either has no post-run delivery route (operator reads the run directly) or
+ * the agent self-delivers via a tool during the run. delivery arrives through
+ * the Task type's open index signature, so narrow it before reading.
+ */
+function deliveryLabel(task: Task): string {
+  const d = typeof task.delivery === 'string' ? task.delivery : ''
+  if (!d) return '—'
+  if (d.startsWith('web:')) return 'web'
+  if (d.startsWith('telegram:')) return 'telegram'
+  if (d.startsWith('email:')) return 'email'
+  return d
+}
 
 /**
  * Humanize a Task's recurring schedule for display. Order of preference:
@@ -1350,6 +1366,9 @@ const statusBg: Record<string, string> = {
               Agent
             </th>
             <th class="px-4 py-2.5 font-medium">
+              Channel
+            </th>
+            <th class="px-4 py-2.5 font-medium">
               Next Run
             </th>
             <th class="px-4 py-2.5 font-medium">
@@ -1410,6 +1429,9 @@ const statusBg: Record<string, string> = {
               </td>
               <td class="px-4 py-2.5 text-fg-muted">
                 {{ task.agentName || '—' }}
+              </td>
+              <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">
+                {{ deliveryLabel(task) }}
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
                 {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
@@ -1543,6 +1565,12 @@ const statusBg: Record<string, string> = {
                 :colspan="tableColspan"
                 class="px-4 py-3"
               >
+                <!-- Output channel (Task.delivery). Em-dash when there's no
+                     declarative route — the agent self-delivers via a tool. -->
+                <div class="mb-4 flex items-center gap-1.5 text-xs">
+                  <span class="uppercase tracking-wider font-medium text-fg-muted">Channel</span>
+                  <span class="text-fg-primary font-mono">{{ deliveryLabel(task) }}</span>
+                </div>
                 <div class="grid gap-6 md:grid-cols-2">
                   <!-- Instructions: the JCLAW-260 step list, read-only by
                      default with an inline editor (slice E) behind Edit. -->
