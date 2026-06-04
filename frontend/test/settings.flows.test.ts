@@ -301,13 +301,15 @@ describe('Settings page — entry inline edit (baseUrl / apiKey)', () => {
     await flushPromises()
 
     // Find the Edit button on the baseUrl row of ollama-cloud. There's a
-    // forest of similar buttons; the baseUrl row's Edit button is the first
-    // pencil under the ollama-cloud provider card. Reach it through the
-    // aria-label of the input that appears after the click.
-    const editButtons = component.findAll('button[title="Edit"]')
+    // forest of similar pencils across the page, so scope to the LLM Providers
+    // section (data-tour="llm-providers") rather than the global button list —
+    // otherwise an Edit pencil in an earlier section (e.g. General → timezone)
+    // would be picked up as button[0]. Within the providers section, the first
+    // pencil is ollama-cloud's baseUrl row.
+    const providersSection = component.find('[data-tour="llm-providers"]')
+    expect(providersSection.exists()).toBe(true)
+    const editButtons = providersSection.findAll('button[title="Edit"]')
     expect(editButtons.length).toBeGreaterThan(0)
-    // Click the first one — that's baseUrl for ollama-cloud since it's the
-    // first provider row rendered.
     await editButtons[0]!.trigger('click')
     await flushPromises()
 
@@ -1438,5 +1440,44 @@ describe('Settings page — Unmanaged keys diagnostic', () => {
     await flushPromises()
 
     expect(component.text()).not.toContain('Unmanaged keys')
+  })
+})
+
+describe('Settings page — General operator timezone (app.timezone)', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  it('POSTs app.timezone when the General timezone is changed and saved', async () => {
+    registerEndpoint('/api/timezones', () => ({
+      timezones: ['UTC', 'Asia/Kuala_Lumpur', 'America/New_York'],
+      default: 'UTC',
+      appDefault: 'UTC',
+    }))
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupDefaultApi({ capturePost: b => captured.push(b) })
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    // Enter edit mode for the General timezone (mirrors clicking the pencil),
+    // then drive the unique <select> + Save button through the DOM.
+    const vm = component.vm as unknown as { editingGeneralField: string | null }
+    vm.editingGeneralField = 'timezone'
+    await flushPromises()
+
+    const select = component.find('select[aria-label="Operator timezone"]')
+    expect(select.exists()).toBe(true)
+    await select.setValue('Asia/Kuala_Lumpur')
+
+    // General is the first section, so its Save button is the first rendered
+    // (no other field is in edit mode).
+    const saveBtn = component.find('button[title="Save"]')
+    expect(saveBtn.exists()).toBe(true)
+    await saveBtn.trigger('click')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'app.timezone')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('Asia/Kuala_Lumpur')
   })
 })

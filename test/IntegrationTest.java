@@ -169,7 +169,8 @@ class IntegrationTest extends UnitTest {
         var assembled = SystemPromptAssembler.assemble(agent, "What is JClaw?");
         assertNotNull(assembled.systemPrompt());
         assertTrue(assembled.systemPrompt().contains("Agent Instructions"));
-        assertTrue(assembled.systemPrompt().contains("Current date:"));
+        // Current date/time moved below the cache boundary into its own section.
+        assertTrue(assembled.systemPrompt().contains("## Current Date and Time"));
 
         // Verify conversation persistence
         var messages = ConversationService.loadRecentMessages(convo);

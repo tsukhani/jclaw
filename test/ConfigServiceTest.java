@@ -75,6 +75,28 @@ class ConfigServiceTest extends UnitTest {
         // Value is in cache, even if DB row were somehow gone the cache would serve it
     }
 
+    // --- setWithSideEffects: app.timezone IANA validation ---
+
+    @Test
+    void setWithSideEffectsRejectsInvalidAppTimezone() {
+        // A typo'd zone must be rejected at the write boundary so the system
+        // prompt never injects a bad zone (the resolver would silently fall
+        // back to the server default, hiding the operator's mistake).
+        var error = ConfigService.setWithSideEffects("app.timezone", "Not/A/Zone");
+        assertNotNull(error, "invalid IANA zone must be rejected");
+        assertTrue(error.toLowerCase().contains("timezone"),
+                "error must explain the timezone rejection: " + error);
+        // The rejected value must NOT be persisted.
+        assertNull(ConfigService.get("app.timezone"));
+    }
+
+    @Test
+    void setWithSideEffectsAcceptsValidAppTimezone() {
+        var error = ConfigService.setWithSideEffects("app.timezone", "Asia/Kuala_Lumpur");
+        assertNull(error, "a valid IANA zone must be accepted");
+        assertEquals("Asia/Kuala_Lumpur", ConfigService.get("app.timezone"));
+    }
+
     // --- setWithSideEffects: the privilege-guard path ---
 
     @Test

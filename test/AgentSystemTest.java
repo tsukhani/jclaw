@@ -641,7 +641,9 @@ class AgentSystemTest extends UnitTest {
         var assembled = SystemPromptAssembler.assemble(agent, "test query");
         assertNotNull(assembled.systemPrompt());
         assertTrue(assembled.systemPrompt().contains("Be helpful and concise"));
-        assertTrue(assembled.systemPrompt().contains("Current date:"));
+        // Current date/time moved out of the cacheable Environment block into
+        // its own per-turn section below the cache boundary (operator zone).
+        assertTrue(assembled.systemPrompt().contains("## Current Date and Time"));
         assertTrue(assembled.systemPrompt().contains("Platform:"));
     }
 

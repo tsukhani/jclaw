@@ -310,7 +310,11 @@ public class ApiTasksController extends Controller {
         ids.sort(String::compareTo);
         var payload = new java.util.LinkedHashMap<String, Object>();
         payload.put("timezones", ids);
+        // `default` = effective task-scheduling zone (tasks.defaultTimezone chain).
+        // `appDefault` = effective operator wall-clock zone (app.timezone chain,
+        // falling back to the server's JVM zone) — used by Settings → General.
         payload.put("default", services.TimezoneResolver.currentDefault().getId());
+        payload.put("appDefault", services.TimezoneResolver.appZone().getId());
         renderJSON(gson.toJson(payload));
     }
 

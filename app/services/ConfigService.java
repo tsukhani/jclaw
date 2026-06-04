@@ -73,6 +73,18 @@ public class ConfigService {
             }
         }
 
+        // Operator timezone must be a valid IANA zone id. Reject typos here so
+        // the system prompt never injects a bad zone — TimezoneResolver.appZone
+        // would silently fall back to the server default, hiding the mistake.
+        if (key.equals(TimezoneResolver.APP_CONFIG_KEY)) {
+            try {
+                java.time.ZoneId.of(value == null ? "" : value.trim());
+            } catch (Exception _) {
+                return "Invalid IANA timezone id '" + value
+                        + "'. Use a value from GET /api/timezones (e.g. 'Asia/Kuala_Lumpur').";
+            }
+        }
+
         set(key, value);
 
         if (key.startsWith("provider.")) {

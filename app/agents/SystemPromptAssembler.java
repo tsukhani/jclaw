@@ -5,9 +5,10 @@ import memory.MemoryStoreFactory;
 import models.Agent;
 import play.Play;
 import services.AgentService;
+import services.TimezoneResolver;
 
-import java.time.LocalDate;
-import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -321,8 +322,11 @@ public class SystemPromptAssembler {
             appendChannelGuidanceSection(b.sb, channelType, guidance);
         }
 
-        // 9. Environment info — date-only resolution and JVM-stable values so the
-        // section does not bust the LLM prompt-prefix cache on every request.
+        // 9. Environment info — only JVM-stable, per-agent values. The current
+        // date/time used to live here, but it is per-turn-variable and was
+        // moved below the cache boundary (appendCurrentTimeSection) so this
+        // whole section stays byte-identical within an agent's lifetime and
+        // never busts the LLM prompt-prefix cache.
         b.startSection("Environment");
         appendEnvironmentSection(b.sb, agent);
 
@@ -333,8 +337,14 @@ public class SystemPromptAssembler {
         b.startSection("Cache Boundary");
         appendCacheBoundary(b.sb);
 
-        // 9. Recalled memories — the only per-turn-variable section, placed past
-        // the cache boundary so updating it never invalidates the cacheable prefix.
+        // 10. Current date and time — per-turn-variable (it changes every
+        // request), so it lives below the cache boundary. The model must read
+        // "now" from here; the cacheable Environment block deliberately omits it.
+        b.startSection("Current Time");
+        appendCurrentTimeSection(b.sb);
+
+        // 11. Recalled memories — per-turn-variable, placed past the cache
+        // boundary so updating it never invalidates the cacheable prefix.
         b.startSection("Relevant Memories");
         appendMemories(b.sb, agent, userMessage);
 
@@ -450,12 +460,32 @@ public class SystemPromptAssembler {
         sb.append("- Model: %s\n".formatted(agent.modelId));
         sb.append("- JClaw version: %s\n".formatted(
                 Play.configuration != null ? Play.configuration.getProperty("application.version", UNKNOWN) : UNKNOWN));
-        sb.append("- Current date: %s\n".formatted(LocalDate.now(ZoneId.systemDefault())));
-        sb.append("- Timezone: %s\n".formatted(ZoneId.systemDefault().getId()));
         sb.append("- Platform: %s (%s)\n".formatted(
                 System.getProperty("os.name", UNKNOWN).toLowerCase(),
                 System.getProperty("os.arch", UNKNOWN)));
         sb.append("- Runtime: Java %s\n".formatted(Runtime.version().feature()));
+    }
+
+    /** Wall-clock format, e.g. {@code Wednesday, 2026-06-04 14:07 (+08:00)}. */
+    private static final DateTimeFormatter CURRENT_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("EEEE, yyyy-MM-dd HH:mm (xxx)");
+
+    /**
+     * Live current date/time in the operator's configured zone
+     * ({@link TimezoneResolver#appZone()}). Appended below the cache boundary
+     * because it changes every turn — keeping it out of the cacheable prefix.
+     * Captured fresh on each assemble() call (every chat turn, every task fire,
+     * and after compaction), so the model always sees the real wall-clock time
+     * instead of guessing.
+     */
+    private static void appendCurrentTimeSection(StringBuilder sb) {
+        var zone = TimezoneResolver.appZone();
+        var now = ZonedDateTime.now(zone);
+        sb.append("\n## Current Date and Time\n");
+        sb.append("- Now: %s\n".formatted(now.format(CURRENT_TIME_FORMAT)));
+        sb.append("- Timezone: %s\n".formatted(zone.getId()));
+        sb.append("- This is the live wall-clock time captured when this prompt was built. "
+                + "Treat it as the current date and time; do not guess or rely on training-cutoff assumptions.\n");
     }
 
     private static void appendCacheBoundary(StringBuilder sb) {
