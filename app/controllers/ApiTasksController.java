@@ -678,6 +678,7 @@ public class ApiTasksController extends Controller {
         var agent = requireAgentFromBody(body);
         var name = requireTaskName(body);
         var spec = requireScheduleSpec(body);
+        rejectInvalidDelivery(body);
 
         rejectDuplicateRecurringTask(name, agent, spec);
 
@@ -727,6 +728,19 @@ public class ApiTasksController extends Controller {
             throw new AssertionError("unreachable: error() throws");
         }
         return name;
+    }
+
+    /**
+     * JCLAW-417: reject a malformed {@code delivery} at the write boundary via
+     * {@link services.DeliverySpec#validate}. Structural only — tool
+     * resolution and channel configuration are caller/runtime concerns. No-op
+     * when {@code delivery} is absent or explicit-null (the latter clears it).
+     */
+    private static void rejectInvalidDelivery(com.google.gson.JsonObject body) {
+        var delivery = readOptionalString(body, KEY_DELIVERY);
+        if (delivery == null) return;
+        var err = services.DeliverySpec.validate(delivery);
+        if (err != null) error(400, err);
     }
 
     @SuppressWarnings("java:S2259")
@@ -842,6 +856,8 @@ public class ApiTasksController extends Controller {
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
+
+        rejectInvalidDelivery(body);
 
         boolean scheduleChanged = applyScheduleUpdate(task, body);
         boolean fieldsChanged = applyOptionalFieldUpdates(task, body);

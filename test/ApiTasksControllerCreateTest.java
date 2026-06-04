@@ -171,6 +171,29 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
     }
 
     @Test
+    void rejectsUnknownDeliveryChannel() {
+        // JCLAW-417: email is not a dispatcher channel — the write boundary
+        // rejects it and points at tool: (e.g. tool:send_gmail_message).
+        var agentId = seedAgent();
+        var resp = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "bad-delivery", "schedule": "now", "delivery": "email:foo@bar.com"}
+                """.formatted(agentId));
+        assertStatus(400, resp);
+        assertTrue(getContent(resp).toLowerCase().contains("delivery channel"), getContent(resp));
+    }
+
+    @Test
+    void acceptsToolDelivery() {
+        // JCLAW-417: tool:<name> is a valid delivery kind (the agent self-delivers).
+        var agentId = seedAgent();
+        var resp = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "tool-delivery", "schedule": "now", "delivery": "tool:send_gmail_message"}
+                """.formatted(agentId));
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("tool:send_gmail_message"), getContent(resp));
+    }
+
+    @Test
     void rejectsUnixFiveFieldCronWithPrependHint() {
         var agentId = seedAgent();
         var resp = POST("/api/tasks", "application/json", """
