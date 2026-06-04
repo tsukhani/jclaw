@@ -65,6 +65,44 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void resolveSubagentModelFollowsPrecedence() {
+        // JCLAW-422. The spawning agent's BASE (e.g. a stale lm-studio) — what
+        // subagents used to ALWAYS inherit, regardless of the model the operator
+        // was actually chatting with.
+        var childAgent = new Agent();
+        childAgent.modelProvider = "lm-studio";
+        childAgent.modelId = "local-model";
+        var parentConv = new Conversation();
+
+        // 1. No per-spawn override, no Settings default, no conversation override
+        //    → the agent base (legacy behavior).
+        var base = SubagentSpawnTool.resolveSubagentModel(parentConv, childAgent, null, null);
+        assertEquals("lm-studio", base.provider());
+        assertEquals("local-model", base.modelId());
+
+        // 2. THE FIX: a mid-chat conversation override (operator switched to Qwen)
+        //    is what the subagent now tracks — not the agent base.
+        parentConv.modelProviderOverride = "openrouter";
+        parentConv.modelIdOverride = "qwen/qwen3.7-max";
+        var conv = SubagentSpawnTool.resolveSubagentModel(parentConv, childAgent, null, null);
+        assertEquals("openrouter", conv.provider());
+        assertEquals("qwen/qwen3.7-max", conv.modelId());
+
+        // 3. A configured subagent default (Settings) pins fan-outs, overriding
+        //    the conversation model (e.g. route subagents to a cheaper model).
+        ConfigService.set(SubagentSpawnTool.CFG_SUBAGENT_PROVIDER, "ollama-cloud");
+        ConfigService.set(SubagentSpawnTool.CFG_SUBAGENT_MODEL, "cheap-model");
+        var pinned = SubagentSpawnTool.resolveSubagentModel(parentConv, childAgent, null, null);
+        assertEquals("ollama-cloud", pinned.provider());
+        assertEquals("cheap-model", pinned.modelId());
+
+        // 4. An explicit per-spawn override beats everything.
+        var explicit = SubagentSpawnTool.resolveSubagentModel(parentConv, childAgent, "together", "x-model");
+        assertEquals("together", explicit.provider());
+        assertEquals("x-model", explicit.modelId());
+    }
+
+    @Test
     void happyPathRecordsRunCompletedAndEmitsLifecycleEvents() throws Exception {
         startLlmServer(simpleResponse("Subagent reply: done."));
         configureProvider();

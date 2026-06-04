@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { readBody } from 'h3'
@@ -1479,5 +1479,32 @@ describe('Settings page — General operator timezone (app.timezone)', () => {
     const hit = captured.find(b => b.key === 'app.timezone')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('Asia/Kuala_Lumpur')
+  })
+})
+
+describe('Settings page — subagent model (JCLAW-422)', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  it('POSTs subagent.modelProvider + subagent.modelId when a specific model is picked', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupDefaultApi({ capturePost: b => captured.push(b) })
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const select = component.find('select[aria-label="Subagent model"]')
+    expect(select.exists()).toBe(true)
+    const optionVals = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
+    expect(optionVals).toContain('ollama-cloud::kimi-k2.5')
+
+    // Pin to a concrete provider::model from the fixture (ollama-cloud/kimi-k2.5).
+    // saveSubagentModel fires two sequential POSTs (provider + modelId) then a
+    // refresh(); drain the microtask queue until both have landed.
+    await select.setValue('ollama-cloud::kimi-k2.5')
+    await vi.waitFor(() => expect(captured.length).toBeGreaterThanOrEqual(2))
+
+    expect(captured.find(b => b.key === 'subagent.modelProvider' && b.value === 'ollama-cloud')).toBeTruthy()
+    expect(captured.find(b => b.key === 'subagent.modelId' && b.value === 'kimi-k2.5')).toBeTruthy()
   })
 })

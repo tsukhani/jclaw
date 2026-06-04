@@ -934,16 +934,21 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var childConv = ConversationService.create(childAgent,
                 parentConv.channelType, parentConv.peerId);
         childConv.parentConversation = parentConv;
-        // JCLAW-269: persist the per-spawn override on the child Conversation so
-        // AgentRunner's ModelOverrideResolver picks it up for this run, and so
-        // the JCLAW-28 cost dashboard's
+        // JCLAW-269 / JCLAW-422: persist the resolved model on the child
+        // Conversation so AgentRunner's ModelOverrideResolver picks it up for
+        // this run, and so the JCLAW-28 cost dashboard's
         // COALESCE(c.modelProviderOverride, c.agent.modelProvider) attributes
-        // spend to the actually-used model. Both columns are set together or
-        // neither — half-set is undefined per Conversation.java's contract.
-        if (modelProviderOverride != null && !modelProviderOverride.isBlank()
-                && modelIdOverride != null && !modelIdOverride.isBlank()) {
-            childConv.modelProviderOverride = modelProviderOverride;
-            childConv.modelIdOverride = modelIdOverride;
+        // spend to the actually-used model. The resolver tracks the model the
+        // operator is ACTUALLY using (the parent conversation's override),
+        // not just the agent's base — see resolveSubagentModel.
+        var resolved = resolveSubagentModel(parentConv, childAgent, modelProviderOverride, modelIdOverride);
+        // Only stamp an override when the resolved model DIFFERS from the child
+        // agent's base — the plain inherit case keeps a null override (matches
+        // prior behavior and the cost dashboard's COALESCE(override, base)).
+        if (!java.util.Objects.equals(resolved.provider(), childAgent.modelProvider)
+                || !java.util.Objects.equals(resolved.modelId(), childAgent.modelId)) {
+            childConv.modelProviderOverride = resolved.provider();
+            childConv.modelIdOverride = resolved.modelId();
         }
         // JCLAW-268: stamp the inherited parent-context summary on the child
         // Conversation. AgentRunner re-injects this into the child's system
@@ -956,6 +961,47 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
         childConv.save();
         return childConv;
+    }
+
+    /** Resolved (provider, modelId) pair for a spawned subagent. */
+    public record SubagentModel(String provider, String modelId) {}
+
+    public static final String CFG_SUBAGENT_PROVIDER = "subagent.modelProvider";
+    public static final String CFG_SUBAGENT_MODEL = "subagent.modelId";
+
+    /**
+     * JCLAW-422: resolve the model a session subagent runs on. Precedence:
+     * <ol>
+     *   <li>explicit per-spawn override ({@code modelProvider}/{@code modelId} args);</li>
+     *   <li>operator-configured subagent default (Settings → Subagents:
+     *       {@code subagent.modelProvider}/{@code subagent.modelId}) — pin every
+     *       fan-out to e.g. a cheaper model;</li>
+     *   <li>the parent conversation's EFFECTIVE model — its mid-chat override if
+     *       the operator switched models, else the spawning agent's base. This is
+     *       the fix: subagents track the model you're ACTUALLY using, not just the
+     *       agent's base (a chat switched to Qwen used to spawn children onto the
+     *       agent's stale lm-studio base).</li>
+     * </ol>
+     */
+    public static SubagentModel resolveSubagentModel(Conversation parentConv, Agent childAgent,
+                                                     String overrideProvider, String overrideId) {
+        if (notBlank(overrideProvider) && notBlank(overrideId)) {
+            return new SubagentModel(overrideProvider, overrideId);
+        }
+        var cfgProvider = services.ConfigService.get(CFG_SUBAGENT_PROVIDER);
+        var cfgModel = services.ConfigService.get(CFG_SUBAGENT_MODEL);
+        if (notBlank(cfgProvider) && notBlank(cfgModel)) {
+            return new SubagentModel(cfgProvider, cfgModel);
+        }
+        var provider = parentConv != null && notBlank(parentConv.modelProviderOverride)
+                ? parentConv.modelProviderOverride : childAgent.modelProvider;
+        var modelId = parentConv != null && notBlank(parentConv.modelIdOverride)
+                ? parentConv.modelIdOverride : childAgent.modelId;
+        return new SubagentModel(provider, modelId);
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
     }
 
     /**
