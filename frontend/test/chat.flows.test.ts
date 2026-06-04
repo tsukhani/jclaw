@@ -249,3 +249,62 @@ describe('Chat page — image attachment on a vision-capable model', () => {
     expect(component.html()).toContain('attached.png')
   })
 })
+
+describe('Chat page — model selector re-syncs after a mid-turn model switch', () => {
+  // Regression: the agent can rewrite its own model during a turn via the
+  // jclaw_api tool (PUT /api/agents/{id}). The header selector reads the
+  // agent through effectiveModel, but the post-stream finally block only
+  // refreshed conversations — never agents — so the dropdown stayed pinned
+  // to the pre-switch model until a manual reload.
+  it('reflects the agent model changed by the jclaw_api tool once the turn completes', async () => {
+    // The /api/agents handler reads a mutable var so a mid-turn switch is
+    // observable when the finally block calls refreshAgents().
+    let agentModelId = 'kimi-k2.5'
+    registerEndpoint('/api/agents', () => [
+      { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: agentModelId,
+        enabled: true, isMain: true, thinkingMode: null, providerConfigured: true },
+    ])
+    registerEndpoint('/api/config', () => ({
+      entries: [
+        { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
+        { key: 'provider.ollama-cloud.apiKey', value: 'xxxx****' },
+        { key: 'provider.ollama-cloud.models', value:
+          '[{"id":"kimi-k2.5","name":"Kimi K2.5"},{"id":"kimi-k2.6","name":"Kimi K2.6"}]' },
+      ],
+    }))
+    registerEndpoint('/api/conversations', () => [])
+
+    // Simulate the tool's server-side persist: flip the agent's model when
+    // the stream POST fires, mimicking the jclaw_api PUT committing mid-turn.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (String(input ?? '').includes('/api/chat/stream')) {
+        agentModelId = 'kimi-k2.6'
+      }
+      const encoder = new TextEncoder()
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":42}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
+          controller.close()
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { selectedModelKey: string }
+
+    // Baseline: the header shows the agent's starting model.
+    expect(vm.selectedModelKey).toBe('ollama-cloud::kimi-k2.5')
+
+    const textarea = component.find<HTMLTextAreaElement>('textarea')
+    await textarea.setValue('switch your model please')
+    await component.find('form').trigger('submit.prevent')
+    await flushPromises()
+    await flushPromises() // let the finally block's refreshAgents() resolve
+
+    // The selector now reflects the mid-turn switch — no reload required.
+    expect(vm.selectedModelKey).toBe('ollama-cloud::kimi-k2.6')
+  })
+})

@@ -2192,6 +2192,15 @@ async function sendMessage() {
     // commit (see AgentRunner.streamLlmLoop — emitUsageAndComplete is
     // intentionally called before the Tx.run persist block for latency).
     refreshConversations()
+    // Re-sync agents too: the agent can rewrite its own model mid-turn via
+    // the jclaw_api tool (PUT /api/agents/{id} → Agent.modelProvider/modelId).
+    // The header selector reads selectedAgent through effectiveModel, so
+    // without this it stays pinned to the pre-switch model until a manual
+    // reload. Single fire is enough — the tool's PUT commits in its own Tx
+    // mid-turn, well before the SSE `complete` frame, so the new value is
+    // already persisted by the time we get here (unlike the conversation
+    // persist-race the double-fire above guards against).
+    refreshAgents()
     // Delayed reconcile rides the same persist-race window so the in-flight
     // user + assistant bubbles pick up their server ids (delete button gates
     // on msg.id — without this the Delete action was a no-op until the user
