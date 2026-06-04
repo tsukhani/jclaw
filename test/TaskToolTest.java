@@ -122,6 +122,31 @@ class TaskToolTest extends UnitTest {
         assertAuditCount("TASK_MGMT_CREATE", "now-task", 1L);
     }
 
+    // === createTask: delivery grammar (JCLAW-418) ===
+
+    @Test
+    void createTaskWithToolDeliveryPersistsIt() {
+        // tool:<name> is a valid delivery kind — the agent self-delivers inline.
+        var result = tool.execute("""
+                {"action":"createTask","name":"email-task","description":"send the report",
+                 "schedule":"now","delivery":"tool:send_gmail_message"}""", agent);
+        assertFalse(result.startsWith("Error:"), "tool: delivery should be accepted; got: " + result);
+        var task = findTaskByName("email-task");
+        assertNotNull(task);
+        assertEquals("tool:send_gmail_message", task.delivery);
+    }
+
+    @Test
+    void createTaskRejectsUnknownDeliveryChannel() {
+        // email is not a channel — rejected with a hint toward tool:.
+        var result = tool.execute("""
+                {"action":"createTask","name":"bad-delivery","description":"x",
+                 "schedule":"now","delivery":"email:foo@bar.com"}""", agent);
+        assertTrue(result.startsWith("Error:"), "email: delivery should be rejected; got: " + result);
+        assertTrue(result.toLowerCase().contains("delivery channel"), result);
+        assertNull(findTaskByName("bad-delivery"), "rejected task must not be persisted");
+    }
+
     @Test
     void createTaskScheduledBareDuration() {
         var before = Instant.now();

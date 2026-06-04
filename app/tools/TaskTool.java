@@ -132,6 +132,16 @@ public class TaskTool implements ToolRegistry.Tool {
                 to avoid accumulating duplicates. Tasks run asynchronously \
                 via the agent.
 
+                OUTPUT DELIVERY: when you create a task, set the `delivery` \
+                field to where its output should go — a channel \
+                ('telegram:<id>'), a tool the task calls during its run \
+                ('tool:send_gmail_message' to email the result), or 'none' if \
+                the output just stays in the run. This is a typed field the UI \
+                reads, so capture the delivery target here rather than leaving \
+                it only in the prose; still describe the delivery step in \
+                `description` as usual — do NOT remove it. Omit `delivery` \
+                entirely to auto-route output back to this chat.
+
                 REMINDERS: when the user says "remind me to X" / "remind me \
                 in N minutes to Y" / "remind me tomorrow about Z", create a \
                 task with payloadType="reminder". The `description` IS the \
@@ -175,13 +185,17 @@ public class TaskTool implements ToolRegistry.Tool {
                         SchemaKeys.DESCRIPTION, "On updateTask: flip the paused flag")),
                 Map.entry(KEY_DELIVERY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION,
-                        "Output delivery target as '<channel>:<target>' — "
-                                + "e.g. 'telegram:12345', 'slack:C0123', 'whatsapp:+15551234567'. "
-                                + "When the task should deliver back to the chat that's creating "
-                                + "it (the common 'remind me' case), OMIT this field — it auto-fills "
-                                + "to the calling conversation. Passing just the channel name (e.g. "
-                                + "'web' or 'telegram' with no colon) also works and fills the "
-                                + "target from the calling chat.")),
+                        "Where the task's output goes. Three forms: "
+                                + "(1) a channel — '<channel>:<target>' e.g. 'telegram:12345', "
+                                + "'slack:C0123', 'whatsapp:+15551234567' (or just the channel name "
+                                + "like 'web'/'telegram', which fills the target from the calling chat); "
+                                + "(2) a tool the agent calls during the run — 'tool:<toolName>' e.g. "
+                                + "'tool:send_gmail_message' for emailing the result (email is NOT a "
+                                + "channel — use tool: for it); "
+                                + "(3) 'none' for a task whose output just stays in the run. "
+                                + "When the task should deliver back to the chat that's creating it (the "
+                                + "common 'remind me' case), OMIT this field — it auto-fills to the "
+                                + "calling conversation.")),
                 Map.entry(KEY_PAYLOAD_TYPE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION,
                         "Payload kind. \"reminder\" makes this a user-visible "
@@ -310,6 +324,13 @@ public class TaskTool implements ToolRegistry.Tool {
         } catch (IllegalArgumentException e) {
             return "Error: Invalid schedule: " + e.getMessage();
         }
+
+        // JCLAW-418: validate the explicit delivery arg against the typed
+        // grammar before persisting. null/omitted is fine (it gets inferred);
+        // a malformed value (e.g. email:, which is not a channel) is rejected
+        // with a hint toward tool:send_gmail_message.
+        var deliveryErr = services.DeliverySpec.validate(optStr(args, KEY_DELIVERY));
+        if (deliveryErr != null) return "Error: " + deliveryErr;
 
         var conflict = checkRecurringDuplicate(name, agent, spec);
         if (conflict != null) return conflict;
@@ -543,6 +564,12 @@ public class TaskTool implements ToolRegistry.Tool {
                     + "with the specific Task id.").formatted(ids.size(), name);
         }
         var taskId = ids.getFirst();
+
+        // JCLAW-418: validate an explicit delivery patch before persisting.
+        if (args.has(KEY_DELIVERY)) {
+            var deliveryErr = services.DeliverySpec.validate(optStr(args, KEY_DELIVERY));
+            if (deliveryErr != null) return "Error: " + deliveryErr;
+        }
 
         // Schedule re-parse, if present, drives type + 4 derived fields.
         final ScheduleShorthandParser.ScheduleSpec spec;
