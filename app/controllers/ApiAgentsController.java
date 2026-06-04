@@ -213,7 +213,7 @@ public class ApiAgentsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        var name = body.get("name").getAsString();
+        var name = requireString(body, "name");
         validateAgentName(name);
         if (Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
             error(409, "The agent name 'main' is reserved for the built-in agent");
@@ -230,8 +230,8 @@ public class ApiAgentsController extends Controller {
         if (Agent.findByName(name) != null) {
             error(409, "An agent named '" + name + "' already exists");
         }
-        var modelProvider = body.get(KEY_MODEL_PROVIDER).getAsString();
-        var modelId = body.get(KEY_MODEL_ID).getAsString();
+        var modelProvider = requireString(body, KEY_MODEL_PROVIDER);
+        var modelId = requireString(body, KEY_MODEL_ID);
         var thinkingMode = readOptionalString(body, KEY_THINKING_MODE);
         var description = readOptionalString(body, KEY_DESCRIPTION);
 
@@ -252,6 +252,28 @@ public class ApiAgentsController extends Controller {
         return (s == null || s.isBlank()) ? null : s;
     }
 
+    /**
+     * Read a REQUIRED string field. Returns 400 — not a 500 NPE — when the field
+     * is absent, JSON null, or blank. Matters on the agent-facing jclaw_api path:
+     * a missing field should surface as an actionable error, not a stack trace.
+     */
+    @SuppressWarnings("java:S2259")
+    private static String requireString(com.google.gson.JsonObject body, String key) {
+        var v = readOptionalString(body, key);
+        if (v == null) {
+            error(400, "'" + key + "' is required");
+            throw new AssertionError("unreachable: error() throws");
+        }
+        return v;
+    }
+
+    /** Read an optional string, falling back when absent OR JSON null (no NPE on a present-but-null field). */
+    private static String optStringOr(com.google.gson.JsonObject body, String key, String fallback) {
+        if (!body.has(key)) return fallback;
+        var el = body.get(key);
+        return el.isJsonNull() ? fallback : el.getAsString();
+    }
+
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
@@ -262,11 +284,11 @@ public class ApiAgentsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        var name = body.has("name") ? body.get("name").getAsString() : agent.name;
+        var name = optStringOr(body, "name", agent.name);
         validateRenameRules(agent, name);
 
-        var modelProvider = body.has(KEY_MODEL_PROVIDER) ? body.get(KEY_MODEL_PROVIDER).getAsString() : agent.modelProvider;
-        var modelId = body.has(KEY_MODEL_ID) ? body.get(KEY_MODEL_ID).getAsString() : agent.modelId;
+        var modelProvider = optStringOr(body, KEY_MODEL_PROVIDER, agent.modelProvider);
+        var modelId = optStringOr(body, KEY_MODEL_ID, agent.modelId);
         var enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : agent.enabled;
         // The main agent cannot be disabled. Service-layer enforcement would also
         // catch this, but we reject at the API boundary so the operator sees an
@@ -394,7 +416,7 @@ public class ApiAgentsController extends Controller {
     public static void saveWorkspaceFile(Long id, String filename) {
         var agent = requireAgent(id);
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_CONTENT)) {
+        if (body == null || !body.has(KEY_CONTENT) || body.get(KEY_CONTENT).isJsonNull()) {
             badRequest();
             throw new AssertionError("unreachable: badRequest() throws");
         }

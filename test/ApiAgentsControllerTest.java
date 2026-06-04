@@ -133,6 +133,23 @@ class ApiAgentsControllerTest extends FunctionalTest {
                 "response must carry the bySkill map key: " + content);
     }
 
+    @Test
+    void createRejectsMissingOrNullRequiredFieldsWith400() {
+        // Regression: a create body missing "name" (or modelProvider / modelId),
+        // or sending an explicit null, used to NPE → HTTP 500 on
+        // get(key).getAsString(). It must surface as an actionable 400 instead —
+        // important on the agent-facing jclaw_api path.
+        login();
+        assertStatus(400, POST("/api/agents", "application/json",
+                "{\"modelProvider\": \"openrouter\", \"modelId\": \"gpt-4.1\"}"));        // missing name
+        assertStatus(400, POST("/api/agents", "application/json",
+                "{\"name\": null, \"modelProvider\": \"openrouter\", \"modelId\": \"gpt-4.1\"}")); // null name
+        assertStatus(400, POST("/api/agents", "application/json",
+                "{\"name\": \"no-provider\", \"modelId\": \"gpt-4.1\"}"));                 // missing modelProvider
+        assertStatus(400, POST("/api/agents", "application/json",
+                "{\"name\": \"no-model\", \"modelProvider\": \"openrouter\"}"));           // missing modelId
+    }
+
     // =====================
     // Workspace file endpoints
     // =====================
