@@ -732,6 +732,21 @@ class TaskToolTest extends UnitTest {
     }
 
     @Test
+    void listRecurringTasksShowsDeliveryLabel() {
+        // JCLAW-421: surface each task's typed delivery so a re-normalization
+        // pass can spot tasks whose delivery is still "none".
+        tool.execute("""
+                {"action":"createTask","name":"emailer","schedule":"@daily",
+                 "delivery":"tool:send_gmail_message"}""", agent);
+        tool.execute("""
+                {"action":"createTask","name":"silent","schedule":"@daily"}""", agent);
+        var reply = tool.execute("""
+                {"action":"listRecurringTasks"}""", agent);
+        assertTrue(reply.contains("[delivery: send_gmail_message]"), reply);
+        assertTrue(reply.contains("[delivery: none]"), reply);
+    }
+
+    @Test
     void listRecurringTasksEmptyReturnsFriendlyMessage() {
         var reply = tool.execute("""
                 {"action":"listRecurringTasks"}""", agent);

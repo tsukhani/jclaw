@@ -140,7 +140,11 @@ public class TaskTool implements ToolRegistry.Tool {
                 reads, so capture the delivery target here rather than leaving \
                 it only in the prose; still describe the delivery step in \
                 `description` as usual — do NOT remove it. Omit `delivery` \
-                entirely to auto-route output back to this chat.
+                entirely to auto-route output back to this chat. The same rule \
+                applies when normalizing EXISTING tasks: listRecurringTasks \
+                shows each task's [delivery: …]; for any whose delivery still \
+                lives only in the prose, infer it and set the field with \
+                updateTask.
 
                 REMINDERS: when the user says "remind me to X" / "remind me \
                 in N minutes to Y" / "remind me tomorrow about Z", create a \
@@ -915,8 +919,12 @@ public class TaskTool implements ToolRegistry.Tool {
                     ? "cron: " + task.cronExpression
                     : "every " + task.intervalSeconds + "s";
             String cadence = task.scheduleDisplay != null ? task.scheduleDisplay : typedCadence;
-            sb.append("- %s (%s) — %s\n".formatted(
-                    task.name, cadence,
+            // JCLAW-421: surface the typed delivery (channel / tool / none) so a
+            // re-normalization pass can spot tasks whose delivery still lives
+            // only in the prose and lift it into the field via updateTask.
+            String delivery = services.DeliverySpec.parse(task.delivery).label();
+            sb.append("- %s (%s) [delivery: %s] — %s\n".formatted(
+                    task.name, cadence, delivery,
                     task.description != null && task.description.length() > 100
                             ? task.description.substring(0, 100) + "..." : task.description));
         }
