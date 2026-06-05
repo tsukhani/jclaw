@@ -354,21 +354,40 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         String channel = explicitChannel;
         String target = explicitTarget;
-        // Inference: when channel or target is missing, read them off the
-        // calling agent's most-recently-updated conversation. Mirrors
-        // SubagentSpawnTool.resolveParentConversation's "most recent wins"
-        // rule. Subagents inherit the parent's channel + peerId at spawn
-        // time (JCLAW-327 AC-5), so this lookup transparently routes a
-        // subagent's send to the user's original channel.
-        if (channel == null || channel.isBlank() || target == null || target.isBlank()) {
+        // Channel inference: when the channel isn't given, read it off the calling
+        // agent's most-recently-updated conversation ("the channel I'm operating on").
+        // Subagents inherit the parent's channel at spawn (JCLAW-327 AC-5).
+        if (channel == null || channel.isBlank()) {
             var conv = (Conversation) Conversation.find(
                     "agent = ?1 ORDER BY updatedAt DESC", agent).first();
             if (conv == null) {
                 return "Error: no active conversation for agent '" + agent.name
                         + "'; pass explicit 'channel' and 'target' to send anyway.";
             }
-            if (channel == null || channel.isBlank()) channel = conv.channelType;
-            if (target == null || target.isBlank()) target = conv.peerId;
+            channel = conv.channelType;
+        }
+        // Target resolution (when not passed explicitly):
+        //   - telegram: the agent's (or an ancestor's) Telegram binding chat id — the
+        //     authoritative "telegram channel setting", with NO dependency on a prior
+        //     conversation, so a proactive send (e.g. a scheduled task firing in a
+        //     web/internal context) reaches the user even with zero telegram history.
+        //   - web / slack / whatsapp: the most-recent conversation peer on that channel
+        //     (no dedicated binding model wired for those yet; web's peer also identifies
+        //     the conversation the dispatcher fires back to).
+        if (target == null || target.isBlank()) {
+            if ("telegram".equalsIgnoreCase(channel)) {
+                var binding = TelegramBinding.findByAgentOrAncestor(agent);
+                if (binding == null) {
+                    return "Error: Telegram is not configured for agent '" + agent.name
+                            + "' (no Telegram binding). Connect a Telegram bot in Channels "
+                            + "settings, or pass an explicit 'target' chat id.";
+                }
+                target = binding.telegramUserId;
+            } else {
+                var cConv = (Conversation) Conversation.find(
+                        "agent = ?1 AND channelType = ?2 ORDER BY updatedAt DESC", agent, channel).first();
+                if (cConv != null) target = cConv.peerId;
+            }
         }
         // Target is required for external channels (telegram/slack/whatsapp)
         // because it's the platform-specific peer id (chat id / channel id /

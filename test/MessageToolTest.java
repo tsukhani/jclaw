@@ -189,12 +189,14 @@ class MessageToolTest extends UnitTest {
     }
 
     @Test
-    void inferenceFromTelegramConversationWithoutPeerErrorsOnMissingTarget() throws Exception {
-        // Inference picks channelType from the active conversation; if that
-        // conversation has no peerId AND the channel is external (target is
-        // required), the missing-target guard fires. Web wouldn't trip this
-        // because target is ignored for web routing.
-        Tx.run(() -> ConversationService.create(agent, "telegram", null));
+    void inferenceFromSlackConversationWithoutPeerErrorsOnMissingTarget() throws Exception {
+        // Inference picks channelType from the active conversation; for an external
+        // channel that resolves its target from the conversation peer (slack/whatsapp),
+        // a null peerId leaves no target and the missing-target guard fires. Web
+        // wouldn't trip this (target is ignored for web routing), and telegram no
+        // longer reaches this path — it reads the chat id from its binding, not the
+        // conversation peer (see telegramTargetResolvesFromBindingNotFromConversationPeer).
+        Tx.run(() -> ConversationService.create(agent, "slack", null));
         var result = invokeTool(agent.id, "{\"action\":\"send\",\"message\":\"hi\"}");
         assertTrue(result.startsWith("Error: no 'target' inferred"),
                 "missing-peerId on an external channel should surface the missing-target error: " + result);
@@ -226,6 +228,39 @@ class MessageToolTest extends UnitTest {
         // We expect a Telegram-shaped error (latest convo), not Slack.
         assertTrue(result.contains("Telegram") || result.contains("telegram"),
                 "should infer most-recent convo (telegram, 999), got: " + result);
+    }
+
+    @Test
+    void telegramTargetResolvesFromBindingNotFromConversationPeer() throws Exception {
+        // The telegram chat id must come from the agent's Telegram BINDING (the channel
+        // setting), with NO dependency on a prior conversation — so a proactive send
+        // (e.g. a scheduled task firing in a web/internal context) reaches the user even
+        // with no relevant chat history. seedTelegramBindingAndConversation sets the
+        // binding's telegram_user_id to "u-1" AND a telegram conversation whose peer is
+        // CHAT_ID; a more-recent web conversation has peer "admin". A channel=telegram
+        // send must target the binding's "u-1" — not the telegram conv peer (CHAT_ID)
+        // and not the web peer ("admin", which Telegram rejects with "chat not found").
+        seedTelegramBindingAndConversation(); // binding telegram_user_id="u-1", telegram conv peer=CHAT_ID
+        Tx.run(() -> {
+            try { Thread.sleep(5); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
+            ConversationService.create(agent, "web", "admin"); // more-recent web conv
+        });
+
+        var result = invokeTool(agent.id,
+                "{\"action\":\"send\",\"message\":\"daily briefing\",\"channel\":\"telegram\"}");
+
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("sent", parsed.get("action").getAsString(),
+                "telegram send must succeed by resolving the target from the binding: " + result);
+        assertEquals(1, server.countRequests("sendMessage"), "exactly one telegram send");
+        var body = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                .map(MockTelegramServer.RecordedRequest::body)
+                .reduce("", (a, b) -> a + b);
+        assertTrue(body.contains("u-1"),
+                "the send must target the binding's telegram_user_id 'u-1', not any conversation peer: " + body);
+        assertTrue(!body.contains(CHAT_ID) && !body.contains("admin"),
+                "the send must NOT use a conversation peer (" + CHAT_ID + " / admin): " + body);
     }
 
     // ──────── JCLAW-374: Telegram message actions ────────
