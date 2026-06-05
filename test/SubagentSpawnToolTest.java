@@ -1,3 +1,4 @@
+import agents.AgentRunner;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -17,9 +18,12 @@ import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
+import services.SubagentRegistry;
 import services.Tx;
 import tools.SubagentSpawnTool;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -62,6 +66,98 @@ class SubagentSpawnToolTest extends UnitTest {
         assertNotNull(tool, "subagent_spawn must be registered by ToolRegistrationJob");
         assertEquals(SubagentSpawnTool.TOOL_NAME, tool.name());
         assertEquals("System", tool.category());
+    }
+
+    // ── JCLAW-424: idle/activity-based timeout (awaitFuture) ────────────
+
+    @Test
+    void awaitCompletesWhenFutureFinishes() {
+        Long runId = 90001L;
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(runId, future);
+        try {
+            future.complete(new AgentRunner.RunResult("done", null));
+            var outcome = SubagentSpawnTool.awaitFuture(future, 5, 1800, runId);
+            assertEquals(SubagentRun.Status.COMPLETED, outcome.terminalStatus());
+            assertEquals("done", outcome.reply());
+        } finally {
+            SubagentRegistry.unregister(runId);
+        }
+    }
+
+    @Test
+    void activityKeepsRunAlivePastIdleBudget() {
+        // JCLAW-424 regression for SubagentRun #4654: a child that keeps working
+        // (touches activity) for LONGER than the idle budget must NOT time out.
+        Long runId = 90002L;
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(runId, future);
+        // Worker: touch every 250ms for ~2.5s (>> the 2s idle budget), then finish.
+        Thread.ofVirtual().start(() -> {
+            try {
+                for (int i = 0; i < 10; i++) {
+                    Thread.sleep(250);
+                    SubagentRegistry.touch(runId);
+                }
+                future.complete(new AgentRunner.RunResult("finished after sustained work", null));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        try {
+            var outcome = SubagentSpawnTool.awaitFuture(future, 2, 1800, runId);
+            assertEquals(SubagentRun.Status.COMPLETED, outcome.terminalStatus(),
+                    "an actively-touching run must not trip the idle budget");
+            assertEquals("finished after sustained work", outcome.reply());
+        } finally {
+            SubagentRegistry.unregister(runId);
+        }
+    }
+
+    @Test
+    void idleRunTimesOutWhenSilent() {
+        // No touches, no completion → the idle budget fires.
+        Long runId = 90003L;
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(runId, future);
+        try {
+            var outcome = SubagentSpawnTool.awaitFuture(future, 1, 1800, runId);
+            assertEquals(SubagentRun.Status.TIMEOUT, outcome.terminalStatus());
+            assertTrue(outcome.terminalOutcome().toLowerCase().contains("idle"),
+                    "idle-timeout reason should mention idleness: " + outcome.terminalOutcome());
+        } finally {
+            SubagentRegistry.unregister(runId);
+        }
+    }
+
+    @Test
+    void absoluteCeilingTimesOutEvenWhenActive() {
+        // AC4: even with continuous activity (idle never fires), the absolute
+        // ceiling halts a runaway. 1s ceiling, huge idle budget, constant touches.
+        Long runId = 90004L;
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(runId, future);
+        var stop = new AtomicBoolean(false);
+        Thread.ofVirtual().start(() -> {
+            while (!stop.get()) {
+                SubagentRegistry.touch(runId);
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        });
+        try {
+            var outcome = SubagentSpawnTool.awaitFuture(future, 3600, 1, runId);
+            assertEquals(SubagentRun.Status.TIMEOUT, outcome.terminalStatus());
+            assertTrue(outcome.terminalOutcome().toLowerCase().contains("ceiling"),
+                    "ceiling-timeout reason should mention the ceiling: " + outcome.terminalOutcome());
+        } finally {
+            stop.set(true);
+            SubagentRegistry.unregister(runId);
+        }
     }
 
     @Test

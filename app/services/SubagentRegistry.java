@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * JCLAW-271: in-memory mapping from {@link SubagentRun} id to the
@@ -63,17 +64,56 @@ public final class SubagentRegistry {
      *  {@code future.get(timeout)}) see CANCELLED on kill rather than blocking
      *  to the full timeout. We deliberately do NOT capture the carrier
      *  Thread — see the class-level comment for why interrupts are forbidden. */
-    private record Entry(Future<?> future, AtomicBoolean cancelRequested) {}
+    private record Entry(Future<?> future, AtomicBoolean cancelRequested, AtomicLong lastActivityNanos) {}
 
     private static final Map<Long, Entry> ACTIVE = new ConcurrentHashMap<>();
 
     /** Register the VT-bearing Future under {@code runId}. Called by the
      *  spawn path right after dispatching the VT. The cancellation flag is
      *  allocated here so {@link #isCancelled} works the instant the entry
-     *  is in the map, even before the VT body has done any work. */
+     *  is in the map, even before the VT body has done any work.
+     *  JCLAW-424: {@code lastActivityNanos} is seeded to "now" so the
+     *  idle-timeout await starts the inactivity clock at registration. */
     public static void register(Long runId, Future<?> future) {
         if (runId == null || future == null) return;
-        ACTIVE.put(runId, new Entry(future, new AtomicBoolean(false)));
+        ACTIVE.put(runId, new Entry(future, new AtomicBoolean(false), new AtomicLong(System.nanoTime())));
+    }
+
+    /**
+     * JCLAW-424: mark the run as having just made progress. Called from
+     * {@link agents.AgentRunner#checkSubagentCancel} — i.e. before each LLM
+     * round and between tool calls — so the idle-timeout clock resets while
+     * the child is actively working. A no-op when the run isn't registered.
+     */
+    public static void touch(Long runId) {
+        if (runId == null) return;
+        var entry = ACTIVE.get(runId);
+        if (entry != null) entry.lastActivityNanos().set(System.nanoTime());
+    }
+
+    /**
+     * JCLAW-424: nanoseconds since the run last touched activity, or {@code -1}
+     * when the run isn't registered (the caller then falls back to wall-clock).
+     */
+    public static long nanosSinceActivity(Long runId) {
+        if (runId == null) return -1L;
+        var entry = ACTIVE.get(runId);
+        return entry == null ? -1L : System.nanoTime() - entry.lastActivityNanos().get();
+    }
+
+    /**
+     * JCLAW-424: cooperative-stop request used by the idle/ceiling timeout in
+     * {@link tools.SubagentSpawnTool}. Flips the same cancel flag {@link #kill}
+     * uses (so the running {@link agents.AgentRunner} bails at its next
+     * checkpoint with {@link agents.RunCancelledException}) but does NOT write a
+     * KILLED audit row — the spawn tool persists the TIMEOUT status itself. The
+     * entry is left in place so the child's checkpoint can still observe the
+     * flag; the spawn path's {@code finally} unregisters once the child stops.
+     */
+    public static void requestStop(Long runId) {
+        if (runId == null) return;
+        var entry = ACTIVE.get(runId);
+        if (entry != null) entry.cancelRequested().set(true);
     }
 
     /** Unregister the entry for {@code runId}. Called from a {@code finally}

@@ -210,8 +210,14 @@ public class AgentRunner {
                     conversation.id, models.SubagentRun.Status.RUNNING).first();
             return run != null ? run.id : null;
         });
-        if (runId != null && services.SubagentRegistry.isCancelled(runId)) {
-            throw new RunCancelledException(runId);
+        if (runId != null) {
+            // JCLAW-424: heartbeat the idle-timeout clock at this safe boundary
+            // (before each LLM round / between tool calls) so an actively-working
+            // child never trips the inactivity budget; only genuine silence does.
+            services.SubagentRegistry.touch(runId);
+            if (services.SubagentRegistry.isCancelled(runId)) {
+                throw new RunCancelledException(runId);
+            }
         }
     }
 

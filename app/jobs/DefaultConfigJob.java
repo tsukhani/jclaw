@@ -239,6 +239,12 @@ public class DefaultConfigJob extends Job<Void> {
                 String.valueOf(tools.SubagentSpawnTool.DEFAULT_DEPTH_LIMIT));
         seedIfAbsent(tools.SubagentSpawnTool.BREADTH_LIMIT_KEY,
                 String.valueOf(tools.SubagentSpawnTool.DEFAULT_BREADTH_LIMIT));
+        // JCLAW-424: absolute wall-clock ceiling on a single subagent run — the
+        // runaway guard the idle budget (an active child never trips it) cannot
+        // provide. Operator-only; 0 disables. Read path lives in
+        // tools.SubagentSpawnTool#awaitFuture.
+        seedIfAbsent(tools.SubagentSpawnTool.MAX_WALLCLOCK_KEY,
+                String.valueOf(tools.SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS));
     }
 
     private void seedDefaultAgent() {

@@ -101,8 +101,33 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     private static final String FIELD_STATUS = "status";
     private static final String FIELD_LABEL = "label";
 
-    /** Default wall-clock budget for a synchronous spawn, per AC. */
+    /**
+     * Default value for the per-spawn {@code runTimeoutSeconds} arg.
+     * JCLAW-424: this is now an IDLE (inactivity) budget, not total wall-clock —
+     * a run times out only after this many seconds with NO activity (no LLM
+     * round / tool call); active work resets the clock. The absolute total
+     * runtime is bounded separately by {@link #MAX_WALLCLOCK_KEY}.
+     */
     static final int DEFAULT_TIMEOUT_SECONDS = 300;
+
+    /**
+     * JCLAW-424: operator-controlled absolute wall-clock ceiling on a single
+     * subagent run, independent of activity — the runaway guard the idle budget
+     * (which an active child never trips) cannot provide. NOT settable by the
+     * spawning LLM. {@code 0} disables the ceiling (idle budget only). Seeded by
+     * {@link jobs.DefaultConfigJob}, editable in Settings &gt; Subagents.
+     */
+    public static final String MAX_WALLCLOCK_KEY = "subagent.maxWallClockSeconds";
+    public static final int DEFAULT_MAX_WALLCLOCK_SECONDS = 1800;
+
+    /** JCLAW-424: idle-await poll cadence — how often the await loop wakes to
+     *  re-check the inactivity and ceiling budgets while the child runs. */
+    private static final long IDLE_POLL_INTERVAL_MS = 1000;
+
+    /** JCLAW-424: bounded grace after a timeout flips the cooperative-stop flag,
+     *  giving the child's next checkpoint a chance to observe it and stop cleanly
+     *  before the spawn path unregisters the run. */
+    private static final long STOP_GRACE_MS = 3000;
 
     /**
      * JCLAW-270: hard cap on the reply-field length in async-spawn announce
@@ -191,7 +216,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 `async` (false — default — blocks until the child finishes; true returns the \
                 run id immediately and posts a completion card to your conversation when \
                 the child terminates. Only compatible with mode="session"), \
-                `runTimeoutSeconds` (wall-clock budget, default 300).""";
+                `runTimeoutSeconds` (idle budget — seconds of INACTIVITY before \
+                the run is timed out; an actively-working child resets it, so \
+                this need not cover total runtime, default 300).""";
     }
 
     @Override
@@ -228,7 +255,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "enabled tools and its own."));
         props.put("runTimeoutSeconds", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
-                "Wall-clock budget for the synchronous run (default 300)"));
+                "Idle budget: seconds of inactivity (no LLM round/tool call) before the run times out; "
+                        + "active work resets it, so it need not cover total runtime (default 300)"));
         props.put("async", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                 SchemaKeys.DESCRIPTION,
                 "When true (default false), return the child's run id immediately and "
@@ -390,8 +418,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         static final InheritSummary NONE = new InheritSummary(null, null);
     }
 
-    /** Result of the synchronous child run + Future.get await. */
-    private record SyncRunOutcome(
+    /** Result of the synchronous child run + idle await. Public for
+     *  {@code SubagentSpawnToolTest} (default package), which inspects the
+     *  terminal status from {@link #awaitFuture}. */
+    public record SyncRunOutcome(
             String reply, SubagentRun.Status terminalStatus,
             String terminalOutcome, String errorReason,
             boolean killedByOperator, boolean replyTruncated) {}
@@ -593,63 +623,112 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         });
 
         try {
-            return awaitFuture(future, timeoutSeconds);
+            int ceilingSeconds = ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS);
+            return awaitFuture(future, timeoutSeconds, ceilingSeconds, runId);
         } finally {
             services.SubagentRegistry.unregister(runId);
         }
     }
 
     /**
-     * Await the child future, translating every terminal path (success,
-     * timeout, interrupt, cancellation, runner exception) into a uniform
-     * {@link SyncRunOutcome}. Keeping the catch ladder isolated here removes
-     * the bulk of the cognitive complexity from {@link #execute}.
+     * JCLAW-424: await the child future on an IDLE-timeout model. The future is
+     * polled every {@link #IDLE_POLL_INTERVAL_MS}; the run times out only when
+     * it has been INACTIVE (no {@link services.SubagentRegistry#touch}) for
+     * longer than {@code idleBudgetSeconds}, or when its total runtime exceeds
+     * the operator-configured {@link #MAX_WALLCLOCK_KEY} ceiling. An actively-
+     * working child resets the idle clock at every LLM round / tool call (see
+     * {@link agents.AgentRunner#checkSubagentCancel}) and so never trips the
+     * idle budget — fixing the prior failure mode where a child still producing
+     * output (e.g. a long report-generation turn) was killed at a fixed
+     * wall-clock deadline. Every other terminal path (success, kill,
+     * yield-watchdog timeout, runner exception) is translated to a uniform
+     * {@link SyncRunOutcome} exactly as before.
+     *
+     * <p>Public for {@code SubagentSpawnToolTest} (default package).
      */
-    private static SyncRunOutcome awaitFuture(
+    public static SyncRunOutcome awaitFuture(
             java.util.concurrent.CompletableFuture<AgentRunner.RunResult> future,
-            int timeoutSeconds) {
-        try {
-            var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
-            var reply = result == null ? "" : result.response();
-            var truncated = result != null && result.truncated();
-            return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
-                    reply, null, false, truncated);
-        } catch (TimeoutException _) {
-            future.cancel(false);
-            var reason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
-            return new SyncRunOutcome("", SubagentRun.Status.TIMEOUT,
-                    reason, reason, false, false);
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-            var reason = "Parent thread interrupted while awaiting subagent";
-            return new SyncRunOutcome("", SubagentRun.Status.FAILED,
-                    reason, reason, false, false);
-        } catch (java.util.concurrent.CancellationException _) {
-            // JCLAW-291: kill primitive cancelled our Future. The registry
-            // already stamped KILLED; bail without overwriting.
-            return new SyncRunOutcome("", SubagentRun.Status.KILLED,
-                    "Killed by operator", null, true, false);
-        } catch (ExecutionException ee) {
-            var cause = ee.getCause() != null ? ee.getCause() : ee;
-            if (cause instanceof agents.RunCancelledException) {
-                // JCLAW-291: runner observed the cancel flag at a checkpoint
-                // and threw. Registry already KILLED; do not touch the audit row.
+            int idleBudgetSeconds, int ceilingSeconds, Long runId) {
+        long idleBudgetNanos = TimeUnit.SECONDS.toNanos(Math.max(1, idleBudgetSeconds));
+        long ceilingNanos = ceilingSeconds <= 0 ? Long.MAX_VALUE : TimeUnit.SECONDS.toNanos(ceilingSeconds);
+        long startNanos = System.nanoTime();
+        while (true) {
+            try {
+                var result = future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                var reply = result == null ? "" : result.response();
+                var truncated = result != null && result.truncated();
+                return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
+                        reply, null, false, truncated);
+            } catch (TimeoutException _) {
+                // Poll tick — the child is still running. Check the two budgets.
+                long idleNanos = services.SubagentRegistry.nanosSinceActivity(runId);
+                if (idleNanos < 0) idleNanos = System.nanoTime() - startNanos; // unregistered fallback
+                if (idleNanos > idleBudgetNanos) {
+                    return stopChildOnTimeout(future, runId,
+                            "Subagent run exceeded its %d-second idle budget (no activity)".formatted(idleBudgetSeconds));
+                }
+                if (System.nanoTime() - startNanos > ceilingNanos) {
+                    return stopChildOnTimeout(future, runId,
+                            "Subagent run exceeded the absolute %d-second ceiling".formatted(ceilingSeconds));
+                }
+                // budgets intact — keep polling
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                var reason = "Parent thread interrupted while awaiting subagent";
+                return new SyncRunOutcome("", SubagentRun.Status.FAILED, reason, reason, false, false);
+            } catch (java.util.concurrent.CancellationException _) {
+                // JCLAW-291: kill primitive cancelled our Future. Registry already KILLED.
                 return new SyncRunOutcome("", SubagentRun.Status.KILLED,
                         "Killed by operator", null, true, false);
+            } catch (ExecutionException ee) {
+                return fromExecutionException(ee);
             }
-            if (cause instanceof TimeoutException) {
-                // JCLAW-326: yield watchdog completed the future exceptionally
-                // because the yield-tightened budget elapsed before the child
-                // finished. Surface as TIMEOUT (not FAILED) so the announce
-                // card + audit row carry the right terminal semantics.
-                var reason = cause.getMessage() != null ? cause.getMessage() : "yield timeout";
-                return new SyncRunOutcome("", SubagentRun.Status.TIMEOUT,
-                        reason, reason, false, false);
-            }
-            var reason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-            return new SyncRunOutcome("", SubagentRun.Status.FAILED,
-                    reason, reason, false, false);
         }
+    }
+
+    /**
+     * JCLAW-424: on idle/ceiling timeout, flip the cooperative-stop flag and
+     * give the child a bounded grace ({@link #STOP_GRACE_MS}) to observe it at
+     * its next checkpoint and unwind cleanly — so the absolute ceiling actually
+     * halts a runaway rather than orphaning its VT — then return the TIMEOUT
+     * outcome.
+     */
+    private static SyncRunOutcome stopChildOnTimeout(
+            java.util.concurrent.CompletableFuture<AgentRunner.RunResult> future, Long runId, String reason) {
+        services.SubagentRegistry.requestStop(runId);
+        long graceDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(STOP_GRACE_MS);
+        while (!future.isDone() && System.nanoTime() < graceDeadline) {
+            try {
+                future.get(200, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException _) {
+                // still unwinding — keep waiting within grace
+            } catch (Exception _) {
+                break; // child stopped (RunCancelled / cancellation / completion)
+            }
+        }
+        future.cancel(false);
+        return new SyncRunOutcome("", SubagentRun.Status.TIMEOUT, reason, reason, false, false);
+    }
+
+    /**
+     * Translate an {@link ExecutionException} from the child future into a
+     * {@link SyncRunOutcome}, preserving the JCLAW-291 (kill) and JCLAW-326
+     * (yield-watchdog timeout) terminal semantics.
+     */
+    private static SyncRunOutcome fromExecutionException(ExecutionException ee) {
+        var cause = ee.getCause() != null ? ee.getCause() : ee;
+        if (cause instanceof agents.RunCancelledException) {
+            // JCLAW-291: runner observed the cancel flag at a checkpoint and threw.
+            return new SyncRunOutcome("", SubagentRun.Status.KILLED,
+                    "Killed by operator", null, true, false);
+        }
+        if (cause instanceof TimeoutException) {
+            // JCLAW-326: yield watchdog completed the future exceptionally.
+            var reason = cause.getMessage() != null ? cause.getMessage() : "yield timeout";
+            return new SyncRunOutcome("", SubagentRun.Status.TIMEOUT, reason, reason, false, false);
+        }
+        var reason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+        return new SyncRunOutcome("", SubagentRun.Status.FAILED, reason, reason, false, false);
     }
 
     /**
@@ -1200,7 +1279,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var future = startAsyncChild(runId, childAgentId, childConvId, task);
         SyncRunOutcome outcome;
         try {
-            outcome = awaitAsyncFuture(future, timeoutSeconds);
+            outcome = awaitAsyncFuture(future, timeoutSeconds,
+                    ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS), runId);
         } finally {
             services.SubagentRegistry.unregister(runId);
         }
@@ -1283,9 +1363,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      */
     @SuppressWarnings("java:S1181")
     private static SyncRunOutcome awaitAsyncFuture(
-            CompletableFuture<AgentRunner.RunResult> future, int timeoutSeconds) {
+            CompletableFuture<AgentRunner.RunResult> future, int timeoutSeconds, int ceilingSeconds, Long runId) {
         try {
-            return awaitFuture(future, timeoutSeconds);
+            return awaitFuture(future, timeoutSeconds, ceilingSeconds, runId);
         } catch (Throwable t) {
             // Top-level guard: see method javadoc.
             var reason = t.getMessage() != null ? t.getMessage() : t.toString();
