@@ -702,6 +702,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 future.get(200, TimeUnit.MILLISECONDS);
             } catch (TimeoutException _) {
                 // still unwinding — keep waiting within grace
+            } catch (InterruptedException _) {
+                // Restore the interrupt flag and stop waiting — don't swallow it
+                // (java:S2142); we then finalize the TIMEOUT outcome below.
+                Thread.currentThread().interrupt();
+                break;
             } catch (Exception _) {
                 break; // child stopped (RunCancelled / cancellation / completion)
             }
