@@ -254,7 +254,10 @@ async function deleteTask(task: Task) {
 // client-side from task.description (already in the /api/tasks payload via
 // parseTaskSteps, the twin of the backend TaskSteps.parse); the run history
 // is lazy-loaded from /api/tasks/{id}/runs on first expand and cached.
-const expandedId = ref<number | null>(null)
+// Independent per-row expansion: expanding one task never collapses another.
+// A reactive Set tracks the open ids; the run-history maps below are already
+// keyed by task id, so each open row keeps its own history.
+const expandedIds = reactive(new Set<number>())
 const runsByTask = reactive<Record<number, TaskRunView[]>>({})
 const runsLoading = reactive<Record<number, boolean>>({})
 const runsError = reactive<Record<number, string | null>>({})
@@ -274,22 +277,24 @@ async function loadRuns(id: number) {
 }
 
 function toggleExpand(id: number) {
-  if (expandedId.value === id) {
-    expandedId.value = null
+  if (expandedIds.has(id)) {
+    expandedIds.delete(id)
     return
   }
-  expandedId.value = id
+  expandedIds.add(id)
   // Lazy-load the run history on first expand; the live SSE refresh
-  // (slice L) reuses loadRuns to keep an open task's history current.
+  // (slice L) reuses loadRuns to keep each open task's history current.
   if (runsByTask[id] === undefined && !runsLoading[id]) {
     void loadRuns(id)
   }
 }
 
-// Steps for the currently-expanded task — parsed once here rather than
-// per-render inside the v-for (only one row is ever open).
-const expandedTask = computed(() => tasks.value?.find(t => t.id === expandedId.value) ?? null)
-const expandedSteps = computed(() => parseTaskSteps(expandedTask.value?.description))
+// Steps for an expanded row, parsed from its description. Called only inside
+// the expanded detail block (guarded by expandedIds.has), so the parse cost
+// is bounded to the handful of open rows.
+function stepsFor(task: Task): string[] {
+  return parseTaskSteps(task.description)
+}
 
 // colspan for the expanded detail row: every visible column, including the
 // leading checkbox column when bulk-select is active. JCLAW-420 added the
@@ -353,6 +358,49 @@ async function saveSteps(task: Task) {
   }
   finally {
     savingSteps.value = false
+  }
+}
+
+// ── JCLAW-426: inline name editor ──
+// Same expanded-row model as the step editor, scoped to one task. Name is
+// required (unlike description), so an empty value is blocked client-side
+// before the PATCH; the backend re-validates and 400s on blank.
+const editingNameId = ref<number | null>(null)
+const editName = ref('')
+const savingName = ref(false)
+const nameError = ref<string | null>(null)
+
+function startEditName(task: Task) {
+  editName.value = task.name
+  nameError.value = null
+  editingNameId.value = task.id
+}
+
+function cancelEditName() {
+  editingNameId.value = null
+  editName.value = ''
+  nameError.value = null
+}
+
+async function saveName(task: Task) {
+  const name = editName.value.trim()
+  if (!name) {
+    nameError.value = 'Name cannot be empty'
+    return
+  }
+  savingName.value = true
+  nameError.value = null
+  try {
+    await $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { name } })
+    editingNameId.value = null
+    editName.value = ''
+    refresh()
+  }
+  catch (e) {
+    nameError.value = e instanceof Error ? e.message : 'Failed to save name'
+  }
+  finally {
+    savingName.value = false
   }
 }
 
@@ -576,11 +624,11 @@ let liveRefreshHandle: ReturnType<typeof setTimeout> | undefined
 function scheduleLiveRefresh() {
   if (liveRefreshHandle) clearTimeout(liveRefreshHandle)
   liveRefreshHandle = setTimeout(() => {
-    if (editingId.value != null || editingDeliveryId.value != null) return
+    if (editingId.value != null || editingDeliveryId.value != null || editingNameId.value != null) return
     refresh()
     refreshStats()
     refreshRecent()
-    if (expandedId.value != null) void loadRuns(expandedId.value)
+    for (const id of expandedIds) void loadRuns(id)
   }, 400)
 }
 
@@ -1451,12 +1499,12 @@ const statusBg: Record<string, string> = {
                 <button
                   type="button"
                   class="inline-flex items-center gap-1.5 text-left bg-transparent border-0 cursor-pointer text-fg-primary hover:text-fg-strong transition-colors"
-                  :aria-expanded="expandedId === task.id"
+                  :aria-expanded="expandedIds.has(task.id)"
                   :aria-label="`Toggle details for ${task.name}`"
                   @click.stop="toggleExpand(task.id)"
                 >
                   <ChevronRightIcon
-                    :class="expandedId === task.id ? 'rotate-90' : ''"
+                    :class="expandedIds.has(task.id) ? 'rotate-90' : ''"
                     class="h-3.5 w-3.5 text-fg-muted shrink-0 transition-transform"
                     aria-hidden="true"
                   />
@@ -1606,7 +1654,7 @@ const statusBg: Record<string, string> = {
               </td>
             </tr>
             <tr
-              v-if="expandedId === task.id"
+              v-if="expandedIds.has(task.id)"
               class="bg-muted/20"
             >
               <td
@@ -1617,6 +1665,81 @@ const statusBg: Record<string, string> = {
                   <!-- Left column: Instructions stacked over the JCLAW-420
                        Channel editor; Run history fills the right column. -->
                   <div class="space-y-6">
+                    <!-- JCLAW-426: task name, read-only with an inline editor
+                     behind Edit. Name is required — the editor blocks an empty
+                     value before PATCH; the backend re-validates and 400s. -->
+                    <section>
+                      <div class="flex items-center justify-between mb-1.5">
+                        <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
+                          Name
+                        </h3>
+                        <button
+                          v-if="editingNameId !== task.id"
+                          type="button"
+                          class="inline-flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+                          @click="startEditName(task)"
+                        >
+                          <PencilSquareIcon
+                            class="h-3 w-3"
+                            aria-hidden="true"
+                          />
+                          Edit
+                        </button>
+                      </div>
+
+                      <!-- Read-only -->
+                      <p
+                        v-if="editingNameId !== task.id"
+                        class="text-xs text-fg-primary"
+                      >
+                        {{ task.name }}
+                      </p>
+
+                      <!-- Inline editor -->
+                      <div
+                        v-else
+                        class="space-y-2"
+                      >
+                        <input
+                          v-model="editName"
+                          type="text"
+                          aria-label="Task name"
+                          placeholder="Task name…"
+                          class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors"
+                          @keyup.enter="saveName(task)"
+                        >
+                        <div class="flex items-center gap-2 pt-0.5">
+                          <span class="flex-1" />
+                          <button
+                            type="button"
+                            :disabled="savingName"
+                            class="px-2 py-1 text-xs bg-muted border border-input text-fg-muted hover:text-fg-strong disabled:opacity-50 cursor-pointer"
+                            @click="cancelEditName"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            :disabled="savingName"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
+                            @click="saveName(task)"
+                          >
+                            <CheckIcon
+                              class="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                            {{ savingName ? 'Saving…' : 'Save' }}
+                          </button>
+                        </div>
+                        <p
+                          v-if="nameError"
+                          class="text-xs text-red-400"
+                        >
+                          {{ nameError }}
+                        </p>
+                      </div>
+                    </section>
+
                     <!-- Instructions: the JCLAW-260 step list, read-only by
                      default with an inline editor (slice E) behind Edit. -->
                     <section>
@@ -1638,24 +1761,25 @@ const statusBg: Record<string, string> = {
                         </button>
                       </div>
 
-                      <!-- Read-only view (numbered when multi-step, verbatim for one). -->
+                      <!-- Read-only view (numbered when multi-step, verbatim for one).
+                           steps parsed per-row now that several rows can be open. -->
                       <template v-if="editingId !== task.id">
                         <ol
-                          v-if="expandedSteps.length > 1"
+                          v-if="stepsFor(task).length > 1"
                           class="list-decimal list-inside space-y-0.5 text-xs text-fg-primary"
                         >
                           <li
-                            v-for="(step, i) in expandedSteps"
+                            v-for="(step, i) in stepsFor(task)"
                             :key="i"
                           >
                             {{ step }}
                           </li>
                         </ol>
                         <p
-                          v-else-if="expandedSteps.length === 1"
+                          v-else-if="stepsFor(task).length === 1"
                           class="text-xs text-fg-primary whitespace-pre-wrap"
                         >
-                          {{ expandedSteps[0] }}
+                          {{ stepsFor(task)[0] }}
                         </p>
                         <p
                           v-else

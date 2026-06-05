@@ -309,4 +309,71 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
         assertTrue(body.contains("\"preCheck\":\"test -d /tmp\""));
         assertTrue(body.contains("\"script\":\"ls\""));
     }
+
+    // --- JCLAW-426: name rename ---
+
+    @Test
+    void updateNameRenamesTask() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "old-name", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"name": "new-name"}
+                """);
+        assertIsOk(resp);
+        assertContentMatch("\"name\":\"new-name\"", resp);
+    }
+
+    @Test
+    void rejectsBlankName() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "keep", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"name": "   "}
+                """);
+        assertStatus(400, resp);
+        assertTrue(getContent(resp).contains("non-blank"),
+                "400 body should explain name must be non-blank");
+    }
+
+    @Test
+    void rejectsExplicitNullName() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "keep", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"name": null}
+                """);
+        assertStatus(400, resp);
+    }
+
+    @Test
+    void rejectsDuplicateRecurringRename() {
+        var agent = seedAgent();
+        seedTask(agent, "alpha", "every 1h");
+        var beta = seedTask(agent, "beta", "every 1h");
+
+        // Renaming beta onto alpha's name collides (both recurring, same agent).
+        var resp = PATCH("/api/tasks/" + beta, "application/json", """
+                {"name": "alpha"}
+                """);
+        assertStatus(409, resp);
+        assertTrue(getContent(resp).contains("already exists"),
+                "409 body should name the conflict");
+    }
+
+    @Test
+    void allowsRenameToOwnCurrentName() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "samename", "every 1h");
+
+        // Self is excluded from the duplicate check, so renaming to the current
+        // name is accepted (not a 409 against itself).
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"name": "samename"}
+                """);
+        assertIsOk(resp);
+        assertContentMatch("\"name\":\"samename\"", resp);
+    }
 }

@@ -46,6 +46,7 @@ public class ApiTasksController extends Controller {
     private static final Gson gson = INSTANCE;
 
     // JSON body keys reused across create/update parsers and per-field tests.
+    private static final String KEY_NAME = "name";
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_SCHEDULE = "schedule";
     private static final String KEY_DESCRIPTION = "description";
@@ -718,11 +719,11 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     private static String requireTaskName(com.google.gson.JsonObject body) {
-        if (!body.has("name") || body.get("name").isJsonNull()) {
+        if (!body.has(KEY_NAME) || body.get(KEY_NAME).isJsonNull()) {
             error(400, "name is required");
             throw new AssertionError("unreachable: error() throws");
         }
-        var name = body.get("name").getAsString();
+        var name = body.get(KEY_NAME).getAsString();
         if (name == null || name.isBlank()) {
             error(400, "name must be non-blank");
             throw new AssertionError("unreachable: error() throws");
@@ -771,6 +772,29 @@ public class ApiTasksController extends Controller {
                 "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5",
                 name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED
         ).fetch());
+        if (!conflicts.isEmpty()) {
+            var conflictId = ((Task) conflicts.getFirst()).id;
+            error(409, "A recurring task named '%s' already exists for this agent (id=%d)"
+                    .formatted(name, conflictId));
+        }
+    }
+
+    /**
+     * Rename variant of {@link #rejectDuplicateRecurringTask}: re-checks the
+     * duplicate-name rule against the task's current agent + type, excluding the
+     * task itself ({@code id != ?6}) so renaming to its own name is a no-op.
+     * Only CRON / INTERVAL are checked — one-shot names are inert (parity with
+     * create). 409 with the conflicting Task id. Relies on {@code update}'s
+     * ambient action transaction (no {@code Tx.run} wrap — it runs alongside the
+     * raw {@code findById}/{@code save} that {@code update} already performs).
+     */
+    private static void rejectDuplicateRecurringRename(String name, Task task) {
+        if (task.type != Task.Type.CRON && task.type != Task.Type.INTERVAL) return;
+        @SuppressWarnings("unchecked")
+        var conflicts = (List<Object>) (List<?>) Task.find(
+                "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5 AND id != ?6",
+                name, task.agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED, task.id
+        ).fetch();
         if (!conflicts.isEmpty()) {
             var conflictId = ((Task) conflicts.getFirst()).id;
             error(409, "A recurring task named '%s' already exists for this agent (id=%d)"
@@ -860,8 +884,9 @@ public class ApiTasksController extends Controller {
         rejectInvalidDelivery(body);
 
         boolean scheduleChanged = applyScheduleUpdate(task, body);
+        boolean nameChanged = applyNameUpdate(task, body);
         boolean fieldsChanged = applyOptionalFieldUpdates(task, body);
-        boolean anyChange = scheduleChanged || fieldsChanged;
+        boolean anyChange = scheduleChanged || nameChanged || fieldsChanged;
 
         if (!anyChange) {
             error(400, "No patchable fields in body");
@@ -909,6 +934,29 @@ public class ApiTasksController extends Controller {
         // stays in sync — the scheduled_tasks row is the source of
         // truth at fire time but operators read nextRunAt from the UI.
         task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
+        return true;
+    }
+
+    /**
+     * Name update: present-and-non-blank renames the task. Unlike description,
+     * name cannot be cleared — present-and-null or present-and-blank is a 400
+     * (mirrors create's {@link #requireTaskName}). A rename of a recurring task
+     * re-checks the duplicate-name rule via {@link #rejectDuplicateRecurringRename}.
+     * Must run AFTER {@link #applyScheduleUpdate} so that check sees the task's
+     * effective type when the same PATCH also changes the schedule.
+     *
+     * @return true if the name field was present (and applied).
+     */
+    private static boolean applyNameUpdate(Task task, com.google.gson.JsonObject body) {
+        if (!body.has(KEY_NAME)) return false;
+        var el = body.get(KEY_NAME);
+        var name = el.isJsonNull() ? null : el.getAsString();
+        if (name == null || name.isBlank()) {
+            error(400, "name must be non-blank");
+            return false; // unreachable — error() throws
+        }
+        rejectDuplicateRecurringRename(name, task);
+        task.name = name;
         return true;
     }
 
