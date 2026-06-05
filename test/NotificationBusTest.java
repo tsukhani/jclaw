@@ -136,8 +136,14 @@ class NotificationBusTest extends UnitTest {
         int before = NotificationBus.listenerCount();
 
         var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
-        // Fast listener: records the event. Tracked via @AfterEach cleanup.
-        subscribe(received::add);
+        // Fast listener: records ONLY this test's own event. NotificationBus is a
+        // process-global static and the parallel unit-test lane can publish other
+        // events into this still-subscribed listener during the ~LISTENER_TIMEOUT_MS
+        // window the slow listener holds publish() open — filtering by the unique
+        // published type isolates the assertion from that cross-talk (a `received::add`
+        // recorded the stray event, failing line 163 with "expected 1 but was 2" on the
+        // busier CI box). Tracked via @AfterEach cleanup.
+        subscribe(msg -> { if (msg.contains("timeout.test")) received.add(msg); });
 
         // Slow listener: sleeps well past the per-listener timeout. Tracked too — even though
         // publish() will remove it, the unsubscribe handle is a safe no-op if already gone.
@@ -182,9 +188,15 @@ class NotificationBusTest extends UnitTest {
     void manySlowListenersDoNotSerializeThePublisher() throws Exception {
         int before = NotificationBus.listenerCount();
 
-        // One healthy listener that records the event — must still be delivered.
+        // One healthy listener that records ONLY this test's own event — must still be
+        // delivered. Filtering by the unique published type isolates the assertion from
+        // cross-talk: NotificationBus is a process-global static and the parallel unit-
+        // test lane can publish other events into this still-subscribed listener during
+        // the ~LISTENER_TIMEOUT_MS window the slow listeners hold publish() open (same
+        // flake as slowListenerIsRemovedAndFastListenerStillReceives — "expected 1 but
+        // was 2" on the busier CI box).
         var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
-        subscribe(received::add);
+        subscribe(msg -> { if (msg.contains("concurrent.test")) received.add(msg); });
 
         // Several listeners that each stall well past the per-listener timeout. On a
         // fixed 2-thread pool with a fresh per-future budget the publisher would block
