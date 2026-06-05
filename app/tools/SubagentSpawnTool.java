@@ -707,7 +707,36 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             }
         }
         future.cancel(false);
-        return new SyncRunOutcome("", SubagentRun.Status.TIMEOUT, reason, reason, false, false);
+        // JCLAW-424 (AC5): surface the child's partial output so the parent can
+        // salvage progress rather than receiving an empty reply. The audit row's
+        // outcome still records the timeout reason (terminalOutcome == reason).
+        var partial = capturePartialReply(runId);
+        return new SyncRunOutcome(partial, SubagentRun.Status.TIMEOUT, reason, reason, false, false);
+    }
+
+    /**
+     * JCLAW-424 (AC5): the child's most recent assistant message, captured on a
+     * timeout so the parent can salvage partial work. Empty when the child timed
+     * out before producing any response, or on any lookup error (defensive — a
+     * partial-capture failure must never mask the timeout outcome itself).
+     */
+    @SuppressWarnings("java:S1181")
+    private static String capturePartialReply(Long runId) {
+        if (runId == null) return "";
+        try {
+            return Tx.run(() -> {
+                var run = (SubagentRun) SubagentRun.findById(runId);
+                if (run == null || run.childConversation == null) return "";
+                models.Message last = models.Message.find(
+                        "conversation.id = ?1 and role = ?2 order by createdAt desc, id desc",
+                        run.childConversation.id, models.MessageRole.ASSISTANT.value).first();
+                return last != null && last.content != null ? last.content : "";
+            });
+        } catch (Throwable t) {
+            EventLogger.warn(SUBAGENT_CHANNEL,
+                    "Failed to capture partial reply for run " + runId + ": " + t.getMessage());
+            return "";
+        }
     }
 
     /**
@@ -1424,7 +1453,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                                                         SyncRunOutcome outcome) {
         var status = outcome.terminalStatus();
         var failureBody = outcome.errorReason() != null ? outcome.errorReason() : "";
-        var announceBody = status == SubagentRun.Status.COMPLETED ? outcome.reply() : failureBody;
+        // JCLAW-424 (AC5): on a timeout, append the child's partial output (carried
+        // on outcome.reply()) to the timeout reason so the async parent salvages it
+        // too — the reason itself is preserved for the announce's terminal semantics.
+        var announceBody = status == SubagentRun.Status.COMPLETED
+                ? outcome.reply()
+                : (status == SubagentRun.Status.TIMEOUT && notBlank(outcome.reply())
+                        ? failureBody + "\n\nPartial output before timeout:\n" + outcome.reply()
+                        : failureBody);
         var displayTruncatedBody = truncateForAnnounce(announceBody);
         final var modelOutputTruncated = outcome.replyTruncated();
         try {

@@ -6,6 +6,7 @@ import models.AgentToolConfig;
 import models.Conversation;
 import models.EventLog;
 import models.Message;
+import models.MessageRole;
 import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -156,6 +157,43 @@ class SubagentSpawnToolTest extends UnitTest {
                     "ceiling-timeout reason should mention the ceiling: " + outcome.terminalOutcome());
         } finally {
             stop.set(true);
+            SubagentRegistry.unregister(runId);
+        }
+    }
+
+    @Test
+    void timeoutCapturesPartialReply() {
+        // AC5: on a timeout, the child's last assistant message is surfaced to the
+        // parent (reply) instead of an empty string, so partial work isn't lost.
+        var parent = createAgent("p-partial", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-partial");
+        var childAgent = createAgent("c-partial", "test-provider", "test-model");
+        var childConv = ConversationService.create(childAgent, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
+        var run = new SubagentRun();
+        run.parentAgent = parent;
+        run.childAgent = childAgent;
+        run.parentConversation = parentConv;
+        run.childConversation = childConv;
+        run.status = SubagentRun.Status.RUNNING;
+        run.save();
+        var msg = new Message();
+        msg.conversation = childConv;
+        msg.role = MessageRole.ASSISTANT.value;
+        msg.content = "partial report drafted so far";
+        msg.createdAt = java.time.Instant.now();
+        msg.save();
+        var runId = run.id;
+
+        commitAndReopen();
+
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(runId, future);
+        try {
+            var outcome = SubagentSpawnTool.awaitFuture(future, 1, 1800, runId);
+            assertEquals(SubagentRun.Status.TIMEOUT, outcome.terminalStatus());
+            assertTrue(outcome.reply().contains("partial report drafted so far"),
+                    "timeout reply must surface the child's partial output, got: " + outcome.reply());
+        } finally {
             SubagentRegistry.unregister(runId);
         }
     }
