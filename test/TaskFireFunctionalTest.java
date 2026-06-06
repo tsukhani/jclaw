@@ -163,8 +163,8 @@ class TaskFireFunctionalTest extends UnitTest {
      * event leaked from the happy path.
      */
     private void assertLifecycleEvents(String agentName, Long taskId, Long runId) {
-        var startedEvents = loadEventsByCategory("TASK_STARTED");
-        var completedEvents = loadEventsByCategory("TASK_COMPLETED");
+        var startedEvents = loadEventsByCategory("TASK_STARTED", agentName);
+        var completedEvents = loadEventsByCategory("TASK_COMPLETED", agentName);
         assertEquals(1, startedEvents.size(), "exactly one TASK_STARTED for this fire");
         assertEquals(1, completedEvents.size(), "exactly one TASK_COMPLETED for this fire");
 
@@ -190,7 +190,7 @@ class TaskFireFunctionalTest extends UnitTest {
         assertTrue(completed.details.contains("\"duration_ms\":"),
                 "TASK_COMPLETED carries duration_ms");
 
-        assertTrue(loadEventsByCategory("TASK_FAILED").isEmpty(),
+        assertTrue(loadEventsByCategory("TASK_FAILED", agentName).isEmpty(),
                 "TASK_FAILED must not fire on a successful run");
     }
 
@@ -222,9 +222,9 @@ class TaskFireFunctionalTest extends UnitTest {
         var runs = listRunsForTask(task.id);
         assertTrue(runs.isEmpty(), "CANCELLED skip must not open a TaskRun");
         EventLogger.flush();
-        assertTrue(loadEventsByCategory("TASK_STARTED").isEmpty());
-        assertTrue(loadEventsByCategory("TASK_COMPLETED").isEmpty());
-        assertTrue(loadEventsByCategory("TASK_FAILED").isEmpty());
+        assertTrue(loadEventsByCategory("TASK_STARTED", agent.name).isEmpty());
+        assertTrue(loadEventsByCategory("TASK_COMPLETED", agent.name).isEmpty());
+        assertTrue(loadEventsByCategory("TASK_FAILED", agent.name).isEmpty());
     }
 
     /**
@@ -259,9 +259,9 @@ class TaskFireFunctionalTest extends UnitTest {
         assertEquals(1, listRunsForTask(task.id).size(),
                 "fire 1 should produce one TaskRun");
         EventLogger.flush();
-        assertEquals(1, loadEventsByCategory("TASK_STARTED").size(),
+        assertEquals(1, loadEventsByCategory("TASK_STARTED", agent.name).size(),
                 "fire 1 emits TASK_STARTED");
-        assertEquals(1, loadEventsByCategory("TASK_COMPLETED").size(),
+        assertEquals(1, loadEventsByCategory("TASK_COMPLETED", agent.name).size(),
                 "fire 1 emits TASK_COMPLETED");
 
         // === Pause via the service (matches production caller — both
@@ -284,9 +284,9 @@ class TaskFireFunctionalTest extends UnitTest {
         assertEquals(1, listRunsForTask(task.id).size(),
                 "fire 2 (paused) must not open a new TaskRun");
         EventLogger.flush();
-        assertEquals(1, loadEventsByCategory("TASK_STARTED").size(),
+        assertEquals(1, loadEventsByCategory("TASK_STARTED", agent.name).size(),
                 "fire 2 (paused) must not emit a new TASK_STARTED");
-        assertEquals(1, loadEventsByCategory("TASK_COMPLETED").size(),
+        assertEquals(1, loadEventsByCategory("TASK_COMPLETED", agent.name).size(),
                 "fire 2 (paused) must not emit a new TASK_COMPLETED");
 
         // === Resume via the service ===
@@ -302,9 +302,9 @@ class TaskFireFunctionalTest extends UnitTest {
         assertEquals(2, listRunsForTask(task.id).size(),
                 "fire 3 (resumed) should produce a second TaskRun");
         EventLogger.flush();
-        assertEquals(2, loadEventsByCategory("TASK_STARTED").size(),
+        assertEquals(2, loadEventsByCategory("TASK_STARTED", agent.name).size(),
                 "fire 3 (resumed) emits a second TASK_STARTED");
-        assertEquals(2, loadEventsByCategory("TASK_COMPLETED").size(),
+        assertEquals(2, loadEventsByCategory("TASK_COMPLETED", agent.name).size(),
                 "fire 3 (resumed) emits a second TASK_COMPLETED");
     }
 
@@ -357,7 +357,7 @@ class TaskFireFunctionalTest extends UnitTest {
         var runs = listRunsForTask(task.id);
         assertTrue(runs.isEmpty(), "paused skip must not open a TaskRun");
         EventLogger.flush();
-        assertTrue(loadEventsByCategory("TASK_STARTED").isEmpty(),
+        assertTrue(loadEventsByCategory("TASK_STARTED", agent.name).isEmpty(),
                 "paused skip must not emit TASK_STARTED — fire body never ran");
     }
 
@@ -434,9 +434,9 @@ class TaskFireFunctionalTest extends UnitTest {
         });
     }
 
-    private List<EventLog> loadEventsByCategory(String category) {
+    private List<EventLog> loadEventsByCategory(String category, String agentId) {
         return Tx.run(() -> {
-            var raw = EventLog.find("category = ?1", category).fetch();
+            var raw = EventLog.find("category = ?1 and agentId = ?2", category, agentId).fetch();
             var typed = new ArrayList<EventLog>(raw.size());
             for (var r : raw) typed.add((EventLog) r);
             return typed;
