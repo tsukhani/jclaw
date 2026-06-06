@@ -311,6 +311,32 @@ public final class Commands {
         return new Result(newConv, welcome, null);
     }
 
+    /**
+     * The synthetic instruction that drives the {@code /start} self-introduction
+     * (JCLAW-430). Sent to the LLM in place of the bare {@code /start} so the
+     * agent introduces itself in its own voice — its identity/persona comes from
+     * its md-file system prompt, already assembled — and lists the slash commands
+     * (supplied here so they're always accurate). Replaces the deterministic
+     * {@link #welcomeText} greeting; the AgentRunner /start path runs it as a
+     * normal streaming turn on a fresh conversation.
+     */
+    public static String startIntroPrompt() {
+        return """
+                A new user just opened a chat with you by sending /start. Introduce \
+                yourself in your own voice: briefly say who you are and what you can \
+                help them with, drawing on your identity and instructions. Then list \
+                the slash commands they can use:
+                • /new — start a fresh conversation
+                • /reset — clear your memory for this chat
+                • /compact — summarize older turns to free up context
+                • /help — show the command list
+                • /model — show the current model
+                • /usage — show context usage for this chat
+                • /stop — interrupt a response in progress
+                • /subagent — inspect, kill, or read subagent transcripts
+                Keep it concise and friendly.""";
+    }
+
     private static Result executeReset(Agent agent, String channelType, Conversation current) {
         if (current == null) {
             // Nothing to reset. Treat as help-like: tell the user we can't

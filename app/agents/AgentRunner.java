@@ -1326,29 +1326,19 @@ public class AgentRunner {
             }
             return;
         }
-        // JCLAW-97: first-contact welcome. Telegram clients auto-send /start when
-        // a user first opens the bot. On that first contact — no Conversation row
-        // exists yet for this peer — reply with a deterministic, capability-aware
-        // welcome (the agent's description + a /help pointer) and open the
-        // conversation, instead of letting the LLM improvise a greeting. A later
-        // /start (the peer already has a conversation) falls through to the normal
-        // LLM turn, preserving the JCLAW-26 passthrough.
-        if (slash.Commands.isStart(text)) {
-            var existing = services.Tx.run(() ->
-                    services.ConversationService.find(agent, channelType, peerId));
-            if (existing == null) {
-                var result = slash.Commands.executeStartWelcome(agent, channelType, peerId);
-                var welcomeSink = sinkFactory.apply(
-                        result.conversation() != null ? result.conversation().id : null);
-                if (result.responseText() != null && !result.responseText().isEmpty()) {
-                    welcomeSink.seal(result.responseText());
-                }
-                return;
-            }
-            // conversation already exists → fall through to the normal LLM turn
-        }
-        var conversation = services.Tx.run(() ->
-                ConversationService.findOrCreate(agent, channelType, peerId, chatType));
+        // JCLAW-430: /start always introduces the bot via the LLM. Telegram
+        // auto-sends /start on first open, and a user can re-invoke it anytime.
+        // Open a FRESH conversation (so the intro isn't muddied by prior context)
+        // and replace the bare "/start" with an explicit intro instruction — the
+        // agent's identity/persona comes from its md-file system prompt, and we
+        // hand it the slash-command list, so it produces a proper self-
+        // introduction instead of improvising from "/start" alone. Replaces the
+        // first-contact-only deterministic welcome (JCLAW-97).
+        final boolean isStart = slash.Commands.isStart(text);
+        final String turnText = isStart ? slash.Commands.startIntroPrompt() : text;
+        var conversation = services.Tx.run(() -> isStart
+                ? ConversationService.create(agent, channelType, peerId)
+                : ConversationService.findOrCreate(agent, channelType, peerId, chatType));
         // The sink needs the conversation id so it can persist / clear the
         // stream checkpoint (JCLAW-95). Callers supply a factory — they own
         // botToken / chatId, we own conversation lookup.
@@ -1369,7 +1359,7 @@ public class AgentRunner {
                 sink::seal,              // onComplete — final edit / planner fallback
                 sink::errorFallback,     // onError — delete placeholder + send error
                 sink::cancel);           // onCancel — quiesce typing heartbeat on /stop
-        runStreaming(agent, conversation.id, channelType, peerId, text,
+        runStreaming(agent, conversation.id, channelType, peerId, turnText,
                 isCancelled, cb, null, attachments);
     }
 

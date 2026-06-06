@@ -1353,4 +1353,18 @@ class SlashCommandsTest extends UnitTest {
         assertEquals(MessageRole.ASSISTANT.value, msg.role);
         assertEquals(welcome, msg.content);
     }
+
+    @Test
+    void startIntroPromptInstructsSelfIntroAndListsCommands() {
+        // JCLAW-430: /start now drives an LLM self-introduction. The synthetic
+        // prompt must tell the agent to introduce itself and must list the slash
+        // commands (so the LLM doesn't have to know them).
+        var p = Commands.startIntroPrompt();
+        assertNotNull(p);
+        assertTrue(p.toLowerCase().contains("introduce yourself"),
+                "must instruct a self-introduction: " + p);
+        for (var cmd : new String[]{"/new", "/reset", "/compact", "/help", "/model", "/usage", "/stop", "/subagent"}) {
+            assertTrue(p.contains(cmd), "intro prompt must list " + cmd);
+        }
+    }
 }
