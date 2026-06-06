@@ -225,6 +225,40 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    void addingABindingToARunningAppStartsItOnlyOnce() {
+        // JCLAW-431: the SDK starts the app once (its isAppRunning flag) and
+        // auto-starts each new session inside registerBot when the app is up — so
+        // a second app.start() is redundant and the real SDK rejects it with "App
+        // is already running", logging a spurious error on every binding
+        // add/transition. Model reality: an existing running poller, then a
+        // freshly-added one that reports not-yet-running for a beat (so
+        // app.isRunning() — "app flag AND every session running" — momentarily
+        // reads false). The runner must NOT re-start the app.
+        fakeApp.setSessionsRunning(true);
+        Long a = seedPollingBinding("agent-a", "111:tokA", "1", true);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(a));
+        assertEquals(1, fakeApp.startInvocations(), "the first binding starts the app once");
+
+        // The newly-registered session reports not-yet-running, flipping
+        // app.isRunning() false even though the app is up.
+        fakeApp.setSessionsRunning(false);
+        Long b = seedPollingBinding("agent-b", "222:tokB", "2", true);
+        EventLogger.clear();
+        TelegramPollingRunner.reconcile();
+        EventLogger.flush();
+
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(b),
+                "the second binding registers");
+        assertEquals(1, fakeApp.startInvocations(),
+                "adding a binding to a running app must NOT call start() again (JCLAW-431)");
+        long startFailures = EventLog.count("category = ?1 AND message LIKE ?2",
+                "channel", "%Failed to start polling app%");
+        assertEquals(0L, startFailures,
+                "no spurious 'App is already running' error on a binding transition");
+    }
+
+    @Test
     void reconcileDropsBindingRemovedFromDb() {
         Long id = seedPollingBinding("agent-c", "333:tokC", "3", true);
         TelegramPollingRunner.reconcile();

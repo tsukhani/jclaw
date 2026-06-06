@@ -49,6 +49,11 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final OkHttpClient HTTP = new OkHttpClient();
     private volatile boolean running = false;
+    // JCLAW-431: count start() calls so a test can assert the runner starts the
+    // app exactly once across a binding add/transition (the real SDK rejects a
+    // second start() with "App is already running").
+    private final java.util.concurrent.atomic.AtomicInteger startInvocations =
+            new java.util.concurrent.atomic.AtomicInteger();
     // JCLAW-429: the isRunning() value each registered session reports. Default
     // false (the fake never start()s a session, so it's genuinely not running);
     // a test sets it true to simulate an alive-but-idle poller.
@@ -110,7 +115,13 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
 
     @Override
     public void start() {
+        startInvocations.incrementAndGet();
         running = true;
+    }
+
+    /** JCLAW-431: how many times the runner called {@link #start()} on this app. */
+    int startInvocations() {
+        return startInvocations.get();
     }
 
     @Override
