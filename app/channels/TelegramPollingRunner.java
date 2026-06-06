@@ -197,7 +197,7 @@ public final class TelegramPollingRunner {
             LongPollingSingleThreadUpdateConsumer consumer = update -> {
                 dispatch(bindingId, update);
                 if (update.getUpdateId() != null) {
-                    TelegramOffsetStore.record(token, update.getUpdateId());
+                    TelegramOffsetStore.persist(token, update.getUpdateId());
                 }
             };
             BotSession session = app.registerBot(token, () -> TelegramUrl.DEFAULT_URL,

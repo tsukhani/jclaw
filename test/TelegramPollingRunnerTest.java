@@ -322,7 +322,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     void registerSeedsGetUpdatesOffsetFromPersistedValue() {
         String token = "654:tokSeed";
         // Pre-persist a high-water mark as if a prior JVM had consumed up to 7000.
-        TelegramOffsetStore.record(token, 7000);
+        TelegramOffsetStore.persist(token, 7000);
 
         seedPollingBinding("agent-seed", token, "6", true);
         TelegramPollingRunner.reconcile();

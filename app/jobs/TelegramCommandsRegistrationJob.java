@@ -97,7 +97,7 @@ public class TelegramCommandsRegistrationJob extends Job<Void> {
                 return;
             }
             TelegramChannel.setMyCommands(b.botToken, botCommands);
-            TelegramCommandsHashStore.record(b.botToken, TelegramCommandsHashStore.hash(botCommands));
+            TelegramCommandsHashStore.persist(b.botToken, TelegramCommandsHashStore.hash(botCommands));
             EventLogger.info(LOG_CATEGORY, b.agent != null ? b.agent.name : null, LOG_SOURCE,
                     "Registered %d slash command(s) for binding %d"
                             .formatted(botCommands.size(), b.id));

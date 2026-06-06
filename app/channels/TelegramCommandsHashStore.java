@@ -164,7 +164,7 @@ public final class TelegramCommandsHashStore {
      * {@code setMyCommands} on the next restart, which is the pre-JCLAW-387
      * behaviour.
      */
-    public static synchronized void record(String token, String hash) {
+    public static synchronized void persist(String token, String hash) {
         String botId = botId(token);
         if (botId == null) return;
         try {

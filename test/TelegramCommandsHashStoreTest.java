@@ -121,7 +121,7 @@ class TelegramCommandsHashStoreTest extends UnitTest {
     void recordThenLoadRoundTrips() {
         String token = "123456:tokenA";
         String h = TelegramCommandsHashStore.hash(sampleList());
-        TelegramCommandsHashStore.record(token, h);
+        TelegramCommandsHashStore.persist(token, h);
         assertEquals(h, TelegramCommandsHashStore.load(token));
     }
 
@@ -132,7 +132,7 @@ class TelegramCommandsHashStoreTest extends UnitTest {
         String token = "123456:tokenA";
         List<BotCommand> commands = sampleList();
         // Simulate a prior boot that registered + persisted this list's hash.
-        TelegramCommandsHashStore.record(token, TelegramCommandsHashStore.hash(commands));
+        TelegramCommandsHashStore.persist(token, TelegramCommandsHashStore.hash(commands));
         assertTrue(TelegramCommandsHashStore.shouldSkip(token, commands),
                 "an unchanged command list must skip the setMyCommands call");
     }
@@ -140,7 +140,7 @@ class TelegramCommandsHashStoreTest extends UnitTest {
     @Test
     void changedListDoesNotSkip() {
         String token = "123456:tokenA";
-        TelegramCommandsHashStore.record(token, TelegramCommandsHashStore.hash(sampleList()));
+        TelegramCommandsHashStore.persist(token, TelegramCommandsHashStore.hash(sampleList()));
         List<BotCommand> changed = List.of(cmd("new", "Start a new conversation"),
                 cmd("reset", "Reset the agent"),
                 cmd("stop", "Halt everything"));   // description changed
@@ -168,7 +168,7 @@ class TelegramCommandsHashStoreTest extends UnitTest {
         String original = "888:secretOne";
         String rotated = "888:secretTwo";
         List<BotCommand> commands = sampleList();
-        TelegramCommandsHashStore.record(original, TelegramCommandsHashStore.hash(commands));
+        TelegramCommandsHashStore.persist(original, TelegramCommandsHashStore.hash(commands));
         assertTrue(TelegramCommandsHashStore.shouldSkip(rotated, commands),
                 "rotated token (same bot id) should see the hash persisted under the old secret");
     }
@@ -176,7 +176,7 @@ class TelegramCommandsHashStoreTest extends UnitTest {
     @Test
     void differentBotIdsDoNotCollide() {
         List<BotCommand> commands = sampleList();
-        TelegramCommandsHashStore.record("111:tok", TelegramCommandsHashStore.hash(commands));
+        TelegramCommandsHashStore.persist("111:tok", TelegramCommandsHashStore.hash(commands));
         // 222 never recorded — its decision is independent of 111's stored hash.
         assertTrue(TelegramCommandsHashStore.shouldSkip("111:tok", commands));
         assertFalse(TelegramCommandsHashStore.shouldSkip("222:tok", commands));

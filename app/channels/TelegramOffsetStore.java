@@ -107,7 +107,7 @@ public final class TelegramOffsetStore {
      * are logged, not thrown: a missed write costs at most a re-process of the
      * affected updates on the next restart, which is the pre-JCLAW-361 behaviour.
      */
-    public static synchronized void record(String token, int updateId) {
+    public static synchronized void persist(String token, int updateId) {
         String botId = botId(token);
         if (botId == null) return;
         if (updateId <= load(token)) return;
