@@ -151,7 +151,7 @@ export function useGuidedTour() {
     destroy()
     if (!state.value.active || import.meta.server) return
     const step = steps[state.value.step]
-    if (!step || route.path !== step.path) return
+    if (route.path !== step?.path) return
 
     const el = await waitForElement(step.selector)
     if (!el) {

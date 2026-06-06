@@ -1299,7 +1299,7 @@ function hasRecentTaskCreate(): boolean {
   if (!msgs.length) return false
   const cutoff = Date.now() - TASK_DELIVERY_POLL_GRACE_MS
   for (const m of msgs) {
-    const messageAge = m.createdAt ? Date.parse(m.createdAt) : NaN
+    const messageAge = m.createdAt ? Date.parse(m.createdAt) : Number.NaN
     // When the message has no createdAt (optimistic), treat as "now" so
     // we don't skip a just-issued create that races the timestamp write.
     if (Number.isFinite(messageAge) && messageAge < cutoff) continue

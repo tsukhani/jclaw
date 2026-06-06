@@ -428,7 +428,6 @@ async function testBinding(binding: TelegramBindingSummary) {
             type="button"
             :disabled="probing.has(b.id)"
             title="Test binding — calls Telegram getMe (and getWebhookInfo for webhooks)"
-            aria-label="Test binding"
             class="px-2 py-1 mr-auto text-xs text-fg-muted hover:text-fg-strong
                    border border-border transition-colors disabled:opacity-40
                    disabled:cursor-not-allowed"
