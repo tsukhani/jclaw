@@ -32,6 +32,7 @@ import java.util.Map;
 public class ApiProvidersController extends Controller {
 
     private static final Gson gson = INSTANCE;
+    private static final String PROVIDER_CONFIG_PREFIX = "provider.";
 
     public record DiscoverModelsResponse(List<Map<String, Object>> models, int count) {}
 
@@ -85,8 +86,8 @@ public class ApiProvidersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
     @ChatSafe(summary = "Discover a provider's available models from its live API")
     public static void discoverModels(String name) {
-        var baseUrl = ConfigService.get("provider." + name + ".baseUrl");
-        var apiKey = ConfigService.get("provider." + name + ".apiKey");
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
+        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
 
         if (baseUrl == null || baseUrl.isBlank()) {
             error(400, "Provider '%s' has no base URL configured".formatted(name));
@@ -190,12 +191,12 @@ public class ApiProvidersController extends Controller {
                                    double cacheWritePrice) {}
 
     private static String modelsKey(String name) {
-        return "provider." + name + ".models";
+        return PROVIDER_CONFIG_PREFIX + name + ".models";
     }
 
     /** 404s unless {@code name} is a configured provider (has a base URL). */
     private static void requireConfiguredProvider(String name) {
-        var baseUrl = ConfigService.get("provider." + name + ".baseUrl");
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
         if (baseUrl == null || baseUrl.isBlank()) {
             error(404, "Provider '%s' is not configured".formatted(name));
         }

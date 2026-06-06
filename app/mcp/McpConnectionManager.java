@@ -56,6 +56,7 @@ public final class McpConnectionManager {
     private static final String CLIENT_VERSION_FALLBACK = "0.0.0-dev";
     private static final String CATEGORY_CONNECT = "MCP_CONNECT";
     private static final String CATEGORY_DISCONNECT = "MCP_DISCONNECT";
+    private static final String TIMESTAMP_LAST_DISCONNECTED = TIMESTAMP_LAST_DISCONNECTED;
 
     private static volatile long backoffInitialMillis = 1_000L;
     private static volatile long backoffCeilingMillis = 30_000L;
@@ -364,7 +365,7 @@ public final class McpConnectionManager {
             entry.status = McpServer.Status.DISCONNECTED;
             entry.lastError = client.lastError();
             persistStatus(server.id, McpServer.Status.DISCONNECTED, client.lastError());
-            persistTimestamp(server.id, "lastDisconnectedAt");
+            persistTimestamp(server.id, TIMESTAMP_LAST_DISCONNECTED);
             scheduleConnect(entry, server, entry.attempts + 1);
         });
     }
@@ -384,7 +385,7 @@ public final class McpConnectionManager {
         if (hadConnection) {
             EventLogger.warn(CATEGORY_DISCONNECT,
                     "MCP server '%s' disconnected: %s".formatted(server.name, error));
-            persistTimestamp(server.id, "lastDisconnectedAt");
+            persistTimestamp(server.id, TIMESTAMP_LAST_DISCONNECTED);
         } else {
             EventLogger.warn(CATEGORY_CONNECT,
                     "MCP server '%s' connect attempt %d failed: %s".formatted(
@@ -533,7 +534,7 @@ public final class McpConnectionManager {
             String jpql = switch (column) {
                 case "lastConnectedAt" ->
                         "UPDATE McpServer s SET s.lastConnectedAt = :now, s.updatedAt = :now WHERE s.id = :id";
-                case "lastDisconnectedAt" ->
+                case TIMESTAMP_LAST_DISCONNECTED ->
                         "UPDATE McpServer s SET s.lastDisconnectedAt = :now, s.updatedAt = :now WHERE s.id = :id";
                 default -> throw new IllegalArgumentException("Unsupported timestamp column: " + column);
             };

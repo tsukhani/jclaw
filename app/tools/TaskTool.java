@@ -76,6 +76,7 @@ public class TaskTool implements ToolRegistry.Tool {
     private static final String KEY_TIMEZONE = "timezone";
 
     // --- Common response strings ---
+    private static final String ERR_PREFIX = "Error: ";
     private static final String ERR_NAME_REQUIRED = "Error: 'name' is required";
     private static final String MSG_NO_TASK_FOUND = "No task found with name '%s'.";
 
@@ -334,7 +335,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // a malformed value (e.g. email:, which is not a channel) is rejected
         // with a hint toward tool:send_gmail_message.
         var deliveryErr = services.DeliverySpec.validate(optStr(args, KEY_DELIVERY));
-        if (deliveryErr != null) return "Error: " + deliveryErr;
+        if (deliveryErr != null) return ERR_PREFIX + deliveryErr;
 
         var conflict = checkRecurringDuplicate(name, agent, spec);
         if (conflict != null) return conflict;
@@ -346,7 +347,7 @@ public class TaskTool implements ToolRegistry.Tool {
         } catch (IllegalArgumentException e) {
             // JCLAW-261: surface invalid-timezone (or any other validated
             // arg) as a clean tool error instead of a Tx-wrapped trace.
-            return "Error: " + e.getMessage();
+            return ERR_PREFIX + e.getMessage();
         }
         services.TaskSchedulingService.register(saved);
 
@@ -572,7 +573,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // JCLAW-418: validate an explicit delivery patch before persisting.
         if (args.has(KEY_DELIVERY)) {
             var deliveryErr = services.DeliverySpec.validate(optStr(args, KEY_DELIVERY));
-            if (deliveryErr != null) return "Error: " + deliveryErr;
+            if (deliveryErr != null) return ERR_PREFIX + deliveryErr;
         }
 
         // Schedule re-parse, if present, drives type + 4 derived fields.
@@ -593,7 +594,7 @@ public class TaskTool implements ToolRegistry.Tool {
         } catch (IllegalArgumentException e) {
             // JCLAW-261: surface invalid-timezone (or any other validated
             // field) as a clean tool error.
-            return "Error: " + e.getMessage();
+            return ERR_PREFIX + e.getMessage();
         }
 
         if (!patch.anyChange()) {

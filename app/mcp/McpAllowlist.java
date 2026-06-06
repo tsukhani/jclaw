@@ -37,6 +37,8 @@ public final class McpAllowlist {
 
     public static final String SKILL_PREFIX = "mcp:";
 
+    private static final String QUERY_SKILL_NAME = QUERY_SKILL_NAME;
+
     private McpAllowlist() {}
 
     /**
@@ -61,14 +63,14 @@ public final class McpAllowlist {
         Set<String> incoming = new HashSet<>();
         for (var tool : tools) incoming.add(tool.name());
 
-        List<AgentSkillAllowedTool> existing = AgentSkillAllowedTool.find("skillName = ?1", skillName).fetch();
+        List<AgentSkillAllowedTool> existing = AgentSkillAllowedTool.find(QUERY_SKILL_NAME, skillName).fetch();
         Set<String> current = new HashSet<>();
         for (var row : existing) current.add(row.toolName);
         if (current.equals(incoming) && existing.size() == agents.size() * incoming.size()) {
             return existing.size();
         }
 
-        AgentSkillAllowedTool.delete("skillName = ?1", skillName);
+        AgentSkillAllowedTool.delete(QUERY_SKILL_NAME, skillName);
         if (tools.isEmpty()) return 0;
         int written = 0;
         for (var agent : agents) {
@@ -87,7 +89,7 @@ public final class McpAllowlist {
     /** Remove every allowlist row this server contributed. Returns the row count. */
     public static int unregister(String serverName) {
         var skillName = SKILL_PREFIX + serverName;
-        return AgentSkillAllowedTool.delete("skillName = ?1", skillName);
+        return AgentSkillAllowedTool.delete(QUERY_SKILL_NAME, skillName);
     }
 
     /**

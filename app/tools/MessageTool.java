@@ -78,6 +78,9 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final String PARAM_MULTIPLE = "allow_multiple";
     private static final String PARAM_OPEN_PERIOD = "open_period";
 
+    private static final String ERR_CALLING_AGENT = "Error: calling agent ";
+    private static final String ERR_NOT_FOUND = " not found.";
+
     private static final String ACTION_SEND = "send";
     private static final String ACTION_DELETE = "delete";
     private static final String ACTION_PIN = "pin";
@@ -350,7 +353,7 @@ public class MessageTool implements ToolRegistry.Tool {
                                     String explicitTarget, String message) {
         var agent = (Agent) Agent.findById(callingAgentId);
         if (agent == null) {
-            return "Error: calling agent " + callingAgentId + " not found.";
+            return ERR_CALLING_AGENT + callingAgentId + ERR_NOT_FOUND;
         }
         String channel = explicitChannel;
         String target = explicitTarget;
@@ -443,7 +446,7 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         var agent = (Agent) Agent.findById(callingAgentId);
         if (agent == null) {
-            return "Error: calling agent " + callingAgentId + " not found.";
+            return ERR_CALLING_AGENT + callingAgentId + ERR_NOT_FOUND;
         }
         var binding = TelegramBinding.findByAgentOrAncestor(agent);
         if (binding == null) {
@@ -493,7 +496,7 @@ public class MessageTool implements ToolRegistry.Tool {
                                Boolean allowsMultiple, Integer openPeriod) {
         var agent = (Agent) Agent.findById(callingAgentId);
         if (agent == null) {
-            return "Error: calling agent " + callingAgentId + " not found.";
+            return ERR_CALLING_AGENT + callingAgentId + ERR_NOT_FOUND;
         }
         var binding = TelegramBinding.findByAgentOrAncestor(agent);
         if (binding == null) {
