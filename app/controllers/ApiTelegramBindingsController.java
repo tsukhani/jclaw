@@ -297,7 +297,8 @@ public class ApiTelegramBindingsController extends Controller {
      *  so a bot is never simultaneously polling and webhooked (Telegram 409s the
      *  {@code getUpdates} loop otherwise). Entering WEBHOOK: stop the poller
      *  ({@code reconcile} drops a no-longer-POLLING binding) BEFORE {@code setWebhook}.
-     *  Entering POLLING: {@code deleteWebhook} BEFORE the poller's first getUpdates.
+     *  Entering POLLING: the poller's own {@code BotSession} runs {@code deleteWebhook}
+     *  before its first getUpdates (JCLAW-432), so no explicit delete is issued here.
      *
      *  <p>Known, harmless residual on POLLING→WEBHOOK: a single
      *  {@code BotSession} "GetUpdates 409" ERROR may be logged. When the binding

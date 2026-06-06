@@ -88,9 +88,17 @@ public final class TelegramWebhookRegistrar {
                              ChannelTransport transport, boolean enabled, WebhookApi api) {
         if (transport == ChannelTransport.WEBHOOK && enabled) {
             registerOne(id, botToken, webhookSecret, baseUrl, api);
+        } else if (enabled) {
+            // POLLING + enabled: a polling session will be registered, and the
+            // SDK's BotSession calls deleteWebhook itself (executeDeleteWebhook,
+            // unconditionally) before its first getUpdates. An explicit
+            // deleteWebhook here is redundant — and it can transiently fail,
+            // logging a spurious "Webhook deletion failed" ERROR on every
+            // create/transition (JCLAW-432). Let the session clear it.
         } else {
-            // POLLING / disabled: ensure Telegram holds no webhook, else the
-            // poller's getUpdates would 409. Idempotent if none is set.
+            // Disabled (either transport): no session runs, so clear any webhook
+            // ourselves — else Telegram keeps POSTing to a dead endpoint (or a
+            // later POLLING getUpdates would 409). Idempotent if none is set.
             api.deleteWebhook(botToken);
         }
     }

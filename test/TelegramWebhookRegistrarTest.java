@@ -58,11 +58,25 @@ class TelegramWebhookRegistrarTest extends UnitTest {
     }
 
     @Test
-    void pollingBindingDeregisters() {
+    void pollingEnabledBindingSkipsDeleteWebhook() {
+        // JCLAW-432: an enabled POLLING binding gets a session, and the SDK's
+        // BotSession deletes any webhook itself before its first getUpdates — so
+        // apply() must NOT issue its own (redundant, sometimes-failing) delete.
         var api = new FakeApi();
         TelegramWebhookRegistrar.apply(7L, "tok", "sek", BASE, ChannelTransport.POLLING, true, api);
-        assertEquals(List.of("tok"), api.deleted);
+        assertTrue(api.deleted.isEmpty(),
+                "enabled POLLING must not call deleteWebhook — the session clears it");
         assertTrue(api.set.isEmpty(), "POLLING must not register a webhook");
+    }
+
+    @Test
+    void pollingDisabledBindingDeregisters() {
+        // A disabled POLLING binding has no session, so apply() must clear any
+        // leftover webhook itself.
+        var api = new FakeApi();
+        TelegramWebhookRegistrar.apply(7L, "tok", "sek", BASE, ChannelTransport.POLLING, false, api);
+        assertEquals(List.of("tok"), api.deleted);
+        assertTrue(api.set.isEmpty());
     }
 
     @Test
