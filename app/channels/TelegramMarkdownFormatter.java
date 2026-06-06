@@ -48,6 +48,7 @@ public final class TelegramMarkdownFormatter {
 
     /** Default tag stack reset at chunk boundaries inside oversized fenced code blocks. */
     private static final String PRE_OPEN = "<pre>";
+    private static final String PRE_CLOSE = "</pre>";
     private static final String PRE_CODE_OPEN = "<pre><code>";
     private static final String PRE_CODE_CLOSE = "</code></pre>";
 
@@ -497,10 +498,10 @@ public final class TelegramMarkdownFormatter {
                 preDepth++;
                 block.append(PRE_OPEN);
                 i += PRE_OPEN.length();
-            } else if (preDepth > 0 && html.startsWith("</pre>", i)) {
+            } else if (preDepth > 0 && html.startsWith(PRE_CLOSE, i)) {
                 preDepth--;
-                block.append("</pre>");
-                i += "</pre>".length();
+                block.append(PRE_CLOSE);
+                i += PRE_CLOSE.length();
             } else if (preDepth == 0 && html.startsWith("\n\n", i)) {
                 blocks.add(block.toString());
                 block.setLength(0);

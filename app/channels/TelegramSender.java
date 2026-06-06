@@ -745,7 +745,8 @@ class TelegramSender {
      * uniform interface still uploads via the dedicated upload client.
      */
     public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
-        return trySendPhoto(peerId, file, file != null ? file.getName() : null, null, null, caption)
+        String fileName = file != null ? file.getName() : null;
+        return trySendPhoto(peerId, file, fileName, null, null, caption)
                 ? SendResult.OK : SendResult.FAILED;
     }
 
@@ -755,7 +756,8 @@ class TelegramSender {
      * ReplyParameters, Integer, String)} (no reply/topic context).
      */
     public SendResult sendDocument(String peerId, java.io.File file, String caption) {
-        return trySendDocument(peerId, file, file != null ? file.getName() : null, null, null, caption)
+        String fileName = file != null ? file.getName() : null;
+        return trySendDocument(peerId, file, fileName, null, null, caption)
                 ? SendResult.OK : SendResult.FAILED;
     }
 

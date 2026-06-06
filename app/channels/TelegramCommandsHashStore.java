@@ -49,9 +49,9 @@ public final class TelegramCommandsHashStore {
     private static final String LOG_SOURCE = "telegram";
 
     /** Field separator (US, 0x1F) between a command's name and its description. */
-    private static final char UNIT_SEP = '';
+    private static final char UNIT_SEP = '\u001F';
     /** Record separator (RS, 0x1E) between successive commands in the list. */
-    private static final char RECORD_SEP = '';
+    private static final char RECORD_SEP = '\u001E';
 
     /**
      * Test override for the command-hash directory (mirrors

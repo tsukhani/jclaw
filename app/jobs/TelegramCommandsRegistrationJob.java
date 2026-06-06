@@ -41,6 +41,9 @@ import java.util.List;
 @NoTransaction
 public class TelegramCommandsRegistrationJob extends Job<Void> {
 
+    private static final String LOG_CATEGORY = "channel";
+    private static final String LOG_SOURCE = "telegram";
+
     @Override
     public void doJob() {
         registerAll();
@@ -88,18 +91,18 @@ public class TelegramCommandsRegistrationJob extends Job<Void> {
     private static void register(TelegramBinding b, List<BotCommand> botCommands) {
         try {
             if (TelegramCommandsHashStore.shouldSkip(b.botToken, botCommands)) {
-                EventLogger.info("channel", b.agent != null ? b.agent.name : null, "telegram",
+                EventLogger.info(LOG_CATEGORY, b.agent != null ? b.agent.name : null, LOG_SOURCE,
                         "Slash-command set unchanged for binding %d; skipping setMyCommands"
                                 .formatted(b.id));
                 return;
             }
             TelegramChannel.setMyCommands(b.botToken, botCommands);
             TelegramCommandsHashStore.record(b.botToken, TelegramCommandsHashStore.hash(botCommands));
-            EventLogger.info("channel", b.agent != null ? b.agent.name : null, "telegram",
+            EventLogger.info(LOG_CATEGORY, b.agent != null ? b.agent.name : null, LOG_SOURCE,
                     "Registered %d slash command(s) for binding %d"
                             .formatted(botCommands.size(), b.id));
         } catch (Exception e) {
-            EventLogger.warn("channel", b.agent != null ? b.agent.name : null, "telegram",
+            EventLogger.warn(LOG_CATEGORY, b.agent != null ? b.agent.name : null, LOG_SOURCE,
                     "Slash-command registration failed for binding %d: %s"
                             .formatted(b.id, e.getMessage()));
         }

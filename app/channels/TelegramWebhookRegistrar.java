@@ -248,6 +248,7 @@ public final class TelegramWebhookRegistrar {
 
     /** Strip the bot token from a message before it is logged or returned. */
     private static String redact(String s, String token) {
-        return s == null ? "" : (token == null || token.isEmpty() ? s : s.replace(token, "<token>"));
+        if (s == null) return "";
+        return token == null || token.isEmpty() ? s : s.replace(token, "<token>");
     }
 }

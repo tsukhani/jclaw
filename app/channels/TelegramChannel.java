@@ -31,10 +31,6 @@ import org.telegram.telegrambots.meta.generics.TelegramClient;
  */
 public class TelegramChannel implements Channel {
 
-    private static final String LOG_CATEGORY = "channel";
-    /** Channel identifier used as logging source and returned by {@link #channelName()}. */
-    private static final String CHANNEL_NAME = "telegram";
-
     private final TelegramSender sender;
 
     TelegramChannel(String botToken) {
