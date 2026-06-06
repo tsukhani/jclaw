@@ -77,8 +77,21 @@ public final class TelegramWebhookRegistrar {
     }
 
     /** A deleted binding can no longer receive updates — drop its webhook. */
-    public static void onBindingDeleted(String botToken) {
-        if (botToken != null) TELEGRAM.deleteWebhook(botToken);
+    public static void onBindingDeleted(String botToken, ChannelTransport transport) {
+        onBindingDeleted(botToken, transport, TELEGRAM);
+    }
+
+    /**
+     * Testable core (JCLAW-433): only a WEBHOOK binding ever registered a webhook,
+     * so only it needs a deleteWebhook on teardown. A POLLING binding has none —
+     * calling deleteWebhook for it is a redundant API round-trip that just adds
+     * noise (and a "Webhook deletion failed" 401 when the bot token was revoked
+     * alongside the delete).
+     */
+    public static void onBindingDeleted(String botToken, ChannelTransport transport, WebhookApi api) {
+        if (botToken != null && transport == ChannelTransport.WEBHOOK) {
+            api.deleteWebhook(botToken);
+        }
     }
 
     // ── testable core (public for default-package tests) ──

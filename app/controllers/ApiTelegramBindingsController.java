@@ -357,11 +357,14 @@ public class ApiTelegramBindingsController extends Controller {
         if (binding == null) notFound();
         String agentName = binding.agent != null ? binding.agent.name : null;
         String botToken = binding.botToken;
+        var transport = binding.transport;
         binding.delete();
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agentName, CHANNEL_TELEGRAM,
                 "Binding %d deleted".formatted(id));
-        // JCLAW-339: drop any webhook so Telegram stops POSTing to a now-dead binding.
-        TelegramWebhookRegistrar.onBindingDeleted(botToken);
+        // JCLAW-339/JCLAW-433: drop the webhook only for a WEBHOOK binding — a
+        // POLLING binding never registered one, so deleting it is a redundant call
+        // that 401s (and logs an error) when the bot token was revoked alongside.
+        TelegramWebhookRegistrar.onBindingDeleted(botToken, transport);
         TelegramPollingRunner.reconcile();
         renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
     }

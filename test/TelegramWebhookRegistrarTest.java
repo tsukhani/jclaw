@@ -89,6 +89,24 @@ class TelegramWebhookRegistrarTest extends UnitTest {
     }
 
     @Test
+    void onBindingDeletedClearsWebhookForWebhookBinding() {
+        // Deleting a WEBHOOK binding must clear its registered webhook.
+        var api = new FakeApi();
+        TelegramWebhookRegistrar.onBindingDeleted("tok", ChannelTransport.WEBHOOK, api);
+        assertEquals(List.of("tok"), api.deleted);
+    }
+
+    @Test
+    void onBindingDeletedSkipsDeleteForPollingBinding() {
+        // JCLAW-433: a POLLING binding never registered a webhook, so deleting it
+        // must not issue a (redundant, sometimes-401ing) deleteWebhook.
+        var api = new FakeApi();
+        TelegramWebhookRegistrar.onBindingDeleted("tok", ChannelTransport.POLLING, api);
+        assertTrue(api.deleted.isEmpty(),
+                "deleting a POLLING binding must not call deleteWebhook");
+    }
+
+    @Test
     void blankBaseSkipsRegistrationWithoutDeleting() {
         // No public base → can't form a URL → skip + warn, but DON'T deregister
         // (the binding is still intended as a webhook).
