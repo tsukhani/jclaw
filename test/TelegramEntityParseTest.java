@@ -112,7 +112,53 @@ class TelegramEntityParseTest extends UnitTest {
                   "chat":{"id":-100,"type":"supergroup"},"date":1,
                   "text":"just chatting in the group"}}
                 """,
-                false, "a plain group message with no entities is not a bot address", "Ada")
+                false, "a plain group message with no entities is not a bot address", "Ada"),
+            // AC1: "@jclaw_bot" inside a url entity (not a mention) must not false-positive.
+            Arguments.of(
+                """
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":1,
+                  "text":"see https://x.com/@jclaw_bot/posts for details",
+                  "entities":[{"type":"url","offset":4,"length":27}]}}
+                """,
+                false, "@jclaw_bot inside a URL (url entity, not mention) must NOT false-positive", null),
+            // AC1: "/help@jclaw_bot" inside a code entity is not a bot_command.
+            Arguments.of(
+                """
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":1,
+                  "text":"run /help@jclaw_bot to see commands",
+                  "entities":[{"type":"code","offset":4,"length":15}]}}
+                """,
+                false, "/help@jclaw_bot inside a code span must NOT flag botMentioned", null),
+            // AC3: replying to the bot's own message (from.id 555 == bot id) is a direct address.
+            Arguments.of(
+                """
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":2,
+                  "text":"yes please",
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":555,"is_bot":true,"first_name":"JClaw"},
+                    "chat":{"id":-100,"type":"supergroup"},"date":1,
+                    "text":"want me to continue?"}}}
+                """,
+                true, "replying to the bot's own message must flag botMentioned", null),
+            // AC3: replying to a human (not the bot) must not flag botMentioned.
+            Arguments.of(
+                """
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":2,
+                  "text":"agreed",
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":77,"is_bot":false,"first_name":"Bob"},
+                    "chat":{"id":-100,"type":"supergroup"},"date":1,
+                    "text":"I think we should ship"}}}
+                """,
+                false, "replying to a human (not the bot) must not flag botMentioned", null)
         );
     }
 
@@ -128,83 +174,6 @@ class TelegramEntityParseTest extends UnitTest {
             assertEquals(expectedDisplayName, msg.fromDisplayName(),
                     "first-name-only display name when no last name");
         }
-    }
-
-    // ── AC1: offset-correctness — no false positive inside a URL ────────
-
-    @Test
-    void handleInsideUrl_doesNotFalsePositive() throws Exception {
-        // The literal "@jclaw_bot" appears inside a URL, but the only entity
-        // is a `url` entity — there is NO mention entity. Substring search
-        // would wrongly fire; offset-based scanning must not.
-        var u = update("""
-                {"update_id":1,"message":{"message_id":1,
-                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
-                  "chat":{"id":-100,"type":"supergroup"},"date":1,
-                  "text":"see https://x.com/@jclaw_bot/posts for details",
-                  "entities":[{"type":"url","offset":4,"length":27}]}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertFalse(msg.botMentioned(),
-                "@jclaw_bot inside a URL (url entity, not mention) must NOT false-positive");
-    }
-
-    @Test
-    void slashCommandInsideCodeSpan_doesNotFalsePositive() throws Exception {
-        // "/help@jclaw_bot" appears inside a `code` entity, not a bot_command
-        // entity — Telegram does not emit bot_command for text inside code.
-        var u = update("""
-                {"update_id":1,"message":{"message_id":1,
-                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
-                  "chat":{"id":-100,"type":"supergroup"},"date":1,
-                  "text":"run /help@jclaw_bot to see commands",
-                  "entities":[{"type":"code","offset":4,"length":15}]}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertFalse(msg.botMentioned(),
-                "/help@jclaw_bot inside a code span must NOT flag botMentioned");
-    }
-
-    // ── AC3: reply-to-bot signal ────────────────────────────────────────
-
-    @Test
-    void replyToBotMessage_flagsBotMentioned() throws Exception {
-        // No mention entity, but the message replies to one authored by the
-        // bot (from.id 555). That is a direct address.
-        var u = update("""
-                {"update_id":1,"message":{"message_id":2,
-                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
-                  "chat":{"id":-100,"type":"supergroup"},"date":2,
-                  "text":"yes please",
-                  "reply_to_message":{"message_id":1,
-                    "from":{"id":555,"is_bot":true,"first_name":"JClaw"},
-                    "chat":{"id":-100,"type":"supergroup"},"date":1,
-                    "text":"want me to continue?"}}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertTrue(msg.botMentioned(),
-                "replying to the bot's own message must flag botMentioned");
-    }
-
-    @Test
-    void replyToOtherUser_doesNotFlagBotMentioned() throws Exception {
-        var u = update("""
-                {"update_id":1,"message":{"message_id":2,
-                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
-                  "chat":{"id":-100,"type":"supergroup"},"date":2,
-                  "text":"agreed",
-                  "reply_to_message":{"message_id":1,
-                    "from":{"id":77,"is_bot":false,"first_name":"Bob"},
-                    "chat":{"id":-100,"type":"supergroup"},"date":1,
-                    "text":"I think we should ship"}}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertFalse(msg.botMentioned(),
-                "replying to a human (not the bot) must not flag botMentioned");
     }
 
     // ── Best-effort degradation when bot identity is unknown ────────────
