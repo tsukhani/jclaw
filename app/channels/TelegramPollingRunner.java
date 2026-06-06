@@ -145,6 +145,18 @@ public final class TelegramPollingRunner {
      */
     private static final ConcurrentHashMap<String, Long> LAST_REBUILD_AT = new ConcurrentHashMap<>();
 
+    /**
+     * JCLAW-434: predicate answering "has Telegram permanently rejected this bot
+     * token?" — getMe returning 401/403/404 (auth/not-found). The watchdog uses
+     * it to disable a wedged binding whose token is invalid/revoked rather than
+     * rebuild-storming getUpdates against a dead token. Injectable (volatile,
+     * publish-then-read) so watchdog tests can stub it without dialing
+     * {@code api.telegram.org}; production uses {@link #tokenRejectedByTelegram}.
+     */
+    @SuppressWarnings("java:S3077") // volatile predicate: pure publish-then-read, no compound mutation
+    private static volatile java.util.function.Predicate<String> tokenRejectedCheck =
+            TelegramPollingRunner::tokenRejectedByTelegram;
+
     /** Config key: minimum interval between consecutive watchdog rebuilds (ms). */
     public static final String CFG_REBUILD_BACKOFF_MIN_MS = "telegram.polling.rebuild-backoff-min-ms";
     /** Config key: cap on the watchdog rebuild backoff interval (ms). */
@@ -322,6 +334,8 @@ public final class TelegramPollingRunner {
         // JCLAW-363 follow-up: clear the rebuild-backoff bookkeeping too.
         REBUILD_COUNT.clear();
         LAST_REBUILD_AT.clear();
+        // JCLAW-434: restore the real getMe-backed token-rejection probe.
+        tokenRejectedCheck = TelegramPollingRunner::tokenRejectedByTelegram;
         watchdogMsOverride = null;
         clock = System::currentTimeMillis;
         APP.set(null);
@@ -605,6 +619,28 @@ public final class TelegramPollingRunner {
                 }
                 continue;
             }
+            // JCLAW-434: before rebuilding, check whether the token itself is the
+            // problem. A wedged poller might be polling with a permanently-invalid
+            // token (revoked/wrong) rather than hitting a transient or 409-conflict
+            // failure — and rebuilding can't fix a bad token, it just re-storms
+            // getUpdates with 401s. Probe getMe: if Telegram rejects the token
+            // (401/403/404), DISABLE the binding so neither reconcile nor the
+            // cooldown self-reconcile re-registers it, unregister the session, and
+            // alert the operator. A valid token (409 / transient network) falls
+            // through to the rebuild/backoff path below.
+            if (tokenRejectedCheck.test(token)) {
+                EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
+                        ("Polling binding %d disabled: Telegram rejected its bot token (getMe "
+                                + "401/403/404). The token is invalid or revoked — fix it and "
+                                + "re-enable the binding.").formatted(bindingId));
+                disableBindingForInvalidToken(bindingId);
+                unregisterInternal(app, bindingId, token);
+                // Disabled, not rebuilding — drop this token's rebuild/alert state.
+                REBUILD_COUNT.remove(token);
+                LAST_REBUILD_AT.remove(token);
+                CONFLICT_ALERTED.remove(token);
+                continue;
+            }
             // JCLAW-363 follow-up: bounded exponential backoff on the rebuild
             // action itself. A token that keeps wedging without ever making
             // progress must not rebuild every tick — that would rebuild-storm a
@@ -624,6 +660,49 @@ public final class TelegramPollingRunner {
                             bindingId, elapsed, timeout, rebuildCount(token) + 1));
             recordRebuild(token, now);
             unregisterInternal(app, bindingId, token);
+        }
+    }
+
+    /**
+     * JCLAW-434: does Telegram reject {@code token} as permanently invalid? Calls
+     * {@code getMe} and treats a 401/403/404 (auth / bot-not-found) as a
+     * definitive rejection — a revoked or wrong token. A transient/network
+     * failure is NOT a rejection (returns false) so a blip never disables a good
+     * binding. Backs the default {@link #tokenRejectedCheck}; tests inject a stub.
+     */
+    private static boolean tokenRejectedByTelegram(String token) {
+        if (token == null) return false;
+        try {
+            TelegramChannel.forToken(token).client()
+                    .execute(org.telegram.telegrambots.meta.api.methods.GetMe.builder().build());
+            return false; // Telegram accepted the token
+        } catch (Exception e) {
+            return ERR_NON_RECOVERABLE.equals(classifyPollingError(e));
+        }
+    }
+
+    /**
+     * JCLAW-434: persist {@code enabled = false} for the binding whose token
+     * Telegram rejected, so the cooldown self-reconcile (and every future
+     * reconcile) skips it instead of re-registering a poller that can only 401.
+     * Runs in its own transaction (the watchdog thread is outside one in prod);
+     * failures are logged, never thrown — a disable that can't persist must not
+     * crash the watchdog tick.
+     */
+    private static void disableBindingForInvalidToken(Long bindingId) {
+        try {
+            services.Tx.run(() -> {
+                TelegramBinding b = TelegramBinding.<TelegramBinding>findById(bindingId);
+                if (b != null) {
+                    b.enabled = false;
+                    b.save();
+                }
+                return null;
+            });
+        } catch (Exception e) {
+            EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
+                    "Failed to disable binding %d after token rejection: %s".formatted(
+                            bindingId, e.getMessage()));
         }
     }
 
@@ -784,6 +863,15 @@ public final class TelegramPollingRunner {
      */
     static void setRebuildCountForTest(String token, int count) {
         if (token != null) REBUILD_COUNT.put(token, count);
+    }
+
+    /**
+     * JCLAW-434: override the token-rejection check so watchdog tests can drive
+     * the auto-disable path without dialing {@code api.telegram.org}. Pass
+     * {@code null} to restore the real {@code getMe} probe.
+     */
+    static void setTokenRejectedCheckForTest(java.util.function.Predicate<String> p) {
+        tokenRejectedCheck = (p != null) ? p : TelegramPollingRunner::tokenRejectedByTelegram;
     }
 
     /** Snapshot of binding state pulled inside the transaction, then read off-thread. */

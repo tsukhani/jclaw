@@ -90,4 +90,13 @@ public final class TelegramPollingRunnerTestHooks {
     public static void setRebuildCount(String token, int count) {
         TelegramPollingRunner.setRebuildCountForTest(token, count);
     }
+
+    /**
+     * JCLAW-434: stub the "has Telegram rejected this token?" probe so a test can
+     * drive the watchdog's auto-disable path without dialing {@code api.telegram.org}.
+     * Pass {@code null} to restore the real {@code getMe} probe.
+     */
+    public static void setTokenRejectedCheck(java.util.function.Predicate<String> p) {
+        TelegramPollingRunner.setTokenRejectedCheckForTest(p);
+    }
 }

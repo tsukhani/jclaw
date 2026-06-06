@@ -60,6 +60,10 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         // bindings without dialing api.telegram.org.
         fakeApp = new InMemoryPollingApp();
         TelegramPollingRunnerTestHooks.setApp(fakeApp);
+        // JCLAW-434: the watchdog now probes getMe for a wedged poller. Default the
+        // probe to "token accepted" so no test dials api.telegram.org; the disable
+        // test overrides it. (clear() above reset it to the real getMe probe.)
+        TelegramPollingRunnerTestHooks.setTokenRejectedCheck(t -> false);
         // JCLAW-361: redirect the offset store at a per-test temp dir so the
         // runner's offset persist/seed lands in tmp, never production state.
         offsetTmp = Files.createTempDirectory("jclaw-tg-offset-runner-");
@@ -487,6 +491,60 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "a binding within the watchdog timeout must not be rebuilt");
         assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs(token),
                 "a healthy binding must not be stamped into cooldown");
+    }
+
+    @Test
+    void watchdogDisablesABindingWhoseTokenTelegramRejects() {
+        // JCLAW-434: a wedged poller whose getMe is rejected (401/403/404) has a
+        // permanently-invalid token. The watchdog must DISABLE the binding (so it
+        // stops being re-registered) and alert — not rebuild it (which would just
+        // re-storm getUpdates with 401s against a dead token).
+        String token = "775:revokedWd";
+        Long id = seedPollingBinding("agent-wd-revoked", token, "8", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+
+        // Telegram rejects this token; jump past the timeout so the poller is wedged.
+        TelegramPollingRunnerTestHooks.setTokenRejectedCheck(t -> token.equals(t));
+        TelegramPollingRunnerTestHooks.setClock(() -> 200_000L);
+        EventLogger.clear();
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        EventLogger.flush();
+
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "a binding with a rejected token must be unregistered");
+        assertFalse(TelegramBinding.<TelegramBinding>findById(id).enabled,
+                "a binding with a rejected token must be disabled so reconcile won't re-register it");
+        assertEquals(0, TelegramPollingRunner.rebuildCount(token),
+                "the binding is disabled, not rebuilt — no rebuild is recorded");
+        long alerts = EventLog.count("category = ?1 AND message LIKE ?2",
+                "channel", "%disabled: Telegram rejected its bot token%");
+        assertEquals(1L, alerts, "the operator is alerted that Telegram rejected the token");
+    }
+
+    @Test
+    void watchdogRebuildsRatherThanDisablesWhenTokenIsValid() {
+        // JCLAW-434 guard: a wedged poller whose getMe SUCCEEDS (valid token — e.g.
+        // a 409 conflict or transient network blip) must take the rebuild path, not
+        // be disabled.
+        String token = "776:validWd";
+        Long id = seedPollingBinding("agent-wd-valid", token, "8", true);
+        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
+        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
+        TelegramPollingRunner.reconcile();
+
+        TelegramPollingRunnerTestHooks.setTokenRejectedCheck(t -> false); // token accepted
+        TelegramPollingRunnerTestHooks.setClock(() -> 200_000L);
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "a stale valid-token binding is rebuilt (unregistered)");
+        assertTrue(TelegramBinding.<TelegramBinding>findById(id).enabled,
+                "a valid-token binding must NOT be disabled");
+        assertTrue(TelegramPollingRunner.cooldownRemainingMs(token) > 0L,
+                "the rebuild path stamps the cooldown");
     }
 
     @Test
