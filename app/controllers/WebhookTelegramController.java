@@ -28,7 +28,7 @@ public class WebhookTelegramController extends Controller {
 
     private static final String CHANNEL_TELEGRAM = "telegram";
     private static final String CATEGORY_CHANNEL = "channel";
-    private static final String THREAD_NAME_PROCESS = THREAD_NAME_PROCESS;
+    private static final String THREAD_NAME_PROCESS = "webhook-telegram-process";
 
     /**
      * JCLAW-371: deserialize the webhook JSON body into an SDK {@link Update}

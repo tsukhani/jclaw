@@ -37,7 +37,7 @@ public final class McpAllowlist {
 
     public static final String SKILL_PREFIX = "mcp:";
 
-    private static final String QUERY_SKILL_NAME = QUERY_SKILL_NAME;
+    private static final String QUERY_SKILL_NAME = "skillName = ?1";
 
     private McpAllowlist() {}
 

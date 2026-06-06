@@ -933,7 +933,9 @@ function expandCron(expr: string, from: Date, to: Date): Date[] {
   if (parts.length === 6) {
     // Spring 6-field: sec min hour dom mon dow — only sec=0 expansion is
     // supported (the calendar grid is minute-resolution).
-    if (parts[0] !== '0') { return [] }
+    if (parts[0] !== '0') {
+      return []
+    }
     ;[min, hour, dom, mon, dow] = parts.slice(1) as [string, string, string, string, string]
   }
   else if (parts.length === 5) {

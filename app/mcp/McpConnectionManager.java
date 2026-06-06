@@ -56,7 +56,7 @@ public final class McpConnectionManager {
     private static final String CLIENT_VERSION_FALLBACK = "0.0.0-dev";
     private static final String CATEGORY_CONNECT = "MCP_CONNECT";
     private static final String CATEGORY_DISCONNECT = "MCP_DISCONNECT";
-    private static final String TIMESTAMP_LAST_DISCONNECTED = TIMESTAMP_LAST_DISCONNECTED;
+    private static final String TIMESTAMP_LAST_DISCONNECTED = "lastDisconnectedAt";
 
     private static volatile long backoffInitialMillis = 1_000L;
     private static volatile long backoffCeilingMillis = 30_000L;

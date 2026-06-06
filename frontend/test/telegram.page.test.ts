@@ -173,7 +173,7 @@ describe('telegram bindings page — health probe (JCLAW-362)', () => {
     const c = await mountSuspended(Telegram)
     // No result before the probe runs.
     expect(c.find('[data-testid="probe-result-7"]').exists()).toBe(false)
-    await c.find('[aria-label="Test binding"]').trigger('click')
+    await c.find('[title^="Test binding"]').trigger('click')
     await flushPromises()
     await nextTick()
     const result = c.find('[data-testid="probe-result-7"]')
@@ -195,7 +195,7 @@ describe('telegram bindings page — health probe (JCLAW-362)', () => {
       error: 'getMe failed: [401] Unauthorized',
     }
     const c = await mountSuspended(Telegram)
-    await c.find('[aria-label="Test binding"]').trigger('click')
+    await c.find('[title^="Test binding"]').trigger('click')
     await flushPromises()
     await nextTick()
     const result = c.find('[data-testid="probe-result-7"]')
@@ -217,7 +217,7 @@ describe('telegram bindings page — health probe (JCLAW-362)', () => {
       error: null,
     }
     const c = await mountSuspended(Telegram)
-    await c.find('[aria-label="Test binding"]').trigger('click')
+    await c.find('[title^="Test binding"]').trigger('click')
     await flushPromises()
     await nextTick()
     const result = c.find('[data-testid="probe-result-7"]')
