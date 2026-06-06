@@ -23,17 +23,16 @@ import java.util.stream.Stream;
 
 /**
  * Unit-ish coverage for {@link TelegramPollingRunner} (JCLAW-313). The
- * runner owns three pieces of testable state outside the SDK's network
- * path:
+ * runner owns two pieces of testable state outside the SDK's network path:
  *
  * <ol>
  *   <li>{@code activeBindingIds()} — the set of bindings the runner has
  *       registered against the long-polling app.</li>
- *   <li>{@code cooldownRemainingMs/cooldownUntil} — the post-unregister
- *       cooldown that defers re-registration to avoid Telegram's HTTP 409
- *       "terminated by other getUpdates" race.</li>
  *   <li>{@code reconcile()} — the idempotent sync from DB → live sessions.</li>
  * </ol>
+ *
+ * <p>JCLAW-436 adds {@code probeTokenHealth()} — the standalone token
+ * health-probe that disables a binding whose bot token Telegram rejects.
  *
  * <p>Happy-path long-poll dispatch is NOT covered here: the SDK calls
  * {@code api.telegram.org} directly through an inner {@code BotSession},
@@ -50,19 +49,17 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     @BeforeEach
     void setup() throws Exception {
         Fixtures.deleteDatabase();
-        // JCLAW-316: clear the runner's static state without shutting down
-        // its background scheduler — stop() would kill SCHEDULER, and a
-        // later unregister via reconcile() schedules a delayed re-reconcile
-        // that would then RejectedExecutionException. clear() is the test-
-        // only state reset; stop() stays the production shutdown path.
+        // JCLAW-316: clear the runner's static state (active + session maps, app
+        // reference, token-rejection probe) between tests. clear() is the test-only
+        // reset; stop() stays the production shutdown path.
         TelegramPollingRunnerTestHooks.clear();
         // Install an in-memory long-polling app so reconcile() can register
         // bindings without dialing api.telegram.org.
         fakeApp = new InMemoryPollingApp();
         TelegramPollingRunnerTestHooks.setApp(fakeApp);
-        // JCLAW-434: the watchdog now probes getMe for a wedged poller. Default the
-        // probe to "token accepted" so no test dials api.telegram.org; the disable
-        // test overrides it. (clear() above reset it to the real getMe probe.)
+        // JCLAW-436: the standalone health-probe calls getMe. Default it to "token
+        // accepted" so no test dials api.telegram.org; the disable test overrides it.
+        // (clear() above reset it to the real getMe probe.)
         TelegramPollingRunnerTestHooks.setTokenRejectedCheck(t -> false);
         // JCLAW-361: redirect the offset store at a per-test temp dir so the
         // runner's offset persist/seed lands in tmp, never production state.
@@ -148,28 +145,6 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         });
     }
 
-    // ===== cooldown helpers (callable on any thread) =====
-
-    @Test
-    void cooldownRemainingMsReturnsZeroForUnknownToken() {
-        assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs("not-a-real-token"));
-    }
-
-    @Test
-    void cooldownRemainingMsReturnsZeroForNullToken() {
-        assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs(null));
-    }
-
-    @Test
-    void cooldownUntilReturnsNullForUnknownToken() {
-        assertNull(TelegramPollingRunner.cooldownUntil("not-a-real-token"));
-    }
-
-    @Test
-    void cooldownUntilReturnsNullForNullToken() {
-        assertNull(TelegramPollingRunner.cooldownUntil(null));
-    }
-
     // ===== reconcile() against the DB =====
 
     @Test
@@ -203,10 +178,10 @@ class TelegramPollingRunnerTest extends FunctionalTest {
 
     // ===== Registration-dependent reconcile() state machine (JCLAW-316) =====
     //
-    // These six exercise reconcile() against the in-memory polling app
-    // installed in @BeforeEach. Each test seeds DB rows, optionally mutates
-    // them in a fresh committed transaction, and asserts on activeBindingIds()
-    // / cooldownRemainingMs() — no api.telegram.org traffic.
+    // These exercise reconcile() against the in-memory polling app installed in
+    // @BeforeEach. Each test seeds DB rows, optionally mutates them in a fresh
+    // committed transaction, and asserts on activeBindingIds() — no
+    // api.telegram.org traffic.
 
     @Test
     void reconcileRegistersEnabledPollingBinding() {
@@ -290,29 +265,6 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         TelegramPollingRunner.reconcile();
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                 "binding flipped to disabled should be unregistered");
-        assertTrue(TelegramPollingRunner.cooldownRemainingMs(token) > 0L,
-                "unregister should stamp cooldown on the prior token");
-    }
-
-    @Test
-    void cooldownSchedulerDropsDeferredReconcileOnShutdown() throws Exception {
-        // JCLAW-335: a binding unregister schedules a reconcile ~30.5s out
-        // (COOLDOWN_MS + 500). At shutdown the scheduler must not wait on that
-        // deferred task — gracefulShutdown only awaits 5s, and an unconfigured
-        // ScheduledThreadPoolExecutor would force-kill it with a WARN after the
-        // 5s tail. Verify newScheduler() drops queued delayed tasks on
-        // shutdown() so the drain is immediate.
-        var newScheduler = TelegramPollingRunner.class.getDeclaredMethod("newScheduler");
-        newScheduler.setAccessible(true);
-        var exec = (java.util.concurrent.ScheduledExecutorService) newScheduler.invoke(null);
-        try {
-            exec.schedule(() -> { }, 60, java.util.concurrent.TimeUnit.SECONDS); // stand in for the deferred reconcile
-            exec.shutdown();
-            assertTrue(exec.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS),
-                    "scheduler must terminate promptly, not wait out the deferred reconcile");
-        } finally {
-            exec.shutdownNow();
-        }
     }
 
     @Test
@@ -343,39 +295,6 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         TelegramPollingRunner.reconcile();
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
                 "binding should still be active under the rotated token");
-        assertTrue(TelegramPollingRunner.cooldownRemainingMs(tokenA) > 0L,
-                "old token should have cooldown stamped after rotation");
-        assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs(tokenB),
-                "new token should be live (no cooldown)");
-    }
-
-    @Test
-    void reconcileDefersRegistrationWhileTokenInCooldown() {
-        String token = "666:tokF";
-        Long id = seedPollingBinding("agent-f", token, "6", true);
-
-        // Register, then disable so reconcile() unregisters + stamps cooldown.
-        TelegramPollingRunner.reconcile();
-        commitInFreshTx(() -> {
-            TelegramBinding b = TelegramBinding.findById(id);
-            b.enabled = false;
-            b.save();
-            return null;
-        });
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.cooldownRemainingMs(token) > 0L);
-
-        // Re-enable and reconcile again — registerInternal must see the live
-        // cooldown and bail out without populating ACTIVE.
-        commitInFreshTx(() -> {
-            TelegramBinding b = TelegramBinding.findById(id);
-            b.enabled = true;
-            b.save();
-            return null;
-        });
-        TelegramPollingRunner.reconcile();
-        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
-                "re-enable during cooldown must defer registration");
     }
 
     // ===== JCLAW-361: offset persistence + seeding wiring =====
@@ -424,324 +343,31 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "after the session advances past the seed, the SDK value drives the offset");
     }
 
-    // ===== JCLAW-363: liveness watchdog + transport rebuild =====
-    //
-    // These drive the watchdog through TelegramPollingRunnerTestHooks: an
-    // injectable clock (advance "now" without sleeping), a watchdog-ms override
-    // (bypass application.conf), and a synchronous tick. A rebuild manifests as
-    // the binding leaving activeBindingIds() with its token stamped into
-    // cooldown — the existing scheduled cooldown reconcile then re-registers it
-    // ~30.5s out, which never fires inside a fast test.
+    // ===== JCLAW-436: standalone token health-probe =====
 
     @Test
-    void consumingAnUpdateAdvancesLastProgress() {
-        String token = "771:tokWd";
-        seedPollingBinding("agent-wd-progress", token, "7", true);
-        // Freeze the clock at t0 so register() seeds last-progress to a known value.
-        TelegramPollingRunnerTestHooks.setClock(() -> 1_000L);
-        TelegramPollingRunner.reconcile();
-        assertEquals(Long.valueOf(1_000L), TelegramPollingRunnerTestHooks.lastProgress(token),
-                "register should seed last-progress to the current clock value");
-
-        // Advance the clock, then drive the consumer; the wrapper must restamp.
-        TelegramPollingRunnerTestHooks.setClock(() -> 5_000L);
-        var consumer = fakeApp.consumerFor(token);
-        assertNotNull(consumer);
-        Update update = new Update();
-        update.setUpdateId(11);
-        ((LongPollingSingleThreadUpdateConsumer) consumer).consume(update);
-
-        assertEquals(Long.valueOf(5_000L), TelegramPollingRunnerTestHooks.lastProgress(token),
-                "consuming an update should advance last-progress to the current clock value");
-    }
-
-    @Test
-    void watchdogRebuildsAStaleBinding() {
-        String token = "772:tokWd";
-        Long id = seedPollingBinding("agent-wd-stale", token, "7", true);
-        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
-        TelegramPollingRunnerTestHooks.setClock(() -> 0L); // register seeds progress at t0
+    void probeTokenHealthDisablesABindingWhoseTokenIsRejected() {
+        // The probe replaces the old liveness watchdog. For an enabled POLLING
+        // binding whose getMe Telegram rejects (401/403/404), the probe must
+        // disable the binding, unregister its live session, and alert the operator.
+        String token = "775:revokedProbe";
+        Long id = seedPollingBinding("agent-probe-revoked", token, "8", true);
         TelegramPollingRunner.reconcile();
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
 
-        // Jump the clock well past the timeout with no intervening consume.
-        TelegramPollingRunnerTestHooks.setClock(() -> 200_000L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-
-        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
-                "a binding stale past the watchdog timeout should be rebuilt (unregistered)");
-        assertTrue(TelegramPollingRunner.cooldownRemainingMs(token) > 0L,
-                "the rebuild should stamp the cooldown so re-register waits out Telegram's stale poll");
-    }
-
-    @Test
-    void watchdogLeavesAFreshBindingAlone() {
-        String token = "773:tokWd";
-        Long id = seedPollingBinding("agent-wd-fresh", token, "7", true);
-        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
-        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
-
-        // Advance only a little — within the timeout — so the binding is healthy.
-        TelegramPollingRunnerTestHooks.setClock(() -> 1_000L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
-                "a binding within the watchdog timeout must not be rebuilt");
-        assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs(token),
-                "a healthy binding must not be stamped into cooldown");
-    }
-
-    @Test
-    void watchdogDisablesABindingWhoseTokenTelegramRejects() {
-        // JCLAW-434: a wedged poller whose getMe is rejected (401/403/404) has a
-        // permanently-invalid token. The watchdog must DISABLE the binding (so it
-        // stops being re-registered) and alert — not rebuild it (which would just
-        // re-storm getUpdates with 401s against a dead token).
-        String token = "775:revokedWd";
-        Long id = seedPollingBinding("agent-wd-revoked", token, "8", true);
-        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
-        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
-
-        // Telegram rejects this token; jump past the timeout so the poller is wedged.
+        // Telegram rejects this token, then run the probe.
         TelegramPollingRunnerTestHooks.setTokenRejectedCheck(t -> token.equals(t));
-        TelegramPollingRunnerTestHooks.setClock(() -> 200_000L);
         EventLogger.clear();
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        TelegramPollingRunnerTestHooks.runTokenHealthProbe();
         EventLogger.flush();
 
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                 "a binding with a rejected token must be unregistered");
         assertFalse(TelegramBinding.<TelegramBinding>findById(id).enabled,
                 "a binding with a rejected token must be disabled so reconcile won't re-register it");
-        assertEquals(0, TelegramPollingRunner.rebuildCount(token),
-                "the binding is disabled, not rebuilt — no rebuild is recorded");
         long alerts = EventLog.count("category = ?1 AND message LIKE ?2",
                 "channel", "%disabled: Telegram rejected its bot token%");
         assertEquals(1L, alerts, "the operator is alerted that Telegram rejected the token");
-    }
-
-    @Test
-    void watchdogRebuildsRatherThanDisablesWhenTokenIsValid() {
-        // JCLAW-434 guard: a wedged poller whose getMe SUCCEEDS (valid token — e.g.
-        // a 409 conflict or transient network blip) must take the rebuild path, not
-        // be disabled.
-        String token = "776:validWd";
-        Long id = seedPollingBinding("agent-wd-valid", token, "8", true);
-        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
-        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
-        TelegramPollingRunner.reconcile();
-
-        TelegramPollingRunnerTestHooks.setTokenRejectedCheck(t -> false); // token accepted
-        TelegramPollingRunnerTestHooks.setClock(() -> 200_000L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-
-        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
-                "a stale valid-token binding is rebuilt (unregistered)");
-        assertTrue(TelegramBinding.<TelegramBinding>findById(id).enabled,
-                "a valid-token binding must NOT be disabled");
-        assertTrue(TelegramPollingRunner.cooldownRemainingMs(token) > 0L,
-                "the rebuild path stamps the cooldown");
-    }
-
-    @Test
-    void watchdogDisabledWhenWatchdogMsIsZero() {
-        String token = "774:tokWd";
-        Long id = seedPollingBinding("agent-wd-off", token, "7", true);
-        TelegramPollingRunnerTestHooks.setWatchdogMs(0L); // disabled
-        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
-        assertFalse(TelegramPollingRunnerTestHooks.isWatchdogRunning(),
-                "watchdogMs=0 must not schedule the periodic tick");
-
-        // Even far past any timeout, a disabled watchdog tick is a no-op.
-        TelegramPollingRunnerTestHooks.setClock(() -> 10_000_000L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
-                "watchdogMs=0 must never rebuild a binding, however stale");
-        assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs(token));
-    }
-
-    @Test
-    void watchdogDoesNotRebuildABindingInCooldown() {
-        String token = "775:tokWd";
-        Long id = seedPollingBinding("agent-wd-cooldown", token, "7", true);
-        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
-        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
-
-        // Stamp a live cooldown on the still-active token, then make it stale.
-        // The watchdog must defer to the in-flight cooldown reconcile rather than
-        // double-rebuild and fight the 409 cooldown.
-        TelegramPollingRunnerTestHooks.stampCooldown(token, 60_000L);
-        TelegramPollingRunnerTestHooks.setClock(() -> 200_000L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
-                "a token in cooldown must not be rebuilt by the watchdog");
-    }
-
-    @Test
-    void watchdogTickStartedOnRegisterWhenEnabled() {
-        String token = "776:tokWd";
-        seedPollingBinding("agent-wd-lifecycle", token, "7", true);
-        TelegramPollingRunnerTestHooks.setWatchdogMs(120_000L);
-        assertFalse(TelegramPollingRunnerTestHooks.isWatchdogRunning(),
-                "no watchdog before the first registration");
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunnerTestHooks.isWatchdogRunning(),
-                "registering a binding with the watchdog enabled should start the periodic tick");
-    }
-
-    // ===== JCLAW-363 follow-up: bounded backoff on the watchdog rebuild path =====
-    //
-    // The backoff governs ONLY the watchdog REBUILD action — never the SDK's
-    // getUpdates poll loop (that already backs off; competing there risks a 409
-    // double-poll). The curve is min << consecutiveRebuilds, capped at max, reset
-    // when the poller consumes an update again. Backoff timestamps use the
-    // injectable test clock, so these are deterministic without sleeping.
-
-    @Test
-    void rebuildBackoffCurveDoublesAndCapsAtMax() {
-        services.ConfigService.set(
-                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MIN_MS, "5000");
-        services.ConfigService.set(
-                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MAX_MS, "300000");
-        // count 0 → floor (the first rebuild is never delayed beyond watchdogMs).
-        assertEquals(5000L, TelegramPollingRunner.rebuildBackoffIntervalMs(0));
-        // doubles per consecutive rebuild …
-        assertEquals(10000L, TelegramPollingRunner.rebuildBackoffIntervalMs(1));
-        assertEquals(20000L, TelegramPollingRunner.rebuildBackoffIntervalMs(2));
-        assertEquals(40000L, TelegramPollingRunner.rebuildBackoffIntervalMs(3));
-        // … until it saturates at the configured cap.
-        assertEquals(300000L, TelegramPollingRunner.rebuildBackoffIntervalMs(20));
-        // A pathologically large count must clamp at max, never overflow.
-        assertEquals(300000L, TelegramPollingRunner.rebuildBackoffIntervalMs(1000));
-    }
-
-    @Test
-    void rebuildBackoffMaxIsNeverBelowMin() {
-        // A misconfigured max < min must not invert the curve.
-        services.ConfigService.set(
-                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MIN_MS, "30000");
-        services.ConfigService.set(
-                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MAX_MS, "1000");
-        assertEquals(30000, TelegramPollingRunner.rebuildBackoffMinMs());
-        assertEquals(30000, TelegramPollingRunner.rebuildBackoffMaxMs(),
-                "max must clamp up to the floor when misconfigured below it");
-    }
-
-    @Test
-    void rebuildBackoffDefaultsWhenUnset() {
-        // No config set → documented defaults (5 s floor, 5 min cap). The DB was
-        // wiped by Fixtures.deleteDatabase in @BeforeEach; clear the in-memory
-        // ConfigService cache so a prior test's set values don't leak in.
-        services.ConfigService.clearCache();
-        assertEquals(TelegramPollingRunner.DEFAULT_REBUILD_BACKOFF_MIN_MS,
-                TelegramPollingRunner.rebuildBackoffMinMs());
-        assertEquals(TelegramPollingRunner.DEFAULT_REBUILD_BACKOFF_MAX_MS,
-                TelegramPollingRunner.rebuildBackoffMaxMs());
-    }
-
-    @Test
-    void consecutiveWatchdogRebuildsBackOffWithIncreasingInterval() {
-        // Drive the watchdog through two rebuilds and assert the second one is
-        // DEFERRED while inside the backoff window, then allowed once it elapses.
-        String token = "790:tokBackoff";
-        Long id = seedPollingBinding("agent-backoff", token, "7", true);
-        // Small watchdog timeout, large backoff floor: a binding goes stale fast
-        // but a second rebuild must wait out the (doubled) backoff window.
-        TelegramPollingRunnerTestHooks.setWatchdogMs(1_000L);
-        services.ConfigService.set(
-                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MIN_MS, "50000");
-        services.ConfigService.set(
-                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MAX_MS, "300000");
-
-        // t0: register (seeds progress at 0).
-        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
-        assertEquals(0, TelegramPollingRunner.rebuildCount(token));
-
-        // t=10_000: stale (>= 1_000) and no prior rebuild → rebuild #1.
-        TelegramPollingRunnerTestHooks.setClock(() -> 10_000L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
-                "first stale tick must rebuild");
-        assertEquals(1, TelegramPollingRunner.rebuildCount(token),
-                "rebuild #1 must bump the consecutive-rebuild count");
-
-        // Re-register so the binding is rebuildable again. Clear the wall-clock
-        // cooldown the rebuild stamped, and seed register-progress at t=10_000.
-        TelegramPollingRunnerTestHooks.stampCooldown(token, -1L);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
-                "binding must re-register for the next watchdog evaluation");
-        assertEquals(1, TelegramPollingRunner.rebuildCount(token),
-                "re-register must NOT reset the backoff count (only a consume does)");
-
-        // count=1 → interval 50_000 << 1 = 100_000 ms. A tick at t=15_000 is
-        // stale (elapsed since progress 5_000 >= 1_000) but only 5_000 ms past
-        // the last rebuild → DEFERRED by backoff.
-        TelegramPollingRunnerTestHooks.setClock(() -> 15_000L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
-                "a stale tick inside the backoff window must NOT rebuild");
-        assertEquals(1, TelegramPollingRunner.rebuildCount(token),
-                "a deferred tick must leave the rebuild count unchanged");
-
-        // Past the 100_000 ms window (last rebuild was at 10_000): t=110_001.
-        TelegramPollingRunnerTestHooks.stampCooldown(token, -1L); // keep cooldown clear
-        TelegramPollingRunnerTestHooks.setClock(() -> 110_001L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
-                "once the backoff window elapses, the watchdog must rebuild again");
-        assertEquals(2, TelegramPollingRunner.rebuildCount(token),
-                "rebuild #2 must bump the count to 2 (longer next window)");
-    }
-
-    @Test
-    void consumingAnUpdateResetsTheRebuildBackoff() {
-        // A genuine consume (the poller recovered) must reset the backoff so a
-        // later wedge starts from the floor again.
-        String token = "791:tokBackoffReset";
-        Long id = seedPollingBinding("agent-backoff-reset", token, "7", true);
-        TelegramPollingRunnerTestHooks.setWatchdogMs(1_000L);
-        services.ConfigService.set(
-                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MIN_MS, "50000");
-        services.ConfigService.set(
-                TelegramPollingRunner.CFG_REBUILD_BACKOFF_MAX_MS, "300000");
-
-        TelegramPollingRunnerTestHooks.setClock(() -> 0L);
-        TelegramPollingRunner.reconcile();
-
-        // Force one rebuild so the backoff count is non-zero.
-        TelegramPollingRunnerTestHooks.setClock(() -> 10_000L);
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-        assertEquals(1, TelegramPollingRunner.rebuildCount(token));
-
-        // Re-register and drive a REAL consume through the runner's consumer —
-        // that calls the production reset path (noteProgressForBackoff).
-        TelegramPollingRunnerTestHooks.stampCooldown(token, -1L);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
-        var consumer = fakeApp.consumerFor(token);
-        assertNotNull(consumer, "re-register must leave a live consumer");
-        Update update = new Update();
-        update.setUpdateId(99);
-        ((LongPollingSingleThreadUpdateConsumer) consumer).consume(update);
-
-        assertEquals(0, TelegramPollingRunner.rebuildCount(token),
-                "a consumed update must reset the consecutive-rebuild count to 0");
-        // And the backoff gate is open again (no recorded last-rebuild stamp).
-        assertTrue(TelegramPollingRunner.rebuildBackoffElapsed(token, 10_001L),
-                "after a reset, the next rebuild is immediately allowed");
     }
 
     // ===== JCLAW-375: inbound reaction notifications =====
@@ -1137,13 +763,13 @@ class TelegramPollingRunnerTest extends FunctionalTest {
      * would then hit a {@code RejectedExecutionException} from
      * {@code SCHEDULER.schedule(...)}.
      */
-    // ===== JCLAW-429: executor-leak + rebuild-cap =====
+    // ===== JCLAW-429: executor-leak =====
 
     @Test
     void unregisterShutsDownTheLeakedSessionExecutor() {
         // The SDK's unregisterBot only stop()s the BotSession — it never shuts the
-        // per-session executor down, so every watchdog rebuild leaks a pool-N
-        // thread. The runner must shut it down on unregister.
+        // per-session executor down, so every unregister leaks a pool-N thread.
+        // The runner must shut it down on unregister.
         var token = "leak-test:abc123";
         var bindingId = seedPollingBinding("leak-agent", token, "11111", true);
         TelegramPollingRunner.reconcile();
@@ -1165,70 +791,6 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "disabled binding must be unregistered");
         assertTrue(exec.isShutdown(),
                 "JCLAW-429: unregister must shut down the per-session executor (no pool-N leak)");
-    }
-
-    @Test
-    void watchdogStopsRebuildingAndAlertsAtTheRebuildCap() {
-        // A poller stuck on a 409 conflict would otherwise rebuild forever
-        // (leaking + churning). At the cap the watchdog must STOP rebuilding
-        // (leave the poller for the SDK to retry) and alert the operator once.
-        var token = "cap-test:def456";
-        var bindingId = seedPollingBinding("cap-agent", token, "22222", true);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(bindingId));
-
-        // Look stale AND already at the rebuild cap — no real 30s cooldowns needed.
-        long t0 = 1_000_000L;
-        TelegramPollingRunnerTestHooks.setClock(() -> t0);
-        TelegramPollingRunnerTestHooks.markProgress(token);
-        TelegramPollingRunnerTestHooks.setRebuildCount(token, TelegramPollingRunner.maxConsecutiveRebuilds());
-        long stale = t0 + TelegramPollingRunner.watchdogMs() + 1;
-        TelegramPollingRunnerTestHooks.setClock(() -> stale);
-
-        EventLogger.clear();
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-        EventLogger.flush();
-
-        // Capped: NOT rebuilt → binding stays registered (the SDK keeps retrying).
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(bindingId),
-                "at the cap the watchdog must NOT unregister/rebuild");
-        long alerts = EventLog.count("category = ?1 AND message LIKE ?2",
-                "channel", "%consecutive rebuilds with no progress%");
-        assertEquals(1L, alerts, "exactly one conflict alert at the rebuild cap");
-
-        // A second tick (still capped) must NOT re-alert — the alert is one-shot.
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-        EventLogger.flush();
-        long alertsAfter = EventLog.count("category = ?1 AND message LIKE ?2",
-                "channel", "%consecutive rebuilds with no progress%");
-        assertEquals(1L, alertsAfter, "the conflict alert is one-shot per stuck episode");
-    }
-
-    @Test
-    void watchdogDoesNotRebuildAnIdleButRunningPoller() {
-        // JCLAW-429 #3: a healthy bot nobody has messaged makes no "progress"
-        // (no consumed update), but its session is still running. The watchdog
-        // must NOT rebuild it — the old no-progress heuristic false-positived on
-        // quiet bots and churned them.
-        var token = "idle-test:ghi789";
-        fakeApp.setSessionsRunning(true); // alive-but-idle session
-        var bindingId = seedPollingBinding("idle-agent", token, "33333", true);
-        TelegramPollingRunner.reconcile();
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(bindingId));
-
-        // Look stale (no progress past the timeout) — but it was never messaged.
-        long t0 = 1_000_000L;
-        TelegramPollingRunnerTestHooks.setClock(() -> t0);
-        TelegramPollingRunnerTestHooks.markProgress(token);
-        long stale = t0 + TelegramPollingRunner.watchdogMs() + 1;
-        TelegramPollingRunnerTestHooks.setClock(() -> stale);
-
-        TelegramPollingRunnerTestHooks.runWatchdogTick();
-
-        assertTrue(TelegramPollingRunner.activeBindingIds().contains(bindingId),
-                "an idle-but-running poller must NOT be rebuilt");
-        assertEquals(0, TelegramPollingRunner.rebuildCount(token),
-                "no rebuild recorded for an alive idle poller");
     }
 
     @Test

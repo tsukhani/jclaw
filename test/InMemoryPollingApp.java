@@ -58,10 +58,6 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
     // app.start() — the SDK app is already running, so start() can only throw.
     private final java.util.concurrent.atomic.AtomicInteger startInvocations =
             new java.util.concurrent.atomic.AtomicInteger();
-    // JCLAW-429: the isRunning() value each registered session reports. Default
-    // false (the fake never start()s a session, so it's genuinely not running);
-    // a test sets it true to simulate an alive-but-idle poller.
-    private volatile boolean sessionsRunning = false;
 
     @Override
     public BotSession registerBot(String botToken, LongPollingUpdateConsumer updatesConsumer) {
@@ -85,26 +81,8 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
         // because the session never polls, so a null-returning supplier is safe.
         var exec = Executors.newSingleThreadScheduledExecutor();
         executors.put(botToken, exec);
-        return new TestBotSession(sessionsRunning, MAPPER, HTTP, exec, botToken,
-                telegramUrlSupplier, getUpdatesGenerator, updatesConsumer);
-    }
-
-    /**
-     * JCLAW-429: a BotSession whose {@link #isRunning()} returns a fixed flag —
-     * lets a test put a registered poller in the "alive but idle" state (running)
-     * vs "wedged" (not running) to exercise the watchdog's liveness check. Never
-     * started, so no network.
-     */
-    private static final class TestBotSession extends BotSession {
-        private final boolean running;
-        TestBotSession(boolean running, ObjectMapper mapper, OkHttpClient http,
-                       ScheduledExecutorService exec, String token,
-                       Supplier<TelegramUrl> url, Function<Integer, GetUpdates> gen,
-                       LongPollingUpdateConsumer consumer) {
-            super(mapper, http, exec, token, url, gen, () -> null, consumer);
-            this.running = running;
-        }
-        @Override public boolean isRunning() { return running; }
+        return new BotSession(MAPPER, HTTP, exec, botToken,
+                telegramUrlSupplier, getUpdatesGenerator, () -> null, updatesConsumer);
     }
 
     @Override
@@ -167,11 +145,5 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
     void shutdownExecutors() {
         for (var e : executors.values()) e.shutdownNow();
         executors.clear();
-    }
-
-    /** JCLAW-429: control what {@link #isRunning()} the next registered session
-     *  reports — true = alive-but-idle, false = wedged. Set before registering. */
-    void setSessionsRunning(boolean v) {
-        sessionsRunning = v;
     }
 }
