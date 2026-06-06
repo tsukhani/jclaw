@@ -3,6 +3,7 @@ package channels;
 import agents.AgentRunner;
 import models.Agent;
 import models.TelegramBinding;
+import org.telegram.telegrambots.longpolling.BotSession;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.TelegramUrl;
@@ -60,6 +61,23 @@ public final class TelegramPollingRunner {
     private static final ConcurrentHashMap<Long, String> ACTIVE = new ConcurrentHashMap<>();
 
     /**
+     * JCLAW-429: bindingId → the {@link BotSession} returned by registerBot, so
+     * unregister can shut down its per-session executor. The SDK's
+     * {@code unregisterBot} only calls {@code BotSession.stop()} (cancels the
+     * poll) and neither {@code stop()} nor {@code close()} shuts the
+     * {@code ScheduledExecutorService} down — so without this every watchdog
+     * rebuild leaks a {@code pool-N-thread-1}.
+     */
+    private static final ConcurrentHashMap<Long, BotSession> SESSIONS = new ConcurrentHashMap<>();
+
+    /**
+     * JCLAW-429: tokens already alerted on for a persistent rebuild-cap conflict,
+     * so the "stop the second instance" alert fires once per stuck episode rather
+     * than every watchdog tick. Cleared on genuine progress (the conflict cleared).
+     */
+    private static final Set<String> CONFLICT_ALERTED = ConcurrentHashMap.newKeySet();
+
+    /**
      * Token → epoch-millis timestamp until which re-registration is blocked. When
      * a binding is unregistered, Telegram's server-side long-poll can linger for
      * up to its timeout (default 30 s) — if we re-register within that window,
@@ -68,8 +86,18 @@ public final class TelegramPollingRunner {
      */
     private static final ConcurrentHashMap<String, Long> COOLDOWN_UNTIL = new ConcurrentHashMap<>();
 
-    /** Default Telegram long-poll timeout is 30 s; match it, plus a small margin. */
-    public static final long COOLDOWN_MS = 30_000L;
+    /** getUpdates long-poll timeout (seconds) requested on every poll (JCLAW-375). */
+    static final int GET_UPDATES_TIMEOUT_SECONDS = 50;
+
+    /**
+     * Re-registration cooldown. MUST exceed {@link #GET_UPDATES_TIMEOUT_SECONDS}
+     * so a re-register doesn't fire getUpdates against the prior session's
+     * server-side long-poll that's still draining — that collision returns a
+     * spurious HTTP 409 "terminated by other getUpdates" (JCLAW-429). The earlier
+     * 30 s value was shorter than the 50 s poll, so a watchdog rebuild self-409'd
+     * on re-register. 50 s poll + 5 s margin.
+     */
+    public static final long COOLDOWN_MS = (GET_UPDATES_TIMEOUT_SECONDS + 5) * 1000L;
 
     /**
      * Cooldown-reconcile scheduler. Non-final so {@link #clearForTest} can
@@ -125,6 +153,11 @@ public final class TelegramPollingRunner {
     public static final int DEFAULT_REBUILD_BACKOFF_MIN_MS = 5_000;
     /** Default ceiling for the rebuild backoff: 5 min between consecutive rebuilds. */
     public static final int DEFAULT_REBUILD_BACKOFF_MAX_MS = 300_000;
+
+    /** Config key: max consecutive watchdog rebuilds before giving up (likely a 409 conflict). */
+    public static final String CFG_MAX_REBUILDS = "telegram.polling.max-consecutive-rebuilds";
+    /** Default cap: after 5 fruitless rebuilds, stop rebuilding and alert the operator. */
+    public static final int DEFAULT_MAX_CONSECUTIVE_REBUILDS = 5;
 
     /**
      * Handle to the periodic watchdog tick scheduled on {@link #scheduler}, or
@@ -237,6 +270,9 @@ public final class TelegramPollingRunner {
                         "Polling app shutdown error: %s".formatted(e.getMessage()));
             }
         }
+        // JCLAW-429: the unregister loop above drained SESSIONS + shut each
+        // executor; clear the conflict-alert set so a restart starts clean.
+        CONFLICT_ALERTED.clear();
         // JCLAW-363: stop the periodic watchdog before draining the scheduler it
         // rides on, so the shutdown awaitTermination isn't held by a fixed-delay
         // task.
@@ -282,6 +318,9 @@ public final class TelegramPollingRunner {
     static void clearForTest() {
         ACTIVE.clear();
         COOLDOWN_UNTIL.clear();
+        // JCLAW-429: drop the session map + conflict-alert set so each test starts clean.
+        SESSIONS.clear();
+        CONFLICT_ALERTED.clear();
         // JCLAW-363: drop the watchdog tick + its tracking state and restore the
         // wall clock / config-driven timeout so each test starts clean.
         stopWatchdog();
@@ -341,9 +380,12 @@ public final class TelegramPollingRunner {
             // (or just-rebuilt) binding isn't treated as stale before its first
             // poll completes.
             markProgress(token);
-            app.registerBot(token, () -> TelegramUrl.DEFAULT_URL,
+            BotSession session = app.registerBot(token, () -> TelegramUrl.DEFAULT_URL,
                     seedingGetUpdatesGenerator(persistedOffset), consumer);
             ACTIVE.put(bindingId, token);
+            // JCLAW-429: keep the session so unregisterInternal can shut down its
+            // executor (the SDK never does). The in-memory test app returns null.
+            if (session != null) SESSIONS.put(bindingId, session);
             ensureWatchdogStarted();
             EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                     "Registered polling session for binding %d (offset seeded from %d)".formatted(
@@ -383,7 +425,7 @@ public final class TelegramPollingRunner {
     private static java.util.function.Function<Integer, GetUpdates> seedingGetUpdatesGenerator(int persistedOffset) {
         return sdkLastReceived -> GetUpdates.builder()
                 .limit(100)
-                .timeout(50)
+                .timeout(GET_UPDATES_TIMEOUT_SECONDS)
                 .offset(Math.max(sdkLastReceived, persistedOffset) + 1)
                 .allowedUpdates(new ArrayList<>(ALLOWED_UPDATES))
                 .build();
@@ -398,6 +440,20 @@ public final class TelegramPollingRunner {
                     "Unregister failed for binding %d: %s".formatted(bindingId, e.getMessage()));
         }
         ACTIVE.remove(bindingId);
+        // JCLAW-429: the SDK's unregisterBot calls BotSession.stop() (cancels the
+        // poll) but never shuts down the per-session ScheduledExecutorService — so
+        // without this every watchdog rebuild leaks a pool-N thread. shutdown()
+        // (not shutdownNow) so an in-flight dispatch isn't interrupted mid-DB
+        // write; stop() already cancelled the poll, so the executor is idle.
+        var leaked = SESSIONS.remove(bindingId);
+        if (leaked != null) {
+            try {
+                leaked.getExecutor().shutdown();
+            } catch (Exception e) {
+                EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
+                        "Executor shutdown failed for binding %d: %s".formatted(bindingId, e.getMessage()));
+            }
+        }
         // NOTE (JCLAW-408): do NOT evict REBUILD_COUNT / LAST_REBUILD_AT here.
         // The watchdog rebuild path tears the binding down via this method and
         // then re-registers; the consecutive-rebuild backoff counter must
@@ -528,6 +584,33 @@ public final class TelegramPollingRunner {
             Long last = LAST_PROGRESS.get(token);
             long elapsed = last == null ? 0L : now - last;
             if (last == null || elapsed < timeout) continue;
+            // JCLAW-429: liveness check. "No progress" means no CONSUMED update —
+            // but a healthy bot nobody has messaged consumes nothing, so the
+            // heuristic false-positives on a quiet bot and rebuild-churns it. The
+            // session's own running flag is the direct signal: a session that's
+            // still running is ALIVE (just idle), not wedged — leave it for the
+            // SDK to keep long-polling. Only a STOPPED session (or one we never
+            // captured) is genuinely wedged and worth rebuilding.
+            var session = SESSIONS.get(bindingId);
+            if (session != null && session.isRunning()) continue;
+            // JCLAW-429: stop rebuild-storming an unfixable conflict. A poller that
+            // has rebuilt maxConsecutiveRebuilds() times without ever making
+            // progress is almost certainly hitting a 409 (a second instance polling
+            // this bot's token). Rebuilding can't clear a conflict — it only churns
+            // sessions and leaks executors. Leave the poller registered (the SDK
+            // keeps retrying and self-recovers when the conflict clears) and alert
+            // the operator once. The count resets on genuine progress.
+            if (rebuildCount(token) >= maxConsecutiveRebuilds()) {
+                if (CONFLICT_ALERTED.add(token)) {
+                    EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
+                            ("Polling binding %d failed %d consecutive rebuilds with no progress — "
+                                    + "stopping rebuilds. Most likely a second instance is polling this "
+                                    + "bot's token (HTTP 409 'terminated by other getUpdates'). Stop the "
+                                    + "other instance; the poller recovers on its own.").formatted(
+                                    bindingId, rebuildCount(token)));
+                }
+                continue;
+            }
             // JCLAW-363 follow-up: bounded exponential backoff on the rebuild
             // action itself. A token that keeps wedging without ever making
             // progress must not rebuild every tick — that would rebuild-storm a
@@ -633,6 +716,22 @@ public final class TelegramPollingRunner {
         if (token == null) return;
         REBUILD_COUNT.remove(token);
         LAST_REBUILD_AT.remove(token);
+        // JCLAW-429: the conflict cleared — re-arm the one-shot alert so a later
+        // wedge on this token can alert again.
+        CONFLICT_ALERTED.remove(token);
+    }
+
+    /**
+     * JCLAW-429: max consecutive watchdog rebuilds (no intervening progress)
+     * before the watchdog STOPS rebuilding and alerts. A poller failing every
+     * rebuild is almost certainly hitting a 409 conflict (another instance
+     * polling this bot), which rebuilding can't fix and only churns + leaks.
+     * Config {@link #CFG_MAX_REBUILDS}, default
+     * {@link #DEFAULT_MAX_CONSECUTIVE_REBUILDS}; clamped {@code >= 1}.
+     */
+    public static int maxConsecutiveRebuilds() {
+        return Math.max(1, services.ConfigService.getInt(
+                CFG_MAX_REBUILDS, DEFAULT_MAX_CONSECUTIVE_REBUILDS));
     }
 
     // ===== JCLAW-363 test seams (documented in TelegramPollingRunnerTestHooks) =====
@@ -682,6 +781,15 @@ public final class TelegramPollingRunner {
         // cooldownRemainingMs() reads the wall clock (it's called from the API
         // thread), so stamp against System time, not the injectable test clock.
         if (token != null) COOLDOWN_UNTIL.put(token, System.currentTimeMillis() + ms);
+    }
+
+    /**
+     * Test-only (JCLAW-429): force {@code token}'s consecutive-rebuild count so a
+     * test can drive the rebuild cap without sitting through {@code MAX} real
+     * 30 s cooldowns between rebuilds.
+     */
+    static void setRebuildCountForTest(String token, int count) {
+        if (token != null) REBUILD_COUNT.put(token, count);
     }
 
     /** Snapshot of binding state pulled inside the transaction, then read off-thread. */

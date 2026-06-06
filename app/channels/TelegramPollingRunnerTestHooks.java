@@ -82,4 +82,12 @@ public final class TelegramPollingRunnerTestHooks {
     public static void stampCooldown(String token, long ms) {
         TelegramPollingRunner.stampCooldownForTest(token, ms);
     }
+
+    /**
+     * JCLAW-429: force {@code token}'s consecutive-rebuild count so a test can
+     * drive the watchdog rebuild cap without sitting through real 30 s cooldowns.
+     */
+    public static void setRebuildCount(String token, int count) {
+        TelegramPollingRunner.setRebuildCountForTest(token, count);
+    }
 }

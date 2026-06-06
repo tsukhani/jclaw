@@ -3,6 +3,7 @@ import channels.TelegramOffsetStore;
 import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
 import models.Agent;
+import models.EventLog;
 import models.TelegramBinding;
 import models.TelegramTopicBinding;
 import org.junit.jupiter.api.*;
@@ -10,6 +11,7 @@ import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateC
 import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import play.test.*;
+import services.EventLogger;
 import services.Tx;
 
 import java.nio.file.Files;
@@ -67,6 +69,9 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     @AfterEach
     void teardown() throws Exception {
         TelegramPollingRunnerTestHooks.clear();
+        // JCLAW-429: shut down any per-session executors the fake created but the
+        // runner didn't unregister (e.g. a binding left registered by a test).
+        if (fakeApp != null) fakeApp.shutdownExecutors();
         System.clearProperty(TelegramOffsetStore.OFFSET_PATH_PROPERTY);
         if (offsetTmp != null && Files.exists(offsetTmp)) {
             try (Stream<Path> walk = Files.walk(offsetTmp)) {
@@ -1048,6 +1053,100 @@ class TelegramPollingRunnerTest extends FunctionalTest {
      * would then hit a {@code RejectedExecutionException} from
      * {@code SCHEDULER.schedule(...)}.
      */
+    // ===== JCLAW-429: executor-leak + rebuild-cap =====
+
+    @Test
+    void unregisterShutsDownTheLeakedSessionExecutor() {
+        // The SDK's unregisterBot only stop()s the BotSession — it never shuts the
+        // per-session executor down, so every watchdog rebuild leaks a pool-N
+        // thread. The runner must shut it down on unregister.
+        var token = "leak-test:abc123";
+        var bindingId = seedPollingBinding("leak-agent", token, "11111", true);
+        TelegramPollingRunner.reconcile();
+
+        var exec = fakeApp.executorFor(token);
+        assertNotNull(exec, "register must hand the session a tracked executor");
+        assertFalse(exec.isShutdown(), "executor is live while the binding is registered");
+
+        // Disable the binding so the next reconcile unregisters it.
+        commitInFreshTx(() -> {
+            TelegramBinding b = TelegramBinding.findById(bindingId);
+            b.enabled = false;
+            b.save();
+            return b.id;
+        });
+        TelegramPollingRunner.reconcile();
+
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(bindingId),
+                "disabled binding must be unregistered");
+        assertTrue(exec.isShutdown(),
+                "JCLAW-429: unregister must shut down the per-session executor (no pool-N leak)");
+    }
+
+    @Test
+    void watchdogStopsRebuildingAndAlertsAtTheRebuildCap() {
+        // A poller stuck on a 409 conflict would otherwise rebuild forever
+        // (leaking + churning). At the cap the watchdog must STOP rebuilding
+        // (leave the poller for the SDK to retry) and alert the operator once.
+        var token = "cap-test:def456";
+        var bindingId = seedPollingBinding("cap-agent", token, "22222", true);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(bindingId));
+
+        // Look stale AND already at the rebuild cap — no real 30s cooldowns needed.
+        long t0 = 1_000_000L;
+        TelegramPollingRunnerTestHooks.setClock(() -> t0);
+        TelegramPollingRunnerTestHooks.markProgress(token);
+        TelegramPollingRunnerTestHooks.setRebuildCount(token, TelegramPollingRunner.maxConsecutiveRebuilds());
+        long stale = t0 + TelegramPollingRunner.watchdogMs() + 1;
+        TelegramPollingRunnerTestHooks.setClock(() -> stale);
+
+        EventLogger.clear();
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        EventLogger.flush();
+
+        // Capped: NOT rebuilt → binding stays registered (the SDK keeps retrying).
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(bindingId),
+                "at the cap the watchdog must NOT unregister/rebuild");
+        long alerts = EventLog.count("category = ?1 AND message LIKE ?2",
+                "channel", "%consecutive rebuilds with no progress%");
+        assertEquals(1L, alerts, "exactly one conflict alert at the rebuild cap");
+
+        // A second tick (still capped) must NOT re-alert — the alert is one-shot.
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+        EventLogger.flush();
+        long alertsAfter = EventLog.count("category = ?1 AND message LIKE ?2",
+                "channel", "%consecutive rebuilds with no progress%");
+        assertEquals(1L, alertsAfter, "the conflict alert is one-shot per stuck episode");
+    }
+
+    @Test
+    void watchdogDoesNotRebuildAnIdleButRunningPoller() {
+        // JCLAW-429 #3: a healthy bot nobody has messaged makes no "progress"
+        // (no consumed update), but its session is still running. The watchdog
+        // must NOT rebuild it — the old no-progress heuristic false-positived on
+        // quiet bots and churned them.
+        var token = "idle-test:ghi789";
+        fakeApp.setSessionsRunning(true); // alive-but-idle session
+        var bindingId = seedPollingBinding("idle-agent", token, "33333", true);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(bindingId));
+
+        // Look stale (no progress past the timeout) — but it was never messaged.
+        long t0 = 1_000_000L;
+        TelegramPollingRunnerTestHooks.setClock(() -> t0);
+        TelegramPollingRunnerTestHooks.markProgress(token);
+        long stale = t0 + TelegramPollingRunner.watchdogMs() + 1;
+        TelegramPollingRunnerTestHooks.setClock(() -> stale);
+
+        TelegramPollingRunnerTestHooks.runWatchdogTick();
+
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(bindingId),
+                "an idle-but-running poller must NOT be rebuilt");
+        assertEquals(0, TelegramPollingRunner.rebuildCount(token),
+                "no rebuild recorded for an alive idle poller");
+    }
+
     @Test
     @Order(Integer.MAX_VALUE)
     void stopIsSafeToCallWhenNothingRegistered() {
