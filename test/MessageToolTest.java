@@ -7,6 +7,9 @@ import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
@@ -18,6 +21,7 @@ import services.Tx;
 import tools.MessageTool;
 
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 /**
  * JCLAW-327 tests: the {@code message} tool's argument parsing, channel +
@@ -465,37 +469,30 @@ class MessageToolTest extends UnitTest {
                 "a disabled edit must NOT touch the Telegram API");
     }
 
-    @Test
-    void replyMissingMessageIdReturnsError() throws Exception {
-        seedTelegramBindingAndConversation();
-        var result = invokeTool(agent.id, "{\"action\":\"reply\",\"message\":\"hi\"}");
-        assertTrue(result.startsWith("Error: 'message_id' is required"), result);
-        assertEquals(0, server.countRequests("sendMessage"));
+    static Stream<Arguments> missingRequiredFieldCases() {
+        return Stream.of(
+            // action, input JSON, expected error prefix, zero-count API method
+            Arguments.of("reply", "{\"action\":\"reply\",\"message\":\"hi\"}",
+                    "Error: 'message_id' is required", "sendMessage"),
+            Arguments.of("edit",  "{\"action\":\"edit\",\"message\":\"hi\"}",
+                    "Error: 'message_id' is required", "editMessageText"),
+            // reply requires a `message` body; message_id alone is not enough.
+            Arguments.of("reply", "{\"action\":\"reply\",\"message_id\":7}",
+                    "Error: 'message' is required",    "sendMessage"),
+            Arguments.of("edit",  "{\"action\":\"edit\",\"message_id\":8}",
+                    "Error: 'message' is required",    "editMessageText")
+        );
     }
 
-    @Test
-    void editMissingMessageIdReturnsError() throws Exception {
+    @ParameterizedTest(name = "action={0}: {2}")
+    @MethodSource("missingRequiredFieldCases")
+    void missingRequiredFieldReturnsError(
+            String action, String input, String expectedErrorPrefix, String zeroCountMethod)
+            throws Exception {
         seedTelegramBindingAndConversation();
-        var result = invokeTool(agent.id, "{\"action\":\"edit\",\"message\":\"hi\"}");
-        assertTrue(result.startsWith("Error: 'message_id' is required"), result);
-        assertEquals(0, server.countRequests("editMessageText"));
-    }
-
-    @Test
-    void replyMissingMessageTextReturnsError() throws Exception {
-        // reply requires a `message` body; message_id alone is not enough.
-        seedTelegramBindingAndConversation();
-        var result = invokeTool(agent.id, "{\"action\":\"reply\",\"message_id\":7}");
-        assertTrue(result.startsWith("Error: 'message' is required"), result);
-        assertEquals(0, server.countRequests("sendMessage"));
-    }
-
-    @Test
-    void editMissingMessageTextReturnsError() throws Exception {
-        seedTelegramBindingAndConversation();
-        var result = invokeTool(agent.id, "{\"action\":\"edit\",\"message_id\":8}");
-        assertTrue(result.startsWith("Error: 'message' is required"), result);
-        assertEquals(0, server.countRequests("editMessageText"));
+        var result = invokeTool(agent.id, input);
+        assertTrue(result.startsWith(expectedErrorPrefix), result);
+        assertEquals(0, server.countRequests(zeroCountMethod));
     }
 
     // ──────── JCLAW-387 (A3): reply-with-native-quote ────────

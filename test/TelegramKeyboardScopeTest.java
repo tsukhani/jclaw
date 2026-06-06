@@ -5,6 +5,8 @@ import channels.TelegramModelCallback;
 import models.Agent;
 import models.Conversation;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.AgentService;
 import services.ConversationService;
@@ -71,83 +73,57 @@ class TelegramKeyboardScopeTest extends UnitTest {
         TelegramChannel.clearForTest(BOT_TOKEN);
     }
 
-    // ── scope = all (default): honored in every chat type ─────────────────
+    // ── scope = all (default) and off: honored / rejected in each chat type ─
 
-    @Test
-    void allScopeHandlesCallbackInPrivateChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "all");
-        dispatchBrowse("private");
-        assertHandlerRan();
+    /**
+     * Covers scope=all (honored in private+group), missing config (defaults to
+     * all, honored in supergroup), and scope=off (rejected in private+group).
+     * {@code scope=null} signals "remove the key" to exercise the default path.
+     */
+    @ParameterizedTest(name = "scope={0}, chatType={1} → ran={2}")
+    @CsvSource({
+        "all,     private,    true",
+        "all,     group,      true",
+        ",         supergroup, true",
+        "off,     private,    false",
+        "off,     group,      false",
+    })
+    void scopeAllAndOffDispatch(String scope, String chatType, boolean expectRan) {
+        if (scope == null || scope.isBlank()) {
+            play.Play.configuration.remove(SCOPE_KEY);
+        } else {
+            play.Play.configuration.setProperty(SCOPE_KEY, scope);
+        }
+        dispatchBrowse(chatType);
+        if (expectRan) {
+            assertHandlerRan();
+        } else {
+            assertRejectedWithNotice();
+        }
     }
 
-    @Test
-    void allScopeHandlesCallbackInGroupChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "all");
-        dispatchBrowse("group");
-        assertHandlerRan();
-    }
+    // ── scope = dm and group: per-chat-type allow/reject ─────────────────
 
-    @Test
-    void missingConfigDefaultsToAllAndHandlesEverywhere() {
-        // No telegram.keyboardScope set — must behave exactly like "all".
-        play.Play.configuration.remove(SCOPE_KEY);
-        dispatchBrowse("supergroup");
-        assertHandlerRan();
-    }
-
-    // ── scope = off: rejected everywhere ──────────────────────────────────
-
-    @Test
-    void offScopeRejectsInPrivateChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "off");
-        dispatchBrowse("private");
-        assertRejectedWithNotice();
-    }
-
-    @Test
-    void offScopeRejectsInGroupChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "off");
-        dispatchBrowse("group");
-        assertRejectedWithNotice();
-    }
-
-    // ── scope = dm: private honored, group rejected ───────────────────────
-
-    @Test
-    void dmScopeHandlesPrivateChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "dm");
-        dispatchBrowse("private");
-        assertHandlerRan();
-    }
-
-    @Test
-    void dmScopeRejectsGroupChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "dm");
-        dispatchBrowse("group");
-        assertRejectedWithNotice();
-    }
-
-    // ── scope = group: group/supergroup honored, private rejected ─────────
-
-    @Test
-    void groupScopeHandlesGroupChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "group");
-        dispatchBrowse("group");
-        assertHandlerRan();
-    }
-
-    @Test
-    void groupScopeHandlesSupergroupChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "group");
-        dispatchBrowse("supergroup");
-        assertHandlerRan();
-    }
-
-    @Test
-    void groupScopeRejectsPrivateChat() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "group");
-        dispatchBrowse("private");
-        assertRejectedWithNotice();
+    /**
+     * Covers scope=dm (private honored, group rejected) and scope=group
+     * (group+supergroup honored, private rejected).
+     */
+    @ParameterizedTest(name = "scope={0}, chatType={1} → ran={2}")
+    @CsvSource({
+        "dm,    private,    true",
+        "dm,    group,      false",
+        "group, group,      true",
+        "group, supergroup, true",
+        "group, private,    false",
+    })
+    void scopeDmAndGroupDispatch(String scope, String chatType, boolean expectRan) {
+        play.Play.configuration.setProperty(SCOPE_KEY, scope);
+        dispatchBrowse(chatType);
+        if (expectRan) {
+            assertHandlerRan();
+        } else {
+            assertRejectedWithNotice();
+        }
     }
 
     // ── Public predicate (consumed by keyboard-SEND sites later) ──────────

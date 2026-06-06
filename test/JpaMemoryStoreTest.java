@@ -82,7 +82,7 @@ class JpaMemoryStoreTest extends UnitTest {
 
     @Test
     void differentTextHashesToDifferentKeyComponent() throws Exception {
-        assertFalse(hash("memory A").equals(hash("memory B")));
+        assertNotEquals(hash("memory A"), hash("memory B"));
     }
 
     @Test
@@ -114,14 +114,14 @@ class JpaMemoryStoreTest extends UnitTest {
     void differentModelSameTextProduceDistinctKeys() throws Exception {
         var k1 = key("text-embedding-3-small", "shared memory text");
         var k2 = key("text-embedding-3-large", "shared memory text");
-        assertFalse(k1.equals(k2));
+        assertNotEquals(k1, k2);
     }
 
     @Test
     void differentTextSameModelProduceDistinctKeys() throws Exception {
         var k1 = key("text-embedding-3-small", "memory one");
         var k2 = key("text-embedding-3-small", "memory two");
-        assertFalse(k1.equals(k2));
+        assertNotEquals(k1, k2);
     }
 
     @Test

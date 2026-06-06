@@ -237,7 +237,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void happyPathRecordsRunCompletedAndEmitsLifecycleEvents() throws Exception {
+    void happyPathRecordsRunCompletedAndVerifiesAuditRow() throws Exception {
         startLlmServer(simpleResponse("Subagent reply: done."));
         configureProvider();
 
@@ -289,6 +289,24 @@ class SubagentSpawnToolTest extends UnitTest {
                 "child must inherit parent.channelType (JCLAW-327 AC-5)");
         assertEquals(parentConv.peerId, childConv.peerId,
                 "child must inherit parent.peerId (JCLAW-327 AC-5)");
+    }
+
+    @Test
+    void happyPathEmitsLifecycleEventsWithCorrectDetails() throws Exception {
+        startLlmServer(simpleResponse("Subagent reply: done."));
+        configureProvider();
+
+        var parent = createAgent("p-events", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-events");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"investigate X\",\"label\":\"investigate-x\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
 
         // Event lifecycle: SPAWN + COMPLETE, no ERROR.
         java.util.List<EventLog> spawnEvents = EventLog.find(

@@ -1,8 +1,13 @@
 import channels.TelegramChannel;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import play.test.UnitTest;
+
+import java.util.stream.Stream;
 
 /**
  * JCLAW-367: MessageEntity / @mention parsing + sender-identity capture in
@@ -45,107 +50,84 @@ class TelegramEntityParseTest extends UnitTest {
                 "display name is first + last");
     }
 
-    @Test
-    void botCommandWithOtherBotSuffix_doesNotFlagBotMentioned() throws Exception {
-        // "/help@other_bot" — bot_command suffix matches a different bot.
-        var u = update("""
+    // ── AC1: bot_command suffix, mention, text_mention, plain text ─────────
+
+    static Stream<Arguments> botMentionedCases() {
+        return Stream.of(
+            // updateJson, expectedBotMentioned, failMessage, expectedDisplayName (or null)
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":1,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":1,
                   "text":"/help@other_bot",
                   "entities":[{"type":"bot_command","offset":0,"length":15}]}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertFalse(msg.botMentioned(),
-                "a command addressed to @other_bot must not flag our bot");
-    }
-
-    @Test
-    void bareBotCommandWithoutSuffix_doesNotFlagBotMentioned() throws Exception {
-        // "/help" with no @suffix — in a group this is not a direct address.
-        var u = update("""
+                """,
+                false, "a command addressed to @other_bot must not flag our bot", null),
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":1,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":1,
                   "text":"/help",
                   "entities":[{"type":"bot_command","offset":0,"length":5}]}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertFalse(msg.botMentioned(),
-                "a suffix-less /help is not a direct bot address");
-    }
-
-    // ── AC1: mention entity ─────────────────────────────────────────────
-
-    @Test
-    void mentionEntityMatchingBot_flagsBotMentioned() throws Exception {
-        // "hey @jclaw_bot what's up" — mention entity at offset 4, length 10.
-        var u = update("""
+                """,
+                false, "a suffix-less /help is not a direct bot address", null),
+            // "hey @jclaw_bot what's up" — mention entity at offset 4, length 10.
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":1,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":1,
                   "text":"hey @jclaw_bot what's up",
                   "entities":[{"type":"mention","offset":4,"length":10}]}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertTrue(msg.botMentioned(),
-                "@jclaw_bot mention must flag botMentioned");
-    }
-
-    @Test
-    void mentionEntityForOtherUser_doesNotFlagBotMentioned() throws Exception {
-        // "@someone_else hi" — mention of a different handle.
-        var u = update("""
+                """,
+                true, "@jclaw_bot mention must flag botMentioned", null),
+            // "@someone_else hi" — mention of a different handle.
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":1,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":1,
                   "text":"@someone_else hi",
                   "entities":[{"type":"mention","offset":0,"length":13}]}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertFalse(msg.botMentioned(),
-                "a mention of a different user must not flag our bot");
-    }
-
-    @Test
-    void textMentionEntityMatchingBotUserId_flagsBotMentioned() throws Exception {
-        // text_mention carries the resolved User object (used for users with
-        // no @-handle, but Telegram also uses it when resolving by id). The
-        // embedded user id 555 == our bot id → addressed.
-        var u = update("""
+                """,
+                false, "a mention of a different user must not flag our bot", null),
+            // text_mention: embedded user id 555 == bot id → addressed.
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":1,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":1,
                   "text":"JClaw please help",
                   "entities":[{"type":"text_mention","offset":0,"length":5,
                     "user":{"id":555,"is_bot":true,"first_name":"JClaw"}}]}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertTrue(msg.botMentioned(),
-                "text_mention resolving to the bot's user id must flag botMentioned");
-    }
-
-    // ── AC1: non-mention message ────────────────────────────────────────
-
-    @Test
-    void plainTextWithoutEntities_doesNotFlagBotMentioned() throws Exception {
-        var u = update("""
+                """,
+                true, "text_mention resolving to the bot's user id must flag botMentioned", null),
+            // plain text — also verifies first-name-only display name
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":1,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada","username":"ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":1,
                   "text":"just chatting in the group"}}
-                """);
+                """,
+                false, "a plain group message with no entities is not a bot address", "Ada")
+        );
+    }
+
+    @ParameterizedTest(name = "[{index}] botMentioned={1}")
+    @MethodSource("botMentionedCases")
+    void botMentionedDetection(String updateJson, boolean expectedBotMentioned,
+            String failMessage, String expectedDisplayName) throws Exception {
+        var u = update(updateJson);
         var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
         assertNotNull(msg);
-        assertFalse(msg.botMentioned(),
-                "a plain group message with no entities is not a bot address");
-        assertEquals("Ada", msg.fromDisplayName(),
-                "first-name-only display name when no last name");
+        assertEquals(expectedBotMentioned, msg.botMentioned(), failMessage);
+        if (expectedDisplayName != null) {
+            assertEquals(expectedDisplayName, msg.fromDisplayName(),
+                    "first-name-only display name when no last name");
+        }
     }
 
     // ── AC1: offset-correctness — no false positive inside a URL ────────
@@ -411,9 +393,11 @@ class TelegramEntityParseTest extends UnitTest {
 
     // ── JCLAW-366 AC3: reply / quote context ────────────────────────────
 
-    @Test
-    void replyToTextMessageFoldsInReplyContext() throws Exception {
-        var u = update("""
+    static Stream<Arguments> replyContextCases() {
+        return Stream.of(
+            // updateJson, expectedReplyContext, failMessage
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":2,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":2,
@@ -422,20 +406,13 @@ class TelegramEntityParseTest extends UnitTest {
                     "from":{"id":77,"is_bot":false,"first_name":"Bob"},
                     "chat":{"id":-100,"type":"supergroup"},"date":1,
                     "text":"shall we ship on Friday?"}}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertEquals("sounds good", msg.text(),
-                "the main turn text must be untouched by the reply context");
-        assertNotNull(msg.replyContext(), "a reply must fold in a replyContext block");
-        assertEquals("in reply to: shall we ship on Friday?", msg.replyContext());
-    }
-
-    @Test
-    void nativeQuotePreferredOverFullRepliedToBody() throws Exception {
-        // The message replies to a long body but the user selected a quote
-        // substring — the quote wins.
-        var u = update("""
+                """,
+                "in reply to: shall we ship on Friday?",
+                "full replied-to text must appear in replyContext"),
+            // The message replies to a long body but the user selected a quote
+            // substring — the quote wins.
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":2,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":2,
@@ -445,17 +422,12 @@ class TelegramEntityParseTest extends UnitTest {
                     "from":{"id":77,"is_bot":false,"first_name":"Bob"},
                     "chat":{"id":-100,"type":"supergroup"},"date":1,
                     "text":"there is a lot here but we should ship on Friday for sure"}}}
-                """);
-        var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
-        assertNotNull(msg);
-        assertEquals("in reply to (quoted): ship on Friday", msg.replyContext(),
-                "the native quote substring must be preferred over the full replied-to body");
-    }
-
-    @Test
-    void replyToMediaOnlyMessageNotesMediaType() throws Exception {
-        // The replied-to message is a photo with no caption — note its type.
-        var u = update("""
+                """,
+                "in reply to (quoted): ship on Friday",
+                "the native quote substring must be preferred over the full replied-to body"),
+            // The replied-to message is a photo with no caption — note its type.
+            Arguments.of(
+                """
                 {"update_id":1,"message":{"message_id":2,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
                   "chat":{"id":-100,"type":"supergroup"},"date":2,
@@ -464,11 +436,21 @@ class TelegramEntityParseTest extends UnitTest {
                     "from":{"id":77,"is_bot":false,"first_name":"Bob"},
                     "chat":{"id":-100,"type":"supergroup"},"date":1,
                     "photo":[{"file_id":"P1","file_unique_id":"up1","width":90,"height":90}]}}}
-                """);
+                """,
+                "in reply to: [photo]",
+                "a media-only replied-to message must note its media type")
+        );
+    }
+
+    @ParameterizedTest(name = "[{index}] replyContext={1}")
+    @MethodSource("replyContextCases")
+    void replyContextIsFoldedCorrectly(String updateJson, String expectedReplyContext,
+            String failMessage) throws Exception {
+        var u = update(updateJson);
         var msg = TelegramChannel.parseUpdate(u, BOT_USERNAME, BOT_USER_ID);
         assertNotNull(msg);
-        assertEquals("in reply to: [photo]", msg.replyContext(),
-                "a media-only replied-to message must note its media type");
+        assertNotNull(msg.replyContext(), "a reply must fold in a replyContext block");
+        assertEquals(expectedReplyContext, msg.replyContext(), failMessage);
     }
 
     @Test
