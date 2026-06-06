@@ -48,10 +48,14 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
     private final ConcurrentHashMap<String, ScheduledExecutorService> executors = new ConcurrentHashMap<>();
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final OkHttpClient HTTP = new OkHttpClient();
-    private volatile boolean running = false;
-    // JCLAW-431: count start() calls so a test can assert the runner starts the
-    // app exactly once across a binding add/transition (the real SDK rejects a
-    // second start() with "App is already running").
+    // JCLAW-431: mirror the real SDK — TelegramBotsLongPollingApplication is
+    // constructed with isAppRunning=true (its ctor does `new AtomicBoolean(true)`),
+    // so it reports running from construction and registerBot auto-starts each
+    // session. The old default (false) let the runner's now-removed app.start()
+    // "succeed" in tests, masking that against the real SDK it can only throw.
+    private volatile boolean running = true;
+    // JCLAW-431: count start() calls so a test can assert the runner NEVER calls
+    // app.start() — the SDK app is already running, so start() can only throw.
     private final java.util.concurrent.atomic.AtomicInteger startInvocations =
             new java.util.concurrent.atomic.AtomicInteger();
     // JCLAW-429: the isRunning() value each registered session reports. Default

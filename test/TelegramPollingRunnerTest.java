@@ -225,24 +225,17 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
-    void addingABindingToARunningAppStartsItOnlyOnce() {
-        // JCLAW-431: the SDK starts the app once (its isAppRunning flag) and
-        // auto-starts each new session inside registerBot when the app is up — so
-        // a second app.start() is redundant and the real SDK rejects it with "App
-        // is already running", logging a spurious error on every binding
-        // add/transition. Model reality: an existing running poller, then a
-        // freshly-added one that reports not-yet-running for a beat (so
-        // app.isRunning() — "app flag AND every session running" — momentarily
-        // reads false). The runner must NOT re-start the app.
-        fakeApp.setSessionsRunning(true);
+    void reconcileNeverCallsAppStart() {
+        // JCLAW-431: telegrambots 9.5.0 constructs the app with isAppRunning=true,
+        // so it is "running" from construction and registerBot auto-starts each
+        // session. The runner must NOT call app.start() — against the real SDK it
+        // can only throw "App is already running", which logged a spurious error
+        // on every binding add/delete/rotation. Registering bindings — including a
+        // second one added to an already-up app — must invoke start() zero times.
         Long a = seedPollingBinding("agent-a", "111:tokA", "1", true);
         TelegramPollingRunner.reconcile();
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(a));
-        assertEquals(1, fakeApp.startInvocations(), "the first binding starts the app once");
 
-        // The newly-registered session reports not-yet-running, flipping
-        // app.isRunning() false even though the app is up.
-        fakeApp.setSessionsRunning(false);
         Long b = seedPollingBinding("agent-b", "222:tokB", "2", true);
         EventLogger.clear();
         TelegramPollingRunner.reconcile();
@@ -250,12 +243,11 @@ class TelegramPollingRunnerTest extends FunctionalTest {
 
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(b),
                 "the second binding registers");
-        assertEquals(1, fakeApp.startInvocations(),
-                "adding a binding to a running app must NOT call start() again (JCLAW-431)");
+        assertEquals(0, fakeApp.startInvocations(),
+                "the runner must never call app.start() — the SDK app runs from construction (JCLAW-431)");
         long startFailures = EventLog.count("category = ?1 AND message LIKE ?2",
                 "channel", "%Failed to start polling app%");
-        assertEquals(0L, startFailures,
-                "no spurious 'App is already running' error on a binding transition");
+        assertEquals(0L, startFailures, "no app-start error on register");
     }
 
     @Test

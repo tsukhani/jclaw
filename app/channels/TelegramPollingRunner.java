@@ -57,27 +57,6 @@ public final class TelegramPollingRunner {
 
     private static final AtomicReference<TelegramBotsLongPollingApplication> APP = new AtomicReference<>();
 
-    /**
-     * JCLAW-431: have we already called {@link
-     * TelegramBotsLongPollingApplication#start()} on the live {@link #APP}?
-     *
-     * <p>The SDK rejects {@code start()} with "App is already running" whenever
-     * its internal {@code isAppRunning} flag is set — but {@code isRunning()},
-     * the natural guard, is the STRICTER "app flag AND <em>every</em> session
-     * running". Adding a binding inserts a session that reports not-yet-running
-     * for a beat, so {@code isRunning()} reads false even though the app is up;
-     * guarding the start on {@code !app.isRunning()} therefore re-enters and
-     * {@code start()} throws on every binding add/transition (the spurious
-     * "Failed to start polling app" error). {@code registerBot} already
-     * auto-starts each new session when the app is running, so the app must be
-     * started exactly once — the first binding after boot/restart. We track
-     * that here instead of consulting {@code isRunning()}. Reset by {@link
-     * #stop} (which closes the app + clears {@link #APP}) and {@link
-     * #clearForTest}.
-     */
-    private static final java.util.concurrent.atomic.AtomicBoolean APP_STARTED =
-            new java.util.concurrent.atomic.AtomicBoolean(false);
-
     /** bindingId → active bot token. Used to detect token rotation on reconcile. */
     private static final ConcurrentHashMap<Long, String> ACTIVE = new ConcurrentHashMap<>();
 
@@ -257,32 +236,17 @@ public final class TelegramPollingRunner {
             }
         }
 
-        // Start the app exactly once — on the first binding registered after
-        // boot/restart. We deliberately leave the app instance in place when the
-        // registration set drops to zero so a subsequent reconcile can reuse the
-        // dispatcher without recreating threads. JCLAW-431: guard on our own
-        // APP_STARTED flag rather than app.isRunning(): registerBot auto-starts
-        // each new session once the app is up, so a second start() is redundant
-        // and the SDK rejects it with "App is already running" — and isRunning()
-        // (app flag AND every session running) reads false the instant a new
-        // session is added, which made the old guard re-enter and log that error
-        // on every binding add/transition.
-        if (!ACTIVE.isEmpty() && APP_STARTED.compareAndSet(false, true)) {
-            try {
-                app.start();
-                EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
-                        "Long-polling app started (%d binding(s) registered)".formatted(ACTIVE.size()));
-            } catch (Exception e) {
-                // A genuine start failure (the redundant "already running" is now
-                // prevented by the flag). Reset so the next reconcile re-attempts;
-                // JCLAW-387 D2: classify + name the recovery curve. We do NOT add
-                // our own retry here — the SDK owns the getUpdates backoff.
-                APP_STARTED.set(false);
-                EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
-                        "Failed to start polling app: %s [%s]".formatted(
-                                e.getMessage(), describePollingErrorCurve(e)));
-            }
-        }
+        // No app.start() here — and there must not be one. JCLAW-431:
+        // telegrambots 9.5.0 constructs TelegramBotsLongPollingApplication with
+        // isAppRunning=true (the ctor does `new AtomicBoolean(true)`), so the app
+        // is "running" from construction and registerBot auto-starts each
+        // session's poller on registration. app.start() can therefore ONLY throw
+        // "App is already running" — it never has anything to start — which
+        // logged a spurious ERROR on every binding add/delete/rotation and on
+        // every watchdog rebuild. We deliberately leave the app instance in place
+        // when the registration set drops to zero so a later reconcile reuses the
+        // dispatcher without recreating threads; the next register's session
+        // auto-starts the same way.
     }
 
     /** Stop all active sessions. Safe to call at app shutdown. */
@@ -303,9 +267,6 @@ public final class TelegramPollingRunner {
         // JCLAW-429: the unregister loop above drained SESSIONS + shut each
         // executor; clear the conflict-alert set so a restart starts clean.
         CONFLICT_ALERTED.clear();
-        // JCLAW-431: the app is closed and APP cleared above, so the next
-        // reconcile builds a fresh app that must be start()ed again.
-        APP_STARTED.set(false);
         // JCLAW-363: stop the periodic watchdog before draining the scheduler it
         // rides on, so the shutdown awaitTermination isn't held by a fixed-delay
         // task.
@@ -354,8 +315,6 @@ public final class TelegramPollingRunner {
         // JCLAW-429: drop the session map + conflict-alert set so each test starts clean.
         SESSIONS.clear();
         CONFLICT_ALERTED.clear();
-        // JCLAW-431: a fresh test installs its own fake app that hasn't been started.
-        APP_STARTED.set(false);
         // JCLAW-363: drop the watchdog tick + its tracking state and restore the
         // wall clock / config-driven timeout so each test starts clean.
         stopWatchdog();
