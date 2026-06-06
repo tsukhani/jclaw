@@ -207,19 +207,19 @@ public final class ParallelToolExecutor {
 
         int workUnits = safeCalls.size() + unsafeGroups.size();
         var latch = new CountDownLatch(workUnits);
+        var ctx = new DispatchContext(
+                toolCalls, agent, conversationId, results, onStatus, isCancelled, latch);
 
         // One virtual thread per parallel-safe call — full concurrency.
         for (int idx : safeCalls) {
             final int i = idx;
-            Thread.ofVirtual().name("agent-tool-parallel").start(() ->
-                    runSafeCall(toolCalls, i, agent, conversationId, results, onStatus, isCancelled, latch));
+            Thread.ofVirtual().name("agent-tool-parallel").start(() -> runSafeCall(ctx, i));
         }
 
         // One virtual thread per non-parallel-safe tool-name group —
         // calls within execute sequentially in declared order.
         for (var group : unsafeGroups.values()) {
-            Thread.ofVirtual().name("agent-tool-serial").start(() ->
-                    runSerialGroup(toolCalls, group, agent, conversationId, results, onStatus, isCancelled, latch));
+            Thread.ofVirtual().name("agent-tool-serial").start(() -> runSerialGroup(ctx, group));
         }
 
         try {
@@ -229,30 +229,37 @@ public final class ParallelToolExecutor {
         }
     }
 
+    /**
+     * Fixed environment for one multi-call dispatch phase: the batch under
+     * execution plus the shared result sink, status callback, cancellation
+     * flag, and completion latch. Threaded identically through every work
+     * unit; only the per-unit selector ({@code int} index or group) varies.
+     */
+    private record DispatchContext(List<ToolCall> toolCalls, Agent agent, Long conversationId,
+                                   ToolRegistry.ToolResult[] results, Consumer<String> onStatus,
+                                   AtomicBoolean isCancelled, CountDownLatch latch) {}
+
     /** Body of one parallel-safe work unit: dispatch a single call. */
-    private static void runSafeCall(List<ToolCall> toolCalls, int i, Agent agent, Long conversationId,
-                                    ToolRegistry.ToolResult[] results, Consumer<String> onStatus,
-                                    AtomicBoolean isCancelled, CountDownLatch latch) {
+    private static void runSafeCall(DispatchContext ctx, int i) {
         try {
-            if (isCancelled != null && isCancelled.get()) return;
-            results[i] = runToolCallSafely(toolCalls.get(i), agent, conversationId, onStatus);
+            if (ctx.isCancelled() != null && ctx.isCancelled().get()) return;
+            ctx.results()[i] = runToolCallSafely(
+                    ctx.toolCalls().get(i), ctx.agent(), ctx.conversationId(), ctx.onStatus());
         } finally {
-            latch.countDown();
+            ctx.latch().countDown();
         }
     }
 
     /** Body of one serial work unit: dispatch calls in declared order. */
-    private static void runSerialGroup(List<ToolCall> toolCalls, List<Integer> group, Agent agent,
-                                       Long conversationId, ToolRegistry.ToolResult[] results,
-                                       Consumer<String> onStatus,
-                                       AtomicBoolean isCancelled, CountDownLatch latch) {
+    private static void runSerialGroup(DispatchContext ctx, List<Integer> group) {
         try {
             for (int idx : group) {
-                if (isCancelled != null && isCancelled.get()) break;
-                results[idx] = runToolCallSafely(toolCalls.get(idx), agent, conversationId, onStatus);
+                if (ctx.isCancelled() != null && ctx.isCancelled().get()) break;
+                ctx.results()[idx] = runToolCallSafely(
+                        ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.onStatus());
             }
         } finally {
-            latch.countDown();
+            ctx.latch().countDown();
         }
     }
 

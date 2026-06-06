@@ -39,6 +39,9 @@ public class ApiChannelsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
+    /** Dashboard summary of the channel kinds currently doing work. */
+    private record ActiveChannelsResponse(int count, Set<String> channelTypes) {}
+
     /**
      * GET /api/channels/active — channel kinds currently doing work,
      * aggregated across the three sources of truth (web, telegram
@@ -48,9 +51,6 @@ public class ApiChannelsController extends Controller {
      *
      * <p>Response: {@code {"count": N, "channelTypes": ["telegram", "web", ...]}}.
      */
-    /** Dashboard summary of the channel kinds currently doing work. */
-    private record ActiveChannelsResponse(int count, Set<String> channelTypes) {}
-
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ActiveChannelsResponse.class)))
     public static void active() {
         var types = ChannelStatusService.activeChannelTypes();

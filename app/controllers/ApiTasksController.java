@@ -496,13 +496,6 @@ public class ApiTasksController extends Controller {
      * </ul>
      * {@code limit} defaults to 200, capped at 500.
      */
-    /**
-     * The startedAt window {@link #recentRuns} queries over: {@code since} is
-     * always set; {@code until} is null in rolling mode (no upper bound) and
-     * set in range mode.
-     */
-    private record RunWindow(Instant since, Instant until) {}
-
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = RecentRunView.class))))
     public static void recentRuns(Integer hours, Integer limit, String from, String to) {
@@ -515,6 +508,13 @@ public class ApiTasksController extends Controller {
         List<TaskRun> rows = (List<TaskRun>) (List<?>) query.fetch(lim);
         renderJSON(gson.toJson(rows.stream().map(RecentRunView::of).toList()));
     }
+
+    /**
+     * The startedAt window {@link #recentRuns} queries over: {@code since} is
+     * always set; {@code until} is null in rolling mode (no upper bound) and
+     * set in range mode.
+     */
+    private record RunWindow(Instant since, Instant until) {}
 
     /**
      * Resolve the {@link RunWindow} from the request: an ISO-8601 {@code from}

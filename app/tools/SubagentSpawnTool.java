@@ -1461,11 +1461,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // JCLAW-424 (AC5): on a timeout, append the child's partial output (carried
         // on outcome.reply()) to the timeout reason so the async parent salvages it
         // too — the reason itself is preserved for the announce's terminal semantics.
+        var failureOrPartialBody = status == SubagentRun.Status.TIMEOUT && notBlank(outcome.reply())
+                ? failureBody + "\n\nPartial output before timeout:\n" + outcome.reply()
+                : failureBody;
         var announceBody = status == SubagentRun.Status.COMPLETED
                 ? outcome.reply()
-                : (status == SubagentRun.Status.TIMEOUT && notBlank(outcome.reply())
-                        ? failureBody + "\n\nPartial output before timeout:\n" + outcome.reply()
-                        : failureBody);
+                : failureOrPartialBody;
         var displayTruncatedBody = truncateForAnnounce(announceBody);
         final var modelOutputTruncated = outcome.replyTruncated();
         try {
