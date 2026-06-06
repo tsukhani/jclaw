@@ -15,6 +15,7 @@ import play.Play;
 import services.EventLogger;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.EnumMap;
@@ -442,14 +443,14 @@ public final class LuceneIndexer {
                 writer.deleteAll();
                 writer.commit();
             } catch (IOException e) {
-                throw new RuntimeException("Lucene wipeForTest failed", e);
+                throw new UncheckedIOException("Lucene wipeForTest failed", e);
             }
         }
         for (var searcher : SEARCHERS.values()) {
             try {
                 searcher.maybeRefresh();
             } catch (IOException e) {
-                throw new RuntimeException("Lucene wipeForTest refresh failed", e);
+                throw new UncheckedIOException("Lucene wipeForTest refresh failed", e);
             }
         }
     }
@@ -466,9 +467,14 @@ public final class LuceneIndexer {
         // and any subprocess (cli admin, migration tool) agree regardless of cwd.
         var override = System.getProperty(INDEX_PATH_PROPERTY);
         var configured = Play.configuration.getProperty(INDEX_PATH_PROPERTY);
-        var chosen = (override != null && !override.isBlank()) ? override
-                : (configured != null && !configured.isBlank()) ? configured
-                : "data/jclaw-lucene";
+        String chosen;
+        if (override != null && !override.isBlank()) {
+            chosen = override;
+        } else if (configured != null && !configured.isBlank()) {
+            chosen = configured;
+        } else {
+            chosen = "data/jclaw-lucene";
+        }
         var rootPath = Path.of(chosen);
         var root = rootPath.isAbsolute() ? rootPath
                 : Play.applicationPath.toPath().resolve(chosen);

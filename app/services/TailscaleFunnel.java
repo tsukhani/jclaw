@@ -39,6 +39,9 @@ public final class TailscaleFunnel {
     private TailscaleFunnel() {}
 
     private static final String CATEGORY = "tailscale";
+    private static final String FUNNEL = "funnel";
+    private static final String HTTPS_SCHEME = "https://";
+    private static final String TAILSCALE_IPS = "TailscaleIPs";
     private static final Duration EXEC_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration STATUS_TIMEOUT = Duration.ofSeconds(5);
     /** {@code funnel --bg} can return before the node's funnel capability has synced
@@ -127,12 +130,12 @@ public final class TailscaleFunnel {
     public static List<String> statusCmd(String bin) { return List.of(bin, "status", "--json"); }
 
     public static List<String> enableCmd(String bin, int port) {
-        return List.of(bin, "funnel", "--bg", "--yes", Integer.toString(port));
+        return List.of(bin, FUNNEL, "--bg", "--yes", Integer.toString(port));
     }
 
-    public static List<String> resetCmd(String bin) { return List.of(bin, "funnel", "reset"); }
+    public static List<String> resetCmd(String bin) { return List.of(bin, FUNNEL, "reset"); }
 
-    public static List<String> funnelStatusCmd(String bin) { return List.of(bin, "funnel", "status"); }
+    public static List<String> funnelStatusCmd(String bin) { return List.of(bin, FUNNEL, "status"); }
 
     // ===================== pure parsing =====================
 
@@ -146,11 +149,11 @@ public final class TailscaleFunnel {
         if (self == null) return null;
         var dns = optString(self, "DNSName");
         if (dns != null && !dns.isBlank()) {
-            return "https://" + dns.replaceAll("\\.$", "");
+            return HTTPS_SCHEME + dns.replaceAll("\\.$", "");
         }
-        if (self.has("TailscaleIPs") && self.get("TailscaleIPs").isJsonArray()) {
-            var ips = self.getAsJsonArray("TailscaleIPs");
-            if (!ips.isEmpty()) return "https://" + ips.get(0).getAsString();
+        if (self.has(TAILSCALE_IPS) && self.get(TAILSCALE_IPS).isJsonArray()) {
+            var ips = self.getAsJsonArray(TAILSCALE_IPS);
+            if (!ips.isEmpty()) return HTTPS_SCHEME + ips.get(0).getAsString();
         }
         return null;
     }
@@ -271,7 +274,7 @@ public final class TailscaleFunnel {
         var res = runner.run(funnelStatusCmd(bin), STATUS_TIMEOUT);
         if (!res.ok() || res.stdout() == null) return false;
         var out = res.stdout().strip().toLowerCase();
-        return out.contains("https://") && !out.contains("no serve config");
+        return out.contains(HTTPS_SCHEME) && !out.contains("no serve config");
     }
 
     private static void sleepQuietly(long millis) {

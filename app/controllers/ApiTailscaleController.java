@@ -22,6 +22,7 @@ public class ApiTailscaleController extends Controller {
 
     private static final Gson gson = INSTANCE;
     private static final String CATEGORY = "tailscale";
+    private static final String FIELD_ENABLED = "enabled";
 
     /**
      * @param enabled   whether the operator has switched Funnel on
@@ -44,8 +45,8 @@ public class ApiTailscaleController extends Controller {
     @SuppressWarnings("java:S2259")
     public static void toggle() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("enabled")) badRequest();
-        boolean enabled = body.get("enabled").getAsBoolean();
+        if (body == null || !body.has(FIELD_ENABLED)) badRequest();
+        boolean enabled = body.get(FIELD_ENABLED).getAsBoolean();
         if (body.has("port") && !body.get("port").isJsonNull()) {
             ConfigService.set(TailscaleFunnel.CFG_PORT, String.valueOf(body.get("port").getAsInt()));
         }

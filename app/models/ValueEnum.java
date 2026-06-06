@@ -27,7 +27,7 @@ public interface ValueEnum {
      * input rather than throwing.
      */
     static <E extends Enum<E> & ValueEnum> Map<String, E> indexOf(E[] constants) {
-        var index = new HashMap<String, E>(constants.length * 2);
+        Map<String, E> index = HashMap.newHashMap(constants.length);
         for (var c : constants) {
             index.put(c.wireValue(), c);
         }

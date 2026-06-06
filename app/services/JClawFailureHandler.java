@@ -134,10 +134,10 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                             "Task '%s' transient failure %d/%d, retry in %ds: %s"
                                     .formatted(outcome.taskName(), r.newRetryCount(),
                                             outcome.budget(), outcome.backoffSecs(), errorMessage));
-            case Decision.Fail f -> {
+            case Decision.Fail(String reason) -> {
                 EventLogger.error("task", outcome.agentName(), null,
                         "Task '%s' failed (%s) after %d attempt(s): %s"
-                                .formatted(outcome.taskName(), f.reason(),
+                                .formatted(outcome.taskName(), reason,
                                         outcome.attempts(), errorMessage));
                 // JCLAW-21 lifecycle audit: TASK_FAILED bookmark. Sibling
                 // to TASK_STARTED / TASK_COMPLETED emitted by TaskExecutor.
@@ -147,7 +147,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                 // the raw error message so dashboards can group by class
                 // while still showing the operator what actually happened.
                 TaskLifecycleEvents.recordFailed(outcome.task(), outcome.runForLifecycle(),
-                        f.reason(), errorMessage);
+                        reason, errorMessage);
             }
         }
         return outcome.decision();
