@@ -6,14 +6,9 @@ import models.MessageRole;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
-import services.search.LuceneIndexer;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 /**
  * Functional HTTP tests for {@code GET /api/task-runs/search} (JCLAW-294
@@ -23,40 +18,12 @@ import java.util.stream.Stream;
  */
 class ApiTasksControllerSearchTest extends FunctionalTest {
 
-    private static Path testIndexParent;
-
-    @BeforeAll
-    static void redirectLuceneIndex() throws Exception {
-        // Redirect Lucene to a per-test-class temp directory so the
-        // autotest JVM never opens the production index's FSDirectory.
-        // Without this, a running production JClaw against the same
-        // checkout holds data/jclaw-lucene/task_run_message/write.lock
-        // and our MessageSearch.init() below crashes with
-        // LockObtainFailedException.
-        testIndexParent = Files.createTempDirectory("jclaw-lucene-test-");
-        // JCLAW-304: setIndexPathForTest now takes the index root —
-        // each scope's subdirectory (e.g. task_run_message/) is appended
-        // by LuceneIndexer.indexPath(Scope) at open() time. Passing the
-        // scope subpath explicitly here would double-resolve to
-        // root/task_run_message/task_run_message/.
-        LuceneIndexer.setIndexPathForTest(testIndexParent);
-    }
-
-    @AfterAll
-    static void restoreLuceneIndex() throws Exception {
-        LuceneIndexer.close();
-        LuceneIndexer.setIndexPathForTest(null);
-        if (testIndexParent != null && Files.exists(testIndexParent)) {
-            try (Stream<Path> walk = Files.walk(testIndexParent)) {
-                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.deleteIfExists(p); } catch (Exception _) { /* best-effort */ }
-                });
-            }
-        }
-    }
-
     @BeforeEach
     void setup() throws Exception {
+        // JCLAW-428: serialize against other Lucene tests and open a clean
+        // index at the %test path (data/jclaw-lucene-test). openForTest()
+        // replaces the old close/open/wipe dance.
+        LuceneTestSync.openForTest();
         // Drop any FT state left from a prior test so Play's
         // Fixtures.deleteDatabase doesn't trip on the FT.INDEXES
         // housekeeping table — see H2LuceneMessageSearchRepositoryTest
@@ -75,6 +42,7 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
         // Tear down so the NEXT test class's Fixtures.deleteDatabase
         // doesn't blow up on FT.INDEXES.
         dropFtSafely();
+        LuceneTestSync.release();
     }
 
     private static void dropFtSafely() {

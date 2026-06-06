@@ -7,9 +7,7 @@ import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
 import services.ConversationService;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
@@ -19,12 +17,8 @@ import services.search.DirectLuceneMessageSearchRepository;
 import services.search.LuceneIndexer;
 import services.search.MessageSearchTestHooks;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
-import java.util.stream.Stream;
 
 /**
  * Live JPA + Lucene round-trip for {@link DirectLuceneMessageSearchRepository}.
@@ -47,50 +41,16 @@ import java.util.stream.Stream;
  */
 class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
-    private static Path testIndexParent;
     private DirectLuceneMessageSearchRepository repo;
 
-    @BeforeAll
-    static void allOnce() throws Exception {
-        // Boot job skips Lucene init in test mode, so the indexer is
-        // closed by default. Open it pointing at a per-test-class temp
-        // directory so we don't share state — and don't fight the
-        // write.lock — with a production JVM running against the same
-        // checkout.
-        testIndexParent = Files.createTempDirectory("jclaw-lucene-test-");
-        // JCLAW-304: setIndexPathForTest now takes the index root —
-        // each scope's subdirectory (e.g. task_run_message/) is appended
-        // by LuceneIndexer.indexPath(Scope) at open() time. Passing the
-        // scope subpath explicitly here would double-resolve to
-        // root/task_run_message/task_run_message/.
-        LuceneIndexer.setIndexPathForTest(testIndexParent);
-    }
-
-    @AfterAll
-    static void allCleanup() throws Exception {
-        LuceneIndexer.close();
-        // Clear the override BEFORE the directory delete so a stray
-        // re-open during cleanup can't lock the temp tree we're about
-        // to remove (no production code re-opens here, but the order
-        // documents intent for future readers).
-        LuceneIndexer.setIndexPathForTest(null);
-        if (testIndexParent != null && Files.exists(testIndexParent)) {
-            try (Stream<Path> walk = Files.walk(testIndexParent)) {
-                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.deleteIfExists(p); } catch (Exception _) { /* best-effort */ }
-                });
-            }
-        }
-    }
-
     @BeforeEach
-    void setup() throws Exception {
+    void setup() {
+        // JCLAW-428: serialize against other Lucene tests and open a clean index
+        // at the %test path (data/jclaw-lucene-test). The boot job skips Lucene
+        // init in test mode, so openForTest() opens it; wipeForTest() clears
+        // leftover docs so a different test class can't contaminate this one.
+        LuceneTestSync.openForTest();
         Fixtures.deleteDatabase();
-        // Force a clean indexer state per test. Closing + reopening rebuilds
-        // the SearcherManager too.
-        LuceneIndexer.close();
-        LuceneIndexer.open();
-        wipeIndex();
         repo = new DirectLuceneMessageSearchRepository();
         MessageSearchTestHooks.setRepository(repo);
     }
@@ -98,22 +58,7 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
     @AfterEach
     void teardown() {
         MessageSearchTestHooks.setRepository(null);
-    }
-
-    private static void wipeIndex() throws Exception {
-        // Delete-all keeps the FSDirectory open but clears prior docs.
-        // Cheaper than close/delete/reopen between tests. Post JCLAW-304
-        // the indexer holds a per-scope EnumMap<Scope, IndexWriter>; wipe
-        // every scope so leftover docs from a different test class can't
-        // contaminate.
-        var fld = LuceneIndexer.class.getDeclaredField("WRITERS");
-        fld.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var writers = (java.util.Map<LuceneIndexer.Scope, org.apache.lucene.index.IndexWriter>) fld.get(null);
-        for (var w : writers.values()) {
-            w.deleteAll();
-            w.commit();
-        }
+        LuceneTestSync.release();
     }
 
     private static Long commitInFreshTx(java.util.function.Supplier<Long> block) {
@@ -286,7 +231,7 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         var trmId = seedMessage("backfilltrmtoken brown fox");
 
         // Drop everything from the index — JPA rows survive.
-        wipeIndex();
+        LuceneIndexer.wipeForTest();
         for (var scope : LuceneIndexer.Scope.values()) {
             assertEquals(0, LuceneIndexer.docCount(scope),
                     "scope " + scope + " must be empty before backfill");

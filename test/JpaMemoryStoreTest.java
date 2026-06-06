@@ -1,4 +1,6 @@
 import memory.JpaMemoryStore;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
@@ -36,6 +38,18 @@ class JpaMemoryStoreTest extends UnitTest {
 
     /** SHA-256 hex is 32 bytes = 64 lowercase-hex characters. */
     private static final int SHA256_HEX_LEN = 64;
+
+    @BeforeEach
+    void luceneClosed() {
+        // JCLAW-428: serialize against the search-mode Lucene tests via the
+        // shared global lock, forcing the index closed for this class.
+        LuceneTestSync.closedForTest();
+    }
+
+    @AfterEach
+    void luceneRelease() {
+        LuceneTestSync.release();
+    }
 
     private static Method hashText() throws Exception {
         var m = JpaMemoryStore.class.getDeclaredMethod("hashText", String.class);

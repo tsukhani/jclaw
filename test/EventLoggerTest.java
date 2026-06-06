@@ -3,6 +3,17 @@ import play.test.*;
 import models.EventLog;
 import services.EventLogger;
 
+import java.util.List;
+
+/**
+ * EventLogger persists to the shared EventLog table via a process-global
+ * buffer. play1 runs the unit + functional lanes concurrently, so any other
+ * test that logs an event lands rows here too — a bare
+ * {@code findRecent(10).size() == 1} assertion flakes ("expected 1 but was
+ * 10", JCLAW-428). Each test therefore writes a UNIQUE category and asserts on
+ * only its own rows via {@link #mine(String)}, so concurrent cross-talk (which
+ * uses other categories) can't perturb the count.
+ */
 class EventLoggerTest extends UnitTest {
 
     @BeforeEach
@@ -11,25 +22,33 @@ class EventLoggerTest extends UnitTest {
         Fixtures.deleteDatabase();
     }
 
+    /** Events with {@code category}, newest first — isolates this test's own
+     *  rows from concurrent cross-talk in the shared EventLog table. */
+    private static List<EventLog> mine(String category) {
+        return EventLog.findRecent(200).stream()
+                .filter(e -> category.equals(e.category))
+                .toList();
+    }
+
     @Test
     void recordCreatesEventLog() {
-        EventLogger.record("INFO", "system", "Test message", "{\"key\":\"value\"}");
+        EventLogger.record("INFO", "eltest.record", "Test message", "{\"key\":\"value\"}");
         EventLogger.flush();
 
-        var events = EventLog.findRecent(10);
+        var events = mine("eltest.record");
         assertEquals(1, events.size());
         assertEquals("INFO", events.getFirst().level);
-        assertEquals("system", events.getFirst().category);
+        assertEquals("eltest.record", events.getFirst().category);
         assertEquals("Test message", events.getFirst().message);
         assertEquals("{\"key\":\"value\"}", events.getFirst().details);
     }
 
     @Test
     void recordWithAgentAndChannel() {
-        EventLogger.record("WARN", "channel", "agent-1", "telegram", "Delivery failed", null);
+        EventLogger.record("WARN", "eltest.agentchannel", "agent-1", "telegram", "Delivery failed", null);
         EventLogger.flush();
 
-        var events = EventLog.findRecent(10);
+        var events = mine("eltest.agentchannel");
         assertEquals(1, events.size());
         assertEquals("agent-1", events.getFirst().agentId);
         assertEquals("telegram", events.getFirst().channel);
@@ -37,21 +56,21 @@ class EventLoggerTest extends UnitTest {
 
     @Test
     void infoConvenienceMethod() {
-        EventLogger.info("llm", "Request sent");
+        EventLogger.info("eltest.info", "Request sent");
         EventLogger.flush();
 
-        var events = EventLog.findRecent(10);
+        var events = mine("eltest.info");
         assertEquals(1, events.size());
         assertEquals("INFO", events.getFirst().level);
-        assertEquals("llm", events.getFirst().category);
+        assertEquals("eltest.info", events.getFirst().category);
     }
 
     @Test
     void warnConvenienceMethod() {
-        EventLogger.warn("channel", "Retry triggered", "attempt 2");
+        EventLogger.warn("eltest.warn", "Retry triggered", "attempt 2");
         EventLogger.flush();
 
-        var events = EventLog.findRecent(10);
+        var events = mine("eltest.warn");
         assertEquals(1, events.size());
         assertEquals("WARN", events.getFirst().level);
         assertEquals("Retry triggered", events.getFirst().message);
@@ -59,20 +78,20 @@ class EventLoggerTest extends UnitTest {
 
     @Test
     void errorConvenienceMethod() {
-        EventLogger.error("tool", "Tool execution failed");
+        EventLogger.error("eltest.error", "Tool execution failed");
         EventLogger.flush();
 
-        var events = EventLog.findRecent(10);
+        var events = mine("eltest.error");
         assertEquals(1, events.size());
         assertEquals("ERROR", events.getFirst().level);
     }
 
     @Test
     void errorWithThrowable() {
-        EventLogger.error("system", "Unhandled exception", new RuntimeException("test error"));
+        EventLogger.error("eltest.errthrow", "Unhandled exception", new RuntimeException("test error"));
         EventLogger.flush();
 
-        var events = EventLog.findRecent(10);
+        var events = mine("eltest.errthrow");
         assertEquals(1, events.size());
         assertTrue(events.getFirst().details.contains("test error"));
     }
@@ -81,16 +100,20 @@ class EventLoggerTest extends UnitTest {
 
     @Test
     void recordSubagentSpawnPersistsCategoryAndMetadata() {
-        EventLogger.recordSubagentSpawn("parent-1", "child-9", "run-abc", "session", "fresh");
+        EventLogger.recordSubagentSpawn("eltest-spawn-parent", "child-9", "run-abc", "session", "fresh");
         EventLogger.flush();
 
-        var events = EventLog.findRecent(10);
+        // SUBAGENT_SPAWN is a shared constant category; scope to this test's
+        // unique parent id so a concurrent subagent test can't add a row here.
+        var events = mine(EventLogger.SUBAGENT_SPAWN).stream()
+                .filter(e -> "eltest-spawn-parent".equals(e.agentId))
+                .toList();
         assertEquals(1, events.size());
         var e = events.getFirst();
         assertEquals("INFO", e.level);
         assertEquals(EventLogger.SUBAGENT_SPAWN, e.category);
-        assertEquals("parent-1", e.agentId);
-        assertTrue(e.details.contains("\"parent_agent_id\":\"parent-1\""));
+        assertEquals("eltest-spawn-parent", e.agentId);
+        assertTrue(e.details.contains("\"parent_agent_id\":\"eltest-spawn-parent\""));
         assertTrue(e.details.contains("\"child_agent_id\":\"child-9\""));
         assertTrue(e.details.contains("\"run_id\":\"run-abc\""));
         assertTrue(e.details.contains("\"mode\":\"session\""));
@@ -99,16 +122,18 @@ class EventLoggerTest extends UnitTest {
 
     @Test
     void recordSubagentLimitExceededOmitsChild() {
-        EventLogger.recordSubagentLimitExceeded("parent-2", "max depth 3 reached");
+        EventLogger.recordSubagentLimitExceeded("eltest-limit-parent", "max depth 3 reached");
         EventLogger.flush();
 
-        var events = EventLog.findRecent(10);
+        var events = mine(EventLogger.SUBAGENT_LIMIT_EXCEEDED).stream()
+                .filter(e -> "eltest-limit-parent".equals(e.agentId))
+                .toList();
         assertEquals(1, events.size());
         var e = events.getFirst();
         assertEquals("WARN", e.level);
         assertEquals(EventLogger.SUBAGENT_LIMIT_EXCEEDED, e.category);
-        assertEquals("parent-2", e.agentId);
-        assertTrue(e.details.contains("\"parent_agent_id\":\"parent-2\""));
+        assertEquals("eltest-limit-parent", e.agentId);
+        assertTrue(e.details.contains("\"parent_agent_id\":\"eltest-limit-parent\""));
         assertTrue(e.details.contains("\"child_agent_id\":null"));
         assertTrue(e.details.contains("\"reason\":\"max depth 3 reached\""));
     }
@@ -118,12 +143,10 @@ class EventLoggerTest extends UnitTest {
         // The (category, message, Throwable) overload — previously 0%-covered —
         // routes Throwable.toString() into the details field.
         var t = new RuntimeException("synthetic boom");
-        EventLogger.error("test-cat-throwable", "ouch", t);
+        EventLogger.error("eltest.cat.throwable", "ouch", t);
         EventLogger.flush();
-        var events = EventLog.findRecent(40);
-        var found = events.stream().anyMatch(e ->
-                "test-cat-throwable".equals(e.category)
-                && "ouch".equals(e.message)
+        var found = mine("eltest.cat.throwable").stream().anyMatch(e ->
+                "ouch".equals(e.message)
                 && e.details != null
                 && e.details.contains("RuntimeException")
                 && e.details.contains("synthetic boom"));
@@ -145,16 +168,16 @@ class EventLoggerTest extends UnitTest {
     // race-free per the JCLAW-334 note above.
     @Test
     void flushPendingForShutdownPersistsTail() {
-        EventLogger.record("INFO", "shutdown-tail", "queued but not yet batched", null);
+        EventLogger.record("INFO", "eltest.shutdown-tail", "queued but not yet batched", null);
 
         // Tail is still in memory — below BATCH_SIZE, no boundary flush yet.
-        assertEquals(0, EventLog.findRecent(10).size());
+        assertEquals(0, mine("eltest.shutdown-tail").size());
 
         EventLogger.flushPendingForShutdown();
 
-        var events = EventLog.findRecent(10);
+        var events = mine("eltest.shutdown-tail");
         assertEquals(1, events.size());
-        assertEquals("shutdown-tail", events.getFirst().category);
+        assertEquals("eltest.shutdown-tail", events.getFirst().category);
         assertEquals("queued but not yet batched", events.getFirst().message);
     }
 }

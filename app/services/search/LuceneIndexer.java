@@ -429,19 +429,49 @@ public final class LuceneIndexer {
         }
     }
 
-    private static Path indexPath(Scope scope) {
-        // Test override wins so autotest runs land their index in a
-        // dedicated tmp directory, never the production default.
-        var override = System.getProperty(INDEX_PATH_PROPERTY);
-        Path root;
-        if (override != null && !override.isBlank()) {
-            root = Path.of(override);
-        } else {
-            // Production default: resolve against the Play app root so the
-            // running JVM and any subprocess (cli admin, migration tool)
-            // all agree on the same path regardless of cwd.
-            root = Play.applicationPath.toPath().resolve("data/jclaw-lucene");
+    /**
+     * Test-only: clear every open scope's index in place (deleteAll + commit)
+     * and refresh the searchers, leaving the writers open at the current path.
+     * Replaces ad-hoc reflection into {@link #WRITERS} from test setup
+     * (JCLAW-428). Callers serialize via {@code LuceneTestSync} so a wipe never
+     * races a concurrent search test on a shared scope. No-op when closed.
+     */
+    public static synchronized void wipeForTest() {
+        for (var writer : WRITERS.values()) {
+            try {
+                writer.deleteAll();
+                writer.commit();
+            } catch (IOException e) {
+                throw new RuntimeException("Lucene wipeForTest failed", e);
+            }
         }
+        for (var searcher : SEARCHERS.values()) {
+            try {
+                searcher.maybeRefresh();
+            } catch (IOException e) {
+                throw new RuntimeException("Lucene wipeForTest refresh failed", e);
+            }
+        }
+    }
+
+    private static Path indexPath(Scope scope) {
+        // Resolution order:
+        //   1. explicit System-property override (setIndexPathForTest) — kept
+        //      for tests that drive the path directly (e.g. LuceneIndexerTest);
+        //   2. Play config jclaw.search.lucenePath, which honours the %test.
+        //      prefix so the autotest JVM lands in data/jclaw-lucene-test and
+        //      never the production index (JCLAW-428);
+        //   3. production default data/jclaw-lucene.
+        // Relative values resolve against the Play app root so the running JVM
+        // and any subprocess (cli admin, migration tool) agree regardless of cwd.
+        var override = System.getProperty(INDEX_PATH_PROPERTY);
+        var configured = Play.configuration.getProperty(INDEX_PATH_PROPERTY);
+        var chosen = (override != null && !override.isBlank()) ? override
+                : (configured != null && !configured.isBlank()) ? configured
+                : "data/jclaw-lucene";
+        var rootPath = Path.of(chosen);
+        var root = rootPath.isAbsolute() ? rootPath
+                : Play.applicationPath.toPath().resolve(chosen);
         return root.resolve(scope.dirName());
     }
 }

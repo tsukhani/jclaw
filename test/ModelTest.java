@@ -6,6 +6,19 @@ import java.time.Instant;
 
 class ModelTest extends UnitTest {
 
+    @BeforeEach
+    void luceneClosed() {
+        // JCLAW-428: Memory.searchByText exercises the DB-LIKE fallback here,
+        // so force the Lucene index closed (and serialize against the
+        // search-mode tests via the shared global lock).
+        LuceneTestSync.closedForTest();
+    }
+
+    @AfterEach
+    void luceneRelease() {
+        LuceneTestSync.release();
+    }
+
     @Test
     void canCreateAndFindAgent() {
         Fixtures.deleteDatabase();

@@ -21,10 +21,19 @@ class IntegrationTest extends UnitTest {
 
     @BeforeEach
     void setup() {
+        // JCLAW-428: memoryRecalledDuringPromptAssembly drives memory recall
+        // through the DB-LIKE fallback, so force the Lucene index closed (and
+        // serialize against the search-mode tests via the shared global lock).
+        LuceneTestSync.closedForTest();
         Fixtures.deleteDatabase();
         cleanupTestAgents();
         ConfigService.clearCache();
         new jobs.ToolRegistrationJob().doJob();
+    }
+
+    @AfterEach
+    void luceneRelease() {
+        LuceneTestSync.release();
     }
 
     @AfterAll

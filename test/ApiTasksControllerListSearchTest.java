@@ -6,12 +6,8 @@ import services.AgentService;
 import services.Tx;
 import services.search.LuceneIndexer;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 /**
  * JCLAW-328: acceptance coverage for the {@code q:} keyword path on
@@ -33,46 +29,21 @@ import java.util.stream.Stream;
  */
 class ApiTasksControllerListSearchTest extends FunctionalTest {
 
-    private static Path testIndexParent;
-
-    @BeforeAll
-    static void redirectLuceneIndex() throws Exception {
-        testIndexParent = Files.createTempDirectory("jclaw-lucene-tasks-test-");
-        LuceneIndexer.setIndexPathForTest(testIndexParent);
-    }
-
-    @AfterAll
-    static void restoreLuceneIndex() throws Exception {
-        LuceneIndexer.close();
-        LuceneIndexer.setIndexPathForTest(null);
-        if (testIndexParent != null && Files.exists(testIndexParent)) {
-            try (Stream<Path> walk = Files.walk(testIndexParent)) {
-                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.deleteIfExists(p); } catch (Exception _) { /* best-effort */ }
-                });
-            }
-        }
-    }
-
     @BeforeEach
     void setup() throws Exception {
+        // JCLAW-428: serialize against other Lucene tests and open a clean
+        // index at the %test path (data/jclaw-lucene-test). openForTest()
+        // replaces the old close + MessageSearch.init + wipeIndex dance.
+        LuceneTestSync.openForTest();
         Fixtures.deleteDatabase();
         AuthFixture.seedAdminPassword("changeme");
         login();
-        LuceneIndexer.close();
         services.search.MessageSearch.init();
-        wipeIndex();
     }
 
-    private static void wipeIndex() throws Exception {
-        var fld = LuceneIndexer.class.getDeclaredField("WRITERS");
-        fld.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var writers = (java.util.Map<LuceneIndexer.Scope, org.apache.lucene.index.IndexWriter>) fld.get(null);
-        for (var w : writers.values()) {
-            w.deleteAll();
-            w.commit();
-        }
+    @AfterEach
+    void luceneRelease() {
+        LuceneTestSync.release();
     }
 
     private void login() {

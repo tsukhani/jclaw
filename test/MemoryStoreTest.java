@@ -6,8 +6,17 @@ class MemoryStoreTest extends UnitTest {
 
     @BeforeEach
     void setup() {
+        // JCLAW-428: JpaMemoryStore.search() exercises the DB-LIKE fallback
+        // here, so force the Lucene index closed (and serialize against the
+        // search-mode tests via the shared global lock).
+        LuceneTestSync.closedForTest();
         Fixtures.deleteDatabase();
         MemoryStoreFactory.reset();
+    }
+
+    @AfterEach
+    void luceneRelease() {
+        LuceneTestSync.release();
     }
 
     @Test

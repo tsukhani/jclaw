@@ -1,16 +1,9 @@
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.search.DirectLuceneMessageSearchRepository;
 import services.search.LuceneIndexer;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.stream.Stream;
 
 /**
  * Direct {@link LuceneIndexer} unit test for JCLAW-406: the per-write
@@ -38,57 +31,20 @@ class LuceneIndexerTest extends UnitTest {
 
     private static final LuceneIndexer.Scope SCOPE = LuceneIndexer.Scope.TASK_RUN_MESSAGE;
 
-    private static Path testIndexParent;
     private DirectLuceneMessageSearchRepository repo;
 
-    @BeforeAll
-    static void allOnce() throws Exception {
-        // Boot job skips Lucene init in test mode, so point the indexer
-        // at a per-class temp directory — same isolation pattern as
-        // DirectLuceneMessageSearchRepositoryTest, so we never fight a
-        // production JVM for the real index's write.lock.
-        testIndexParent = Files.createTempDirectory("jclaw-lucene-indexer-test-");
-        LuceneIndexer.setIndexPathForTest(testIndexParent);
-    }
-
-    @AfterAll
-    static void allCleanup() throws Exception {
-        LuceneIndexer.close();
-        LuceneIndexer.setIndexPathForTest(null);
-        if (testIndexParent != null && Files.exists(testIndexParent)) {
-            try (Stream<Path> walk = Files.walk(testIndexParent)) {
-                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.deleteIfExists(p); } catch (Exception _) { /* best-effort */ }
-                });
-            }
-        }
-    }
-
     @BeforeEach
-    void setup() throws Exception {
-        // Clean indexer state per test: close + reopen rebuilds every
-        // scope's writer and SearcherManager, then wipe leftover docs.
-        LuceneIndexer.close();
-        LuceneIndexer.open();
-        wipeIndex();
+    void setup() {
+        // JCLAW-428: serialize against other Lucene tests and open a clean index
+        // at the %test path (data/jclaw-lucene-test). openForTest() opens it (the
+        // boot job skips Lucene init in test mode) and wipes leftover docs.
+        LuceneTestSync.openForTest();
         repo = new DirectLuceneMessageSearchRepository();
     }
 
     @AfterEach
     void teardown() {
-        // No shared static state to reset beyond the index itself, which
-        // the next setup()'s close/open/wipe handles.
-    }
-
-    private static void wipeIndex() throws Exception {
-        var fld = LuceneIndexer.class.getDeclaredField("WRITERS");
-        fld.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var writers = (java.util.Map<LuceneIndexer.Scope, org.apache.lucene.index.IndexWriter>) fld.get(null);
-        for (var w : writers.values()) {
-            w.deleteAll();
-            w.commit();
-        }
+        LuceneTestSync.release();
     }
 
     @Test
