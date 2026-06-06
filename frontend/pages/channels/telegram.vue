@@ -63,48 +63,6 @@ const availableAgents = computed(() => {
 const { mutate, loading: saving } = useApiMutation()
 const { confirm } = useConfirm()
 
-/**
- * Ticks every second while the page is mounted so cooldown countdowns update
- * live without re-fetching. When a binding's cooldown crosses zero, a single
- * refresh() pulls fresh data from the server so the toggle unlocks naturally.
- */
-const nowMs = ref(Date.now())
-let tickHandle: ReturnType<typeof setInterval> | null = null
-let refreshingAfterCooldown = false
-
-onMounted(() => {
-  tickHandle = setInterval(() => {
-    nowMs.value = Date.now()
-  }, 1000)
-})
-onUnmounted(() => {
-  if (tickHandle) clearInterval(tickHandle)
-})
-
-function cooldownSecondsLeft(b: TelegramBindingSummary): number {
-  if (!b.cooldownUntil) return 0
-  const until = Date.parse(b.cooldownUntil)
-  if (Number.isNaN(until)) return 0
-  return Math.max(0, Math.ceil((until - nowMs.value) / 1000))
-}
-
-watch(nowMs, async () => {
-  if (refreshingAfterCooldown) return
-  const anyExpired = (bindings.value ?? []).some((b) => {
-    if (!b.cooldownUntil) return false
-    const until = Date.parse(b.cooldownUntil)
-    return !Number.isNaN(until) && until <= nowMs.value
-  })
-  if (!anyExpired) return
-  refreshingAfterCooldown = true
-  try {
-    await refresh()
-  }
-  finally {
-    refreshingAfterCooldown = false
-  }
-})
-
 const creating = ref(false)
 const editing = ref<TelegramBindingSummary | null>(null)
 
@@ -324,10 +282,6 @@ async function save() {
 }
 
 async function toggleEnabled(binding: TelegramBindingSummary) {
-  // Cooldown lock: ignore clicks during the post-unregister drain window.
-  // The button is :disabled in that state, but this guards a defensive second
-  // path (programmatic click, keyboard, etc.).
-  if (cooldownSecondsLeft(binding) > 0) return
   const next = !binding.enabled
   const result = await mutate(`/api/channels/telegram/bindings/${binding.id}`, {
     method: 'PUT',
@@ -435,23 +389,13 @@ async function testBinding(binding: TelegramBindingSummary) {
             {{ b.agentName ?? '(no agent)' }}
           </h3>
           <div class="flex items-center gap-2 shrink-0">
-            <span
-              v-if="cooldownSecondsLeft(b) > 0"
-              class="text-xs font-mono text-fg-muted"
-              :title="`Telegram long-poll drain in progress — re-enable unlocks in ${cooldownSecondsLeft(b)}s`"
-            >
-              disabling {{ cooldownSecondsLeft(b) }}s
-            </span>
             <!-- The aria-checked attribute is dynamically bound via the Vue colon shorthand; Sonar's static analyser does not resolve those bindings, but the required ARIA property is in fact present. -->
             <button
               type="button"
               role="switch"
               :aria-checked="b.enabled"
-              :disabled="cooldownSecondsLeft(b) > 0"
               :aria-label="b.enabled ? 'Disable binding' : 'Enable binding'"
-              :title="cooldownSecondsLeft(b) > 0
-                ? `Disabling — unlocks in ${cooldownSecondsLeft(b)}s`
-                : (b.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable')"
+              :title="b.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'"
               class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full
                      transition-colors focus:outline-hidden focus:ring-1 focus:ring-ring
                      disabled:cursor-not-allowed disabled:opacity-60"

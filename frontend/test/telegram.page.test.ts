@@ -25,7 +25,6 @@ function binding(overrides: Record<string, unknown> = {}) {
     replyToMode: null,
     errorReplyPolicy: null,
     notifierCooldownMs: null,
-    cooldownUntil: null,
     createdAt: null,
     updatedAt: null,
     ...overrides,

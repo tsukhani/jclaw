@@ -56,9 +56,7 @@ public class ApiTelegramBindingsController extends Controller {
      *  {@code webhookSecret} are elided — they're secrets. {@code webhookBaseUrl}
      *  is the operator-editable public host; {@code effectiveWebhookUrl} is the
      *  full URL to register (base + fixed path + secret), surfaced so the Edit UI
-     *  can show it. {@code cooldownUntil} is the ISO-8601 instant until which
-     *  re-registration is blocked after an unregister (post-JCLAW-89 Telegram
-     *  long-poll cooldown). */
+     *  can show it. */
     private record BindingView(Long id, Long agentId, String agentName,
                                 String telegramUserId, String transport,
                                 String webhookBaseUrl, boolean hasWebhookSecret,
@@ -66,10 +64,8 @@ public class ApiTelegramBindingsController extends Controller {
                                 boolean enabled,
                                 String replyToMode, String errorReplyPolicy,
                                 Long notifierCooldownMs,
-                                String cooldownUntil,
                                 String createdAt, String updatedAt) {
         static BindingView of(TelegramBinding b) {
-            var cooldown = TelegramPollingRunner.cooldownUntil(b.botToken);
             return new BindingView(b.id,
                     b.agent != null ? b.agent.id : null,
                     b.agent != null ? b.agent.name : null,
@@ -80,7 +76,6 @@ public class ApiTelegramBindingsController extends Controller {
                     effectiveWebhookUrl(b),
                     b.enabled,
                     b.replyToMode, b.errorReplyPolicy, b.notifierCooldownMs,
-                    cooldown != null ? cooldown.toString() : null,
                     b.createdAt != null ? b.createdAt.toString() : null,
                     b.updatedAt != null ? b.updatedAt.toString() : null);
         }
