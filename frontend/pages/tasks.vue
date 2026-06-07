@@ -1276,11 +1276,15 @@ const statusBg: Record<string, string> = {
         <template v-if="!selectMode">
           <button
             :disabled="!tasks?.length"
-            class="px-3 py-1.5 border border-input text-fg-muted text-xs hover:text-fg-strong hover:border-neutral-500 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
-            title="Delete completed/failed/cancelled run history and reset the run KPIs"
+            class="p-2 border border-input text-fg-muted hover:text-fg-strong hover:border-neutral-500 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
+            title="Reset stats — delete completed/failed/cancelled run history and reset the run KPIs"
+            aria-label="Reset stats"
             @click="resetStats"
           >
-            Reset stats
+            <ArrowPathIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
           </button>
           <button
             :disabled="!tasks?.length"
