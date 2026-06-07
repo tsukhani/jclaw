@@ -12,6 +12,7 @@ import services.TaskExecutionHandler;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Executors;
 
@@ -98,6 +99,15 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                     "DbSchedulerBootstrap: skipping scheduler start in test mode");
             return;
         }
+
+        // Capture the boot instant BEFORE the scheduler starts: BootConsistencyCheck
+        // uses it as the orphaned-run reconciliation cutoff, so a re-fire opened by
+        // this generation's first poll (startedAt after now) is left in-flight while
+        // every prior-generation RUNNING run is reconciled to FAILED. A per-bootstrap
+        // instant — not RuntimeMXBean's JVM-start, which is constant for the JVM's
+        // life — keeps this correct across Play dev-mode hot reloads, where
+        // @OnApplicationStart re-runs in the SAME JVM on each code change.
+        Instant bootInstant = Instant.now();
 
         // Defense-in-depth: re-assert the scheduled_tasks DDL. Priority ordering
         // (this job runs last) already means DbSchedulerSchemaInitJob has run,
@@ -188,7 +198,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         // it was also the only way to dodge the unordered-sibling race that left
         // it logging "scheduler not bootstrapped; skipping sweep".)
         try {
-            BootConsistencyCheck.sweep(built);
+            BootConsistencyCheck.sweep(built, bootInstant);
         } catch (Exception e) {
             // Don't crash the bootstrap if sweep throws — the scheduler
             // is already alive and TaskSchedulingService.register

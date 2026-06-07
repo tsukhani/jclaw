@@ -251,6 +251,27 @@ class BootConsistencyCheckTest extends UnitTest {
                 "boot sweep must reconcile a run orphaned by a prior JVM generation");
     }
 
+    @Test
+    void sweepReconcilesPriorGenerationRunWithinSameJvm() {
+        // The dev-mode hot-reload bug: a fire from a PRIOR scheduler generation
+        // has a RECENT startedAt (after the JVM start), so the old JVM-start
+        // cutoff never reconciled it and stale RUNNING rows piled up on each
+        // @OnApplicationStart re-run within the same JVM. The per-bootstrap
+        // cutoff variant of sweep() must reconcile it.
+        var task = persistTask("reload-orphan", Task.Status.ACTIVE);
+        var priorGenStart = Instant.now();
+        var runId = persistRun(task, priorGenStart, TaskRun.Status.RUNNING, null);
+
+        // A later bootstrap within the same JVM captures a fresh cutoff just
+        // after the prior generation's run opened — exactly what
+        // DbSchedulerBootstrapJob now passes from its pre-start bootInstant.
+        BootConsistencyCheck.sweep(stub.proxy(), priorGenStart.plusMillis(5));
+
+        assertEquals(TaskRun.Status.FAILED,
+                ((TaskRun) TaskRun.findById(runId)).status,
+                "a run left RUNNING by a prior scheduler generation (same JVM) must be reconciled");
+    }
+
     // === Helpers ===
 
     private Long persistRun(Task task, Instant startedAt, TaskRun.Status status, Instant completedAt) {

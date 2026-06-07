@@ -11,7 +11,6 @@ import services.TaskExecutionHandler;
 import services.TaskSchedulingService;
 import services.Tx;
 
-import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
@@ -104,6 +103,27 @@ public class BootConsistencyCheck extends Job<Void> {
      * </ol>
      */
     public static int sweep(SchedulerClient scheduler) {
+        return sweep(scheduler, Instant.now());
+    }
+
+    /**
+     * Sweep variant taking an explicit {@code bootCutoff} for orphaned-run
+     * reconciliation. The production bootstrap captures this instant BEFORE
+     * starting the scheduler (see {@link DbSchedulerBootstrapJob#doJob}) so a
+     * re-fire opened by this generation's first poll — whose {@code startedAt}
+     * is necessarily after the cutoff — is never mistaken for an orphan, while
+     * every run left RUNNING by a PRIOR scheduler generation (started before
+     * this bootstrap) is reconciled.
+     *
+     * <p>Using a per-bootstrap instant rather than the JVM start instant is what
+     * makes the sweep correct under Play dev-mode hot reloads:
+     * {@code @OnApplicationStart} re-runs (a fresh scheduler generation that
+     * re-fires the overdue task) but the JVM — and thus
+     * {@code RuntimeMXBean.getStartTime()} — does not change, so a JVM-start
+     * cutoff would leave every prior-generation RUNNING run uncleaned and the
+     * Tasks UI would accumulate stale "RUNNING" pills on each reload.
+     */
+    public static int sweep(SchedulerClient scheduler, Instant bootCutoff) {
         // JCLAW-258: surface LOST tasks first so the admin UI is correct
         // by the time the rest of the sweep finishes. Reads scheduled_tasks
         // directly, no scheduler interaction — runs cheaply when the table
@@ -116,19 +136,21 @@ public class BootConsistencyCheck extends Job<Void> {
         }
 
         // JCLAW-410: close out per-fire run-history rows orphaned in RUNNING by a
-        // prior JVM generation (a fire that died mid-execution before stamping a
-        // terminal status). The LOST/re-arm steps heal the Task; without this the
-        // task_run row shows "RUNNING" with an ever-growing elapsed timer forever
-        // for a run that isn't executing. Cutoff is the JVM start instant, so a
-        // fire that began in THIS JVM is treated as in-flight and left alone.
-        reconcileOrphanedRuns(jvmStartInstant());
+        // prior scheduler generation (a fire that died mid-execution before
+        // stamping a terminal status). The LOST/re-arm steps heal the Task;
+        // without this the task_run row shows "RUNNING" with an ever-growing
+        // elapsed timer forever for a run that isn't executing. {@code bootCutoff}
+        // divides prior-generation runs from runs opened by this generation's
+        // first poll, so a freshly-opened re-fire is treated as in-flight and
+        // left alone.
+        reconcileOrphanedRuns(bootCutoff);
 
         return reArmOrphans(scheduler);
     }
 
     /**
      * Flip every {@link TaskRun} left {@link TaskRun.Status#RUNNING} by a prior
-     * JVM generation to {@link TaskRun.Status#FAILED}, stamping {@code completedAt},
+     * scheduler generation to {@link TaskRun.Status#FAILED}, stamping {@code completedAt},
      * {@code durationMs}, and an {@code error} reason. A fire that dies mid-execution
      * (JVM crash/restart before it writes a terminal status) leaves its run-history
      * row RUNNING with {@code completedAt == null} — Task-level recovery never
@@ -136,21 +158,21 @@ public class BootConsistencyCheck extends Job<Void> {
      * not executing (and nothing ever clears it: {@link TaskCleanupJob} only deletes
      * terminal Task trees past retention).
      *
-     * <p>{@code jvmStart} is the cutoff: only RUNNING runs whose {@code startedAt}
+     * <p>{@code bootCutoff} is the cutoff: only RUNNING runs whose {@code startedAt}
      * is strictly before it are reconciled. A fire that opened its row within THIS
-     * JVM necessarily started after JVM boot, so it is genuinely in-flight and
-     * skipped — this is what makes the sweep safe to run alongside db-scheduler's
-     * first poll without racing a freshly-opened run to FAILED.
+     * scheduler generation started after the cutoff, so it is genuinely in-flight
+     * and skipped — this is what makes the sweep safe to run alongside
+     * db-scheduler's first poll without racing a freshly-opened run to FAILED.
      *
-     * @param jvmStart cutoff instant; runs started before it are considered orphaned
+     * @param bootCutoff cutoff instant; runs started before it are considered orphaned
      * @return number of run rows flipped to FAILED
      */
-    public static int reconcileOrphanedRuns(Instant jvmStart) {
+    public static int reconcileOrphanedRuns(Instant bootCutoff) {
         return Tx.run(() -> {
             var now = Instant.now();
             int count = 0;
             for (Object o : TaskRun.find("status = ?1 and startedAt < ?2",
-                    TaskRun.Status.RUNNING, jvmStart).fetch()) {
+                    TaskRun.Status.RUNNING, bootCutoff).fetch()) {
                 var run = (TaskRun) o;
                 run.status = TaskRun.Status.FAILED;
                 run.completedAt = now;
@@ -169,12 +191,6 @@ public class BootConsistencyCheck extends Job<Void> {
             }
             return count;
         });
-    }
-
-    /** JVM start instant — the cutoff dividing prior-generation runs from runs
-     *  opened by the current JVM. */
-    private static Instant jvmStartInstant() {
-        return Instant.ofEpochMilli(ManagementFactory.getRuntimeMXBean().getStartTime());
     }
 
     /**
