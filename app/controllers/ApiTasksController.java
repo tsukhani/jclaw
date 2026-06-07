@@ -408,7 +408,12 @@ public class ApiTasksController extends Controller {
         var payload = new TaskStatsView(
                 runsToday, successRate, avgDurationMs,
                 countTasks(Task.Status.PENDING, payloadType, excludePayloadType),
-                countTasks(Task.Status.RUNNING, payloadType, excludePayloadType),
+                // RUNNING is the only live-execution stat that lives on the
+                // TaskRun, not the Task: a recurring task stays ACTIVE (a
+                // one-shot stays PENDING) while its run executes, so count
+                // RUNNING runs — the same signal the UI's runningRunId uses —
+                // rather than Task.Status.RUNNING, which nothing currently sets.
+                countRunningRuns(payloadType, excludePayloadType),
                 countTasks(Task.Status.ACTIVE, payloadType, excludePayloadType),
                 countTasks(Task.Status.FAILED, payloadType, excludePayloadType));
         renderJSON(gson.toJson(payload));
@@ -440,6 +445,21 @@ public class ApiTasksController extends Controller {
         var jpql = "SELECT COUNT(t) FROM Task t WHERE t.status = :status"
                 + payloadTypeWhere("t", payloadType, excludePayloadType);
         var q = JPA.em().createQuery(jpql, Long.class).setParameter("status", status);
+        bindPayloadType(q, payloadType, excludePayloadType);
+        return q.getSingleResult();
+    }
+
+    /**
+     * Count task runs currently in flight ({@link TaskRun.Status#RUNNING}).
+     * Unlike {@link #countRunsSince} this is deliberately not bounded by
+     * "today" — a run that started before midnight and is still executing
+     * must still count. Scoped by payloadType like the other aggregates.
+     */
+    private static long countRunningRuns(String payloadType, String excludePayloadType) {
+        var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.status = :rstatus"
+                + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
+        var q = JPA.em().createQuery(jpql, Long.class)
+                .setParameter("rstatus", TaskRun.Status.RUNNING);
         bindPayloadType(q, payloadType, excludePayloadType);
         return q.getSingleResult();
     }

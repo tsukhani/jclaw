@@ -28,9 +28,13 @@ class ApiTasksControllerStatsTest extends FunctionalTest {
     }
 
     /**
-     * Seed an agent, three tasks (one each PENDING / FAILED / RUNNING) and
-     * three of-today runs (two COMPLETED with 1000ms + 3000ms durations, one
-     * FAILED) in a fresh tx so the controller thread sees them.
+     * Seed an agent, four tasks and four of-today runs in a fresh tx so the
+     * controller thread sees them. The "running" signal lives on the TaskRun,
+     * not the Task: the ACTIVE recurring task carries the one in-flight RUNNING
+     * run (the realistic case that must count), while the Status.RUNNING task
+     * carries only terminal runs — it must NOT inflate runningCount. The two
+     * COMPLETED runs (1000ms + 3000ms) plus one FAILED run drive successRate /
+     * avgDurationMs.
      */
     private static void seedAll() {
         var err = new AtomicReference<Throwable>();
@@ -46,8 +50,13 @@ class ApiTasksControllerStatsTest extends FunctionalTest {
 
                     mkTask(agent, "pending-task", Task.Status.PENDING);
                     mkTask(agent, "failed-task", Task.Status.FAILED);
-                    mkTask(agent, "active-task", Task.Status.ACTIVE);
+                    var active = mkTask(agent, "active-task", Task.Status.ACTIVE);
                     var running = mkTask(agent, "running-task", Task.Status.RUNNING);
+
+                    // The realistic in-flight case: a recurring ACTIVE task with
+                    // a RUNNING run. This — not the Status.RUNNING task below — is
+                    // what runningCount must count.
+                    mkRun(active, TaskRun.Status.RUNNING, null);
 
                     mkRun(running, TaskRun.Status.COMPLETED, 1000L);
                     mkRun(running, TaskRun.Status.COMPLETED, 3000L);
@@ -101,9 +110,12 @@ class ApiTasksControllerStatsTest extends FunctionalTest {
         var resp = GET("/api/tasks/stats");
         assertIsOk(resp);
         var body = getContent(resp);
-        assertTrue(body.contains("\"runsToday\":3"), body);
+        assertTrue(body.contains("\"runsToday\":4"), body);
         assertTrue(body.contains("\"pendingCount\":1"), body);
         assertTrue(body.contains("\"failedCount\":1"), body);
+        // runningCount counts RUNNING runs, not Status.RUNNING tasks: only the
+        // ACTIVE task's in-flight run counts; the Status.RUNNING task (terminal
+        // runs only) must not.
         assertTrue(body.contains("\"runningCount\":1"), body);
         assertTrue(body.contains("\"activeCount\":1"), body);
         // 2 COMPLETED / 3 terminal == 0.666...
