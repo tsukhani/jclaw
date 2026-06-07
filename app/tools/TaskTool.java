@@ -118,9 +118,13 @@ public class TaskTool implements ToolRegistry.Tool {
                 parameter. Single tool, multiple actions selected via the \
                 'action' parameter. Use createTask with a 'schedule' string: \
                 'now' (IMMEDIATE), '30m'/'2h'/'1d' (SCHEDULED at now+duration), \
+                an absolute ISO date-time '2026-06-13T15:00' (SCHEDULED one-shot \
+                at that specific moment, in the task's timezone), \
                 'every 30m'/'every 2h'/'every 1d' (INTERVAL — minimum 1 minute \
                 via shorthand), or Spring 6-field cron ('0 0 9 * * *' or \
                 '0/30 * * * * *' for every 30 seconds) or at-shortcut ('@daily'). \
+                For a ONE-TIME fire at a specific date/time use the absolute \
+                date-time, NOT a cron (a cron would repeat every year). \
                 Use updateTask to change fields on an existing task by name. \
                 Use pause/resume to toggle a recurring task without losing its \
                 cadence. Use runNow to fire immediately. Use cancelTask to \
@@ -149,7 +153,12 @@ public class TaskTool implements ToolRegistry.Tool {
 
                 REMINDERS: when the user says "remind me to X" / "remind me \
                 in N minutes to Y" / "remind me tomorrow about Z", create a \
-                task with payloadType="reminder". The `description` IS the \
+                task with payloadType="reminder". For a ONE-TIME reminder at a \
+                specific date/time (e.g. "remind me at 3pm on June 13"), pass an \
+                absolute ISO date-time as the schedule (e.g. "2026-06-13T15:00") \
+                so it fires ONCE then completes — do NOT use a cron for a one-off \
+                (that repeats every year). Use a cron only when the user wants it \
+                to REPEAT (e.g. "every Friday"). The `description` IS the \
                 reminder text the user sees verbatim (e.g. "Brush your \
                 teeth", "Pay salaries") — do NOT phrase it as instructions \
                 to yourself. Reminders SKIP the LLM at fire time, so no \
@@ -185,7 +194,7 @@ public class TaskTool implements ToolRegistry.Tool {
                                 + "simple task or a reminder, pass a single plain string. A one-element "
                                 + "array and a plain string behave identically.")),
                 Map.entry(KEY_SCHEDULE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Schedule shorthand: 'now', duration like '30m'/'2h'/'1d' for one-shot, 'every <duration>' for INTERVAL, or Spring 6-field cron / at-shortcut for CRON")),
+                        SchemaKeys.DESCRIPTION, "Schedule shorthand: 'now' (IMMEDIATE); a duration like '30m'/'2h'/'1d' for a one-shot N-from-now; an absolute ISO date-time like '2026-06-13T15:00' for a one-shot at a specific moment (interpreted in the task's timezone); 'every <duration>' for INTERVAL; or a Spring 6-field cron / at-shortcut for CRON. Use an absolute date-time (not a cron) for a one-time reminder on a specific date.")),
                 Map.entry(KEY_PAUSED, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "On updateTask: flip the paused flag")),
                 Map.entry(KEY_DELIVERY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
@@ -321,11 +330,15 @@ public class TaskTool implements ToolRegistry.Tool {
         var description = readDescriptionArg(args);
         if (description == null) description = "";
         if (!hasValue(args, KEY_SCHEDULE)) {
-            return "Error: 'schedule' is required (use 'now', a duration like '30m', 'every 30m', or a Spring 6-field cron / @daily etc.)";
+            return "Error: 'schedule' is required (use 'now', a duration like '30m', an absolute date-time like '2026-06-13T15:00', 'every 30m', or a Spring 6-field cron / @daily etc.)";
         }
         final ScheduleShorthandParser.ScheduleSpec spec;
         try {
-            spec = ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString());
+            // Resolve the zone up front so an absolute date-time schedule
+            // ("2026-06-13T15:00") is interpreted in the same timezone the task
+            // will be saved with (validated again in persistNewTask).
+            var zone = services.TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
+            spec = ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
             return "Error: Invalid schedule: " + e.getMessage();
         }
@@ -580,7 +593,8 @@ public class TaskTool implements ToolRegistry.Tool {
         final ScheduleShorthandParser.ScheduleSpec spec;
         if (hasValue(args, KEY_SCHEDULE)) {
             try {
-                spec = ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString());
+                var zone = services.TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
+                spec = ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString(), zone);
             } catch (IllegalArgumentException e) {
                 return "Error: Invalid schedule: " + e.getMessage();
             }

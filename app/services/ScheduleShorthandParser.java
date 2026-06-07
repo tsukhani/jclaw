@@ -3,6 +3,10 @@ package services;
 import models.Task;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.regex.Pattern;
 
 /**
@@ -23,6 +27,7 @@ import java.util.regex.Pattern;
  *   <tr><th>Input</th><th>Type</th><th>Sets</th></tr>
  *   <tr><td>{@code "now"} (case-insensitive)</td><td>IMMEDIATE</td><td>scheduledAt = now</td></tr>
  *   <tr><td>{@code "30m"}, {@code "2h"}, {@code "1d"}</td><td>SCHEDULED</td><td>scheduledAt = now + duration</td></tr>
+ *   <tr><td>{@code "2026-06-13T15:00"} (ISO date-time, optional seconds / offset)</td><td>SCHEDULED</td><td>scheduledAt = that instant (a bare local form is resolved in the task zone)</td></tr>
  *   <tr><td>{@code "every 30m"}, {@code "every 2h"}, {@code "every 1d"}</td><td>INTERVAL</td><td>intervalSeconds = duration</td></tr>
  *   <tr><td>Spring 6-field cron, or {@code @hourly}/{@code @daily}/{@code @weekly}/{@code @monthly}/{@code @yearly}</td><td>CRON</td><td>cronExpression = input</td></tr>
  * </table>
@@ -48,6 +53,11 @@ import java.util.regex.Pattern;
 public final class ScheduleShorthandParser {
 
     private static final Pattern DURATION = Pattern.compile("^(\\d+)([mhd])$");
+
+    /** Leading ISO date-time (date, then 'T' or space, then HH:mm) — an
+     *  absolute one-off SCHEDULED fire rather than a recurring cron. */
+    private static final Pattern ABS_DATETIME =
+            Pattern.compile("\\d{4}-\\d{2}-\\d{2}[T ]\\d{1,2}:\\d{2}");
 
     private ScheduleShorthandParser() {}
 
@@ -81,6 +91,22 @@ public final class ScheduleShorthandParser {
      * API boundary.
      */
     public static ScheduleSpec parse(String input) {
+        // Pass null so the default zone is resolved lazily — only an absolute
+        // local date-time needs it, so a pure form ("now"/"30m"/cron) stays
+        // free of the ConfigService lookup currentDefault() performs.
+        return parse(input, null);
+    }
+
+    /**
+     * Zone-aware parse. {@code zone} resolves only an absolute <em>local</em>
+     * date-time (no offset) into a concrete {@link Instant}; every other form
+     * is zone-independent. A {@code null} zone falls back to
+     * {@link TimezoneResolver#currentDefault()} (resolved lazily, only when an
+     * absolute local date-time is actually present). Callers that know the
+     * task's timezone (the chat tool, the create/update endpoints) pass it so
+     * "{@code 2026-06-13T15:00}" means 3 pm in the user's zone, not the server's.
+     */
+    public static ScheduleSpec parse(String input, ZoneId zone) {
         if (input == null || input.isBlank()) {
             throw new IllegalArgumentException("Schedule expression is empty");
         }
@@ -97,6 +123,15 @@ public final class ScheduleShorthandParser {
             return new ScheduleSpec(Task.Type.INTERVAL, null, null, secs, input);
         }
 
+        // Absolute one-off date/time -> SCHEDULED one-shot (fires once, then
+        // COMPLETED). Detected before the cron heuristic so a space-separated
+        // form ("2026-06-13 15:00") isn't mistaken for a multi-token cron.
+        if (ABS_DATETIME.matcher(trimmed).lookingAt()) {
+            var when = parseAbsoluteDatetime(trimmed,
+                    zone != null ? zone : TimezoneResolver.currentDefault());
+            return new ScheduleSpec(Task.Type.SCHEDULED, when, null, null, input);
+        }
+
         // Cron path: @-shortcut OR multi-token whitespace expression
         // (5 tokens for legacy Unix detection, 6 for Spring). Both go
         // through JClawCronUtils.validate which handles the 5-token
@@ -109,6 +144,31 @@ public final class ScheduleShorthandParser {
         // Bare duration: SCHEDULED at now + duration.
         long secs = parseDurationSeconds(trimmed);
         return new ScheduleSpec(Task.Type.SCHEDULED, Instant.now().plusSeconds(secs), null, null, input);
+    }
+
+    /**
+     * Resolve an absolute ISO date-time to an {@link Instant}. An explicit
+     * offset ({@code 2026-06-13T15:00+08:00} or a trailing {@code Z}) is
+     * honoured as-is; a bare local date-time ({@code 2026-06-13T15:00}, with
+     * optional seconds and a {@code T} or space separator) is interpreted in
+     * {@code zone}. Anything else throws with a form hint.
+     */
+    private static Instant parseAbsoluteDatetime(String raw, ZoneId zone) {
+        var iso = raw.replaceFirst(" ", "T");
+        try {
+            return OffsetDateTime.parse(iso).toInstant();
+        } catch (DateTimeParseException noOffset) {
+            // No explicit offset — fall through and resolve as a local time.
+        }
+        try {
+            return LocalDateTime.parse(iso).atZone(zone).toInstant();
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException(
+                    ("Unrecognized date-time '%s'. Use an ISO form like "
+                            + "'2026-06-13T15:00' (interpreted in the task's timezone) or "
+                            + "with an explicit offset like '2026-06-13T15:00+08:00'.")
+                            .formatted(raw));
+        }
     }
 
     private static long parseDurationSeconds(String s) {

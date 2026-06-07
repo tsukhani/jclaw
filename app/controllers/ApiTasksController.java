@@ -753,7 +753,8 @@ public class ApiTasksController extends Controller {
             throw new AssertionError("unreachable: error() throws");
         }
         try {
-            return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString());
+            var zone = services.TimezoneResolver.resolve(readOptionalString(body, KEY_TIMEZONE));
+            return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
             error(400, "Invalid schedule: " + e.getMessage());
             throw new AssertionError("unreachable: error() throws");

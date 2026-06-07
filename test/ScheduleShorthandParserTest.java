@@ -4,6 +4,9 @@ import services.ScheduleShorthandParser;
 import models.Task;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 
 class ScheduleShorthandParserTest extends UnitTest {
 
@@ -119,6 +122,52 @@ class ScheduleShorthandParserTest extends UnitTest {
         assertThrows(IllegalArgumentException.class, () -> ScheduleShorthandParser.parse(""));
         assertThrows(IllegalArgumentException.class, () -> ScheduleShorthandParser.parse("   "));
         assertThrows(IllegalArgumentException.class, () -> ScheduleShorthandParser.parse(null));
+    }
+
+    @Test
+    void absoluteDatetimeWithOffsetParsesToScheduledOneShot() {
+        var spec = ScheduleShorthandParser.parse("2026-06-13T15:00+08:00");
+        assertEquals(Task.Type.SCHEDULED, spec.type(),
+                "an absolute date-time is a one-shot (SCHEDULED -> PENDING), not a recurring cron");
+        assertEquals(OffsetDateTime.parse("2026-06-13T15:00+08:00").toInstant(), spec.scheduledAt());
+        assertNull(spec.cronExpression());
+        assertNull(spec.intervalSeconds());
+        assertEquals("2026-06-13T15:00+08:00", spec.scheduleDisplay());
+    }
+
+    @Test
+    void absoluteLocalDatetimeResolvedInGivenZone() {
+        var tokyo = ZoneId.of("Asia/Tokyo");
+        var spec = ScheduleShorthandParser.parse("2026-06-13T15:00", tokyo);
+        assertEquals(Task.Type.SCHEDULED, spec.type());
+        assertEquals(LocalDateTime.parse("2026-06-13T15:00").atZone(tokyo).toInstant(),
+                spec.scheduledAt(), "a bare local date-time is interpreted in the supplied zone");
+    }
+
+    @Test
+    void absoluteLocalDatetimeWithSecondsAndSpaceSeparator() {
+        var spec = ScheduleShorthandParser.parse("2026-06-13 15:00:00");
+        assertEquals(Task.Type.SCHEDULED, spec.type());
+        assertNotNull(spec.scheduledAt());
+        assertNull(spec.cronExpression());
+    }
+
+    @Test
+    void malformedAbsoluteDatetimeRejected() {
+        // Looks date-time-shaped but month 13 / day 40 are invalid.
+        assertThrows(IllegalArgumentException.class,
+                () -> ScheduleShorthandParser.parse("2026-13-40T15:00"));
+    }
+
+    @Test
+    void dateSpecificCronStillParsesAsCron() {
+        // Regression: "0 0 15 13 6 *" (15:00 on Jun 13) is a genuine cron and must
+        // stay CRON — the one-off fix is the agent choosing an absolute date-time,
+        // not the parser reinterpreting cron expressions.
+        var spec = ScheduleShorthandParser.parse("0 0 15 13 6 *");
+        assertEquals(Task.Type.CRON, spec.type());
+        assertEquals("0 0 15 13 6 *", spec.cronExpression());
+        assertNull(spec.scheduledAt());
     }
 
     @Test
