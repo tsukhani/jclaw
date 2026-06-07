@@ -60,6 +60,11 @@ public class ApiTasksController extends Controller {
     private static final String KEY_SCRIPT = "script";
     private static final String KEY_NO_AGENT = "noAgent";
     private static final String KEY_AUTO_DELETE = "autoDeleteOnComplete";
+
+    /** JPQL bind-parameter name (the RUNNING status filter) and the TaskRun→Task
+     *  alias path, factored out of the run-stats / reset queries (S1192). */
+    private static final String PARAM_RUNNING = "running";
+    private static final String RUN_TASK_ALIAS = "r.task";
     private static final String KEY_CONTEXT_FROM_TASK_IDS = "contextFromTaskIds";
     private static final String KEY_REPEAT_LIMIT = "repeatLimit";
     private static final String KEY_PAUSED = "paused";
@@ -413,7 +418,7 @@ public class ApiTasksController extends Controller {
                                        String payloadType, String excludePayloadType) {
         var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.startedAt >= :since"
                 + (status != null ? " AND r.status = :rstatus" : "")
-                + payloadTypeWhere("r.task", payloadType, excludePayloadType);
+                + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
         var q = JPA.em().createQuery(jpql, Long.class).setParameter("since", since);
         if (status != null) q.setParameter("rstatus", status);
         bindPayloadType(q, payloadType, excludePayloadType);
@@ -423,7 +428,7 @@ public class ApiTasksController extends Controller {
     private static Double avgCompletedDuration(Instant since, String payloadType, String excludePayloadType) {
         var jpql = "SELECT AVG(r.durationMs) FROM TaskRun r "
                 + "WHERE r.startedAt >= :since AND r.status = :rstatus AND r.durationMs IS NOT NULL"
-                + payloadTypeWhere("r.task", payloadType, excludePayloadType);
+                + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
         var q = JPA.em().createQuery(jpql)
                 .setParameter("since", since)
                 .setParameter("rstatus", TaskRun.Status.COMPLETED);
@@ -639,7 +644,7 @@ public class ApiTasksController extends Controller {
                             + "WHERE r.task.id IN :ids AND r.status = :running "
                             + "GROUP BY r.task.id")
                     .setParameter("ids", taskIds)
-                    .setParameter("running", TaskRun.Status.RUNNING)
+                    .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING)
                     .getResultList();
             var rmap = java.util.HashMap.<Long, Long>newHashMap(runningRows.size());
             for (var row : runningRows) {
@@ -1127,13 +1132,13 @@ public class ApiTasksController extends Controller {
         var em = play.db.jpa.JPA.em();
         var msgQ = em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
                         + payloadTypeWhere("m.taskRun.task", payloadType, excludePayloadType))
-                .setParameter("running", TaskRun.Status.RUNNING);
+                .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
         bindPayloadType(msgQ, payloadType, excludePayloadType);
         msgQ.executeUpdate();
 
         var runQ = em.createQuery("DELETE FROM TaskRun r WHERE r.status <> :running"
-                        + payloadTypeWhere("r.task", payloadType, excludePayloadType))
-                .setParameter("running", TaskRun.Status.RUNNING);
+                        + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType))
+                .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
         bindPayloadType(runQ, payloadType, excludePayloadType);
         int deleted = runQ.executeUpdate();
         em.flush();
