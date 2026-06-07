@@ -361,7 +361,86 @@ class TaskFireFunctionalTest extends UnitTest {
                 "paused skip must not emit TASK_STARTED — fire body never ran");
     }
 
+    // === JCLAW: reminder auto-delete-on-complete ===
+
+    @Test
+    void oneShotReminderAutoDeletesWhenOptedIn() throws Exception {
+        var agent = createAgent("autodel-agent", "test-provider", "test-model");
+        var task = persistReminder(agent, "Visit Bamboo Hills", Task.Type.SCHEDULED, true, null);
+
+        fireViaHandler(task);
+
+        assertEquals(0L, (long) Tx.run(() -> Task.count("id = ?1", task.id)),
+                "a one-off reminder that opted in is auto-deleted after a successful fire");
+        assertTrue(listRunsForTask(task.id).isEmpty(), "its run history is removed too");
+    }
+
+    @Test
+    void oneShotReminderKeptWhenOptedOut() throws Exception {
+        var agent = createAgent("keep-agent", "test-provider", "test-model");
+        var task = persistReminder(agent, "Keep me", Task.Type.SCHEDULED, false, null);
+
+        fireViaHandler(task);
+
+        assertEquals(1L, (long) Tx.run(() -> Task.count("id = ?1", task.id)),
+                "opting out keeps the reminder after it fires");
+    }
+
+    @Test
+    void recurringReminderNeverAutoDeletes() throws Exception {
+        var agent = createAgent("recurring-rem-agent", "test-provider", "test-model");
+        // CRON reminder with the flag set — recurring reminders never "complete",
+        // so the one-shot gate keeps it.
+        var task = persistReminder(agent, "Weekly nudge", Task.Type.CRON, true, "0 0 9 * * 5");
+
+        fireViaHandler(task);
+
+        assertEquals(1L, (long) Tx.run(() -> Task.count("id = ?1", task.id)),
+                "a recurring reminder is never auto-deleted even with the flag set");
+    }
+
+    @Test
+    void regularOneShotTaskNeverAutoDeletes() throws Exception {
+        // A non-reminder task that genuinely COMPLETES keeps its audit history
+        // even with the flag set — auto-delete is reminder-only.
+        startLlmServer(simpleResponse("done"));
+        configureProvider();
+        var agent = createAgent("regular-task-agent", "test-provider", "test-model");
+        var task = persistTask(agent, "Month-end report", "Summarise.", Task.Type.SCHEDULED);
+        task.scheduledAt = Instant.now();
+        task.autoDeleteOnComplete = true;   // set, but payloadType is null -> not a reminder
+        task.save();
+
+        fireViaHandler(task);
+
+        assertEquals(1L, (long) Tx.run(() -> Task.count("id = ?1", task.id)),
+                "auto-delete never applies to a regular task (audit history preserved)");
+        assertEquals(1, listRunsForTask(task.id).size(), "its completed run is retained");
+    }
+
     // === Helpers ===
+
+    private Task persistReminder(Agent agent, String name, Task.Type type,
+                                 boolean autoDelete, String cron) {
+        var t = persistTask(agent, name, "Nudge: " + name, type);
+        t.payloadType = "reminder";
+        t.autoDeleteOnComplete = autoDelete;
+        t.cronExpression = cron;
+        if (type == Task.Type.SCHEDULED) t.scheduledAt = Instant.now();
+        t.save();
+        return t;
+    }
+
+    /** Commit the seeded task, fire it once through the production handler on a
+     *  fresh tx (db-scheduler's carrier), then clear the test's stale cache. */
+    private void fireViaHandler(Task task) throws Exception {
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var dbTask = TaskExecutionHandler.buildTask();
+        var instance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME, task.id.toString());
+        driveFire(dbTask, instance);
+        JPA.em().clear();
+    }
 
     private Agent createAgent(String name, String provider, String model) {
         var a = new Agent();

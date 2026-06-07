@@ -34,6 +34,18 @@ async function deleteOne(r: Task) {
   await refresh()
 }
 
+// Only one-shot reminders ever complete (recurring ones recur), so auto-delete
+// only applies to them — the toggle is hidden for recurring reminders.
+function isOneShot(r: Task): boolean {
+  return r.type === 'SCHEDULED' || r.type === 'IMMEDIATE'
+}
+
+// Flip auto-delete-after-fire for a one-off reminder.
+async function toggleAutoDelete(r: Task, on: boolean) {
+  await mutate(`/api/tasks/${r.id}`, { method: 'PATCH', body: { autoDeleteOnComplete: on } })
+  await refresh()
+}
+
 // The /api/tasks Task type carries description / delivery / scheduleDisplay
 // through its open `[key: string]: unknown` index signature rather than
 // declared optional properties, so reads need an explicit string narrowing.
@@ -214,6 +226,9 @@ const statusColors: Record<string, string> = {
             <th class="px-4 py-2.5 font-medium">
               Fired
             </th>
+            <th class="px-4 py-2.5 font-medium">
+              Auto-delete
+            </th>
             <th class="px-4 py-2.5 font-medium text-right">
               Actions
             </th>
@@ -253,6 +268,21 @@ const statusColors: Record<string, string> = {
             </td>
             <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
               {{ firedAtLabel(r) }}
+            </td>
+            <td class="px-4 py-2.5 whitespace-nowrap">
+              <input
+                v-if="isOneShot(r)"
+                type="checkbox"
+                class="accent-emerald-500 cursor-pointer align-middle"
+                :checked="r.autoDeleteOnComplete"
+                :aria-label="`Auto-delete ${reminderBody(r)} after it fires`"
+                title="Auto-delete this reminder after a successful fire"
+                @change="toggleAutoDelete(r, ($event.target as HTMLInputElement).checked)"
+              >
+              <span
+                v-else
+                class="text-fg-muted text-xs"
+              >—</span>
             </td>
             <td class="px-4 py-2.5 whitespace-nowrap text-right">
               <button

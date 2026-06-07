@@ -350,6 +350,10 @@ public final class TaskExecutor {
             TaskLifecycleEvents.recordCompleted(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
             dispatchDelivery(task, closed, resolved.deliveredViaMessageTool());
+            // Auto-delete a one-shot reminder that opted in — the fire delivered,
+            // so the reminder has served its purpose. Runs after delivery so the
+            // nudge is sent first; the Notification row survives (not a FK).
+            autoDeleteIfRequested(task);
         }
         return closed;
     }
@@ -482,5 +486,44 @@ public final class TaskExecutor {
             }
             return null;
         });
+    }
+
+    /**
+     * JCLAW: auto-delete a one-shot reminder after a successful fire when it
+     * opted in ({@link Task#autoDeleteOnComplete}). Hard-deletes the task and
+     * its run history; the user-visible {@link models.Notification} (the nudge)
+     * is left intact because {@code Notification.sourceTaskId} is a plain id,
+     * not a foreign key. Gated on reminder + one-shot type, so a recurring
+     * reminder (which never completes) and every regular task (audit history
+     * preserved) are untouched. Best-effort — a failure is logged, never
+     * propagated into the fire path.
+     */
+    private static void autoDeleteIfRequested(Task task) {
+        if (!isReminder(task) || !task.autoDeleteOnComplete) return;
+        if (task.type != Task.Type.IMMEDIATE && task.type != Task.Type.SCHEDULED) return;
+        try {
+            Tx.run(() -> {
+                var em = play.db.jpa.JPA.em();
+                em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :tid")
+                        .setParameter("tid", task.id).executeUpdate();
+                em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :tid")
+                        .setParameter("tid", task.id).executeUpdate();
+                em.createQuery("DELETE FROM Task t WHERE t.id = :tid")
+                        .setParameter("tid", task.id).executeUpdate();
+                em.flush();
+                return null;
+            });
+            // One-shots are reaped by db-scheduler's OnCompleteRemove, but cancel
+            // is idempotent and closes any race that leaves a scheduled_tasks row.
+            TaskSchedulingService.cancel(task.id);
+            EventLogger.info("TASK_MGMT_AUTO_DELETE",
+                    task.agent != null ? task.agent.name : null, null,
+                    "Reminder '%s' (id=%d) auto-deleted after a successful fire"
+                            .formatted(task.name, task.id));
+        } catch (Exception e) {
+            EventLogger.warn("task", null, null,
+                    "TaskExecutor.autoDeleteIfRequested: failed for Task id %d: %s"
+                            .formatted(task.id, e.getMessage()));
+        }
     }
 }

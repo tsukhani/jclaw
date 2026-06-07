@@ -59,6 +59,7 @@ public class ApiTasksController extends Controller {
     private static final String KEY_PRE_CHECK = "preCheck";
     private static final String KEY_SCRIPT = "script";
     private static final String KEY_NO_AGENT = "noAgent";
+    private static final String KEY_AUTO_DELETE = "autoDeleteOnComplete";
     private static final String KEY_CONTEXT_FROM_TASK_IDS = "contextFromTaskIds";
     private static final String KEY_REPEAT_LIMIT = "repeatLimit";
     private static final String KEY_PAUSED = "paused";
@@ -74,6 +75,7 @@ public class ApiTasksController extends Controller {
                             String modelProvider, String modelId,
                             String enabledToolNames, String workdir,
                             String preCheck, String script, boolean noAgent,
+                            boolean autoDeleteOnComplete,
                             String contextFromTaskIds, Integer repeatLimit,
                             String timezone, String effectiveTimezone,
                             Long runningRunId) {
@@ -113,6 +115,7 @@ public class ApiTasksController extends Controller {
                     t.modelProvider, t.modelId,
                     t.enabledToolNames, t.workdir,
                     t.preCheck, t.script, t.noAgent,
+                    t.autoDeleteOnComplete,
                     t.contextFromTaskIds, t.repeatLimit,
                     t.timezone,
                     // JCLAW-261: precomputed effective zone so the UI can
@@ -839,6 +842,14 @@ public class ApiTasksController extends Controller {
         if (body.has(KEY_NO_AGENT) && !body.get(KEY_NO_AGENT).isJsonNull()) {
             t.noAgent = body.get(KEY_NO_AGENT).getAsBoolean();
         }
+        // Reminders default to auto-delete-after-fire (a fired one-off reminder
+        // has served its purpose); regular tasks keep their audit history. An
+        // explicit body value overrides.
+        if (body.has(KEY_AUTO_DELETE) && !body.get(KEY_AUTO_DELETE).isJsonNull()) {
+            t.autoDeleteOnComplete = body.get(KEY_AUTO_DELETE).getAsBoolean();
+        } else {
+            t.autoDeleteOnComplete = "reminder".equalsIgnoreCase(t.payloadType);
+        }
         t.contextFromTaskIds = readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);
         if (body.has(KEY_REPEAT_LIMIT) && !body.get(KEY_REPEAT_LIMIT).isJsonNull()) {
             t.repeatLimit = body.get(KEY_REPEAT_LIMIT).getAsInt();
@@ -1014,6 +1025,10 @@ public class ApiTasksController extends Controller {
         }
         if (body.has(KEY_NO_AGENT) && !body.get(KEY_NO_AGENT).isJsonNull()) {
             task.noAgent = body.get(KEY_NO_AGENT).getAsBoolean();
+            changed = true;
+        }
+        if (body.has(KEY_AUTO_DELETE) && !body.get(KEY_AUTO_DELETE).isJsonNull()) {
+            task.autoDeleteOnComplete = body.get(KEY_AUTO_DELETE).getAsBoolean();
             changed = true;
         }
         return changed;

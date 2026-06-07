@@ -111,6 +111,18 @@ public class Task extends Model {
     @Column(nullable = false)
     public boolean paused = false;
 
+    /**
+     * When true, a one-shot reminder is hard-deleted (task + run history) after
+     * a successful COMPLETED fire — a fired one-off reminder has served its
+     * purpose and need not linger. Defaults true for reminders at creation and
+     * false for regular tasks (which keep their audit history). Enforcement
+     * (in {@code TaskExecutor}) is gated on reminder + one-shot type, so it
+     * never removes a recurring reminder (which never completes) or a regular
+     * task. The user-visible Notification (the nudge) is preserved.
+     */
+    @Column(name = "auto_delete_on_complete", nullable = false)
+    public boolean autoDeleteOnComplete = false;
+
     @Column(name = "retry_count", nullable = false)
     public int retryCount = 0;
 

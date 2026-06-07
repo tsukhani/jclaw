@@ -407,6 +407,13 @@ export interface Task {
    */
   paused: boolean
   /**
+   * When true, a one-shot reminder is auto-deleted after a successful fire.
+   * Defaults true for reminders, false for regular tasks; only one-shot
+   * reminders are ever auto-deleted (recurring reminders and regular tasks
+   * keep their history).
+   */
+  autoDeleteOnComplete: boolean
+  /**
    * JCLAW-260: instruction body. Plain text is a single step; a JSON array
    * of strings is an ordered step list. Parse with {@code parseTaskSteps}.
    */

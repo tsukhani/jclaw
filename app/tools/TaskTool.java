@@ -71,6 +71,7 @@ public class TaskTool implements ToolRegistry.Tool {
     private static final String KEY_PRE_CHECK = "preCheck";
     private static final String KEY_SCRIPT = "script";
     private static final String KEY_NO_AGENT = "noAgent";
+    private static final String KEY_AUTO_DELETE = "autoDeleteOnComplete";
     private static final String KEY_CONTEXT_FROM_TASK_IDS = "contextFromTaskIds";
     private static final String KEY_REPEAT_LIMIT = "repeatLimit";
     private static final String KEY_TIMEZONE = "timezone";
@@ -158,7 +159,10 @@ public class TaskTool implements ToolRegistry.Tool {
                 absolute ISO date-time as the schedule (e.g. "2026-06-13T15:00") \
                 so it fires ONCE then completes — do NOT use a cron for a one-off \
                 (that repeats every year). Use a cron only when the user wants it \
-                to REPEAT (e.g. "every Friday"). The `description` IS the \
+                to REPEAT (e.g. "every Friday"). A one-off reminder auto-deletes \
+                itself after it fires (autoDeleteOnComplete defaults true for \
+                reminders); set autoDeleteOnComplete=false to KEEP a fired \
+                reminder. The `description` IS the \
                 reminder text the user sees verbatim (e.g. "Brush your \
                 teeth", "Pay salaries") — do NOT phrase it as instructions \
                 to yourself. Reminders SKIP the LLM at fire time, so no \
@@ -234,6 +238,8 @@ public class TaskTool implements ToolRegistry.Tool {
                         SchemaKeys.DESCRIPTION, "Shell script body — exec instead of the LLM when noAgent=true")),
                 Map.entry(KEY_NO_AGENT, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "Skip the LLM round-trip; runs script if set, otherwise delivers description verbatim")),
+                Map.entry(KEY_AUTO_DELETE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                        SchemaKeys.DESCRIPTION, "Auto-delete this reminder after a successful one-off fire (a fired one-off reminder has served its purpose). Defaults TRUE for reminders, false for regular tasks; set false to KEEP a reminder. Only one-shot reminders are affected — recurring reminders and regular tasks are never auto-deleted.")),
                 Map.entry(KEY_CONTEXT_FROM_TASK_IDS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "JSON array of upstream Task ids whose outputs feed this task's context")),
                 Map.entry(KEY_REPEAT_LIMIT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
@@ -520,6 +526,13 @@ public class TaskTool implements ToolRegistry.Tool {
         // creation (no chat context) leaves delivery null.
         task.delivery = resolveDeliverySpec(optStr(args, KEY_DELIVERY), agent);
         task.payloadType = optStr(args, KEY_PAYLOAD_TYPE);
+        // Reminders default to auto-delete-after-fire; regular tasks keep their
+        // audit history. An explicit arg overrides.
+        if (hasValue(args, KEY_AUTO_DELETE)) {
+            task.autoDeleteOnComplete = args.get(KEY_AUTO_DELETE).getAsBoolean();
+        } else {
+            task.autoDeleteOnComplete = "reminder".equalsIgnoreCase(task.payloadType);
+        }
         task.modelProvider = optStr(args, KEY_MODEL_PROVIDER);
         task.modelId = optStr(args, KEY_MODEL_ID);
         task.enabledToolNames = optStr(args, KEY_ENABLED_TOOL_NAMES);
@@ -705,6 +718,10 @@ public class TaskTool implements ToolRegistry.Tool {
         }
         if (hasValue(args, KEY_NO_AGENT)) {
             task.noAgent = args.get(KEY_NO_AGENT).getAsBoolean();
+            anyChange = true;
+        }
+        if (hasValue(args, KEY_AUTO_DELETE)) {
+            task.autoDeleteOnComplete = args.get(KEY_AUTO_DELETE).getAsBoolean();
             anyChange = true;
         }
         if (args.has(KEY_REPEAT_LIMIT)) {
