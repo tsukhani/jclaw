@@ -1,6 +1,7 @@
 ---
 name: business-card-reader
 description: Read a business card image, extract contact details (name, phone, email, company, etc.), append them to a Google Sheet, then send a welcome email and WhatsApp message to the contact.
+version: 1.0.3
 author: main
 tools: [documents, mcp_google-workspace, exec, datetime]
 commands: []
