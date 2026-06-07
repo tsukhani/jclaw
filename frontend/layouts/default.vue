@@ -622,7 +622,11 @@ const navGroups: NavGroup[] = [
       />
 
       <!-- Content -->
-      <main class="flex-1 min-h-0 overflow-auto p-6 relative">
+      <!-- scrollbar-gutter:stable reserves the vertical-scrollbar space at all
+           times, so the content width doesn't change when a tall view (e.g. an
+           expanded Tasks row) makes the scrollbar appear — which otherwise
+           reflows full-width tables (columns shift, values wrap). -->
+      <main class="flex-1 min-h-0 overflow-auto p-6 relative [scrollbar-gutter:stable]">
         <slot />
       </main>
     </div>
