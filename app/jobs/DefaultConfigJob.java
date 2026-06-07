@@ -19,9 +19,9 @@ import services.scanners.ScannerRegistry;
  * is the boot foundation: {@code ToolRegistrationJob}, the Ollama/LM-Studio
  * probes, and {@code TelegramStreamingRecoveryJob} all read config at startup,
  * so seeding it before they run makes those previously-implicit ordering
- * dependencies explicit. Raw-DDL schema migration is handled separately by
- * {@link SchemaMigrationJob} (priority {@code -200}), which runs strictly
- * before this job so the columns those readers touch already exist.
+ * dependencies explicit. (The columns those readers touch are created by
+ * Hibernate's {@code ddl=update} at SessionFactory init, which completes
+ * before any {@code @OnApplicationStart} job runs.)
  */
 @OnApplicationStart(priority = -100)
 public class DefaultConfigJob extends Job<Void> {
