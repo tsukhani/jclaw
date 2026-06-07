@@ -25,10 +25,13 @@ There is one creation action — `createTask` — that takes a single `schedule`
 |-------------------------------------------------|-----------|--------------------------------------------------------|
 | `now`                                           | IMMEDIATE | Run as soon as the row is saved.                       |
 | `30m` / `2h` / `1d`                             | SCHEDULED | Run once at *now + duration*.                          |
+| `2026-06-13T15:00` (ISO date-time)              | SCHEDULED | Run **once** at a specific calendar moment, in the task's timezone (an explicit offset like `+08:00` is honored as-is). |
 | `every 30m` / `every 2h` / `every 1d`           | INTERVAL  | Recur every N (minimum 1 minute via shorthand).        |
 | Spring 6-field cron (`0 0 9 * * *`) or `@daily` | CRON      | Calendar-aligned recurrence.                           |
 
 Your original input is stored verbatim, so the **Schedule** column reads "every 30m" back to you — not the normalized "every 1800 seconds."
+
+For something that should happen **once** on a given day, use the absolute date-time — *not* a cron. It produces a one-shot `SCHEDULED` task that shows `PENDING`, fires once, then `COMPLETED`. A cron with a fixed month and day (e.g. `0 0 15 13 6 *`) would silently repeat *every year* and show as recurring (`ACTIVE`).
 
 ### What `task_manager` exposes
 
@@ -55,6 +58,10 @@ Two ways to stop a task. They are not the same:
 ## The Tasks page
 
 The [Tasks](/tasks) page shows every task you own, with three view modes — Table, Cards, and Calendar — switched from the tab strip on the right. The view selection persists in the URL (`?view=cards`), so refresh and shareable links survive.
+
+### Dashboard stats
+
+A KPI strip above the list shows **Runs today**, **Success rate**, **Avg duration**, and the live **Pending / Running / Failed** task counts. The first three are derived from your task **run history**. To clear them, click the **Reset stats** control (the circular-arrow icon in the page header, next to the retention label): it deletes completed/failed/cancelled run history — in-flight runs are kept — so the run-derived KPIs reset. The live task-status counts are unaffected, since they reflect current task state, not history.
 
 ### Filters
 
@@ -145,6 +152,8 @@ When in doubt, ask the agent — `task_manager` knows Spring cron and can transl
 ## Retention
 
 Completed and cancelled tasks are kept for **N days**, then swept by a daily cleanup job. The retention TTL is configured at **Settings → Tasks → Retention** and shown next to the page title so you don't get surprised by auto-deletes. Setting retention to `0` disables the sweep.
+
+Independently of that day-based TTL, JClaw keeps only the **10 most recent runs per task** — each new fire prunes older run history for that task. A frequently-recurring task (an every-30-minutes labeler, say) therefore never grows its run table without bound: you always have the latest ten fires, while the day-based sweep removes whole completed/cancelled tasks past the TTL.
 
 ## What a task run looks like
 

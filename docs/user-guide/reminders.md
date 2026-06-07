@@ -18,7 +18,15 @@ Reminders are created by **agents** through the same `task_manager` tool that cr
 > "Remind me tomorrow at 9am to pay salaries."
 > "Every Monday at 10am, remind me to do the team retro."
 
-The agent picks the right schedule shape (`30m`, a SCHEDULED instant, a CRON expression) and writes the *description* as the reminder text you want to see. The agent should not phrase the description as instructions to itself — when a reminder fires, that text is delivered verbatim.
+The agent picks the right schedule shape and writes the *description* as the reminder text you want to see:
+
+- A **duration** (`30m`, `2h`, `1d`) for "in N minutes/hours/days."
+- An **absolute date-time** (e.g. `2026-06-13T15:00`, interpreted in the task's timezone) for a **one-time reminder on a specific day** — "remind me at 3pm on June 13." This is a one-shot.
+- A **cron expression** for a **repeating** reminder — "every Monday at 10am."
+
+**A one-time reminder fires once and then completes** (status `PENDING` → `COMPLETED`, and by default it auto-deletes itself — see [Auto-delete after firing](/guide#reminders)). **A repeating reminder stays `ACTIVE`** and keeps firing on its cadence. Use an absolute date-time, not a cron, for something that should happen only once — a cron with a fixed month/day would silently repeat every year.
+
+The agent should not phrase the description as instructions to itself — when a reminder fires, that text is delivered verbatim.
 
 :::note The agent gets out of the way
 At fire time, JClaw skips the LLM round-trip entirely. The fire path writes a notification (web) or sends a Telegram message with a 🔔 prefix and closes the run. No tokens are consumed, no agent context is touched, no conversation history is appended.
@@ -55,9 +63,19 @@ Each toast offers three buttons:
 
 The distinction between **Mark as seen** and **trash** matters most for recurring reminders: *seen* ends just this nudge; *trash* ends the whole schedule.
 
+## Auto-delete after firing
+
+A **one-time reminder cleans itself up** once it has fired successfully — a reminder you asked for on a specific day has served its purpose the moment it nudges you, so JClaw removes the reminder (and its run history) automatically. This is **on by default** for one-off reminders.
+
+- **The notification you received is kept.** Only the scheduled reminder behind it is removed; your toast / Telegram nudge stays put, and the [Reminders](/reminders) feed of past notifications is unaffected.
+- **It applies only to one-time reminders.** A **recurring** reminder (cron/interval) never auto-deletes — it keeps firing on its cadence — and regular [tasks](/guide#tasks) are *never* auto-deleted, since their run history is your audit trail.
+- **A reminder that fails to fire is always kept**, so you can see what went wrong.
+
+To **keep** a particular one-off reminder after it fires, untick its **Auto-delete** checkbox on the [Reminders](/reminders) page (or tell the agent "keep this reminder after it fires"). Tick it back on to restore the default.
+
 ## The Reminders page
 
-Lists every reminder you've ever scheduled, with the same row regardless of delivery channel.
+Lists every reminder you've ever scheduled, with the same row regardless of delivery channel. Above the list, three cards track the lifecycle states that matter for reminders — **Pending** (one-time reminders waiting to fire), **Active** (recurring reminders), and **Failed**. Reminders skip the LLM, so there are no run-rate or success-rate metrics here.
 
 | Column        | Meaning                                                                                                       |
 |---------------|---------------------------------------------------------------------------------------------------------------|
@@ -65,15 +83,16 @@ Lists every reminder you've ever scheduled, with the same row regardless of deli
 | **When**      | Relative-time hint for the next fire — "in 5m", "in 3h", or an absolute date for far-future fires.             |
 | **Schedule**  | The original schedule shorthand — "every Mon 10:00", "0 0 9 * * *", "30m".                                     |
 | **Channel**   | `web` or `telegram`. `web (auto)` means the channel was inferred from the calling chat at creation time.       |
-| **Status**    | Same enum as tasks (`PENDING`, `ACTIVE`, `COMPLETED`, `CANCELLED`, …) — reminders are tasks under the hood.    |
+| **Status**    | Same enum as tasks — a one-time reminder is `PENDING` (waiting) then `COMPLETED`; a recurring one is `ACTIVE`. |
 | **Fired**     | When the most recent fire happened. The truth-of-record for "did the reminder go off when I said?"             |
+| **Auto-delete** | For a one-time reminder, a checkbox: ticked (the default) means the reminder removes itself after it fires; untick to keep it. Recurring reminders show `—` (not applicable). |
 | **Actions**   | **Delete** — hard-deletes the reminder and any past notifications it produced.                                 |
 
 There is no **Run now** affordance for reminders — by definition a reminder is "fire on a schedule"; running one manually is just sending yourself an immediate message.
 
 ## Persistence
 
-Reminders persist forever. Notifications written by past fires also persist forever — the [Reminders](/reminders) page is your history. Removing a reminder is always an explicit user action:
+**Recurring reminders persist until you remove them.** **One-time reminders auto-delete after they fire** (see *Auto-delete after firing* above) — unless you've unticked their **Auto-delete** box, in which case they persist too. Either way, the **notifications** written by past fires persist independently of the reminder that produced them, so your nudges stay visible even after a one-off reminder cleans itself up. Removing a reminder yourself is always an explicit action:
 
 - **Trash from a toast** — deletes the task + notification, and cascades to past notifications for that task.
 - **Delete from [Reminders](/reminders)** — same effect, surfaced as a confirm dialog.
