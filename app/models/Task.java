@@ -1,6 +1,7 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.ColumnDefault;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -120,7 +121,14 @@ public class Task extends Model {
      * never removes a recurring reminder (which never completes) or a regular
      * task. The user-visible Notification (the nudge) is preserved.
      */
+    // @ColumnDefault is load-bearing, not cosmetic: without a DEFAULT, Hibernate
+    // emits `ADD COLUMN ... boolean NOT NULL`, which fails when the task table
+    // already has rows (can't backfill NULL into a NOT NULL column) — the DDL
+    // rolls back, the column never lands, and every Task query then errors on
+    // the missing column. The DEFAULT lets the migration backfill existing rows.
+    // Any future NOT-NULL column added to an already-populated table needs this.
     @Column(name = "auto_delete_on_complete", nullable = false)
+    @ColumnDefault("false")
     public boolean autoDeleteOnComplete = false;
 
     @Column(name = "retry_count", nullable = false)
