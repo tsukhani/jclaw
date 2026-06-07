@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowUturnLeftIcon,
+  BookOpenIcon,
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ChevronDownIcon,
@@ -33,6 +34,7 @@ const TOOL_ICONS: Record<string, FunctionalComponent> = {
   'terminal': CommandLineIcon,
   'folder': FolderIcon,
   'document': DocumentTextIcon,
+  'book': BookOpenIcon,
   'globe': GlobeAltIcon,
   'search': MagnifyingGlassIcon,
   'browser': ComputerDesktopIcon,
