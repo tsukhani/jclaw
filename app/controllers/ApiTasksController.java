@@ -372,7 +372,8 @@ public class ApiTasksController extends Controller {
      * today) so the UI renders an em dash rather than 0.
      */
     private record TaskStatsView(long runsToday, Double successRate, Double avgDurationMs,
-                                 long pendingCount, long runningCount, long failedCount) {}
+                                 long pendingCount, long runningCount, long activeCount,
+                                 long failedCount) {}
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
@@ -400,6 +401,7 @@ public class ApiTasksController extends Controller {
                 runsToday, successRate, avgDurationMs,
                 countTasks(Task.Status.PENDING, payloadType, excludePayloadType),
                 countTasks(Task.Status.RUNNING, payloadType, excludePayloadType),
+                countTasks(Task.Status.ACTIVE, payloadType, excludePayloadType),
                 countTasks(Task.Status.FAILED, payloadType, excludePayloadType));
         renderJSON(gson.toJson(payload));
     }

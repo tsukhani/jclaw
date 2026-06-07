@@ -99,21 +99,17 @@ function deliveryLabel(r: Task): string {
   return d
 }
 
-function statusVariant(status: string): string {
-  switch (status) {
-    case 'ACTIVE':
-    case 'PENDING':
-      return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
-    case 'COMPLETED':
-      return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-    case 'CANCELLED':
-      return 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500'
-    case 'FAILED':
-    case 'LOST':
-      return 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300'
-    default:
-      return 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-  }
+// Status → text color, matching the /tasks table's statusColors so reminders
+// read with the same colored-mono convention as the rest of the app (rather
+// than the old rounded-pill badges).
+const statusColors: Record<string, string> = {
+  PENDING: 'text-yellow-400',
+  ACTIVE: 'text-emerald-400',
+  RUNNING: 'text-blue-400',
+  LOST: 'text-orange-400',
+  COMPLETED: 'text-green-400',
+  FAILED: 'text-red-400',
+  CANCELLED: 'text-neutral-600',
 }
 </script>
 
@@ -128,29 +124,14 @@ function statusVariant(status: string): string {
       the description is what you'll see.
     </p>
 
-    <!-- Reminder KPI strip — mirrors the /tasks header but scoped to
-         payloadType=reminder so reminder counts/run KPIs live on their own
-         page rather than leaking into the automation-tasks stats. -->
+    <!-- Reminder KPI strip — reminders never run through the LLM, so per-run
+         metrics (Runs today / Success rate) are meaningless here; we only track
+         the lifecycle states that matter: Pending (one-shot waiting), Active
+         (recurring ongoing), and Failed. Scoped to payloadType=reminder. -->
     <div
       v-if="reminderStats"
-      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-6"
+      class="grid grid-cols-3 gap-2 mb-6"
     >
-      <div class="bg-surface-elevated border border-border px-3 py-2">
-        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
-          Runs today
-        </div>
-        <div class="text-lg font-semibold text-fg-strong">
-          {{ reminderStats.runsToday }}
-        </div>
-      </div>
-      <div class="bg-surface-elevated border border-border px-3 py-2">
-        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
-          Success rate
-        </div>
-        <div class="text-lg font-semibold text-fg-strong">
-          {{ reminderStats.successRate != null ? `${Math.round(reminderStats.successRate * 100)}%` : '—' }}
-        </div>
-      </div>
       <div class="bg-surface-elevated border border-border px-3 py-2">
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
           Pending
@@ -161,13 +142,13 @@ function statusVariant(status: string): string {
       </div>
       <div class="bg-surface-elevated border border-border px-3 py-2">
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
-          Running
+          Active
         </div>
         <div
           class="text-lg font-semibold"
-          :class="reminderStats.runningCount > 0 ? 'text-blue-400' : 'text-fg-strong'"
+          :class="reminderStats.activeCount > 0 ? 'text-emerald-400' : 'text-fg-strong'"
         >
-          {{ reminderStats.runningCount }}
+          {{ reminderStats.activeCount }}
         </div>
       </div>
       <div class="bg-surface-elevated border border-border px-3 py-2">
@@ -186,17 +167,17 @@ function statusVariant(status: string): string {
     <!-- Empty state -->
     <section
       v-if="!reminders || reminders.length === 0"
-      class="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-6 py-12 text-center dark:border-zinc-700 dark:bg-zinc-900/30"
+      class="border border-dashed border-border bg-surface-elevated px-6 py-12 text-center"
     >
-      <BellAlertIcon class="mx-auto h-10 w-10 text-zinc-400" />
-      <h2 class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+      <BellAlertIcon class="mx-auto h-10 w-10 text-fg-muted" />
+      <h2 class="mt-3 text-sm font-medium text-fg-strong">
         No reminders yet
       </h2>
-      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
+      <p class="mt-1 text-sm text-fg-muted">
         Open
         <NuxtLink
           to="/chat"
-          class="font-medium text-emerald-600 underline-offset-2 hover:underline dark:text-emerald-400"
+          class="font-medium text-emerald-500 underline-offset-2 hover:underline"
         >
           a chat
         </NuxtLink>
@@ -205,82 +186,86 @@ function statusVariant(status: string): string {
       </p>
     </section>
 
-    <!-- Reminders table -->
+    <!-- Reminders table — same design-token styling as the /tasks table
+         (bg-surface-elevated / border-border / text-fg-* / colored-mono status)
+         so the rows read consistently with the rest of the app. -->
     <section
       v-else
-      class="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+      class="bg-surface-elevated border border-border"
     >
       <table class="w-full text-sm">
-        <thead class="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400">
-          <tr>
-            <th class="px-4 py-2 text-left font-medium">
+        <thead>
+          <tr class="border-b border-border text-left text-xs text-fg-muted">
+            <th class="px-4 py-2.5 font-medium">
               Reminder
             </th>
-            <th class="px-4 py-2 text-left font-medium">
+            <th class="px-4 py-2.5 font-medium">
               When
             </th>
-            <th class="px-4 py-2 text-left font-medium">
+            <th class="px-4 py-2.5 font-medium">
               Schedule
             </th>
-            <th class="px-4 py-2 text-left font-medium">
+            <th class="px-4 py-2.5 font-medium">
               Channel
             </th>
-            <th class="px-4 py-2 text-left font-medium">
+            <th class="px-4 py-2.5 font-medium">
               Status
             </th>
-            <th class="px-4 py-2 text-left font-medium">
+            <th class="px-4 py-2.5 font-medium">
               Fired
             </th>
-            <th class="px-4 py-2 text-right font-medium">
+            <th class="px-4 py-2.5 font-medium text-right">
               Actions
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <tbody class="divide-y divide-border">
           <tr
             v-for="r in reminders"
             :key="r.id"
-            class="hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+            class="hover:bg-muted/30 transition-colors"
           >
-            <td class="max-w-md px-4 py-3">
-              <div class="font-medium text-zinc-900 dark:text-zinc-100">
+            <td class="max-w-md px-4 py-2.5">
+              <div class="text-fg-primary">
                 {{ reminderBody(r) }}
               </div>
               <div
                 v-if="asString(r.description) && r.name && asString(r.description) !== r.name"
-                class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-500"
+                class="mt-0.5 text-xs text-fg-muted"
               >
                 {{ r.name }}
               </div>
             </td>
-            <td class="px-4 py-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">
+            <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
               {{ nextFireLabel(r) }}
             </td>
-            <td class="px-4 py-3 whitespace-nowrap font-mono text-xs text-zinc-600 dark:text-zinc-400">
+            <td class="px-4 py-2.5 whitespace-nowrap font-mono text-xs text-fg-muted">
               {{ reminderScheduleDisplay(r) || r.type }}
             </td>
-            <td class="px-4 py-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">
+            <td class="px-4 py-2.5 whitespace-nowrap font-mono text-xs text-fg-muted">
               {{ deliveryLabel(r) }}
             </td>
-            <td class="px-4 py-3 whitespace-nowrap">
+            <td class="px-4 py-2.5 whitespace-nowrap">
               <span
-                class="rounded-full px-2 py-0.5 text-xs font-medium"
-                :class="statusVariant(r.status)"
-              >
-                {{ r.status }}
-              </span>
+                :class="statusColors[r.status]"
+                class="text-xs font-mono"
+              >{{ r.status }}</span>
             </td>
-            <td class="px-4 py-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">
+            <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
               {{ firedAtLabel(r) }}
             </td>
-            <td class="px-4 py-3 whitespace-nowrap text-right">
+            <td class="px-4 py-2.5 whitespace-nowrap text-right">
               <button
-                class="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-900/30"
-                title="Delete"
+                type="button"
+                class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                title="Delete reminder"
+                :aria-label="`Delete ${reminderBody(r)}`"
                 @click="deleteOne(r)"
               >
-                <TrashIcon class="h-3.5 w-3.5" />
-                Delete
+                <TrashIcon
+                  class="w-4 h-4"
+                  aria-hidden="true"
+                />
               </button>
             </td>
           </tr>

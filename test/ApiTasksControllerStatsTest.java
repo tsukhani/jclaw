@@ -46,6 +46,7 @@ class ApiTasksControllerStatsTest extends FunctionalTest {
 
                     mkTask(agent, "pending-task", Task.Status.PENDING);
                     mkTask(agent, "failed-task", Task.Status.FAILED);
+                    mkTask(agent, "active-task", Task.Status.ACTIVE);
                     var running = mkTask(agent, "running-task", Task.Status.RUNNING);
 
                     mkRun(running, TaskRun.Status.COMPLETED, 1000L);
@@ -104,6 +105,7 @@ class ApiTasksControllerStatsTest extends FunctionalTest {
         assertTrue(body.contains("\"pendingCount\":1"), body);
         assertTrue(body.contains("\"failedCount\":1"), body);
         assertTrue(body.contains("\"runningCount\":1"), body);
+        assertTrue(body.contains("\"activeCount\":1"), body);
         // 2 COMPLETED / 3 terminal == 0.666...
         assertTrue(body.contains("\"successRate\":0.6"), body);
         // (1000 + 3000) / 2 == 2000

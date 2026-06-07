@@ -508,6 +508,7 @@ export interface TaskStats {
   avgDurationMs?: number | null
   pendingCount: number
   runningCount: number
+  activeCount: number
   failedCount: number
 }
 
