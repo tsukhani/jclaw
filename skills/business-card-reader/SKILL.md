@@ -2,7 +2,7 @@
 name: business-card-reader
 description: Read a business card image, extract contact details (name, phone, email, company, etc.), append them to a Google Sheet, then send a welcome email and WhatsApp message to the contact.
 author: main
-tools: [documents, mcp_google-workspace, exec, datetime]
+tools: [documents, mcp_google_workspace, exec, datetime]
 commands: []
 icon: 📇
 ---
@@ -61,8 +61,8 @@ Missing-field handling (kept consistent with the Edge Cases table below): a miss
 
 ## Step 3 — Append the Contact to a Google Sheet
 
-1. **Discover the live API first.** Action names and argument schemas below are indicative. Before constructing a call, invoke `mcp_google-workspace` with no `tool` argument (or its list/discovery action) to enumerate the actual action names and parameters the connected server exposes, and build your call from those.
-2. **Auth model.** `mcp_google-workspace` acts as a specific connected Google identity, provisioned per agent owner; it needs only Sheets-append and Gmail-send scopes. Confirm the connected account is the user's own before writing anything.
+1. **Discover the live API first.** Action names and argument schemas below are indicative. Before constructing a call, invoke `mcp_google_workspace` with no `tool` argument (or its list/discovery action) to enumerate the actual action names and parameters the connected server exposes, and build your call from those.
+2. **Auth model.** `mcp_google_workspace` acts as a specific connected Google identity, provisioned per agent owner; it needs only Sheets-append and Gmail-send scopes. Confirm the connected account is the user's own before writing anything.
 3. **Pre-requisite:** the target Google Sheet must already exist and be accessible to that identity. Ask the user for the Sheet name / ID if it isn't known.
 4. The Sheet should have a **header row** with these exact column titles (create it if absent):
 
@@ -84,7 +84,7 @@ Full Name | Job Title | Company Name | Phone | Email | Website | Address | Linke
 ## Step 4 — Send a Welcome Email
 
 1. **Confirm first.** Draft the email and show the user the recipient, subject, and full body. Send only after the user explicitly approves (per the Safety contract). Do **not** send if `email` is missing — ask the user to supply it or skip this step.
-2. Use `mcp_google-workspace`'s mail-send action with:
+2. Use `mcp_google_workspace`'s mail-send action with:
    - `to`: the contact's `email`
    - `subject`: a warm, professional subject line (e.g., `"Nice to meet you, {full_name}!"`)
    - `body`: a personalised, plain-text welcome message. **Sign with the invoking user's name taken from the agent/user profile — never hardcode a specific person's name**, so the skill stays correct when promoted to other owners. Include a brief, genuine opt-out line (e.g., "If you'd rather I didn't follow up here, just let me know and I'll remove your details.").
