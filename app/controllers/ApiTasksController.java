@@ -1095,6 +1095,36 @@ public class ApiTasksController extends Controller {
         renderJSON("{\"status\":\"deleted\",\"id\":" + taskId + "}");
     }
 
+    /**
+     * Reset the run-derived dashboard KPIs by hard-deleting terminal
+     * (non-RUNNING) task runs and their transcripts, scoped by the same
+     * {@code payloadType} filter {@link #stats} uses (the Tasks page passes
+     * {@code excludePayloadType=reminder}, so a reset there never touches
+     * reminder history). In-flight RUNNING runs are preserved so a reset during
+     * an active fire doesn't orphan it. The task-status counts (pending /
+     * running / failed) are untouched — they reflect live Task state, not run
+     * history.
+     */
+    public static void resetStats(String payloadType, String excludePayloadType) {
+        var em = play.db.jpa.JPA.em();
+        var msgQ = em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
+                        + payloadTypeWhere("m.taskRun.task", payloadType, excludePayloadType))
+                .setParameter("running", TaskRun.Status.RUNNING);
+        bindPayloadType(msgQ, payloadType, excludePayloadType);
+        msgQ.executeUpdate();
+
+        var runQ = em.createQuery("DELETE FROM TaskRun r WHERE r.status <> :running"
+                        + payloadTypeWhere("r.task", payloadType, excludePayloadType))
+                .setParameter("running", TaskRun.Status.RUNNING);
+        bindPayloadType(runQ, payloadType, excludePayloadType);
+        int deleted = runQ.executeUpdate();
+        em.flush();
+
+        EventLogger.info("TASK_MGMT_RESET_STATS", null, null,
+                "Reset task stats: deleted %d terminal task run(s)".formatted(deleted));
+        renderJSON("{\"status\":\"reset\",\"deletedRuns\":" + deleted + "}");
+    }
+
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void pause(Long id) {

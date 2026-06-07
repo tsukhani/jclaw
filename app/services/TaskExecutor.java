@@ -7,6 +7,7 @@ import models.Task;
 import models.TaskRun;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -38,6 +39,16 @@ import java.util.Objects;
 public final class TaskExecutor {
 
     private TaskExecutor() {}
+
+    /**
+     * Per-task cap on persisted run history. Only the most recent
+     * {@code MAX_RUNS_PER_TASK} fires of any single Task are retained; older
+     * {@code task_run} rows (and their transcripts) are pruned right after each
+     * new run opens, so a frequently-recurring task can't grow the table
+     * without bound. Operators keep recent per-fire history; durable audit
+     * lives in the structured event log, not the transcript.
+     */
+    public static final int MAX_RUNS_PER_TASK = 10;
 
     /**
      * Resolved-in-Tx capture of the task fields the agent loop needs.
@@ -78,6 +89,11 @@ public final class TaskExecutor {
                             .formatted(task.id));
             return null;
         }
+
+        // Cap persisted run history to the most recent MAX_RUNS_PER_TASK fires.
+        // Best-effort and in its own transaction (the run above is already
+        // committed), so a prune hiccup never fails the fire that just opened.
+        pruneRunHistory(task.id);
 
         // JCLAW-414: register the in-flight run so an operator cancel
         // (POST /api/task-runs/{id}/cancel) can flip its cooperative-
@@ -181,6 +197,47 @@ public final class TaskExecutor {
             r.save();
             return r;
         });
+    }
+
+    /**
+     * Cap {@code taskId}'s persisted run history at {@link #MAX_RUNS_PER_TASK}
+     * most recent fires: delete the transcript rows first (FK order), then the
+     * run rows, keeping the newest by {@code startedAt} ({@code id} as a stable
+     * tiebreaker for same-instant fires). Best-effort — runs in its own short
+     * transaction and swallows-with-warn any failure, since this is housekeeping
+     * that must never break the fire that triggered it. Public so a focused unit
+     * test can exercise the cap without driving a full agent loop.
+     */
+    public static void pruneRunHistory(Long taskId) {
+        try {
+            Tx.run(() -> {
+                var em = play.db.jpa.JPA.em();
+                @SuppressWarnings("unchecked")
+                List<Long> keepIds = em.createQuery(
+                        "SELECT r.id FROM TaskRun r WHERE r.task.id = :tid "
+                                + "ORDER BY r.startedAt DESC, r.id DESC")
+                        .setParameter("tid", taskId)
+                        .setMaxResults(MAX_RUNS_PER_TASK)
+                        .getResultList();
+                // Fewer rows than the cap means there is nothing to prune.
+                if (keepIds.size() < MAX_RUNS_PER_TASK) return null;
+                em.createQuery("DELETE FROM TaskRunMessage m "
+                                + "WHERE m.taskRun.task.id = :tid AND m.taskRun.id NOT IN :keep")
+                        .setParameter("tid", taskId)
+                        .setParameter("keep", keepIds)
+                        .executeUpdate();
+                em.createQuery("DELETE FROM TaskRun r "
+                                + "WHERE r.task.id = :tid AND r.id NOT IN :keep")
+                        .setParameter("tid", taskId)
+                        .setParameter("keep", keepIds)
+                        .executeUpdate();
+                return null;
+            });
+        } catch (Exception e) {
+            EventLogger.warn("task", null, null,
+                    "TaskExecutor.pruneRunHistory: failed to cap run history for Task id %d: %s"
+                            .formatted(taskId, e.getMessage()));
+        }
     }
 
     /**

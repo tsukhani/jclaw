@@ -249,6 +249,23 @@ async function deleteTask(task: Task) {
   refresh()
 }
 
+// Reset the run-derived KPIs (Runs Today / Success Rate / Avg Duration) by
+// deleting terminal run history. In-flight runs and the task definitions
+// themselves are kept; scoped to the same excludePayloadType=reminder the
+// stats fetch uses so it never touches the Reminders surface.
+async function resetStats() {
+  const ok = await confirm({
+    title: 'Reset task stats?',
+    message: 'Permanently delete all completed, failed and cancelled run history (in-flight runs are kept). Runs Today, Success Rate and Avg Duration will reset.',
+    confirmText: 'Reset stats',
+    variant: 'danger',
+  })
+  if (!ok) return
+  await $fetch('/api/task-runs/reset?excludePayloadType=reminder', { method: 'POST' })
+  refresh()
+  refreshStats()
+}
+
 // ── JCLAW-22 (slice D): row-expand detail — step list + TaskRun history ──
 // Single-open accordion (same UX as /logs). The step list is parsed
 // client-side from task.description (already in the /api/tasks payload via
@@ -1257,6 +1274,14 @@ const statusBg: Record<string, string> = {
           {{ retentionDisplay }}
         </NuxtLink>
         <template v-if="!selectMode">
+          <button
+            :disabled="!tasks?.length"
+            class="px-3 py-1.5 border border-input text-fg-muted text-xs hover:text-fg-strong hover:border-neutral-500 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
+            title="Delete completed/failed/cancelled run history and reset the run KPIs"
+            @click="resetStats"
+          >
+            Reset stats
+          </button>
           <button
             :disabled="!tasks?.length"
             class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
