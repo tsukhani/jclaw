@@ -264,6 +264,12 @@ async function resetStats() {
   await $fetch('/api/task-runs/reset?excludePayloadType=reminder', { method: 'POST' })
   refresh()
   refreshStats()
+  // refresh()/refreshStats() update the task list and KPIs, but the per-task
+  // RUN HISTORY shown in an expanded panel reads from the runsByTask cache,
+  // which still holds the now-deleted terminal rows. Re-pull runs for every
+  // task whose history has been loaded so open panels drop the cleared rows
+  // (a still-RUNNING run, spared by the reset, correctly remains).
+  for (const id of Object.keys(runsByTask)) void loadRuns(Number(id), true)
 }
 
 // ── JCLAW-22 (slice D): row-expand detail — step list + TaskRun history ──
