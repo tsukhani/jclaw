@@ -186,7 +186,7 @@ Independently of that day-based TTL, JClaw keeps only the **10 most recent runs 
 
 ## What a task run looks like
 
-When a task fires, JClaw runs the owning agent with the task description as its input and lets it run until the task completes or fails. The turn-by-turn transcript is saved as the **run's trace** — not as a chat. A task fire does **not** create an entry on the [Conversations](/conversations) page: each fire appears in that task's **run history** (expand the task's row on the [Tasks](/tasks) page), and clicking a run there opens its full trace in a side panel. Failed fires log the error against the run and trigger a retry up to the configured cap.
+When a task fires, JClaw runs the owning agent with the task description as its input and lets it run until the task completes or fails. The turn-by-turn transcript is saved as the **run's trace** — not as a chat. A task fire does **not** create an entry on the [Conversations](/conversations) page: each fire appears in that task's **run history** (expand the task's row on the [Tasks](/tasks) page), and clicking a run there opens its full trace in a side panel. While a run is in flight you can watch it — see *Watching a fire live* below. Failed fires log the error against the run and trigger a retry up to the configured cap.
 
 If you want the task to ping you when it's done, build that into the task description:
 
@@ -216,8 +216,8 @@ The agent rejects a `createTask` call when an agent already has a non-cancelled 
 Tasks are scoped to the owning agent. One agent never sees, pauses, or cancels another agent's tasks of the same name. The `runNow` and `cancelTask` actions only operate on tasks the calling agent owns.
 :::
 
-:::note No live progress streaming
-A task fire isn't streamed live, and it doesn't appear on the [Conversations](/conversations) page — its transcript is the **run's trace**, not a chat. Each fire shows up in the task's **run history** (expand the task's row on the [Tasks](/tasks) page); click a run there to read its full turn-by-turn trace in the side panel once it's recorded.
+:::note Watching a fire live
+A task fire doesn't appear on the [Conversations](/conversations) page — its transcript is the **run's trace**, not a chat — but you *can* watch it as it runs. Expand the task's row on the [Tasks](/tasks) page: an in-flight fire shows up in the **run history** as a `RUNNING` entry with a live elapsed timer and a one-line preview of its latest step. Click that entry to open the **trace panel**, which fills in turn-by-turn as the fire proceeds (refreshed every couple of seconds), then settles on the complete trace when the run finishes.
 :::
 
 ## Where to go next
