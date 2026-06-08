@@ -146,14 +146,6 @@ const statusColors: Record<string, string> = {
     >
       <div class="bg-surface-elevated border border-border px-3 py-2">
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
-          Pending
-        </div>
-        <div class="text-lg font-semibold text-fg-strong">
-          {{ reminderStats.pendingCount }}
-        </div>
-      </div>
-      <div class="bg-surface-elevated border border-border px-3 py-2">
-        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
           Active
         </div>
         <div
@@ -161,6 +153,14 @@ const statusColors: Record<string, string> = {
           :class="reminderStats.activeCount > 0 ? 'text-emerald-400' : 'text-fg-strong'"
         >
           {{ reminderStats.activeCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Pending
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ reminderStats.pendingCount }}
         </div>
       </div>
       <div class="bg-surface-elevated border border-border px-3 py-2">
