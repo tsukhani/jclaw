@@ -1545,7 +1545,12 @@ const statusBg: Record<string, string> = {
       v-if="view === 'table'"
       class="bg-surface-elevated border border-border"
     >
-      <table class="w-full text-sm">
+      <!-- table-fixed + per-column header widths: with auto layout the
+           expanded detail row (a wide colspan cell) re-balanced every column
+           on expand/collapse. Fixed layout sizes columns from the header row
+           alone, so the detail content can't shift them. Widths sum to 100%
+           (the select-mode checkbox th keeps its own w-8). -->
+      <table class="w-full text-sm table-fixed">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
             <th
@@ -1560,31 +1565,31 @@ const statusBg: Record<string, string> = {
                 @change="toggleSelectAll"
               >
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium w-[18%]">
               Name
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium w-[6%]">
               Type
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium w-[14%]">
               Schedule
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium w-[7%]">
               Status
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium w-[6%]">
               Agent
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium w-[8%]">
               Channel
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium w-[25%]">
               Next Run
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th class="px-4 py-2.5 font-medium w-[6%]">
               Retries
             </th>
-            <th class="px-4 py-2.5 font-medium text-right">
+            <th class="px-4 py-2.5 font-medium text-right w-[10%]">
               Actions
             </th>
           </tr>
