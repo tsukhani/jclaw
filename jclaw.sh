@@ -2368,11 +2368,21 @@ do_stop_prod() {
     pid=$(cat server.pid 2>/dev/null)
     if [[ -z "$pid" ]]; then
         echo "Warning: server.pid is empty — cannot wait for JVM exit."
-        play stop
+        play stop || true
         return
     fi
     echo "==> Stopping Play backend (pid: $pid)..."
-    play stop
+    # `play stop` shells out to the gradle :playStop task, which waits a
+    # bounded ~10s for the JVM to exit and returns BUILD FAILED (non-zero)
+    # if it doesn't — e.g. when the shutdown hook deadlocks (the Play.stop
+    # ↔ ApplicationClassloader circular wait, triggered by an in-flight
+    # Groovy 404 render holding the classloader monitor onApplicationStop
+    # needs). Under `set -e` that non-zero would abort this function before
+    # the wait-and-escalate loop below ever runs, leaving a half-dead JVM
+    # and surfacing only a bare gradle stack trace. Swallow it: the SIGTERM
+    # is delivered regardless, and the kill -0 loop below is our real exit
+    # signal.
+    play stop || true
 
     # JCLAW-190: `play stop` (framework/pym/play/commands/daemon.py:84-86)
     # signals the JVM with SIGTERM and immediately removes server.pid —
@@ -2401,14 +2411,21 @@ do_stop_prod() {
     done
 
     if kill -0 "$pid" 2>/dev/null; then
-        echo "Warning: pid $pid still alive after $((max_ds / 2))s — JVM may still be shutting down."
-        echo "         If a follow-up start fails, check 'ps -p $pid' and decide whether to kill -9."
-    else
-        # Clean up a stray pid file if Play left one behind (force-kill, crash, etc.)
-        [[ -f server.pid ]] && rm -f server.pid
-        echo ""
-        echo "JClaw stopped."
+        # SIGTERM didn't bring it down within the budget — almost always the
+        # Play.stop ↔ ApplicationClassloader shutdown deadlock, which no
+        # further SIGTERM can clear (the process is already inside its own
+        # SIGTERM handler running shutdown hooks). Escalate to SIGKILL so
+        # `stop` actually stops and a follow-up `start`/`restart` finds
+        # released ports and a reapable H2 lock instead of a wedged zombie.
+        echo "Warning: pid $pid still alive after $((max_ds / 2))s (likely the Play"
+        echo "         shutdown deadlock) — escalating to kill -9."
+        kill -9 "$pid" 2>/dev/null || true
+        sleep 1   # let the OS release the ports / H2 file lock the JVM held
     fi
+    # Clean up the pid file regardless of graceful vs forced exit.
+    [[ -f server.pid ]] && rm -f server.pid
+    echo ""
+    echo "JClaw stopped."
 }
 
 # ─── Dev mode start/stop ───
