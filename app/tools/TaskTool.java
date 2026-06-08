@@ -197,16 +197,17 @@ public class TaskTool implements ToolRegistry.Tool {
                                 + "'weekly-invoice-digest'. NOT a title-case phrase like 'Nose Trimmer "
                                 + "Price Hunt'. It's the handle cancelTask/updateTask/runNow address it by.")),
                 Map.entry(SchemaKeys.DESCRIPTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Task instructions for the agent — the WORK only. When the "
-                                + "work has more than one distinct step, ALWAYS pass a JSON array of step "
-                                + "strings in order — do NOT collapse them into one prose paragraph — e.g. "
+                        SchemaKeys.DESCRIPTION, "Task instructions for the agent — the WORK only. For an "
+                                + "agent task ALWAYS pass a JSON array of step strings in order — never a "
+                                + "prose paragraph — even when there is only one action (then it's a "
+                                + "one-element array), e.g. "
                                 + "[\"Fetch yesterday's orders\", \"Summarise the totals\", "
                                 + "\"Highlight anything unusual\"] — the steps render as a numbered "
                                 + "list in the admin UI and are flattened into the agent's prompt. Do NOT "
                                 + "add a 'send it to <channel>' step — where the output goes is the "
-                                + "`delivery` field's job, delivered automatically after the run. Only a "
-                                + "genuinely single-action task or a reminder passes a single plain string; "
-                                + "a one-element array and a plain string behave identically.")),
+                                + "`delivery` field's job, delivered automatically after the run. The ONLY "
+                                + "case that passes a single plain string is a reminder, whose description "
+                                + "is the verbatim text the user sees.")),
                 Map.entry(KEY_SCHEDULE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Schedule shorthand: 'now' (IMMEDIATE); a duration like '30m'/'2h'/'1d' for a one-shot N-from-now; an absolute ISO date-time like '2026-06-13T15:00' for a one-shot at a specific moment (interpreted in the task's timezone); 'every <duration>' for INTERVAL; or a Spring 6-field cron / at-shortcut for CRON. Use an absolute date-time (not a cron) for a one-time reminder on a specific date.")),
                 Map.entry(KEY_PAUSED, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
