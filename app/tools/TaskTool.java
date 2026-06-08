@@ -143,14 +143,18 @@ public class TaskTool implements ToolRegistry.Tool {
                 ('telegram:<id>'), a tool the task calls during its run \
                 ('tool:send_gmail_message' to email the result), or 'none' if \
                 the output just stays in the run. This is a typed field the UI \
-                reads, so capture the delivery target here rather than leaving \
-                it only in the prose; still describe the delivery step in \
-                `description` as usual — do NOT remove it. Omit `delivery` \
-                entirely to auto-route output back to this chat. The same rule \
-                applies when normalizing EXISTING tasks: listRecurringTasks \
+                reads AND the engine acts on. Put only the WORK in \
+                `description` — do NOT add a 'send it to <channel>' step: when \
+                the task completes JClaw automatically delivers the run's \
+                output to the `delivery` target (and for a 'tool:' target it \
+                injects the call directive for you), so a manual send step is \
+                redundant and can make the result go out twice. Omit \
+                `delivery` entirely to auto-route output back to this chat. The \
+                same applies when normalizing EXISTING tasks: listRecurringTasks \
                 shows each task's [delivery: …]; for any whose delivery still \
-                lives only in the prose, infer it and set the field with \
-                updateTask.
+                lives only in the prose, infer it, set the field with \
+                updateTask, and drop the now-redundant send step from the \
+                description.
 
                 REMINDERS: when the user says "remind me to X" / "remind me \
                 in N minutes to Y" / "remind me tomorrow about Z", create a \
@@ -190,11 +194,13 @@ public class TaskTool implements ToolRegistry.Tool {
                 Map.entry(KEY_NAME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Task name (short identifier)")),
                 Map.entry(SchemaKeys.DESCRIPTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Task instructions for the agent. For a multi-step task, "
-                                + "pass a JSON array of step strings in order, e.g. "
+                        SchemaKeys.DESCRIPTION, "Task instructions for the agent — the WORK only. For a "
+                                + "multi-step task, pass a JSON array of step strings in order, e.g. "
                                 + "[\"Fetch yesterday's orders\", \"Summarise the totals\", "
-                                + "\"Post the summary to the channel\"] — the steps render as a numbered "
-                                + "list in the admin UI and are flattened into the agent's prompt. For a "
+                                + "\"Highlight anything unusual\"] — the steps render as a numbered "
+                                + "list in the admin UI and are flattened into the agent's prompt. Do NOT "
+                                + "add a 'send it to <channel>' step — where the output goes is the "
+                                + "`delivery` field's job, delivered automatically after the run. For a "
                                 + "simple task or a reminder, pass a single plain string. A one-element "
                                 + "array and a plain string behave identically.")),
                 Map.entry(KEY_SCHEDULE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
