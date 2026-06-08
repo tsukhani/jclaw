@@ -159,32 +159,12 @@ public final class TelegramInboundTextBuffer {
      *  {@code telegram.inbound.coalesce-threshold} (default 4000). Unparseable
      *  / unset values fall back to the default. */
     static int coalesceThreshold() {
-        return readInt(CFG_THRESHOLD, DEFAULT_COALESCE_THRESHOLD);
+        return utils.PlayConfig.intOr(CFG_THRESHOLD, DEFAULT_COALESCE_THRESHOLD);
     }
 
     /** Idle window in ms before a buffered group flushes, read from
      *  {@code telegram.inbound.coalesce-window-ms} (default 750). */
     static long coalesceWindowMs() {
-        return readLong(CFG_WINDOW_MS, DEFAULT_COALESCE_WINDOW_MS);
-    }
-
-    private static int readInt(String key, int fallback) {
-        var raw = play.Play.configuration.getProperty(key);
-        if (raw == null || raw.isBlank()) return fallback;
-        try {
-            return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException _) {
-            return fallback;
-        }
-    }
-
-    private static long readLong(String key, long fallback) {
-        var raw = play.Play.configuration.getProperty(key);
-        if (raw == null || raw.isBlank()) return fallback;
-        try {
-            return Long.parseLong(raw.trim());
-        } catch (NumberFormatException _) {
-            return fallback;
-        }
+        return utils.PlayConfig.longOr(CFG_WINDOW_MS, DEFAULT_COALESCE_WINDOW_MS);
     }
 }

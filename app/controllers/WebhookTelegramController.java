@@ -119,17 +119,17 @@ public class WebhookTelegramController extends Controller {
      * default 60). Unparseable / unset values fall back to the default.
      */
     private static int rateLimitMax() {
-        return readInt(CFG_RATE_LIMIT_MAX, DEFAULT_RATE_LIMIT_MAX);
+        return utils.PlayConfig.intOr(CFG_RATE_LIMIT_MAX, DEFAULT_RATE_LIMIT_MAX);
     }
 
     /** M1: rate-limit window in seconds ({@code telegram.webhook.rate-limit.window-seconds}, default 60). */
     private static long rateLimitWindowSeconds() {
-        return readInt(CFG_RATE_LIMIT_WINDOW_SECONDS, (int) DEFAULT_RATE_LIMIT_WINDOW_SECONDS);
+        return utils.PlayConfig.intOr(CFG_RATE_LIMIT_WINDOW_SECONDS, (int) DEFAULT_RATE_LIMIT_WINDOW_SECONDS);
     }
 
     /** M1: maximum accepted body size in bytes ({@code telegram.webhook.max-body-bytes}, default 1 MiB). */
     private static long maxBodyBytes() {
-        return readLong(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
+        return utils.PlayConfig.longOr(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
     }
 
     /**
@@ -169,26 +169,6 @@ public class WebhookTelegramController extends Controller {
     private static boolean trustedProxy() {
         var raw = play.Play.configuration.getProperty(CFG_TRUSTED_PROXY, "false");
         return raw != null && raw.trim().equalsIgnoreCase("true");
-    }
-
-    private static int readInt(String key, int fallback) {
-        var raw = play.Play.configuration.getProperty(key);
-        if (raw == null || raw.isBlank()) return fallback;
-        try {
-            return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException _) {
-            return fallback;
-        }
-    }
-
-    private static long readLong(String key, long fallback) {
-        var raw = play.Play.configuration.getProperty(key);
-        if (raw == null || raw.isBlank()) return fallback;
-        try {
-            return Long.parseLong(raw.trim());
-        } catch (NumberFormatException _) {
-            return fallback;
-        }
     }
 
     private static BindingCtx loadBindingCtx(Long bindingId) {
