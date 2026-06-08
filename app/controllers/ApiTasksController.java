@@ -204,7 +204,7 @@ public class ApiTasksController extends Controller {
      */
     private record TaskRunView(Long id, String status,
                                String startedAt, String completedAt, Long durationMs,
-                               String error, String outputSummary,
+                               String error, String outputSummary, String latestTurnPreview,
                                String deliveryStatus, String deliveryTarget, String deliveryError,
                                String traceJson, String createdAt) {
         static TaskRunView of(TaskRun r) {
@@ -216,12 +216,33 @@ public class ApiTasksController extends Controller {
                     r.durationMs,
                     r.error,
                     r.outputSummary,
+                    latestTurnPreviewFor(r),
                     r.deliveryStatus != null ? r.deliveryStatus.name() : null,
                     r.deliveryTarget,
                     r.deliveryError,
                     r.traceJson,
                     r.createdAt != null ? r.createdAt.toString() : null);
         }
+    }
+
+    /** Max characters of an in-flight run's preview clip (one-liner in the row). */
+    private static final int RUN_PREVIEW_MAX = 160;
+
+    /**
+     * One-line preview of the newest turn of a still-RUNNING run, so the Tasks
+     * run-history row can show a live clip of an in-flight fire — which has no
+     * {@code outputSummary} yet (that's stamped only at completion). Returns
+     * null for terminal runs (the row renders {@code outputSummary} instead)
+     * and for a run with no text turn yet. One indexed lookup, and only for the
+     * at-most-one RUNNING run in a history page.
+     */
+    private static String latestTurnPreviewFor(TaskRun r) {
+        if (r.status != TaskRun.Status.RUNNING) return null;
+        var latest = (TaskRunMessage) TaskRunMessage.find(
+                "taskRun = ?1 AND content IS NOT NULL ORDER BY turnIndex DESC", r).first();
+        if (latest == null || latest.content == null || latest.content.isBlank()) return null;
+        var text = latest.content.strip();
+        return text.length() > RUN_PREVIEW_MAX ? text.substring(0, RUN_PREVIEW_MAX) + "…" : text;
     }
 
     /**

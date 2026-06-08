@@ -211,4 +211,56 @@ class ApiTasksControllerRunsTest extends FunctionalTest {
         assertTrue(body.contains("\"deliveryError\":\"channel down\""), body);
         assertTrue(body.contains("\"traceJson\":"), body);
     }
+
+    @Test
+    void runningRunExposesLatestTurnPreviewTerminalRunsDoNot() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "preview-task");
+        // One older terminal run (no preview — the row renders outputSummary)
+        // plus one newest in-flight RUNNING run whose latest turn is the clip.
+        seedRuns(taskId, 1);
+        seedRunningRunWithTurns(taskId, "first turn", "latest turn in flight");
+
+        var resp = GET("/api/tasks/" + taskId + "/runs");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        // The RUNNING run surfaces its newest turn as a live preview clip...
+        assertTrue(body.contains("\"latestTurnPreview\":\"latest turn in flight\""), body);
+        // ...while the terminal run carries none.
+        assertTrue(body.contains("\"latestTurnPreview\":null"), body);
+    }
+
+    /** Seed one RUNNING run carrying the given turns (turnIndex ascending). */
+    private static void seedRunningRunWithTurns(Long taskId, String... turns) {
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                services.Tx.run(() -> {
+                    var task = (Task) Task.findById(taskId);
+                    var run = new TaskRun();
+                    run.task = task;
+                    run.startedAt = Instant.now();
+                    run.status = TaskRun.Status.RUNNING;
+                    run.save();
+                    for (int i = 0; i < turns.length; i++) {
+                        var m = new models.TaskRunMessage();
+                        m.taskRun = run;
+                        m.role = models.MessageRole.ASSISTANT;
+                        m.content = turns[i];
+                        m.turnIndex = i;
+                        m.save();
+                    }
+                });
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+    }
 }

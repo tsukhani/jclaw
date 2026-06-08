@@ -279,17 +279,19 @@ const runsByTask = reactive<Record<number, TaskRunView[]>>({})
 const runsLoading = reactive<Record<number, boolean>>({})
 const runsError = reactive<Record<number, string | null>>({})
 
-async function loadRuns(id: number) {
-  runsLoading[id] = true
+async function loadRuns(id: number, silent = false) {
+  if (!silent) runsLoading[id] = true
   runsError[id] = null
   try {
     runsByTask[id] = await $fetch<TaskRunView[]>(`/api/tasks/${id}/runs?limit=20`)
   }
   catch (e) {
-    runsError[id] = e instanceof Error ? e.message : 'Failed to load run history'
+    // A silent poll failure is transient — keep the last good history rather
+    // than flashing an error over a row the user is watching.
+    if (!silent) runsError[id] = e instanceof Error ? e.message : 'Failed to load run history'
   }
   finally {
-    runsLoading[id] = false
+    if (!silent) runsLoading[id] = false
   }
 }
 
@@ -476,8 +478,15 @@ const peekSubtitle = ref('')
 const peekMessages = ref<TaskRunMessageView[]>([])
 const peekLoading = ref(false)
 const peekError = ref<string | null>(null)
+// The run open in the trace panel, plus its owning task (when opened from a
+// history row) — the live poll uses these to keep the run's status fresh and
+// stream its trace while it's still RUNNING.
+const peekRunId = ref<number | null>(null)
+const peekTaskId = ref<number | null>(null)
 
-async function loadTrace(runId: number, title: string, subtitle: string) {
+async function loadTrace(runId: number, title: string, subtitle: string, taskId: number | null = null) {
+  peekRunId.value = runId
+  peekTaskId.value = taskId
   peekTitle.value = title
   peekSubtitle.value = subtitle
   peekOpen.value = true
@@ -495,14 +504,43 @@ async function loadTrace(runId: number, title: string, subtitle: string) {
   }
 }
 
-function openTrace(run: TaskRunView) {
+// Silent re-fetch of the open trace (no spinner, no clear) — the live poll uses
+// it so new turns of a RUNNING run append in place as the fire proceeds.
+async function refreshOpenTrace() {
+  if (peekRunId.value == null) return
+  try {
+    peekMessages.value = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${peekRunId.value}/messages`)
+  }
+  catch { /* transient — the next tick retries */ }
+}
+
+// Whether the open run is still in flight, derived from the loaded run lists so
+// it self-corrects the instant a refresh flips the run terminal.
+const peekRunIsRunning = computed(() => {
+  if (peekRunId.value == null) return false
+  for (const runs of Object.values(runsByTask)) {
+    const hit = runs.find(r => r.id === peekRunId.value)
+    if (hit) return hit.status === 'RUNNING'
+  }
+  return false
+})
+
+function openTrace(run: TaskRunView, taskId?: number) {
   const when = run.startedAt ? new Date(run.startedAt).toLocaleString() : ''
-  void loadTrace(run.id, `Run trace — ${run.status ?? ''}`, when)
+  void loadTrace(run.id, `Run trace — ${run.status ?? ''}`, when, taskId ?? null)
 }
 
 function closeTrace() {
   peekOpen.value = false
+  peekRunId.value = null
+  peekTaskId.value = null
 }
+
+// When the open run finishes (RUNNING → terminal) pull the final trace once, so
+// the last turns written between polls aren't missed.
+watch(peekRunIsRunning, (running, wasRunning) => {
+  if (wasRunning && !running && peekOpen.value) void refreshOpenTrace()
+})
 
 // ── JCLAW-22 (slice T): transcript search ──
 // Distinct from the FilterBar's q (task name/description, JCLAW-304): this
@@ -616,14 +654,33 @@ const { onEvent } = useEventBus()
 // 1s tick drives the live elapsed-time indicator for RUNNING runs.
 const nowMs = ref(Date.now())
 let tickHandle: ReturnType<typeof setInterval> | undefined
+let liveTraceHandle: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   tickHandle = setInterval(() => {
     nowMs.value = Date.now()
   }, 1000)
+  // Live trace poll: the SSE bus emits only lifecycle events (started /
+  // completed / …), not the per-turn growth of an in-flight run. So while a
+  // RUNNING run is on screen — expanded in the history, or open in the trace
+  // panel — re-fetch it every 2s (silently) so its partial clip and trace fill
+  // in as the fire proceeds.
+  liveTraceHandle = setInterval(() => {
+    void liveTracePoll()
+  }, 2000)
 })
 onUnmounted(() => {
   if (tickHandle) clearInterval(tickHandle)
+  if (liveTraceHandle) clearInterval(liveTraceHandle)
 })
+
+async function liveTracePoll() {
+  const taskIds = new Set<number>(expandedIds)
+  if (peekOpen.value && peekTaskId.value != null) taskIds.add(peekTaskId.value)
+  for (const id of taskIds) {
+    if (runsByTask[id]?.some(r => r.status === 'RUNNING')) void loadRuns(id, true)
+  }
+  if (peekOpen.value && peekRunIsRunning.value) void refreshOpenTrace()
+}
 
 function elapsedSince(startedAt: string | null): string {
   if (!startedAt) return ''
@@ -2029,7 +2086,7 @@ const statusBg: Record<string, string> = {
                           type="button"
                           class="w-full text-left text-xs border-l-2 border-border pl-2 py-0.5 bg-transparent cursor-pointer hover:border-emerald-500 hover:bg-muted/40 transition-colors"
                           :aria-label="`View execution trace for this run`"
-                          @click="openTrace(run)"
+                          @click="openTrace(run, task.id)"
                         >
                           <div class="flex flex-wrap items-center gap-2">
                             <span
@@ -2061,6 +2118,12 @@ const statusBg: Record<string, string> = {
                             class="text-fg-muted mt-0.5 whitespace-pre-wrap break-words line-clamp-3"
                           >
                             {{ run.outputSummary }}
+                          </p>
+                          <p
+                            v-else-if="run.status === 'RUNNING' && run.latestTurnPreview"
+                            class="text-blue-300/80 mt-0.5 whitespace-pre-wrap break-words line-clamp-2 italic"
+                          >
+                            {{ run.latestTurnPreview }}
                           </p>
                         </button>
                       </li>

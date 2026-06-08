@@ -450,6 +450,9 @@ export interface TaskRunView {
   durationMs: number | null
   error: string | null
   outputSummary: string | null
+  /** Newest turn's text for a still-RUNNING run — a live clip the row shows
+   *  before outputSummary exists. Null for terminal runs. */
+  latestTurnPreview: string | null
   deliveryStatus: string | null
   deliveryTarget: string | null
   deliveryError: string | null
