@@ -319,6 +319,59 @@ class AgentServiceTest extends UnitTest {
     }
 
     @Test
+    void deleteRemovesRemainingAgentScopedFkRows() {
+        // Repro for the H2 23503 referential-integrity violation seen when
+        // deleting a subagent run whose agent carried a ToolApprovalGrant:
+        // agent.delete() failed on the grant's agent_id FK because grants —
+        // and Notification / Telegram bindings — weren't cleared first.
+        var agent = AgentService.create("svc-delete-fk-rows", "openrouter", "gpt-4.1");
+        var agentId = agent.id;
+
+        var grant = new models.ToolApprovalGrant();
+        grant.agent = agent;
+        grant.toolName = "shell";
+        grant.save();
+
+        var note = new models.Notification();
+        note.agent = agent;
+        note.content = "test notification";
+        note.save();
+
+        // A TelegramBinding plus a TelegramTopicBinding that FKs it — exercises
+        // the delete ordering (the topic binding must go before its binding).
+        var tb = new models.TelegramBinding();
+        tb.agent = agent;
+        tb.botToken = "delete-fk-test-token";
+        tb.telegramUserId = "12345";
+        tb.save();
+
+        var topic = new models.TelegramTopicBinding();
+        topic.agent = agent;
+        topic.binding = tb;
+        topic.chatId = "chat-1";
+        topic.threadId = 7;
+        topic.save();
+
+        assertTrue(models.ToolApprovalGrant.count("agent.id = ?1", agentId) > 0);
+        assertTrue(models.Notification.count("agent.id = ?1", agentId) > 0);
+        assertTrue(models.TelegramBinding.count("agent.id = ?1", agentId) > 0);
+        assertTrue(models.TelegramTopicBinding.count("agent.id = ?1", agentId) > 0);
+
+        // Previously threw ConstraintViolationException on TOOL_APPROVAL_GRANT.
+        AgentService.delete(agent);
+
+        assertEquals(0L, models.ToolApprovalGrant.count("agent.id = ?1", agentId),
+                "tool-approval grants must cascade");
+        assertEquals(0L, models.Notification.count("agent.id = ?1", agentId),
+                "notifications must cascade");
+        assertEquals(0L, models.TelegramBinding.count("agent.id = ?1", agentId),
+                "telegram bindings must cascade");
+        assertEquals(0L, models.TelegramTopicBinding.count("agent.id = ?1", agentId),
+                "telegram topic bindings must cascade");
+        assertEquals(0L, Agent.count("id = ?1", agentId), "agent row must be deleted");
+    }
+
+    @Test
     void deleteCascadesToSubagentDescendants() {
         // Repro for the H2 23503 referential-integrity violation observed
         // when deleting a parent that has spawned sub-agents — the Agent

@@ -376,6 +376,19 @@ public class AgentService {
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM Task t WHERE t.agent.id = :agentId")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        // Remaining agent-scoped FK tables that also block the agent.delete()
+        // below. TelegramTopicBinding before TelegramBinding (it FKs binding_id).
+        // ToolApprovalGrant is the one that surfaced (a subagent that requested
+        // tool approval carries a grant); the others are the same latent gap.
+        em.createQuery("DELETE FROM TelegramTopicBinding tb "
+                        + "WHERE tb.agent.id = :agentId OR tb.binding.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        em.createQuery("DELETE FROM TelegramBinding b WHERE b.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        em.createQuery("DELETE FROM ToolApprovalGrant g WHERE g.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        em.createQuery("DELETE FROM Notification n WHERE n.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.flush();
         em.clear();
 
