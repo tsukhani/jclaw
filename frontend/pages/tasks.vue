@@ -1435,7 +1435,10 @@ const statusBg: Record<string, string> = {
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
           Pending
         </div>
-        <div class="text-lg font-semibold text-fg-strong">
+        <div
+          class="text-lg font-semibold"
+          :class="stats.pendingCount > 0 ? 'text-yellow-400' : 'text-fg-strong'"
+        >
           {{ stats.pendingCount }}
         </div>
       </div>
