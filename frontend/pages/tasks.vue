@@ -1156,6 +1156,7 @@ const calendarDays = computed<DayCell[]>(() => {
   const cells: DayCell[] = []
   const today = new Date()
   today.setHours(0, 0, 0, 0)
+  const nowMs = Date.now()
   // Project once over the full visible window so we don't re-walk per cell.
   const gridEnd = new Date(gridStart)
   gridEnd.setDate(gridStart.getDate() + 42)
@@ -1168,13 +1169,18 @@ const calendarDays = computed<DayCell[]>(() => {
     d.setDate(gridStart.getDate() + i)
     const dayStart = d.getTime()
     const dayEnd = dayStart + 24 * 60 * 60 * 1000
+    const isToday = dayStart === today.getTime()
     cells.push({
       date: d,
       inMonth: d >= monthStart && d < monthEnd,
-      isToday: d.getTime() === today.getTime(),
-      isPast: d.getTime() < today.getTime(),
+      isToday,
+      isPast: dayStart < today.getTime(),
       fires: allFires
-        .filter(f => f.fireAt.getTime() >= dayStart && f.fireAt.getTime() < dayEnd)
+        // On today's cell, raise the lower bound to `now` so already-elapsed
+        // fires (12:00am, 12:30am, …) drop off and the user sees only what's
+        // still upcoming today. Every other day shows its full set.
+        .filter(f => f.fireAt.getTime() >= (isToday ? nowMs : dayStart)
+          && f.fireAt.getTime() < dayEnd)
         .sort((a, b) => a.fireAt.getTime() - b.fireAt.getTime()),
     })
   }
