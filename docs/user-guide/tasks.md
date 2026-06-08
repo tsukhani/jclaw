@@ -101,6 +101,35 @@ Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks
 | `FAILED`    | Hit the retry cap. Click **Retry** to requeue.                                                                 |
 | `CANCELLED` | `cancelTask` was called. Row is preserved; `runNow` revives it.                                                |
 
+### Lifecycle
+
+Those states aren't independent — a task moves between them on a fixed set of transitions. One-shot tasks (`IMMEDIATE` / `SCHEDULED`) begin at `PENDING`; recurring tasks (`CRON` / `INTERVAL`) begin at `ACTIVE`. Both flip to `RUNNING` for the duration of each fire and back out when it ends:
+
+```text
+one-shot     PENDING ──▶ RUNNING ──▶ COMPLETED        (done — a fired one-shot is terminal)
+recurring    ACTIVE  ──▶ RUNNING ──▶ ACTIVE           (loops once per cadence)
+
+failure      RUNNING ──▶ PENDING/ACTIVE               (transient: retry on backoff)
+             RUNNING ──▶ FAILED ──▶ (Retry) ──▶ PENDING/ACTIVE   (permanent / retries used up)
+
+crash        RUNNING ──▶ LOST ──▶ (auto re-fire) ──▶ RUNNING ──▶ …
+
+operator     PENDING/ACTIVE ──▶ CANCELLED ──▶ (runNow / re-enable) ──▶ PENDING/ACTIVE
+```
+
+Walking the transitions:
+
+- **Fire starts.** At the scheduled moment the task flips to `RUNNING` and a fresh run opens — you'll see the blue `RUNNING` pill and a live elapsed-time counter in the run history.
+- **Success.** A one-shot ends `COMPLETED` (it has served its purpose); a recurring task drops back to `ACTIVE` to await its next cadence. If the task has a delivery target, the reply is pushed afterward.
+- **Transient failure.** A recoverable error (network blip, rate-limit) bumps the **Retries** counter and reschedules on a backoff — `30s → 60s → 5m → 15m → 1h`. The task returns to its waiting state between attempts, then re-enters `RUNNING` on the retry.
+- **Permanent failure.** A non-recoverable error, or the retry cap reached, ends the task `FAILED`. **Retry** requeues it.
+- **Crash recovery.** If the server stops mid-fire, the task is left `RUNNING` with a stale scheduler heartbeat. JClaw marks it `LOST` after ~1 minute so you can see it stalled, then the scheduler automatically re-fires it (~2 minutes) — `LOST → RUNNING → COMPLETED/FAILED` — with no action from you. **Retry** skips the wait.
+- **Operator stop.** *Cancel* moves a task to `CANCELLED` (the row is kept; `runNow` or **Re-enable** revives it). Cancelling a single in-flight **run** stops only that fire and returns the task to its waiting state — the recurring schedule is left intact.
+
+:::note Reminders ride the same machine
+[Reminders](/guide#reminders) move through these exact states; only the *body* of a fire differs — a verbatim nudge instead of an agent turn. So a one-off reminder goes `PENDING → RUNNING → COMPLETED` (and removes itself right after if auto-delete is on), while a recurring reminder cycles `ACTIVE → RUNNING → ACTIVE` like any recurring task.
+:::
+
 ### Per-row actions
 
 | Icon             | Appears when                       | Effect                                                                                |
