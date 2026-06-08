@@ -1659,9 +1659,14 @@ const statusBg: Record<string, string> = {
                       aria-hidden="true"
                     />
                   </button>
-                  <!-- Recurring + live + a run in flight → Cancel this run (JCLAW-414). -->
+                  <!-- Recurring + a run in flight → Cancel this run (JCLAW-414).
+                       Gated on runningRunId, NOT isLive: a recurring task mid-fire
+                       is in the RUNNING state (which isLive excludes, since pause
+                       only applies to PENDING/ACTIVE), yet that is exactly when a
+                       run exists to cancel. cancelRun's backend precondition is
+                       run.status == RUNNING, which runningRunId already implies. -->
                   <button
-                    v-else-if="!selectMode && isRecurring(task) && isLive(task) && task.runningRunId"
+                    v-else-if="!selectMode && isRecurring(task) && task.runningRunId"
                     type="button"
                     class="p-1 text-red-400 hover:text-red-300 transition-colors"
                     :title="`Cancel the running fire of “${task.name}” — stops at the next safe point; schedule unchanged`"
