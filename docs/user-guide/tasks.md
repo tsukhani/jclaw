@@ -186,7 +186,7 @@ Independently of that day-based TTL, JClaw keeps only the **10 most recent runs 
 
 ## What a task run looks like
 
-When a task fires, JClaw spins up the owning agent on its own conversation, hands it the task description as input, and lets it run until the task completes or fails. The transcript lands in [Conversations](/conversations) and is also reachable from the task's run history on the [Tasks](/tasks) page. Failed fires log the error against the run and trigger a retry up to the configured cap.
+When a task fires, JClaw runs the owning agent with the task description as its input and lets it run until the task completes or fails. The turn-by-turn transcript is saved as the **run's trace** — not as a chat. A task fire does **not** create an entry on the [Conversations](/conversations) page: each fire appears in that task's **run history** (expand the task's row on the [Tasks](/tasks) page), and clicking a run there opens its full trace in a side panel. Failed fires log the error against the run and trigger a retry up to the configured cap.
 
 If you want the task to ping you when it's done, build that into the task description:
 
@@ -217,7 +217,7 @@ Tasks are scoped to the owning agent. One agent never sees, pauses, or cancels a
 :::
 
 :::note No live progress streaming
-[Tasks](/tasks) doesn't stream the in-progress conversation. To watch what the agent is doing right now, open the associated conversation from [Conversations](/conversations).
+A task fire isn't streamed live, and it doesn't appear on the [Conversations](/conversations) page — its transcript is the **run's trace**, not a chat. Each fire shows up in the task's **run history** (expand the task's row on the [Tasks](/tasks) page); click a run there to read its full turn-by-turn trace in the side panel once it's recorded.
 :::
 
 ## Where to go next
