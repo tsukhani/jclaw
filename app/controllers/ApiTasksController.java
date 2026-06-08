@@ -61,10 +61,13 @@ public class ApiTasksController extends Controller {
     private static final String KEY_NO_AGENT = "noAgent";
     private static final String KEY_AUTO_DELETE = "autoDeleteOnComplete";
 
-    /** JPQL bind-parameter name (the RUNNING status filter) and the TaskRun→Task
-     *  alias path, factored out of the run-stats / reset queries (S1192). */
+    /** JPQL bind-parameter names (the RUNNING status filter on TaskRun→Task, and
+     *  the {@code r.status} filter shared by the run-count aggregates) plus the
+     *  TaskRun→Task alias path, factored out of the run-stats / reset queries
+     *  (S1192). */
     private static final String PARAM_RUNNING = "running";
     private static final String RUN_TASK_ALIAS = "r.task";
+    private static final String PARAM_RSTATUS = "rstatus";
     private static final String KEY_CONTEXT_FROM_TASK_IDS = "contextFromTaskIds";
     private static final String KEY_REPEAT_LIMIT = "repeatLimit";
     private static final String KEY_PAUSED = "paused";
@@ -446,7 +449,7 @@ public class ApiTasksController extends Controller {
                 + (status != null ? " AND r.status = :rstatus" : "")
                 + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
         var q = JPA.em().createQuery(jpql, Long.class).setParameter("since", since);
-        if (status != null) q.setParameter("rstatus", status);
+        if (status != null) q.setParameter(PARAM_RSTATUS, status);
         bindPayloadType(q, payloadType, excludePayloadType);
         return q.getSingleResult();
     }
@@ -457,7 +460,7 @@ public class ApiTasksController extends Controller {
                 + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
         var q = JPA.em().createQuery(jpql)
                 .setParameter("since", since)
-                .setParameter("rstatus", TaskRun.Status.COMPLETED);
+                .setParameter(PARAM_RSTATUS, TaskRun.Status.COMPLETED);
         bindPayloadType(q, payloadType, excludePayloadType);
         return (Double) q.getSingleResult();
     }
@@ -480,7 +483,7 @@ public class ApiTasksController extends Controller {
         var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.status = :rstatus"
                 + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);
         var q = JPA.em().createQuery(jpql, Long.class)
-                .setParameter("rstatus", TaskRun.Status.RUNNING);
+                .setParameter(PARAM_RSTATUS, TaskRun.Status.RUNNING);
         bindPayloadType(q, payloadType, excludePayloadType);
         return q.getSingleResult();
     }
