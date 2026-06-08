@@ -226,6 +226,74 @@ class TaskExecutorTest extends UnitTest {
                 "blank description should fall back to task.name");
     }
 
+    // === Task-level lifecycle transitions (PENDING/ACTIVE -> RUNNING -> ...) ===
+
+    @Test
+    void oneShotFireLeavesTaskCompleted() throws Exception {
+        // A one-shot fire drives the documented PENDING -> RUNNING -> COMPLETED
+        // path; the task ends terminal (a fired one-shot is done).
+        startLlmServer(simpleResponse("done"));
+        configureProvider();
+        var agent = createAgent("os-agent", "test-provider", "test-model");
+        var task = persistTask(agent, "one-shot", "Do it.", Task.Type.IMMEDIATE);
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        fireOnVirtualThread(task);
+        JPA.em().clear();
+
+        assertEquals(Task.Status.COMPLETED, taskStatus(task.id),
+                "a one-shot fire must end the task COMPLETED");
+    }
+
+    @Test
+    void recurringFireRestoresTaskToActive() throws Exception {
+        // The genuinely new restore: a recurring task goes ACTIVE -> RUNNING ->
+        // ACTIVE per fire. Before this fix recurring tasks never entered RUNNING,
+        // so a missing restore would now strand them showing RUNNING forever.
+        startLlmServer(simpleResponse("tick"));
+        configureProvider();
+        var agent = createAgent("cron-agent", "test-provider", "test-model");
+        var task = persistTask(agent, "recurring", "Do it.", Task.Type.CRON);
+        task.status = Task.Status.ACTIVE;   // recurring steady-state
+        task.save();
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        fireOnVirtualThread(task);
+        JPA.em().clear();
+
+        assertEquals(Task.Status.ACTIVE, taskStatus(task.id),
+                "a recurring fire must restore the task to ACTIVE, not strand it RUNNING");
+    }
+
+    @Test
+    void leaveRunningGuardPreservesConcurrentCancel() throws Exception {
+        // The close-out is guarded on still-RUNNING: an operator cancel that
+        // raced the fire (-> CANCELLED) must not be dragged back out by a late
+        // success/cancel restore. A genuinely RUNNING task does flip.
+        var agent = createAgent("guard-agent", "p", "m");
+        var cancelled = persistTask(agent, "cancelled-task", "x", Task.Type.IMMEDIATE);
+        var running = persistTask(agent, "running-task", "x", Task.Type.IMMEDIATE);
+        cancelled.status = Task.Status.CANCELLED;
+        cancelled.save();
+        running.status = Task.Status.RUNNING;
+        running.save();
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        onVirtualThread(() -> {
+            TaskExecutor.leaveRunning(cancelled.id, Task.Status.COMPLETED);
+            TaskExecutor.leaveRunning(running.id, Task.Status.ACTIVE);
+        });
+        JPA.em().clear();
+
+        assertEquals(Task.Status.CANCELLED, taskStatus(cancelled.id),
+                "leaveRunning must not drag a CANCELLED task out — guarded on RUNNING");
+        assertEquals(Task.Status.ACTIVE, taskStatus(running.id),
+                "leaveRunning flips a still-RUNNING task to the target state");
+    }
+
     // === Auto-delivery wire (Bug 1 fix) ===
 
     @Test
@@ -404,6 +472,28 @@ class TaskExecutorTest extends UnitTest {
         assertFalse(thread.isAlive(), "TaskExecutor.runTask should complete within 30s");
         if (errorRef.get() != null) throw errorRef.get();
         return resultRef.get();
+    }
+
+    /** Run {@code r} on a virtual thread (so its inner Tx.run calls don't
+     *  collide with the test thread's open transaction) and join. */
+    private void onVirtualThread(Runnable r) throws Exception {
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                r.run();
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(10_000);
+        assertFalse(thread.isAlive(), "virtual-thread body should complete within 10s");
+        if (errorRef.get() != null) throw errorRef.get();
+    }
+
+    /** Current persisted status of a task, read in the test thread's tx. */
+    private Task.Status taskStatus(Long id) {
+        var t = (Task) Task.findById(id);
+        return t == null ? null : t.status;
     }
 
     private java.util.List<TaskRunMessage> loadMessages(Long taskRunId) {

@@ -190,12 +190,45 @@ public final class TaskExecutor {
         return Tx.run(() -> {
             var resolvedTask = (Task) Task.findById(task.id);
             if (resolvedTask == null) return null;
+            // Documented lifecycle: a one-shot (PENDING) or recurring (ACTIVE)
+            // task — or a re-fired LOST one — enters RUNNING for the duration of
+            // the fire, so the Status pill and LostTaskDetector observe it. Flip
+            // only alive/lost states; a task cancelled in the race window between
+            // the handler's CANCELLED check and here stays CANCELLED (the run we
+            // open is reconciled by the normal completion path).
+            switch (resolvedTask.status) {
+                case PENDING, ACTIVE, LOST -> {
+                    resolvedTask.status = Task.Status.RUNNING;
+                    resolvedTask.save();
+                }
+                default -> { /* terminal / cancelled — never resurrect */ }
+            }
             var r = new TaskRun();
             r.task = resolvedTask;
             r.startedAt = Instant.now();
             r.status = TaskRun.Status.RUNNING;
             r.save();
             return r;
+        });
+    }
+
+    /**
+     * Transition a task <em>out</em> of {@link Task.Status#RUNNING} to
+     * {@code to}, but only while it is still RUNNING — so a concurrent operator
+     * action that raced this fire (e.g. cancel → {@link Task.Status#CANCELLED})
+     * is never clobbered. Its own short Tx; the canonical close-out for every
+     * non-crash exit of a fire (success, cancel; the transient/permanent-fail
+     * exits live in {@link JClawFailureHandler}).
+     * Public so a focused unit test can exercise the guard directly.
+     */
+    public static void leaveRunning(Long taskId, Task.Status to) {
+        Tx.run(() -> {
+            var fresh = (Task) Task.findById(taskId);
+            if (fresh != null && fresh.status == Task.Status.RUNNING) {
+                fresh.status = to;
+                fresh.save();
+            }
+            return null;
         });
     }
 
@@ -292,6 +325,11 @@ public final class TaskExecutor {
             // action, not a failure for JClawFailureHandler to classify, and
             // not a reschedule trigger.
             sink.onCancelled("Cancelled by operator");
+            // The fire ended without completing; return the task from RUNNING to
+            // its alive state (ACTIVE for recurring, PENDING for one-shot) so it
+            // isn't stranded showing RUNNING. Only this fire was cancelled — the
+            // recurring schedule / next-run time are untouched. Guarded.
+            leaveRunning(task.id, Task.initialStatusFor(task.type));
             EventLogger.info("task", null, null,
                     "TaskExecutor.runTask: task run %d cancelled by operator".formatted(sink.taskRunId()));
             return false;
@@ -336,16 +374,18 @@ public final class TaskExecutor {
         });
         var closed = resolved.run();
         if (closed != null && closed.status == TaskRun.Status.COMPLETED) {
-            // Mark one-shot Tasks (IMMEDIATE/SCHEDULED) as COMPLETED so
-            // the operator UI shows the terminal state. Recurring Tasks
-            // (CRON/INTERVAL) intentionally stay PENDING — the Task row
-            // is the recurrence config; the scheduled_tasks row carries
-            // the next fire time, and per-fire history lives in
-            // task_run rows. Symmetric with JClawFailureHandler's
-            // FAILED write on terminal failure (we don't pair this
-            // with PENDING resets — once a one-shot succeeds it's done).
+            // Documented lifecycle close-out. A one-shot (IMMEDIATE/SCHEDULED)
+            // ends RUNNING → COMPLETED — terminal; a fired one-shot is done. A
+            // recurring (CRON/INTERVAL) ends RUNNING → ACTIVE, ready for its next
+            // fire (the scheduled_tasks row carries the next time; per-fire
+            // history lives in task_run rows). Both guarded on still-RUNNING so a
+            // concurrent operator cancel (→ CANCELLED) is not clobbered.
+            // Symmetric with JClawFailureHandler's RUNNING → FAILED on terminal
+            // failure.
             if (task.type == Task.Type.IMMEDIATE || task.type == Task.Type.SCHEDULED) {
-                markTaskCompleted(task.id);
+                leaveRunning(task.id, Task.Status.COMPLETED);
+            } else {
+                leaveRunning(task.id, Task.Status.ACTIVE);
             }
             TaskLifecycleEvents.recordCompleted(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
@@ -473,17 +513,6 @@ public final class TaskExecutor {
             fresh.deliveryTarget = target;
             fresh.deliveryError = error;
             fresh.save();
-            return null;
-        });
-    }
-
-    private static void markTaskCompleted(Long taskId) {
-        Tx.run(() -> {
-            var fresh = (Task) Task.findById(taskId);
-            if (fresh != null && fresh.status == Task.Status.PENDING) {
-                fresh.status = Task.Status.COMPLETED;
-                fresh.save();
-            }
             return null;
         });
     }

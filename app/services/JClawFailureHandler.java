@@ -62,8 +62,9 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      */
     public sealed interface Decision permits Decision.Reschedule, Decision.Fail {
         /**
-         * Try again at {@code nextRunAt}; Task remains PENDING with bumped
-         * retryCount.
+         * Try again at {@code nextRunAt}; the Task returns from RUNNING to its
+         * alive state (PENDING one-shot / ACTIVE recurring) with bumped
+         * retryCount for the backoff window.
          *
          * @param nextRunAt      when db-scheduler should fire the next
          *                       attempt
@@ -187,6 +188,14 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             task.retryCount = newRetryCount;
             task.lastError = errorMessage;
             task.nextRunAt = nextRunAt;
+            // Lifecycle: the fire ended (transiently). Return RUNNING → alive
+            // (PENDING one-shot / ACTIVE recurring) for the backoff window so the
+            // task isn't shown RUNNING while merely waiting to retry; the next
+            // attempt re-enters RUNNING via openRunningTaskRun. Guarded on
+            // still-RUNNING so a raced operator cancel (→ CANCELLED) is preserved.
+            if (task.status == Task.Status.RUNNING) {
+                task.status = Task.initialStatusFor(task.type);
+            }
             task.save();
             return new DecideOutcome(new Decision.Reschedule(nextRunAt, newRetryCount),
                     task, null, task.name, agentName, budget, backoffSecs, newRetryCount);
