@@ -1383,7 +1383,7 @@ const statusBg: Record<string, string> = {
          lifecycle events so the counts stay current. -->
     <div
       v-if="stats"
-      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4"
+      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2 mb-4"
     >
       <div class="bg-surface-elevated border border-border px-3 py-2">
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
@@ -1411,14 +1411,6 @@ const statusBg: Record<string, string> = {
       </div>
       <div class="bg-surface-elevated border border-border px-3 py-2">
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
-          Pending
-        </div>
-        <div class="text-lg font-semibold text-fg-strong">
-          {{ stats.pendingCount }}
-        </div>
-      </div>
-      <div class="bg-surface-elevated border border-border px-3 py-2">
-        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
           Running
         </div>
         <div
@@ -1426,6 +1418,25 @@ const statusBg: Record<string, string> = {
           :class="stats.runningCount > 0 ? 'text-blue-400' : 'text-fg-strong'"
         >
           {{ stats.runningCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Active
+        </div>
+        <div
+          class="text-lg font-semibold"
+          :class="stats.activeCount > 0 ? 'text-emerald-400' : 'text-fg-strong'"
+        >
+          {{ stats.activeCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Pending
+        </div>
+        <div class="text-lg font-semibold text-fg-strong">
+          {{ stats.pendingCount }}
         </div>
       </div>
       <div class="bg-surface-elevated border border-border px-3 py-2">
