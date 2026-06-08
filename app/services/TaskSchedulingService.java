@@ -96,7 +96,7 @@ public final class TaskSchedulingService {
     static void setSchedulerClientSupplierForTest(Supplier<SchedulerClient> supplier) {
         clientSupplier = supplier != null
                 ? supplier
-                : () -> DbSchedulerBootstrapJob.scheduler();
+                : DbSchedulerBootstrapJob::scheduler;
     }
 
     /**

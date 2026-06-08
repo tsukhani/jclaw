@@ -316,7 +316,7 @@ public final class TaskExecutor {
             // operators see at a glance.
             sink.onComplete(outcome.content());
             return true;
-        } catch (agents.RunCancelledException e) {
+        } catch (agents.RunCancelledException _) {
             // JCLAW-414: operator cancelled this fire mid-run. The cancel
             // endpoint already flipped the flag and stamps the run CANCELLED
             // for instant UI; close here too (idempotent — onCancelled only

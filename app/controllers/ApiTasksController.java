@@ -583,7 +583,7 @@ public class ApiTasksController extends Controller {
                 var since = Instant.parse(from);
                 var until = (to != null && !to.isBlank()) ? Instant.parse(to) : Instant.now();
                 return new RunWindow(since, until);
-            } catch (java.time.DateTimeException e) {
+            } catch (java.time.DateTimeException _) {
                 error(400, "from/to must be ISO-8601 instants");
                 throw new AssertionError("unreachable: error() throws");
             }

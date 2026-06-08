@@ -67,7 +67,7 @@ public final class TaskSteps {
                     // to the raw text so the fire path still has a prompt.
                     return steps.isEmpty() ? List.of(description) : List.copyOf(steps);
                 }
-            } catch (JsonSyntaxException ignored) {
+            } catch (JsonSyntaxException _) {
                 // Looked like an array but wasn't valid JSON — treat as text.
             }
         }

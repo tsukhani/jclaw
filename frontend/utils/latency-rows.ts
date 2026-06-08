@@ -172,7 +172,7 @@ export function buildLatencyRows<H extends { count: number } = LatencyHistogram>
     const h = metrics[key]
     const parentEmitted = hasSamples(h)
     if (parentEmitted) {
-      rows.push({ key, label: TOP_LEVEL_LABELS[key] ?? key, h: h as H, isChild: false })
+      rows.push({ key, label: TOP_LEVEL_LABELS[key] ?? key, h, isChild: false })
       seen.add(key)
     }
     // Nest prologue children immediately under the parent — only when the

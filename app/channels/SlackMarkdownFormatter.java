@@ -157,7 +157,7 @@ public final class SlackMarkdownFormatter {
         }
 
         void trimTrailingNewlines() {
-            while (out.length() > 0 && out.charAt(out.length() - 1) == '\n') {
+            while (!out.isEmpty() && out.charAt(out.length() - 1) == '\n') {
                 out.setLength(out.length() - 1);
             }
         }

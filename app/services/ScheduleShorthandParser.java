@@ -157,12 +157,12 @@ public final class ScheduleShorthandParser {
         var iso = raw.replaceFirst(" ", "T");
         try {
             return OffsetDateTime.parse(iso).toInstant();
-        } catch (DateTimeParseException noOffset) {
+        } catch (DateTimeParseException _) {
             // No explicit offset — fall through and resolve as a local time.
         }
         try {
             return LocalDateTime.parse(iso).atZone(zone).toInstant();
-        } catch (DateTimeParseException e) {
+        } catch (DateTimeParseException _) {
             throw new IllegalArgumentException(
                     ("Unrecognized date-time '%s'. Use an ISO form like "
                             + "'2026-06-13T15:00' (interpreted in the task's timezone) or "

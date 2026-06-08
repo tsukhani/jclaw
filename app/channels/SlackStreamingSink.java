@@ -145,7 +145,7 @@ public final class SlackStreamingSink {
     }
 
     private void flush() {
-        if (pending.length() == 0) return;
+        if (pending.isEmpty()) return;
         if (slacker.appendStream(channelId, streamTs, pending.toString())) {
             pending.setLength(0);
         }

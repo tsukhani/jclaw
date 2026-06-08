@@ -1,7 +1,6 @@
 package agents;
 
 import channels.TelegramApprovalService;
-import channels.TelegramApprovalService.Outcome;
 import channels.TelegramMarkdownFormatter;
 import models.Agent;
 import models.Conversation;

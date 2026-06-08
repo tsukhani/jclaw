@@ -178,7 +178,7 @@ public final class LuceneIndexer {
         try {
             var v = Long.parseLong(raw.trim());
             return v > 0 ? v : DEFAULT_COMMIT_INTERVAL_SECONDS;
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return DEFAULT_COMMIT_INTERVAL_SECONDS;
         }
     }

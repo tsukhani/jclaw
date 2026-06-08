@@ -51,7 +51,7 @@ function slugify(input: string): string {
   return input
     .toLowerCase()
     // Strip backticks; we want `mode=session` → `mode-session`, not `mode=session-`.
-    .replaceAll(/`/g, '')
+    .replaceAll('`', '')
     .replaceAll(/[^\w\s-]/g, ' ')
     .trim()
     .replaceAll(/\s+/g, '-')
@@ -107,10 +107,10 @@ function transformCallouts(md: string): string {
 
 function escapeHtml(s: string): string {
   return s
-    .replaceAll(/&/g, '&amp;')
-    .replaceAll(/</g, '&lt;')
-    .replaceAll(/>/g, '&gt;')
-    .replaceAll(/"/g, '&quot;')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
 }
 
 /**

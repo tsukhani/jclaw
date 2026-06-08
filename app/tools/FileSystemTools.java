@@ -757,16 +757,16 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 cursor = start;
             }
             switch (op) {
-                case LineOp.Replace(var _, var endLine, var content) -> {
+                case LineOp.Replace(_, var endLine, var content) -> {
                     merged.addAll(splitContentLines(content));
                     cursor = Math.max(cursor, endLine); // skip the replaced original lines
                     replaced++;
                 }
-                case LineOp.Insert(var _, var content) -> {
+                case LineOp.Insert(_, var content) -> {
                     merged.addAll(splitContentLines(content)); // insert before line `start`
                     inserted++;
                 }
-                case LineOp.Delete(var _, var endLine) -> {
+                case LineOp.Delete(_, var endLine) -> {
                     cursor = Math.max(cursor, endLine); // skip the deleted original lines
                     deleted++;
                 }

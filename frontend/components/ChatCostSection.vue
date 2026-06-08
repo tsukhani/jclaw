@@ -778,7 +778,7 @@ function exportCsv() {
  */
 function csvCell(value: string): string {
   if (!/[",\n]/.test(value)) return value
-  return '"' + value.replaceAll(/"/g, '""') + '"'
+  return '"' + value.replaceAll('"', '""') + '"'
 }
 
 defineExpose({ refresh })

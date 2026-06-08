@@ -108,7 +108,7 @@ public final class TelegramApprovalService {
     public static Outcome await(CompletableFuture<Outcome> future, Duration timeout) {
         try {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
+        } catch (TimeoutException _) {
             // Find and expire the entry this future belongs to.
             PENDING.entrySet().stream()
                     .filter(en -> en.getValue().future() == future)
@@ -117,7 +117,7 @@ public final class TelegramApprovalService {
                     .ifPresent(id -> expire(id, Outcome.TIMED_OUT));
             future.complete(Outcome.TIMED_OUT);
             return Outcome.TIMED_OUT;
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return Outcome.TIMED_OUT;
         } catch (ExecutionException e) {

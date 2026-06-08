@@ -21,7 +21,7 @@ export function parseTaskSteps(description: unknown): string[] {
         && parsed.length > 0
         && parsed.every(s => typeof s === 'string')
       ) {
-        return parsed as string[]
+        return parsed
       }
     }
     catch {

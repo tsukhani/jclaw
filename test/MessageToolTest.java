@@ -2,7 +2,6 @@ import agents.ToolRegistry;
 import channels.TelegramChannel;
 import com.google.gson.JsonParser;
 import models.Agent;
-import models.Conversation;
 import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

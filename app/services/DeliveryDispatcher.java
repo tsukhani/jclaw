@@ -5,9 +5,7 @@ import channels.SlackChannel;
 import channels.TelegramChannel;
 import channels.WhatsAppChannel;
 import models.Agent;
-import models.ChannelType;
 import models.Conversation;
-import models.Message;
 import models.MessageRole;
 import models.TelegramBinding;
 

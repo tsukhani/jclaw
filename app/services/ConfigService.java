@@ -159,6 +159,9 @@ public class ConfigService {
     }
 
     public static List<Config> listAll() {
+        // NB: must stay a lambda, not a method reference — Tx.run is overloaded
+        // (Function0<T> vs Runnable) and Config::findAll is ambiguous between
+        // them, whereas the explicit lambda resolves cleanly (Sonar S1612 FP).
         return Tx.run(() -> Config.<Config>findAll());
     }
 

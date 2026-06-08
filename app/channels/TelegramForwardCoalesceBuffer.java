@@ -99,7 +99,7 @@ public final class TelegramForwardCoalesceBuffer {
         if (incoming.text() != null && !incoming.text().isEmpty()) {
             // Forwards are distinct messages, not one split blob — separate
             // them with a blank line so the agent reads them as a list.
-            if (bucket.text.length() > 0) bucket.text.append("\n\n");
+            if (!bucket.text.isEmpty()) bucket.text.append("\n\n");
             bucket.text.append(incoming.text());
         }
         if (incoming.attachments() != null) bucket.attachments.addAll(incoming.attachments());
@@ -144,7 +144,7 @@ public final class TelegramForwardCoalesceBuffer {
         if (raw == null || raw.isBlank()) return DEFAULT_FORWARD_COALESCE_WINDOW_MS;
         try {
             return Long.parseLong(raw.trim());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return DEFAULT_FORWARD_COALESCE_WINDOW_MS;
         }
     }

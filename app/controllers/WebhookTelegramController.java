@@ -142,7 +142,7 @@ public class WebhookTelegramController extends Controller {
         if (header == null || header.value() == null) return false;
         try {
             return Long.parseLong(header.value().trim()) > maxBodyBytes;
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return false;
         }
     }
@@ -176,7 +176,7 @@ public class WebhookTelegramController extends Controller {
         if (raw == null || raw.isBlank()) return fallback;
         try {
             return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return fallback;
         }
     }
@@ -186,7 +186,7 @@ public class WebhookTelegramController extends Controller {
         if (raw == null || raw.isBlank()) return fallback;
         try {
             return Long.parseLong(raw.trim());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return fallback;
         }
     }

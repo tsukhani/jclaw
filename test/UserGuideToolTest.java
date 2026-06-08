@@ -50,7 +50,7 @@ class UserGuideToolTest extends UnitTest {
                 walk.sorted(Comparator.reverseOrder()).forEach(p -> {
                     try {
                         Files.deleteIfExists(p);
-                    } catch (Exception ignored) {
+                    } catch (Exception _) {
                         // best-effort temp cleanup
                     }
                 });

@@ -328,7 +328,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             if (annotationFor(route.action) == null) continue;
             try {
                 if (route.matches(method, matchPath) != null) return true;
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException _) {
                 // Defensive: a @ChatSafe action should never be a static/404 route,
                 // but if matches() throws we treat it as a non-match and keep scanning.
             }
@@ -350,7 +350,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             if (resolved != null && resolved.length >= 2 && resolved[1] instanceof Method m) {
                 return m.getAnnotation(ChatSafe.class);
             }
-        } catch (Exception ignored) {
+        } catch (Exception _) {
             // fall through to manual resolution
         }
         // Fallback: resolve "Controller.method" by name off Play's classloader.
@@ -367,7 +367,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
                     return candidate.getAnnotation(ChatSafe.class);
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception _) {
             // not a resolvable controller action — skip
         }
         return null;

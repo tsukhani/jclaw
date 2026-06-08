@@ -147,7 +147,7 @@ function generateWebhookSecret(): string {
   crypto.getRandomValues(bytes)
   let bin = ''
   for (const b of bytes) bin += String.fromCharCode(b)
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return btoa(bin).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
 }
 
 // The full webhook URL preview: editable base + the fixed path. For an existing

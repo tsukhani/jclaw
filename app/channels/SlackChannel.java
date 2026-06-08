@@ -198,7 +198,7 @@ public class SlackChannel implements Channel {
             return slack.methods(config.botToken())
                     .chatAppendStream(r -> r.channel(channelId).ts(ts).markdownText(markdownDelta))
                     .isOk();
-        } catch (SlackApiException | IOException e) {
+        } catch (SlackApiException | IOException _) {
             return false;
         }
     }
@@ -211,7 +211,7 @@ public class SlackChannel implements Channel {
             return slack.methods(config.botToken())
                     .chatStopStream(r -> r.channel(channelId).ts(ts))
                     .isOk();
-        } catch (SlackApiException | IOException e) {
+        } catch (SlackApiException | IOException _) {
             return false;
         }
     }

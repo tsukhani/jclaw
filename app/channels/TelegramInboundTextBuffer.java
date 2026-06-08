@@ -173,7 +173,7 @@ public final class TelegramInboundTextBuffer {
         if (raw == null || raw.isBlank()) return fallback;
         try {
             return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return fallback;
         }
     }
@@ -183,7 +183,7 @@ public final class TelegramInboundTextBuffer {
         if (raw == null || raw.isBlank()) return fallback;
         try {
             return Long.parseLong(raw.trim());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return fallback;
         }
     }

@@ -96,7 +96,7 @@ public final class TailscaleFunnel {
         int fallback;
         try {
             fallback = Integer.parseInt(play.Play.configuration.getProperty("http.port", "9000"));
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             fallback = 9000;
         }
         return ConfigService.getInt(CFG_PORT, fallback);
@@ -181,7 +181,7 @@ public final class TailscaleFunnel {
         try {
             var el = JsonParser.parseString(s);
             return el.isJsonObject() ? el.getAsJsonObject() : null;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             return null;
         }
     }
@@ -280,7 +280,7 @@ public final class TailscaleFunnel {
     private static void sleepQuietly(long millis) {
         try {
             Thread.sleep(millis);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }
@@ -334,7 +334,7 @@ public final class TailscaleFunnel {
             joinQuietly(tOut);
             joinQuietly(tErr);
             return new ExecResult(proc.exitValue(), out.toString(), err.toString(), false);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             proc.destroyForcibly();
             closeQuietly(proc.getInputStream());
@@ -367,7 +367,7 @@ public final class TailscaleFunnel {
                 EventLogger.warn(CATEGORY, null, null,
                         "tailscale drain thread did not finish within 2s; output may be truncated");
             }
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

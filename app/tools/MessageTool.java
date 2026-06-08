@@ -574,7 +574,7 @@ public class MessageTool implements ToolRegistry.Tool {
         if (el == null || el.isJsonNull()) return null;
         try {
             return el.getAsInt();
-        } catch (NumberFormatException | IllegalStateException e) {
+        } catch (NumberFormatException | IllegalStateException _) {
             return null;
         }
     }
@@ -586,7 +586,7 @@ public class MessageTool implements ToolRegistry.Tool {
         if (el == null || el.isJsonNull()) return null;
         try {
             return el.getAsBoolean();
-        } catch (IllegalStateException | UnsupportedOperationException e) {
+        } catch (IllegalStateException | UnsupportedOperationException _) {
             return null;
         }
     }
@@ -606,7 +606,7 @@ public class MessageTool implements ToolRegistry.Tool {
             try {
                 var s = item.getAsString();
                 if (s != null && !s.isBlank()) out.add(s.strip());
-            } catch (IllegalStateException | UnsupportedOperationException ignored) {
+            } catch (IllegalStateException | UnsupportedOperationException _) {
                 // Non-primitive array element (e.g. nested object) — skip it.
             }
         }

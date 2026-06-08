@@ -17,15 +17,15 @@ public class WebhookWhatsAppController extends Controller {
      * GET — Hub verification challenge from Meta.
      */
     @SuppressWarnings("java:S2259")
-    public static void verify(String hub_mode, String hub_verify_token, String hub_challenge) {
-        // Play maps hub.mode → hub_mode etc. via query params
+    public static void verify(String hubMode, String hubVerifyToken, String hubChallenge) {
+        // Play maps hub.mode → hubMode etc. via query params
         var mode = params.get("hub.mode");
         var verifyToken = params.get("hub.verify_token");
         var challenge = params.get("hub.challenge");
 
-        if (mode == null) { mode = hub_mode; }
-        if (verifyToken == null) { verifyToken = hub_verify_token; }
-        if (challenge == null) { challenge = hub_challenge; }
+        if (mode == null) { mode = hubMode; }
+        if (verifyToken == null) { verifyToken = hubVerifyToken; }
+        if (challenge == null) { challenge = hubChallenge; }
 
         var config = WhatsAppChannel.WhatsAppConfig.load();
         if (!"subscribe".equals(mode) || config == null

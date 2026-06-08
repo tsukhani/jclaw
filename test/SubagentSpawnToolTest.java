@@ -101,7 +101,7 @@ class SubagentSpawnToolTest extends UnitTest {
                     SubagentRegistry.touch(runId);
                 }
                 future.complete(new AgentRunner.RunResult("finished after sustained work", null));
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         });
@@ -144,7 +144,7 @@ class SubagentSpawnToolTest extends UnitTest {
                 SubagentRegistry.touch(runId);
                 try {
                     Thread.sleep(100);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                     return;
                 }

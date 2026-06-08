@@ -1,10 +1,8 @@
 import models.Agent;
-import models.ChannelConfig;
 import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
@@ -58,10 +56,7 @@ class DeliveryDispatcherTest extends UnitTest {
     @Test
     void dispatchWebWritesMessageToParentChainRoot() {
         var parent = createAgent("ds-web-parent");
-        var rootConv = Tx.run(() -> {
-            var c = services.ConversationService.create(parent, "web", "admin");
-            return c;
-        });
+        var rootConv = Tx.run(() -> services.ConversationService.create(parent, "web", "admin"));
         var result = Tx.run(() -> DeliveryDispatcher.dispatch(parent, "web", "ignored", "live progress 42%"));
         assertTrue(result.ok(), "web dispatch must succeed when an active conversation exists, got: " + result.reason());
         // Verify the message landed on the root conversation with the right

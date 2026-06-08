@@ -176,7 +176,7 @@ class ApiTasksControllerRetryTest extends FunctionalTest {
         // DB.getDataSource() returns Hikari-pooled connections with autoCommit=false
         // (Hibernate-managed). Force autocommit on so the row lands before
         // the controller's separate-connection SELECT.
-        try (var conn = DB.datasource.getConnection()) {
+        try (var conn = DB.getDataSource().getConnection()) {
             conn.setAutoCommit(true);
             try (var ps = conn.prepareStatement(
                     "INSERT INTO scheduled_tasks "

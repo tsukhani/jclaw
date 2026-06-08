@@ -79,7 +79,7 @@ public final class TelegramBotIdentity {
         if (colon <= 0) return null;
         try {
             return Long.parseLong(botToken.substring(0, colon));
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return null;
         }
     }

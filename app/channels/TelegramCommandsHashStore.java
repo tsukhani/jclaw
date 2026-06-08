@@ -124,7 +124,7 @@ public final class TelegramCommandsHashStore {
         if (testHashDir == null) {
             try {
                 testHashDir = Files.createTempDirectory("jclaw-cmdhash-test-");
-            } catch (IOException e) {
+            } catch (IOException _) {
                 testHashDir = Play.applicationPath.toPath().resolve("tmp/cmdhash-test");
             }
         }

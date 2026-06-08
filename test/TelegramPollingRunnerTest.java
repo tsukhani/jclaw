@@ -356,7 +356,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
 
         // Telegram rejects this token, then run the probe.
-        TelegramPollingRunnerTestHooks.setTokenRejectedCheck(t -> token.equals(t));
+        TelegramPollingRunnerTestHooks.setTokenRejectedCheck(token::equals);
         EventLogger.clear();
         TelegramPollingRunnerTestHooks.runTokenHealthProbe();
         EventLogger.flush();

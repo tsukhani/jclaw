@@ -3,7 +3,6 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
 import models.Message;
-import models.MessageRole;
 import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

@@ -42,7 +42,7 @@ public class MemoryStoreFactory {
                     var store = (MemoryStore) storeClass.getDeclaredConstructor().newInstance();
                     EventLogger.info(EVENT_CATEGORY_MEMORY, "Initializing Neo4j memory store");
                     yield store;
-                } catch (ClassNotFoundException e) {
+                } catch (ClassNotFoundException _) {
                     EventLogger.error(EVENT_CATEGORY_MEMORY,
                             "Neo4j driver not found in classpath. Add neo4j-java-driver JAR to lib/. Falling back to JPA.");
                     yield new JpaMemoryStore();

@@ -233,7 +233,7 @@ class TelegramFileDownloaderTest extends UnitTest {
     private static boolean isEmptyDir(Path dir) {
         try (var s = Files.list(dir)) {
             return s.findAny().isEmpty();
-        } catch (IOException e) {
+        } catch (IOException _) {
             return true;
         }
     }
