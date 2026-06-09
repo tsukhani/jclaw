@@ -1734,96 +1734,28 @@ check_play() {
     fi
 }
 
-# Verify Python 3.9+ is available. Strictly speaking this is transitively
-# enforced by check_play (the play command is itself a Python wrapper
-# script), but a too-old or broken Python produces cryptic SyntaxErrors
-# from inside the wrapper. The explicit check here gives operators a
-# clean "Python X.Y is too old" diagnostic instead.
-check_python() {
-    local python_cmd=""
-    if command -v python3 >/dev/null 2>&1; then
-        python_cmd=python3
-    elif command -v python >/dev/null 2>&1; then
-        python_cmd=python
-    else
-        echo "Error: python not found. Python 3.9+ is required for the play command."
-        exit 1
-    fi
-    local py_version
-    py_version=$("$python_cmd" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
-    if [[ -z "$py_version" ]]; then
-        echo "Error: Could not determine Python version from $python_cmd."
-        exit 1
-    fi
-    local major minor
-    IFS=. read -r major minor <<< "$py_version"
-    if (( major < 3 )) || { (( major == 3 )) && (( minor < 9 )); }; then
-        echo "Error: Python $py_version found, but Python 3.9+ is required for the play command."
-        exit 1
-    fi
-}
-
 # Single entry point for prerequisite validation. Called from setup and
 # from each runtime entry point (start/restart/test) so an environment
 # missing a dependency fails at the dispatch level with a clean
 # diagnostic, instead of cryptically halfway through play deps --sync or
-# pnpm install. Cheap (5 fork-execs, ~50ms total on warm caches).
+# pnpm install. Cheap (4 fork-execs, ~50ms total on warm caches).
 #
-# Order matters — foundational toolchains first, derived tools after,
-# so each successful check is unambiguous. If python is missing, we
-# want "Python not found" before "Play not found", because Play
-# happens to be a Python wrapper script — checking play first would
-# pass (the binary exists on PATH) only to have it fail later inside
-# the wrapper with a cryptic Python error. Same logic for corepack,
-# which ships inside Node's binary distribution.
+# Order matters — foundational toolchains first, derived tools after, so
+# each successful check is unambiguous. corepack is checked after node
+# because it ships inside Node's binary distribution.
 #
 # Dependency graph:
 #   java     — standalone
-#   python   — standalone (Play wrapper script depends on it)
 #   node     — standalone (corepack ships inside it)
-#   play     — depends on python
+#   play     — standalone (the 1.13.x `play` CLI is a /bin/sh Gradle wrapper)
 #   corepack — depends on node
-# Remove test bytecode from precompiled/java/. `play precompile` walks
-# both app/ AND test/, so the prod precompiled tree carries test classes
-# (AgentRouterTest.class, MockTelegramServer$CannedResponse.class, etc.)
-# that have no role at runtime — they reference test-only deps (JUnit,
-# play.test.UnitTest) that don't ship in lib/, so the JVM can't actually
-# load them, but they bloat the dist by ~26% and clutter classpath
-# diagnostics. Glob-by-name (`*Test*.class`) is unreliable: AuthFixture
-# and MockTelegramServer don't carry the suffix. Source-driven mapping
-# is robust — enumerate test/*.java, delete each one's top-level + inner
-# class files (Outer$Inner.class) at the precompiled/java root.
-#
-# Test files have no `package` declaration in this codebase so they all
-# land flat at precompiled/java/<Name>.class — -maxdepth 1 keeps the
-# search bounded; if a future test file ever gets a package, it would
-# survive (which is fine — at most a small leak, not a correctness bug).
-strip_test_bytecode_from_precompiled() {
-    local target_dir="${1:-$SCRIPT_DIR}"
-    local precompiled="$target_dir/precompiled/java"
-    [[ -d "$precompiled" ]] || return 0
-    [[ -d "$target_dir/test" ]] || return 0
-    local stripped=0 name f count
-    for f in "$target_dir/test"/*.java; do
-        [[ -f "$f" ]] || continue
-        name=$(basename "$f" .java)
-        count=$(find "$precompiled" -maxdepth 1 \
-                  \( -name "$name.class" -o -name "$name\$*.class" \) \
-                  -type f -print -delete 2>/dev/null | wc -l)
-        stripped=$((stripped + count))
-    done
-    if (( stripped > 0 )); then
-        echo "    Stripped $stripped test class file(s) from precompiled/java/"
-    fi
-}
 
 check_prereqs() {
     # Foundational — no dependencies on other checks
     check_java
-    check_python
 
     # Derived — depends on the foundational checks above
-    check_play       # Python wrapper script; check_python must pass first
+    check_play       # the play CLI must be on PATH
 
     # Node + corepack are only needed when there's frontend source to
     # build, which means we're in a developer clone. A dist install
@@ -1863,11 +1795,6 @@ do_setup() {
     # Print in the same dependency-graph order as check_prereqs runs them:
     # foundational toolchains first, then the wrappers/tools that ride them.
     echo "    Java:     $(java -version 2>&1 | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
-    if command -v python3 >/dev/null 2>&1; then
-        echo "    Python:   $(python3 -V 2>&1)"
-    else
-        echo "    Python:   $(python -V 2>&1)"
-    fi
     echo "    Node:     $(node -v)"
     echo "    Play:     $(command -v play)"
     echo "    Corepack: $(corepack -v 2>/dev/null || echo 'present')"
@@ -1980,7 +1907,6 @@ do_dist() {
     # (no more app-side lib/). Cold cache: ~30s; warm: ~2s.
     echo "==> Precompiling backend (play precompile)..."
     play precompile
-    strip_test_bytecode_from_precompiled "$SCRIPT_DIR"
 
     validate_corepack_pnpm
     echo "==> Installing frontend dependencies..."
@@ -2202,7 +2128,6 @@ do_start_prod() {
             || [[ -n "$(find app -name '*.java' -newer precompiled/java -print -quit 2>/dev/null)" ]]; then
             echo "==> Precompiling backend (source newer than precompiled classes)..."
             play precompile
-            strip_test_bytecode_from_precompiled "$SCRIPT_DIR"
         else
             echo "==> Skipping precompile (precompiled classes are up to date)"
         fi
@@ -2608,7 +2533,7 @@ do_stop_dev() {
     fi
 
     # Stop backend (play run — we manage the pid file, not Play). The
-    # wrapper may have grandchildren (Python `play` → JVM → forked workers),
+    # wrapper may have grandchildren (sh `play` → Gradle/JVM → forked workers),
     # so kill_tree's recursive descent is necessary; pkill -P only catches
     # direct children. We then BLOCK until port 9000 is actually free so a
     # subsequent restart can't race the dying JVM's shutdown hooks.
