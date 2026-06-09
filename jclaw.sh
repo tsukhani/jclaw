@@ -31,7 +31,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|help>
+Usage: jclaw.sh [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -76,7 +76,12 @@ Commands:
             Runs precompile + frontend build + `play dist`; operators
             unzipping the result need Java 25 + Gradle + Play 1 fork on
             their machine to launch it. For a self-contained tarball,
-            see the Dockerfile (uses `play bundle` instead).
+            see `bundle` (or the Dockerfile, which ships the same artifact).
+  bundle    Build the self-contained bundle zip at dist/jclaw-bundle.zip and
+            exit. Like `dist` but via `play bundle` — bakes in the framework,
+            resolved deps, and a `./play` launcher, so the unzipped tree runs
+            with only a Java 25 JRE (no Gradle/Play install). Same artifact the
+            Dockerfile ships inside the container image.
   help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
@@ -218,7 +223,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle)
             return 0
             ;;
         *)
@@ -246,6 +251,7 @@ usage_for() {
         loadtest) usage_loadtest ;;
         test)     usage_test     ;;
         dist)     usage_dist     ;;
+        bundle)   usage_bundle   ;;
         *)        usage          ;;
     esac
 }
@@ -725,6 +731,35 @@ EOF
     fi
 }
 
+usage_bundle() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh bundle
+
+Build the self-contained bundle zip at dist/jclaw-bundle.zip and exit.
+Unlike 'dist', the bundle bakes in the framework jar + lib, the
+Gradle-resolved app deps, precompiled classes, the prebuilt SPA, and a
+\`./play\` launcher — so the unzipped tree runs with only a Java 25 JRE,
+no Gradle or Play 1 fork install on the host. Same artifact the
+Dockerfile ships inside the container image.
+
+Example:
+  ./jclaw.sh bundle
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh bundle
+
+Not available in this distribution. The 'bundle' command builds a
+self-contained artifact from a developer checkout — needs app/ sources
+and frontend/ to (re)build, neither of which ship with 'play dist'
+tarballs.
+
+For the full list of commands in this distribution: ./jclaw.sh help
+EOF
+    fi
+}
+
 # Render the JClaw landing screen on bare invocation: ASCII-art logo in
 # emerald, one-line product blurb, and pointers at the two commands every
 # new contributor needs (setup for first-time wiring, --help for the full
@@ -914,7 +949,7 @@ while [[ $# -gt 0 ]]; do
             COMMAND="$1"
             shift
             ;;
-        setup|init-worktree|loadtest|test|dist)
+        setup|init-worktree|loadtest|test|dist|bundle)
             # Developer-only commands. Available on a `git clone` because
             # they touch repo state (hooks, fixtures, frontend deps); not
             # available on a `play dist` install where there's no .git
@@ -1953,6 +1988,34 @@ do_dist() {
     fi
 
     echo "==> Distribution ready at $zip_file"
+}
+
+do_bundle() {
+    cd "$SCRIPT_DIR"
+
+    # Same Gradle-needs-pnpm-on-PATH + pin-hash plumbing as do_dist (see there
+    # for the rationale). play bundle (PlayBundleTask) is self-contained too —
+    # playPrecompile + buildFrontendAndCopySpa + dep/framework resolution + zip
+    # in one task — so, like do_dist, we don't pre-run any of it here.
+    ensure_pnpm_on_path_for_gradle
+    validate_corepack_pnpm
+
+    # play bundle (PlayBundleTask) writes dist/<rootProject.name>-bundle.zip =
+    # dist/jclaw-bundle.zip (inner prefix "jclaw/"). Unlike the dist zip it
+    # bakes in the framework jar + lib, Gradle-resolved app deps, and a `./play`
+    # launcher alongside precompiled/ + public/spa/, so the unzipped tree runs
+    # on a Java 25 JRE alone — the same artifact the Dockerfile stages into its
+    # image. Daemon disabled for the same pnpm-probe-PATH reason as do_dist.
+    echo "==> Building self-contained bundle (play bundle)..."
+    GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.daemon=false" play bundle
+
+    local zip_file="$SCRIPT_DIR/dist/jclaw-bundle.zip"
+    if [[ ! -f "$zip_file" ]]; then
+        echo "Error: play bundle did not create $zip_file"
+        exit 1
+    fi
+
+    echo "==> Bundle ready at $zip_file"
 }
 
 # ─── Production start/stop ───
@@ -3027,5 +3090,9 @@ case "$COMMAND" in
     dist)
         check_prereqs
         do_dist
+        ;;
+    bundle)
+        check_prereqs
+        do_bundle
         ;;
 esac
