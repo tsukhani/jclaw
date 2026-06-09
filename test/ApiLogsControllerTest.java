@@ -1,6 +1,6 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
-import services.EventLogger;
+import models.EventLog;
 
 class ApiLogsControllerTest extends FunctionalTest {
 
@@ -26,6 +26,19 @@ class ApiLogsControllerTest extends FunctionalTest {
         if (err.get() != null) throw new RuntimeException(err.get());
     }
 
+    /** Insert an EventLog row directly via JPA (must run inside a committed Tx,
+     *  e.g. {@link #commitInFreshTx}). Deliberately bypasses EventLogger, whose
+     *  process-global `pending` queue a concurrently-running test's clear()/flush()
+     *  can drain mid-test — emptying our seeded rows and flaking this suite on CI.
+     *  @PrePersist fills timestamp + createdAt. */
+    private static void seedEvent(String category, String message) {
+        var e = new EventLog();
+        e.level = "INFO";
+        e.category = category;
+        e.message = message;
+        e.save();
+    }
+
     @Test
     void listRequiresAuth() {
         assertEquals(401, GET("/api/logs").status.intValue());
@@ -46,9 +59,8 @@ class ApiLogsControllerTest extends FunctionalTest {
     void listAppliesCategoryFilter() {
         login();
         commitInFreshTx(() -> {
-            EventLogger.info("test-cat-A", "first entry");
-            EventLogger.info("test-cat-B", "second entry");
-            EventLogger.flush();
+            seedEvent("test-cat-A", "first entry");
+            seedEvent("test-cat-B", "second entry");
         });
         var resp = GET("/api/logs?category=test-cat-A");
         assertIsOk(resp);
@@ -61,9 +73,8 @@ class ApiLogsControllerTest extends FunctionalTest {
     void listAppliesSearchFilterCaseInsensitively() {
         login();
         commitInFreshTx(() -> {
-            EventLogger.info("search-cat", "Unique-Sentence-Marker-Alpha");
-            EventLogger.info("search-cat", "different message");
-            EventLogger.flush();
+            seedEvent("search-cat", "Unique-Sentence-Marker-Alpha");
+            seedEvent("search-cat", "different message");
         });
         var resp = GET("/api/logs?search=unique-sentence-marker");
         assertIsOk(resp);
