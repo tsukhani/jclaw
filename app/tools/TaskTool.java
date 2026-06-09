@@ -56,6 +56,7 @@ public class TaskTool implements ToolRegistry.Tool {
     private static final String ACTION_CANCEL_TASK = "cancelTask";
     private static final String ACTION_DELETE_TASK = "deleteTask";
     private static final String ACTION_LIST_RECURRING_TASKS = "listRecurringTasks";
+    private static final String ACTION_LIST_REMINDERS = "listReminders";
 
     // --- JSON argument / schema keys ---
     private static final String KEY_ACTION = "action";
@@ -105,7 +106,8 @@ public class TaskTool implements ToolRegistry.Tool {
                 new agents.ToolAction(ACTION_RUN_NOW,               "Fire a task immediately by name; accepts any state (revives CANCELLED to PENDING)"),
                 new agents.ToolAction(ACTION_CANCEL_TASK,           "Cancel a task by name (any type) — sets status=CANCELLED, row stays so runNow can revive it later"),
                 new agents.ToolAction(ACTION_DELETE_TASK,           "Hard-delete a task and its run history by name. Irreversible — the row is gone. Use cancelTask if you might want it back"),
-                new agents.ToolAction(ACTION_LIST_RECURRING_TASKS,  "List the agent's currently active recurring tasks")
+                new agents.ToolAction(ACTION_LIST_RECURRING_TASKS,  "List the agent's currently active recurring tasks"),
+                new agents.ToolAction(ACTION_LIST_REMINDERS,        "List the agent's upcoming reminders (PENDING one-shots + ACTIVE recurring) — name, fire time, status — so you can update or cancel one by name")
         );
     }
 
@@ -175,12 +177,19 @@ public class TaskTool implements ToolRegistry.Tool {
                 🔔 prefix). The reminder description should be 1-2 short \
                 lines, written as if you were the one nudging the user. \
                 Leave `delivery` unset and it auto-routes to the calling \
-                chat — that's almost always what the user wants.""";
+                chat — that's almost always what the user wants. To FIND or \
+                MODIFY an existing reminder (e.g. "move my 3pm reminder to \
+                4pm", "cancel the dentist reminder"), call listReminders \
+                first — it returns the agent's upcoming reminders (name, fire \
+                time, status). A one-time reminder is SCHEDULED, so it does \
+                NOT appear in listRecurringTasks; use listReminders for it. \
+                Then address the reminder by its name with updateTask / \
+                cancelTask / deleteTask.""";
     }
 
     @Override
     public String summary() {
-        return "Manage background tasks via the 'action' parameter: createTask, updateTask, pause, resume, runNow, cancelTask, deleteTask, listRecurringTasks.";
+        return "Manage background tasks via the 'action' parameter: createTask, updateTask, pause, resume, runNow, cancelTask, deleteTask, listRecurringTasks, listReminders.";
     }
 
     @Override
@@ -189,7 +198,8 @@ public class TaskTool implements ToolRegistry.Tool {
         var props = Map.ofEntries(
                 Map.entry(KEY_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.ENUM, List.of(ACTION_CREATE_TASK, ACTION_UPDATE_TASK, ACTION_PAUSE, ACTION_RESUME,
-                                ACTION_RUN_NOW, ACTION_CANCEL_TASK, ACTION_DELETE_TASK, ACTION_LIST_RECURRING_TASKS),
+                                ACTION_RUN_NOW, ACTION_CANCEL_TASK, ACTION_DELETE_TASK, ACTION_LIST_RECURRING_TASKS,
+                                ACTION_LIST_REMINDERS),
                         SchemaKeys.DESCRIPTION, "The action to perform")),
                 Map.entry(KEY_NAME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Task name — a short kebab-case identifier: lower-case "
@@ -282,6 +292,7 @@ public class TaskTool implements ToolRegistry.Tool {
             case ACTION_CANCEL_TASK -> cancelTask(args, agent);
             case ACTION_DELETE_TASK -> deleteTask(args, agent);
             case ACTION_LIST_RECURRING_TASKS -> listRecurringTasks(agent);
+            case ACTION_LIST_REMINDERS -> listReminders(agent);
             default -> "Error: Unknown action '%s'".formatted(action);
         };
     }
@@ -968,6 +979,35 @@ public class TaskTool implements ToolRegistry.Tool {
             String delivery = services.DeliverySpec.parse(task.delivery).label();
             sb.append("- %s (%s) [delivery: %s] — %s\n".formatted(
                     task.name, cadence, delivery,
+                    task.description != null && task.description.length() > 100
+                            ? task.description.substring(0, 100) + "..." : task.description));
+        }
+        return sb.toString();
+    }
+
+    private String listReminders(Agent agent) {
+        // Agent-scoped, same multi-tenancy reason as listRecurringTasks.
+        // Scoped to upcoming fires (PENDING one-shots + ACTIVE recurring) so
+        // the agent sees reminders it can still edit or cancel — not fired/
+        // auto-deleted history. This is the one-shot-reminder discovery path
+        // listRecurringTasks deliberately omits: a one-time SCHEDULED reminder
+        // is neither CRON nor INTERVAL, so findRecurring never returns it.
+        var reminders = services.Tx.run(() -> Task.findReminders(agent));
+        if (reminders.isEmpty()) return "No upcoming reminders.";
+        var sb = new StringBuilder("Reminders:\n");
+        for (var task : reminders) {
+            // One-shot reminders: nextRunAt is the real fire instant (what the
+            // user cares about when editing). Recurring reminders: nextRunAt is
+            // only a create-time placeholder (the live next-fire lives in the
+            // scheduler), so show the cadence string instead — same choice
+            // listRecurringTasks makes.
+            boolean recurring = task.type == Task.Type.CRON || task.type == Task.Type.INTERVAL;
+            String when = recurring
+                    ? (task.scheduleDisplay != null ? task.scheduleDisplay : task.type.name())
+                    : (task.nextRunAt != null ? task.nextRunAt.toString()
+                            : (task.scheduleDisplay != null ? task.scheduleDisplay : "—"));
+            sb.append("- %s (%s) [%s] — %s\n".formatted(
+                    task.name, when, task.status.name(),
                     task.description != null && task.description.length() > 100
                             ? task.description.substring(0, 100) + "..." : task.description));
         }

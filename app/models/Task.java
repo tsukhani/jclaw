@@ -361,4 +361,22 @@ public class Task extends Model {
                 "agent = ?1 AND type IN (?2, ?3) AND status != ?4",
                 agent, Type.CRON, Type.INTERVAL, Status.CANCELLED).fetch();
     }
+
+    /**
+     * Reminder Tasks ({@code payloadType="reminder"}) for the given agent
+     * still due to fire — {@code PENDING} (a one-shot waiting) or
+     * {@code ACTIVE} (a recurring reminder). Excludes fired/cancelled
+     * reminders so the agent's {@code listReminders} surfaces only what it
+     * can still edit or cancel by name — the {@code /reminders} page's
+     * {@code /api/tasks?payloadType=reminder} query narrowed to upcoming
+     * fires. Exact {@code "reminder"} match mirrors the REST list filter
+     * ({@code ApiTasksController.list}). Agent-scoped for the same
+     * multi-tenancy reason as {@link #findRecurring} — one agent must
+     * never see another's reminders.
+     */
+    public static List<Task> findReminders(models.Agent agent) {
+        return Task.find(
+                "agent = ?1 AND payloadType = ?2 AND status IN (?3, ?4)",
+                agent, "reminder", Status.PENDING, Status.ACTIVE).fetch();
+    }
 }

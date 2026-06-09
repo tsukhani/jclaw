@@ -89,6 +89,7 @@ class TaskToolTest extends UnitTest {
         assertTrue(actionNames.contains("runNow"));
         assertTrue(actionNames.contains("cancelTask"));
         assertTrue(actionNames.contains("listRecurringTasks"));
+        assertTrue(actionNames.contains("listReminders"));
         // The schema has `action` listed as required.
         @SuppressWarnings("unchecked")
         var required = (java.util.List<String>) tool.parameters().get("required");
@@ -751,6 +752,76 @@ class TaskToolTest extends UnitTest {
         var reply = tool.execute("""
                 {"action":"listRecurringTasks"}""", agent);
         assertEquals("No recurring tasks configured.", reply);
+    }
+
+    // === listReminders ===
+
+    @Test
+    void listRemindersReturnsUpcomingAgentScopedReminders() {
+        // A one-shot reminder (SCHEDULED → PENDING) and a recurring reminder
+        // (CRON → ACTIVE) — both must appear.
+        tool.execute("""
+                {"action":"createTask","name":"dentist","schedule":"30m",
+                 "payloadType":"reminder","description":"See the dentist"}""", agent);
+        tool.execute("""
+                {"action":"createTask","name":"standup","schedule":"@daily",
+                 "payloadType":"reminder","description":"Daily standup"}""", agent);
+        // Non-reminder tasks (no payloadType) — must NOT appear.
+        tool.execute("""
+                {"action":"createTask","name":"plain-once","schedule":"30m"}""", agent);
+        tool.execute("""
+                {"action":"createTask","name":"plain-cron","schedule":"@daily"}""", agent);
+        // Another agent's reminder — must NOT appear under the calling agent.
+        tool.execute("""
+                {"action":"createTask","name":"other-rem","schedule":"30m",
+                 "payloadType":"reminder","description":"not yours"}""", otherAgent);
+
+        var reply = tool.execute("""
+                {"action":"listReminders"}""", agent);
+        assertTrue(reply.contains("dentist"), reply);
+        assertTrue(reply.contains("standup"), reply);
+        assertFalse(reply.contains("plain-once"),
+                "non-reminder one-shot must not appear in the reminder list; got: " + reply);
+        assertFalse(reply.contains("plain-cron"),
+                "non-reminder recurring must not appear in the reminder list; got: " + reply);
+        assertFalse(reply.contains("other-rem"),
+                "another agent's reminders must not appear; got: " + reply);
+    }
+
+    @Test
+    void listRemindersExcludesCancelledReminder() {
+        tool.execute("""
+                {"action":"createTask","name":"gone","schedule":"30m",
+                 "payloadType":"reminder","description":"will be cancelled"}""", agent);
+        tool.execute("""
+                {"action":"cancelTask","name":"gone"}""", agent);
+        // findReminders is scoped to PENDING/ACTIVE, so a CANCELLED reminder
+        // drops out of the discovery list — it's no longer upcoming.
+        var reply = tool.execute("""
+                {"action":"listReminders"}""", agent);
+        assertEquals("No upcoming reminders.", reply);
+    }
+
+    @Test
+    void listRemindersEmptyReturnsFriendlyMessage() {
+        var reply = tool.execute("""
+                {"action":"listReminders"}""", agent);
+        assertEquals("No upcoming reminders.", reply);
+    }
+
+    @Test
+    void listRemindersHeaderAndOneShotStatusAreStable() {
+        tool.execute("""
+                {"action":"createTask","name":"rem-header","schedule":"30m",
+                 "payloadType":"reminder","description":"Brush your teeth"}""", agent);
+        var reply = tool.execute("""
+                {"action":"listReminders"}""", agent);
+        assertTrue(reply.startsWith("Reminders:"),
+                "list must start with the stable header; got: " + reply);
+        assertTrue(reply.contains("- rem-header"),
+                "list entry should be dash-prefixed by name");
+        assertTrue(reply.contains("[PENDING]"),
+                "a one-shot reminder should surface its PENDING status; got: " + reply);
     }
 
     // === Helpers ===
