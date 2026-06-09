@@ -422,7 +422,7 @@ const statusColors: Record<string, string> = {
             <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
               {{ whenLabel(r) }}
             </td>
-            <td class="px-4 py-2.5 whitespace-nowrap text-xs text-fg-muted">
+            <td class="px-4 py-2.5 text-xs text-fg-muted">
               {{ reminderSchedule(r) }}
             </td>
             <td class="px-4 py-2.5 whitespace-nowrap font-mono text-xs text-fg-muted">
