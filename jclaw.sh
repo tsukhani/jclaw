@@ -1900,25 +1900,17 @@ do_dist() {
     # reach grandchild processes, so the shim is what crosses the boundary.
     ensure_pnpm_on_path_for_gradle
 
-    # No explicit dep-resolution step here — Gradle handles it natively
-    # in 1.13.x (PF-90). `play precompile` (and `play dist` further down)
-    # both transitively depend on Gradle's dependency resolution, which
-    # runs against build.gradle.kts and lands jars in ~/.gradle/caches/
-    # (no more app-side lib/). Cold cache: ~30s; warm: ~2s.
-    echo "==> Precompiling backend (play precompile)..."
-    play precompile
-
+    # Validate the corepack/pnpm pin (hard-fail on a missing or mismatched
+    # integrity hash) before Gradle drives pnpm under the hood.
     validate_corepack_pnpm
-    echo "==> Installing frontend dependencies..."
-    cd "$SCRIPT_DIR/frontend"
-    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-    echo "==> Building static SPA (nuxi generate)..."
-    npx nuxi generate
-    echo "==> Copying SPA build to public/spa/..."
-    rm -rf "$SCRIPT_DIR/public/spa"
-    cp -r .output/public "$SCRIPT_DIR/public/spa"
-    cd "$SCRIPT_DIR"
 
+    # play dist (PlayDistTask) is self-contained: it runs playPrecompile
+    # (via dependsOn — Gradle resolves deps natively in 1.13.x, PF-90) and
+    # buildFrontendAndCopySpa (pnpm install + nuxi generate + copy to
+    # public/spa/), then zips. We deliberately do NOT pre-run the backend
+    # precompile or the SPA build here — playDist redoes both, so doing them
+    # up front just built the whole thing twice.
+    #
     # Disable the Gradle daemon for `play dist` only. The play1 plugin's
     # playDist task probes pnpm via ExecOperations.exec, which defaults to
     # the JVM's frozen-at-startup PATH — i.e. the daemon's environment. A
