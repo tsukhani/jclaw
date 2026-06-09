@@ -1440,7 +1440,7 @@ const statusBg: Record<string, string> = {
             <th class="px-4 py-2.5 font-medium w-[6%]">
               Type
             </th>
-            <th class="px-4 py-2.5 font-medium w-[14%]">
+            <th class="px-4 py-2.5 font-medium w-[19.5%]">
               Schedule
             </th>
             <th class="px-4 py-2.5 font-medium w-[7%]">
@@ -1452,7 +1452,7 @@ const statusBg: Record<string, string> = {
             <th class="px-4 py-2.5 font-medium w-[8%]">
               Channel
             </th>
-            <th class="px-4 py-2.5 font-medium w-[25%]">
+            <th class="px-4 py-2.5 font-medium w-[19.5%]">
               Next Run
             </th>
             <th class="px-4 py-2.5 font-medium w-[6%]">
