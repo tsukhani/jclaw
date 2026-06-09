@@ -106,6 +106,19 @@ export function humanCron(expr: string): string | null {
       if (d >= 0 && d <= 6) return `weekly on ${dowNames[d]} at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
     }
   }
+  // "Last <weekday> of the month" idiom: a weekday constrained to the final
+  // week (day 25-31) occurs at most once a month, so "dom=25-31 + a single
+  // weekday" means the last such weekday. cronstrue would render this literally
+  // ("between day 25 and 31 of the month, and on Friday") — name it properly.
+  // Uses full weekday names here because "last Friday of the month" reads more
+  // naturally than the abbreviated weekly form.
+  if (sec === '0' && dom === '25-31' && mon === '*' && /^\d+$/.test(min) && /^\d+$/.test(hour) && /^\d+$/.test(dow)) {
+    const fullDow = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    const d = Number.parseInt(dow, 10)
+    if (d >= 0 && d <= 6) {
+      return `last ${fullDow[d]} of the month at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
+    }
+  }
   // Anything the hand-rolled patterns above don't recognize — day-of-month
   // specifics, L/# modifiers ("last Friday of the month", "third Saturday"),
   // ranges/lists — delegate to cronstrue so a UI view never shows a raw cron

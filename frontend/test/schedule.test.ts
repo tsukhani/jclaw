@@ -93,6 +93,13 @@ describe('humanSchedule / humanCron (shared with the Tasks page)', () => {
     expect(humanCron('@daily')).toBe('daily at midnight')
   })
 
+  it('recognizes the 25-31 + weekday "last <day> of the month" idiom', () => {
+    // 6-field Spring (sec min hour dom=25-31 mon dow=5 Friday at 17:00) and the
+    // 5-field form both read as the last weekday, not cronstrue's literal range.
+    expect(humanCron('0 0 17 25-31 * 5')).toBe('last Friday of the month at 5 PM')
+    expect(humanCron('0 17 25-31 * 5')).toBe('last Friday of the month at 5 PM')
+  })
+
   it('falls back to cronstrue for patterns the hand-rolled humanizer misses (never raw cron)', () => {
     // L modifier — "last Friday of the month"; not handled by the hand-rolled
     // patterns, so it must come back humanized via cronstrue (JCLAW-438 item 4).
