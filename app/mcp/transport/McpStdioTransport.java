@@ -85,12 +85,17 @@ public final class McpStdioTransport implements McpTransport {
     @Override
     public void close() {
         closed = true;
-        // Close both pipes before destroying the process so the reader/writer
-        // buffers release their underlying streams. Ordered stream-close →
-        // process-destroy so the subprocess sees EOF on its stdin before the
-        // forced kill, giving well-behaved servers a chance to exit cleanly.
+        // Close stdin first so the subprocess sees EOF on its input and a
+        // well-behaved server can exit cleanly. Then destroy the process BEFORE
+        // closing stdout (JCLAW-439): the readLoop holds the stdout BufferedReader's
+        // monitor while blocked in a non-interruptible readLine(), so stdout.close()
+        // — synchronized on that same monitor — cannot acquire it until the read
+        // returns. Destroying the process closes the subprocess's stdout, which
+        // makes the blocked readLine() return EOF and release the monitor; only
+        // then is stdout.close() lock-free. Closing stdout first deadlocked
+        // graceful shutdown for ShutdownJob's full 15s on any MCP server that
+        // doesn't exit on stdin EOF.
         try { if (stdin != null) stdin.close(); } catch (IOException _) { /* best effort */ }
-        try { if (stdout != null) stdout.close(); } catch (IOException _) { /* best effort */ }
         if (process != null) {
             process.destroy();
             try {
@@ -102,6 +107,7 @@ public final class McpStdioTransport implements McpTransport {
         }
         if (readerThread != null) readerThread.interrupt();
         if (errReaderThread != null) errReaderThread.interrupt();
+        try { if (stdout != null) stdout.close(); } catch (IOException _) { /* best effort */ }
     }
 
     // S1141: outer try catches IOException (terminates the loop); inner try

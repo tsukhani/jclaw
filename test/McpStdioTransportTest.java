@@ -10,6 +10,7 @@ import play.test.UnitTest;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -137,6 +138,24 @@ class McpStdioTransportTest extends UnitTest {
         // close() must not throw and must not surface a spurious onError for the EOF.
         Thread.sleep(100);
         assertNull(error.get(), "EOF after explicit close must not surface as error");
+    }
+
+    @Test
+    void closeReturnsPromptlyWhenSubprocessIsIdle() throws Exception {
+        // JCLAW-439 regression: an idle MCP server (no stdout output, ignores
+        // stdin EOF) leaves the readLoop blocked in a non-interruptible
+        // readLine() holding the stdout BufferedReader's monitor. close() must
+        // destroy the process BEFORE closing stdout, or stdout.close() deadlocks
+        // on that monitor — which wedged graceful shutdown for ShutdownJob's
+        // full 15s. `sleep` is the ideal stand-in: outputs nothing, never exits
+        // on stdin EOF, so the old close()-stdout-first order would hang here.
+        Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase().startsWith("windows"),
+                "no POSIX 'sleep'; skipping");
+        var idle = new McpStdioTransport("idle", List.of("sleep", "30"), Map.of());
+        idle.start(received::add, error::set);
+        Thread.sleep(150); // let the reader loop enter the blocking readLine()
+        assertTimeoutPreemptively(Duration.ofSeconds(5), idle::close,
+                "close() must not deadlock on the stdout reader lock");
     }
 
     private static JsonObject initParams() {
