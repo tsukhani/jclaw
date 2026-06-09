@@ -200,6 +200,15 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             row.save();
             return null;
         });
+        // Barrier: the play1 TestEngine runs the unit lane concurrently with
+        // functional tests on the shared H2 DB; under that load the fresh-VT commit
+        // above can lag becoming visible to the DELETE request's connection, so
+        // stop()'s cleanup finds no row and this assert flakes on CI (passes locally
+        // even at 600x amplification). Spin on a fresh-Tx read until the seed is
+        // globally visible before issuing the DELETE — normally one no-spin read.
+        awaitCommitted(() ->
+                AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean") == 1L,
+                "seeded allowlist row never became visible to a fresh Tx");
         var resp = DELETE("/api/mcp-servers/" + id);
         assertIsOk(resp);
         // Verify in a fresh VT/Tx so the read sees the controller's committed
@@ -318,5 +327,19 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         try { t.join(); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
         if (err.get() != null) throw new RuntimeException(err.get());
         return holder.get();
+    }
+
+    /** Spin until {@code cond}, evaluated in a fresh committed Tx, holds — up to
+     *  ~2s — then return; fail with {@code msg} if it never does. Defends against
+     *  the rare cross-connection commit-visibility lag under the concurrent
+     *  TestEngine (a fresh-VT commit not yet visible to a later request's
+     *  connection). Normally returns on the first read with no sleep. */
+    private static void awaitCommitted(java.util.concurrent.Callable<Boolean> cond, String msg) {
+        var deadline = System.nanoTime() + java.time.Duration.ofSeconds(2).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (Boolean.TRUE.equals(commitInFreshTx(cond))) return;
+            try { Thread.sleep(10); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
+        }
+        org.junit.jupiter.api.Assertions.fail(msg);
     }
 }
