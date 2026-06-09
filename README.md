@@ -18,6 +18,52 @@
 
 <br>
 
+## Quick Install (one-line)
+
+Get JClaw running in one command. The installer downloads the self-contained
+`jclaw-bundle.zip` from the latest GitHub Release, verifies Java 25+ (the bundle's
+**only** runtime dependency), extracts it to `~/.jclaw`, and starts JClaw on
+<http://localhost:9000>.
+
+**macOS & Linux**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
+```
+
+> On Windows the bundle runs through **Git Bash** or **WSL** (the launcher is a
+> POSIX shell script). The installer prefers Git Bash; if only WSL is present it
+> launches there; if neither is found it installs and prints how to run it.
+
+Once running, manage it with `jclaw status`, `jclaw stop`, `jclaw restart`.
+
+**Requirements:** a Java 25+ runtime ([Zulu](https://www.azul.com/downloads/?version=java-25)
+or Temurin). Nothing else — the bundle bakes in the framework, app dependencies,
+precompiled classes, and the prebuilt SPA.
+
+**Configuration** (optional environment variables):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `JCLAW_HOME` | `~/.jclaw` | Install directory |
+| `JCLAW_VERSION` | `latest` | Pin a release tag, e.g. `v0.13.40` |
+| `JCLAW_PORT` | `9000` | Port reported on launch |
+| `JCLAW_NO_START` | — | Set to `1` to install without starting |
+
+```bash
+# Pin a version and install without auto-starting:
+curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh \
+  | JCLAW_VERSION=v0.13.40 JCLAW_NO_START=1 sh
+```
+
+---
+
 ## Overview
 
 JClaw is Abundent's AI-powered automation platform — built from scratch in **pure Java** on a customized [Play Framework 1.x](https://github.com/tsukhani/play1) foundation. It draws ideas and feature designs from two predecessor projects:
@@ -25,7 +71,7 @@ JClaw is Abundent's AI-powered automation platform — built from scratch in **p
 - **[OpenClaw](https://github.com/tsukhani/openclaw)** (Node.js/TypeScript) — agent orchestration, memory system, conversational AI patterns
 - **[JavaClaw](https://github.com/jobrunr/javaclaw)** (Spring Boot) — job scheduling, background task processing, browser automation
 
-The implementation is entirely original — no code is shared with either project. JClaw is built on Java library primitives (JDK HttpClient, ProcessBuilder, virtual threads, JPA) with no Spring, no heavy framework bloat, and no Node.js runtime on the server. The result is a leaner, faster, more maintainable platform for building AI agents and automation workflows.
+The implementation is entirely original — no code is shared with either project. JClaw is built on lean library primitives (OkHttp 5, ProcessBuilder, virtual threads, JPA) with no Spring, no heavy framework bloat, and no Node.js runtime on the server. The result is a leaner, faster, more maintainable platform for building AI agents and automation workflows.
 
 ---
 
@@ -43,7 +89,7 @@ The implementation is entirely original — no code is shared with either projec
 - 🤖 **Agent System** — Conversational AI agents with memory and context
 - ⚡ **Job Scheduling** — Background tasks, cron jobs, and distributed execution
 - 🔧 **Pure Java** — No Python/JavaScript runtimes required
-- 📦 **Built-in Frontend** — Nuxt 3 SPA (Vue 3 + TypeScript)
+- 📦 **Built-in Frontend** — Nuxt 4 SPA (Vue 3 + TypeScript)
 - 🔌 **Plugin Architecture** — Modular, extensible design
 - 🧠 **Memory & Context** — Persistent conversations across sessions
 - 🚀 **Lightweight** — Minimal resource footprint, fast startup
@@ -66,7 +112,7 @@ jclaw/
 │   ├── application.conf          # Main app config
 │   ├── routes                    # URL routing
 │   └── initial-data.yml          # Bootstrap data
-├── frontend/                     # Nuxt 3 SPA (SPA-only; ssr: false)
+├── frontend/                     # Nuxt 4 SPA (SPA-only; ssr: false)
 │   ├── app.vue                   # Root component
 │   ├── layouts/                  # Page layouts
 │   ├── pages/                    # Nuxt file-based routes
@@ -89,13 +135,16 @@ jclaw/
 
 ## Getting Started
 
-### Prerequisites
+### Runtime Prerequisites
 
-- JDK 25+ (Zulu recommended)
-- Python 3.9+ (3.12 recommended) — Play's CLI commands are Python scripts
-- [Abundent's Play Framework 1.x](https://github.com/tsukhani/play1) (`play` command in PATH)
-- Node.js 20+ (24 recommended) for frontend
-- pnpm for frontend package management
+- **JDK 25+** (Zulu recommended)
+
+That's the whole list. The [Abundent Play 1.x fork](https://github.com/tsukhani/play1),
+app dependencies, precompiled classes, and the prebuilt SPA all ship **inside**
+`jclaw-bundle.zip`, so a Java 25 runtime is the only thing the host needs to run
+JClaw — see [Quick Install](#quick-install-one-line). (Building from source instead
+adds a dev toolchain — Node.js, pnpm, and the `play` CLI — which the
+[Dev Container](#dev-container-recommended) installs for you.)
 
 #### Optional system dependencies
 
@@ -422,12 +471,15 @@ To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP
 - **Agents**: Conversational AI with memory/context persistence
 - **Jobs**: Background processing powered by Play's built-in job system
 
-### Frontend (Nuxt 3)
+### Frontend (Nuxt 4)
 
-- **Framework**: Vue 3 + TypeScript + Nuxt 3 (SPA mode, `ssr: false`)
-- **State**: Composables backed by `useState` (no Pinia)
-- **Styling**: Tailwind CSS
+- **Framework**: Vue 3 + TypeScript + Nuxt 4 (SPA mode, `ssr: false`)
+- **UI components**: [shadcn-nuxt](https://www.shadcn-vue.com/) on [Reka UI](https://reka-ui.com/) primitives, with `class-variance-authority` + `tailwind-merge` for variants
+- **Styling**: Tailwind CSS v4 (via `@tailwindcss/vite`), Lucide + Heroicons icons, Inter variable font
+- **State**: Composables backed by `useState` (no Pinia); `@vueuse/core` utilities
+- **Data & rendering**: `@tanstack/vue-table` for tables, `marked` + `dompurify` for safe Markdown, `zod` for validation
 - **API**: Cookie-session authenticated `$fetch` to the Play backend, proxied via Nitro in dev
+- **Tooling**: Vitest + `@nuxt/test-utils` + happy-dom, Playwright e2e, ESLint + Stylelint, `vue-tsc` typecheck, a11y via `vue-axe`/`axe-core`
 
 ---
 
@@ -445,7 +497,7 @@ To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP
 
 - [Play Framework 1.x](https://github.com/tsukhani/play1)
 - [OpenClaw Reference](https://docs.openclaw.ai)
-- [Nuxt 3 Docs](https://nuxt.com/docs)
+- [Nuxt 4 Docs](https://nuxt.com/docs)
 - [JavaClaw Concepts](https://github.com/jobrunr/javaclaw)
 
 ---

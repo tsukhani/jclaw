@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java) with a **Nuxt 3** (Vue 3 + TypeScript) SPA frontend. It combines OpenClaw agent orchestration and JavaClaw job scheduling into a single Java-first platform.
+JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java) with a **Nuxt 4** (Vue 3 + TypeScript) SPA frontend. It combines OpenClaw agent orchestration and JavaClaw job scheduling into a single Java-first platform.
 
 **Status**: pre-v1 (alpha), work in progress.
 
@@ -29,7 +29,7 @@ play autotest             # Run all tests (unit + functional)
 play dist                 # Build production distribution
 ```
 
-### Frontend (Nuxt 3)
+### Frontend (Nuxt 4)
 ```bash
 cd frontend
 pnpm install              # Install dependencies
@@ -111,7 +111,7 @@ JClaw uses **OkHttp 5.x** (with `okhttp-sse` for streaming) as its single outbou
 All HTTP-client provisioning lives in `app/utils/HttpFactories.java` — a single class that exposes named factory methods (`llmStreaming()`, `llmSingleShot(Duration)`, `general()`, `general(Duration)`) so call sites declare *intent* rather than reach into named static fields. Internally it shares two connection pools (LLM/64-slot, general/32-slot) and two dispatchers (LLM uses a virtual-thread executor, general uses OkHttp's default cached pool — request volume on the non-LLM path doesn't justify VT scheduling). The Telegram SDK and `WebFetchTool`/`SsrfGuard` build their own clients with stack-specific tuning that doesn't fit any of the four `HttpFactories` tiers (the SDK has its own internal usage; `SsrfGuard` plugs in a per-request DNS allow-list against tool-fetch SSRF).
 
 ### Frontend
-- Nuxt 3 SPA in `frontend/` with Tailwind CSS
+- Nuxt 4 SPA in `frontend/` with Tailwind CSS v4
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
 - `useApi<T>(path)` composable in `frontend/composables/useApi.ts` wraps `useFetch` for backend calls
 - Package manager: **pnpm**, version pinned in `frontend/package.json`'s `packageManager` field with a `+sha512-...` integrity hash. Three layers keep the hash present and verified:
