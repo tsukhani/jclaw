@@ -281,7 +281,7 @@ function fmtRunTime(run: RecentRunView): string {
   const s = run.startedAt
     ? new Date(run.startedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : '?'
-  return run.durationMs != null ? `${s} · ${(run.durationMs / 1000).toFixed(1)}s` : s
+  return run.durationMs == null ? s : `${s} · ${(run.durationMs / 1000).toFixed(1)}s`
 }
 </script>
 

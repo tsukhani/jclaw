@@ -56,14 +56,14 @@ export function projectFires(task: Task, from: Date, to: Date): ProjectedFire[] 
       for (const f of expandCron(expr, from, to)) push(f)
     }
     else if (task.nextRunAt) {
-      const d = new Date(task.nextRunAt as string)
+      const d = new Date(task.nextRunAt)
       if (d >= from && d < to) push(d)
     }
     return out
   }
   // SCHEDULED / IMMEDIATE / one-shot — single fire on nextRunAt.
   if (task.nextRunAt) {
-    const d = new Date(task.nextRunAt as string)
+    const d = new Date(task.nextRunAt)
     if (d >= from && d < to) push(d)
   }
   return out
@@ -90,21 +90,22 @@ export function expandCron(expr: string, from: Date, to: Date): Date[] {
     '@yearly': '0 0 1 1 *',
     '@annually': '0 0 1 1 *',
   }
-  if (shortcut[trimmed]) return expandCron(shortcut[trimmed]!, from, to)
+  const expanded = shortcut[trimmed]
+  if (expanded) return expandCron(expanded, from, to)
 
   const parts = trimmed.split(/\s+/)
   // Normalize to the 5-field [min, hour, dom, mon, dow]. A 6-field Spring cron
   // contributes its trailing 5 fields, but only when sec=0 (minute-resolution).
-  const fields = parts.length === 6
-    ? (parts[0] === '0' ? parts.slice(1) : null)
-    : (parts.length === 5 ? parts : null)
+  let fields: string[] | null = null
+  if (parts.length === 5) fields = parts
+  else if (parts.length === 6 && parts[0] === '0') fields = parts.slice(1)
   if (!fields) return []
   const [min, hour, dom, mon, dow] = fields as [string, string, string, string, string]
 
   // Date-aware day modifiers — matchCronField only sees a single numeric field
   // value, so "last/Nth weekday" and "last day" need the whole calendar date.
-  const lastDow = dow.match(/^([0-7])L$/i) // "5L" → last <weekday> of the month
-  const nthDow = dow.match(/^([0-7])#([1-5])$/) // "5#3" → 3rd <weekday> of the month
+  const lastDow = /^([0-7])L$/i.exec(dow) // "5L" → last <weekday> of the month
+  const nthDow = /^([0-7])#([1-5])$/.exec(dow) // "5#3" → 3rd <weekday> of the month
   const domLast = /^L$/i.test(dom) // "L" → last calendar day of the month
   // Adding n days crosses into the next month ⇒ d sits in the final n-day window.
   const crossesMonth = (d: Date, n: number): boolean => {
@@ -145,7 +146,7 @@ export function expandCron(expr: string, from: Date, to: Date): Date[] {
 export function matchCronField(field: string, value: number, min: number, max: number): boolean {
   if (field === '*' || field === '?') return true
   for (const part of field.split(',')) {
-    const stepMatch = part.match(/^(.+)\/(\d+)$/)
+    const stepMatch = /^(.+)\/(\d+)$/.exec(part)
     if (stepMatch) {
       const step = Number.parseInt(stepMatch[2]!, 10)
       const base = stepMatch[1]!

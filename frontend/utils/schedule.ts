@@ -116,7 +116,7 @@ export function humanCron(expr: string): string | null {
   if (sec === '0' && mon === '*' && /^\d+$/.test(min) && /^\d+$/.test(hour)) {
     const fullDow = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     const at = formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))
-    const lDay = dow.match(/^([0-7])L$/i)?.[1]
+    const lDay = /^([0-7])L$/i.exec(dow)?.[1]
     if ((dom === '*' || dom === '?') && lDay !== undefined) {
       return `last ${fullDow[Number.parseInt(lDay, 10) % 7]} of the month at ${at}`
     }
@@ -168,7 +168,7 @@ function formatClock(hour: number, minute: number, second: number, period: strin
  * fallback reads "At 5 PM, …" like the hand-rolled phrasings.
  */
 function tidyCronstrueTimes(s: string): string {
-  return s.replace(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(AM|PM)\b/g,
+  return s.replaceAll(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(AM|PM)\b/g,
     (_m, h, mm, ss, ap) => formatClock(
       Number.parseInt(h, 10), Number.parseInt(mm, 10), ss ? Number.parseInt(ss, 10) : 0, ap))
 }

@@ -34,7 +34,7 @@ function escapeHtml(s: string): string {
 
 export function linkify(text: string): string {
   if (!text) return ''
-  const html = escapeHtml(text).replace(
+  const html = escapeHtml(text).replaceAll(
     URL_RE,
     url => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`,
   )

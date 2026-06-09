@@ -1003,10 +1003,14 @@ public class TaskTool implements ToolRegistry.Tool {
             // scheduler), so show the cadence string instead — same choice
             // listRecurringTasks makes.
             boolean recurring = task.type == Task.Type.CRON || task.type == Task.Type.INTERVAL;
-            String when = recurring
-                    ? (task.scheduleDisplay != null ? task.scheduleDisplay : task.type.name())
-                    : (task.nextRunAt != null ? task.nextRunAt.toString()
-                            : (task.scheduleDisplay != null ? task.scheduleDisplay : "—"));
+            String when;
+            if (recurring) {
+                when = task.scheduleDisplay != null ? task.scheduleDisplay : task.type.name();
+            } else if (task.nextRunAt != null) {
+                when = task.nextRunAt.toString();
+            } else {
+                when = task.scheduleDisplay != null ? task.scheduleDisplay : "—";
+            }
             sb.append("- %s (%s) [%s] — %s\n".formatted(
                     task.name, when, task.status.name(),
                     task.description != null && task.description.length() > 100
