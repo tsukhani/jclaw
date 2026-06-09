@@ -7,20 +7,73 @@ import { BellAlertIcon, TrashIcon } from '@heroicons/vue/24/outline'
 
 definePageMeta({ title: 'Reminders' })
 
-// Mirror the /tasks page's API shape but scope to payloadType=reminder
-// (backend filter added in ApiTasksController.list). The Tasks list
-// itself excludes reminders via excludePayloadType=reminder, so a given
-// task row never appears on both pages.
-const url = '/api/tasks?payloadType=reminder&limit=200'
+// ── JCLAW-438: FilterBar-driven search/filter ──
+// Mirrors the /tasks page: one FilterBar emits chips, onFiltersChanged
+// rehydrates the watched refs, and the request URL recomputes from them so
+// the table refetches reactively. payloadType=reminder stays pinned so this
+// page only ever shows reminders (the /tasks list passes the inverse,
+// excludePayloadType=reminder, so a row never appears on both pages).
+const qFilter = ref('')
+const statusFilter = ref('')
+const typeFilter = ref('')
+
+interface Filter { key: string, value: string }
+function onFiltersChanged(filters: Filter[]) {
+  // A bare token parses to key `name` in FilterBar; map it to q too so plain
+  // typing searches the reminder text without needing the `q:` prefix.
+  qFilter.value = filters.find(f => f.key === 'q' || f.key === 'name')?.value ?? ''
+  statusFilter.value = filters.find(f => f.key === 'status')?.value ?? ''
+  typeFilter.value = filters.find(f => f.key === 'type')?.value ?? ''
+}
+
+const url = computed(() => {
+  const params = new URLSearchParams()
+  params.set('payloadType', 'reminder')
+  // q is the FTS keyword (reminder name + description Lucene scope); status /
+  // type are equality predicates the backend intersects with the hit set.
+  if (qFilter.value) params.set('q', qFilter.value)
+  if (statusFilter.value) params.set('status', statusFilter.value)
+  if (typeFilter.value) params.set('type', typeFilter.value)
+  params.set('limit', '200')
+  return `/api/tasks?${params}`
+})
 const { data: reminders, refresh } = await useFetch<Task[]>(url)
 
-// Reminder-scoped KPI strip — the same aggregate the /tasks page shows, but
-// filtered to payloadType=reminder so reminder counts + run KPIs live here
-// (and stay out of the Tasks page, which excludes them).
+// Reminder-scoped KPI strip — kept unfiltered (always ?payloadType=reminder)
+// so the Active/Pending/Failed totals reflect ALL reminders, not the current
+// search. Matches the /tasks page, whose KPI strip is also search-independent.
 const { data: reminderStats } = await useFetch<TaskStats>('/api/tasks/stats?payloadType=reminder')
 
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
+
+const hasActiveFilters = computed(() => !!(qFilter.value || statusFilter.value || typeFilter.value))
+
+// ── JCLAW-438: Delete-all via the shared bulk-select pattern ──
+// Same trash-icon → checkbox column → "Delete N" flow the Tasks and Subagent
+// Runs pages use (useBulkSelect). "Select all" + delete is the delete-all path.
+const {
+  selectMode,
+  selectedIds,
+  deletingBulk,
+  selectableRows,
+  enter: enterSelectMode,
+  exit: exitSelectMode,
+  toggle: toggleSelection,
+  toggleAll: toggleSelectAll,
+  deleteSelected,
+} = useBulkSelect<Task>({
+  rows: reminders,
+  deleteOne: id => $fetch<unknown>(`/api/tasks/${id}`, { method: 'DELETE' }),
+  onComplete: () => refresh(),
+  confirmCopy: count => ({
+    title: 'Delete reminders',
+    message: `Permanently delete ${count} reminder${count === 1 ? '' : 's'}? This cannot be undone.`,
+  }),
+})
+
+const allSelected = computed(() =>
+  selectableRows.value.length > 0 && selectedIds.value.size === selectableRows.value.length)
 
 async function deleteOne(r: Task) {
   const ok = await confirm({
@@ -32,6 +85,23 @@ async function deleteOne(r: Task) {
   if (!ok) return
   await mutate(`/api/tasks/${r.id}`, { method: 'DELETE' })
   await refresh()
+}
+
+// FilterBar's Export button downloads the current (filtered) reminder set as a
+// JSON bundle — mirrors the Tasks page's audit export, scoped to reminders.
+function exportReminders() {
+  const list = reminders.value ?? []
+  if (!list.length) return
+  const payload = { exportedAt: new Date().toISOString(), reminderCount: list.length, reminders: list }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = `jclaw-reminders-${new Date().toISOString().replaceAll(':', '-').slice(0, 19)}.json`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(href)
 }
 
 // Only one-shot reminders ever complete (recurring ones recur), so auto-delete
@@ -65,37 +135,45 @@ function reminderScheduleDisplay(r: Task): string {
   return asString(r.scheduleDisplay)
 }
 
-function nextFireLabel(r: Task): string {
-  // For COMPLETED reminders, the "When" column is misleading because the
-  // task has already fired — defer to the Fired column for the truth.
+// ── JCLAW-438: live "time until fire" countdown ──
+// 1s tick so the When column stays current while the page is open. SPA-only
+// (Reminders renders client-side), so the interval is safe in onMounted.
+const nowMs = ref(Date.now())
+let tickHandle: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  tickHandle = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+onUnmounted(() => {
+  if (tickHandle) clearInterval(tickHandle)
+})
+
+// When column — the exact wall-clock datetime the reminder (next) fires, in
+// the app's effective timezone ("10 Jun 2026 · 1:15 pm"). COMPLETED reminders
+// have already fired, so the Fired column is authoritative — defer.
+function whenLabel(r: Task): string {
   if (r.status === 'COMPLETED') return '—'
   if (!r.nextRunAt) return '—'
-  const t = Date.parse(r.nextRunAt)
-  if (!Number.isFinite(t)) return r.nextRunAt
-  const deltaMs = t - Date.now()
-  if (deltaMs < 0) return 'past due'
-  const sec = Math.round(deltaMs / 1000)
-  if (sec < 90) return `in ${sec}s`
-  const min = Math.round(sec / 60)
-  if (min < 90) return `in ${min}m`
-  const hr = Math.round(min / 60)
-  if (hr < 36) return `in ${hr}h`
-  return new Date(t).toLocaleString(undefined, {
-    weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
+  return formatDateTime(r.nextRunAt, r.effectiveTimezone ?? null)
 }
 
+// Schedule column — how it's scheduled. Recurring reminders show their cadence
+// ("every Tuesday at 5 PM", "every 30 min"); one-shot reminders show the
+// countdown until they fire ("in 3 hours"). Never a raw cron / ISO value.
+function reminderSchedule(r: Task): string {
+  if (r.type === 'CRON' || r.type === 'INTERVAL') return humanSchedule(r)
+  if (r.status === 'COMPLETED') return '—'
+  if (!r.nextRunAt) return reminderScheduleDisplay(r) || r.type
+  return timeUntil(r.nextRunAt, nowMs.value)
+}
+
+// Fired column — the absolute datetime the reminder last fired, same format as
+// the When column (JCLAW-438 item 2), in the app's effective timezone.
 function firedAtLabel(r: Task): string {
   const raw = asString(r.lastFiredAt)
   if (!raw) return '—'
-  const t = Date.parse(raw)
-  if (!Number.isFinite(t)) return raw
-  // For just-fired reminders the absolute timestamp is the most useful info —
-  // the operator wants to verify "did it actually run when I said?" — so emit
-  // a fixed locale-aware date+time rather than a relative "5m ago" string.
-  return new Date(t).toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
+  return formatDateTime(raw, r.effectiveTimezone ?? null)
 }
 
 function deliveryLabel(r: Task): string {
@@ -127,10 +205,46 @@ const statusColors: Record<string, string> = {
 
 <template>
   <div>
-    <h1 class="text-lg font-semibold text-fg-strong mb-6">
-      Reminders
-    </h1>
-    <p class="-mt-4 mb-6 text-sm text-zinc-600 dark:text-zinc-400">
+    <div class="flex items-center justify-between mb-2">
+      <h1 class="text-lg font-semibold text-fg-strong">
+        Reminders
+      </h1>
+      <div class="flex items-center gap-2">
+        <template v-if="!selectMode">
+          <button
+            :disabled="!reminders?.length"
+            type="button"
+            class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
+            title="Delete reminders"
+            aria-label="Delete reminders"
+            @click="enterSelectMode"
+          >
+            <TrashIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+        </template>
+        <template v-else>
+          <button
+            type="button"
+            class="px-3 py-1.5 border border-input text-fg-muted text-xs hover:text-fg-strong hover:border-neutral-500 transition-colors"
+            @click="exitSelectMode"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            :disabled="!selectedIds.size || deletingBulk"
+            class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 transition-colors"
+            @click="deleteSelected"
+          >
+            Delete {{ selectedIds.size || '' }}
+          </button>
+        </template>
+      </div>
+    </div>
+    <p class="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
       Personal nudges that fire on a schedule and surface as a toast in the corner of the app
       (or via Telegram if you've configured it). They never go through the LLM —
       the description is what you'll see.
@@ -142,7 +256,7 @@ const statusColors: Record<string, string> = {
          (recurring ongoing), and Failed. Scoped to payloadType=reminder. -->
     <div
       v-if="reminderStats"
-      class="grid grid-cols-3 gap-2 mb-6"
+      class="grid grid-cols-3 gap-2 mb-4"
     >
       <div class="bg-surface-elevated border border-border px-3 py-2">
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
@@ -179,26 +293,53 @@ const statusColors: Record<string, string> = {
       </div>
     </div>
 
-    <!-- Empty state -->
+    <!-- Search / filter bar — one chip-based bar (JCLAW-304 pattern). `q:`
+         keyword runs FTS over the reminder name + description; `status:` and
+         `type:` are equality filters. A bare word also searches (mapped to q
+         in onFiltersChanged). -->
+    <div class="mb-4">
+      <FilterBar
+        storage-key="reminders"
+        placeholder="Filter... (e.g., dentist status:PENDING type:SCHEDULED)"
+        :filter-keys="['q', 'status', 'type']"
+        @update:filters="onFiltersChanged"
+        @export="exportReminders"
+      />
+    </div>
+
+    <!-- Empty state — onboarding copy when there are genuinely no reminders;
+         a plain "no matches" when a filter is narrowing an otherwise non-empty
+         set so the chat hint doesn't mislead. -->
     <section
       v-if="!reminders || reminders.length === 0"
       class="border border-dashed border-border bg-surface-elevated px-6 py-12 text-center"
     >
-      <BellAlertIcon class="mx-auto h-10 w-10 text-fg-muted" />
-      <h2 class="mt-3 text-sm font-medium text-fg-strong">
-        No reminders yet
-      </h2>
-      <p class="mt-1 text-sm text-fg-muted">
-        Open
-        <NuxtLink
-          to="/chat"
-          class="font-medium text-emerald-500 underline-offset-2 hover:underline"
-        >
-          a chat
-        </NuxtLink>
-        and say something like <em>"remind me to pay salaries tomorrow at 9am"</em>
-        or <em>"remind me in 5 minutes to take the laundry out"</em>.
-      </p>
+      <template v-if="hasActiveFilters">
+        <BellAlertIcon class="mx-auto h-10 w-10 text-fg-muted" />
+        <h2 class="mt-3 text-sm font-medium text-fg-strong">
+          No reminders match your filters
+        </h2>
+        <p class="mt-1 text-sm text-fg-muted">
+          Clear the filter bar to see all reminders.
+        </p>
+      </template>
+      <template v-else>
+        <BellAlertIcon class="mx-auto h-10 w-10 text-fg-muted" />
+        <h2 class="mt-3 text-sm font-medium text-fg-strong">
+          No reminders yet
+        </h2>
+        <p class="mt-1 text-sm text-fg-muted">
+          Open
+          <NuxtLink
+            to="/chat"
+            class="font-medium text-emerald-500 underline-offset-2 hover:underline"
+          >
+            a chat
+          </NuxtLink>
+          and say something like <em>"remind me to pay salaries tomorrow at 9am"</em>
+          or <em>"remind me in 5 minutes to take the laundry out"</em>.
+        </p>
+      </template>
     </section>
 
     <!-- Reminders table — same design-token styling as the /tasks table
@@ -211,6 +352,18 @@ const statusColors: Record<string, string> = {
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
+            <th
+              v-if="selectMode"
+              class="px-4 py-2.5 w-10"
+            >
+              <input
+                type="checkbox"
+                class="accent-red-500 cursor-pointer align-middle"
+                :checked="allSelected"
+                aria-label="Select all reminders"
+                @change="toggleSelectAll"
+              >
+            </th>
             <th class="px-4 py-2.5 font-medium">
               Reminder
             </th>
@@ -243,6 +396,18 @@ const statusColors: Record<string, string> = {
             :key="r.id"
             class="hover:bg-muted/30 transition-colors"
           >
+            <td
+              v-if="selectMode"
+              class="px-4 py-2.5"
+            >
+              <input
+                type="checkbox"
+                class="accent-red-500 cursor-pointer align-middle"
+                :checked="selectedIds.has(r.id)"
+                :aria-label="`Select ${reminderBody(r)}`"
+                @change="toggleSelection(r.id)"
+              >
+            </td>
             <td class="max-w-md px-4 py-2.5">
               <div class="text-fg-primary">
                 {{ reminderBody(r) }}
@@ -255,10 +420,10 @@ const statusColors: Record<string, string> = {
               </div>
             </td>
             <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
-              {{ nextFireLabel(r) }}
+              {{ whenLabel(r) }}
             </td>
-            <td class="px-4 py-2.5 whitespace-nowrap font-mono text-xs text-fg-muted">
-              {{ reminderScheduleDisplay(r) || r.type }}
+            <td class="px-4 py-2.5 whitespace-nowrap text-xs text-fg-muted">
+              {{ reminderSchedule(r) }}
             </td>
             <td class="px-4 py-2.5 whitespace-nowrap font-mono text-xs text-fg-muted">
               {{ deliveryLabel(r) }}

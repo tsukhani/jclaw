@@ -754,153 +754,22 @@ function deliveryLabel(task: Task): string {
   return channel
 }
 
-/**
- * Humanize a Task's recurring schedule for display. Order of preference:
- *   1. Recognized cron pattern (daily at 9 AM, every 30 min, weekdays at...)
- *   2. INTERVAL duration humanized (every 30 min, every 2 hours, every 1 day)
- *   3. Server's scheduleDisplay — the operator's raw input verbatim
- *   4. em-dash if nothing applies (one-shot / unscheduled tasks)
- */
-function humanSchedule(task: Task): string {
-  if (task.type === 'INTERVAL') {
-    const secs = task.intervalSeconds as number | null | undefined
-    if (typeof secs === 'number' && secs > 0) return `every ${humanDuration(secs)}`
-    return (task.scheduleDisplay as string | null) || '—'
-  }
-  if (task.type === 'CRON') {
-    const expr = task.cronExpression as string | null | undefined
-    if (expr) {
-      const h = humanCron(expr)
-      if (h) return h
-    }
-    return (task.scheduleDisplay as string | null) || expr || '—'
-  }
-  return (task.scheduleDisplay as string | null) || '—'
-}
+// JCLAW-438: humanSchedule / humanCron / humanDuration / formatTime12h moved
+// to utils/schedule.ts (auto-imported) so the Reminders page shares the same
+// cron/interval humanizers instead of duplicating ~50 lines.
 
-function humanDuration(secs: number): string {
-  if (secs % 86400 === 0) {
-    const d = secs / 86400
-    return d === 1 ? '1 day' : `${d} days`
-  }
-  if (secs % 3600 === 0) {
-    const h = secs / 3600
-    return h === 1 ? '1 hour' : `${h} hours`
-  }
-  if (secs % 60 === 0) {
-    const m = secs / 60
-    return m === 1 ? '1 min' : `${m} min`
-  }
-  return `${secs}s`
-}
-
-/**
- * Recognize common cron patterns and return a natural-language equivalent.
- * Returns null for patterns we don't know — caller falls back to the
- * server's scheduleDisplay so the operator at least sees their raw input.
- */
-function humanCron(expr: string): string | null {
-  const trimmed = expr.trim()
-  switch (trimmed) {
-    case '@hourly': return 'hourly'
-    case '@daily':
-    case '@midnight': return 'daily at midnight'
-    case '@weekly': return 'weekly on Sunday at midnight'
-    case '@monthly': return 'monthly on the 1st at midnight'
-    case '@yearly':
-    case '@annually': return 'yearly on Jan 1 at midnight'
-  }
-  const parts = trimmed.split(/\s+/)
-  let sec: string, min: string, hour: string, dom: string, mon: string, dow: string
-  if (parts.length === 6) {
-    // We know all six indexes exist after the length check.
-    [sec, min, hour, dom, mon, dow] = parts as [string, string, string, string, string, string]
-  }
-  else if (parts.length === 5) {
-    [min, hour, dom, mon, dow] = parts as [string, string, string, string, string]
-    sec = '0'
-  }
-  else return null
-  const dailyWildcards = dom === '*' && mon === '*' && dow === '*'
-  if (sec === '0' && dailyWildcards) {
-    if (min.startsWith('*/') && hour === '*') {
-      const n = Number.parseInt(min.slice(2), 10)
-      if (!Number.isNaN(n)) return `every ${n} min`
-    }
-    if (min === '0' && hour.startsWith('*/')) {
-      const n = Number.parseInt(hour.slice(2), 10)
-      if (!Number.isNaN(n)) {
-        const unit = n === 1 ? '1 hour' : `${n} hours`
-        return `every ${unit}`
-      }
-    }
-    if (/^\d+$/.test(min) && /^\d+$/.test(hour)) {
-      return `daily at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
-    }
-  }
-  if (sec === '0' && dom === '*' && mon === '*' && /^\d+$/.test(min) && /^\d+$/.test(hour)) {
-    if (dow === '1-5' || /^MON-FRI$/i.test(dow)) {
-      return `weekdays at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
-    }
-    const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    if (/^\d+$/.test(dow)) {
-      const d = Number.parseInt(dow, 10)
-      if (d >= 0 && d <= 6) return `weekly on ${dowNames[d]} at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
-    }
-  }
-  return null
-}
-
-function formatTime12h(hour: number, min: number): string {
-  const period = hour >= 12 ? 'PM' : 'AM'
-  const h12 = hour % 12 || 12
-  const mm = min === 0 ? '' : `:${min.toString().padStart(2, '0')}`
-  return `${h12}${mm} ${period}`
-}
-
-/**
- * Mirror pages/index.vue's formatActivityTimestamp so the Next Run column
- * reads "May 24, 2026 · 9:00:00 AM" instead of the locale-default
- * "25/05/2026, 09:00:00". Pinned to 12-hour clock so AM/PM is consistent
- * regardless of OS locale settings.
- *
- * <p>JCLAW-261: when {@code zone} is supplied (the task's effective IANA
- * timezone), the timestamp is rendered IN that zone — so "9 am NYC"
- * shows as 9:00 AM regardless of where the operator's browser sits. The
- * zone short-id is appended so the operator can tell which clock they're
- * reading. A null/undefined zone falls back to browser-local (existing
- * behavior); used by the few legacy call sites that don't carry a task.
- */
 /**
  * JCLAW-261: which IANA zone should the Next Run column render this
  * task's timestamp in? CRON / SCHEDULED carry a meaningful per-task
  * (or default-resolved) zone; INTERVAL and IMMEDIATE are duration-
  * based and have no wall-clock binding — render those in the browser's
- * local zone (return undefined to fall through formatTaskTimestamp's
- * default behavior).
+ * local zone (return undefined to fall through formatDateTime's
+ * default behavior). The datetime formatter itself (formatDateTime) is
+ * shared from utils/schedule.ts.
  */
 function zoneForTaskRender(task: Task): string | undefined {
   if (task.type !== 'CRON' && task.type !== 'SCHEDULED') return undefined
   return task.effectiveTimezone ?? undefined
-}
-
-function formatTaskTimestamp(iso: string, zone?: string | null): string {
-  const d = new Date(iso)
-  const opts: Intl.DateTimeFormatOptions = zone ? { timeZone: zone } : {}
-  const date = d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    ...opts,
-  })
-  const time = d.toLocaleTimeString(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-    ...opts,
-  })
-  return zone ? `${date} · ${time} (${zone})` : `${date} · ${time}`
 }
 
 // ─────────────────────────── Calendar projection ────────────────────────────
@@ -1649,7 +1518,7 @@ const statusBg: Record<string, string> = {
                 {{ deliveryLabel(task) }}
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
-                {{ task.nextRunAt ? formatTaskTimestamp(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
+                {{ task.nextRunAt ? formatDateTime(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
                 {{ task.retryCount }}/{{ task.maxRetries }}
@@ -2129,7 +1998,7 @@ const statusBg: Record<string, string> = {
                               :class="statusColors[run.status ?? '']"
                               class="font-mono"
                             >{{ run.status }}</span>
-                            <span class="text-fg-muted">{{ run.startedAt ? formatTaskTimestamp(run.startedAt, zoneForTaskRender(task)) : '—' }}</span>
+                            <span class="text-fg-muted">{{ run.startedAt ? formatDateTime(run.startedAt, zoneForTaskRender(task)) : '—' }}</span>
                             <span
                               v-if="run.durationMs != null"
                               class="text-fg-muted"
