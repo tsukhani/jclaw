@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Task, TaskStats } from '~/types/api'
 import { BellAlertIcon, ChevronRightIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { linkify } from '~/utils/linkify'
 
 // BellAlertIcon retained for the empty-state placeholder; the header no
 // longer carries it to match the /channels page's plain h1 convention.
@@ -492,9 +493,15 @@ const statusColors: Record<string, string> = {
                 :colspan="reminderColspan"
                 class="px-4 py-3"
               >
-                <div class="max-w-3xl whitespace-pre-wrap break-words text-sm text-fg-primary">
-                  {{ reminderBody(r) }}
-                </div>
+                <!-- Linkify-only render (NOT markdown): the reminder text is
+                     shown verbatim, but bare http(s) URLs become clickable
+                     anchors. -->
+                <!-- eslint-disable vue/no-v-html -- linkify() HTML-escapes then DOMPurify-sanitizes -->
+                <div
+                  class="reminder-body max-w-3xl whitespace-pre-wrap break-words text-sm text-fg-primary"
+                  v-html="linkify(reminderBody(r))"
+                />
+                <!-- eslint-enable vue/no-v-html -->
               </td>
             </tr>
           </template>
@@ -503,3 +510,18 @@ const statusColors: Record<string, string> = {
     </section>
   </div>
 </template>
+
+<style scoped>
+/* Autolinked URLs in the expanded reminder body. v-html content isn't touched
+   by scoped attributes, so `:deep()` is required to reach the injected <a>.
+   Emerald + underline matches the page's other links (the empty-state hint). */
+.reminder-body :deep(a) {
+  color: #10b981; /* emerald-500 */
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.reminder-body :deep(a:hover) {
+  color: #34d399; /* emerald-400 */
+}
+</style>

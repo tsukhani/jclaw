@@ -14,7 +14,7 @@ function reminderRows() {
     {
       id: 1,
       name: 'meeting-ibrahim',
-      description: 'Reminder: Meeting with Ibrahim at 2:30 PM',
+      description: 'Reminder: Meeting with Ibrahim at 2:30 PM\nMaps: https://www.google.com/maps/dir/?api=1&destination=3.1547903,101.718559',
       type: 'SCHEDULED',
       status: 'PENDING',
       paused: false,
@@ -93,6 +93,20 @@ describe('reminders page (JCLAW-438)', () => {
     expect(toggle).toBeDefined()
     await toggle?.trigger('click')
     expect(component.text()).toContain('Meeting with Ibrahim at 2:30 PM')
+  })
+
+  it('renders bare URLs in the reminder body as clickable anchors', async () => {
+    const component = await mountSuspended(Reminders)
+    const toggle = component.findAll('button')
+      .find(b => b.attributes('aria-label') === 'Toggle details for meeting-ibrahim')
+    await toggle?.trigger('click')
+    const link = component.findAll('a')
+      .find(a => a.attributes('href')?.startsWith('https://www.google.com/maps'))
+    expect(link).toBeDefined()
+    expect(link?.attributes('target')).toBe('_blank')
+    expect(link?.attributes('rel')).toBe('noopener noreferrer')
+    // The query-string `&` round-trips through the href intact.
+    expect(link?.attributes('href')).toContain('api=1&destination=3.1547903,101.718559')
   })
 
   it('Delete-all enters bulk-select mode with a select-all checkbox', async () => {
