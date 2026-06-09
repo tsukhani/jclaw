@@ -180,14 +180,24 @@ pipeline {
                 // Output: dist/jclaw.zip with files prefixed jclaw/
                 // (project.name from settings.gradle.kts).
                 //
-                // The self-contained variant (with framework, deps, and
-                // a `./play` launcher baked in, JRE-only at runtime) is
-                // produced by `play bundle` and only by the Dockerfile —
-                // not by this pipeline. The GitHub Release attaches the
-                // dist zip; the GHCR Docker image carries the bundle.
+                // The self-contained variant (framework, resolved deps, and a
+                // `./play` launcher baked in, JRE-only at runtime) comes from
+                // the playBundle Gradle task — the same artifact the Dockerfile
+                // bakes into the GHCR image. We build it here too via
+                // `./gradlew playBundle` so both the GitHub Release and the
+                // Jenkins artifacts carry the source dist AND the runnable
+                // bundle. Gradle's incremental build skips the precompile + SPA
+                // steps already done above when their inputs are unchanged, so
+                // playBundle's marginal cost is dependency resolution + zip
+                // assembly. Output: dist/jclaw-bundle.zip (same jclaw/ prefix).
                 sh './jclaw.sh dist'
+                sh './gradlew playBundle'
 
-                archiveArtifacts artifacts: 'dist/jclaw.zip', fingerprint: true
+                // Both zips ride the same archiveArtifacts call, so the bundle
+                // falls under the job's artifact retention
+                // (artifactNumToKeepStr: '5' in options.buildDiscarder) exactly
+                // like the dist — latest builds only, unversioned filenames.
+                archiveArtifacts artifacts: 'dist/jclaw.zip, dist/jclaw-bundle.zip', fingerprint: true
             }
         }
 
@@ -201,11 +211,15 @@ pipeline {
                     sh "echo 'Creating release: ${version}'"
                     sh "git tag ${version} || true"
 
-                    // GitHub Release with dist zip (delete existing release if re-running)
+                    // GitHub Release with both the source dist and the runnable
+                    // bundle attached (delete existing release if re-running).
+                    // Both assets live on the same release, so the 'Cleanup Old
+                    // Releases' stage (keep last 5) prunes them together — the
+                    // bundle gets the same release retention as the dist.
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release delete ${version} --repo tsukhani/jclaw --yes || true
-                            gh release create ${version} dist/jclaw.zip \
+                            gh release create ${version} dist/jclaw.zip dist/jclaw-bundle.zip \
                                 --repo tsukhani/jclaw \
                                 --title "JClaw ${version}" \
                                 --generate-notes
