@@ -219,7 +219,8 @@ public class TaskTool implements ToolRegistry.Tool {
                                 + "case that passes a single plain string is a reminder, whose description "
                                 + "is the verbatim text the user sees.")),
                 Map.entry(KEY_SCHEDULE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Schedule shorthand: 'now' (IMMEDIATE); a duration like '30m'/'2h'/'1d' for a one-shot N-from-now; an absolute ISO date-time like '2026-06-13T15:00' for a one-shot at a specific moment (interpreted in the task's timezone); 'every <duration>' for INTERVAL; or a Spring 6-field cron / at-shortcut for CRON. Use an absolute date-time (not a cron) for a one-time reminder on a specific date.")),
+                        SchemaKeys.DESCRIPTION, "Schedule shorthand: 'now' (IMMEDIATE); a duration like '30m'/'2h'/'1d' for a one-shot N-from-now; an absolute ISO date-time like '2026-06-13T15:00' for a one-shot at a specific moment (interpreted in the task's timezone); 'every <duration>' for INTERVAL; or a Spring 6-field cron / at-shortcut for CRON. Use an absolute date-time (not a cron) for a one-time reminder on a specific date. "
+                                + "Day-of-month modifiers (the cron engine supports them): for 'the last <weekday> of the month' use the L suffix in the day-of-week field, e.g. '0 0 17 * * 5L' = last Friday at 5 PM — do NOT use a day-of-month range like '25-31', which silently skips months where the last weekday falls before the 25th. For the Nth weekday use '#', e.g. '0 0 9 * * 1#2' = 2nd Monday. For the last calendar day of the month use 'L' in the day-of-month field, e.g. '0 0 9 L * *'.")),
                 Map.entry(KEY_PAUSED, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "On updateTask: flip the paused flag")),
                 Map.entry(KEY_DELIVERY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,

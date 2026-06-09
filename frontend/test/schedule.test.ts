@@ -93,9 +93,13 @@ describe('humanSchedule / humanCron (shared with the Tasks page)', () => {
     expect(humanCron('@daily')).toBe('daily at midnight')
   })
 
-  it('recognizes the 25-31 + weekday "last <day> of the month" idiom', () => {
-    // 6-field Spring (sec min hour dom=25-31 mon dow=5 Friday at 17:00) and the
-    // 5-field form both read as the last weekday, not cronstrue's literal range.
+  it('renders "last <day> of the month" for both the 5L form and the 25-31 idiom', () => {
+    // Canonical "<n>L" day-of-week form (what task_manager now emits), with "*"
+    // and Quartz "?" day-of-month, 6- and 5-field.
+    expect(humanCron('0 0 17 * * 5L')).toBe('last Friday of the month at 5 PM')
+    expect(humanCron('0 0 17 ? * 5L')).toBe('last Friday of the month at 5 PM')
+    expect(humanCron('0 17 * * 5L')).toBe('last Friday of the month at 5 PM')
+    // Legacy lossy idiom (dom=25-31 + weekday) reads identically.
     expect(humanCron('0 0 17 25-31 * 5')).toBe('last Friday of the month at 5 PM')
     expect(humanCron('0 17 25-31 * 5')).toBe('last Friday of the month at 5 PM')
   })

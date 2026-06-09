@@ -89,6 +89,38 @@ class JClawCronUtilsTest extends UnitTest {
     }
 
     @Test
+    void lastWeekdayOfMonthModifierIsSupported() {
+        // JCLAW-438: task_manager emits "<n>L" for "the last <weekday> of the
+        // month" (e.g. "last Friday" payroll reminders) instead of the lossy
+        // dom=25-31 range. The cron engine (db-scheduler CronSchedule) must
+        // accept L and resolve to the LAST such weekday; this guards against a
+        // future engine swap silently dropping L support and stranding tasks.
+        var zone = ZoneId.of("Asia/Kuala_Lumpur");
+        JClawCronUtils.validate("0 0 17 * * 5L"); // must not throw at the API/tool boundary
+        var next = JClawCronUtils.nextExecution("0 0 17 * * 5L", zone);
+        assertNotNull(next, "last-Friday cron must resolve a next fire");
+        var local = LocalDateTime.ofInstant(next, zone);
+        assertEquals(java.time.DayOfWeek.FRIDAY, local.getDayOfWeek(), "5L must fire on a Friday");
+        assertEquals(17, local.getHour());
+        // The LAST Friday of its month: a week later is necessarily next month.
+        assertNotEquals(local.getMonth(), local.plusDays(7).getMonth(),
+                "5L must be the last Friday — seven days later lands in the next month");
+    }
+
+    @Test
+    void nthWeekdayOfMonthModifierIsSupported() {
+        // "#" (Nth weekday) also flows through, e.g. "0 0 9 * * 1#2" = 2nd Monday.
+        var zone = ZoneId.of("Asia/Kuala_Lumpur");
+        JClawCronUtils.validate("0 0 9 * * 1#2");
+        var next = JClawCronUtils.nextExecution("0 0 9 * * 1#2", zone);
+        assertNotNull(next);
+        var local = LocalDateTime.ofInstant(next, zone);
+        assertEquals(java.time.DayOfWeek.MONDAY, local.getDayOfWeek());
+        assertTrue(local.getDayOfMonth() >= 8 && local.getDayOfMonth() <= 14,
+                "2nd Monday must fall on day 8-14; got " + local.getDayOfMonth());
+    }
+
+    @Test
     void zoneAwareResultIsFutureRelativeToNow() {
         // Defensive sanity: regardless of zone, the next fire must be
         // strictly after now() — the simulatedSuccess(Instant.now()) seed

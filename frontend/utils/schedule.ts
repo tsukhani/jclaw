@@ -106,17 +106,23 @@ export function humanCron(expr: string): string | null {
       if (d >= 0 && d <= 6) return `weekly on ${dowNames[d]} at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
     }
   }
-  // "Last <weekday> of the month" idiom: a weekday constrained to the final
-  // week (day 25-31) occurs at most once a month, so "dom=25-31 + a single
-  // weekday" means the last such weekday. cronstrue would render this literally
-  // ("between day 25 and 31 of the month, and on Friday") — name it properly.
-  // Uses full weekday names here because "last Friday of the month" reads more
-  // naturally than the abbreviated weekly form.
-  if (sec === '0' && dom === '25-31' && mon === '*' && /^\d+$/.test(min) && /^\d+$/.test(hour) && /^\d+$/.test(dow)) {
+  // "Last <weekday> of the month" — two equivalent spellings the UI should read
+  // identically (cronstrue renders both verbosely). Full weekday names here
+  // because "last Friday of the month" reads more naturally than the weekly form:
+  //   • "<n>L" in the day-of-week field — the canonical form (e.g. "0 0 17 * * 5L"),
+  //     what task_manager now emits; dom is "*" or Quartz "?".
+  //   • dom=25-31 + a single weekday — the lossy idiom older tasks may carry; a
+  //     weekday in the final week (day 25-31) occurs at most once a month.
+  if (sec === '0' && mon === '*' && /^\d+$/.test(min) && /^\d+$/.test(hour)) {
     const fullDow = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    const d = Number.parseInt(dow, 10)
-    if (d >= 0 && d <= 6) {
-      return `last ${fullDow[d]} of the month at ${formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))}`
+    const at = formatTime12h(Number.parseInt(hour, 10), Number.parseInt(min, 10))
+    const lDay = dow.match(/^([0-7])L$/i)?.[1]
+    if ((dom === '*' || dom === '?') && lDay !== undefined) {
+      return `last ${fullDow[Number.parseInt(lDay, 10) % 7]} of the month at ${at}`
+    }
+    if (dom === '25-31' && /^\d+$/.test(dow)) {
+      const d = Number.parseInt(dow, 10)
+      if (d >= 0 && d <= 6) return `last ${fullDow[d]} of the month at ${at}`
     }
   }
   // Anything the hand-rolled patterns above don't recognize — day-of-month
