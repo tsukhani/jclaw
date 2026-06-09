@@ -132,7 +132,7 @@ export function humanCron(expr: string): string | null {
   // form (seconds first). Returns null only on a genuinely invalid expression,
   // in which case humanSchedule falls back to the operator's scheduleDisplay.
   try {
-    return cronstrue.toString(trimmed, { throwExceptionOnParseError: true })
+    return tidyCronstrueTimes(cronstrue.toString(trimmed, { throwExceptionOnParseError: true }))
   }
   catch {
     return null
@@ -147,15 +147,42 @@ export function formatTime12h(hour: number, min: number): string {
 }
 
 /**
+ * Render a 12-hour wall-clock time dropping a zero minute and zero second
+ * (JCLAW-438): 5pm → "5 PM", 1:15pm → "1:15 PM", 1:15:45pm → "1:15:45 PM".
+ * The minute is kept whenever seconds show, so "5:00:30" stays well-formed.
+ * The am/pm token passes through verbatim so its case matches the caller's
+ * surrounding style (cronstrue emits "PM"; formatDateTime emits "pm").
+ */
+function formatClock(hour: number, minute: number, second: number, period: string): string {
+  const showSeconds = second !== 0
+  const showMinutes = minute !== 0 || showSeconds
+  let out = String(hour)
+  if (showMinutes) out += `:${String(minute).padStart(2, '0')}`
+  if (showSeconds) out += `:${String(second).padStart(2, '0')}`
+  return period ? `${out} ${period}` : out
+}
+
+/**
+ * cronstrue renders times zero-padded with an explicit :MM ("At 05:00 PM, …").
+ * Apply the same drop-zero rule to every time token in its output so the cron
+ * fallback reads "At 5 PM, …" like the hand-rolled phrasings.
+ */
+function tidyCronstrueTimes(s: string): string {
+  return s.replace(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(AM|PM)\b/g,
+    (_m, h, mm, ss, ap) => formatClock(
+      Number.parseInt(h, 10), Number.parseInt(mm, 10), ss ? Number.parseInt(ss, 10) : 0, ap))
+}
+
+/**
  * Absolute wall-clock datetime, rendered in the app's effective IANA zone
  * (resolved server-side onto Task.effectiveTimezone). Produces e.g.
  * "10 Jun 2026 · 1:15 pm" — day-first (en-GB, the app's locale convention),
  * 12-hour so am/pm is stable regardless of OS locale. The zone is applied for
  * rendering but NOT labelled — the configured timezone is implicit from
- * Settings (JCLAW-438 item 1). Seconds appear only when the instant isn't on
- * a whole minute (item 3: "1:30:00 pm" → "1:30 pm"). A null/blank zone falls
- * back to the browser's local zone. Shared by the Tasks (Next Run) and
- * Reminders (When / Fired) columns.
+ * Settings (JCLAW-438 item 1). A zero minute and/or second is dropped:
+ * "5:00:00 pm" → "5 pm", "1:30:00 pm" → "1:30 pm", "1:30:45 pm" stays. A
+ * null/blank zone falls back to the browser's local zone. Shared by the
+ * Tasks (Next Run) and Reminders (When / Fired) columns.
  */
 export function formatDateTime(iso: string, zone?: string | null): string {
   const t = Date.parse(iso)
@@ -163,16 +190,17 @@ export function formatDateTime(iso: string, zone?: string | null): string {
   const d = new Date(t)
   const opts: Intl.DateTimeFormatOptions = zone ? { timeZone: zone } : {}
   const date = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', ...opts })
-  // All standard IANA zones have whole-minute offsets, so the seconds-of-minute
-  // is the same in UTC and the target zone — read it off the instant directly.
-  const showSeconds = Math.floor(t / 1000) % 60 !== 0
-  const time = d.toLocaleTimeString('en-GB', {
-    hour: 'numeric',
-    minute: '2-digit',
-    ...(showSeconds ? { second: '2-digit' } : {}),
-    hour12: true,
-    ...opts,
-  })
+  // Pull the clock parts in the target zone (so the minute is correct even for
+  // half-hour-offset zones) and apply the drop-zero rule via formatClock.
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, ...opts,
+  }).formatToParts(d)
+  const part = (type: string) => parts.find(p => p.type === type)?.value ?? ''
+  const time = formatClock(
+    Number.parseInt(part('hour') || '0', 10),
+    Number.parseInt(part('minute') || '0', 10),
+    Number.parseInt(part('second') || '0', 10),
+    part('dayPeriod').toLowerCase())
   return `${date} · ${time}`
 }
 

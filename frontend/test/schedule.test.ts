@@ -69,6 +69,13 @@ describe('formatDateTime (JCLAW-438 — absolute, app-zone, day-first, no zone l
       .toBe('9 Jun 2026 · 1:30:45 pm')
   })
 
+  it('drops a zero minute too: 5pm not 5:00pm', () => {
+    expect(norm(formatDateTime('2026-06-09T17:00:00+08:00', 'Asia/Kuala_Lumpur')))
+      .toBe('9 Jun 2026 · 5 pm')
+    expect(norm(formatDateTime('2026-06-09T11:00:00+08:00', 'Asia/Kuala_Lumpur')))
+      .toBe('9 Jun 2026 · 11 am')
+  })
+
   it('no zone → renders browser-local, still no label', () => {
     expect(formatDateTime('2026-06-10T13:15:00Z')).not.toContain('(')
   })
@@ -105,11 +112,18 @@ describe('humanSchedule / humanCron (shared with the Tasks page)', () => {
   })
 
   it('falls back to cronstrue for patterns the hand-rolled humanizer misses (never raw cron)', () => {
-    // L modifier — "last Friday of the month"; not handled by the hand-rolled
-    // patterns, so it must come back humanized via cronstrue (JCLAW-438 item 4).
-    expect(humanCron('0 0 17 * * 5L')).toContain('last Friday')
-    // Day-of-month specific — also only via cronstrue.
+    // Day-of-month specific and "#" (Nth weekday) aren't hand-rolled, so they
+    // come back humanized via cronstrue (JCLAW-438 item 4).
     expect(humanCron('0 0 9 1 * *')).toContain('day 1')
+    expect(humanCron('0 0 17 ? * 6#3')).toContain('third Saturday')
+  })
+
+  it('applies the drop-zero rule to cronstrue times too: 9 AM not 09:00 AM', () => {
+    const dayOne = humanCron('0 0 9 1 * *')!
+    expect(dayOne).toContain('9 AM')
+    expect(dayOne).not.toContain('09:00')
+    // Non-zero minutes are kept.
+    expect(humanCron('0 30 8 1 * *')).toContain('8:30 AM')
   })
 
   it('INTERVAL → every <duration>', () => {
