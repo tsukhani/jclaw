@@ -1,12 +1,25 @@
 <script setup lang="ts">
 import type { Task, TaskStats } from '~/types/api'
-import { BellAlertIcon, ChevronRightIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { BellAlertIcon, CalendarDaysIcon, ChevronRightIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { linkify } from '~/utils/linkify'
 
 // BellAlertIcon retained for the empty-state placeholder; the header no
 // longer carries it to match the /channels page's plain h1 convention.
 
 definePageMeta({ title: 'Reminders' })
+
+// ── JCLAW-440: table / calendar view, persisted to the URL so refresh /
+// back-forward keep the view (mirrors the Tasks page). ──
+const route = useRoute()
+const router = useRouter()
+const view = computed<'table' | 'calendar'>({
+  get() {
+    return route.query.view === 'calendar' ? 'calendar' : 'table'
+  },
+  set(v) {
+    router.replace({ query: { ...route.query, view: v === 'table' ? undefined : v } }).catch(() => {})
+  },
+})
 
 // ── JCLAW-438: FilterBar-driven search/filter ──
 // Mirrors the /tasks page: one FilterBar emits chips, onFiltersChanged
@@ -219,9 +232,43 @@ const statusColors: Record<string, string> = {
 <template>
   <div>
     <div class="flex items-center justify-between mb-2">
-      <h1 class="text-lg font-semibold text-fg-strong">
-        Reminders
-      </h1>
+      <div class="flex items-center gap-3">
+        <h1 class="text-lg font-semibold text-fg-strong">
+          Reminders
+        </h1>
+        <!-- View switcher (icon-only): table / calendar. State persists in the
+             URL (?view=calendar) so refresh + shareable links survive. -->
+        <div
+          v-if="!selectMode"
+          class="inline-flex border border-input divide-x divide-input"
+          role="tablist"
+          aria-label="Reminder view"
+        >
+          <button
+            v-for="opt in ([
+              { id: 'table', label: 'Table', icon: TableCellsIcon },
+              { id: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
+            ] as const)"
+            :key="opt.id"
+            type="button"
+            role="tab"
+            :aria-selected="view === opt.id"
+            :title="`${opt.label} view`"
+            :aria-label="`${opt.label} view`"
+            class="p-2 inline-flex items-center transition-colors"
+            :class="view === opt.id
+              ? 'bg-muted text-fg-strong'
+              : 'text-fg-muted hover:text-fg-strong'"
+            @click="view = opt.id"
+          >
+            <component
+              :is="opt.icon"
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      </div>
       <div class="flex items-center gap-2">
         <template v-if="!selectMode">
           <button
@@ -324,7 +371,7 @@ const statusColors: Record<string, string> = {
          a plain "no matches" when a filter is narrowing an otherwise non-empty
          set so the chat hint doesn't mislead. -->
     <section
-      v-if="!reminders || reminders.length === 0"
+      v-if="view === 'table' && (!reminders || reminders.length === 0)"
       class="border border-dashed border-border bg-surface-elevated px-6 py-12 text-center"
     >
       <template v-if="hasActiveFilters">
@@ -359,7 +406,7 @@ const statusColors: Record<string, string> = {
          (bg-surface-elevated / border-border / text-fg-* / colored-mono status)
          so the rows read consistently with the rest of the app. -->
     <section
-      v-else
+      v-else-if="view === 'table'"
       class="bg-surface-elevated border border-border"
     >
       <table class="w-full text-sm">
@@ -508,6 +555,14 @@ const statusColors: Record<string, string> = {
         </tbody>
       </table>
     </section>
+
+    <!-- Calendar view (JCLAW-440): shared component, fire-projection only
+         (reminders skip the LLM, so no run-trace blocks). -->
+    <ScheduleCalendar
+      v-else-if="view === 'calendar'"
+      :items="reminders ?? []"
+      :show-runs="false"
+    />
   </div>
 </template>
 
