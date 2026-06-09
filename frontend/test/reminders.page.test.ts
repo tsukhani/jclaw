@@ -82,6 +82,19 @@ describe('reminders page (JCLAW-438)', () => {
     expect(text).not.toContain('(Asia/Kuala_Lumpur)')
   })
 
+  it('rows collapse to the kebab name and expand to the full reminder text', async () => {
+    const component = await mountSuspended(Reminders)
+    // Collapsed: the kebab name shows; the full reminder text is hidden.
+    expect(component.text()).toContain('meeting-ibrahim')
+    expect(component.text()).not.toContain('Meeting with Ibrahim at 2:30 PM')
+    // Expanding the row reveals the verbatim reminder text.
+    const toggle = component.findAll('button')
+      .find(b => b.attributes('aria-label') === 'Toggle details for meeting-ibrahim')
+    expect(toggle).toBeDefined()
+    await toggle?.trigger('click')
+    expect(component.text()).toContain('Meeting with Ibrahim at 2:30 PM')
+  })
+
   it('Delete-all enters bulk-select mode with a select-all checkbox', async () => {
     const component = await mountSuspended(Reminders)
     const trash = component.findAll('button')

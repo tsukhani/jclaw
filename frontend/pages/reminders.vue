@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Task, TaskStats } from '~/types/api'
-import { BellAlertIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { BellAlertIcon, ChevronRightIcon, TrashIcon } from '@heroicons/vue/24/outline'
 
 // BellAlertIcon retained for the empty-state placeholder; the header no
 // longer carries it to match the /channels page's plain h1 convention.
@@ -74,6 +74,18 @@ const {
 
 const allSelected = computed(() =>
   selectableRows.value.length > 0 && selectedIds.value.size === selectableRows.value.length)
+
+// ── Expandable rows (mirrors the Tasks page) ──
+// The Reminder cell shows just the kebab name; the chevron expands a detail
+// row with the full reminder text (the verbatim nudge) and collapses it again.
+const expandedIds = reactive(new Set<number>())
+function toggleExpand(id: number) {
+  if (expandedIds.has(id)) expandedIds.delete(id)
+  else expandedIds.add(id)
+}
+// colspan for the expanded detail row: all 8 visible columns, +1 for the
+// leading checkbox column when bulk-select is active.
+const reminderColspan = computed(() => (selectMode.value ? 9 : 8))
 
 async function deleteOne(r: Task) {
   const ok = await confirm({
@@ -368,16 +380,16 @@ const statusColors: Record<string, string> = {
               Reminder
             </th>
             <th class="px-4 py-2.5 font-medium">
-              When
+              Schedule
             </th>
             <th class="px-4 py-2.5 font-medium">
-              Schedule
+              Status
             </th>
             <th class="px-4 py-2.5 font-medium">
               Channel
             </th>
             <th class="px-4 py-2.5 font-medium">
-              Status
+              When
             </th>
             <th class="px-4 py-2.5 font-medium">
               Fired
@@ -391,82 +403,101 @@ const statusColors: Record<string, string> = {
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
-          <tr
+          <template
             v-for="r in reminders"
             :key="r.id"
-            class="hover:bg-muted/30 transition-colors"
           >
-            <td
-              v-if="selectMode"
-              class="px-4 py-2.5"
+            <tr class="hover:bg-muted/30 transition-colors">
+              <td
+                v-if="selectMode"
+                class="px-4 py-2.5"
+              >
+                <input
+                  type="checkbox"
+                  class="accent-red-500 cursor-pointer align-middle"
+                  :checked="selectedIds.has(r.id)"
+                  :aria-label="`Select ${r.name}`"
+                  @change="toggleSelection(r.id)"
+                >
+              </td>
+              <td class="px-4 py-2.5 text-fg-primary">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 text-left bg-transparent border-0 cursor-pointer text-fg-primary hover:text-fg-strong transition-colors"
+                  :aria-expanded="expandedIds.has(r.id)"
+                  :aria-label="`Toggle details for ${r.name}`"
+                  @click.stop="toggleExpand(r.id)"
+                >
+                  <ChevronRightIcon
+                    :class="expandedIds.has(r.id) ? 'rotate-90' : ''"
+                    class="h-3.5 w-3.5 text-fg-muted shrink-0 transition-transform"
+                    aria-hidden="true"
+                  />
+                  {{ r.name }}
+                </button>
+              </td>
+              <td class="px-4 py-2.5 text-xs text-fg-muted">
+                {{ reminderSchedule(r) }}
+              </td>
+              <td class="px-4 py-2.5 whitespace-nowrap">
+                <span
+                  :class="statusColors[r.status]"
+                  class="text-xs font-mono"
+                >{{ r.status }}</span>
+              </td>
+              <td class="px-4 py-2.5 whitespace-nowrap font-mono text-xs text-fg-muted">
+                {{ deliveryLabel(r) }}
+              </td>
+              <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
+                {{ whenLabel(r) }}
+              </td>
+              <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
+                {{ firedAtLabel(r) }}
+              </td>
+              <td class="px-4 py-2.5 whitespace-nowrap">
+                <input
+                  v-if="isOneShot(r)"
+                  type="checkbox"
+                  class="accent-emerald-500 cursor-pointer align-middle"
+                  :checked="r.autoDeleteOnComplete"
+                  :aria-label="`Auto-delete ${r.name} after it fires`"
+                  title="Auto-delete this reminder after a successful fire"
+                  @change="toggleAutoDelete(r, ($event.target as HTMLInputElement).checked)"
+                >
+                <span
+                  v-else
+                  class="text-fg-muted text-xs"
+                >—</span>
+              </td>
+              <td class="px-4 py-2.5 whitespace-nowrap text-right">
+                <button
+                  type="button"
+                  class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                  title="Delete reminder"
+                  :aria-label="`Delete ${r.name}`"
+                  @click="deleteOne(r)"
+                >
+                  <TrashIcon
+                    class="w-4 h-4"
+                    aria-hidden="true"
+                  />
+                </button>
+              </td>
+            </tr>
+            <tr
+              v-if="expandedIds.has(r.id)"
+              class="bg-muted/20"
             >
-              <input
-                type="checkbox"
-                class="accent-red-500 cursor-pointer align-middle"
-                :checked="selectedIds.has(r.id)"
-                :aria-label="`Select ${reminderBody(r)}`"
-                @change="toggleSelection(r.id)"
+              <td
+                :colspan="reminderColspan"
+                class="px-4 py-3"
               >
-            </td>
-            <td class="max-w-md px-4 py-2.5">
-              <div class="text-fg-primary">
-                {{ reminderBody(r) }}
-              </div>
-              <div
-                v-if="asString(r.description) && r.name && asString(r.description) !== r.name"
-                class="mt-0.5 text-xs text-fg-muted"
-              >
-                {{ r.name }}
-              </div>
-            </td>
-            <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
-              {{ whenLabel(r) }}
-            </td>
-            <td class="px-4 py-2.5 text-xs text-fg-muted">
-              {{ reminderSchedule(r) }}
-            </td>
-            <td class="px-4 py-2.5 whitespace-nowrap font-mono text-xs text-fg-muted">
-              {{ deliveryLabel(r) }}
-            </td>
-            <td class="px-4 py-2.5 whitespace-nowrap">
-              <span
-                :class="statusColors[r.status]"
-                class="text-xs font-mono"
-              >{{ r.status }}</span>
-            </td>
-            <td class="px-4 py-2.5 whitespace-nowrap text-fg-muted text-xs">
-              {{ firedAtLabel(r) }}
-            </td>
-            <td class="px-4 py-2.5 whitespace-nowrap">
-              <input
-                v-if="isOneShot(r)"
-                type="checkbox"
-                class="accent-emerald-500 cursor-pointer align-middle"
-                :checked="r.autoDeleteOnComplete"
-                :aria-label="`Auto-delete ${reminderBody(r)} after it fires`"
-                title="Auto-delete this reminder after a successful fire"
-                @change="toggleAutoDelete(r, ($event.target as HTMLInputElement).checked)"
-              >
-              <span
-                v-else
-                class="text-fg-muted text-xs"
-              >—</span>
-            </td>
-            <td class="px-4 py-2.5 whitespace-nowrap text-right">
-              <button
-                type="button"
-                class="p-1 text-fg-muted hover:text-red-400 transition-colors"
-                title="Delete reminder"
-                :aria-label="`Delete ${reminderBody(r)}`"
-                @click="deleteOne(r)"
-              >
-                <TrashIcon
-                  class="w-4 h-4"
-                  aria-hidden="true"
-                />
-              </button>
-            </td>
-          </tr>
+                <div class="max-w-3xl whitespace-pre-wrap break-words text-sm text-fg-primary">
+                  {{ reminderBody(r) }}
+                </div>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
     </section>
