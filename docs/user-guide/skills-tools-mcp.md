@@ -21,7 +21,7 @@ A skill is a chunk of markdown — instructions, examples, a methodology — tha
 - An output template ("respond in JSON with these fields").
 - A persona ("you are a careful, thorough technical reviewer").
 
-Skills can also contribute shell commands to an agent's effective allowlist (visible on the [Agents](/guide#agents) edit form under *Shell Allowlist*) — so a "git wrangler" skill can grant the commands it needs without each operator hand-editing the global allowlist.
+Skills can also contribute shell commands to an agent's effective allowlist (visible on the [Agents](/guide#agents) edit form under *Shell Allowlist*) — so a "git wrangler" skill can grant the commands it needs without you hand-editing the global allowlist.
 
 ### Global skills vs Agent skills
 

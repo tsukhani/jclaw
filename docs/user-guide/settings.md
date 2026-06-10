@@ -26,10 +26,6 @@ For each provider you can:
 
 If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
 
-:::gotcha Keys are not portable
-Each operator's API keys are scoped to their own login. Sharing keys with a teammate means giving each of them their own copy on their own [Settings](/settings) page.
-:::
-
 ## OCR
 
 Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
@@ -100,7 +96,7 @@ Two knobs for the [Tasks](/guide#tasks) subsystem:
 | `retentionDays`           | 30      | Days a terminal task (`COMPLETED` / `FAILED` / `CANCELLED` / `LOST`) stays in the DB before `TaskCleanupJob` hard-deletes it along with its run history. `0` disables auto-cleanup entirely. Active tasks (`PENDING` / `ACTIVE` / `RUNNING`) are never touched. Max: 3650 (≈10 years). |
 | `defaultTimezone`         | `UTC`   | IANA timezone applied to `CRON` / `SCHEDULED` tasks that don't specify their own. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
 
-The retention TTL is also displayed next to the [Tasks](/tasks) page title so operators don't get surprised by auto-deletes.
+The retention TTL is also displayed next to the [Tasks](/tasks) page title so you don't get surprised by auto-deletes.
 
 ## Performance
 

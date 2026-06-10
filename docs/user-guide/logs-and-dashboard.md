@@ -18,7 +18,7 @@ The [Dashboard](/) is the first thing you see after signing in. Four stat cards 
 | **Channels**      | Number of currently-active external channels — web + Telegram bindings + Slack/WhatsApp configs.       |
 | **Tasks**         | Three sub-stats side by side: **Active** (recurring `CRON` / `INTERVAL` in steady state), **Running** (currently firing), **Pending** (`SCHEDULED` / `IMMEDIATE` waiting). |
 
-The Tasks card's three-way split is intentional — operators want to see `RUNNING` tick up and back down during a fire without going to the Tasks page.
+The Tasks card's three-way split is intentional — you want to see `RUNNING` tick up and back down during a fire without going to the Tasks page.
 
 ### Refresh cadence
 

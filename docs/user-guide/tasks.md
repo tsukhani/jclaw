@@ -212,7 +212,7 @@ A recurring task stays scheduled across server restarts. If you bind a noisy tas
 The agent rejects a `createTask` call when an agent already has a non-cancelled recurring task with the same name. Use `updateTask` to change the existing row, or `cancelTask` it first.
 :::
 
-:::note Multi-tenancy
+:::note Per-agent scoping
 Tasks are scoped to the owning agent. One agent never sees, pauses, or cancels another agent's tasks of the same name. The `runNow` and `cancelTask` actions only operate on tasks the calling agent owns.
 :::
 

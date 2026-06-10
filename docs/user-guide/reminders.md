@@ -119,7 +119,7 @@ POST /api/tasks
 - `delivery: "web"` or `"telegram"` (channel name only, no `:target`) → fills the target from the calling chat.
 - `delivery: "telegram:<chatId>"` → explicit Telegram route, regardless of where the call originated.
 
-Most operators will never touch this endpoint — say it out loud in [Chat](/chat) and the agent will do the right thing.
+You'll likely never touch this endpoint — say it out loud in [Chat](/chat) and the agent will do the right thing.
 
 ## Tips and gotchas
 
