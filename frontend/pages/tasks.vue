@@ -96,27 +96,14 @@ const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
 
 // JCLAW-259: surface the retention TTL in the page header so operators
-// know when terminal tasks will auto-delete. Read the single config key
-// rather than the whole /api/config list to keep the request cheap.
-// Reactive on visit only — the TaskCleanupJob runs daily off the chat
-// hot path so the value doesn't change mid-session; if the operator
-// updates it in Settings, navigating back here refreshes naturally.
-interface RetentionConfigEntry { value?: string }
-const retentionConfig = await useFetch<RetentionConfigEntry>('/api/config/tasks.retentionDays', {
-  // The endpoint returns 404 when the key is absent — that's the
-  // "use default" case, not an error. Suppress the throw so the page
-  // still renders.
-  default: (): RetentionConfigEntry => ({}),
-  // Don't propagate the 404 to the page-level error boundary; surface
-  // it as an empty payload so the computed below resolves to the
-  // default-days branch.
-  onResponseError: ({ response }) => { if (response.status === 404) response._data = {} },
-})
-
+// know when terminal tasks will auto-delete. The effective value rides on
+// the stats payload (TaskCleanupJob.resolveRetentionDays, resolved
+// server-side) — so the default lives only in the backend, the client
+// never re-derives it, and there's no separate config fetch that 404s when
+// the key is unset. Reactive on visit and on every stats refresh.
 const retentionDisplay = computed(() => {
-  const raw = retentionConfig.data.value?.value
-  const days = raw == null || raw === '' ? 30 : Number.parseInt(raw, 10)
-  if (!Number.isFinite(days)) return 'Retention: 30 days (default)'
+  const days = stats.value?.retentionDays
+  if (days == null) return null
   if (days === 0) return 'Retention: disabled — terminal tasks kept forever'
   return `Retention: ${days} day${days === 1 ? '' : 's'}`
 })
@@ -797,6 +784,7 @@ function zoneForTaskRender(task: Task): string | undefined {
              operators don't get surprised by auto-deletes. Sourced from
              tasks.retentionDays (default 30, 0 = disabled). -->
         <NuxtLink
+          v-if="retentionDisplay"
           to="/settings"
           class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
           title="Configure in Settings → Tasks"

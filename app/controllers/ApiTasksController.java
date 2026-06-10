@@ -405,7 +405,7 @@ public class ApiTasksController extends Controller {
      */
     private record TaskStatsView(long runsToday, Double successRate, Double avgDurationMs,
                                  long pendingCount, long runningCount, long activeCount,
-                                 long failedCount) {}
+                                 long failedCount, int retentionDays) {}
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
@@ -439,7 +439,12 @@ public class ApiTasksController extends Controller {
                 // rather than Task.Status.RUNNING, which nothing currently sets.
                 countRunningRuns(payloadType, excludePayloadType),
                 countTasks(Task.Status.ACTIVE, payloadType, excludePayloadType),
-                countTasks(Task.Status.FAILED, payloadType, excludePayloadType));
+                countTasks(Task.Status.FAILED, payloadType, excludePayloadType),
+                // JCLAW-259: carry the effective retention TTL so the page
+                // header renders it without a separate config fetch (which
+                // 404s when the key is unset). Resolved server-side so the
+                // default lives only in TaskCleanupJob, never in the client.
+                jobs.TaskCleanupJob.resolveRetentionDays());
         renderJSON(gson.toJson(payload));
     }
 

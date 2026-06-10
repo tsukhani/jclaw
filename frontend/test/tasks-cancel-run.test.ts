@@ -52,7 +52,6 @@ function registerTaskMounts(rows: TaskFixture[]) {
     pendingCount: 0, runningCount: rows.filter(r => r.runningRunId != null).length, failedCount: 0,
   }))
   registerEndpoint('/api/task-runs/recent', () => [])
-  registerEndpoint('/api/config/tasks.retentionDays', () => ({ value: null }))
   for (const r of rows) {
     registerEndpoint(`/api/tasks/${r.id}/runs`, () => [])
   }

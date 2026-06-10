@@ -39,7 +39,6 @@ function setupMockApi() {
   registerEndpoint('/api/conversations/channels', () => ['web', 'telegram'])
   registerEndpoint('/api/tasks', () => [])
   registerEndpoint('/api/subagent-runs', () => [])
-  registerEndpoint('/api/config/tasks.retentionDays', () => ({ value: null }))
 }
 
 describe('FilterBar — JCLAW-328 q: dispatch contract', () => {

@@ -40,7 +40,6 @@ describe('Tasks page — Reset stats refreshes open run history', () => {
       pendingCount: 0, runningCount: 0, failedCount: 0,
     }))
     registerEndpoint('/api/task-runs/recent', () => [])
-    registerEndpoint('/api/config/tasks.retentionDays', () => ({ value: null }))
     registerEndpoint('/api/tasks/1/runs', () => {
       runsCalls++
       return didReset

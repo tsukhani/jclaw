@@ -520,6 +520,13 @@ export interface TaskStats {
   runningCount: number
   activeCount: number
   failedCount: number
+  /**
+   * Effective task-retention TTL in days, resolved server-side from
+   * tasks.retentionDays (TaskCleanupJob): absent/invalid collapses to the
+   * backend default, 0 means cleanup is disabled. The client renders this
+   * verbatim and never re-derives the default.
+   */
+  retentionDays: number
 }
 
 /** A single persisted model on a provider (stored inside provider.{name}.models JSON). */
