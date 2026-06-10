@@ -61,6 +61,8 @@ describe('channels page — Slack guidance (JCLAW-83) + Tailscale Funnel (JCLAW-
     const component = await mountSuspended(Channels)
     const button = component.findAll('button').find(b => b.text() === 'Enable Funnel')
     expect(button?.attributes('disabled')).toBeDefined()
+    // The resume hint only applies when the operator has the funnel switched on.
+    expect(component.text()).not.toContain('will resume automatically')
   })
 
   it('enables Enable Funnel when Tailscale is installed and connected', async () => {
@@ -75,6 +77,8 @@ describe('channels page — Slack guidance (JCLAW-83) + Tailscale Funnel (JCLAW-
     const component = await mountSuspended(Channels)
     const button = component.findAll('button').find(b => b.text() === 'Disable Funnel')
     expect(button?.attributes('disabled')).toBeUndefined()
+    // enabled (unavailable) is a self-healing state, not a stuck one — say so.
+    expect(component.text()).toContain('The funnel will resume automatically when Tailscale reconnects.')
   })
 
   it('uses the funnel public URL as the Slack request URL when the funnel is active', async () => {

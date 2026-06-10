@@ -327,6 +327,10 @@ onActivated(() => refreshBindings())
         class="text-xs text-amber-400 mb-3"
       >
         {{ tailscale?.error }}
+        <span
+          v-if="tailscale?.enabled"
+          class="block text-fg-muted mt-1"
+        >The funnel will resume automatically when Tailscale reconnects.</span>
       </p>
       <button
         :disabled="tailscaleToggling || funnelEnableBlocked"
