@@ -71,7 +71,7 @@ JClaw is Abundent's AI-powered automation platform — built from scratch in **p
 - **[OpenClaw](https://github.com/tsukhani/openclaw)** (Node.js/TypeScript) — agent orchestration, memory system, conversational AI patterns
 - **[JavaClaw](https://github.com/jobrunr/javaclaw)** (Spring Boot) — job scheduling, background task processing, browser automation
 
-The implementation is entirely original — no code is shared with either project. JClaw is built on lean library primitives (OkHttp 5, ProcessBuilder, virtual threads, JPA) with no Spring, no heavy framework bloat, and no Node.js runtime on the server. The result is a leaner, faster, more maintainable platform for building AI agents and automation workflows.
+The implementation is entirely original — no code is shared with either project. JClaw is built on lean library primitives (OkHttp 5, db-scheduler, ProcessBuilder, virtual threads, JPA) with no Spring, no heavy framework bloat, and no Node.js runtime on the server. The result is a leaner, faster, more maintainable platform for building AI agents and automation workflows.
 
 ---
 
@@ -87,7 +87,7 @@ The implementation is entirely original — no code is shared with either projec
 ## Features
 
 - 🤖 **Agent System** — Conversational AI agents with memory and context
-- ⚡ **Job Scheduling** — Background tasks, cron jobs, and distributed execution
+- ⚡ **Job Scheduling** — Persistent cron & scheduled tasks via db-scheduler, with automatic retries and crash recovery
 - 🔧 **Pure Java** — No Python/JavaScript runtimes required
 - 📦 **Built-in Frontend** — Nuxt 4 SPA (Vue 3 + TypeScript)
 - 🔌 **Plugin Architecture** — Modular, extensible design
@@ -102,16 +102,23 @@ The implementation is entirely original — no code is shared with either projec
 jclaw/
 ├── app/                          # Application code
 │   ├── controllers/              # HTTP controllers (Play 1.x pattern)
-│   ├── models/                   # Domain models, entities
-│   ├── services/                 # Business logic, services
+│   ├── models/                   # JPA domain entities
+│   ├── services/                 # Business logic (incl. db-scheduler bridge)
 │   ├── agents/                   # AI agent implementations
-│   ├── jobs/                     # Background job handlers
-│   ├── skills/                   # Modular skills/plugins
+│   ├── channels/                 # Messaging channels (web, Telegram, Slack)
+│   ├── llm/                      # LLM provider drivers (OkHttp 5)
+│   ├── tools/                    # Agent tool implementations
+│   ├── memory/                   # Agent memory stores (JPA-backed)
+│   ├── mcp/                      # Model Context Protocol client
+│   ├── slash/                    # Slash-command handlers
+│   ├── jobs/                     # Play @Every jobs + db-scheduler handlers
+│   ├── views/                    # Groovy server templates
 │   └── utils/                    # Utility classes
 ├── conf/                         # Play configuration
 │   ├── application.conf          # Main app config
 │   ├── routes                    # URL routing
-│   └── initial-data.yml          # Bootstrap data
+│   ├── play.plugins              # Play plugin registration
+│   └── log4j2.xml                # Logging configuration
 ├── frontend/                     # Nuxt 4 SPA (SPA-only; ssr: false)
 │   ├── app.vue                   # Root component
 │   ├── layouts/                  # Page layouts
@@ -127,7 +134,6 @@ jclaw/
 ├── test/                         # Unit and integration tests
 ├── tmp/                          # Play temp/runtime files
 ├── logs/                         # Application logs
-├── .github/                      # GitHub workflows (if migrated)
 └── README.md                     # This file
 ```
 
@@ -440,7 +446,7 @@ Run the backend and frontend test suites together and print a consolidated pass/
 ./jclaw.sh test
 ```
 
-This runs `play auto-test` (backend JUnit + functional tests) followed by `pnpm test` (frontend Vitest), streams each side's output live, and finishes with a two-line verdict like:
+This runs `play autotest` (backend JUnit + functional tests) followed by `pnpm test` (frontend Vitest), streams each side's output live, and finishes with a two-line verdict like:
 
 ```
  backend  : PASSED  (47 classes, 26s)
@@ -469,7 +475,8 @@ To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP
 - **Controllers**: RESTful API endpoints
 - **Services**: Business logic with dependency injection
 - **Agents**: Conversational AI with memory/context persistence
-- **Jobs**: Background processing powered by Play's built-in job system
+- **Jobs**: Internal maintenance (cleanup, probes, boot checks) on Play's built-in `@Every` / `@OnApplicationStart` job system
+- **Scheduling**: User-facing Tasks — cron, scheduled, and immediate — run on [db-scheduler](https://github.com/kagkarlsson/db-scheduler), persisted in a `scheduled_tasks` table with atomic row-claim, pluggable retries, and heartbeat-based dead-execution recovery
 
 ### Frontend (Nuxt 4)
 
