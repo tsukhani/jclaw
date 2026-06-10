@@ -56,6 +56,27 @@ describe('channels page — Slack guidance (JCLAW-83) + Tailscale Funnel (JCLAW-
     expect(text).toContain('Enable Funnel')
   })
 
+  it('disables Enable Funnel while Tailscale is unavailable', async () => {
+    tailscaleResponse = { enabled: false, available: false, publicUrl: null, error: 'Tailscale is installed but not connected (state: Stopped)' }
+    const component = await mountSuspended(Channels)
+    const button = component.findAll('button').find(b => b.text() === 'Enable Funnel')
+    expect(button?.attributes('disabled')).toBeDefined()
+  })
+
+  it('enables Enable Funnel when Tailscale is installed and connected', async () => {
+    tailscaleResponse = { enabled: false, available: true, publicUrl: null, error: null }
+    const component = await mountSuspended(Channels)
+    const button = component.findAll('button').find(b => b.text() === 'Enable Funnel')
+    expect(button?.attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps Disable Funnel clickable even when Tailscale becomes unavailable', async () => {
+    tailscaleResponse = { enabled: true, available: false, publicUrl: null, error: 'tailscale CLI not available or tailscaled not running' }
+    const component = await mountSuspended(Channels)
+    const button = component.findAll('button').find(b => b.text() === 'Disable Funnel')
+    expect(button?.attributes('disabled')).toBeUndefined()
+  })
+
   it('uses the funnel public URL as the Slack request URL when the funnel is active', async () => {
     tailscaleResponse = { enabled: true, available: true, publicUrl: 'https://jclaw.tnet.ts.net', error: null }
     const component = await mountSuspended(Channels)

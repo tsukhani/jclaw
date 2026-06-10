@@ -129,6 +129,11 @@ const { mutate, loading: saving } = useApiMutation()
 // JCLAW-84: app-level Tailscale Funnel toggle. Exposes this whole instance (one
 // port serves every channel webhook), so it's one switch, not per-channel.
 const tailscaleToggling = ref(false)
+// Enabling requires Tailscale to be installed AND connected (available); the
+// disable direction stays clickable so a broken Tailscale can't trap the
+// toggle in the on state.
+const funnelEnableBlocked = computed(() =>
+  !tailscale.value?.enabled && !tailscale.value?.available)
 async function toggleTailscale() {
   tailscaleToggling.value = true
   const next = !(tailscale.value?.enabled ?? false)
@@ -324,8 +329,8 @@ onActivated(() => refreshBindings())
         {{ tailscale?.error }}
       </p>
       <button
-        :disabled="tailscaleToggling"
-        class="px-4 py-1.5 text-sm font-medium border disabled:opacity-40 transition-colors"
+        :disabled="tailscaleToggling || funnelEnableBlocked"
+        class="px-4 py-1.5 text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         :class="tailscale?.enabled
           ? 'border-input text-fg-strong hover:border-ring hover:bg-muted'
           : 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500'"
