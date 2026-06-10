@@ -176,7 +176,7 @@ Killed runs don't get an announce card. The `/subagent kill` response *is* your 
 :::
 
 :::tip Scoping
-Subagents are scoped to your login. You can't see or kill another user's runs from the [Subagents](/subagents) page or the `/subagent` command.
+Every subagent run belongs to you. JClaw Personal Edition has a single **admin** operator, so the [Subagents](/subagents) page and the `/subagent` command show and control every run on the instance.
 :::
 
 ## Where to go next
