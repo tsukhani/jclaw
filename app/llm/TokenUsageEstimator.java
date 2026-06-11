@@ -1,5 +1,7 @@
 package llm;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.gson.Gson;
 import com.knuddels.jtokkit.Encodings;
 import com.knuddels.jtokkit.api.Encoding;
@@ -30,6 +32,26 @@ public final class TokenUsageEstimator {
 
     private static final Gson gson = INSTANCE;
     private static final EncodingRegistry REGISTRY = Encodings.newLazyEncodingRegistry();
+
+    /**
+     * Memoized token counts keyed by {@code (encoding, text)}. A chat request
+     * re-includes the full conversation history every turn, so without this the
+     * same immutable historical message is re-tokenized on every subsequent turn
+     * — O(N²) BPE work over a conversation, and the #1 CPU hotspot under load
+     * profiling. {@link Encoding#countTokensOrdinary(String)} is a pure function
+     * of {@code (encoding, text)}, so caching is behavior-preserving. Bounded by
+     * total cached characters with W-TinyLFU eviction, so the memo can never
+     * itself leak; {@code recordStats} backs {@link #tokenCacheHitCount()}.
+     */
+    private static final Cache<TokenKey, Integer> COUNT_CACHE = Caffeine.newBuilder()
+            .maximumWeight(16_000_000)
+            .weigher((TokenKey k, Integer v) -> k.text().length())
+            .recordStats()
+            .build();
+
+    /** Memo key. {@code encoding} instances are lazy-registry singletons, so
+     *  identity equality is the correct — and cheapest — match. */
+    private record TokenKey(Encoding encoding, String text) {}
 
     private static final int TOKENS_PER_MESSAGE = 3;
     private static final int TOKENS_PER_NAME = 1;
@@ -142,7 +164,16 @@ public final class TokenUsageEstimator {
 
     private static int count(Encoding encoding, String text) {
         if (text == null || text.isEmpty()) return 0;
-        return encoding.countTokensOrdinary(text);
+        return COUNT_CACHE.get(new TokenKey(encoding, text),
+                k -> k.encoding().countTokensOrdinary(k.text()));
+    }
+
+    /**
+     * Cache-hit count for the token-count memo — diagnostics and tests only.
+     * Monotonic across the JVM lifetime.
+     */
+    public static long tokenCacheHitCount() {
+        return COUNT_CACHE.stats().hitCount();
     }
 
     private static ResolvedEncoding resolveEncoding(String model) {

@@ -55,6 +55,24 @@ class TokenUsageEstimatorTest extends UnitTest {
     }
 
     @Test
+    void repeatedTokenizationOfIdenticalContentHitsTheCache() {
+        // A chat request re-includes the full history every turn, so the same
+        // immutable message is tokenized again on the next turn. The memo must
+        // serve that repeat from cache while returning an identical count.
+        var msg = ChatMessage.user("memoization probe: the quick brown fox jumps "
+                + "over the lazy dog, repeatedly, across many conversation turns");
+
+        long hitsBefore = TokenUsageEstimator.tokenCacheHitCount();
+        var first = TokenUsageEstimator.estimateMessage("gpt-4o", msg);
+        var second = TokenUsageEstimator.estimateMessage("gpt-4o", msg);
+
+        assertEquals(first.tokens(), second.tokens(),
+                "memoized re-count must equal the first count");
+        assertTrue(TokenUsageEstimator.tokenCacheHitCount() > hitsBefore,
+                "re-tokenizing identical content must be served from the cache");
+    }
+
+    @Test
     void completionEstimateIncludesReasoningText() {
         var contentOnly = TokenUsageEstimator.estimateCompletion(
                 "gpt-4o", "final answer", List.of(), null);
