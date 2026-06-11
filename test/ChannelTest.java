@@ -571,7 +571,7 @@ class ChannelTest extends UnitTest {
                 }
                 """).getAsJsonObject();
 
-        var msg = SlackChannel.parseEvent(json);
+        var msg = SlackChannel.parseEvent(json, null);
         assertNotNull(msg);
         assertEquals("C01234567", msg.channelId());
         assertEquals("U99999", msg.userId());
@@ -592,8 +592,30 @@ class ChannelTest extends UnitTest {
                 }
                 """).getAsJsonObject();
 
-        var msg = SlackChannel.parseEvent(json);
+        var msg = SlackChannel.parseEvent(json, null);
         assertNull(msg);
+    }
+
+    @Test
+    void slackIgnoreSelfMessageByBotUserId() {
+        // JCLAW-357 self-loop guard: a plain message (no bot_id) from the
+        // binding's own bot user id is dropped when that id is passed in. The
+        // same payload with a different bot id is NOT dropped (control).
+        var json = JsonParser.parseString("""
+                {
+                    "type": "event_callback",
+                    "event": {
+                        "type": "message",
+                        "channel": "C01234567",
+                        "user": "UBOTSELF",
+                        "text": "my own echo"
+                    }
+                }
+                """).getAsJsonObject();
+        assertNull(SlackChannel.parseEvent(json, "UBOTSELF"),
+                "message from the bot's own user id must be dropped");
+        assertNotNull(SlackChannel.parseEvent(json, "USOMEONEELSE"),
+                "a different bot id must not drop a real user's message");
     }
 
     @Test
@@ -610,7 +632,7 @@ class ChannelTest extends UnitTest {
                 }
                 """).getAsJsonObject();
 
-        var msg = SlackChannel.parseEvent(json);
+        var msg = SlackChannel.parseEvent(json, null);
         assertNull(msg);
     }
 
@@ -629,7 +651,7 @@ class ChannelTest extends UnitTest {
                 }
                 """).getAsJsonObject();
 
-        var msg = SlackChannel.parseEvent(json);
+        var msg = SlackChannel.parseEvent(json, null);
         assertNotNull(msg);
         assertEquals("1700000000.000100", msg.threadTs());
     }
@@ -648,7 +670,7 @@ class ChannelTest extends UnitTest {
                 }
                 """).getAsJsonObject();
 
-        var msg = SlackChannel.parseEvent(json);
+        var msg = SlackChannel.parseEvent(json, null);
         assertNotNull(msg);
         assertNull(msg.threadTs());
     }
@@ -908,10 +930,20 @@ class ChannelTest extends UnitTest {
     }
 
     @Test
-    void channelRegistryResolvesConcreteChannelsForSlackAndWhatsApp() {
+    void channelRegistryReturnsNullForSlackWithoutAnEnabledBinding() {
+        // SLACK is per-agent-binding now (JCLAW-441), like Telegram: with no
+        // enabled binding the registry returns null so the caller drops the
+        // dispatch. A null agent (queue-dispatch without agent context) can't
+        // resolve a bot token either, so it's null too.
         var slack = ChannelRegistry.forChannel("slack", null, "C-chan");
+        assertNull(slack);
+    }
+
+    @Test
+    void channelRegistryResolvesConcreteChannelForWhatsApp() {
+        // WhatsApp's Cloud API token is workspace-scoped (not per-agent), so the
+        // registry yields a concrete stateless adapter without a binding lookup.
         var whatsapp = ChannelRegistry.forChannel("whatsapp", null, "12025550000");
-        assertInstanceOf(SlackChannel.class, slack);
         assertInstanceOf(WhatsAppChannel.class, whatsapp);
     }
 

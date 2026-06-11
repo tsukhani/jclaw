@@ -3,6 +3,7 @@ import channels.ChannelTransport;
 import models.Agent;
 import models.ChannelConfig;
 import models.EventLog;
+import models.SlackBinding;
 import models.TelegramBinding;
 import play.test.*;
 import services.EventLogger;
@@ -78,42 +79,34 @@ class WebhookControllerTest extends FunctionalTest {
         assertEquals(200, response.status.intValue());
     }
 
-    // ===== Slack =====
+    // ===== Slack (JCLAW-441: per-binding) =====
 
     @Test
-    void slackWebhookReturns401WhenUnconfigured() {
-        // No ChannelConfig row — SlackConfig.load() returns null, the JCLAW-16
-        // guard rejects before any body parse.
-        var response = POST("/api/webhooks/slack", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
+    void slackWebhookReturns404ForUnknownBinding() {
+        // The URL carries the binding id; an unknown id is rejected before any
+        // body/signature work (and audited).
+        var response = POST("/api/webhooks/slack/99999", "application/json", "{}");
+        assertEquals(404, response.status.intValue());
         assertSignatureFailureLogged("slack");
     }
 
     @Test
-    void slackWebhookReturns401WhenConfigDisabled() {
-        // Row exists but enabled=false — SlackConfig.load() returns null, same
-        // rejection path as fully unconfigured.
-        commitInFreshTx(() -> {
-            var cc = new ChannelConfig();
-            cc.channelType = "slack";
-            cc.enabled = false;
-            cc.configJson = "{\"botToken\":\"xoxb-test\",\"signingSecret\":\"s\"}";
-            cc.save();
-            return cc.id;
-        });
-        ChannelConfig.evictCache("slack");
-
-        var response = POST("/api/webhooks/slack", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
+    void slackWebhookReturns403ForDisabledBinding() {
+        // Binding exists but enabled=false — rejected with 403 before any body
+        // parse, distinct from the unknown-binding 404.
+        var bindingId = seedSlackBinding(false);
+        var response = POST("/api/webhooks/slack/" + bindingId, "application/json", "{}");
+        assertEquals(403, response.status.intValue());
+        assertSignatureFailureLogged("slack");
     }
 
     @Test
     void slackWebhookReturns401WhenSignatureHeadersMissing() {
-        // Config is valid, but the inbound POST omits both x-slack-signature
-        // and x-slack-request-timestamp — controller must reject before any
-        // signature compute.
-        seedSlackConfig();
-        var response = POST("/api/webhooks/slack",
+        // Binding is valid + enabled, but the inbound POST omits both
+        // x-slack-signature and x-slack-request-timestamp — controller must
+        // reject before any signature compute.
+        var bindingId = seedSlackBinding(true);
+        var response = POST("/api/webhooks/slack/" + bindingId,
                 "application/json", "{\"type\":\"event_callback\"}");
         assertEquals(401, response.status.intValue());
         assertSignatureFailureLogged("slack");
@@ -209,16 +202,23 @@ class WebhookControllerTest extends FunctionalTest {
         });
     }
 
-    private void seedSlackConfig() {
-        commitInFreshTx(() -> {
-            var cc = new ChannelConfig();
-            cc.channelType = "slack";
-            cc.enabled = true;
-            cc.configJson = "{\"botToken\":\"xoxb-test\",\"signingSecret\":\"test-secret\"}";
-            cc.save();
-            return cc.id;
+    private Long seedSlackBinding(boolean enabled) {
+        return commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "slack-binding-agent-" + System.nanoTime();
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+
+            var binding = new SlackBinding();
+            binding.agent = agent;
+            binding.botToken = "xoxb-test-" + System.nanoTime();
+            binding.signingSecret = "test-secret";
+            binding.transport = ChannelTransport.HTTP;
+            binding.enabled = enabled;
+            binding.save();
+            return binding.id;
         });
-        ChannelConfig.evictCache("slack");
     }
 
     private void seedWhatsAppConfig() {

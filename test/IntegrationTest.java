@@ -114,7 +114,7 @@ class IntegrationTest extends UnitTest {
                 }
                 """).getAsJsonObject();
 
-        var msg = SlackChannel.parseEvent(payload);
+        var msg = SlackChannel.parseEvent(payload, null);
         assertNotNull(msg);
         assertEquals("C01234567", msg.channelId());
         assertEquals("Hey from Slack", msg.text());

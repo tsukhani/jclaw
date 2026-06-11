@@ -2,6 +2,7 @@ package channels;
 
 import models.ChannelType;
 import models.Conversation;
+import models.SlackBinding;
 import models.TelegramBinding;
 
 /**
@@ -11,15 +12,15 @@ import models.TelegramBinding;
  * that returned {@code null} for the two commonest channels (Telegram, Web) and
  * forced every caller to special-case them.
  *
- * <p>Telegram is per-binding: the bot token lives on the matching
- * {@link TelegramBinding} (looked up from the conversation's agent + peer), so
- * the resolved instance carries that token. Slack and WhatsApp are stateless
- * adapters. Web is a no-op push channel (replies are DB-persisted).
+ * <p>Telegram and Slack are per-binding: the bot token lives on the matching
+ * {@link TelegramBinding} / {@link SlackBinding} (looked up from the
+ * conversation's agent), so the resolved instance carries that token. WhatsApp
+ * is a stateless adapter. Web is a no-op push channel (replies are DB-persisted).
  *
  * <p>Returns {@code null} only when no usable channel exists — an unknown
- * channel-type string, or a Telegram conversation with no enabled binding — so
- * callers can drop the dispatch (the same way the old null branch did) rather
- * than throwing.
+ * channel-type string, or a Telegram/Slack conversation with no enabled binding
+ * — so callers can drop the dispatch (the same way the old null branch did)
+ * rather than throwing.
  */
 public final class ChannelRegistry {
 
@@ -52,7 +53,12 @@ public final class ChannelRegistry {
                 var binding = TelegramBinding.findEnabledByAgentAndUser(agent, peerId);
                 yield binding == null ? null : TelegramChannel.forToken(binding.botToken);
             }
-            case SLACK -> new SlackChannel();
+            case SLACK -> {
+                // Slack is per-agent-binding like Telegram (JCLAW-441). A subagent
+                // reaches the user via an ancestor's bot, so walk the parent chain.
+                var binding = SlackBinding.findByAgentOrAncestor(agent);
+                yield (binding == null || !binding.enabled) ? null : SlackChannel.forToken(binding.botToken);
+            }
             case WHATSAPP -> new WhatsAppChannel();
             case WEB -> new WebChannel();
         };

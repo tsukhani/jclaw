@@ -42,13 +42,18 @@ public final class SlackStreamingSink {
         void postFallback(String channelId, String text, String threadTs);
     }
 
-    private static final Slacker LIVE = new Slacker() {
-        @Override public String startStream(String c, String th, String u, String init) { return SlackChannel.startStream(c, th, u, init); }
-        @Override public boolean appendStream(String c, String ts, String d) { return SlackChannel.appendStream(c, ts, d); }
-        @Override public boolean stopStream(String c, String ts) { return SlackChannel.stopStream(c, ts); }
-        @Override public void setStatus(String c, String th, String s) { SlackChannel.setAssistantStatus(c, th, s); }
-        @Override public void postFallback(String c, String text, String th) { SlackChannel.sendMessage(c, text, th); }
-    };
+    /** JCLAW-441: a live Slacker bound to one agent's bot token. The streaming +
+     *  fallback calls all carry {@code botToken} so the reply posts as that
+     *  binding's bot, not the legacy app-global identity. */
+    private static Slacker live(String botToken) {
+        return new Slacker() {
+            @Override public String startStream(String c, String th, String u, String init) { return SlackChannel.startStream(c, th, u, init, botToken); }
+            @Override public boolean appendStream(String c, String ts, String d) { return SlackChannel.appendStream(c, ts, d, botToken); }
+            @Override public boolean stopStream(String c, String ts) { return SlackChannel.stopStream(c, ts, botToken); }
+            @Override public void setStatus(String c, String th, String s) { SlackChannel.setAssistantStatus(c, th, s, botToken); }
+            @Override public void postFallback(String c, String text, String th) { SlackChannel.sendMessage(c, text, th, botToken); }
+        };
+    }
 
     private final String channelId;
     private final String threadTs;
@@ -63,8 +68,8 @@ public final class SlackStreamingSink {
     private boolean statusSet;   // true while the "is typing…" status is showing
     private long lastFlushMs;
 
-    public SlackStreamingSink(String channelId, String threadTs, String recipientUserId) {
-        this(channelId, threadTs, recipientUserId, LIVE, APPEND_THROTTLE_MS);
+    public SlackStreamingSink(String channelId, String threadTs, String recipientUserId, String botToken) {
+        this(channelId, threadTs, recipientUserId, live(botToken), APPEND_THROTTLE_MS);
     }
 
     /** Test seam: inject the Slacker and append throttle (0 = flush every update). */

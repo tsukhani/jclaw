@@ -2,14 +2,12 @@ package channels;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.slack.api.Slack;
 import com.slack.api.app_backend.SlackSignature;
 import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.request.chat.ChatPostMessageRequest;
 import com.slack.api.model.event.MessageEvent;
 import com.slack.api.util.json.GsonFactory;
-import models.ChannelConfig;
 import services.EventLogger;
 
 import java.io.IOException;
@@ -18,10 +16,15 @@ import java.io.IOException;
  * Slack Web API + Events API client, on the official Slack SDK (com.slack.api).
  *
  * <p>JCLAW-83: inbound uses {@link SlackSignature.Verifier} + the typed
- * {@link MessageEvent} model; outbound uses the Web API {@code MethodsClient}
- * ({@code chat.postMessage} with {@code mrkdwn} and {@code thread_ts}). The SDK
- * manages its own OkHttp client, so Slack traffic stays off JClaw's LLM/general
- * connection pools.
+ * {@link MessageEvent} model; outbound uses the Web API {@code MethodsClient}.
+ * The SDK manages its own OkHttp client, so Slack traffic stays off JClaw's
+ * LLM/general connection pools.
+ *
+ * <p>JCLAW-441: outbound is per-agent-binding. The send/stream methods take an
+ * explicit bot token (resolved from the agent's {@link models.SlackBinding} at
+ * the call site); {@link #forToken(String)} binds an instance to one agent's bot
+ * for the generic {@link Channel} send path ({@code DeliveryDispatcher},
+ * {@code ChannelRegistry}). There is no app-global Slack config.
  */
 public class SlackChannel implements Channel {
 
@@ -33,28 +36,27 @@ public class SlackChannel implements Channel {
     private static final String CHANNEL_NAME = "slack";
     private static final String CHANNEL = "channel";
 
+    /** This instance's per-agent bot token (JCLAW-441), or null for instances
+     *  used only for inbound/metadata ({@link #channelName}, file-send no-ops).
+     *  The generic {@link Channel} send path requires it. */
+    private final String botToken;
+
     /** Optional Slack {@code thread_ts} this instance replies into (JCLAW-83);
-     *  null = post at channel level. Set per-send via
-     *  {@link #sendMessage(String, String, String)} so the shared
-     *  {@link Channel#trySend} contract stays thread-unaware. Each outbound send
-     *  uses its own instance, so this final field is safe to read off the
-     *  retry path. */
+     *  null = post at channel level. */
     private final String outboundThreadTs;
 
-    public SlackChannel() { this(null); }
+    public SlackChannel() { this(null, null); }
 
-    private SlackChannel(String outboundThreadTs) { this.outboundThreadTs = outboundThreadTs; }
+    private SlackChannel(String botToken, String outboundThreadTs) {
+        this.botToken = botToken;
+        this.outboundThreadTs = outboundThreadTs;
+    }
 
-    public record SlackConfig(String botToken, String signingSecret) {
-        public static SlackConfig load() {
-            var cc = ChannelConfig.findByType(CHANNEL_NAME);
-            if (cc == null || !cc.enabled) return null;
-            var json = JsonParser.parseString(cc.configJson).getAsJsonObject();
-            return new SlackConfig(
-                    json.get("botToken").getAsString(),
-                    json.get("signingSecret").getAsString()
-            );
-        }
+    /** JCLAW-441: an instance bound to one agent's bot token, for the generic
+     *  {@link Channel} send path. Slack's SDK client is per-token + stateless, so
+     *  no caching is needed (unlike Telegram's {@code forToken}). */
+    public static SlackChannel forToken(String botToken) {
+        return new SlackChannel(botToken, null);
     }
 
     @Override
@@ -62,64 +64,50 @@ public class SlackChannel implements Channel {
 
     /**
      * JCLAW-141: generic cross-channel text send (the {@link Channel} contract).
-     * Posts {@code text} at channel level via the shared retry policy, behaviorally
-     * identical to the {@code sendWithRetry} path the queue-drain dispatcher used
-     * before this refactor — so no formatting is applied here. The mrkdwn-formatting
-     * + thread-aware reply path is the static {@link #sendMessage(String, String,
-     * String)}, which the live webhook/streaming-fallback path uses and which is
-     * outside the generic Channel contract (it carries Slack's {@code thread_ts}).
+     * Still resolves the legacy app-global token; JCLAW-441 unit 5 switches this
+     * to the agent's binding via {@code DeliveryDispatcher}.
      */
     @Override
     public SendResult sendText(String peerId, String text) {
         return sendWithRetry(peerId, text) ? SendResult.OK : SendResult.FAILED;
     }
 
-    /**
-     * JCLAW-141: Slack outbound here is the Web API {@code chat.postMessage} text
-     * path only — JClaw has no native Slack file-upload send today, so a photo
-     * delivery isn't supported. Returns {@link SendResult#FAILED} (the interface
-     * default) explicitly so the no-op is unambiguous at this call site.
-     */
+    /** JCLAW-141: no native Slack file-upload send today (JCLAW-345). */
     @Override
     public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
         return SendResult.FAILED;
     }
 
-    /** JCLAW-141: no native Slack file-upload send — see {@link #sendPhoto}. */
+    /** JCLAW-141: no native Slack file-upload send today (JCLAW-345). */
     @Override
     public SendResult sendDocument(String peerId, java.io.File file, String caption) {
         return SendResult.FAILED;
     }
 
-    public static boolean sendMessage(String channelId, String text) {
-        return sendMessage(channelId, text, null);
-    }
-
-    /** Send to {@code channelId}, optionally replying into {@code threadTs}
-     *  (JCLAW-83). {@code threadTs} null posts at channel level. */
-    public static boolean sendMessage(String channelId, String text, String threadTs) {
-        var config = SlackConfig.load();
-        if (config == null) {
-            EventLogger.error(CHANNEL, null, CHANNEL_NAME, "Slack not configured");
+    /**
+     * JCLAW-441: send to {@code channelId} as the bot identified by {@code botToken},
+     * optionally replying into {@code threadTs}. Agents emit CommonMark; convert to
+     * Slack mrkdwn so it renders formatted.
+     */
+    public static boolean sendMessage(String channelId, String text, String threadTs, String botToken) {
+        if (botToken == null || botToken.isBlank()) {
+            EventLogger.error(CHANNEL, null, CHANNEL_NAME, "Slack send: no bot token");
             return false;
         }
-        // JCLAW-341: agents emit CommonMark; convert to Slack mrkdwn so it renders
-        // formatted instead of showing literal **bold** / # headings / [t](u).
-        return new SlackChannel(threadTs).sendWithRetry(channelId, SlackMarkdownFormatter.format(text));
+        return new SlackChannel(botToken, threadTs).trySend(botToken, channelId,
+                SlackMarkdownFormatter.format(text), threadTs) == SendResult.OK;
     }
 
     @Override
     public SendResult trySend(String peerId, String text) {
-        var config = SlackConfig.load();
-        if (config == null) return SendResult.FAILED;
-        return trySend(config, peerId, text, outboundThreadTs);
+        if (botToken == null || botToken.isBlank()) return SendResult.FAILED;
+        return trySend(botToken, peerId, text, outboundThreadTs);
     }
 
     /**
      * Pure, testable {@code chat.postMessage} request builder — sets
-     * {@code mrkdwn:true} (JCLAW-14 §4.4) and the optional {@code thread_ts}
-     * (JCLAW-83). A null {@code threadTs} is omitted, so the reply posts at
-     * channel level.
+     * {@code mrkdwn:true} and the optional {@code thread_ts} (null omitted, so
+     * the reply posts at channel level).
      */
     public static ChatPostMessageRequest postRequest(String channelId, String text, String threadTs) {
         return ChatPostMessageRequest.builder()
@@ -130,17 +118,15 @@ public class SlackChannel implements Channel {
                 .build();
     }
 
-    private SendResult trySend(SlackConfig config, String channelId, String text, String threadTs) {
+    private SendResult trySend(String botToken, String channelId, String text, String threadTs) {
         try {
-            var resp = slack.methods(config.botToken())
+            var resp = slack.methods(botToken)
                     .chatPostMessage(postRequest(channelId, text, threadTs));
             if (resp.isOk()) {
                 EventLogger.info(CHANNEL, null, CHANNEL_NAME,
                         "Message sent to channel %s".formatted(channelId));
                 return SendResult.OK;
             }
-            // The synchronous client surfaces a 429 as SlackApiException (below);
-            // a "ratelimited" body error is rare but handled defensively.
             if ("ratelimited".equals(resp.getError())) {
                 EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "Rate-limited (API error)");
                 return SendResult.rateLimited(0L);
@@ -167,18 +153,17 @@ public class SlackChannel implements Channel {
     }
 
     /**
-     * JCLAW-341: start a native Slack text stream in a thread and return its
-     * {@code ts} (or null on failure). {@code recipientUserId} is required for DM
-     * streaming. The {@code markdown_text} fields render standard markdown
-     * natively, so no mrkdwn conversion is applied on the streaming path. Requires
-     * the app to be a Slack AI Assistant (Agents & AI Apps) with {@code assistant:write}.
+     * JCLAW-341/441: start a native Slack text stream in a thread as the bot
+     * identified by {@code botToken}; return its {@code ts} (or null on failure).
+     * {@code recipientUserId} is required for DM streaming. The {@code markdown_text}
+     * fields render standard markdown natively (no mrkdwn conversion). Requires the
+     * app to be a Slack AI Assistant with {@code assistant:write}.
      */
     public static String startStream(String channelId, String threadTs, String recipientUserId,
-                                     String initialMarkdown) {
-        var config = SlackConfig.load();
-        if (config == null) return null;
+                                     String initialMarkdown, String botToken) {
+        if (botToken == null || botToken.isBlank()) return null;
         try {
-            var resp = slack.methods(config.botToken()).chatStartStream(r -> r
+            var resp = slack.methods(botToken).chatStartStream(r -> r
                     .channel(channelId).threadTs(threadTs).recipientUserId(recipientUserId)
                     .markdownText(initialMarkdown));
             if (resp.isOk()) return resp.getTs();
@@ -190,12 +175,11 @@ public class SlackChannel implements Channel {
         }
     }
 
-    /** JCLAW-341: append a markdown delta to a live stream. Returns false on error. */
-    public static boolean appendStream(String channelId, String ts, String markdownDelta) {
-        var config = SlackConfig.load();
-        if (config == null) return false;
+    /** JCLAW-341/441: append a markdown delta to a live stream. Returns false on error. */
+    public static boolean appendStream(String channelId, String ts, String markdownDelta, String botToken) {
+        if (botToken == null || botToken.isBlank()) return false;
         try {
-            return slack.methods(config.botToken())
+            return slack.methods(botToken)
                     .chatAppendStream(r -> r.channel(channelId).ts(ts).markdownText(markdownDelta))
                     .isOk();
         } catch (SlackApiException | IOException _) {
@@ -203,12 +187,11 @@ public class SlackChannel implements Channel {
         }
     }
 
-    /** JCLAW-341: finalize a live stream. Returns false on error. */
-    public static boolean stopStream(String channelId, String ts) {
-        var config = SlackConfig.load();
-        if (config == null) return false;
+    /** JCLAW-341/441: finalize a live stream. Returns false on error. */
+    public static boolean stopStream(String channelId, String ts, String botToken) {
+        if (botToken == null || botToken.isBlank()) return false;
         try {
-            return slack.methods(config.botToken())
+            return slack.methods(botToken)
                     .chatStopStream(r -> r.channel(channelId).ts(ts))
                     .isOk();
         } catch (SlackApiException | IOException _) {
@@ -217,15 +200,14 @@ public class SlackChannel implements Channel {
     }
 
     /**
-     * JCLAW-341: set (or clear, with {@code ""}) the assistant-thread status line —
-     * the native "X is typing…" indicator. Requires the AI Assistant feature +
-     * {@code assistant:write} + a {@code thread_ts}. Best-effort; failures logged.
+     * JCLAW-341/441: set (or clear, with {@code ""}) the assistant-thread status
+     * line as the bot identified by {@code botToken}. Requires the AI Assistant
+     * feature + {@code assistant:write} + a {@code thread_ts}. Best-effort.
      */
-    public static void setAssistantStatus(String channelId, String threadTs, String status) {
-        var config = SlackConfig.load();
-        if (config == null) return;
+    public static void setAssistantStatus(String channelId, String threadTs, String status, String botToken) {
+        if (botToken == null || botToken.isBlank()) return;
         try {
-            slack.methods(config.botToken()).assistantThreadsSetStatus(r -> r
+            slack.methods(botToken).assistantThreadsSetStatus(r -> r
                     .channelId(channelId).threadTs(threadTs).status(status));
         } catch (SlackApiException | IOException e) {
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "setStatus failed: %s".formatted(e.getMessage()));
@@ -246,8 +228,8 @@ public class SlackChannel implements Channel {
     /**
      * Verify a Slack request signature with the SDK's {@link SlackSignature.Verifier}:
      * HMAC-SHA256 over {@code v0:timestamp:body} plus a built-in 5-minute
-     * stale-timestamp / replay window. Same method shape as the prior hand-rolled
-     * version, so {@link controllers.WebhookSlackController} is unchanged.
+     * stale-timestamp / replay window. JCLAW-441 passes the per-binding signing
+     * secret here.
      */
     public static boolean verifySignature(String signingSecret, String timestamp, String body, String signature) {
         if (signingSecret == null || timestamp == null || signature == null) {
@@ -263,12 +245,13 @@ public class SlackChannel implements Channel {
 
     /**
      * Parse an Events API envelope into an {@link InboundMessage}, or null for
-     * anything that isn't a plain user message (url_verification is handled by
-     * the controller; bot messages and message subtypes are ignored). Message
-     * fields come from the SDK's typed {@link MessageEvent}; {@code thread_ts} is
-     * carried so replies land in-thread (JCLAW-83).
+     * anything that isn't a plain user message. {@code botUserId} (the binding's
+     * own bot, JCLAW-357) drops the bot's own messages in addition to the
+     * {@code bot_id} guard. {@code url_verification} is handled by the controller;
+     * message subtypes (edits/joins/etc.) are still ignored here pending
+     * JCLAW-344/352/353.
      */
-    public static InboundMessage parseEvent(JsonObject payload) {
+    public static InboundMessage parseEvent(JsonObject payload, String botUserId) {
         if (!"event_callback".equals(str(payload, "type"))) {
             return null;
         }
@@ -276,8 +259,14 @@ public class SlackChannel implements Channel {
         if (eventObj == null || !"message".equals(str(eventObj, "type"))) {
             return null;
         }
-        // Ignore bot messages and message subtypes (edits, joins, bot_message, ...).
+        // Drop the bot's own messages (bot_id present, or user == this bot) and
+        // message subtypes (edits, joins, bot_message, ...) — the latter pending
+        // JCLAW-344/352/353.
         if (eventObj.has("bot_id") || eventObj.has("subtype")) {
+            return null;
+        }
+        var user = str(eventObj, "user");
+        if (botUserId != null && !botUserId.isBlank() && botUserId.equals(user)) {
             return null;
         }
         var event = SLACK_GSON.fromJson(eventObj, MessageEvent.class);

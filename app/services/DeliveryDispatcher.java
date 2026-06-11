@@ -7,6 +7,7 @@ import channels.WhatsAppChannel;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
+import models.SlackBinding;
 import models.TelegramBinding;
 
 import java.util.LinkedHashMap;
@@ -26,11 +27,11 @@ import java.util.Map;
  *       configured channel when a {@link models.TaskRun} terminates.</li>
  * </ul>
  *
- * <p>Telegram routes via the per-agent {@link TelegramBinding}'s bot token
- * (each agent has at most one binding by privacy design — see the
- * {@code agent_id} unique constraint on the binding table). Slack and
- * WhatsApp use system-wide {@link models.ChannelConfig} rows because their
- * Bot API tokens are workspace-scoped, not per-agent.
+ * <p>Telegram and Slack route via the per-agent {@link TelegramBinding} /
+ * {@link SlackBinding} bot token (each agent has at most one binding by privacy
+ * design — see the {@code agent_id} unique constraint on the binding tables).
+ * WhatsApp uses a system-wide {@link models.ChannelConfig} row because its Cloud
+ * API token is workspace-scoped, not per-agent.
  *
  * <p>Retry + rate-limit backoff are inherited from {@link Channel#sendWithRetry}
  * — a single retry with the platform's {@code Retry-After} hint, capped at
@@ -92,12 +93,12 @@ public final class DeliveryDispatcher {
      *
      * <p>Wraps {@link Channel#sendWithRetry} so callers get one automatic
      * retry against the platform's rate-limit hint. Must run inside a JPA
-     * transaction when telegram is the channel — the per-agent binding
-     * lookup goes through JPA.
+     * transaction when telegram or slack is the channel — the per-agent
+     * binding lookup goes through JPA.
      *
      * @param agent the agent owning the conversation that initiated the
-     *              dispatch. Required for telegram; ignored for slack/whatsapp
-     *              because their configs are workspace-scoped.
+     *              dispatch. Required for telegram + slack (per-agent binding
+     *              lookup); ignored for whatsapp (workspace-scoped config).
      * @param channelType one of {@code telegram}, {@code slack}, {@code whatsapp}.
      *              Case-insensitive. Other values return {@code CHANNEL_UNSUPPORTED}.
      * @param target  channel-specific peer id. Telegram: numeric chat id.
@@ -114,7 +115,7 @@ public final class DeliveryDispatcher {
         var canonical = channelType.toLowerCase();
         return switch (canonical) {
             case TELEGRAM -> dispatchTelegram(agent, target, text);
-            case SLACK -> dispatchSlack(target, text);
+            case SLACK -> dispatchSlack(agent, target, text);
             case WHATSAPP -> dispatchWhatsApp(target, text);
             case "web" -> dispatchWeb(agent, target, text);
             default -> DispatchResult.unsupported(channelType);
@@ -184,12 +185,24 @@ public final class DeliveryDispatcher {
                         "Telegram API rejected the message (see logs for details).");
     }
 
-    private static DispatchResult dispatchSlack(String channelId, String text) {
-        if (SlackChannel.SlackConfig.load() == null) {
-            return DispatchResult.noConfig(SLACK,
-                    "Configure the workspace Slack app in Settings → Channels → Slack.");
+    private static DispatchResult dispatchSlack(Agent agent, String channelId, String text) {
+        if (agent == null) {
+            return DispatchResult.failedDelivery(
+                    "Slack dispatch requires an agent context for per-binding bot-token lookup.");
         }
-        return new SlackChannel().sendWithRetry(channelId, text)
+        // Per-agent binding, parent-walked so a subagent reaches the user via an
+        // ancestor's bot (JCLAW-441) — mirrors the Telegram path above.
+        var binding = SlackBinding.findByAgentOrAncestor(agent);
+        if (binding == null) {
+            return DispatchResult.noConfig(SLACK,
+                    "Connect a Slack bot for agent '" + agent.name
+                            + "' (or any of its ancestors) in Settings → Channels → Slack.");
+        }
+        if (!binding.enabled) {
+            return DispatchResult.noConfig(SLACK,
+                    "Slack binding for agent '" + binding.agent.name + "' is disabled.");
+        }
+        return SlackChannel.forToken(binding.botToken).sendWithRetry(channelId, text)
                 ? DispatchResult.delivered()
                 : DispatchResult.failedDelivery(
                         "Slack API rejected the message (see logs for details).");

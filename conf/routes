@@ -151,6 +151,11 @@ POST    /api/channels/telegram/bindings         ApiTelegramBindingsController.cr
 PUT     /api/channels/telegram/bindings/{id}    ApiTelegramBindingsController.update
 DELETE  /api/channels/telegram/bindings/{id}    ApiTelegramBindingsController.delete
 POST    /api/channels/telegram/bindings/{id}/test  ApiTelegramBindingsController.test
+GET     /api/channels/slack/bindings            ApiSlackBindingsController.list
+POST    /api/channels/slack/bindings            ApiSlackBindingsController.create
+PUT     /api/channels/slack/bindings/{id}       ApiSlackBindingsController.update
+DELETE  /api/channels/slack/bindings/{id}       ApiSlackBindingsController.delete
+POST    /api/channels/slack/bindings/{id}/test  ApiSlackBindingsController.test
 GET     /api/channels/{channelType}             ApiChannelsController.get
 PUT     /api/channels/{channelType}             ApiChannelsController.save
 
@@ -160,7 +165,7 @@ POST    /api/tailscale                          ApiTailscaleController.toggle
 
 # Webhooks (no auth — verified by their own mechanisms)
 POST    /api/webhooks/telegram/{bindingId}/{secret}  WebhookTelegramController.webhook
-POST    /api/webhooks/slack                     WebhookSlackController.webhook
+POST    /api/webhooks/slack/{bindingId}         WebhookSlackController.webhook
 GET     /api/webhooks/whatsapp                  WebhookWhatsAppController.verify
 POST    /api/webhooks/whatsapp                  WebhookWhatsAppController.webhook
 

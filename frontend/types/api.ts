@@ -44,6 +44,37 @@ export interface TelegramBindingSummary {
   updatedAt: string | null
 }
 
+/**
+ * One Slack bot-agent binding, as surfaced by
+ * {@code GET /api/channels/slack/bindings} (JCLAW-441). The bot token, signing
+ * secret, and app token are never returned — only the presence flags
+ * {@link hasSigningSecret} / {@link hasAppToken}. {@link effectiveRequestUrl} is
+ * the full Events API Request URL (base + /api/webhooks/slack/{id}) the operator
+ * pastes into the Slack app; non-null only for an HTTP binding with a public base.
+ */
+export interface SlackBindingSummary {
+  id: number
+  agentId: number | null
+  agentName: string | null
+  ownerUserId: string | null
+  /** HTTP (Events API webhook) or SOCKET (Socket Mode). */
+  transport: string
+  /** Editable public base (scheme + host, no path) Slack reaches this instance
+   *  at for the Events API. The fixed path + id are appended. Null for SOCKET. */
+  webhookBaseUrl: string | null
+  effectiveRequestUrl: string | null
+  hasSigningSecret: boolean
+  hasAppToken: boolean
+  /** The bot's own user id, cached from auth.test — used for the self-loop guard
+   *  and shown in the health probe. Null until a successful probe. */
+  botUserId: string | null
+  teamId: string | null
+  enabled: boolean
+  replyToMode: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
 /** A conversation between a user and an agent. */
 export interface Conversation {
   id: number

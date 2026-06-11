@@ -1,0 +1,283 @@
+package controllers;
+
+import channels.ChannelTransport;
+import channels.SlackWebApi;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import models.Agent;
+import models.SlackBinding;
+import play.mvc.Controller;
+import play.mvc.With;
+import services.AgentService;
+import services.EventLogger;
+
+import static utils.GsonHolder.INSTANCE;
+
+/**
+ * CRUD API for per-agent Slack bindings (JCLAW-441). Mirrors
+ * {@link ApiTelegramBindingsController}: each binding maps one Slack app
+ * (bot token + signing secret, optional app token) to one agent, so multiple
+ * Slack bots can coexist, one per agent. Replaces the pre-441 app-global
+ * {@code ChannelConfig("slack")}.
+ *
+ * <p>Simpler than Telegram in two ways: Slack request authenticity comes from
+ * the signing-secret HMAC (no per-URL webhook secret to generate), and the HTTP
+ * (Events API) transport needs no server-side registration — the operator pastes
+ * the per-binding Request URL into the Slack app dashboard. Socket Mode runner
+ * reconciliation arrives with JCLAW-351.
+ */
+@With(AuthCheck.class)
+public class ApiSlackBindingsController extends Controller {
+
+    private static final Gson gson = INSTANCE;
+
+    private static final String KEY_BOT_TOKEN = "botToken";
+    private static final String KEY_SIGNING_SECRET = "signingSecret";
+    private static final String KEY_APP_TOKEN = "appToken";
+    private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_OWNER_USER_ID = "ownerUserId";
+    private static final String KEY_TRANSPORT = "transport";
+    private static final String KEY_WEBHOOK_BASE_URL = "webhookBaseUrl";
+    private static final String KEY_ENABLED = "enabled";
+    private static final String KEY_REPLY_TO_MODE = "replyToMode";
+
+    private static final String EVENT_CATEGORY_CHANNEL = "channel";
+    private static final String CHANNEL_SLACK = "slack";
+
+    /** The fixed Slack Events API contract path; the per-binding id is appended. */
+    private static final String WEBHOOK_PATH = "/api/webhooks/slack/";
+
+    /** Flat projection the frontend consumes. The secrets ({@code botToken},
+     *  {@code signingSecret}, {@code appToken}) are elided; only presence flags
+     *  are surfaced. {@code effectiveRequestUrl} is the full Events API Request
+     *  URL to paste into the Slack app (base + path + id), shown in the Edit UI. */
+    private record BindingView(Long id, Long agentId, String agentName,
+                                String ownerUserId, String transport,
+                                String webhookBaseUrl, String effectiveRequestUrl,
+                                boolean hasSigningSecret, boolean hasAppToken,
+                                String botUserId, String teamId,
+                                boolean enabled, String replyToMode,
+                                String createdAt, String updatedAt) {
+        static BindingView of(SlackBinding b) {
+            return new BindingView(b.id,
+                    b.agent != null ? b.agent.id : null,
+                    b.agent != null ? b.agent.name : null,
+                    b.ownerUserId,
+                    b.transport != null ? b.transport.name() : ChannelTransport.HTTP.name(),
+                    b.webhookBaseUrl,
+                    effectiveRequestUrl(b),
+                    b.signingSecret != null && !b.signingSecret.isBlank(),
+                    b.appToken != null && !b.appToken.isBlank(),
+                    b.botUserId, b.teamId,
+                    b.enabled, b.replyToMode,
+                    b.createdAt != null ? b.createdAt.toString() : null,
+                    b.updatedAt != null ? b.updatedAt.toString() : null);
+        }
+
+        /** The Events API Request URL to register in the Slack app dashboard:
+         *  {@code base + /api/webhooks/slack/{id}}. Null unless this is an HTTP
+         *  binding with a public base (SOCKET bindings need no public URL). */
+        private static String effectiveRequestUrl(SlackBinding b) {
+            if (b.transport != ChannelTransport.HTTP
+                    || b.webhookBaseUrl == null || b.webhookBaseUrl.isBlank() || b.id == null) {
+                return null;
+            }
+            var base = b.webhookBaseUrl.endsWith("/")
+                    ? b.webhookBaseUrl.substring(0, b.webhookBaseUrl.length() - 1)
+                    : b.webhookBaseUrl;
+            return base + WEBHOOK_PATH + b.id;
+        }
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
+    public static void list() {
+        var items = SlackBinding.<SlackBinding>findAll().stream()
+                .map(BindingView::of)
+                .toList();
+        renderJSON(gson.toJson(items));
+    }
+
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
+    public static void create() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) badRequest();
+
+        String botToken = readRequiredString(body, KEY_BOT_TOKEN);
+        String signingSecret = readRequiredString(body, KEY_SIGNING_SECRET);
+        Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
+                ? body.get(KEY_AGENT_ID).getAsLong() : null;
+        if (botToken == null || signingSecret == null || agentId == null) {
+            error(400, "botToken, signingSecret, and agentId are required");
+            throw new AssertionError("unreachable: error() throws");
+        }
+
+        Agent agent = AgentService.findById(agentId);
+        if (agent == null || !agent.enabled) {
+            error(400, "agentId must reference an enabled agent");
+            throw new AssertionError("unreachable: error() throws");
+        }
+        if (SlackBinding.findByBotToken(botToken) != null) {
+            error(409, "A binding with this bot token already exists");
+        }
+        // Agent uniqueness mirrors Telegram: agent memory is scoped per agent, so
+        // binding one agent to a second Slack workspace would share memory.
+        if (SlackBinding.findByAgent(agent) != null) {
+            error(409, "Agent '%s' is already bound to another Slack binding".formatted(agent.name));
+        }
+
+        var binding = new SlackBinding();
+        binding.botToken = botToken;
+        binding.signingSecret = signingSecret;
+        binding.agent = agent;
+        binding.appToken = readOptionalString(body, KEY_APP_TOKEN);
+        binding.ownerUserId = readOptionalString(body, KEY_OWNER_USER_ID);
+        binding.transport = parseTransport(body, ChannelTransport.HTTP);
+        binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
+        binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
+        binding.replyToMode = readOptionalString(body, KEY_REPLY_TO_MODE);
+        // Best-effort identity probe: cache botUserId/teamId so the bot-loop guard
+        // works immediately. A bad token still saves (the operator fixes it via
+        // update + test, mirroring Telegram's save-then-test flow).
+        cacheIdentity(binding);
+        binding.save();
+
+        EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_SLACK,
+                "Binding %d created".formatted(binding.id));
+        renderJSON(gson.toJson(BindingView.of(binding)));
+    }
+
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
+    public static void update(Long id) {
+        var binding = SlackBinding.<SlackBinding>findById(id);
+        if (binding == null) notFound();
+
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) badRequest();
+
+        boolean tokenChanged = applyBotTokenUpdate(binding, body);
+        applyAgentUpdate(binding, body);
+        applyOptionalFieldUpdates(binding, body);
+        if (tokenChanged) cacheIdentity(binding);
+        binding.save();
+
+        EventLogger.info(EVENT_CATEGORY_CHANNEL,
+                binding.agent != null ? binding.agent.name : null, CHANNEL_SLACK,
+                "Binding %d updated".formatted(binding.id));
+        renderJSON(gson.toJson(BindingView.of(binding)));
+    }
+
+    /**
+     * Health-probe a binding against the live Slack API ({@code auth.test}) so a
+     * bad/revoked token surfaces here rather than at the next send. Refreshes the
+     * cached {@code botUserId}/{@code teamId} on success. HTTP stays 200 and the
+     * {@code ok} flag carries the verdict, mirroring Telegram's {@code test()}.
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SlackWebApi.AuthTestResult.class)))
+    public static void test(Long id) {
+        var binding = SlackBinding.<SlackBinding>findById(id);
+        if (binding == null) notFound();
+        var result = SlackWebApi.authTest(binding.botToken);
+        if (result.ok()) {
+            binding.botUserId = result.botUserId();
+            binding.teamId = result.teamId();
+            binding.save();
+        }
+        EventLogger.info(EVENT_CATEGORY_CHANNEL,
+                binding.agent != null ? binding.agent.name : null, CHANNEL_SLACK,
+                "Binding %d health probe: %s".formatted(id, result.ok() ? "ok" : "error"));
+        renderJSON(gson.toJson(result));
+    }
+
+    @SuppressWarnings("java:S2259")
+    public static void delete(Long id) {
+        var binding = SlackBinding.<SlackBinding>findById(id);
+        if (binding == null) notFound();
+        String agentName = binding.agent != null ? binding.agent.name : null;
+        binding.delete();
+        EventLogger.info(EVENT_CATEGORY_CHANNEL, agentName, CHANNEL_SLACK,
+                "Binding %d deleted".formatted(id));
+        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+    }
+
+    // ── update helpers ──
+
+    @SuppressWarnings("java:S2259")
+    private static boolean applyBotTokenUpdate(SlackBinding binding, JsonObject body) {
+        if (!body.has(KEY_BOT_TOKEN)) return false;
+        String newToken = body.get(KEY_BOT_TOKEN).getAsString();
+        if (newToken == null || newToken.isBlank() || newToken.equals(binding.botToken)) return false;
+        var existing = SlackBinding.findByBotToken(newToken);
+        if (existing != null && !existing.id.equals(binding.id)) {
+            error(409, "A binding with this bot token already exists");
+        }
+        binding.botToken = newToken;
+        return true;
+    }
+
+    @SuppressWarnings("java:S2259")
+    private static void applyAgentUpdate(SlackBinding binding, JsonObject body) {
+        if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
+        Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
+        if (agent == null || !agent.enabled) {
+            error(400, "agentId must reference an enabled agent");
+        }
+        if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
+            var other = SlackBinding.findByAgent(agent);
+            if (other != null && !other.id.equals(binding.id)) {
+                error(409, "Agent '%s' is already bound to another Slack binding".formatted(agent.name));
+            }
+        }
+        binding.agent = agent;
+    }
+
+    private static void applyOptionalFieldUpdates(SlackBinding binding, JsonObject body) {
+        if (body.has(KEY_SIGNING_SECRET)) {
+            String v = readOptionalString(body, KEY_SIGNING_SECRET);
+            if (v != null) binding.signingSecret = v;   // never null out the required secret
+        }
+        if (body.has(KEY_APP_TOKEN)) binding.appToken = readOptionalString(body, KEY_APP_TOKEN);
+        if (body.has(KEY_OWNER_USER_ID)) binding.ownerUserId = readOptionalString(body, KEY_OWNER_USER_ID);
+        if (body.has(KEY_TRANSPORT)) binding.transport = parseTransport(body, binding.transport);
+        if (body.has(KEY_WEBHOOK_BASE_URL)) binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
+        if (body.has(KEY_ENABLED)) binding.enabled = body.get(KEY_ENABLED).getAsBoolean();
+        if (body.has(KEY_REPLY_TO_MODE)) binding.replyToMode = readOptionalString(body, KEY_REPLY_TO_MODE);
+    }
+
+    /** Probe the bot token and cache its {@code botUserId}/{@code teamId} when ok;
+     *  leaves them untouched on failure (the binding still saves). */
+    private static void cacheIdentity(SlackBinding binding) {
+        var probe = SlackWebApi.authTest(binding.botToken);
+        if (probe.ok()) {
+            binding.botUserId = probe.botUserId();
+            binding.teamId = probe.teamId();
+        }
+    }
+
+    // ── shared helpers ──
+
+    private static String readRequiredString(JsonObject body, String key) {
+        if (!body.has(key) || body.get(key).isJsonNull()) return null;
+        String s = body.get(key).getAsString();
+        return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    private static String readOptionalString(JsonObject body, String key) {
+        return JsonBodyReader.optString(body, key, true);
+    }
+
+    private static ChannelTransport parseTransport(JsonObject body, ChannelTransport fallback) {
+        String raw = body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()
+                ? body.get(KEY_TRANSPORT).getAsString() : null;
+        return ChannelTransport.parse(raw, fallback);
+    }
+}

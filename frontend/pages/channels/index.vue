@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { CheckIcon, ClipboardDocumentIcon } from '@heroicons/vue/24/outline'
-import type { TelegramBindingSummary } from '~/types/api'
+import type { SlackBindingSummary, TelegramBindingSummary } from '~/types/api'
 
 interface ChannelInfo {
   channelType: string
@@ -18,22 +17,10 @@ interface ChannelField {
   showWhen?: (form: Record<string, string>) => boolean
 }
 
-interface ChannelSetup {
-  // Provider callback the channel must receive on (rendered as an absolute URL
-  // against the live origin) — e.g. Slack's Events API Request URL.
-  requestUrlPath?: string
-  steps: string[]
-  // Grouped values the operator transcribes verbatim into the provider's
-  // dashboard (scopes, event names, settings), rendered as labeled monospace
-  // blocks — one value per line — so they're easy to scan and copy (JCLAW-13).
-  groups?: Array<{ label: string, hint?: string, values: string[] }>
-}
-
 interface ChannelTypeDef {
   type: string
   label: string
   fields: ChannelField[]
-  setup?: ChannelSetup
 }
 
 interface TailscaleStatus {
@@ -46,69 +33,19 @@ interface TailscaleStatus {
 const [
   { data: channels, refresh },
   { data: telegramBindings, refresh: refreshBindings },
+  { data: slackBindings, refresh: refreshSlackBindings },
   { data: tailscale, refresh: refreshTailscale },
 ] = await Promise.all([
   useFetch<ChannelInfo[]>('/api/channels'),
   useFetch<TelegramBindingSummary[]>('/api/channels/telegram/bindings'),
+  useFetch<SlackBindingSummary[]>('/api/channels/slack/bindings'),
   useFetch<TailscaleStatus>('/api/tailscale'),
 ])
 
-// Telegram was removed from the inline-configure list in JCLAW-89: it now
-// manages a list of per-user bot bindings on its own detail page. Slack and
-// WhatsApp retain the single-config-per-channel model.
+// Telegram (JCLAW-89) and Slack (JCLAW-441) manage per-agent bot bindings on
+// their own detail pages. Only WhatsApp retains the single-config-per-channel
+// model (its Cloud API token is workspace-scoped, not per-agent).
 const channelTypes: ChannelTypeDef[] = [
-  {
-    type: 'slack',
-    label: 'Slack',
-    fields: [
-      {
-        name: 'botToken',
-        label: 'Bot token',
-        type: 'password',
-        hint: 'OAuth and Permissions: Bot User OAuth Token (starts with xoxb-).',
-      },
-      {
-        name: 'signingSecret',
-        label: 'Signing secret',
-        type: 'password',
-        hint: 'Basic Information: App Credentials: Signing Secret.',
-      },
-    ],
-    setup: {
-      requestUrlPath: '/api/webhooks/slack',
-      steps: [
-        'Create a Slack app at api.slack.com/apps (From scratch) in your workspace.',
-        'OAuth & Permissions: add every Bot Token Scope listed below, then Install to Workspace.',
-        'Copy the Bot User OAuth Token (xoxb-…) into Bot token, and the Signing Secret (Basic Information → App Credentials) into Signing secret, then Save here.',
-        'Event Subscriptions: turn it On, set the Request URL above, and subscribe to every bot event listed below; Save Changes.',
-        'App Home: enable both settings below so users can DM the bot.',
-        'Agents & AI Apps: enable the Assistant feature (below) for the native "is typing…" indicator and streaming replies.',
-        'Reinstall to Workspace if Slack prompts (scope/event changes require it). Then DM the bot, or invite it to a channel with /invite @YourBot.',
-      ],
-      groups: [
-        {
-          label: 'OAuth & Permissions → Bot Token Scopes',
-          hint: 'chat:write sends replies; each *:history scope lets the bot read that surface; app_mentions:read covers @-mentions; assistant:write enables the typing indicator + streaming.',
-          values: ['chat:write', 'assistant:write', 'app_mentions:read', 'channels:history', 'groups:history', 'im:history', 'mpim:history'],
-        },
-        {
-          label: 'Event Subscriptions → Subscribe to bot events',
-          hint: 'Each event needs its matching scope above (e.g. message.im ↔ im:history). message.im is what delivers a DM to the bot.',
-          values: ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim'],
-        },
-        {
-          label: 'App Home → Show Tabs (toggle both On)',
-          hint: 'Without these, Slack greys out the DM box with "Sending messages to this app has been turned off."',
-          values: ['Messages Tab', 'Allow users to send Slash commands and messages from the messages tab'],
-        },
-        {
-          label: 'Agents & AI Apps → enable the Assistant',
-          hint: 'Optional but recommended: lets the bot stream replies with a native "is typing…" indicator (chat.startStream). Without it, replies post once when ready (still formatted, no "(edited)").',
-          values: ['Enable the Assistant / Agent feature'],
-        },
-      ],
-    },
-  },
   {
     type: 'whatsapp',
     label: 'WhatsApp',
@@ -142,64 +79,10 @@ async function toggleTailscale() {
   if (result !== null) refreshTailscale()
 }
 
-// JCLAW-83: setup guidance for the channel being configured. requestUrl renders
-// the provider callback (e.g. Slack's Events API Request URL) against the live
-// origin so the operator can copy it straight into their Slack app.
-const currentDef = computed(() =>
-  editing.value ? channelTypes.find(c => c.type === editing.value) ?? null : null)
-const setupSteps = computed<string[]>(() => currentDef.value?.setup?.steps ?? [])
-const setupGroups = computed(() => currentDef.value?.setup?.groups ?? [])
-const requestPath = computed(() => currentDef.value?.setup?.requestUrlPath ?? '')
-
-// Slack POSTs the webhook from its own servers, so the Request URL must be a
-// public HTTPS address — the browser origin only qualifies in a real deployment,
-// never localhost / LAN / plain HTTP (even https://localhost is unreachable from
-// Slack). requestUrl is shown as a ready value only when this page is already
-// loaded over such an address; otherwise we show the path + guidance.
-const isPublicHttps = computed(() => {
-  const o = import.meta.client ? window.location.origin : ''
-  if (!/^https:\/\//i.test(o)) return false
-  const host = o.replace(/^https:\/\//i, '').replace(/:\d+$/, '').toLowerCase()
-  return !(host === 'localhost' || host.endsWith('.local') || host === '[::1]'
-    || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
-    || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === '0.0.0.0')
-})
-// When the Tailscale Funnel (JCLAW-84) is enabled and live, its public URL is the
-// real, copy-paste-ready base for webhook Request URLs — preferred over the
-// browser origin, which only qualifies in a public deployment.
-const funnelBaseUrl = computed(() => {
-  const t = tailscale.value
-  return t?.enabled && t.available && t.publicUrl ? t.publicUrl : ''
-})
-const requestUrl = computed(() => {
-  if (!requestPath.value) return ''
-  if (funnelBaseUrl.value) return `${funnelBaseUrl.value}${requestPath.value}`
-  return isPublicHttps.value ? `${window.location.origin}${requestPath.value}` : ''
-})
-const requestUrlViaFunnel = computed(() => requestPath.value !== '' && funnelBaseUrl.value !== '')
-
-// JCLAW-13: copy the transcribable setup values (Request URL, scopes, events) to
-// the clipboard. `copied` holds the most-recently-copied value for a brief check.
-const copied = ref('')
-let copiedTimer: ReturnType<typeof setTimeout> | null = null
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    copied.value = text
-    if (copiedTimer) {
-      clearTimeout(copiedTimer)
-    }
-    copiedTimer = setTimeout(() => {
-      copied.value = ''
-    }, 1500)
-  }
-  catch {
-    // Clipboard unavailable (insecure context or denied) — no-op.
-  }
-}
-
 const telegramActiveCount = computed(() =>
   (telegramBindings.value ?? []).filter(b => b.enabled).length)
+const slackActiveCount = computed(() =>
+  (slackBindings.value ?? []).filter(b => b.enabled).length)
 
 function editChannel(type: string) {
   const def = channelTypes.find(c => c.type === type)
@@ -240,9 +123,12 @@ function visibleFields(def: ChannelTypeDef): ChannelField[] {
   return def.fields.filter(f => !f.showWhen || f.showWhen(form.value))
 }
 
-// Re-pull the bindings summary when the user returns from the Telegram detail
-// page so the header badge reflects any add/remove they did there.
-onActivated(() => refreshBindings())
+// Re-pull the bindings summaries when the user returns from a detail page so the
+// Telegram/Slack badges reflect any add/remove they did there.
+onActivated(() => {
+  refreshBindings()
+  refreshSlackBindings()
+})
 </script>
 
 <template>
@@ -267,6 +153,24 @@ onActivated(() => refreshBindings())
             :class="telegramActiveCount > 0 ? 'text-green-400' : 'text-fg-muted'"
             class="text-xs font-mono"
           >{{ telegramActiveCount > 0 ? `${telegramActiveCount} active` : 'not configured' }}</span>
+        </div>
+        <span class="text-xs text-fg-muted">
+          Manage bindings →
+        </span>
+      </NuxtLink>
+
+      <NuxtLink
+        to="/channels/slack"
+        class="bg-surface-elevated border border-border p-4 block hover:border-ring transition-colors"
+      >
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-medium text-fg-strong">
+            Slack
+          </h3>
+          <span
+            :class="slackActiveCount > 0 ? 'text-green-400' : 'text-fg-muted'"
+            class="text-xs font-mono"
+          >{{ slackActiveCount > 0 ? `${slackActiveCount} active` : 'not configured' }}</span>
         </div>
         <span class="text-xs text-fg-muted">
           Manage bindings →
@@ -351,101 +255,6 @@ onActivated(() => refreshBindings())
       <h2 class="text-sm font-medium text-fg-strong mb-4">
         Configure {{ channelTypes.find(c => c.type === editing)?.label }}
       </h2>
-      <div
-        v-if="setupSteps.length"
-        class="mb-4 border border-border bg-muted p-3 text-xs text-fg-muted space-y-2"
-      >
-        <div
-          v-if="requestPath"
-          class="text-fg-strong"
-        >
-          Events API Request URL
-          <template v-if="requestUrlViaFunnel">
-            <span class="block mt-1 font-normal text-fg-muted">
-              Set this as the Request URL under Event Subscriptions (live via Tailscale Funnel):
-            </span>
-            <div class="mt-1 flex items-start gap-2">
-              <code class="font-mono break-all text-emerald-400">{{ requestUrl }}</code>
-              <button
-                type="button"
-                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
-                :aria-label="copied === requestUrl ? 'Copied' : 'Copy request URL'"
-                @click="copyText(requestUrl)"
-              >
-                <CheckIcon
-                  v-if="copied === requestUrl"
-                  class="h-4 w-4 text-emerald-400"
-                />
-                <ClipboardDocumentIcon
-                  v-else
-                  class="h-4 w-4"
-                />
-              </button>
-            </div>
-          </template>
-          <template v-else>
-            <span class="block mt-1 font-normal text-fg-muted">
-              Append <code class="font-mono text-fg-strong">{{ requestPath }}</code> to your public HTTPS base URL and set it as the Request URL under Event Subscriptions.
-            </span>
-            <span
-              v-if="requestUrl"
-              class="block mt-1 font-normal text-fg-muted"
-            >
-              From this page that is
-              <code class="font-mono break-all text-fg-strong">{{ requestUrl }}</code>
-            </span>
-            <span
-              v-else
-              class="block mt-1 font-normal text-fg-muted"
-            >
-              Slack reaches it from its own servers, so localhost, LAN, and plain HTTP will not work. Enable Tailscale Funnel above, or expose this host with another tunnel.
-            </span>
-          </template>
-        </div>
-        <ol class="list-decimal list-inside space-y-1">
-          <li
-            v-for="(step, i) in setupSteps"
-            :key="i"
-          >
-            {{ step }}
-          </li>
-        </ol>
-        <div
-          v-for="g in setupGroups"
-          :key="g.label"
-          class="text-fg-strong"
-        >
-          {{ g.label }}
-          <span
-            v-if="g.hint"
-            class="block font-normal text-fg-muted"
-          >{{ g.hint }}</span>
-          <div class="mt-1 space-y-1">
-            <div
-              v-for="v in g.values"
-              :key="v"
-              class="flex items-start gap-2"
-            >
-              <code class="font-mono break-all text-emerald-400">{{ v }}</code>
-              <button
-                type="button"
-                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
-                :aria-label="copied === v ? 'Copied' : `Copy ${v}`"
-                @click="copyText(v)"
-              >
-                <CheckIcon
-                  v-if="copied === v"
-                  class="h-4 w-4 text-emerald-400"
-                />
-                <ClipboardDocumentIcon
-                  v-else
-                  class="h-4 w-4"
-                />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
       <div class="space-y-3">
         <template
           v-for="field in visibleFields(channelTypes.find(c => c.type === editing)!)"

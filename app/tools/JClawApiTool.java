@@ -89,6 +89,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             "/api/events",                // SSE; we buffer full bodies
             "/api/bindings",              // channel routing -- comms redirection / secrets
             "/api/channels/telegram/",    // telegram bindings carry bot tokens
+            "/api/channels/slack/",       // slack bindings carry bot tokens + signing secrets
             "/api/tailscale",             // network-funnel infra config
             "/api/logs",                  // raw app logs can leak secrets/PII
             "/api/metrics/loadtest"       // load-test harness -- resource/cost abuse
