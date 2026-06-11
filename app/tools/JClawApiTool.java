@@ -73,6 +73,9 @@ public class JClawApiTool implements ToolRegistry.Tool {
     private static final String KEY_BODY = "body";
     private static final String KEY_QUERY = "query";
 
+    /** Every callable path must start with this prefix (the three gate checks share it). */
+    private static final String API_PREFIX = "/api/";
+
     /** Path prefixes refused at the tool layer (the deny-floor). Each one is a
      *  whole-subsystem category the in-process tool must never invoke regardless
      *  of the model's intent or the SKILL.md's contents. Order doesn't matter;
@@ -177,7 +180,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         if (!ALLOWED_METHODS.contains(method)) {
             return "Error: method must be one of " + ALLOWED_METHODS + " -- got: " + methodRaw;
         }
-        if (!path.startsWith("/api/")) {
+        if (!path.startsWith(API_PREFIX)) {
             return "Error: path must start with /api/ -- got: " + path;
         }
         for (var blocked : PATH_BLOCKLIST) {
@@ -283,7 +286,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             Method m = resolveMethod(route.action);
             if (m == null) continue;                       // not a controller action
             var path = route.path;
-            if (path == null || !path.startsWith("/api/")) continue;
+            if (path == null || !path.startsWith(API_PREFIX)) continue;
             if (isDenyFloored(path)) continue;             // unconditional deny-floor
             if (m.isAnnotationPresent(ChatHidden.class)) continue;   // per-action opt-out
             var verb = (route.method == null || route.method.isBlank() || "*".equals(route.method))
@@ -331,7 +334,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         var matchPath = path;
         int q = matchPath.indexOf('?');
         if (q >= 0) matchPath = matchPath.substring(0, q);
-        if (!matchPath.startsWith("/api/")) return false;
+        if (!matchPath.startsWith(API_PREFIX)) return false;
         if (isDenyFloored(matchPath)) return false;
         for (var route : Router.routes) {
             Method m = resolveMethod(route.action);
