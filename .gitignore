@@ -58,6 +58,12 @@ javadoc/
 *.ipr
 out/
 
+# VS Code (+ its Java language-server compile output under bin/; the tracked
+# bin/*.jar + bin/*.mjs are kept by anchoring these to the subdirs only)
+.vscode/
+/bin/main/
+/bin/test/
+
 # NetBeans
 nbproject/
 nbproject/private/
