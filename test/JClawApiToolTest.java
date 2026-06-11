@@ -3,21 +3,18 @@ import play.test.*;
 import tools.JClawApiTool;
 
 /**
- * Unit coverage for {@link JClawApiTool}'s argument parsing and path
- * blocklist (JCLAW-282).
+ * Unit coverage for {@link JClawApiTool}'s argument parsing, deny-floor, and the
+ * blacklist discover/call gate.
  *
- * <p>Skips the live-HTTP round trip — the bearer-auth + controller
- * dispatch is already exercised by {@code ApiTokensControllerTest} and
- * the rest of the FunctionalTest suite. What only this layer can verify
- * is that the tool's blocklist and arg validation refuse bad inputs
- * before any socket opens.
+ * <p>Skips the live-HTTP round trip -- bearer-auth + controller dispatch is
+ * exercised by the FunctionalTest suite. What only this layer verifies is that
+ * the deny layers and arg validation refuse bad inputs before any socket opens.
  *
- * <p>JCLAW-329 adds the {@code discover} action: a route-table scan that
- * returns only {@code @ChatSafe}-annotated {@code /api/} endpoints, minus the
- * PATH_BLOCKLIST. Those tests run the real scan (UnitTest boots Play, so
- * {@code Router.routes} is populated and the controllers carry their runtime
- * annotations), and the call-path tests assert the existing validation still
- * fires — the discover branch must not regress the original call path.
+ * <p>Blacklist model: {@code jclaw_api} discovers/invokes <em>every</em>
+ * {@code /api/} route that resolves to a controller action by default, minus the
+ * {@code PATH_BLOCKLIST} deny-floor and minus {@code @ChatHidden} actions. These
+ * tests run the real route-table scan (UnitTest boots Play, so {@code Router.routes}
+ * is populated and controllers carry their runtime annotations).
  */
 class JClawApiToolTest extends UnitTest {
 
@@ -69,7 +66,7 @@ class JClawApiToolTest extends UnitTest {
                 "got: " + result);
     }
 
-    // ==================== path blocklist (security) ====================
+    // ==================== deny-floor (security) ====================
 
     @Test
     void blocksChatSendPath() {
@@ -79,7 +76,7 @@ class JClawApiToolTest extends UnitTest {
                 "{\"method\":\"POST\",\"path\":\"/api/chat/send\"," +
                 "\"body\":{\"agentId\":1,\"message\":\"hi\"}}", null);
         assertTrue(result.contains("reserved and cannot be invoked"),
-                "expected blocklist refusal; got: " + result);
+                "expected deny-floor refusal; got: " + result);
         assertTrue(result.contains("/api/chat/"),
                 "error should name the blocked prefix; got: " + result);
     }
@@ -95,9 +92,6 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void blocksApiTokensPath() {
-        // Privilege-escalation surface: a tool that can mint another
-        // token could survive its own revocation. Blocked at the tool
-        // boundary, with AuthCheck.requireSessionAuth as belt-and-suspenders.
         var result = tool.execute(
                 "{\"method\":\"POST\",\"path\":\"/api/api-tokens\"," +
                 "\"body\":{\"name\":\"escalation\"}}", null);
@@ -115,7 +109,6 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void blocksEventsPath() {
-        // SSE — full-response buffering doesn't match streaming semantics.
         var result = tool.execute(
                 "{\"method\":\"GET\",\"path\":\"/api/events\"}", null);
         assertTrue(result.contains("/api/events"),
@@ -123,101 +116,124 @@ class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    void allowsSafePathsToReachUrlConstruction() {
-        // /api/agents is on the curated allowlist (SKILL.md). The tool's
-        // execute path proceeds past validation and into the HTTP call.
-        // In the unit-test JVM there's no Play listener bound, so the
-        // call will error at the socket layer — we just verify it didn't
-        // get short-circuited by the blocklist or arg validation.
+    void blocksBindingsPath() {
+        var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/bindings\"}", null);
+        assertTrue(result.contains("/api/bindings"),
+                "bindings (comms routing) must be deny-floored; got: " + result);
+    }
+
+    @Test
+    void blocksTelegramBindingsPath() {
         var result = tool.execute(
-                "{\"method\":\"GET\",\"path\":\"/api/agents\"}", null);
-        // Either a successful HTTP response (if a port happens to be
-        // listening) or a network error — but NOT a blocklist refusal.
+                "{\"method\":\"GET\",\"path\":\"/api/channels/telegram/bindings\"}", null);
+        assertTrue(result.contains("reserved and cannot be invoked"),
+                "telegram bindings (bot tokens) must be deny-floored; got: " + result);
+    }
+
+    @Test
+    void blocksTailscalePath() {
+        var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/tailscale\"}", null);
+        assertTrue(result.contains("/api/tailscale"),
+                "tailscale (infra config) must be deny-floored; got: " + result);
+    }
+
+    @Test
+    void blocksLogsPath() {
+        var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/logs\"}", null);
+        assertTrue(result.contains("/api/logs"),
+                "logs (secret leak) must be deny-floored; got: " + result);
+    }
+
+    @Test
+    void blocksLoadtestPath() {
+        var result = tool.execute("{\"method\":\"POST\",\"path\":\"/api/metrics/loadtest\"}", null);
+        assertTrue(result.contains("/api/metrics/loadtest"),
+                "load-test harness (resource abuse) must be deny-floored; got: " + result);
+    }
+
+    // ==================== blacklist call gate ====================
+
+    @Test
+    void callAllowsUnannotatedEndpoint() {
+        // /api/status is a real route carrying no annotation. Under the blacklist
+        // it is callable by default -- execute proceeds past the gate to the HTTP
+        // call (which then errors at the socket in the unit JVM).
+        var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/status\"}", null);
+        assertFalse(result.contains("is not callable"),
+                "unannotated /api/status must be callable under the blacklist; got: " + result);
         assertFalse(result.contains("reserved and cannot be invoked"),
-                "/api/agents should not be blocked; got: " + result);
-        assertFalse(result.contains("must start with /api/"),
-                "/api/agents should clear the path-prefix check; got: " + result);
-    }
-
-    // ============ allowlist enforcement on call (default-deny) ============
-
-    @Test
-    void callRejectsUnannotatedEndpoint() {
-        // /api/status is a real route but not @ChatSafe. Previously callable
-        // (only the blocklist gated `call`); now refused by the allowlist.
-        var result = tool.execute(
-                "{\"method\":\"GET\",\"path\":\"/api/status\"}", null);
-        assertTrue(result.contains("is not a chat-safe endpoint"),
-                "unannotated endpoint must be denied; got: " + result);
+                "/api/status is not deny-floored; got: " + result);
     }
 
     @Test
-    void callRejectsUnannotatedVerbOnAnnotatedPath() {
-        // GET /api/config/{key} is @ChatSafe, but DELETE on the same path
-        // (delete) is not — the allowlist is verb-specific.
-        var result = tool.execute(
-                "{\"method\":\"DELETE\",\"path\":\"/api/config/some-key\"}", null);
-        assertTrue(result.contains("is not a chat-safe endpoint"),
-                "unannotated verb must be denied even on an annotated path; got: " + result);
+    void callRejectsChatHiddenEndpoint() {
+        // DELETE /api/conversations (bulk wipe) is @ChatHidden -- refused even
+        // though /api/conversations is not deny-floored.
+        var result = tool.execute("{\"method\":\"DELETE\",\"path\":\"/api/conversations\"}", null);
+        assertTrue(result.contains("is not callable"),
+                "@ChatHidden endpoint must be refused; got: " + result);
     }
 
     @Test
-    void isChatSafeCallMatchesAnnotatedConcretePath() {
-        // Concrete paths resolve against the route patterns
-        // (/api/providers/{name}/models, /api/agents).
-        assertTrue(JClawApiTool.isChatSafeCall("GET", "/api/providers/openrouter/models"),
-                "GET providers/{name}/models is @ChatSafe");
-        assertTrue(JClawApiTool.isChatSafeCall("GET", "/api/agents"),
-                "GET agents is @ChatSafe");
+    void isCallableAllowsUnannotatedRoutes() {
+        assertTrue(JClawApiTool.isCallable("GET", "/api/status"),
+                "unannotated GET /api/status is callable under the blacklist");
+        assertTrue(JClawApiTool.isCallable("DELETE", "/api/agents/5"),
+                "DELETE agent is callable (real route, not hidden/floored)");
+        assertTrue(JClawApiTool.isCallable("POST", "/api/providers/refresh-prices"),
+                "refresh-prices is callable (real route, not hidden/floored)");
+        assertTrue(JClawApiTool.isCallable("GET", "/api/providers/openrouter/models"),
+                "concrete path resolves against the route pattern");
     }
 
     @Test
-    void providerModelMutationsAreChatSafe() {
-        // Both provider model-management endpoints are @ChatSafe so the agent
-        // can discover a catalog and add a model through chat.
-        assertTrue(JClawApiTool.isChatSafeCall("POST", "/api/providers/openrouter/models"),
-                "addModel must be @ChatSafe");
-        assertTrue(JClawApiTool.isChatSafeCall("POST", "/api/providers/openrouter/discover-models"),
-                "discoverModels must be @ChatSafe");
+    void isCallableRefusesHiddenDenyFlooredAndUnknown() {
+        assertFalse(JClawApiTool.isCallable("DELETE", "/api/conversations"),
+                "deleteConversations is @ChatHidden");
+        assertFalse(JClawApiTool.isCallable("PUT", "/api/channels/web"),
+                "channels save is @ChatHidden");
+        assertFalse(JClawApiTool.isCallable("GET", "/api/tailscale"),
+                "tailscale is deny-floored");
+        assertFalse(JClawApiTool.isCallable("GET", "/api/logs"),
+                "logs is deny-floored");
+        assertFalse(JClawApiTool.isCallable("GET", "/api/no-such-endpoint-xyz"),
+                "nonexistent path matches only the @ChatHidden catch-all -> refused");
     }
 
     @Test
-    void isChatSafeCallRejectsUnannotatedAndWrongVerb() {
-        assertFalse(JClawApiTool.isChatSafeCall("GET", "/api/status"),
-                "unannotated route must not be allowlisted");
-        assertFalse(JClawApiTool.isChatSafeCall("POST", "/api/providers/refresh-prices"),
-                "refreshPrices (POST) is not @ChatSafe");
-        assertFalse(JClawApiTool.isChatSafeCall("DELETE", "/api/agents/5"),
-                "delete agent is not @ChatSafe");
-    }
-
-    @Test
-    void isChatSafeCallIgnoresQueryString() {
-        // A query string in the path must not defeat the pattern match.
-        assertTrue(JClawApiTool.isChatSafeCall("GET", "/api/config?foo=bar"),
+    void isCallableIgnoresQueryString() {
+        assertTrue(JClawApiTool.isCallable("GET", "/api/config?foo=bar"),
                 "query string should be stripped before matching");
     }
 
-    // ==================== discover (JCLAW-329) ====================
+    // ==================== discover ====================
 
     @Test
-    void discoverListsChatSafeEndpoints() {
+    void discoverUsesOperationSummaryAndBodyHint() {
         var out = tool.execute("{\"action\":\"discover\"}", null);
         assertTrue(out.contains("/api/agents"), "agents endpoint missing: " + out);
-        assertTrue(out.toLowerCase().contains("list agents"), "agents summary missing: " + out);
+        assertTrue(out.toLowerCase().contains("list agents"), "@Operation summary missing: " + out);
         assertTrue(out.contains("/api/mcp-servers"), "mcp-servers endpoint missing: " + out);
-        // body hint surfaced for a mutating endpoint (POST /api/agents)
-        assertTrue(out.contains("modelProvider"), "create-agent body hint missing: " + out);
+        // body hint mined from the Swagger @RequestBody record (ConfigSaveRequest -> "key, value")
+        assertTrue(out.contains("key, value"), "config-save body hint from @RequestBody record missing: " + out);
     }
 
     @Test
-    void discoverExcludesUnannotatedAndBlocklisted() {
+    void discoverIncludesPreviouslyHiddenEndpoints() {
+        // The blacklist inversion: routes that were never @ChatSafe now appear too.
         var out = tool.execute("{\"action\":\"discover\"}", null);
-        // /api/status is a real route but not @ChatSafe — must not appear
-        assertFalse(out.contains("/api/status"), "unannotated /api/status leaked: " + out);
-        // blocklisted families must never appear even if a marker slipped through
-        assertFalse(out.contains("/api/chat"), "blocklisted /api/chat leaked: " + out);
-        assertFalse(out.contains("/api/auth"), "blocklisted /api/auth leaked: " + out);
+        assertTrue(out.contains("/api/status"), "/api/status must now be discovered: " + out);
+        assertTrue(out.contains("/api/tasks"), "/api/tasks must now be discovered: " + out);
+    }
+
+    @Test
+    void discoverExcludesDenyFlooredAndCatchAll() {
+        var out = tool.execute("{\"action\":\"discover\"}", null);
+        assertFalse(out.contains("/api/chat"), "deny-floored /api/chat leaked: " + out);
+        assertFalse(out.contains("/api/auth"), "deny-floored /api/auth leaked: " + out);
+        assertFalse(out.contains("/api/tailscale"), "deny-floored /api/tailscale leaked: " + out);
+        assertFalse(out.contains("/api/logs"), "deny-floored /api/logs leaked: " + out);
+        assertFalse(out.contains("ANY /api/"), "404 catch-all (@ChatHidden) leaked into discover: " + out);
     }
 
     @Test
@@ -225,27 +241,18 @@ class JClawApiToolTest extends UnitTest {
         var out = tool.execute("{\"action\":\"discover\",\"filter\":\"mcp-servers\"}", null);
         assertTrue(out.contains("/api/mcp-servers"), "mcp-servers endpoint missing under filter: " + out);
         assertFalse(out.contains("/api/agents"), "filter=mcp-servers should exclude agents: " + out);
-        assertFalse(out.contains("/api/providers"), "filter=mcp-servers should exclude providers: " + out);
     }
 
     // ==================== schema-level checks ====================
 
     @Test
     void parametersNoLongerForceMethodAndPath() {
-        // JCLAW-329: method/path moved from schema-required to runtime-validated.
-        // A discover call (action="discover") supplies neither, so declaring them
-        // required would make the host reject the discover round-trip before it
-        // ever reaches execute(). The required-field error now comes from the
-        // tool itself (see rejectsMissingMethod / rejectsMissingPath).
         assertNull(tool.parameters().get("required"),
                 "method/path must not be schema-required so discover can omit them");
     }
 
     @Test
     void nameMatchesPublicConstant() {
-        // External callers (AgentService.create, ToolRegistrationJob)
-        // reference TOOL_NAME; the instance must return the same name
-        // or the lookup goes through ToolRegistry inconsistently.
         assertEquals(JClawApiTool.TOOL_NAME, tool.name());
     }
 }

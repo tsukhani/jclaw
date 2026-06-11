@@ -1,9 +1,11 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.Task;
@@ -72,6 +74,13 @@ public class ApiTasksController extends Controller {
     private static final String KEY_REPEAT_LIMIT = "repeatLimit";
     private static final String KEY_PAUSED = "paused";
     private static final String KEY_TIMEZONE = "timezone";
+
+    public record TaskRequest(String name, Long agentId, String schedule, String description,
+                              String delivery, String payloadType, String modelProvider, String modelId,
+                              java.util.List<String> enabledToolNames, String workdir, String preCheck,
+                              String script, Boolean noAgent, Boolean autoDeleteOnComplete,
+                              java.util.List<Long> contextFromTaskIds, Integer repeatLimit,
+                              Boolean paused, String timezone) {}
 
     private record TaskView(Long id, String name, String description, String type, String status,
                             String cronExpression, Long intervalSeconds, String scheduleDisplay,
@@ -311,6 +320,7 @@ public class ApiTasksController extends Controller {
     // S2259: Play 1.x halt methods (badRequest, notFound, etc.) throw a Result that Sonar can't see across the framework boundary.
     @SuppressWarnings({"java:S2259", "java:S1181"})
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TranscriptSearchHit.class))))
+    @Operation(summary = "Full-text search task-run transcripts (q, limit) returning matching messages with task/run context")
     public static void searchTranscripts(String q, Integer limit) {
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         if (q == null || q.isBlank()) {
@@ -338,6 +348,7 @@ public class ApiTasksController extends Controller {
      * the fallback chain client-side.
      */
     @SuppressWarnings("java:S2259")
+    @Operation(summary = "List IANA timezone ids plus the effective task-scheduling and app default zones")
     public static void timezones() {
         var ids = new java.util.ArrayList<>(java.time.ZoneId.getAvailableZoneIds());
         ids.sort(String::compareTo);
@@ -358,6 +369,7 @@ public class ApiTasksController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunView.class))))
+    @Operation(summary = "Paginated TaskRun history for one task (startedAt DESC), 404 if task missing")
     public static void runs(Long id, Integer limit, Integer offset) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -383,6 +395,7 @@ public class ApiTasksController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunMessageView.class))))
+    @Operation(summary = "Turn-by-turn message trace for one TaskRun (turnIndex order), 404 if run missing")
     public static void runMessages(Long id) {
         TaskRun run = TaskRun.findById(id);
         if (run == null) notFound();
@@ -409,6 +422,7 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
+    @Operation(summary = "Task dashboard KPIs (runs today, success rate, avg duration, pending/running/active/failed counts, retention days)")
     public static void stats(String payloadType, String excludePayloadType) {
         var zone = services.TimezoneResolver.currentDefault();
         var since = java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant();
@@ -557,6 +571,7 @@ public class ApiTasksController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = RecentRunView.class))))
+    @Operation(summary = "Recent TaskRuns across all tasks for the calendar/timeline (range via from/to or rolling last hours)")
     public static void recentRuns(Integer hours, Integer limit, String from, String to) {
         int lim = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         var window = resolveRunWindow(hours, from, to);
@@ -598,6 +613,7 @@ public class ApiTasksController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))
+    @Operation(summary = "List tasks filtered by status/type/agent/payloadType and full-text q, paginated with X-Total-Count")
     public static void list(String status, String type, Long agentId, String q,
                              String payloadType, String excludePayloadType,
                              Integer limit, Integer offset) {
@@ -731,6 +747,8 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TaskRequest.class)))
+    @Operation(summary = "Create a task from a JSON body (agentId, name, schedule + optional fields) and register it with the scheduler")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -942,6 +960,8 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TaskRequest.class)))
+    @Operation(summary = "Patch a task by id from a JSON body of changed fields, re-registering the scheduler when the schedule changes")
     public static void update(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -1098,6 +1118,7 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @Operation(summary = "Cancel a PENDING or ACTIVE task by id (sets status CANCELLED and unschedules)")
     public static void cancel(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -1133,6 +1154,7 @@ public class ApiTasksController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200")
+    @Operation(summary = "Hard-delete a task by id along with its runs, messages, notifications, and scheduler row")
     public static void delete(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -1177,6 +1199,7 @@ public class ApiTasksController extends Controller {
      * running / failed) are untouched — they reflect live Task state, not run
      * history.
      */
+    @Operation(summary = "Reset dashboard KPIs by deleting terminal (non-RUNNING) task runs and transcripts, scoped by payloadType")
     public static void resetStats(String payloadType, String excludePayloadType) {
         var em = play.db.jpa.JPA.em();
         var msgQ = em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
@@ -1199,6 +1222,7 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @Operation(summary = "Pause a PENDING or ACTIVE task by id so it won't fire until resumed")
     public static void pause(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -1218,6 +1242,7 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @Operation(summary = "Resume a paused PENDING or ACTIVE task by id so it fires on schedule again")
     public static void resume(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -1247,6 +1272,7 @@ public class ApiTasksController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @Operation(summary = "Re-arm a CANCELLED task's schedule at its next natural fire without firing immediately")
     public static void reenable(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -1278,6 +1304,7 @@ public class ApiTasksController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @Operation(summary = "Fire a task immediately by id, reviving a CANCELLED task first so the run isn't skipped")
     public static void run(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -1311,6 +1338,7 @@ public class ApiTasksController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskRunView.class)))
+    @Operation(summary = "Cancel an in-progress task run by runId (cooperative flag + stamp CANCELLED), 400 if not RUNNING")
     public static void cancelRun(Long runId) {
         TaskRun run = TaskRun.findById(runId);
         if (run == null) notFound();
@@ -1341,6 +1369,7 @@ public class ApiTasksController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @Operation(summary = "Retry a FAILED or LOST task by id (reset retryCount/lastError and re-register to fire now)")
     public static void retry(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();

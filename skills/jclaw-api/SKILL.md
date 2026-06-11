@@ -10,7 +10,7 @@ icon: ⚙️
 
 Use this skill when the user asks you to **change JClaw's own state** — adding an MCP server, creating an agent, toggling a tool on an agent, editing a config value, etc.
 
-The `jclaw_api` tool exposes a curated, **chat-safe** subset of JClaw's HTTP API, and the list of callable endpoints is **discovered at runtime** — there is no fixed catalog to drift. Do not invent endpoints, and never call one that `discover` does not list. If the user wants something genuinely outside the catalog, say so plainly: extending coverage means marking that controller action `@ChatSafe` in the backend (a code change), not editing this skill.
+The `jclaw_api` tool exposes JClaw's own HTTP API, and the list of callable endpoints is **discovered at runtime** — there is no fixed catalog to drift. Do not invent endpoints, and never call one that `discover` does not list. Every `/api/` endpoint is callable by default unless it is deny-listed, so coverage is automatic — a newly-added endpoint appears in `discover` with no skill edit. If `discover` does not list something, it is deliberately off-limits (see below); to *hide* a sensitive endpoint, mark its controller action `@ChatHidden` (or add its prefix to the tool's deny-floor) in the backend, not in this skill.
 
 ## How to call
 
@@ -27,7 +27,7 @@ The tool returns `HTTP <status>\n<body>` so you can read both. A 4xx response us
 
 These staples don't need a discover round-trip first; run `action="discover"` for anything else.
 
-- **Agents** — `GET /api/agents` (list); `POST /api/agents` body `name`, `modelProvider`, `modelId` (create); `PUT /api/agents/{id}` (update).
+- **Agents** — `GET /api/agents` (list); `POST /api/agents` body `name`, `modelProvider`, `modelId` (create); `PUT /api/agents/{id}` (update); `DELETE /api/agents/{id}` (delete an agent). The built-in **main** agent cannot be deleted — `DELETE` on it returns 409; don't attempt it.
 - **MCP servers** — `POST /api/mcp-servers` body `name`, `enabled`, `transport` (`STDIO` or `HTTP`), then `command`/`args`/`env` or `url`/`headers`; confirm it boots with `POST /api/mcp-servers/{id}/test`.
 - **Toggle a tool on an agent** — `PUT /api/agents/{id}/tools/{name}` with `{ "enabled": <bool> }`.
 - **Install a skill on an agent** — `POST /api/agents/{id}/skills/{name}/copy` with an empty body (installs **and** enables); `PUT /api/agents/{id}/skills/{name}` only toggles an already-installed skill.
@@ -47,6 +47,13 @@ The following endpoints exist in JClaw's API but are **deliberately not callable
 - All `/api/api-tokens` routes — minting or revoking API tokens through chat would be a privilege-escalation surface.
 - `/api/webhooks/*` — verified by their own signature mechanisms; not for in-process use.
 - `/api/events` — Server-Sent Events; the tool buffers full responses and isn't suited to streams.
+
+- `/api/bindings`, `/api/channels/telegram/*` — channel routing and Telegram bot tokens; editing these could redirect or impersonate your messaging.
+- `/api/tailscale` — network-funnel infrastructure config.
+- `/api/logs` — raw application logs can leak secrets and PII.
+- `/api/metrics/loadtest*` — the load-test harness; an agent must not spawn load.
+
+Individual destructive or secret-bearing actions inside otherwise-callable controllers are hidden the same way (marked `@ChatHidden` in the backend): bulk conversation deletes, channel-config writes, and the transcription model-download trigger. You won't see them in `discover`.
 
 If the user requests an operation that resolves to one of these, refuse explicitly and explain the boundary. Do not try to compose multiple permitted endpoints to simulate a forbidden one.
 

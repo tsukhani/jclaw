@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.JsonObject;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -97,12 +98,14 @@ public class ApiMetricsController extends Controller {
      *  dynamic shape (one entry per segment); not annotated with a fixed
      *  schema since the shape is dictated at runtime by the segments that
      *  have observed traffic. */
+    @Operation(summary = "Snapshot latency segment histograms as JSON")
     public static void latency() {
         renderJSON(LatencyStats.snapshot().toString());
     }
 
     /** DELETE /api/metrics/latency — reset histograms. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Reset latency segment histograms")
     public static void resetLatency() {
         LatencyStats.reset();
         renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
@@ -140,6 +143,7 @@ public class ApiMetricsController extends Controller {
      * anyway.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CostResponse.class)))
+    @Operation(summary = "List per-turn cost rows since a timestamp for client-side aggregation")
     public static void cost() {
         java.time.Instant since = parseSinceParam(params.get("since"));
         Long agentId = parseAgentIdParam(params.get("agentId"));

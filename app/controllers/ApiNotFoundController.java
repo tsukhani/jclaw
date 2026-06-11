@@ -17,6 +17,7 @@ import play.mvc.Controller;
  */
 public class ApiNotFoundController extends Controller {
 
+    @ChatHidden("404 catch-all -- matches every unknown /api path; must never grant")
     public static void handle() {
         response.status = 404;
         renderJSON("{\"error\":\"Not found\"}");

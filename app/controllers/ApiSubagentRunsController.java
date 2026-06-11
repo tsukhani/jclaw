@@ -2,9 +2,11 @@ package controllers;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.EventLog;
 import models.SubagentRun;
@@ -75,6 +77,7 @@ public class ApiSubagentRunsController extends Controller {
      * client-side range display.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubagentRunView.class))))
+    @Operation(summary = "List subagent runs with optional filters and pagination")
     public static void list(Long parentAgentId, Long parentConversationId,
                             String status, String since, String q,
                             Integer limit, Integer offset) {
@@ -256,6 +259,7 @@ public class ApiSubagentRunsController extends Controller {
      * sweeps the run row as part of the agent's FK chain.
      */
     @ApiResponse(responseCode = "200")
+    @Operation(summary = "Delete a terminal subagent run and its child agent")
     public static void delete(Long id) {
         if (id == null) {
             response.status = 400;
@@ -297,7 +301,9 @@ public class ApiSubagentRunsController extends Controller {
      * rows, emits SUBAGENT_KILL on success, returns the resulting message
      * in either case.
      */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = KillRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = KillResponse.class)))
+    @Operation(summary = "Kill a running subagent")
     public static void kill(Long id) {
         if (id == null) {
             response.status = 400;

@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -54,6 +55,7 @@ public class ApiTranscriptionController extends Controller {
     /** GET /api/transcription/state — snapshot for the Settings UI. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TranscriptionStateResponse.class)))
+    @Operation(summary = "Snapshot transcription config, ffmpeg availability, and per-Whisper-model download status")
     public static void state() {
         var ffmpeg = FfmpegProbe.lastResult();
         // Force one probe if the cache is still on the UNRUN sentinel —
@@ -96,6 +98,7 @@ public class ApiTranscriptionController extends Controller {
     // can't. Same Play-1.x-vs-Sonar gap that S2259 papers over.
     @SuppressWarnings({"java:S2259", "java:S3655"})
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
+    @ChatHidden("triggers a Whisper model download -- disk/network resource action")
     public static void download(String id) {
         var model = WhisperModel.byId(id);
         if (model.isEmpty()) error(400, "Unknown whisper model id: " + id);

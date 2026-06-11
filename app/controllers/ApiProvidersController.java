@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -58,7 +59,7 @@ public class ApiProvidersController extends Controller {
      * partition spend.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ProviderInfo.class))))
-    @ChatSafe(summary = "List configured LLM providers")
+    @Operation(summary = "List configured LLM providers")
     public static void list() {
         var infos = ProviderRegistry.listAll().stream()
                 .map(p -> {
@@ -84,7 +85,7 @@ public class ApiProvidersController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
-    @ChatSafe(summary = "Discover a provider's available models from its live API")
+    @Operation(summary = "Discover a provider's available models from its live API")
     public static void discoverModels(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
@@ -115,7 +116,7 @@ public class ApiProvidersController extends Controller {
      * the read complement to {@link #addModel}.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
-    @ChatSafe(summary = "List a provider's configured models (id + display name)")
+    @Operation(summary = "List a provider's configured models (id + display name)")
     public static void models(String name) {
         requireConfiguredProvider(name);
         var arr = parseModelsArray(ConfigService.get(modelsKey(name)));
@@ -144,8 +145,7 @@ public class ApiProvidersController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelInfoRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AddModelResponse.class)))
-    @ChatSafe(summary = "Add a model to a provider by id",
-            body = "id (required); optional name, contextWindow, maxTokens, supportsThinking, supportsVision, supportsAudio")
+    @Operation(summary = "Add a model to a provider by id")
     public static void addModel(String name) {
         requireConfiguredProvider(name);
 
@@ -280,6 +280,7 @@ public class ApiProvidersController extends Controller {
      * silently appearing to do nothing.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RefreshPricesResponse.class)))
+    @Operation(summary = "Manually refresh LiteLLM model prices (synchronous)")
     public static void refreshPrices() {
         var result = PricingRefreshService.refresh();
         renderJSON(gson.toJson(new RefreshPricesResponse(

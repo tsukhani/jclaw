@@ -2,6 +2,7 @@ package controllers;
 
 import agents.SystemPromptAssembler.PromptBreakdown;
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -77,6 +78,11 @@ public class ApiAgentsController extends Controller {
         return agent;
     }
 
+    public record AgentRequest(String name, String modelProvider, String modelId,
+                               String thinkingMode, String description, Boolean enabled) {}
+
+    public record WorkspaceFileRequest(String content) {}
+
     private record AgentView(Long id, String name, String description,
                              String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
@@ -104,7 +110,7 @@ public class ApiAgentsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentView.class))))
-    @ChatSafe(summary = "List agents (id, name, modelProvider, modelId, enabled, isMain)")
+    @Operation(summary = "List agents (id, name, modelProvider, modelId, enabled, isMain)")
     public static void list() {
         var agents = AgentService.listAll();
         var configuredKeys = AgentService.configuredModelKeys();
@@ -122,7 +128,7 @@ public class ApiAgentsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
-    @ChatSafe(summary = "Get one agent's full details by id")
+    @Operation(summary = "Get one agent's full details by id")
     public static void get(Long id) {
         var agent = requireAgent(id);
         renderJSON(gson.toJson(AgentView.of(agent)));
@@ -138,6 +144,7 @@ public class ApiAgentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptBreakdown.class)))
+    @Operation(summary = "Per-section breakdown of the system prompt this agent would receive next turn")
     public static void promptBreakdown(Long id) {
         var agent = requireAgent(id);
         // channelType is required: every real chat lives on a channel, so the
@@ -169,6 +176,7 @@ public class ApiAgentsController extends Controller {
      *
      * @param id the agent id whose effective allowlist is requested
      */
+    @Operation(summary = "Effective shell allowlist for an agent: global config unioned with enabled-skill commands")
     public static void effectiveShellAllowlist(Long id) {
         var agent = requireAgent(id);
 
@@ -207,8 +215,8 @@ public class ApiAgentsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
-    @ChatSafe(summary = "Create an agent", body = "name, modelProvider, modelId")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
+    @Operation(summary = "Create an agent")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -276,8 +284,8 @@ public class ApiAgentsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
-    @ChatSafe(summary = "Update an agent by id", body = "any of name, modelProvider, modelId, enabled, thinkingMode, description")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
+    @Operation(summary = "Update an agent by id")
     public static void update(Long id) {
         var agent = requireAgent(id);
 
@@ -352,6 +360,7 @@ public class ApiAgentsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
+    @Operation(summary = "Delete an agent by id (the built-in 'main' agent cannot be deleted)")
     public static void delete(Long id) {
         var agent = requireAgent(id);
         if (agent.isMain()) {
@@ -371,6 +380,7 @@ public class ApiAgentsController extends Controller {
      * @param filePath path inside the agent's workspace
      */
     @SuppressWarnings("java:S2259")
+    @Operation(summary = "Serve a binary workspace file with its content type for inline rendering or download")
     public static void serveWorkspaceFile(Long id, String filePath) {
         var agent = requireAgent(id);
 
@@ -405,6 +415,7 @@ public class ApiAgentsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
+    @Operation(summary = "Read a text workspace file's contents by filename")
     public static void getWorkspaceFile(Long id, String filename) {
         var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
@@ -413,6 +424,8 @@ public class ApiAgentsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkspaceFileRequest.class)))
+    @Operation(summary = "Write a text workspace file's contents by filename")
     public static void saveWorkspaceFile(Long id, String filename) {
         var agent = requireAgent(id);
         var body = JsonBodyReader.readJsonBody();

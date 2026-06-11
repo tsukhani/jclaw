@@ -1,5 +1,6 @@
 package controllers;
 
+import io.swagger.v3.oas.annotations.Operation;
 import models.MessageAttachment;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -27,6 +28,7 @@ public class ApiAttachmentsController extends Controller {
      * @param uuid the attachment's client-facing key
      */
     @SuppressWarnings("java:S2259")
+    @Operation(summary = "Stream the raw bytes of a persisted chat-message attachment (inline for media, attachment otherwise)")
     public static void download(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
         if (att == null) notFound();

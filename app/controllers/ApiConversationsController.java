@@ -2,6 +2,7 @@ package controllers;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -128,6 +129,7 @@ public class ApiConversationsController extends Controller {
      * not worth the unbounded fetch cost.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConversationView.class))))
+    @Operation(summary = "List conversations with optional channel, agent, name, peer, and full-text (q) filters, paginated")
     public static void listConversations(String channel, Long agentId, String name, String peer,
                                           String q, Integer limit, Integer offset) {
         boolean hasNameFilter = name != null && !name.isBlank();
@@ -270,6 +272,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConversationView.class)))
+    @Operation(summary = "Get a single conversation by id, in the same shape as one list row")
     public static void getConversation(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -282,6 +285,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageView.class))))
+    @Operation(summary = "List a conversation's messages in ascending order, paginated")
     public static void getMessages(Long id, Integer limit, Integer offset) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -375,6 +379,7 @@ public class ApiConversationsController extends Controller {
      * GET /api/conversations/{id}/queue
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = QueueStatusResponse.class)))
+    @Operation(summary = "Get the busy flag and queued-message count for a conversation")
     public static void getQueueStatus(Long id) {
         var busy = services.ConversationQueue.isBusy(id);
         var queueSize = services.ConversationQueue.getQueueSize(id);
@@ -390,6 +395,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @ChatHidden("destructive history deletion")
     public static void deleteMessage(Long id, Long mid) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -407,6 +413,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @ChatHidden("destructive history deletion")
     public static void deleteConversation(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -433,6 +440,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
+    @ChatHidden("destructive bulk history deletion -- wipes conversations")
     public static void deleteConversations() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -479,6 +487,7 @@ public class ApiConversationsController extends Controller {
      * GET /api/conversations/channels — Distinct channel types in use.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(type = "string"))))
+    @Operation(summary = "List the distinct channel types currently in use across conversations")
     public static void listConversationChannels() {
         List<String> channels = JPA.em()
                 .createQuery("SELECT DISTINCT c.channelType FROM Conversation c ORDER BY c.channelType", String.class)
@@ -503,6 +512,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelOverrideRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ModelOverrideResponse.class)))
+    @Operation(summary = "Set a conversation-scoped model provider/model override, validated against the provider registry")
     public static void setModelOverride(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -543,6 +553,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Clear a conversation's model override, reverting to the agent default (idempotent)")
     public static void clearModelOverride(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();

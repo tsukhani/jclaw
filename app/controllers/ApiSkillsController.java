@@ -2,6 +2,7 @@ package controllers;
 
 import agents.SkillLoader;
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -80,7 +81,7 @@ public class ApiSkillsController extends Controller {
 
     /** GET /api/skills — List all global skills. */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SkillView.class))))
-    @ChatSafe(summary = "List all skills in the global registry")
+    @Operation(summary = "List all skills in the global registry")
     public static void list() {
         var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
         var globalDir = SkillLoader.globalSkillsPath();
@@ -104,6 +105,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/skills/{name} — Get a global skill with full content. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillDetailView.class)))
+    @Operation(summary = "Get a global skill with its full SKILL.md content")
     public static void get(String name) {
         var path = resolveSkillName(SkillLoader.globalSkillsPath(), name).resolve(SKILL_MD);
         if (!Files.exists(path)) notFound();
@@ -129,6 +131,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/skills/{name}/files — List all files in a skill folder with metadata and detected tool dependencies. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
+    @Operation(summary = "List files in a global skill folder with metadata and detected tool dependencies")
     public static void listFiles(String name) {
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
@@ -137,6 +140,7 @@ public class ApiSkillsController extends Controller {
 
     /** GET /api/skills/{name}/files/{&lt;path&gt;filePath} — Read a text file from a skill folder. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFileContentResponse.class)))
+    @Operation(summary = "Read a text file from a global skill folder")
     public static void readFile(String name, String filePath) {
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         readSkillFileFrom(dir, filePath);
@@ -233,6 +237,7 @@ public class ApiSkillsController extends Controller {
     /** DELETE /api/skills/{name} — Delete a global skill. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
+    @Operation(summary = "Delete a global skill (rejects the built-in skill-creator)")
     public static void delete(String name) {
         if ("skill-creator".equals(name)) {
             error(403, "The skill-creator skill is a built-in skill and cannot be deleted.");
@@ -245,7 +250,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/agents/{id}/skills — List workspace skills for an agent with enabled status. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
-    @ChatSafe(summary = "List an agent's installed skills and their enabled state")
+    @Operation(summary = "List an agent's installed skills and their enabled state")
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -286,7 +291,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillToggleResponse.class)))
-    @ChatSafe(summary = "Enable or disable an already-installed skill on an agent", body = "enabled (bool)")
+    @Operation(summary = "Enable or disable an already-installed skill on an agent")
     public static void updateForAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -333,7 +338,7 @@ public class ApiSkillsController extends Controller {
     /** POST /api/agents/{id}/skills/{name}/copy — Copy a global skill into the agent's workspace. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCopyResponse.class)))
-    @ChatSafe(summary = "Install (copy) a global skill into an agent's workspace and enable it (use this to add a skill an agent lacks)")
+    @Operation(summary = "Install (copy) a global skill into an agent's workspace and enable it (use this to add a skill an agent lacks)")
     public static void copyToAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -389,6 +394,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/agents/{id}/skills/{name}/files — List files in an agent workspace skill folder. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
+    @Operation(summary = "List files in an agent workspace skill folder with metadata and detected tool dependencies")
     public static void listAgentSkillFiles(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -400,6 +406,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/agents/{id}/skills/{name}/files/{filePath} — Read a text file from an agent skill. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFileContentResponse.class)))
+    @Operation(summary = "Read a text file from an agent workspace skill")
     public static void readAgentSkillFile(Long id, String name, String filePath) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -410,6 +417,7 @@ public class ApiSkillsController extends Controller {
     /** DELETE /api/agents/{id}/skills/{name}/delete — Delete a skill from an agent's workspace. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
+    @Operation(summary = "Delete a skill from an agent's workspace and revoke its shell-allowlist grants")
     public static void deleteAgentSkill(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -431,6 +439,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillPromoteRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillPromoteResponse.class)))
+    @Operation(summary = "Promote an agent workspace skill to the global registry (sanitizes asynchronously)")
     public static void promote() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("agentId") || !body.has(KEY_SKILL_NAME)) badRequest();
@@ -468,6 +477,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillRenameRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillRenameResponse.class)))
+    @Operation(summary = "Rename a global skill folder")
     public static void rename(String name) {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_NEW_NAME)) badRequest();

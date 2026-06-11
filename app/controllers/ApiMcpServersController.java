@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -42,18 +43,24 @@ public class ApiMcpServersController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    public record McpServerRequest(String name, Boolean enabled, Boolean requiresApproval,
+                                   String transport, String command, java.util.List<String> args,
+                                   java.util.Map<String, String> env, String url,
+                                   java.util.Map<String, String> headers) {}
+
     // JSON body keys reused across create/update parsers.
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_TRANSPORT = "transport";
     private static final String KEY_REQUIRES_APPROVAL = "requiresApproval";
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
-    @ChatSafe(summary = "List MCP servers with status and tool count")
+    @Operation(summary = "List MCP servers with status and tool count")
     public static void list() {
         renderJSON(gson.toJson(McpServerService.listAll()));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
+    @Operation(summary = "Get a single MCP server by id")
     public static void get(Long id) {
         var row = requireServer(id);
         renderJSON(gson.toJson(McpServerService.View.of(row)));
@@ -61,8 +68,8 @@ public class ApiMcpServersController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
-    @ChatSafe(summary = "Add an MCP server (STDIO or HTTP)", body = "name, enabled, requiresApproval, transport (STDIO or HTTP), then command/args/env or url/headers")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
+    @Operation(summary = "Add an MCP server (STDIO or HTTP)")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -98,8 +105,8 @@ public class ApiMcpServersController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
-    @ChatSafe(summary = "Update an MCP server by id; it reconnects automatically", body = "fields to change: transport, command, args, env, url, headers, enabled, requiresApproval")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
+    @Operation(summary = "Update an MCP server by id; it reconnects automatically")
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
@@ -154,6 +161,7 @@ public class ApiMcpServersController extends Controller {
         row.name = newName;
     }
 
+    @Operation(summary = "Disconnect and delete an MCP server by id")
     public static void delete(Long id) {
         var row = requireServer(id);
         // stop() handles every teardown concern: closes the McpClient,
@@ -166,7 +174,7 @@ public class ApiMcpServersController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    @ChatSafe(summary = "Test an MCP server connection by id (probe); returns success, toolCount, toolNames")
+    @Operation(summary = "Test an MCP server connection by id (probe); returns success, toolCount, toolNames")
     public static void test(Long id) {
         var row = requireServer(id);
         var result = McpServerService.testConnection(row);

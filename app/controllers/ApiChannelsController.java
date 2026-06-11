@@ -3,6 +3,7 @@ package controllers;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -33,6 +34,7 @@ public class ApiChannelsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ChannelView.class))))
+    @Operation(summary = "List all stored channel configurations")
     public static void list() {
         List<ChannelConfig> configs = ChannelConfig.findAll();
         var result = configs.stream().map(ChannelView::of).toList();
@@ -52,6 +54,7 @@ public class ApiChannelsController extends Controller {
      * <p>Response: {@code {"count": N, "channelTypes": ["telegram", "web", ...]}}.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ActiveChannelsResponse.class)))
+    @Operation(summary = "Get the count and set of channel types currently doing work, aggregated across web, telegram, and ChannelConfig")
     public static void active() {
         var types = ChannelStatusService.activeChannelTypes();
         renderJSON(gson.toJson(new ActiveChannelsResponse(types.size(), types)));
@@ -59,6 +62,7 @@ public class ApiChannelsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
+    @ChatHidden("channel config detail may include secrets")
     public static void get(String channelType) {
         var config = ChannelConfig.findByType(channelType);
         if (config == null) notFound();
@@ -68,6 +72,7 @@ public class ApiChannelsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ChannelConfig.class)))
+    @ChatHidden("writes channel config -- secrets / comms routing")
     public static void save(String channelType) {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();

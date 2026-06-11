@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.Operation;
 import models.Notification;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -63,6 +64,7 @@ public class ApiNotificationsController extends Controller {
      * @param limit  hard cap on result count; defaults to 50
      */
     @SuppressWarnings("java:S2259")
+    @Operation(summary = "List notifications newest-first, filtered by unread/all status with a result cap")
     public static void list(String status, Integer limit) {
         int cap = limit != null && limit > 0 ? Math.min(limit, 500) : 50;
         var mode = status == null || status.isBlank() ? "unread" : status.toLowerCase();
@@ -85,6 +87,7 @@ public class ApiNotificationsController extends Controller {
      * dismiss-on-click path doesn't have to track state.
      */
     @SuppressWarnings("java:S2259")
+    @Operation(summary = "Mark a notification acknowledged (idempotent), without deleting it")
     public static void ack(Long id) {
         var n = (Notification) Notification.findById(id);
         if (n == null) notFound();
@@ -106,6 +109,7 @@ public class ApiNotificationsController extends Controller {
      * path; this endpoint is for "I never want to see this again."
      */
     @SuppressWarnings("java:S2259")
+    @Operation(summary = "Hard-delete a notification by id")
     public static void delete(Long id) {
         var n = (Notification) Notification.findById(id);
         if (n == null) notFound();

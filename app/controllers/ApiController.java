@@ -1,5 +1,6 @@
 package controllers;
 
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -41,6 +42,7 @@ public class ApiController extends Controller {
                                   String expectedFrameworkVersion) {}
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Report service health, app name/version, run mode, and Play framework version vs. expected")
     public static void status() {
         var resp = new StatusResponse(
                 "ok",
