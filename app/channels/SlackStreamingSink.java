@@ -21,7 +21,7 @@ import services.EventLogger;
  * update/seal/error sequentially on one virtual thread, and {@link #begin()} runs
  * before it (happens-before via thread start), so no synchronization is needed.
  */
-public final class SlackStreamingSink {
+public final class SlackStreamingSink implements ChannelStreamingSink {
 
     private static final String LOG_CATEGORY = "channel";
     private static final String LOG_SOURCE = "slack";
@@ -93,6 +93,21 @@ public final class SlackStreamingSink {
             canStream = recipientUserId != null && !recipientUserId.isBlank();
         }
         lastFlushMs = System.currentTimeMillis();
+    }
+
+    /** JCLAW-442: {@link ChannelStreamingSink} typing cue. Slack's is the
+     *  assistant-thread status line set by {@link #begin()} — there is no
+     *  background heartbeat thread (unlike Telegram). */
+    @Override
+    public void startTypingHeartbeat() {
+        begin();
+    }
+
+    /** JCLAW-442: {@link ChannelStreamingSink} cancellation (e.g. /stop) — clear
+     *  the "is typing…" status; no live stream to tear down beyond that. */
+    @Override
+    public void cancel() {
+        clearStatus();
     }
 
     /** Per-token-batch hook: lazily start the stream with the first content (so the

@@ -72,7 +72,7 @@ import java.util.regex.Pattern;
  * thread pushes tokens; {@link #flush()} runs on {@link #scheduler()}. All
  * mutable state is guarded by {@code stateLock}.
  */
-public final class TelegramStreamingSink {
+public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     private static final String LOG_CATEGORY = "channel";
     private static final String LOG_SOURCE = "telegram";

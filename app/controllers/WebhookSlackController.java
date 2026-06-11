@@ -7,12 +7,9 @@ import com.google.gson.JsonParser;
 import models.SlackBinding;
 import play.mvc.Controller;
 import play.mvc.Http;
-import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
 import utils.WebhookUtil;
-
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Slack Events API webhook. JCLAW-441: the URL carries the per-agent binding id
@@ -108,7 +105,6 @@ public class WebhookSlackController extends Controller {
     }
 
     private static void processMessage(Long bindingId, String botToken, SlackChannel.InboundMessage message) {
-        long acceptedAtNs = System.nanoTime();
         try {
             // JCLAW-83: capture the inbound thread_ts so the reply lands in-thread
             // (null for a non-threaded message → posts at channel level).
@@ -122,21 +118,16 @@ public class WebhookSlackController extends Controller {
             if (agent == null) {
                 return; // binding deleted/disabled between accept and dispatch
             }
-            var conversation = Tx.run(() ->
-                    ConversationService.findOrCreate(agent, CHANNEL_SLACK, message.channelId()));
-            // JCLAW-341: native Slack streaming (chat.startStream/appendStream/
-            // stopStream) → live "is typing…" + progressive text, no (edited) tag.
-            // Falls back to a single formatted post off-thread. recipientUserId is
-            // required by the streaming API for DMs. JCLAW-441: streamed as the
-            // binding's bot (botToken).
-            var sink = new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken);
-            sink.begin();
-            AgentRunner.runStreaming(agent, conversation.id, CHANNEL_SLACK, message.channelId(),
-                    message.text(), new AtomicBoolean(false),
-                    new AgentRunner.StreamingCallbacks(
-                            conv -> { }, sink::update, reasoning -> { }, status -> { },
-                            tool -> { }, sink::seal, sink::errorFallback, () -> { }),
-                    acceptedAtNs);
+            // JCLAW-442: route through the shared higher-level entry (as Telegram does)
+            // so slash commands + the conversation lifecycle are handled centrally and
+            // future inbound attachments (JCLAW-344) ride the same overload. The factory
+            // owns the per-binding bot token + channel/thread; processInboundForAgentStreaming
+            // invokes startTypingHeartbeat (the "is typing…" status) before the LLM. The
+            // sink streams natively in assistant threads, else posts a formatted reply.
+            AgentRunner.processInboundForAgentStreaming(
+                    agent, CHANNEL_SLACK, message.channelId(), message.text(),
+                    _ -> new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken),
+                    java.util.List.of(), null);
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "Error processing message: %s".formatted(e.getMessage()));

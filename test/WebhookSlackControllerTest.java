@@ -179,6 +179,22 @@ class WebhookSlackControllerTest extends FunctionalTest {
     }
 
     @Test
+    void slashCommandIsAcceptedAndReturns200() {
+        // JCLAW-442: routing through processInboundForAgentStreaming activates
+        // slash-command interception on Slack. A "/new" message event is handled
+        // (opens a fresh conversation) and 200s synchronously without an LLM round
+        // trip. We assert only the synchronous contract; the slash handling runs on
+        // the dispatch virtual thread.
+        var id = seedBinding();
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
+                + "\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"/new\"}}";
+        var sig = hmac(body, ts);
+        var response = postWithSlackHeaders(id, body, ts, sig);
+        assertIsOk(response);
+    }
+
+    @Test
     void ignoresBotMessages() {
         // Bot messages carry a bot_id and must NOT round-trip through the agent —
         // guard against feedback loops. parseEvent returns null, controller 200s.

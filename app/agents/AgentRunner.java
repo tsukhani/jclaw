@@ -1245,7 +1245,7 @@ public class AgentRunner {
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
-            java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory) {
+            java.util.function.Function<Long, channels.ChannelStreamingSink> sinkFactory) {
         processInboundForAgentStreaming(agent, channelType, peerId, text, sinkFactory,
                 java.util.List.of(), null);
     }
@@ -1270,7 +1270,7 @@ public class AgentRunner {
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
-            java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory,
+            java.util.function.Function<Long, channels.ChannelStreamingSink> sinkFactory,
             java.util.List<services.AttachmentService.Input> attachments) {
         processInboundForAgentStreaming(agent, channelType, peerId, text, sinkFactory,
                 attachments, null);
@@ -1300,7 +1300,7 @@ public class AgentRunner {
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
-            java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory,
+            java.util.function.Function<Long, channels.ChannelStreamingSink> sinkFactory,
             java.util.List<services.AttachmentService.Input> attachments,
             String chatType) {
         // JCLAW-26: intercept slash commands before the LLM round. Reuse the
