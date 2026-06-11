@@ -184,7 +184,9 @@ public final class SlackFileDownloader {
                 if (code != 200) {
                     return new FetchFailed("download HTTP " + code);
                 }
-                var ct = resp.body() != null ? resp.body().contentType() : null;
+                // OkHttp 5's Response.body is non-null (an empty body for bodyless
+                // responses), so a null-check here is dead — read the type directly.
+                var ct = resp.body().contentType();
                 String ctStr = ct != null ? ct.toString() : "";
                 // Slack serves an HTML login page (not bytes) when the token lacks
                 // files:read or url_private (not _download) was used. Reject it.

@@ -130,7 +130,7 @@ const funnelBaseUrl = computed(() => {
 })
 
 const isPublicHttps = computed(() => {
-  const o = import.meta.client ? window.location.origin : ''
+  const o = import.meta.client ? globalThis.location.origin : ''
   if (!/^https:\/\//i.test(o)) return false
   const host = o.replace(/^https:\/\//i, '').replace(/:\d+$/, '').toLowerCase()
   return !(host === 'localhost' || host.endsWith('.local') || host === '[::1]'
@@ -139,7 +139,7 @@ const isPublicHttps = computed(() => {
 })
 
 const defaultPublicBase = computed(() =>
-  funnelBaseUrl.value || (isPublicHttps.value ? window.location.origin : ''))
+  funnelBaseUrl.value || (isPublicHttps.value ? globalThis.location.origin : ''))
 
 // Telegram secret_token charset is base64url (A-Z a-z 0-9 _ -).
 function generateWebhookSecret(): string {

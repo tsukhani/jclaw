@@ -3,6 +3,8 @@ import models.Agent;
 import models.EventLog;
 import models.SlackBinding;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.*;
 import services.EventLogger;
 import services.Tx;
@@ -150,78 +152,28 @@ class WebhookSlackControllerTest extends FunctionalTest {
         assertEquals("hello-slack", getContent(response));
     }
 
-    @Test
-    void acceptsValidEventCallbackAndReturns200() {
-        // A signed event_callback for a non-message event — parseEvent returns
-        // null for non-message types, so it falls through to ok() without
-        // spawning the dispatch thread. We assert the synchronous outcome.
+    /**
+     * Every well-signed event yields a synchronous 200 — whether it's processed
+     * (message, slash, file_share) or dropped at parse time (non-message subtype,
+     * bot message). The parse + dispatch decision runs on the dispatch virtual
+     * thread; here we pin only the 200 contract Slack relies on. The self-loop
+     * guard (own bot user id) is covered separately below — it depends on the
+     * seeded {@code botUserId}.
+     */
+    @ParameterizedTest(name = "signedEventReturns200[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "non-message event   | {\"type\":\"event_callback\",\"event\":{\"type\":\"reaction_added\"}}",
+            "plain message       | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"hi\"}}",
+            "slash command       | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"/new\"}}",
+            "file_share          | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"pic\",\"files\":[{\"id\":\"F1\",\"name\":\"p.png\",\"mimetype\":\"image/png\",\"size\":10,\"url_private_download\":\"https://files.slack.com/files-pri/T/F1/p.png\"}]}}",
+            "bot message dropped | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"channel\":\"C123\",\"bot_id\":\"B789\",\"text\":\"echo\"}}"
+    })
+    void signedEventReturns200(String label, String body) {
         var id = seedBinding();
         var ts = String.valueOf(Instant.now().getEpochSecond());
-        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"reaction_added\"}}";
         var sig = hmac(body, ts);
         var response = postWithSlackHeaders(id, body, ts, sig);
-        assertIsOk(response);
-    }
-
-    @Test
-    void acceptsValidMessageEventAndReturns200() {
-        // A real message event with valid signature: the controller resolves the
-        // binding's agent, spawns a virtual thread for processing, and returns 200.
-        // We don't assert downstream side effects (would race the VT, and the LLM
-        // call fails without a provider key) — only the synchronous 200 contract.
-        var id = seedBinding();
-        var ts = String.valueOf(Instant.now().getEpochSecond());
-        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
-                + "\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"hi\"}}";
-        var sig = hmac(body, ts);
-        var response = postWithSlackHeaders(id, body, ts, sig);
-        assertIsOk(response);
-    }
-
-    @Test
-    void slashCommandIsAcceptedAndReturns200() {
-        // JCLAW-442: routing through processInboundForAgentStreaming activates
-        // slash-command interception on Slack. A "/new" message event is handled
-        // (opens a fresh conversation) and 200s synchronously without an LLM round
-        // trip. We assert only the synchronous contract; the slash handling runs on
-        // the dispatch virtual thread.
-        var id = seedBinding();
-        var ts = String.valueOf(Instant.now().getEpochSecond());
-        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
-                + "\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"/new\"}}";
-        var sig = hmac(body, ts);
-        var response = postWithSlackHeaders(id, body, ts, sig);
-        assertIsOk(response);
-    }
-
-    @Test
-    void fileShareEventWithFilesReturns200() {
-        // JCLAW-344: a file_share event carries files[] and must be admitted (not
-        // dropped as an unknown subtype). The controller 200s synchronously; the
-        // file download + dispatch run on the virtual thread. We assert only the
-        // 200 contract — the download itself is covered by SlackFileDownloaderTest.
-        var id = seedBinding();
-        var ts = String.valueOf(Instant.now().getEpochSecond());
-        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
-                + "\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"pic\","
-                + "\"files\":[{\"id\":\"F1\",\"name\":\"p.png\",\"mimetype\":\"image/png\",\"size\":10,"
-                + "\"url_private_download\":\"https://files.slack.com/files-pri/T/F1/p.png\"}]}}";
-        var sig = hmac(body, ts);
-        var response = postWithSlackHeaders(id, body, ts, sig);
-        assertIsOk(response);
-    }
-
-    @Test
-    void ignoresBotMessages() {
-        // Bot messages carry a bot_id and must NOT round-trip through the agent —
-        // guard against feedback loops. parseEvent returns null, controller 200s.
-        var id = seedBinding();
-        var ts = String.valueOf(Instant.now().getEpochSecond());
-        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
-                + "\"channel\":\"C123\",\"bot_id\":\"B789\",\"text\":\"echo\"}}";
-        var sig = hmac(body, ts);
-        var response = postWithSlackHeaders(id, body, ts, sig);
-        assertIsOk(response);
+        assertEquals(200, response.status.intValue(), "event '" + label + "' must return 200");
     }
 
     @Test

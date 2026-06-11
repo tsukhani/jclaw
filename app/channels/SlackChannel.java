@@ -35,6 +35,7 @@ public class SlackChannel implements Channel {
 
     private static final String CHANNEL_NAME = "slack";
     private static final String CHANNEL = "channel";
+    private static final String FILES_KEY = "files";
 
     /** This instance's per-agent bot token (JCLAW-441), or null for instances
      *  used only for inbound/metadata ({@link #channelName}, file-send no-ops).
@@ -289,10 +290,10 @@ public class SlackChannel implements Channel {
      *  Empty when absent — the text-only path. Prefers {@code url_private_download}
      *  (direct bytes) over {@code url_private} (which serves an HTML page). */
     private static java.util.List<SlackPendingFile> parseFiles(JsonObject eventObj) {
-        if (!eventObj.has("files") || !eventObj.get("files").isJsonArray()) {
+        if (!eventObj.has(FILES_KEY) || !eventObj.get(FILES_KEY).isJsonArray()) {
             return java.util.List.of();
         }
-        var arr = eventObj.getAsJsonArray("files");
+        var arr = eventObj.getAsJsonArray(FILES_KEY);
         var out = new java.util.ArrayList<SlackPendingFile>(arr.size());
         for (var el : arr) {
             if (!el.isJsonObject()) {
