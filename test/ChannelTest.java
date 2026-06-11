@@ -637,6 +637,84 @@ class ChannelTest extends UnitTest {
     }
 
     @Test
+    void slackFileShareSubtypeIsAdmittedWithFiles() {
+        // JCLAW-344: the file_share subtype carries inbound files and must NOT be
+        // dropped (unlike message_changed above). Its files[] are extracted.
+        var json = JsonParser.parseString("""
+                {
+                    "type": "event_callback",
+                    "event": {
+                        "type": "message",
+                        "subtype": "file_share",
+                        "channel": "C01234567",
+                        "user": "U99999",
+                        "text": "here is a pic",
+                        "files": [
+                            {"id": "F1", "name": "pic.png", "mimetype": "image/png",
+                             "size": 1234, "url_private_download": "https://files.slack.com/files-pri/T/F1/pic.png"}
+                        ]
+                    }
+                }
+                """).getAsJsonObject();
+
+        var msg = SlackChannel.parseEvent(json, null);
+        assertNotNull(msg, "file_share must be admitted, not dropped");
+        assertEquals(1, msg.files().size());
+        var f = msg.files().get(0);
+        assertEquals("https://files.slack.com/files-pri/T/F1/pic.png", f.urlPrivateDownload());
+        assertEquals("pic.png", f.name());
+        assertEquals("image/png", f.mimeType());
+        assertEquals(1234L, f.sizeBytes());
+    }
+
+    @Test
+    void slackParseEventExtractsFilesFromPlainMessage() {
+        // A plain message (no subtype) can also carry files[]; they're extracted,
+        // and slack_audio's subtype rides along for the downloader's MIME remap.
+        var json = JsonParser.parseString("""
+                {
+                    "type": "event_callback",
+                    "event": {
+                        "type": "message",
+                        "channel": "C01234567",
+                        "user": "U99999",
+                        "text": "",
+                        "files": [
+                            {"id": "F2", "name": "voice.mp4", "mimetype": "video/mp4",
+                             "subtype": "slack_audio", "size": 500,
+                             "url_private_download": "https://files.slack.com/files-pri/T/F2/voice.mp4"}
+                        ]
+                    }
+                }
+                """).getAsJsonObject();
+
+        var msg = SlackChannel.parseEvent(json, null);
+        assertNotNull(msg);
+        assertEquals(1, msg.files().size());
+        assertEquals("slack_audio", msg.files().get(0).subtype());
+    }
+
+    @Test
+    void slackParseEventHasEmptyFilesWhenNone() {
+        // A text-only message yields an empty (non-null) files list.
+        var json = JsonParser.parseString("""
+                {
+                    "type": "event_callback",
+                    "event": {
+                        "type": "message",
+                        "channel": "C01234567",
+                        "user": "U99999",
+                        "text": "just text"
+                    }
+                }
+                """).getAsJsonObject();
+
+        var msg = SlackChannel.parseEvent(json, null);
+        assertNotNull(msg);
+        assertTrue(msg.files().isEmpty(), "text-only message must have empty files list");
+    }
+
+    @Test
     void slackParseEventCarriesThreadTs() {
         var json = JsonParser.parseString("""
                 {

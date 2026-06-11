@@ -195,6 +195,23 @@ class WebhookSlackControllerTest extends FunctionalTest {
     }
 
     @Test
+    void fileShareEventWithFilesReturns200() {
+        // JCLAW-344: a file_share event carries files[] and must be admitted (not
+        // dropped as an unknown subtype). The controller 200s synchronously; the
+        // file download + dispatch run on the virtual thread. We assert only the
+        // 200 contract — the download itself is covered by SlackFileDownloaderTest.
+        var id = seedBinding();
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
+                + "\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"pic\","
+                + "\"files\":[{\"id\":\"F1\",\"name\":\"p.png\",\"mimetype\":\"image/png\",\"size\":10,"
+                + "\"url_private_download\":\"https://files.slack.com/files-pri/T/F1/p.png\"}]}}";
+        var sig = hmac(body, ts);
+        var response = postWithSlackHeaders(id, body, ts, sig);
+        assertIsOk(response);
+    }
+
+    @Test
     void ignoresBotMessages() {
         // Bot messages carry a bot_id and must NOT round-trip through the agent —
         // guard against feedback loops. parseEvent returns null, controller 200s.

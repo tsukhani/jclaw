@@ -97,6 +97,7 @@ describe('slack bindings page — Request URL + setup (JCLAW-441)', () => {
     const text = c.text()
     expect(text).toContain('chat:write')
     expect(text).toContain('assistant:write')
+    expect(text).toContain('files:read')
     expect(text).toContain('message.im')
     expect(text).toContain('app_mention')
     // Both required secret fields are present on create.

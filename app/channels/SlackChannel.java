@@ -241,15 +241,17 @@ public class SlackChannel implements Channel {
 
     // --- Inbound event parsing (SDK model) ---
 
-    public record InboundMessage(String channelId, String userId, String text, String threadTs) {}
+    public record InboundMessage(String channelId, String userId, String text, String threadTs,
+                                 java.util.List<SlackPendingFile> files) {}
 
     /**
      * Parse an Events API envelope into an {@link InboundMessage}, or null for
      * anything that isn't a plain user message. {@code botUserId} (the binding's
      * own bot, JCLAW-357) drops the bot's own messages in addition to the
-     * {@code bot_id} guard. {@code url_verification} is handled by the controller;
-     * message subtypes (edits/joins/etc.) are still ignored here pending
-     * JCLAW-344/352/353.
+     * {@code bot_id} guard. {@code url_verification} is handled by the controller.
+     * The {@code file_share} subtype is admitted (it carries inbound files,
+     * JCLAW-344); other subtypes (edits/joins/etc.) stay ignored pending
+     * JCLAW-352/353.
      */
     public static InboundMessage parseEvent(JsonObject payload, String botUserId) {
         if (!"event_callback".equals(str(payload, "type"))) {
@@ -259,10 +261,15 @@ public class SlackChannel implements Channel {
         if (eventObj == null || !"message".equals(str(eventObj, "type"))) {
             return null;
         }
-        // Drop the bot's own messages (bot_id present, or user == this bot) and
-        // message subtypes (edits, joins, bot_message, ...) — the latter pending
-        // JCLAW-344/352/353.
-        if (eventObj.has("bot_id") || eventObj.has("subtype")) {
+        // Drop the bot's own messages (bot_id, or user == this bot). Most message
+        // subtypes (edits, joins, bot_message, ...) are still ignored, but admit
+        // `file_share` — it carries inbound files (JCLAW-344). Edit/delete subtypes
+        // remain pending JCLAW-352/353.
+        if (eventObj.has("bot_id")) {
+            return null;
+        }
+        var subtype = str(eventObj, "subtype");
+        if (!subtype.isBlank() && !"file_share".equals(subtype)) {
             return null;
         }
         var user = str(eventObj, "user");
@@ -274,7 +281,36 @@ public class SlackChannel implements Channel {
                 event.getChannel(),
                 event.getUser(),
                 event.getText() != null ? event.getText() : "",
-                event.getThreadTs());
+                event.getThreadTs(),
+                parseFiles(eventObj));
+    }
+
+    /** Extract the event's {@code files[]} array into pending downloads (JCLAW-344).
+     *  Empty when absent — the text-only path. Prefers {@code url_private_download}
+     *  (direct bytes) over {@code url_private} (which serves an HTML page). */
+    private static java.util.List<SlackPendingFile> parseFiles(JsonObject eventObj) {
+        if (!eventObj.has("files") || !eventObj.get("files").isJsonArray()) {
+            return java.util.List.of();
+        }
+        var arr = eventObj.getAsJsonArray("files");
+        var out = new java.util.ArrayList<SlackPendingFile>(arr.size());
+        for (var el : arr) {
+            if (!el.isJsonObject()) {
+                continue;
+            }
+            var f = el.getAsJsonObject();
+            var url = str(f, "url_private_download");
+            if (url.isBlank()) {
+                url = str(f, "url_private");
+            }
+            if (url.isBlank()) {
+                continue; // nothing downloadable on this file object
+            }
+            long size = f.has("size") && !f.get("size").isJsonNull() ? f.get("size").getAsLong() : 0L;
+            out.add(new SlackPendingFile(
+                    str(f, "id"), url, str(f, "name"), str(f, "mimetype"), size, str(f, "subtype")));
+        }
+        return out;
     }
 
     private static String str(JsonObject o, String key) {

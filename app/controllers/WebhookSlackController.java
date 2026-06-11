@@ -2,6 +2,7 @@ package controllers;
 
 import agents.AgentRunner;
 import channels.SlackChannel;
+import channels.SlackFileDownloader;
 import channels.SlackStreamingSink;
 import com.google.gson.JsonParser;
 import models.SlackBinding;
@@ -23,6 +24,8 @@ public class WebhookSlackController extends Controller {
     private static final String CHANNEL_SLACK = "slack";
     private static final String INVALID_SIGNATURE = "Invalid signature";
     private static final String CATEGORY_CHANNEL = "channel";
+    /** JCLAW-344: cap inbound files per message (matches OpenClaw's MAX_SLACK_MEDIA_FILES). */
+    private static final int MAX_INBOUND_FILES = 8;
 
     @SuppressWarnings("java:S2259")
     public static void webhook(Long bindingId) {
@@ -118,19 +121,59 @@ public class WebhookSlackController extends Controller {
             if (agent == null) {
                 return; // binding deleted/disabled between accept and dispatch
             }
+            // JCLAW-344: download inbound files (files:read) into the agent's staging
+            // dir so the runner gets a vision / transcription turn. Rejected files
+            // (too large / unreadable) get a user-visible note; the rest proceed.
+            var attachments = downloadFiles(botToken, message, agent.name);
             // JCLAW-442: route through the shared higher-level entry (as Telegram does)
-            // so slash commands + the conversation lifecycle are handled centrally and
-            // future inbound attachments (JCLAW-344) ride the same overload. The factory
-            // owns the per-binding bot token + channel/thread; processInboundForAgentStreaming
-            // invokes startTypingHeartbeat (the "is typing…" status) before the LLM. The
-            // sink streams natively in assistant threads, else posts a formatted reply.
+            // so slash commands + the conversation lifecycle are handled centrally. The
+            // factory owns the per-binding bot token + channel/thread;
+            // processInboundForAgentStreaming invokes startTypingHeartbeat before the
+            // LLM. The sink streams natively in assistant threads, else posts a reply.
             AgentRunner.processInboundForAgentStreaming(
                     agent, CHANNEL_SLACK, message.channelId(), message.text(),
                     _ -> new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken),
-                    java.util.List.of(), null);
+                    attachments, null);
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "Error processing message: %s".formatted(e.getMessage()));
         }
+    }
+
+    /**
+     * JCLAW-344: download up to {@link #MAX_INBOUND_FILES} inbound Slack files into
+     * the agent's staging dir, returning the staged {@link services.AttachmentService.Input}s
+     * the runner finalizes. Each failure (too large / unreadable / non-Slack host)
+     * is logged and counted; a single note is sent to the channel if any were
+     * rejected, so the user isn't left wondering why an attachment was ignored.
+     */
+    private static java.util.List<services.AttachmentService.Input> downloadFiles(
+            String botToken, SlackChannel.InboundMessage message, String agentName) {
+        var files = message.files();
+        if (files == null || files.isEmpty()) {
+            return java.util.List.of();
+        }
+        var inputs = new java.util.ArrayList<services.AttachmentService.Input>();
+        int rejected = 0;
+        for (int i = 0; i < files.size() && i < MAX_INBOUND_FILES; i++) {
+            var file = files.get(i);
+            var result = SlackFileDownloader.download(botToken, file, agentName);
+            if (result instanceof SlackFileDownloader.Ok(var input)) {
+                inputs.add(input);
+            } else {
+                rejected++;
+                String reason = result instanceof SlackFileDownloader.SizeExceeded
+                        ? "exceeds the 20 MB limit"
+                        : "could not be downloaded";
+                EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
+                        "Slack inbound file '%s' %s".formatted(file.name(), reason));
+            }
+        }
+        if (rejected > 0) {
+            SlackChannel.sendMessage(message.channelId(),
+                    "⚠️ %d attachment(s) couldn't be processed (too large or unreadable).".formatted(rejected),
+                    message.threadTs(), botToken);
+        }
+        return inputs;
     }
 }
