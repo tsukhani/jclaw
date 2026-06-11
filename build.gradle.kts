@@ -1,6 +1,25 @@
 plugins {
     id("org.playframework.play1")
     id("org.sonarqube") version "7.3.1.8318"
+    id("eclipse")
+}
+
+// The VS Code Java language server (Buildship/Eclipse model) compiles into a
+// repo-root bin/main + bin/test by default, polluting the tree. Redirect that
+// project-model output into build/ (already gitignored) so it never lands at
+// the root. Does not affect Gradle's own compile output (build/classes/java).
+eclipse {
+    classpath {
+        defaultOutputDir = layout.buildDirectory.dir("ide-classes").get().asFile
+        // defaultOutputDir only sets the fallback; Buildship still pins each source
+        // folder's output to bin/main / bin/test. Clear those so every source folder
+        // inherits the default (build/ide-classes) and nothing lands in bin/.
+        file.whenMerged {
+            (this as org.gradle.plugins.ide.eclipse.model.Classpath).entries
+                .filterIsInstance<org.gradle.plugins.ide.eclipse.model.SourceFolder>()
+                .forEach { it.output = null }
+        }
+    }
 }
 
 play1 {

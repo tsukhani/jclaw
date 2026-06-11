@@ -58,11 +58,14 @@ javadoc/
 *.ipr
 out/
 
-# VS Code (+ its Java language-server compile output under bin/; the tracked
-# bin/*.jar + bin/*.mjs are kept by anchoring these to the subdirs only)
+# VS Code (its Java language-server build output is redirected to build/ via the
+# eclipse plugin in build.gradle.kts, so it no longer lands in bin/)
 .vscode/
-/bin/main/
-/bin/test/
+
+# Eclipse / Buildship IDE metadata (generated, same category as .idea/ above)
+.classpath
+.project
+.settings/
 
 # NetBeans
 nbproject/
