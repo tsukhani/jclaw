@@ -215,6 +215,40 @@ public class SlackChannel implements Channel {
         }
     }
 
+    /**
+     * JCLAW-346: post {@code text} (mrkdwn) and return the new message's {@code ts}
+     * (or null on failure). Used to seed the off-thread draft-preview message that
+     * {@link #editMessage} then progressively edits. The text is posted verbatim —
+     * the live preview shows raw deltas; the formatted text lands on the final edit.
+     */
+    public static String postText(String channelId, String text, String threadTs, String botToken) {
+        if (botToken == null || botToken.isBlank()) return null;
+        try {
+            var resp = slack.methods(botToken).chatPostMessage(postRequest(channelId, text, threadTs));
+            return resp.isOk() ? resp.getTs() : null;
+        } catch (SlackApiException | IOException e) {
+            EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "postText failed: %s".formatted(e.getMessage()));
+            return null;
+        }
+    }
+
+    /**
+     * JCLAW-346: replace a message's text via {@code chat.update} (mrkdwn). Drives
+     * the off-thread draft-preview edit loop + the final formatted edit. Returns
+     * false on error so the caller can stop editing / fall back. (The chat.update
+     * primitive is also the basis for JCLAW-347's edit action tool.)
+     */
+    public static boolean editMessage(String channelId, String ts, String text, String botToken) {
+        if (botToken == null || botToken.isBlank()) return false;
+        try {
+            return slack.methods(botToken)
+                    .chatUpdate(r -> r.channel(channelId).ts(ts).text(text))
+                    .isOk();
+        } catch (SlackApiException | IOException _) {
+            return false;
+        }
+    }
+
     private static long parseRetryAfterMs(String header) {
         if (header == null || header.isBlank()) return 0L;
         try {

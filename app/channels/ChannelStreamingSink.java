@@ -8,10 +8,11 @@ package channels;
  * attachment finalization — while the sink owns the channel-specific live-reply
  * mechanics.
  *
- * <p>The five methods are exactly what {@code processInboundForAgentStreaming}
+ * <p>The five core methods are exactly what {@code processInboundForAgentStreaming}
  * invokes on its sink: a typing cue before the first token, per-token updates,
  * completion, error delivery, and cancellation. {@link TelegramStreamingSink}
- * and {@link SlackStreamingSink} implement it.
+ * and {@link SlackStreamingSink} implement it. {@link #toolProgress} is an
+ * optional hook (default no-op) a channel can override to surface tool activity.
  */
 public interface ChannelStreamingSink {
 
@@ -31,4 +32,11 @@ public interface ChannelStreamingSink {
 
     /** Cancellation (e.g. /stop): quiesce any live indicator/stream. */
     void cancel();
+
+    /** Optional (JCLAW-346): surface a completed tool call (by name) as live
+     *  progress before the assistant's text turn begins. Default no-op —
+     *  Slack's off-thread draft preview overrides it; Telegram ignores it. */
+    default void toolProgress(String toolName) {
+        // no-op by default
+    }
 }

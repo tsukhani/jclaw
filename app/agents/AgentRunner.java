@@ -1355,7 +1355,7 @@ public class AgentRunner {
                 sink::update,            // onToken — live preview edits
                 _ -> {},                 // onReasoning — not surfaced on Telegram
                 _ -> {},                 // onStatus — not surfaced on Telegram
-                _ -> {},                 // onToolCall — JCLAW-170, web-only for now
+                tc -> sink.toolProgress(tc.name()),  // onToolCall — Slack off-thread draft preview (JCLAW-346); default no-op elsewhere
                 sink::seal,              // onComplete — final edit / planner fallback
                 sink::errorFallback,     // onError — delete placeholder + send error
                 sink::cancel);           // onCancel — quiesce typing heartbeat on /stop
