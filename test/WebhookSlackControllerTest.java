@@ -90,6 +90,28 @@ class WebhookSlackControllerTest extends FunctionalTest {
         });
     }
 
+    /** Seed a binding to the privileged "main" agent with the given owner (JCLAW-354). */
+    private Long seedMainBinding(String ownerUserId) {
+        return commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "main"; // Agent.isMain() → owner-locked binding
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+            var b = new SlackBinding();
+            b.agent = agent;
+            b.botToken = "xoxb-main-" + System.nanoTime();
+            b.signingSecret = SIGNING_SECRET;
+            b.botUserId = BOT_USER_ID;
+            b.ownerUserId = ownerUserId;
+            b.transport = ChannelTransport.HTTP;
+            b.enabled = true;
+            b.save();
+            return b.id;
+        });
+    }
+
     private static String hmac(String body, String timestamp) {
         try {
             var baseString = "v0:" + timestamp + ":" + body;
@@ -350,5 +372,23 @@ class WebhookSlackControllerTest extends FunctionalTest {
         assertFalse(events.stream().anyMatch(e ->
                         e.message != null && e.message.contains("dropped by access policy")),
                 "a mention-addressed channel message must not be dropped");
+    }
+
+    @Test
+    void mainAgentDmFromNonOwnerIsDropped() {
+        // The main agent is owner-locked: a DM from anyone but the owner is dropped,
+        // even though the same DM to a non-main binding (no owner) would be served.
+        var id = seedMainBinding(OWNER_USER);
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
+                + "\"channel\":\"D123\",\"channel_type\":\"im\",\"user\":\"U_INTRUDER\",\"text\":\"hi\"}}";
+        var sig = hmac(body, ts);
+        var response = postWithSlackHeaders(id, body, ts, sig);
+        assertEquals(200, response.status.intValue());
+
+        EventLogger.flush();
+        var dropped = EventLog.findRecent(20).stream().anyMatch(e ->
+                e.message != null && e.message.contains("dropped by access policy"));
+        assertTrue(dropped, "a non-owner DM to the main agent must be dropped (owner-locked)");
     }
 }

@@ -5,77 +5,92 @@ import play.test.UnitTest;
 /**
  * Unit coverage for the JCLAW-354 access matrix in {@link SlackAccessPolicy}.
  *
- * <ul>
- *   <li>DM ({@code im}) from owner → allowed; from non-owner → rejected (when an
- *       owner is configured)</li>
- *   <li>DM with NO owner configured → open (backward-compatible)</li>
- *   <li>channel/group/mpim WITH mention → allowed (any member); WITHOUT → ignored</li>
- *   <li>unknown channel_type → falls to the DM rule (safe default)</li>
- * </ul>
- *
- * <p>The pure predicate keeps these network-free; the HTTP wiring through the
- * webhook is covered by {@code WebhookSlackControllerTest}.
+ * <p>The owner user id is the private/shared switch: owner set → private (owner-only
+ * on every surface); owner unset → shared (DM open, channels mention-gated), except a
+ * binding that requires an owner ({@code ownerRequired} — the main agent) fails closed
+ * without one.
  */
 class SlackAccessPolicyTest extends UnitTest {
 
     private static final String OWNER = "U_OWNER";
     private static final String GUEST = "U_GUEST";
 
-    // ── DM (im) ─────────────────────────────────────────────────────────
+    // ── Owner SET → private (regardless of ownerRequired) ───────────────
 
     @Test
-    void dmFromOwnerIsAllowed() {
-        assertTrue(SlackAccessPolicy.isAllowed(OWNER, OWNER, "im", false),
-                "owner DM is served, mention irrelevant");
-    }
-
-    @Test
-    void dmFromNonOwnerIsRejectedWhenOwnerSet() {
-        assertFalse(SlackAccessPolicy.isAllowed(OWNER, GUEST, "im", true),
+    void privateDmServesOnlyTheOwner() {
+        assertTrue(SlackAccessPolicy.isAllowed(OWNER, OWNER, "im", false, false),
+                "owner reaches their private DM");
+        assertFalse(SlackAccessPolicy.isAllowed(OWNER, GUEST, "im", true, false),
                 "a non-owner DM is rejected even if it mentions the bot");
     }
 
     @Test
-    void dmIsOpenWhenNoOwnerConfigured() {
-        // Backward-compat: a binding with no owner set serves DMs from anyone.
-        assertTrue(SlackAccessPolicy.isAllowed(null, GUEST, "im", false),
-                "null owner → DM open to anyone");
-        assertTrue(SlackAccessPolicy.isAllowed("", GUEST, "im", false),
+    void privateChannelServesOnlyTheOwnerAndOnlyWithMention() {
+        assertTrue(SlackAccessPolicy.isAllowed(OWNER, OWNER, "channel", true, false),
+                "the owner reaches a private binding in a channel by mentioning it");
+        assertFalse(SlackAccessPolicy.isAllowed(OWNER, GUEST, "channel", true, false),
+                "a GUEST mention does NOT reach a private (owner-set) binding");
+        assertFalse(SlackAccessPolicy.isAllowed(OWNER, OWNER, "channel", false, false),
+                "the owner still needs to @mention in a channel");
+        assertFalse(SlackAccessPolicy.isAllowed(OWNER, GUEST, "mpim", true, false),
+                "group DMs are private too when an owner is set");
+    }
+
+    @Test
+    void ownerSetIsPrivateEvenForTheMainAgent() {
+        // ownerRequired doesn't change the owner-set behavior — main is private the
+        // same way a custom agent with an owner is.
+        assertTrue(SlackAccessPolicy.isAllowed(OWNER, OWNER, "im", false, true),
+                "the owner reaches their main-agent DM");
+        assertFalse(SlackAccessPolicy.isAllowed(OWNER, GUEST, "channel", true, true),
+                "a guest mention does not reach the main agent in a channel");
+    }
+
+    // ── Owner UNSET, non-main → shared ──────────────────────────────────
+
+    @Test
+    void sharedDmIsOpenToAnyone() {
+        assertTrue(SlackAccessPolicy.isAllowed(null, GUEST, "im", false, false),
+                "no owner → DM open to anyone");
+        assertTrue(SlackAccessPolicy.isAllowed("", GUEST, "im", false, false),
                 "blank owner → DM open to anyone");
     }
 
-    // ── Channels / groups / mpim ────────────────────────────────────────
-
     @Test
-    void channelMessageWithMentionIsAllowed() {
-        // Owner-restriction does NOT apply in channels — any member may address the bot.
-        assertTrue(SlackAccessPolicy.isAllowed(OWNER, GUEST, "channel", true),
-                "a mention-addressed channel message is served regardless of sender");
-        assertTrue(SlackAccessPolicy.isAllowed(OWNER, GUEST, "group", true),
-                "private groups behave like channels");
-        assertTrue(SlackAccessPolicy.isAllowed(OWNER, GUEST, "mpim", true),
-                "group DMs behave like channels");
+    void sharedChannelIsMentionGatedForAnyMember() {
+        assertTrue(SlackAccessPolicy.isAllowed(null, GUEST, "channel", true, false),
+                "no owner → any member who @mentions is served");
+        assertTrue(SlackAccessPolicy.isAllowed(null, GUEST, "mpim", true, false),
+                "group DMs are mention-gated when shared");
+        assertFalse(SlackAccessPolicy.isAllowed(null, GUEST, "channel", false, false),
+                "unaddressed channel chatter is ignored");
     }
 
+    // ── Owner UNSET, main (ownerRequired) → fail closed ─────────────────
+
     @Test
-    void channelMessageWithoutMentionIsIgnored() {
-        assertFalse(SlackAccessPolicy.isAllowed(OWNER, OWNER, "channel", false),
-                "unaddressed channel chatter is ignored even from the owner");
-        assertFalse(SlackAccessPolicy.isAllowed(OWNER, GUEST, "mpim", false),
-                "unaddressed group-DM chatter is ignored");
+    void mainAgentFailsClosedWithoutOwner() {
+        // A full-access agent with no owner configured must reach NO ONE.
+        assertFalse(SlackAccessPolicy.isAllowed(null, OWNER, "im", false, true),
+                "no owner configured → main-agent DM reaches no one");
+        assertFalse(SlackAccessPolicy.isAllowed("", GUEST, "channel", true, true),
+                "no owner configured → main-agent channel reaches no one even with a mention");
     }
 
-    // ── Unknown / missing channel_type ──────────────────────────────────
+    // ── Unknown / missing channel_type → DM rule ────────────────────────
 
     @Test
     void unknownChannelTypeFallsToDmRule() {
-        // An unrecognized/missing type must NOT lock the owner out of their primary
-        // (DM/Assistant) surface — it uses the DM rule, not the mention gate.
-        assertTrue(SlackAccessPolicy.isAllowed(OWNER, OWNER, null, false),
+        // Owner set: private DM rule (owner served, others not).
+        assertTrue(SlackAccessPolicy.isAllowed(OWNER, OWNER, null, false, false),
                 "null channel_type from the owner is served via the DM rule");
-        assertFalse(SlackAccessPolicy.isAllowed(OWNER, GUEST, null, true),
-                "null channel_type from a non-owner is rejected via the DM rule (owner set)");
-        assertTrue(SlackAccessPolicy.isAllowed(null, GUEST, "", false),
-                "blank channel_type with no owner is open");
+        assertFalse(SlackAccessPolicy.isAllowed(OWNER, GUEST, null, true, false),
+                "null channel_type from a non-owner is rejected via the DM rule");
+        // Owner unset, non-main: open. Main: fail closed.
+        assertTrue(SlackAccessPolicy.isAllowed(null, GUEST, "", false, false),
+                "blank channel_type with no owner (non-main) is open");
+        assertFalse(SlackAccessPolicy.isAllowed(null, GUEST, "", false, true),
+                "blank channel_type with no owner (main) fails closed");
     }
 }

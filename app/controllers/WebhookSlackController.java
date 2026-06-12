@@ -55,12 +55,17 @@ public class WebhookSlackController extends Controller {
             return;
         }
 
-        // JCLAW-354: access gate. DMs are owner-only (when an owner is set); channels
-        // are mention-gated. A disallowed message is silently dropped with a 200 so
-        // Slack doesn't retry. Channel mention-gating needs the cached bot user id
-        // (set by the Test probe) — same dependency as the self-loop guard above.
+        // JCLAW-354: access gate. The owner user id is the private/shared switch — set
+        // an owner and the binding is private (served only to the owner, on DMs and
+        // mention-addressed channels alike); leave it unset and it's shared (DM open,
+        // channels mention-gated for any member). The main agent (full filesystem/shell
+        // access) additionally REQUIRES an owner: with none it fails closed, so a random
+        // workspace user can't reach it. A disallowed message is silently dropped with a
+        // 200 so Slack doesn't retry. Channel mention-gating needs the cached bot user
+        // id (set by the Test probe) — same dependency as the self-loop guard.
+        var agentIsMain = binding.agent != null && binding.agent.isMain();
         if (!SlackAccessPolicy.isAllowed(binding.ownerUserId, message.userId(),
-                message.channelType(), message.botMentioned())) {
+                message.channelType(), message.botMentioned(), agentIsMain)) {
             EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "Message from %s in %s (%s) dropped by access policy".formatted(
                             message.userId(), message.channelId(), message.channelType()));

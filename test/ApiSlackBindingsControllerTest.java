@@ -219,6 +219,20 @@ class ApiSlackBindingsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void createRejectsMainAgentWithoutOwner() {
+        // JCLAW-354: the main agent has full system access, so a binding to it must set
+        // an owner user id — a random workspace user must not be able to reach it. The
+        // guard runs before the identity probe, so no network call is made.
+        var agentId = seedAgent("main");
+        login();
+        var body = """
+                {"botToken": "xoxb-t", "signingSecret": "s", "agentId": %d}
+                """.formatted(agentId);
+        assertEquals(400, POST("/api/channels/slack/bindings",
+                "application/json", body).status.intValue());
+    }
+
+    @Test
     void createConflictsOnDuplicateBotToken() {
         var firstAgentId = seedAgent("agent-a");
         var secondAgentId = seedAgent("agent-b");

@@ -88,6 +88,15 @@ const filteredAgents = computed(() => {
   return availableAgents.value.filter(a => a.name.toLowerCase().includes(q))
 })
 
+// JCLAW-354: the main agent has full filesystem/shell access, so a binding to it
+// must set an owner user id (it's owner-locked at runtime, and the API rejects an
+// owner-less main binding). Other agents keep it optional.
+const selectedAgentIsMain = computed(() =>
+  (agents.value ?? []).find(a => a.id === form.value.agentId)?.isMain ?? false)
+
+const ownerRequired = computed(() =>
+  selectedAgentIsMain.value && form.value.ownerUserId.trim().length === 0)
+
 const canSave = computed(() => {
   if (!form.value.agentId) return false
   // On create both secrets are required; on edit blank means "keep existing".
@@ -97,6 +106,8 @@ const canSave = computed(() => {
   }
   // A binding needs a public host so its Events API Request URL is reachable.
   if (form.value.webhookBaseUrl.trim().length === 0) return false
+  // The main agent must be owner-locked.
+  if (ownerRequired.value) return false
   return true
 })
 
@@ -385,6 +396,15 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
             <dt>Bot user</dt>
             <dd class="font-mono text-fg-strong truncate">
               {{ b.botUserId ?? 'not probed' }}
+            </dd>
+          </div>
+          <div
+            v-if="b.ownerUserId"
+            class="flex justify-between gap-4"
+          >
+            <dt>Owner</dt>
+            <dd class="font-mono text-fg-strong truncate">
+              {{ b.ownerUserId }}
             </dd>
           </div>
         </dl>
@@ -703,7 +723,9 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           for="binding-owner-user-id"
           class="block"
         >
-          <span class="block text-xs text-fg-muted mb-1">owner user id (optional)</span>
+          <span class="block text-xs text-fg-muted mb-1">
+            owner user id {{ selectedAgentIsMain ? '(required for main)' : '(optional)' }}
+          </span>
           <input
             id="binding-owner-user-id"
             v-model="form.ownerUserId"
@@ -713,12 +735,19 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
                    focus:outline-hidden focus:border-ring transition-colors"
           >
           <span class="mt-1 block text-xs text-fg-muted">
-            Your Slack user id. When set, it locks DMs to you (messages from anyone else
-            are ignored) and is the approver for exec / dangerous-tool requests. Leave
-            blank to let anyone DM the bot and to skip approvals. Either way, in channels
-            the bot only responds when you @mention it. Find it in your Slack profile →
-            ⋮ → Copy member ID.
+            Your Slack user id. Set it and the bot is private to you — only you can reach
+            it (in DMs, and in channels by @mentioning it); everyone else is ignored. It's
+            also the approver for exec / dangerous-tool requests. Leave it blank and the
+            bot is shared — anyone can DM it, and any channel member can reach it by
+            @mention. Find it in your Slack profile → ⋮ → Copy member ID.
           </span>
+          <p
+            v-if="ownerRequired"
+            class="mt-1 text-xs text-amber-400"
+          >
+            The main agent has full filesystem and shell access. An owner is required so
+            only you can reach it — others are blocked entirely.
+          </p>
         </label>
 
         <label

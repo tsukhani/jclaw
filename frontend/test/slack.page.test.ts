@@ -9,7 +9,7 @@ import Slack from '~/pages/channels/slack.vue'
 // /api/webhooks/slack/{id} — operator-pasted (not auto-registered like Telegram).
 // The base pre-fills from the Tailscale Funnel (or a public origin), else blank.
 
-const AGENT = { id: 1, name: 'main', enabled: true, modelProvider: 'openrouter', modelId: 'gpt-4.1' }
+const AGENT = { id: 1, name: 'main', enabled: true, isMain: true, modelProvider: 'openrouter', modelId: 'gpt-4.1' }
 
 function binding(overrides: Record<string, unknown> = {}) {
   return {
@@ -115,6 +115,29 @@ describe('slack bindings page — Request URL + setup (JCLAW-441)', () => {
     expect(text).toContain('Interactivity')
     // JCLAW-349: the lifecycle-command note (! prefix, since Slack blocks / in threads).
     expect(text).toContain('!reset')
+  })
+
+  it('shows the owner user id on the card when set', async () => {
+    bindingsResponse = [binding({ id: 7, ownerUserId: 'UOWNER123', botUserId: 'UBOT' })]
+    const c = await mountSuspended(Slack)
+    expect(c.text()).toContain('Owner')
+    expect(c.text()).toContain('UOWNER123')
+  })
+
+  it('requires an owner for a main-agent binding and blocks save until set', async () => {
+    // AGENT (id 1) is the main agent; its binding has no owner.
+    bindingsResponse = [binding({ id: 7, ownerUserId: null })]
+    const c = await mountSuspended(Slack)
+    await c.find('[aria-label="Edit binding"]').trigger('click')
+    await nextTick()
+    // The warning shows and Save is disabled while the owner is blank.
+    expect(c.text()).toContain('full filesystem and shell access')
+    const saveBtn = c.findAll('button').find(b => b.text() === 'Save')
+    expect(saveBtn!.attributes('disabled')).toBeDefined()
+    // Entering an owner clears the block.
+    await c.find('#binding-owner-user-id').setValue('UOWNER123')
+    await nextTick()
+    expect(saveBtn!.attributes('disabled')).toBeUndefined()
   })
 })
 

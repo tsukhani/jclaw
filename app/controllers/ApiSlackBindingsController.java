@@ -138,6 +138,7 @@ public class ApiSlackBindingsController extends Controller {
         binding.agent = agent;
         binding.appToken = readOptionalString(body, KEY_APP_TOKEN);
         binding.ownerUserId = readOptionalString(body, KEY_OWNER_USER_ID);
+        requireOwnerForMain(agent, binding.ownerUserId);
         binding.transport = parseTransport(body, ChannelTransport.HTTP);
         binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
         binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
@@ -166,6 +167,7 @@ public class ApiSlackBindingsController extends Controller {
         boolean tokenChanged = applyBotTokenUpdate(binding, body);
         applyAgentUpdate(binding, body);
         applyOptionalFieldUpdates(binding, body);
+        requireOwnerForMain(binding.agent, binding.ownerUserId);
         if (tokenChanged) cacheIdentity(binding);
         binding.save();
 
@@ -173,6 +175,17 @@ public class ApiSlackBindingsController extends Controller {
                 binding.agent != null ? binding.agent.name : null, CHANNEL_SLACK,
                 "Binding %d updated".formatted(binding.id));
         renderJSON(gson.toJson(BindingView.of(binding)));
+    }
+
+    /**
+     * JCLAW-354: the main agent has full filesystem / shell access, so an owner-less
+     * binding to it would let any workspace user reach it. Require an owner user id
+     * for a main-agent binding (400 otherwise). Non-main bindings stay optional.
+     */
+    private static void requireOwnerForMain(Agent agent, String ownerUserId) {
+        if (agent != null && agent.isMain() && (ownerUserId == null || ownerUserId.isBlank())) {
+            error(400, "The main agent has full system access — set an owner user id so only you can reach it");
+        }
     }
 
     /**
