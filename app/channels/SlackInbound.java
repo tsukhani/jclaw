@@ -40,6 +40,14 @@ public final class SlackInbound {
      * main-agent flag is resolved in its own tx to avoid touching the lazy association.
      */
     public static void dispatchEvent(SlackBinding binding, JsonObject eventCallbackPayload) {
+        // JCLAW-357: drop redelivered events (Slack retries when it doesn't get a fast
+        // ack) so the agent processes each message exactly once — across either transport.
+        var dedupKey = dedupKey(eventCallbackPayload);
+        if (!SlackDedup.firstSeen(dedupKey)) {
+            EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
+                    "Duplicate Slack event %s dropped".formatted(dedupKey));
+            return;
+        }
         var message = SlackChannel.parseEvent(eventCallbackPayload, binding.botUserId);
         if (message == null) {
             return; // non-message event, subtype, or the bot's own message
@@ -91,6 +99,22 @@ public final class SlackInbound {
                     Thread.ofVirtual().name("slack-approval").start(() ->
                             SlackApprovalService.resolve(p.approvalId(), p.decision(), fromUserId)));
         }
+    }
+
+    /**
+     * Dedup key for an {@code event_callback}: the message's identity {@code channel:ts}
+     * (its own ts, stable across redeliveries), falling back to the envelope's
+     * {@code event_id} (carried verbatim on Events API retries) when the inner event has no
+     * channel/ts. Null when neither is present — {@link SlackDedup#firstSeen} then processes.
+     */
+    private static String dedupKey(JsonObject eventCallbackPayload) {
+        if (eventCallbackPayload.has("event") && eventCallbackPayload.get("event").isJsonObject()) {
+            var event = eventCallbackPayload.getAsJsonObject("event");
+            if (event.has("channel") && event.has("ts")) {
+                return event.get("channel").getAsString() + ":" + event.get("ts").getAsString();
+            }
+        }
+        return eventCallbackPayload.has("event_id") ? eventCallbackPayload.get("event_id").getAsString() : null;
     }
 
     private static void processMessage(Long bindingId, String botToken, SlackChannel.InboundMessage message) {

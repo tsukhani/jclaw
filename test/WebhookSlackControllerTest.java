@@ -391,4 +391,25 @@ class WebhookSlackControllerTest extends FunctionalTest {
                 e.message != null && e.message.contains("dropped by access policy"));
         assertTrue(dropped, "a non-owner DM to the main agent must be dropped (owner-locked)");
     }
+
+    @Test
+    void redeliveredEventIsDeduped() {
+        // JCLAW-357: posting the same event twice (a Slack redelivery) processes it once;
+        // the second arrival is dropped as a duplicate. A unique message ts keys the dedup
+        // so the global cache can't collide with other tests.
+        var id = seedBinding();
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        var msgTs = "1700000000." + System.nanoTime();
+        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
+                + "\"channel\":\"C123\",\"channel_type\":\"im\",\"user\":\"U456\",\"text\":\"hi\","
+                + "\"ts\":\"" + msgTs + "\"}}";
+        var sig = hmac(body, ts);
+        assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue());
+        assertEquals(200, postWithSlackHeaders(id, body, ts, sig).status.intValue());
+
+        EventLogger.flush();
+        var deduped = EventLog.findRecent(20).stream().anyMatch(e ->
+                e.message != null && e.message.contains("Duplicate Slack event") && e.message.contains(msgTs));
+        assertTrue(deduped, "the redelivered event must be logged as a duplicate drop");
+    }
 }
