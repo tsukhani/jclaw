@@ -276,7 +276,7 @@ async function copyText(text: string) {
 // Static Slack-app setup values the operator transcribes into the dashboard
 // (relocated from the old app-global Channels editor). Each *:history scope
 // lets the bot read that surface; the matching message.* event delivers it.
-const SETUP_SCOPES = ['chat:write', 'assistant:write', 'app_mentions:read', 'files:read', 'channels:history', 'groups:history', 'im:history', 'mpim:history']
+const SETUP_SCOPES = ['chat:write', 'assistant:write', 'app_mentions:read', 'files:read', 'files:write', 'im:write', 'channels:history', 'groups:history', 'im:history', 'mpim:history']
 const SETUP_EVENTS = ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim']
 </script>
 

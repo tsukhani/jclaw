@@ -132,7 +132,7 @@ public class WebhookSlackController extends Controller {
             // LLM. The sink streams natively in assistant threads, else posts a reply.
             AgentRunner.processInboundForAgentStreaming(
                     agent, CHANNEL_SLACK, message.channelId(), message.text(),
-                    _ -> new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken),
+                    _ -> new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken, agent.name),
                     attachments, null);
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,

@@ -76,6 +76,10 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     private final String recipientUserId;
     private final Slacker slacker;
     private final long throttleMs;
+    // JCLAW-345: seal-time outbound file upload. Null on the test-injected path
+    // (those tests don't exercise uploads), which disables the dispatch.
+    private final String botToken;
+    private final String agentName;
     private final StringBuilder pending = new StringBuilder();
     private String streamTs;     // native stream ts; null until first token (lazy start)
     private boolean canStream;   // assistant thread + recipient present
@@ -90,18 +94,28 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     private boolean draftStopped;  // stop the live loop (length cap / post-or-edit failure)
     private final java.util.List<String> toolLines = new java.util.ArrayList<>();
 
-    public SlackStreamingSink(String channelId, String threadTs, String recipientUserId, String botToken) {
-        this(channelId, threadTs, recipientUserId, live(botToken), APPEND_THROTTLE_MS);
+    /** Production: stream as the binding's bot; {@code agentName} drives the
+     *  seal-time upload of any files the agent linked in its reply (JCLAW-345). */
+    public SlackStreamingSink(String channelId, String threadTs, String recipientUserId,
+                              String botToken, String agentName) {
+        this(channelId, threadTs, recipientUserId, live(botToken), APPEND_THROTTLE_MS, botToken, agentName);
     }
 
     /** Test seam: inject the Slacker and append throttle (0 = flush every update). */
     public SlackStreamingSink(String channelId, String threadTs, String recipientUserId,
                               Slacker slacker, long throttleMs) {
+        this(channelId, threadTs, recipientUserId, slacker, throttleMs, null, null);
+    }
+
+    private SlackStreamingSink(String channelId, String threadTs, String recipientUserId,
+                               Slacker slacker, long throttleMs, String botToken, String agentName) {
         this.channelId = channelId;
         this.threadTs = threadTs;
         this.recipientUserId = recipientUserId;
         this.slacker = slacker;
         this.throttleMs = throttleMs;
+        this.botToken = botToken;
+        this.agentName = agentName;
     }
 
     /** Show the "is typing…" status (assistant thread). The stream message itself is
@@ -218,6 +232,10 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
             // post the full formatted reply once.
             slacker.postFallback(channelId, fullText, threadTs);
         }
+        // JCLAW-345: upload any files the agent linked in its reply (the prose was
+        // already streamed above). No-op on the test-injected path (botToken/agentName
+        // null) and when the reply has no workspace-file links.
+        SlackOutboundPlanner.dispatchFiles(channelId, threadTs, agentName, fullText, botToken);
         clearStatus();
     }
 
