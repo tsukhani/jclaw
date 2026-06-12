@@ -166,6 +166,7 @@ POST    /api/tailscale                          ApiTailscaleController.toggle
 # Webhooks (no auth — verified by their own mechanisms)
 POST    /api/webhooks/telegram/{bindingId}/{secret}  WebhookTelegramController.webhook
 POST    /api/webhooks/slack/{bindingId}         WebhookSlackController.webhook
+POST    /api/webhooks/slack/{bindingId}/interactive  WebhookSlackController.interactive
 GET     /api/webhooks/whatsapp                  WebhookWhatsAppController.verify
 POST    /api/webhooks/whatsapp                  WebhookWhatsAppController.webhook
 

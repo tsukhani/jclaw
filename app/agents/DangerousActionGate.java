@@ -1,9 +1,11 @@
 package agents;
 
+import channels.SlackApprovalService;
 import channels.TelegramApprovalService;
 import channels.TelegramMarkdownFormatter;
 import models.Agent;
 import models.Conversation;
+import models.SlackBinding;
 import models.TelegramBinding;
 import models.ToolApprovalGrant;
 import services.ConfigService;
@@ -72,6 +74,7 @@ public final class DangerousActionGate {
 
     private static final String LOG_CATEGORY = "tool";
     private static final String CHANNEL_NAME = "telegram";
+    private static final String SLACK_CHANNEL = "slack";
 
     /** Default wait for a button tap before the prompt times out (seconds). */
     private static final int DEFAULT_TIMEOUT_SECONDS = 300;
@@ -127,11 +130,11 @@ public final class DangerousActionGate {
             return Decision.PROCEED;
         }
 
-        // JCLAW-423: the interactive approve/deny prompt only exists on Telegram,
-        // and only reaches the operator when THIS conversation is the Telegram
-        // one. Route the prompt only for a Telegram conversation that also has a
-        // usable binding; every other channel (web, Slack, or no conversation)
-        // has no approval surface and must NOT silently route to a bound chat.
+        // JCLAW-423/350: the interactive approve/deny prompt reaches the operator
+        // only when THIS conversation is on a channel that has an approval surface
+        // (Telegram or Slack) AND has a usable binding. Route the prompt only there;
+        // every other channel (web, or no conversation) has no surface and must NOT
+        // silently route to a bound chat — it falls through to the off-channel policy.
         var channelType = resolveChannelType(conversationId);
         if (CHANNEL_NAME.equals(channelType)) {
             var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
@@ -140,6 +143,18 @@ public final class DangerousActionGate {
             }
             // A Telegram conversation with no usable binding can't be prompted;
             // fall through to the off-channel policy rather than block forever.
+        } else if (SLACK_CHANNEL.equals(channelType)) {
+            var binding = Tx.run(() -> SlackBinding.findByAgentOrAncestor(agent));
+            // Slack needs an owner user id to authorize the tap (JCLAW-350); without
+            // one there's nobody who can resolve the prompt, so fall through instead
+            // of posting an unanswerable approval that would only ever time out.
+            if (binding != null && binding.enabled
+                    && binding.ownerUserId != null && !binding.ownerUserId.isBlank()) {
+                var channelId = resolvePeerId(conversationId);
+                if (channelId != null) {
+                    return promptAndAwaitSlack(agent, toolName, argsJson, binding, channelId);
+                }
+            }
         }
 
         return offChannelDecision(agent, toolName, channelType);
@@ -188,6 +203,17 @@ public final class DangerousActionGate {
         });
     }
 
+    /** The conversation's {@code peerId} (the Slack channel to prompt in), or {@code null}. */
+    private static String resolvePeerId(Long conversationId) {
+        if (conversationId == null) {
+            return null;
+        }
+        return Tx.run(() -> {
+            Conversation c = Conversation.findById(conversationId);
+            return c == null ? null : c.peerId;
+        });
+    }
+
     private static Decision promptAndAwait(Agent agent, String toolName, String argsJson,
                                            TelegramBinding binding) {
         // The bound user's private chat: in a Telegram private chat
@@ -206,20 +232,11 @@ public final class DangerousActionGate {
         return switch (outcome) {
             case APPROVED_ONCE -> Decision.PROCEED;
             case APPROVED_SESSION -> {
-                GRANTS.add(grantKey(agent, toolName));
-                EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
-                        "Dangerous tool '%s' approved (%s) — future calls won't re-prompt"
-                                .formatted(toolName, outcome));
+                recordSessionGrant(agent, toolName, CHANNEL_NAME, outcome.name());
                 yield Decision.PROCEED;
             }
             case APPROVED_ALWAYS -> {
-                GRANTS.add(grantKey(agent, toolName));
-                // JCLAW-385: persist the always-grant so it survives a restart.
-                // Idempotent on the unique (agent, tool) key.
-                Tx.run(() -> ToolApprovalGrant.upsert(agent, toolName));
-                EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
-                        "Dangerous tool '%s' approved (%s) — future calls won't re-prompt (persisted)"
-                                .formatted(toolName, outcome));
+                recordAlwaysGrant(agent, toolName, CHANNEL_NAME, outcome.name());
                 yield Decision.PROCEED;
             }
             case DENIED, TIMED_OUT, EXPIRED -> {
@@ -228,6 +245,62 @@ public final class DangerousActionGate {
                 yield Decision.ABORT;
             }
         };
+    }
+
+    /**
+     * Slack analog of {@link #promptAndAwait} (JCLAW-350): post an approve/deny
+     * Block Kit prompt to the conversation's channel, gated on the binding's owner
+     * user id, and block until the owner taps a button (or it times out). Shares the
+     * standing-grant recording and {@link #timeout()} with the Telegram path.
+     */
+    private static Decision promptAndAwaitSlack(Agent agent, String toolName, String argsJson,
+                                                SlackBinding binding, String channelId) {
+        var prompt = buildSlackPrompt(toolName, argsJson);
+
+        EventLogger.info(LOG_CATEGORY, agent.name, SLACK_CHANNEL,
+                "Dangerous tool '%s' requires approval; prompting owner %s in %s"
+                        .formatted(toolName, binding.ownerUserId, channelId));
+
+        var future = SlackApprovalService.request(
+                binding.botToken, channelId, null, binding.ownerUserId, prompt, true);
+        var outcome = SlackApprovalService.await(future, timeout());
+
+        return switch (outcome) {
+            case APPROVED_ONCE -> Decision.PROCEED;
+            case APPROVED_SESSION -> {
+                recordSessionGrant(agent, toolName, SLACK_CHANNEL, outcome.name());
+                yield Decision.PROCEED;
+            }
+            case APPROVED_ALWAYS -> {
+                recordAlwaysGrant(agent, toolName, SLACK_CHANNEL, outcome.name());
+                yield Decision.PROCEED;
+            }
+            case DENIED, TIMED_OUT, EXPIRED -> {
+                EventLogger.warn(LOG_CATEGORY, agent.name, SLACK_CHANNEL,
+                        "Dangerous tool '%s' not approved (%s) — aborting".formatted(toolName, outcome));
+                yield Decision.ABORT;
+            }
+        };
+    }
+
+    /** Record an in-process session grant for {@code (agent, toolName)} and log it. */
+    private static void recordSessionGrant(Agent agent, String toolName, String channelName, String outcomeName) {
+        GRANTS.add(grantKey(agent, toolName));
+        EventLogger.info(LOG_CATEGORY, agent.name, channelName,
+                "Dangerous tool '%s' approved (%s) — future calls won't re-prompt"
+                        .formatted(toolName, outcomeName));
+    }
+
+    /**
+     * Record a session grant AND persist an always-grant (JCLAW-385) so it survives
+     * a restart. The upsert is idempotent on the unique {@code (agent, tool)} key.
+     */
+    private static void recordAlwaysGrant(Agent agent, String toolName, String channelName, String outcomeName) {
+        GRANTS.add(grantKey(agent, toolName));
+        Tx.run(() -> ToolApprovalGrant.upsert(agent, toolName));
+        EventLogger.info(LOG_CATEGORY, agent.name, channelName,
+                "Dangerous tool '%s' approved (%s) — future calls won't re-prompt (persisted)"
+                        .formatted(toolName, outcomeName));
     }
 
     /**
@@ -255,6 +328,19 @@ public final class DangerousActionGate {
         return "⚠ <b>Approval required</b>\n"
                 + "The agent wants to run the <b>" + TelegramMarkdownFormatter.escapeHtml(toolName)
                 + "</b> action:\n<pre>" + TelegramMarkdownFormatter.escapeHtml(args) + "</pre>";
+    }
+
+    /**
+     * Slack mrkdwn prompt body (rendered inside a Block Kit section). The args go in
+     * a fenced code block so backticks/asterisks in them don't format, and are
+     * length-capped like {@link #buildPrompt}.
+     */
+    private static String buildSlackPrompt(String toolName, String argsJson) {
+        var args = argsJson == null ? "" : argsJson;
+        if (args.length() > 600) {
+            args = args.substring(0, 600) + "… (truncated)";
+        }
+        return "The agent wants to run the *" + toolName + "* action:\n```" + args + "```";
     }
 
     private static String grantKey(Agent agent, String toolName) {

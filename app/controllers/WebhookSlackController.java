@@ -1,9 +1,12 @@
 package controllers;
 
 import agents.AgentRunner;
+import channels.SlackApprovalCallback;
+import channels.SlackApprovalService;
 import channels.SlackChannel;
 import channels.SlackFileDownloader;
 import channels.SlackStreamingSink;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.SlackBinding;
 import play.mvc.Controller;
@@ -11,6 +14,9 @@ import play.mvc.Http;
 import services.EventLogger;
 import services.Tx;
 import utils.WebhookUtil;
+
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Slack Events API webhook. JCLAW-441: the URL carries the per-agent binding id
@@ -27,58 +33,10 @@ public class WebhookSlackController extends Controller {
     /** JCLAW-344: cap inbound files per message (matches OpenClaw's MAX_SLACK_MEDIA_FILES). */
     private static final int MAX_INBOUND_FILES = 8;
 
-    @SuppressWarnings("java:S2259")
     public static void webhook(Long bindingId) {
-        // Resolve the binding from the URL first. Unknown id → 404; disabled → 403.
-        // The id is not a secret (the signing-secret HMAC below is the auth), so a
-        // distinct 404/403 here is fine and aids operator debugging.
-        SlackBinding binding = SlackBinding.findById(bindingId);
-        if (binding == null) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
-                    "Webhook rejected: unknown Slack binding %s".formatted(bindingId));
-            notFound("Unknown Slack binding");
-        }
-        if (!binding.enabled) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
-                    "Webhook rejected: Slack binding %s is disabled".formatted(bindingId));
-            forbidden("Binding disabled");
-        }
-        if (binding.signingSecret == null || binding.signingSecret.isBlank()) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
-                    "Webhook rejected: Slack binding %s has no signing secret".formatted(bindingId));
-            unauthorized(INVALID_SIGNATURE);
-        }
-
-        // Read raw body for signature verification.
-        String rawBody;
-        try {
-            rawBody = WebhookUtil.readRawBody();
-        } catch (Exception _) {
-            EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK, "Failed to read request body");
-            error();
-            return;  // javac definite-assignment: rawBody is unassigned on this catch path
-        }
-
-        // Verify signature against THIS binding's secret before any payload parsing
-        // — url_verification challenges are signed by Slack too, so they run through
-        // the same gate as normal events.
-        var timestamp = Http.Request.current().headers.get("x-slack-request-timestamp");
-        var signature = Http.Request.current().headers.get("x-slack-signature");
-
-        if (timestamp == null || signature == null) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
-                    "Missing signature headers");
-            unauthorized("Missing signature");
-        }
-
-        if (!SlackChannel.verifySignature(binding.signingSecret,
-                timestamp.value(), rawBody, signature.value())) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
-                    INVALID_SIGNATURE);
-            unauthorized(INVALID_SIGNATURE);
-        }
-
-        var payload = JsonParser.parseString(rawBody).getAsJsonObject();
+        var verified = resolveAndVerify(bindingId);
+        var binding = verified.binding();
+        var payload = JsonParser.parseString(verified.rawBody()).getAsJsonObject();
 
         // URL verification challenge (runs post-verification).
         if (payload.has("type") && "url_verification".equals(payload.get("type").getAsString())) {
@@ -106,6 +64,111 @@ public class WebhookSlackController extends Controller {
 
         ok();
     }
+
+    /**
+     * Slack interactivity endpoint (JCLAW-350): receives {@code block_actions} when
+     * the bound owner taps an exec-approval button. Same per-binding HMAC gate as
+     * {@link #webhook} — the signature is over the raw {@code application/x-www-form-urlencoded}
+     * body ({@code payload=<urlencoded-json>}), so we verify the raw body first, then
+     * extract and decode the {@code payload} field. Resolution (which does a
+     * {@code chat.update}) runs off-thread so the 200 ack lands inside Slack's 3 s window.
+     */
+    public static void interactive(Long bindingId) {
+        var verified = resolveAndVerify(bindingId);
+        var binding = verified.binding();
+        var rawBody = verified.rawBody();
+
+        // Interactivity bodies are form-encoded with a single `payload` field. The
+        // signature (already verified) covers this raw form string, not the JSON.
+        if (!rawBody.startsWith("payload=")) {
+            badRequest("Missing payload");
+        }
+        var payloadJson = URLDecoder.decode(rawBody.substring("payload=".length()), StandardCharsets.UTF_8);
+        var payload = JsonParser.parseString(payloadJson).getAsJsonObject();
+
+        // Only block_actions carries button taps; ignore anything else (e.g. shortcuts).
+        if (!payload.has("type") || !"block_actions".equals(payload.get("type").getAsString())) {
+            ok();
+            return;
+        }
+        var fromUserId = payload.has("user") && payload.getAsJsonObject("user").has("id")
+                ? payload.getAsJsonObject("user").get("id").getAsString() : null;
+
+        // Resolve every approval action present (Slack sends one per tap, but iterate
+        // defensively). Non-approval action_ids parse to empty and are skipped.
+        var botToken = binding.botToken;
+        if (payload.has("actions") && payload.get("actions").isJsonArray()) {
+            for (var el : payload.getAsJsonArray("actions")) {
+                if (!el.isJsonObject()) continue;
+                JsonObject action = el.getAsJsonObject();
+                if (!action.has("action_id")) continue;
+                var actionId = action.get("action_id").getAsString();
+                SlackApprovalCallback.parse(actionId).ifPresent(p ->
+                        Thread.ofVirtual().name("slack-approval").start(() ->
+                                SlackApprovalService.resolve(p.approvalId(), p.decision(), fromUserId)));
+            }
+        }
+        ok();
+    }
+
+    /**
+     * Shared per-binding gate for both Slack POST endpoints: resolve the binding
+     * (404 unknown / 403 disabled / 401 no-secret), read the raw body, and verify
+     * the Slack request signature against this binding's secret. Returns only on
+     * success; every rejection path halts via a Play {@code Result} exception.
+     */
+    @SuppressWarnings("java:S2259") // Play's notFound/forbidden/unauthorized halt; binding is non-null past each guard
+    private static Verified resolveAndVerify(Long bindingId) {
+        SlackBinding binding = SlackBinding.findById(bindingId);
+        if (binding == null) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
+                    "Webhook rejected: unknown Slack binding %s".formatted(bindingId));
+            notFound("Unknown Slack binding");
+        }
+        if (!binding.enabled) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
+                    "Webhook rejected: Slack binding %s is disabled".formatted(bindingId));
+            forbidden("Binding disabled");
+        }
+        if (binding.signingSecret == null || binding.signingSecret.isBlank()) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
+                    "Webhook rejected: Slack binding %s has no signing secret".formatted(bindingId));
+            unauthorized(INVALID_SIGNATURE);
+        }
+
+        var rawBody = readRawBodyOrHalt();
+
+        // Verify against THIS binding's secret before any payload parsing —
+        // url_verification challenges are signed by Slack too, so they run through
+        // the same gate as normal events.
+        var timestamp = Http.Request.current().headers.get("x-slack-request-timestamp");
+        var signature = Http.Request.current().headers.get("x-slack-signature");
+        if (timestamp == null || signature == null) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
+                    "Missing signature headers");
+            unauthorized("Missing signature");
+        }
+        if (!SlackChannel.verifySignature(binding.signingSecret,
+                timestamp.value(), rawBody, signature.value())) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
+                    INVALID_SIGNATURE);
+            unauthorized(INVALID_SIGNATURE);
+        }
+        return new Verified(binding, rawBody);
+    }
+
+    private static String readRawBodyOrHalt() {
+        try {
+            return WebhookUtil.readRawBody();
+        } catch (Exception _) {
+            EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK, "Failed to read request body");
+            error();
+            return null; // unreachable: error() halts the request; satisfies javac definite-assignment
+        }
+    }
+
+    /** A binding whose request signature has passed, paired with the verified raw body. */
+    private record Verified(SlackBinding binding, String rawBody) {}
 
     private static void processMessage(Long bindingId, String botToken, SlackChannel.InboundMessage message) {
         try {

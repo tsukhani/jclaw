@@ -60,6 +60,10 @@ interface BindingForm {
   signingSecret: string
   agentId: number | null
   agentQuery: string
+  // JCLAW-350: Slack user id (e.g. U012ABC) allowed to approve exec / dangerous-tool
+  // requests via the interactivity endpoint. Optional — blank means no approval
+  // surface (dangerous tools fall to the off-channel policy).
+  ownerUserId: string
   // Editable public host (scheme + host, no path), e.g. https://host.ts.net. The
   // fixed path + binding id are appended to form the Events API Request URL.
   webhookBaseUrl: string
@@ -70,6 +74,7 @@ const emptyForm = (): BindingForm => ({
   signingSecret: '',
   agentId: null,
   agentQuery: '',
+  ownerUserId: '',
   webhookBaseUrl: '',
 })
 
@@ -125,6 +130,12 @@ const fullRequestUrl = computed(() => {
   return id ? `${base}/api/webhooks/slack/${id}` : ''
 })
 
+// JCLAW-350: the Interactivity Request URL is the Events URL + /interactive. The
+// operator pastes it into the Slack app's Interactivity & Shortcuts settings so
+// exec-approval button taps reach the binding's interactivity endpoint.
+const fullInteractiveUrl = computed(() =>
+  fullRequestUrl.value ? `${fullRequestUrl.value}/interactive` : '')
+
 // Pre-fill the base when the form opens without one. Idempotent — won't clobber
 // an edited base.
 function prefillBase() {
@@ -147,6 +158,7 @@ function openEdit(binding: SlackBindingSummary) {
     signingSecret: '',
     agentId: binding.agentId,
     agentQuery: binding.agentName ?? '',
+    ownerUserId: binding.ownerUserId ?? '',
     webhookBaseUrl: binding.webhookBaseUrl ?? '',
   }
   errorMessage.value = ''
@@ -184,6 +196,8 @@ async function save() {
   const body: Record<string, unknown> = {
     agentId: form.value.agentId,
     webhookBaseUrl: form.value.webhookBaseUrl.trim(),
+    // Always send: a blank clears the stored owner (null) so approvals can be turned off.
+    ownerUserId: form.value.ownerUserId.trim() || null,
   }
   // New bindings default to enabled=true; existing enabled state is preserved on
   // edit (the card toggle is the only control for it). Only send it on create so
@@ -380,26 +394,49 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
              binding id) and a public base is set. -->
         <div
           v-if="b.effectiveRequestUrl"
-          class="mb-3 text-xs text-fg-muted"
+          class="mb-3 text-xs text-fg-muted space-y-2"
         >
-          <span class="block mb-1">Events API Request URL:</span>
-          <div class="flex items-start gap-2">
-            <code class="font-mono break-all text-emerald-400">{{ b.effectiveRequestUrl }}</code>
-            <button
-              type="button"
-              class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
-              :aria-label="copied === b.effectiveRequestUrl ? 'Copied' : 'Copy request URL'"
-              @click="copyText(b.effectiveRequestUrl)"
-            >
-              <CheckIcon
-                v-if="copied === b.effectiveRequestUrl"
-                class="h-4 w-4 text-emerald-400"
-              />
-              <ClipboardDocumentIcon
-                v-else
-                class="h-4 w-4"
-              />
-            </button>
+          <div>
+            <span class="block mb-1">Events API Request URL:</span>
+            <div class="flex items-start gap-2">
+              <code class="font-mono break-all text-emerald-400">{{ b.effectiveRequestUrl }}</code>
+              <button
+                type="button"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                :aria-label="copied === b.effectiveRequestUrl ? 'Copied' : 'Copy request URL'"
+                @click="copyText(b.effectiveRequestUrl)"
+              >
+                <CheckIcon
+                  v-if="copied === b.effectiveRequestUrl"
+                  class="h-4 w-4 text-emerald-400"
+                />
+                <ClipboardDocumentIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+              </button>
+            </div>
+          </div>
+          <div>
+            <span class="block mb-1">Interactivity Request URL:</span>
+            <div class="flex items-start gap-2">
+              <code class="font-mono break-all text-emerald-400">{{ `${b.effectiveRequestUrl}/interactive` }}</code>
+              <button
+                type="button"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                :aria-label="copied === `${b.effectiveRequestUrl}/interactive` ? 'Copied' : 'Copy interactivity URL'"
+                @click="copyText(`${b.effectiveRequestUrl}/interactive`)"
+              >
+                <CheckIcon
+                  v-if="copied === `${b.effectiveRequestUrl}/interactive`"
+                  class="h-4 w-4 text-emerald-400"
+                />
+                <ClipboardDocumentIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -510,6 +547,13 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
             bot event below, and Save Changes. App Home: enable the Messages tab and
             slash/message sending. Agents &amp; AI Apps: enable the Assistant feature
             for the native "is typing…" indicator + streaming replies.
+          </li>
+          <li>
+            Interactivity &amp; Shortcuts (optional, for exec approvals): turn On and
+            paste the Interactivity Request URL (the Events URL with
+            <code class="font-mono px-1 bg-muted text-fg-strong">/interactive</code>
+            appended, shown on the binding's card). Then set the approver user id below
+            so dangerous-tool requests prompt you with approve/deny buttons.
           </li>
         </ol>
         <div class="text-fg-strong">
@@ -645,6 +689,27 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
         </label>
 
         <label
+          for="binding-owner-user-id"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">approver user id (optional)</span>
+          <input
+            id="binding-owner-user-id"
+            v-model="form.ownerUserId"
+            type="text"
+            placeholder="U012ABCDEF"
+            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                   focus:outline-hidden focus:border-ring transition-colors"
+          >
+          <span class="mt-1 block text-xs text-fg-muted">
+            Your Slack user id, allowed to approve exec / dangerous-tool requests via
+            the Interactivity buttons. Leave blank to skip approvals (dangerous tools
+            then follow the off-channel policy). Find it in your Slack profile → ⋮ →
+            Copy member ID.
+          </span>
+        </label>
+
+        <label
           for="binding-webhook-base"
           class="block"
         >
@@ -661,26 +726,49 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
 
         <div
           v-if="fullRequestUrl"
-          class="text-xs text-fg-muted space-y-1"
+          class="text-xs text-fg-muted space-y-2"
         >
-          <span class="block">Events API Request URL — paste this into the Slack app's Event Subscriptions:</span>
-          <div class="flex items-start gap-2">
-            <code class="font-mono break-all text-emerald-400">{{ fullRequestUrl }}</code>
-            <button
-              type="button"
-              class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
-              :aria-label="copied === fullRequestUrl ? 'Copied' : 'Copy request URL'"
-              @click="copyText(fullRequestUrl)"
-            >
-              <CheckIcon
-                v-if="copied === fullRequestUrl"
-                class="h-4 w-4 text-emerald-400"
-              />
-              <ClipboardDocumentIcon
-                v-else
-                class="h-4 w-4"
-              />
-            </button>
+          <div class="space-y-1">
+            <span class="block">Events API Request URL — paste this into the Slack app's Event Subscriptions:</span>
+            <div class="flex items-start gap-2">
+              <code class="font-mono break-all text-emerald-400">{{ fullRequestUrl }}</code>
+              <button
+                type="button"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                :aria-label="copied === fullRequestUrl ? 'Copied' : 'Copy request URL'"
+                @click="copyText(fullRequestUrl)"
+              >
+                <CheckIcon
+                  v-if="copied === fullRequestUrl"
+                  class="h-4 w-4 text-emerald-400"
+                />
+                <ClipboardDocumentIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+              </button>
+            </div>
+          </div>
+          <div class="space-y-1">
+            <span class="block">Interactivity Request URL — paste this into Interactivity &amp; Shortcuts (needed for exec approvals):</span>
+            <div class="flex items-start gap-2">
+              <code class="font-mono break-all text-emerald-400">{{ fullInteractiveUrl }}</code>
+              <button
+                type="button"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                :aria-label="copied === fullInteractiveUrl ? 'Copied' : 'Copy interactivity URL'"
+                @click="copyText(fullInteractiveUrl)"
+              >
+                <CheckIcon
+                  v-if="copied === fullInteractiveUrl"
+                  class="h-4 w-4 text-emerald-400"
+                />
+                <ClipboardDocumentIcon
+                  v-else
+                  class="h-4 w-4"
+                />
+              </button>
+            </div>
           </div>
         </div>
         <p

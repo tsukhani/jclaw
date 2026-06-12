@@ -64,6 +64,12 @@ describe('slack bindings page — Request URL + setup (JCLAW-441)', () => {
     const copyBtn = c.findAll('button')
       .find(b => (b.attributes('aria-label') ?? '').startsWith('Copy request URL'))
     expect(copyBtn).toBeDefined()
+    // JCLAW-350: the interactivity URL (Events URL + /interactive) also appears,
+    // with its own copy button, for wiring Slack's Interactivity & Shortcuts.
+    expect(c.text()).toContain('https://jclaw.tnet.ts.net/api/webhooks/slack/7/interactive')
+    const interactiveCopy = c.findAll('button')
+      .find(b => (b.attributes('aria-label') ?? '').startsWith('Copy interactivity URL'))
+    expect(interactiveCopy).toBeDefined()
   })
 
   it('pre-fills the public base and builds the full Request URL when editing (funnel live)', async () => {
@@ -104,6 +110,9 @@ describe('slack bindings page — Request URL + setup (JCLAW-441)', () => {
     // Both required secret fields are present on create.
     expect(c.find('#binding-bot-token').exists()).toBe(true)
     expect(c.find('#binding-signing-secret').exists()).toBe(true)
+    // JCLAW-350: the optional approver-user-id field + the Interactivity setup step.
+    expect(c.find('#binding-owner-user-id').exists()).toBe(true)
+    expect(text).toContain('Interactivity')
   })
 })
 

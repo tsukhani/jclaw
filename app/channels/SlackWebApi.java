@@ -2,8 +2,10 @@ package channels;
 
 import com.slack.api.Slack;
 import com.slack.api.methods.SlackApiException;
+import com.slack.api.model.block.LayoutBlock;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Thin Slack Web API helper shared across the Slack epic (JCLAW-441 foundation).
@@ -17,6 +19,41 @@ public final class SlackWebApi {
     private static final Slack slack = Slack.getInstance();
 
     private SlackWebApi() {}
+
+    /**
+     * Post a Block Kit message and return its {@code ts}, or {@code null} on failure.
+     * The {@code fallbackText} is the notification/screen-reader text Slack shows
+     * where blocks can't render (mobile push, a11y); the {@code blocks} carry the
+     * interactive surface. Used by {@link SlackApprovalService} (JCLAW-350) to post
+     * the exec-approval prompt with approve/deny buttons.
+     */
+    public static String postMessageWithBlocks(String botToken, String channelId, String threadTs,
+                                               String fallbackText, List<LayoutBlock> blocks) {
+        if (botToken == null || botToken.isBlank()) return null;
+        try {
+            var resp = slack.methods(botToken).chatPostMessage(r -> r
+                    .channel(channelId).threadTs(threadTs).text(fallbackText).blocks(blocks));
+            return resp.isOk() ? resp.getTs() : null;
+        } catch (IOException | SlackApiException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Replace a message's blocks via {@code chat.update} — used to swap the live
+     * approve/deny prompt for a static "Approved/Denied/Expired" line once the
+     * approval resolves, so the stale buttons can't be tapped again.
+     */
+    public static boolean updateMessageWithBlocks(String botToken, String channelId, String ts,
+                                                  String fallbackText, List<LayoutBlock> blocks) {
+        if (botToken == null || botToken.isBlank()) return false;
+        try {
+            return slack.methods(botToken).chatUpdate(r -> r
+                    .channel(channelId).ts(ts).text(fallbackText).blocks(blocks)).isOk();
+        } catch (IOException | SlackApiException e) {
+            return false;
+        }
+    }
 
     /**
      * Result of an {@code auth.test} probe: {@code ok} plus the bot's own user
