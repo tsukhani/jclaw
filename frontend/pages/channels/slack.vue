@@ -703,7 +703,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           for="binding-owner-user-id"
           class="block"
         >
-          <span class="block text-xs text-fg-muted mb-1">approver user id (optional)</span>
+          <span class="block text-xs text-fg-muted mb-1">owner user id (optional)</span>
           <input
             id="binding-owner-user-id"
             v-model="form.ownerUserId"
@@ -713,10 +713,11 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
                    focus:outline-hidden focus:border-ring transition-colors"
           >
           <span class="mt-1 block text-xs text-fg-muted">
-            Your Slack user id, allowed to approve exec / dangerous-tool requests via
-            the Interactivity buttons. Leave blank to skip approvals (dangerous tools
-            then follow the off-channel policy). Find it in your Slack profile → ⋮ →
-            Copy member ID.
+            Your Slack user id. When set, it locks DMs to you (messages from anyone else
+            are ignored) and is the approver for exec / dangerous-tool requests. Leave
+            blank to let anyone DM the bot and to skip approvals. Either way, in channels
+            the bot only responds when you @mention it. Find it in your Slack profile →
+            ⋮ → Copy member ID.
           </span>
         </label>
 

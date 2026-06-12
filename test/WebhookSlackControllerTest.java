@@ -307,4 +307,48 @@ class WebhookSlackControllerTest extends FunctionalTest {
                         && "slack".equals(e.channel));
         assertTrue(found, "expected WEBHOOK_SIGNATURE_FAILURE event for slack");
     }
+
+    // ── Access policy gate (JCLAW-354) ──────────────────────────────────
+
+    @Test
+    void channelMessageWithoutMentionIsDroppedByAccessPolicy() {
+        // A signed channel message that doesn't @mention the bot is dropped (200, but
+        // not dispatched). Exercises parseEvent's channel_type + botMentioned and the
+        // gate wiring together. Asserted via the drop audit line.
+        var id = seedBinding();
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
+                + "\"channel\":\"C123\",\"channel_type\":\"channel\",\"user\":\"U456\",\"text\":\"hello team\"}}";
+        var sig = hmac(body, ts);
+        var response = postWithSlackHeaders(id, body, ts, sig);
+        assertEquals(200, response.status.intValue());
+
+        EventLogger.flush();
+        var dropped = EventLog.findRecent(20).stream().anyMatch(e ->
+                e.message != null && e.message.contains("dropped by access policy"));
+        assertTrue(dropped, "an unaddressed channel message must be dropped by the access policy");
+    }
+
+    @Test
+    void channelMessageMentioningBotIsServed() {
+        // The same channel message, now @mentioning the bot (<@UBOT0001> = the seeded
+        // botUserId), passes the gate and is accepted for processing.
+        var id = seedBinding();
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        var body = "{\"type\":\"event_callback\",\"event\":{\"type\":\"message\","
+                + "\"channel\":\"C123\",\"channel_type\":\"channel\",\"user\":\"U456\","
+                + "\"text\":\"<@" + BOT_USER_ID + "> hi\"}}";
+        var sig = hmac(body, ts);
+        var response = postWithSlackHeaders(id, body, ts, sig);
+        assertEquals(200, response.status.intValue());
+
+        EventLogger.flush();
+        var events = EventLog.findRecent(20);
+        assertTrue(events.stream().anyMatch(e ->
+                        e.message != null && e.message.contains("Message received from")),
+                "a mention-addressed channel message must be accepted");
+        assertFalse(events.stream().anyMatch(e ->
+                        e.message != null && e.message.contains("dropped by access policy")),
+                "a mention-addressed channel message must not be dropped");
+    }
 }

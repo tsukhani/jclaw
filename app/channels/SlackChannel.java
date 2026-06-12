@@ -277,7 +277,8 @@ public class SlackChannel implements Channel {
     // --- Inbound event parsing (SDK model) ---
 
     public record InboundMessage(String channelId, String userId, String text, String threadTs,
-                                 java.util.List<SlackPendingFile> files) {}
+                                 java.util.List<SlackPendingFile> files, String channelType,
+                                 boolean botMentioned) {}
 
     /**
      * Parse an Events API envelope into an {@link InboundMessage}, or null for
@@ -312,12 +313,22 @@ public class SlackChannel implements Channel {
             return null;
         }
         var event = SLACK_GSON.fromJson(eventObj, MessageEvent.class);
+        var text = event.getText() != null ? event.getText() : "";
+        // JCLAW-354: channel_type ("im"/"channel"/"group"/"mpim") drives the access
+        // gate (owner-only DM vs mention-gated channel); botMentioned is true when the
+        // text carries a <@BOTID> mention (Slack renders mentions as <@U…> / <@U…|name>,
+        // so a prefix match covers both forms).
+        var channelType = str(eventObj, "channel_type");
+        var botMentioned = botUserId != null && !botUserId.isBlank()
+                && text.contains("<@" + botUserId);
         return new InboundMessage(
                 event.getChannel(),
                 event.getUser(),
-                event.getText() != null ? event.getText() : "",
+                text,
                 event.getThreadTs(),
-                parseFiles(eventObj));
+                parseFiles(eventObj),
+                channelType,
+                botMentioned);
     }
 
     /** Extract the event's {@code files[]} array into pending downloads (JCLAW-344).

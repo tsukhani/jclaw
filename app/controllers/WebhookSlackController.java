@@ -1,6 +1,7 @@
 package controllers;
 
 import agents.AgentRunner;
+import channels.SlackAccessPolicy;
 import channels.SlackApprovalCallback;
 import channels.SlackApprovalService;
 import channels.SlackChannel;
@@ -51,6 +52,19 @@ public class WebhookSlackController extends Controller {
         var message = SlackChannel.parseEvent(payload, binding.botUserId);
         if (message == null) {
             ok(); // Non-message event, subtype, or the bot's own message
+            return;
+        }
+
+        // JCLAW-354: access gate. DMs are owner-only (when an owner is set); channels
+        // are mention-gated. A disallowed message is silently dropped with a 200 so
+        // Slack doesn't retry. Channel mention-gating needs the cached bot user id
+        // (set by the Test probe) — same dependency as the self-loop guard above.
+        if (!SlackAccessPolicy.isAllowed(binding.ownerUserId, message.userId(),
+                message.channelType(), message.botMentioned())) {
+            EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
+                    "Message from %s in %s (%s) dropped by access policy".formatted(
+                            message.userId(), message.channelId(), message.channelType()));
+            ok();
             return;
         }
 
