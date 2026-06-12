@@ -273,11 +273,17 @@ async function copyText(text: string) {
   }
 }
 
-// Static Slack-app setup values the operator transcribes into the dashboard
-// (relocated from the old app-global Channels editor). Each *:history scope
-// lets the bot read that surface; the matching message.* event delivers it.
-const SETUP_SCOPES = ['chat:write', 'assistant:write', 'app_mentions:read', 'files:read', 'files:write', 'im:write', 'channels:history', 'groups:history', 'im:history', 'mpim:history']
-const SETUP_EVENTS = ['app_mention', 'message.channels', 'message.groups', 'message.im', 'message.mpim']
+// Static Slack-app setup values the operator transcribes into the dashboard —
+// exactly the scopes/events the code uses (verified against app/): chat:write
+// (post/edit replies + the off-thread draft loop), assistant:write (native
+// chat.startStream + the "is typing…" status), files:read (download inbound
+// shared files, JCLAW-344), files:write + im:write (upload generated files,
+// JCLAW-345; im:write opens a DM channel for the upload), and each *:history so
+// the matching message.* event is delivered. No app_mention: parseEvent handles
+// only `message` events, so the bot reacts to messages in the channels it's
+// invited to (via message.channels), not to app_mention events.
+const SETUP_SCOPES = ['chat:write', 'assistant:write', 'files:read', 'files:write', 'im:write', 'channels:history', 'groups:history', 'im:history', 'mpim:history']
+const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'message.mpim']
 </script>
 
 <template>

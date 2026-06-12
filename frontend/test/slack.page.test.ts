@@ -100,7 +100,7 @@ describe('slack bindings page — Request URL + setup (JCLAW-441)', () => {
     expect(text).toContain('files:read')
     expect(text).toContain('files:write')
     expect(text).toContain('message.im')
-    expect(text).toContain('app_mention')
+    expect(text).toContain('message.channels')
     // Both required secret fields are present on create.
     expect(c.find('#binding-bot-token').exists()).toBe(true)
     expect(c.find('#binding-signing-secret').exists()).toBe(true)
