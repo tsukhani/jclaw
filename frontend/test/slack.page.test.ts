@@ -113,6 +113,8 @@ describe('slack bindings page — Request URL + setup (JCLAW-441)', () => {
     // JCLAW-350: the optional approver-user-id field + the Interactivity setup step.
     expect(c.find('#binding-owner-user-id').exists()).toBe(true)
     expect(text).toContain('Interactivity')
+    // JCLAW-349: the lifecycle-command note (! prefix, since Slack blocks / in threads).
+    expect(text).toContain('!reset')
   })
 })
 

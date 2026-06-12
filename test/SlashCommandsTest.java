@@ -67,6 +67,47 @@ class SlashCommandsTest extends UnitTest {
         assertEquals(Commands.Command.STOP, Commands.parse("/stop").orElseThrow());
     }
 
+    // ── JCLAW-349: Slack ! command rewrite + channel-aware help ─────────
+
+    @Test
+    void rewriteBangCommandMapsKnownCommandsToSlash() {
+        assertEquals("/reset", Commands.rewriteBangCommand("!reset"));
+        assertEquals("/new", Commands.rewriteBangCommand("!new"));
+        assertEquals("/stop", Commands.rewriteBangCommand("!stop"));
+        assertEquals("/help", Commands.rewriteBangCommand("!help"));
+        // Args survive the rewrite.
+        assertEquals("/model openrouter/gpt-5", Commands.rewriteBangCommand("!model openrouter/gpt-5"));
+    }
+
+    @Test
+    void rewriteBangCommandLeavesNonCommandsUntouched() {
+        assertEquals("!foo", Commands.rewriteBangCommand("!foo"));     // unknown command → to the LLM
+        assertEquals("!", Commands.rewriteBangCommand("!"));           // bare bang
+        assertEquals("hello", Commands.rewriteBangCommand("hello"));   // no bang
+        assertEquals("/reset", Commands.rewriteBangCommand("/reset")); // already a slash command
+        assertNull(Commands.rewriteBangCommand(null));
+    }
+
+    @Test
+    void slackHelpUsesBangPrefixOtherChannelsUseSlash() {
+        var slackHelp = Commands.helpTextFor("slack");
+        assertTrue(slackHelp.contains("!reset"), "Slack help must list !reset");
+        assertTrue(slackHelp.contains("!help"), "Slack help must list !help");
+        assertFalse(slackHelp.contains("/reset"), "Slack help must not show the (dead-in-threads) /reset form");
+        // Non-Slack channels keep the canonical / forms.
+        assertEquals(Commands.HELP_TEXT, Commands.helpTextFor("telegram"));
+        assertEquals(Commands.HELP_TEXT, Commands.helpTextFor("web"));
+    }
+
+    @Test
+    void executeHelpOnSlackReturnsBangHelp() {
+        // /help (reached via a rewritten !help) returns the Slack-shaped listing.
+        var result = Commands.execute(Commands.Command.HELP, agent, "slack", "C1", null);
+        assertEquals(Commands.Command.HELP, result.command());
+        assertTrue(result.responseText().contains("!reset"),
+                "executeHelp on Slack must return the ! listing");
+    }
+
     // ── /compact ──────────────────────────────────────────────────────
 
     @Test

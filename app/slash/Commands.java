@@ -211,6 +211,24 @@ public final class Commands {
     }
 
     /**
+     * JCLAW-349: Slack reserves {@code /}-prefixed input for native slash commands,
+     * which Slack refuses to deliver inside a thread — and the Assistant pane is a
+     * thread, so {@code /reset} can never reach the bot there. On Slack the lifecycle
+     * commands are therefore typed with a {@code !} prefix in an ordinary message,
+     * which Slack delivers normally. Rewrite a leading {@code !<known-command>} to
+     * its canonical {@code /<command>} form so the shared interception
+     * ({@link #parse}/{@link #execute}) handles it unchanged — args survive
+     * ({@code !model x/y} → {@code /model x/y}). Anything else — a bare {@code !}, an
+     * unknown {@code !foo}, or non-{@code !} text — is returned verbatim so it flows
+     * to the LLM as normal content.
+     */
+    public static String rewriteBangCommand(String text) {
+        if (text == null || text.length() < 2 || text.charAt(0) != '!') return text;
+        var candidate = "/" + text.substring(1);
+        return parse(candidate).isPresent() ? candidate : text;
+    }
+
+    /**
      * True when {@code text}'s first token is {@code /start} (case-insensitive).
      *
      * <p>{@code /start} is deliberately NOT a {@link Command}: on Telegram it
@@ -519,18 +537,37 @@ public final class Commands {
     }
 
     private static Result executeHelp(Agent agent, String channelType, Conversation current) {
+        var helpText = helpTextFor(channelType);
         if (current != null) {
             final Long convId = current.id;
             Tx.run(() -> {
                 var conv = (Conversation) Conversation.findById(convId);
                 if (conv != null) {
-                    ConversationService.appendAssistantMessage(conv, HELP_TEXT, null);
+                    ConversationService.appendAssistantMessage(conv, helpText, null);
                 }
             });
         }
         EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                 "/help" + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
-        return new Result(current, HELP_TEXT, Command.HELP);
+        return new Result(current, helpText, Command.HELP);
+    }
+
+    /**
+     * Channel-appropriate help listing. On Slack the lifecycle commands are invoked
+     * with a {@code !} prefix (JCLAW-349 — slash commands don't reach threads), so
+     * the Slack help lists the {@code !} forms; every other channel uses the
+     * canonical {@code /} forms ({@link #HELP_TEXT}). The Slack listing is built from
+     * {@link Command} so it can't drift from the actual command set.
+     */
+    public static String helpTextFor(String channelType) {
+        if (!"slack".equals(channelType)) return HELP_TEXT;
+        var sb = new StringBuilder(
+                "Available commands — Slack reserves / for slash commands (which don't work in "
+                + "threads), so use a ! prefix:\n");
+        for (var c : Command.values()) {
+            sb.append("• !").append(c.bareName()).append(" — ").append(c.shortDescription).append('\n');
+        }
+        return sb.toString();
     }
 
     /**

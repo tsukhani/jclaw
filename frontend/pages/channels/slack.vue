@@ -545,7 +545,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           <li>
             Event Subscriptions: turn On, paste that Request URL, subscribe to every
             bot event below, and Save Changes. App Home: enable the Messages tab and
-            slash/message sending. Agents &amp; AI Apps: enable the Assistant feature
+            allow message sending. Agents &amp; AI Apps: enable the Assistant feature
             for the native "is typing…" indicator + streaming replies.
           </li>
           <li>
@@ -556,6 +556,17 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
             so dangerous-tool requests prompt you with approve/deny buttons.
           </li>
         </ol>
+        <p class="text-fg-muted">
+          Lifecycle commands need no setup: in any conversation with the bot, type
+          <code class="font-mono px-1 bg-muted text-fg-strong">!help</code>,
+          <code class="font-mono px-1 bg-muted text-fg-strong">!reset</code>,
+          <code class="font-mono px-1 bg-muted text-fg-strong">!new</code>, or
+          <code class="font-mono px-1 bg-muted text-fg-strong">!stop</code>. Slack
+          blocks <code class="font-mono px-1 bg-muted text-fg-strong">/</code> commands
+          inside threads (including the Assistant pane), so JClaw uses a
+          <code class="font-mono px-1 bg-muted text-fg-strong">!</code> prefix, which
+          works everywhere.
+        </p>
         <div class="text-fg-strong">
           OAuth &amp; Permissions → Bot Token Scopes
           <div class="mt-1 space-y-1">

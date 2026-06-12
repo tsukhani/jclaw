@@ -188,13 +188,19 @@ public class WebhookSlackController extends Controller {
             // dir so the runner gets a vision / transcription turn. Rejected files
             // (too large / unreadable) get a user-visible note; the rest proceed.
             var attachments = downloadFiles(botToken, message, agent.name);
+            // JCLAW-349: Slack reserves / for native slash commands, which it refuses
+            // to deliver inside a thread (the Assistant pane is a thread). So lifecycle
+            // commands use a ! prefix in messages; rewrite !cmd → /cmd here so the
+            // shared slash interception below handles it and the canned reply lands
+            // in-thread via the sink.
+            var text = slash.Commands.rewriteBangCommand(message.text());
             // JCLAW-442: route through the shared higher-level entry (as Telegram does)
             // so slash commands + the conversation lifecycle are handled centrally. The
             // factory owns the per-binding bot token + channel/thread;
             // processInboundForAgentStreaming invokes startTypingHeartbeat before the
             // LLM. The sink streams natively in assistant threads, else posts a reply.
             AgentRunner.processInboundForAgentStreaming(
-                    agent, CHANNEL_SLACK, message.channelId(), message.text(),
+                    agent, CHANNEL_SLACK, message.channelId(), text,
                     _ -> new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken, agent.name),
                     attachments, null);
         } catch (Exception e) {
