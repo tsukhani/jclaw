@@ -233,6 +233,20 @@ class ApiSlackBindingsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void createRejectsSocketBindingWithoutAppToken() {
+        // JCLAW-351: Socket Mode authenticates the WebSocket with an app-level token, so
+        // a SOCKET binding must supply one (and needs no signing secret). The guard runs
+        // before the identity probe — no network call.
+        var agentId = seedAgent("sb-agent");
+        login();
+        var body = """
+                {"botToken": "xoxb-t", "transport": "SOCKET", "agentId": %d}
+                """.formatted(agentId);
+        assertEquals(400, POST("/api/channels/slack/bindings",
+                "application/json", body).status.intValue());
+    }
+
+    @Test
     void createConflictsOnDuplicateBotToken() {
         var firstAgentId = seedAgent("agent-a");
         var secondAgentId = seedAgent("agent-b");

@@ -1,38 +1,30 @@
 package controllers;
 
-import agents.AgentRunner;
-import channels.SlackAccessPolicy;
-import channels.SlackApprovalCallback;
-import channels.SlackApprovalService;
 import channels.SlackChannel;
-import channels.SlackFileDownloader;
-import channels.SlackStreamingSink;
-import com.google.gson.JsonObject;
+import channels.SlackInbound;
 import com.google.gson.JsonParser;
 import models.SlackBinding;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
-import services.Tx;
 import utils.WebhookUtil;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Slack Events API webhook. JCLAW-441: the URL carries the per-agent binding id
- * ({@code /api/webhooks/slack/{bindingId}}), so each bot has its own endpoint and
- * authenticates against its own signing secret. Routing is binding-first — the
- * binding's agent handles the message; there is no app-global config or
- * channel-id lookup in this path.
+ * Slack Events API webhook + interactivity endpoints. JCLAW-441: the URL carries the
+ * per-agent binding id, so each bot has its own endpoint and authenticates against its
+ * own signing secret. These endpoints own the HTTP-transport specifics (HMAC over the
+ * raw body, the {@code url_verification} challenge, the 200 ack); the actual parse +
+ * access gate + dispatch live in {@link SlackInbound}, shared with the Socket Mode
+ * transport (JCLAW-351).
  */
 public class WebhookSlackController extends Controller {
 
     private static final String CHANNEL_SLACK = "slack";
     private static final String INVALID_SIGNATURE = "Invalid signature";
     private static final String CATEGORY_CHANNEL = "channel";
-    /** JCLAW-344: cap inbound files per message (matches OpenClaw's MAX_SLACK_MEDIA_FILES). */
-    private static final int MAX_INBOUND_FILES = 8;
 
     public static void webhook(Long bindingId) {
         var verified = resolveAndVerify(bindingId);
@@ -47,54 +39,20 @@ public class WebhookSlackController extends Controller {
             return;
         }
 
-        // Parse event, dropping the binding's own bot messages (JCLAW-357 self-loop
-        // guard via the cached bot user id).
-        var message = SlackChannel.parseEvent(payload, binding.botUserId);
-        if (message == null) {
-            ok(); // Non-message event, subtype, or the bot's own message
-            return;
-        }
-
-        // JCLAW-354: access gate. The owner user id is the private/shared switch — set
-        // an owner and the binding is private (served only to the owner, on DMs and
-        // mention-addressed channels alike); leave it unset and it's shared (DM open,
-        // channels mention-gated for any member). The main agent (full filesystem/shell
-        // access) additionally REQUIRES an owner: with none it fails closed, so a random
-        // workspace user can't reach it. A disallowed message is silently dropped with a
-        // 200 so Slack doesn't retry. Channel mention-gating needs the cached bot user
-        // id (set by the Test probe) — same dependency as the self-loop guard.
-        var agentIsMain = binding.agent != null && binding.agent.isMain();
-        if (!SlackAccessPolicy.isAllowed(binding.ownerUserId, message.userId(),
-                message.channelType(), message.botMentioned(), agentIsMain)) {
-            EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
-                    "Message from %s in %s (%s) dropped by access policy".formatted(
-                            message.userId(), message.channelId(), message.channelType()));
-            ok();
-            return;
-        }
-
-        EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
-                "Message received from %s in %s".formatted(message.userId(), message.channelId()));
-
-        // Process async. The bot token (immutable) crosses the thread boundary; the
-        // lazy agent association is re-resolved inside a fresh tx on that thread.
-        var botToken = binding.botToken;
-        Thread.ofVirtual().name("webhook-slack").start(() -> processMessage(bindingId, botToken, message));
-
+        SlackInbound.dispatchEvent(binding, payload);
         ok();
     }
 
     /**
-     * Slack interactivity endpoint (JCLAW-350): receives {@code block_actions} when
-     * the bound owner taps an exec-approval button. Same per-binding HMAC gate as
+     * Slack interactivity endpoint (JCLAW-350): receives {@code block_actions} when the
+     * bound owner taps an exec-approval button. Same per-binding HMAC gate as
      * {@link #webhook} — the signature is over the raw {@code application/x-www-form-urlencoded}
      * body ({@code payload=<urlencoded-json>}), so we verify the raw body first, then
-     * extract and decode the {@code payload} field. Resolution (which does a
-     * {@code chat.update}) runs off-thread so the 200 ack lands inside Slack's 3 s window.
+     * extract and decode the {@code payload} field. Resolution runs off-thread so the
+     * 200 ack lands inside Slack's 3 s window.
      */
     public static void interactive(Long bindingId) {
         var verified = resolveAndVerify(bindingId);
-        var binding = verified.binding();
         var rawBody = verified.rawBody();
 
         // Interactivity bodies are form-encoded with a single `payload` field. The
@@ -105,33 +63,12 @@ public class WebhookSlackController extends Controller {
         var payloadJson = URLDecoder.decode(rawBody.substring("payload=".length()), StandardCharsets.UTF_8);
         var payload = JsonParser.parseString(payloadJson).getAsJsonObject();
 
-        // Only block_actions carries button taps; ignore anything else (e.g. shortcuts).
-        if (!payload.has("type") || !"block_actions".equals(payload.get("type").getAsString())) {
-            ok();
-            return;
-        }
-        var fromUserId = payload.has("user") && payload.getAsJsonObject("user").has("id")
-                ? payload.getAsJsonObject("user").get("id").getAsString() : null;
-
-        // Resolve every approval action present (Slack sends one per tap, but iterate
-        // defensively). Non-approval action_ids parse to empty and are skipped.
-        var botToken = binding.botToken;
-        if (payload.has("actions") && payload.get("actions").isJsonArray()) {
-            for (var el : payload.getAsJsonArray("actions")) {
-                if (!el.isJsonObject()) continue;
-                JsonObject action = el.getAsJsonObject();
-                if (!action.has("action_id")) continue;
-                var actionId = action.get("action_id").getAsString();
-                SlackApprovalCallback.parse(actionId).ifPresent(p ->
-                        Thread.ofVirtual().name("slack-approval").start(() ->
-                                SlackApprovalService.resolve(p.approvalId(), p.decision(), fromUserId)));
-            }
-        }
+        SlackInbound.dispatchInteractive(payload);
         ok();
     }
 
     /**
-     * Shared per-binding gate for both Slack POST endpoints: resolve the binding
+     * Shared per-binding gate for the Slack POST endpoints: resolve the binding
      * (404 unknown / 403 disabled / 401 no-secret), read the raw body, and verify
      * the Slack request signature against this binding's secret. Returns only on
      * success; every rejection path halts via a Play {@code Result} exception.
@@ -188,80 +125,4 @@ public class WebhookSlackController extends Controller {
 
     /** A binding whose request signature has passed, paired with the verified raw body. */
     private record Verified(SlackBinding binding, String rawBody) {}
-
-    private static void processMessage(Long bindingId, String botToken, SlackChannel.InboundMessage message) {
-        try {
-            // JCLAW-83: capture the inbound thread_ts so the reply lands in-thread
-            // (null for a non-threaded message → posts at channel level).
-            var threadTs = message.threadTs();
-            // Binding-first dispatch: the bound agent handles the message. Re-resolve
-            // it (and re-check enabled) inside a tx on this virtual thread.
-            var agent = Tx.run(() -> {
-                SlackBinding b = SlackBinding.findById(bindingId);
-                return (b == null || !b.enabled) ? null : b.agent;
-            });
-            if (agent == null) {
-                return; // binding deleted/disabled between accept and dispatch
-            }
-            // JCLAW-344: download inbound files (files:read) into the agent's staging
-            // dir so the runner gets a vision / transcription turn. Rejected files
-            // (too large / unreadable) get a user-visible note; the rest proceed.
-            var attachments = downloadFiles(botToken, message, agent.name);
-            // JCLAW-349: Slack reserves / for native slash commands, which it refuses
-            // to deliver inside a thread (the Assistant pane is a thread). So lifecycle
-            // commands use a ! prefix in messages; rewrite !cmd → /cmd here so the
-            // shared slash interception below handles it and the canned reply lands
-            // in-thread via the sink.
-            var text = slash.Commands.rewriteBangCommand(message.text());
-            // JCLAW-442: route through the shared higher-level entry (as Telegram does)
-            // so slash commands + the conversation lifecycle are handled centrally. The
-            // factory owns the per-binding bot token + channel/thread;
-            // processInboundForAgentStreaming invokes startTypingHeartbeat before the
-            // LLM. The sink streams natively in assistant threads, else posts a reply.
-            AgentRunner.processInboundForAgentStreaming(
-                    agent, CHANNEL_SLACK, message.channelId(), text,
-                    _ -> new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken, agent.name),
-                    attachments, null);
-        } catch (Exception e) {
-            EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
-                    "Error processing message: %s".formatted(e.getMessage()));
-        }
-    }
-
-    /**
-     * JCLAW-344: download up to {@link #MAX_INBOUND_FILES} inbound Slack files into
-     * the agent's staging dir, returning the staged {@link services.AttachmentService.Input}s
-     * the runner finalizes. Each failure (too large / unreadable / non-Slack host)
-     * is logged and counted; a single note is sent to the channel if any were
-     * rejected, so the user isn't left wondering why an attachment was ignored.
-     */
-    private static java.util.List<services.AttachmentService.Input> downloadFiles(
-            String botToken, SlackChannel.InboundMessage message, String agentName) {
-        var files = message.files();
-        if (files == null || files.isEmpty()) {
-            return java.util.List.of();
-        }
-        var inputs = new java.util.ArrayList<services.AttachmentService.Input>();
-        int rejected = 0;
-        for (int i = 0; i < files.size() && i < MAX_INBOUND_FILES; i++) {
-            var file = files.get(i);
-            var result = SlackFileDownloader.download(botToken, file, agentName);
-            if (result instanceof SlackFileDownloader.Ok(var input)) {
-                inputs.add(input);
-            } else {
-                rejected++;
-                String reason = result instanceof SlackFileDownloader.SizeExceeded
-                        ? "exceeds the 20 MB limit"
-                        : "could not be downloaded";
-                EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
-                        "Slack inbound file '%s' %s".formatted(file.name(), reason));
-            }
-        }
-        if (rejected > 0) {
-            SlackChannel.sendMessage(message.channelId(),
-                    "⚠️ %d attachment(s) couldn't be processed (too large or unreadable).".formatted(rejected),
-                    message.threadTs(), botToken);
-        }
-        return inputs;
-    }
 }

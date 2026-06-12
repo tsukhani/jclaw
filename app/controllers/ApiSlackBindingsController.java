@@ -1,6 +1,7 @@
 package controllers;
 
 import channels.ChannelTransport;
+import channels.SlackSocketModeRunner;
 import channels.SlackWebApi;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -110,11 +111,25 @@ public class ApiSlackBindingsController extends Controller {
         if (body == null) badRequest();
 
         String botToken = readRequiredString(body, KEY_BOT_TOKEN);
-        String signingSecret = readRequiredString(body, KEY_SIGNING_SECRET);
+        var transport = parseTransport(body, ChannelTransport.HTTP);
+        String signingSecret = readOptionalString(body, KEY_SIGNING_SECRET);
+        String appToken = readOptionalString(body, KEY_APP_TOKEN);
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
                 ? body.get(KEY_AGENT_ID).getAsLong() : null;
-        if (botToken == null || signingSecret == null || agentId == null) {
-            error(400, "botToken, signingSecret, and agentId are required");
+        if (botToken == null || agentId == null) {
+            error(400, "botToken and agentId are required");
+            throw new AssertionError("unreachable: error() throws");
+        }
+        // JCLAW-351: transport-specific inbound credential. The Events API (HTTP) verifies
+        // an HMAC, so it needs the signing secret; Socket Mode authenticates the WebSocket
+        // with the app-level token (xapp-) instead, and needs no public URL.
+        if (transport == ChannelTransport.SOCKET) {
+            if (appToken == null || appToken.isBlank()) {
+                error(400, "Socket Mode requires an app-level token (xapp-)");
+                throw new AssertionError("unreachable: error() throws");
+            }
+        } else if (signingSecret == null || signingSecret.isBlank()) {
+            error(400, "The Events API transport requires a signing secret");
             throw new AssertionError("unreachable: error() throws");
         }
 
@@ -136,10 +151,10 @@ public class ApiSlackBindingsController extends Controller {
         binding.botToken = botToken;
         binding.signingSecret = signingSecret;
         binding.agent = agent;
-        binding.appToken = readOptionalString(body, KEY_APP_TOKEN);
+        binding.appToken = appToken;
         binding.ownerUserId = readOptionalString(body, KEY_OWNER_USER_ID);
         requireOwnerForMain(agent, binding.ownerUserId);
-        binding.transport = parseTransport(body, ChannelTransport.HTTP);
+        binding.transport = transport;
         binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
         binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
         binding.replyToMode = readOptionalString(body, KEY_REPLY_TO_MODE);
@@ -151,6 +166,8 @@ public class ApiSlackBindingsController extends Controller {
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_SLACK,
                 "Binding %d created".formatted(binding.id));
+        // JCLAW-351: open/close the Socket Mode connection if this binding is SOCKET.
+        SlackSocketModeRunner.reconcile();
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
@@ -174,6 +191,8 @@ public class ApiSlackBindingsController extends Controller {
         EventLogger.info(EVENT_CATEGORY_CHANNEL,
                 binding.agent != null ? binding.agent.name : null, CHANNEL_SLACK,
                 "Binding %d updated".formatted(binding.id));
+        // JCLAW-351: reconcile Socket Mode (transport/app-token/enabled may have changed).
+        SlackSocketModeRunner.reconcile();
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
@@ -219,6 +238,8 @@ public class ApiSlackBindingsController extends Controller {
         binding.delete();
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agentName, CHANNEL_SLACK,
                 "Binding %d deleted".formatted(id));
+        // JCLAW-351: close the Socket Mode connection if the deleted binding had one.
+        SlackSocketModeRunner.reconcile();
         renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
     }
 

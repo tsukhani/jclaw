@@ -58,6 +58,11 @@ interface BindingForm {
   // Secrets: required on create, blank-to-keep on edit (we never receive them).
   botToken: string
   signingSecret: string
+  // JCLAW-351: inbound transport. HTTP = Events API webhook (needs signing secret +
+  // public URL); SOCKET = Socket Mode WebSocket (needs the app-level token, no public URL).
+  transport: string
+  // JCLAW-351: app-level token (xapp-…) for Socket Mode. Write-only like the secrets.
+  appToken: string
   agentId: number | null
   agentQuery: string
   // JCLAW-350: Slack user id (e.g. U012ABC) allowed to approve exec / dangerous-tool
@@ -72,6 +77,8 @@ interface BindingForm {
 const emptyForm = (): BindingForm => ({
   botToken: '',
   signingSecret: '',
+  transport: 'HTTP',
+  appToken: '',
   agentId: null,
   agentQuery: '',
   ownerUserId: '',
@@ -97,15 +104,25 @@ const selectedAgentIsMain = computed(() =>
 const ownerRequired = computed(() =>
   selectedAgentIsMain.value && form.value.ownerUserId.trim().length === 0)
 
+// JCLAW-351: Socket Mode drops the public-URL + signing-secret requirement and instead
+// authenticates the WebSocket with an app-level token.
+const isSocket = computed(() => form.value.transport === 'SOCKET')
+
 const canSave = computed(() => {
   if (!form.value.agentId) return false
-  // On create both secrets are required; on edit blank means "keep existing".
   if (editing.value === null) {
+    // botToken is always required on create.
     if (form.value.botToken.trim().length === 0) return false
-    if (form.value.signingSecret.trim().length === 0) return false
+    // Transport-specific inbound credential.
+    if (isSocket.value) {
+      if (form.value.appToken.trim().length === 0) return false
+    }
+    else if (form.value.signingSecret.trim().length === 0) {
+      return false
+    }
   }
-  // A binding needs a public host so its Events API Request URL is reachable.
-  if (form.value.webhookBaseUrl.trim().length === 0) return false
+  // Events API needs a public host for its Request URL; Socket Mode does not.
+  if (!isSocket.value && form.value.webhookBaseUrl.trim().length === 0) return false
   // The main agent must be owner-locked.
   if (ownerRequired.value) return false
   return true
@@ -167,6 +184,8 @@ function openEdit(binding: SlackBindingSummary) {
   form.value = {
     botToken: '',
     signingSecret: '',
+    transport: binding.transport ?? 'HTTP',
+    appToken: '',
     agentId: binding.agentId,
     agentQuery: binding.agentName ?? '',
     ownerUserId: binding.ownerUserId ?? '',
@@ -206,7 +225,9 @@ async function save() {
   const method = editing.value ? 'PUT' : 'POST'
   const body: Record<string, unknown> = {
     agentId: form.value.agentId,
-    webhookBaseUrl: form.value.webhookBaseUrl.trim(),
+    transport: form.value.transport,
+    // Events API needs the public base; Socket Mode ignores it (send blank).
+    webhookBaseUrl: isSocket.value ? '' : form.value.webhookBaseUrl.trim(),
     // Always send: a blank clears the stored owner (null) so approvals can be turned off.
     ownerUserId: form.value.ownerUserId.trim() || null,
   }
@@ -214,9 +235,10 @@ async function save() {
   // edit (the card toggle is the only control for it). Only send it on create so
   // a subsequent edit doesn't re-enable a binding the operator just disabled.
   if (!editing.value) body.enabled = true
-  // Secrets: send only when provided. Blank leaves the stored value untouched.
+  // Secrets/tokens: send only when provided. Blank leaves the stored value untouched.
   if (form.value.botToken.trim()) body.botToken = form.value.botToken.trim()
   if (form.value.signingSecret.trim()) body.signingSecret = form.value.signingSecret.trim()
+  if (form.value.appToken.trim()) body.appToken = form.value.appToken.trim()
   const result = await mutate(url, { method, body })
   if (result === null) {
     errorMessage.value = 'Save failed — check server logs for details.'
@@ -386,6 +408,12 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           </div>
         </div>
         <dl class="text-xs text-fg-muted space-y-1 mb-4">
+          <div class="flex justify-between gap-4">
+            <dt>Transport</dt>
+            <dd class="font-mono text-fg-strong truncate">
+              {{ b.transport === 'SOCKET' ? 'Socket Mode' : 'Events API' }}
+            </dd>
+          </div>
           <div class="flex justify-between gap-4">
             <dt>Workspace</dt>
             <dd class="font-mono text-fg-strong truncate">
@@ -645,6 +673,26 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
 
       <div class="space-y-3">
         <label
+          for="binding-transport"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">transport</span>
+          <select
+            id="binding-transport"
+            v-model="form.transport"
+            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                   focus:outline-hidden focus:border-ring transition-colors"
+          >
+            <option value="HTTP">Events API (public URL)</option>
+            <option value="SOCKET">Socket Mode (no public URL)</option>
+          </select>
+          <span class="mt-1 block text-xs text-fg-muted">
+            Socket Mode connects out over a WebSocket using an app-level token, so it
+            needs no public Request URL or signing secret — good for a laptop / dev box.
+          </span>
+        </label>
+
+        <label
           for="binding-bot-token"
           class="block"
         >
@@ -660,6 +708,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
         </label>
 
         <label
+          v-if="!isSocket"
           for="binding-signing-secret"
           class="block"
         >
@@ -672,6 +721,28 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
             class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
                    focus:outline-hidden focus:border-ring transition-colors"
           >
+        </label>
+
+        <label
+          v-if="isSocket"
+          for="binding-app-token"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">appToken</span>
+          <input
+            id="binding-app-token"
+            v-model="form.appToken"
+            type="password"
+            :placeholder="editing ? 'leave blank to keep existing app token' : 'xapp-…'"
+            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                   focus:outline-hidden focus:border-ring transition-colors"
+          >
+          <span class="mt-1 block text-xs text-fg-muted">
+            App-level token with the
+            <code class="font-mono px-1 bg-muted text-fg-strong">connections:write</code>
+            scope (Basic Information → App-Level Tokens). Enable Socket Mode in the app
+            first; you still subscribe to bot events, but no Request URL is needed.
+          </span>
         </label>
 
         <label
@@ -750,82 +821,84 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           </p>
         </label>
 
-        <label
-          for="binding-webhook-base"
-          class="block"
-        >
-          <span class="block text-xs text-fg-muted mb-1">Public URL</span>
-          <input
-            id="binding-webhook-base"
-            v-model="form.webhookBaseUrl"
-            type="url"
-            placeholder="https://your-host.example.com"
-            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                   focus:outline-hidden focus:border-ring transition-colors"
+        <template v-if="!isSocket">
+          <label
+            for="binding-webhook-base"
+            class="block"
           >
-        </label>
+            <span class="block text-xs text-fg-muted mb-1">Public URL</span>
+            <input
+              id="binding-webhook-base"
+              v-model="form.webhookBaseUrl"
+              type="url"
+              placeholder="https://your-host.example.com"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                   focus:outline-hidden focus:border-ring transition-colors"
+            >
+          </label>
 
-        <div
-          v-if="fullRequestUrl"
-          class="text-xs text-fg-muted space-y-2"
-        >
-          <div class="space-y-1">
-            <span class="block">Events API Request URL — paste this into the Slack app's Event Subscriptions:</span>
-            <div class="flex items-start gap-2">
-              <code class="font-mono break-all text-emerald-400">{{ fullRequestUrl }}</code>
-              <button
-                type="button"
-                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
-                :aria-label="copied === fullRequestUrl ? 'Copied' : 'Copy request URL'"
-                @click="copyText(fullRequestUrl)"
-              >
-                <CheckIcon
-                  v-if="copied === fullRequestUrl"
-                  class="h-4 w-4 text-emerald-400"
-                />
-                <ClipboardDocumentIcon
-                  v-else
-                  class="h-4 w-4"
-                />
-              </button>
+          <div
+            v-if="fullRequestUrl"
+            class="text-xs text-fg-muted space-y-2"
+          >
+            <div class="space-y-1">
+              <span class="block">Events API Request URL — paste this into the Slack app's Event Subscriptions:</span>
+              <div class="flex items-start gap-2">
+                <code class="font-mono break-all text-emerald-400">{{ fullRequestUrl }}</code>
+                <button
+                  type="button"
+                  class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                  :aria-label="copied === fullRequestUrl ? 'Copied' : 'Copy request URL'"
+                  @click="copyText(fullRequestUrl)"
+                >
+                  <CheckIcon
+                    v-if="copied === fullRequestUrl"
+                    class="h-4 w-4 text-emerald-400"
+                  />
+                  <ClipboardDocumentIcon
+                    v-else
+                    class="h-4 w-4"
+                  />
+                </button>
+              </div>
+            </div>
+            <div class="space-y-1">
+              <span class="block">Interactivity Request URL — paste this into Interactivity &amp; Shortcuts (needed for exec approvals):</span>
+              <div class="flex items-start gap-2">
+                <code class="font-mono break-all text-emerald-400">{{ fullInteractiveUrl }}</code>
+                <button
+                  type="button"
+                  class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                  :aria-label="copied === fullInteractiveUrl ? 'Copied' : 'Copy interactivity URL'"
+                  @click="copyText(fullInteractiveUrl)"
+                >
+                  <CheckIcon
+                    v-if="copied === fullInteractiveUrl"
+                    class="h-4 w-4 text-emerald-400"
+                  />
+                  <ClipboardDocumentIcon
+                    v-else
+                    class="h-4 w-4"
+                  />
+                </button>
+              </div>
             </div>
           </div>
-          <div class="space-y-1">
-            <span class="block">Interactivity Request URL — paste this into Interactivity &amp; Shortcuts (needed for exec approvals):</span>
-            <div class="flex items-start gap-2">
-              <code class="font-mono break-all text-emerald-400">{{ fullInteractiveUrl }}</code>
-              <button
-                type="button"
-                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
-                :aria-label="copied === fullInteractiveUrl ? 'Copied' : 'Copy interactivity URL'"
-                @click="copyText(fullInteractiveUrl)"
-              >
-                <CheckIcon
-                  v-if="copied === fullInteractiveUrl"
-                  class="h-4 w-4 text-emerald-400"
-                />
-                <ClipboardDocumentIcon
-                  v-else
-                  class="h-4 w-4"
-                />
-              </button>
-            </div>
-          </div>
-        </div>
-        <p
-          v-else-if="!form.webhookBaseUrl.trim()"
-          class="text-xs text-amber-400"
-        >
-          Enter your public HTTPS URL — or enable the Tailscale Funnel on the
-          Channels page — so Slack can reach this binding's Request URL.
-        </p>
-        <p
-          v-else
-          class="text-xs text-fg-muted"
-        >
-          The full Request URL is generated when you save (it includes the new
-          binding's id), then shown on the binding's card to copy into Slack.
-        </p>
+          <p
+            v-else-if="!form.webhookBaseUrl.trim()"
+            class="text-xs text-amber-400"
+          >
+            Enter your public HTTPS URL — or enable the Tailscale Funnel on the
+            Channels page — so Slack can reach this binding's Request URL.
+          </p>
+          <p
+            v-else
+            class="text-xs text-fg-muted"
+          >
+            The full Request URL is generated when you save (it includes the new
+            binding's id), then shown on the binding's card to copy into Slack.
+          </p>
+        </template>
       </div>
 
       <p

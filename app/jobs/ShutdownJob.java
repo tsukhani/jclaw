@@ -1,5 +1,6 @@
 package jobs;
 
+import channels.SlackSocketModeRunner;
 import channels.TelegramPollingRunner;
 import channels.TelegramStreamingSink;
 import play.jobs.Job;
@@ -55,6 +56,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("db-scheduler", DbSchedulerBootstrapJob::shutdownGracefully),
                 new Component("playwright-browser", PlaywrightBrowserTool::closeAllSessions),
                 new Component("telegram-polling", TelegramPollingRunner::stop),
+                new Component("slack-socket-mode", SlackSocketModeRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("whisper-transcriber", services.transcription.WhisperJniTranscriber::shutdown),
                 new Component("mcp-connections", mcp.McpConnectionManager::shutdown),

@@ -139,6 +139,28 @@ describe('slack bindings page — Request URL + setup (JCLAW-441)', () => {
     await nextTick()
     expect(saveBtn!.attributes('disabled')).toBeUndefined()
   })
+
+  it('switches to Socket Mode: app token replaces the signing secret + public URL (JCLAW-351)', async () => {
+    const c = await mountSuspended(Slack)
+    await c.findAll('button').find(b => b.text() === '+ New binding')!.trigger('click')
+    await nextTick()
+    // HTTP default: signing secret + public URL present, no app token.
+    expect(c.find('#binding-signing-secret').exists()).toBe(true)
+    expect(c.find('#binding-webhook-base').exists()).toBe(true)
+    expect(c.find('#binding-app-token').exists()).toBe(false)
+    // Switch to Socket Mode.
+    await c.find('#binding-transport').setValue('SOCKET')
+    await nextTick()
+    expect(c.find('#binding-app-token').exists()).toBe(true)
+    expect(c.find('#binding-signing-secret').exists()).toBe(false)
+    expect(c.find('#binding-webhook-base').exists()).toBe(false)
+  })
+
+  it('shows the transport on the card (JCLAW-351)', async () => {
+    bindingsResponse = [binding({ id: 7, transport: 'SOCKET' })]
+    const c = await mountSuspended(Slack)
+    expect(c.text()).toContain('Socket Mode')
+  })
 })
 
 describe('slack bindings page — health probe (JCLAW-441)', () => {

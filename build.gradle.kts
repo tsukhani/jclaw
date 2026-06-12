@@ -346,6 +346,10 @@ dependencies {
             exclude(group = "com.squareup.okio")
         }
     }
+    // JCLAW-351: Slack Socket Mode backend. The socket-mode client classes ship inside
+    // slack-api-client, but its WebSocket runtime is optional — pull the lightweight
+    // Java-WebSocket impl so SocketModeClient.Backend.JavaWebSocket has a transport.
+    implementation("org.java-websocket:Java-WebSocket:1.6.0")
 
     // JCLAW-163: whisper.cpp via JNI for offline transcription. The artifact
     // bundles native libs for every developer-laptop platform (mac arm64/x64,

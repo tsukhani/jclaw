@@ -1,5 +1,6 @@
 package jobs;
 
+import channels.SlackSocketModeRunner;
 import channels.TelegramPollingRunner;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
@@ -25,5 +26,6 @@ public class ChannelRunnerJob extends Job<Void> {
     @Override
     public void doJob() {
         TelegramPollingRunner.reconcile();
+        SlackSocketModeRunner.reconcile();
     }
 }
