@@ -79,6 +79,42 @@ public class WhatsAppBinding extends Model {
     public String ownerJid;
 
     /**
+     * Meta's verified business name for this Cloud-API number, resolved by the
+     * {@link channels.WhatsAppCloudApiProbe} at create/update and cached for
+     * display (JCLAW-445). Nullable — null for WHATSAPP_WEB bindings and until a
+     * successful probe runs. No {@code @ColumnDefault}: the column is nullable, so
+     * the ALTER on a populated table is safe.
+     */
+    @Column(name = "verified_name")
+    public String verifiedName;
+
+    /**
+     * Meta's human-readable {@code display_phone_number} for this Cloud-API number,
+     * cached alongside {@link #verifiedName} from the probe (JCLAW-445). Nullable —
+     * see {@link #verifiedName} for the rationale.
+     */
+    @Column(name = "display_phone_number")
+    public String displayPhoneNumber;
+
+    /**
+     * Pre-approved message-template name used for business-initiated outbound that
+     * falls OUTSIDE the 24h customer-service window (JCLAW-447). Null when the
+     * operator hasn't configured one — out-of-window sends then log a warning and
+     * best-effort send free-form (which Meta will reject, but the failure is the
+     * operator's to resolve). Cloud-API-only; null for WHATSAPP_WEB. Nullable, so
+     * the ALTER on a populated table needs no {@code @ColumnDefault}.
+     */
+    @Column(name = "template_name")
+    public String templateName;
+
+    /**
+     * BCP-47 language/locale code for {@link #templateName} (e.g. {@code en_US}).
+     * Defaults to {@code en_US} at send time when null but a template name is set.
+     */
+    @Column(name = "template_language")
+    public String templateLanguage;
+
+    /**
      * Agent uniqueness is a privacy constraint, not a modelling choice: agent
      * memory is scoped by agentId only, so binding one agent to multiple
      * WhatsApp numbers (and thus multiple owners) would share memories across
@@ -144,6 +180,19 @@ public class WhatsAppBinding extends Model {
             cur = cur.parentAgent;
         }
         return null;
+    }
+
+    /**
+     * Resolve a Cloud-API binding by its operator-chosen {@link #verifyToken} —
+     * used by the inbound webhook's GET hub-verification challenge (JCLAW-446),
+     * which has no {@code phone_number_id} to route on. Returns the first enabled
+     * match (the token is operator-unique in practice; multiple bindings sharing
+     * one token would be a misconfiguration). Null/blank token → null.
+     */
+    public static WhatsAppBinding findByVerifyToken(String verifyToken) {
+        if (verifyToken == null || verifyToken.isBlank()) return null;
+        return WhatsAppBinding.find(
+                "verifyToken = ?1 and enabled = true", verifyToken).first();
     }
 
     public static List<WhatsAppBinding> findAllEnabled() {
