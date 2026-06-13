@@ -1,5 +1,6 @@
 package controllers;
 
+import channels.WhatsAppCloudApiProbe;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -45,6 +46,8 @@ public class ApiWhatsAppBindingsController extends Controller {
     private static final String KEY_VERIFY_TOKEN = "verifyToken";
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_ENABLED = "enabled";
+    private static final String KEY_TEMPLATE_NAME = "templateName";
+    private static final String KEY_TEMPLATE_LANGUAGE = "templateLanguage";
 
     private static final String EVENT_CATEGORY_CHANNEL = "channel";
     private static final String CHANNEL_WHATSAPP = "whatsapp";
@@ -57,6 +60,8 @@ public class ApiWhatsAppBindingsController extends Controller {
                                 String transport, String phoneNumberId,
                                 boolean hasAccessToken, boolean hasAppSecret,
                                 boolean hasVerifyToken,
+                                String verifiedName, String displayPhoneNumber,
+                                String templateName, String templateLanguage,
                                 boolean enabled, String createdAt, String updatedAt) {
         static BindingView of(WhatsAppBinding b) {
             return new BindingView(b.id,
@@ -67,6 +72,10 @@ public class ApiWhatsAppBindingsController extends Controller {
                     b.accessToken != null && !b.accessToken.isBlank(),
                     b.appSecret != null && !b.appSecret.isBlank(),
                     b.verifyToken != null && !b.verifyToken.isBlank(),
+                    b.verifiedName,
+                    b.displayPhoneNumber,
+                    b.templateName,
+                    b.templateLanguage,
                     b.enabled,
                     b.createdAt != null ? b.createdAt.toString() : null,
                     b.updatedAt != null ? b.updatedAt.toString() : null);
@@ -129,7 +138,17 @@ public class ApiWhatsAppBindingsController extends Controller {
         binding.accessToken = accessToken;
         binding.appSecret = readOptionalString(body, KEY_APP_SECRET);
         binding.verifyToken = readOptionalString(body, KEY_VERIFY_TOKEN);
+        binding.templateName = readOptionalString(body, KEY_TEMPLATE_NAME);
+        binding.templateLanguage = readOptionalString(body, KEY_TEMPLATE_LANGUAGE);
         binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
+
+        // JCLAW-445: verify the Cloud-API credentials against the Graph API BEFORE
+        // persisting. A bad token / unverified number is rejected with 422 so the
+        // operator never saves a binding that can't deliver. WHATSAPP_WEB has no
+        // Cloud-API credentials to probe — it's skipped (the helper returns early).
+        if (!verifyCloudApiCredentials(binding, transport, phoneNumberId, accessToken)) {
+            return; // 422 already sent by the helper
+        }
         binding.save();
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_WHATSAPP,
@@ -147,9 +166,24 @@ public class ApiWhatsAppBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
+        // Capture the credential identity before mutation so we only re-probe when
+        // phoneNumberId or accessToken actually changes (JCLAW-445) — an unrelated
+        // edit (enable/disable, verifyToken) must not pay a Graph round-trip.
+        String prevPhoneNumberId = binding.phoneNumberId;
+        String prevAccessToken = binding.accessToken;
+
         applyPhoneNumberIdUpdate(binding, body);
         applyAgentUpdate(binding, body);
         applyOptionalFieldUpdates(binding, body);
+
+        boolean credentialsChanged =
+                !java.util.Objects.equals(prevPhoneNumberId, binding.phoneNumberId)
+                        || !java.util.Objects.equals(prevAccessToken, binding.accessToken);
+        if (credentialsChanged
+                && !verifyCloudApiCredentials(binding, binding.transport,
+                        binding.phoneNumberId, binding.accessToken)) {
+            return; // 422 already sent by the helper
+        }
         binding.save();
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL,
@@ -167,6 +201,43 @@ public class ApiWhatsAppBindingsController extends Controller {
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agentName, CHANNEL_WHATSAPP,
                 "Binding %d deleted".formatted(id));
         renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+    }
+
+    // ── credential verification (JCLAW-445) ──
+
+    /**
+     * Probe the Cloud-API credentials and cache the resolved identity onto the
+     * binding, or send a 422 and return {@code false} on failure. A no-op (returns
+     * {@code true}) for WHATSAPP_WEB or when either credential is absent — a
+     * CLOUD_API create already requires both via the upstream 400 guard, so the
+     * only absent-credential path here is an update that clears one, which we let
+     * through unverified (and leaves the cached identity untouched).
+     *
+     * <p>On success the binding's {@code verifiedName}/{@code displayPhoneNumber}
+     * are populated from the probe so the projection can surface them; on failure
+     * the caller must NOT save (the 422 short-circuits the request).
+     */
+    @SuppressWarnings("java:S2259")
+    private static boolean verifyCloudApiCredentials(WhatsAppBinding binding,
+                                                     WhatsAppTransport transport,
+                                                     String phoneNumberId,
+                                                     String accessToken) {
+        if (transport != WhatsAppTransport.CLOUD_API
+                || phoneNumberId == null || accessToken == null) {
+            return true;
+        }
+        var result = WhatsAppCloudApiProbe.probe(phoneNumberId, accessToken);
+        if (result instanceof WhatsAppCloudApiProbe.Verified(String name, String number)) {
+            binding.verifiedName = name;
+            binding.displayPhoneNumber = number;
+            return true;
+        }
+        var reason = ((WhatsAppCloudApiProbe.Failed) result).reason();
+        EventLogger.warn(EVENT_CATEGORY_CHANNEL,
+                binding.agent != null ? binding.agent.name : null, CHANNEL_WHATSAPP,
+                "Cloud-API credential verification failed: " + reason);
+        error(422, "WhatsApp Cloud-API verification failed: " + reason);
+        return false;
     }
 
     // ── update helpers ──
@@ -218,6 +289,14 @@ public class ApiWhatsAppBindingsController extends Controller {
         if (body.has(KEY_VERIFY_TOKEN)) {
             String v = readOptionalString(body, KEY_VERIFY_TOKEN);
             if (v != null) binding.verifyToken = v;
+        }
+        // Template name/lang are plain config, not secrets: a present key replaces
+        // (including clearing to null, since blank → "no template configured").
+        if (body.has(KEY_TEMPLATE_NAME)) {
+            binding.templateName = readOptionalString(body, KEY_TEMPLATE_NAME);
+        }
+        if (body.has(KEY_TEMPLATE_LANGUAGE)) {
+            binding.templateLanguage = readOptionalString(body, KEY_TEMPLATE_LANGUAGE);
         }
         if (body.has(KEY_ENABLED)) binding.enabled = body.get(KEY_ENABLED).getAsBoolean();
     }

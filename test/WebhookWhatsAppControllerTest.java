@@ -1,5 +1,8 @@
-import models.ChannelConfig;
+import models.Agent;
 import models.EventLog;
+import models.WhatsAppBinding;
+import models.WhatsAppConversationWindow;
+import models.WhatsAppTransport;
 import org.junit.jupiter.api.*;
 import play.test.*;
 import services.EventLogger;
@@ -12,26 +15,29 @@ import java.util.HexFormat;
 import java.util.function.Supplier;
 
 /**
- * Happy-path and verify-flow coverage for
- * {@link controllers.WebhookWhatsAppController} (JCLAW-313). The companion
- * {@code WebhookControllerTest} owns the unconfigured / missing-signature
- * rejections; this file covers:
+ * Coverage for the per-binding-routed Cloud-API webhook
+ * {@link controllers.WebhookWhatsAppController} (JCLAW-446). The controller now
+ * resolves a {@link WhatsAppBinding} by {@code verify_token} (GET) or
+ * {@code phone_number_id} (POST) rather than the pre-446 app-global
+ * {@code ChannelConfig("whatsapp")}. This file covers:
  *
  * <ul>
- *   <li>GET hub-verify success/failure paths;</li>
- *   <li>POST with valid x-hub-signature-256 (HMAC-SHA256 over raw body);</li>
- *   <li>parse-failure pathways (non-text message, no entry).</li>
+ *   <li>GET hub-verify success/failure routed by the binding's verify token;</li>
+ *   <li>POST HMAC verification against the resolved binding's app secret
+ *       (fail-closed when absent), routed by phone_number_id;</li>
+ *   <li>fast-ack on status/unsupported payloads and on unknown phone-number-ids;</li>
+ *   <li>the JCLAW-447 24h-window write on a successfully parsed inbound.</li>
  * </ul>
  */
 class WebhookWhatsAppControllerTest extends FunctionalTest {
 
     private static final String APP_SECRET = "whatsapp-app-secret-fixture";
     private static final String VERIFY_TOKEN = "whatsapp-verify-token-fixture";
+    private static final String PHONE_NUMBER_ID = "PN1";
 
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        ChannelConfig.evictCache("whatsapp");
         EventLogger.clear();
     }
 
@@ -55,18 +61,27 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         return ref.get();
     }
 
-    private void seedWhatsAppConfig() {
-        commitInFreshTx(() -> {
-            var cc = new ChannelConfig();
-            cc.channelType = "whatsapp";
-            cc.enabled = true;
-            cc.configJson = "{\"phoneNumberId\":\"PN1\",\"accessToken\":\"AT1\","
-                    + "\"appSecret\":\"" + APP_SECRET + "\","
-                    + "\"verifyToken\":\"" + VERIFY_TOKEN + "\"}";
-            cc.save();
-            return cc.id;
+    /** Seed an enabled Cloud-API binding with full inbound credentials. */
+    private Long seedBinding(String appSecret) {
+        return commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "wa-webhook-agent-" + System.nanoTime();
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+
+            var b = new WhatsAppBinding();
+            b.agent = agent;
+            b.transport = WhatsAppTransport.CLOUD_API;
+            b.phoneNumberId = PHONE_NUMBER_ID;
+            b.accessToken = "AT1";
+            b.appSecret = appSecret;
+            b.verifyToken = VERIFY_TOKEN;
+            b.enabled = true;
+            b.save();
+            return b.id;
         });
-        ChannelConfig.evictCache("whatsapp");
     }
 
     private static String sign(String body) {
@@ -95,11 +110,11 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         return makeRequest(req);
     }
 
-    // ===== GET hub verify =====
+    // ===== GET hub verify (routed by verify token) =====
 
     @Test
-    void verifyReturns403WhenUnconfigured() {
-        // No config row at all → 403.
+    void verifyReturns403WhenNoBindingOwnsToken() {
+        // No binding at all → 403.
         var response = GET("/api/webhooks/whatsapp?hub.mode=subscribe"
                 + "&hub.verify_token=" + VERIFY_TOKEN + "&hub.challenge=c123");
         assertEquals(403, response.status.intValue());
@@ -107,7 +122,7 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
 
     @Test
     void verifyReturns403OnWrongVerifyToken() {
-        seedWhatsAppConfig();
+        seedBinding(APP_SECRET);
         var response = GET("/api/webhooks/whatsapp?hub.mode=subscribe"
                 + "&hub.verify_token=wrong&hub.challenge=c123");
         assertEquals(403, response.status.intValue());
@@ -115,100 +130,98 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
 
     @Test
     void verifyReturns403OnWrongMode() {
-        seedWhatsAppConfig();
-        // Meta sends mode=subscribe; anything else (e.g. mode=unsubscribe)
-        // must 403.
+        seedBinding(APP_SECRET);
         var response = GET("/api/webhooks/whatsapp?hub.mode=unsubscribe"
                 + "&hub.verify_token=" + VERIFY_TOKEN + "&hub.challenge=c123");
         assertEquals(403, response.status.intValue());
     }
 
     @Test
-    void verifyEchoesChallengeOnSuccess() {
-        seedWhatsAppConfig();
+    void verifyEchoesChallengeWhenBindingOwnsToken() {
+        seedBinding(APP_SECRET);
         var response = GET("/api/webhooks/whatsapp?hub.mode=subscribe"
                 + "&hub.verify_token=" + VERIFY_TOKEN + "&hub.challenge=echo-me-123");
         assertIsOk(response);
         assertEquals("echo-me-123", getContent(response));
     }
 
-    // ===== POST signature =====
+    // ===== POST signature (routed by phone_number_id, verified against binding.appSecret) =====
 
     @Test
     void postRejectsSignatureWithoutSha256Prefix() {
-        // verifySignature requires the "sha256=" prefix — a bare hex
-        // string must fail closed.
-        seedWhatsAppConfig();
-        var body = "{}";
-        var sig = sign(body);
-        var bareHex = sig.substring("sha256=".length());
+        seedBinding(APP_SECRET);
+        var body = textPayload();
+        var bareHex = sign(body).substring("sha256=".length());
         var response = postWithSig(body, bareHex);
         assertEquals(401, response.status.intValue());
     }
 
     @Test
     void postRejectsMismatchedSignature() {
-        // Right prefix, wrong digest → 401.
-        seedWhatsAppConfig();
-        var response = postWithSig("{}", "sha256=deadbeef");
+        seedBinding(APP_SECRET);
+        var response = postWithSig(textPayload(), "sha256=deadbeef");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    void postAcceptsValidSignatureForEmptyPayload() {
-        // Valid HMAC over a payload that parseWebhook returns null for
-        // (no "entry" key) → controller falls through to ok().
-        seedWhatsAppConfig();
-        var body = "{}";
+    void postFailsClosedWhenBindingHasNoAppSecret() {
+        // JCLAW-16: an absent appSecret must never become a verification bypass.
+        seedBinding(null);
+        var body = textPayload();
+        var response = postWithSig(body, sign(body));
+        assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    void postAcksUnknownPhoneNumberId() {
+        seedBinding(APP_SECRET);
+        // A payload whose phone_number_id matches no binding → fast-ack, no work.
+        var body = "{\"entry\":[{\"changes\":[{\"value\":{"
+                + "\"metadata\":{\"phone_number_id\":\"UNKNOWN\"},"
+                + "\"messages\":[{\"from\":\"15551234567\",\"id\":\"wamid.u\","
+                + "\"type\":\"text\",\"text\":{\"body\":\"hi\"}}]}}]}]}";
+        // Signed with the right secret, but routing fails first → 200 (acked, ignored).
         var response = postWithSig(body, sign(body));
         assertIsOk(response);
     }
 
     @Test
     void postAcceptsValidSignatureForStatusUpdate() {
-        // Meta sends "statuses" payloads for delivery receipts; parseWebhook
-        // returns null because there's no "messages" array. Controller
-        // returns 200.
-        seedWhatsAppConfig();
-        var body = "{\"entry\":[{\"changes\":[{\"value\":"
-                + "{\"statuses\":[{\"id\":\"wamid.x\",\"status\":\"delivered\"}]}}]}]}";
+        seedBinding(APP_SECRET);
+        var body = "{\"entry\":[{\"changes\":[{\"value\":{"
+                + "\"metadata\":{\"phone_number_id\":\"" + PHONE_NUMBER_ID + "\"},"
+                + "\"statuses\":[{\"id\":\"wamid.x\",\"status\":\"delivered\"}]}}]}]}";
         var response = postWithSig(body, sign(body));
         assertIsOk(response);
     }
 
     @Test
-    void postAcceptsValidSignatureForTextMessage() {
-        // Full text-message payload: signature passes, parseWebhook
-        // returns an InboundMessage, controller spawns a virtual thread
-        // for processing and returns 200 synchronously.
-        seedWhatsAppConfig();
-        var body = "{\"entry\":[{\"changes\":[{\"value\":{"
-                + "\"metadata\":{\"phone_number_id\":\"PN1\"},"
-                + "\"messages\":[{\"from\":\"15551234567\",\"id\":\"wamid.x\","
-                + "\"type\":\"text\",\"text\":{\"body\":\"hi\"}}]"
-                + "}}]}]}";
+    void postAcceptsValidSignatureForTextMessageAndOpensWindow() {
+        var bindingId = seedBinding(APP_SECRET);
+        var body = textPayload();
         var response = postWithSig(body, sign(body));
         assertIsOk(response);
+        // JCLAW-447: a parsed inbound opens the 24h window for (binding, sender).
+        boolean within = commitInFreshTx(() ->
+                WhatsAppConversationWindow.isWithinWindow(bindingId, "15551234567", java.time.Instant.now()));
+        assertTrue(within, "a parsed inbound must open the 24h customer-service window");
     }
 
     @Test
-    void postSkipsNonTextMessageTypes() {
-        // Non-text message types (image, audio, sticker, etc.) currently
-        // return null from parseWebhook — controller returns 200 without
-        // spawning the dispatch VT.
-        seedWhatsAppConfig();
+    void postAcceptsUnsupportedMessageType() {
+        seedBinding(APP_SECRET);
         var body = "{\"entry\":[{\"changes\":[{\"value\":{"
+                + "\"metadata\":{\"phone_number_id\":\"" + PHONE_NUMBER_ID + "\"},"
                 + "\"messages\":[{\"from\":\"15551234567\",\"id\":\"wamid.y\","
-                + "\"type\":\"sticker\"}]"
-                + "}}]}]}";
+                + "\"type\":\"system\",\"system\":{\"body\":\"x\"}}]}}]}]}";
         var response = postWithSig(body, sign(body));
         assertIsOk(response);
     }
 
     @Test
     void rejectionsAreAuditedAsWebhookSignatureFailure() {
-        seedWhatsAppConfig();
-        var response = postWithSig("{}", "sha256=bad");
+        seedBinding(APP_SECRET);
+        var response = postWithSig(textPayload(), "sha256=bad");
         assertEquals(401, response.status.intValue());
 
         EventLogger.flush();
@@ -217,5 +230,13 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
                 "WEBHOOK_SIGNATURE_FAILURE".equals(e.category)
                         && "whatsapp".equals(e.channel));
         assertTrue(found, "expected WEBHOOK_SIGNATURE_FAILURE event for whatsapp");
+    }
+
+    private static String textPayload() {
+        return "{\"entry\":[{\"changes\":[{\"value\":{"
+                + "\"metadata\":{\"phone_number_id\":\"" + PHONE_NUMBER_ID + "\"},"
+                + "\"contacts\":[{\"profile\":{\"name\":\"Ada\"},\"wa_id\":\"15551234567\"}],"
+                + "\"messages\":[{\"from\":\"15551234567\",\"id\":\"wamid.x\","
+                + "\"type\":\"text\",\"text\":{\"body\":\"hi\"}}]}}]}]}";
     }
 }

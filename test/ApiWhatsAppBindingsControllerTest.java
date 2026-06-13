@@ -1,3 +1,4 @@
+import channels.WhatsAppCloudApiProbe;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.WhatsAppBinding;
@@ -9,15 +10,17 @@ import services.Tx;
 import java.util.function.Supplier;
 
 /**
- * Functional HTTP tests for {@code ApiWhatsAppBindingsController} (JCLAW-444).
- * Covers the CRUD surface behind {@code /api/channels/whatsapp/bindings}: the
- * auth boundary, transport-aware body validation (Cloud API needs a phone number
+ * Functional HTTP tests for {@code ApiWhatsAppBindingsController} (JCLAW-444 +
+ * JCLAW-445). Covers the CRUD surface behind {@code /api/channels/whatsapp/bindings}:
+ * the auth boundary, transport-aware body validation (Cloud API needs a phone number
  * id + access token; WhatsApp-Web needs only an agent), the 409 conflict paths
  * (duplicate phone number id, agent already bound), secret elision in the
- * projection, and blank-to-keep on update. Mirrors {@code ApiSlackBindingsControllerTest}.
+ * projection, blank-to-keep on update, and the JCLAW-445 Cloud-API credential
+ * probe (verified-name caching on success, 422 on failure).
  *
- * <p>Unlike Slack there is no network probe on create (credential verification is
- * JCLAW-445), so the suite never touches the network.
+ * <p>The Graph probe is stubbed via {@link WhatsAppCloudApiProbe#installForTest}
+ * so the suite never touches the network; the default stub verifies, and the
+ * failure tests install a {@code Failed} stub.
  */
 class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
 
@@ -25,6 +28,14 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
     void setup() {
         Fixtures.deleteDatabase();
         AuthFixture.seedAdminPassword("changeme");
+        // Default: every Cloud-API probe verifies. Failure tests override this.
+        WhatsAppCloudApiProbe.installForTest((phoneNumberId, accessToken) ->
+                new WhatsAppCloudApiProbe.Verified("Test Biz", "+1 555-0000"));
+    }
+
+    @AfterEach
+    void teardown() {
+        WhatsAppCloudApiProbe.clearForTest();
     }
 
     private void login() {
@@ -277,6 +288,85 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
         assertIsOk(response);
         var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
         assertEquals("WHATSAPP_WEB", obj.get("transport").getAsString());
+    }
+
+    // ===== JCLAW-445: credential verification =====
+
+    @Test
+    void createCachesVerifiedNameAndDisplayNumberOnSuccess() {
+        login();
+        var agentId = seedAgent("wb-verify-ok");
+        WhatsAppCloudApiProbe.installForTest((p, t) ->
+                new WhatsAppCloudApiProbe.Verified("Acme Corp", "+1 555-0100"));
+        var body = """
+                {"transport": "CLOUD_API", "phoneNumberId": "phone-verify",
+                 "accessToken": "tok", "agentId": %d}
+                """.formatted(agentId);
+        var response = POST("/api/channels/whatsapp/bindings", "application/json", body);
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals("Acme Corp", obj.get("verifiedName").getAsString(),
+                "the probe's verified name must be cached + surfaced");
+        assertEquals("+1 555-0100", obj.get("displayPhoneNumber").getAsString());
+    }
+
+    @Test
+    void createRejectsFailedProbeWith422AndDoesNotPersist() {
+        login();
+        var agentId = seedAgent("wb-verify-fail");
+        WhatsAppCloudApiProbe.installForTest((p, t) ->
+                new WhatsAppCloudApiProbe.Failed("Invalid OAuth access token"));
+        var body = """
+                {"transport": "CLOUD_API", "phoneNumberId": "phone-bad",
+                 "accessToken": "tok-bad", "agentId": %d}
+                """.formatted(agentId);
+        var response = POST("/api/channels/whatsapp/bindings", "application/json", body);
+        assertEquals(422, response.status.intValue());
+        assertTrue(getContent(response).contains("Invalid OAuth access token"),
+                "422 body should surface the probe reason");
+        // Nothing persisted.
+        long count = commitInFreshTx(() -> WhatsAppBinding.count());
+        assertEquals(0, count, "a failed probe must not persist the binding");
+    }
+
+    @Test
+    void whatsappWebCreateSkipsProbe() {
+        login();
+        var agentId = seedAgent("wb-web-noprobe");
+        // Install a probe that would FAIL if called — WHATSAPP_WEB must never call it.
+        WhatsAppCloudApiProbe.installForTest((p, t) -> {
+            throw new AssertionError("WhatsApp-Web create must not probe the Graph API");
+        });
+        var response = POST("/api/channels/whatsapp/bindings", "application/json",
+                "{\"transport\": \"WHATSAPP_WEB\", \"agentId\": %d}".formatted(agentId));
+        assertIsOk(response);
+    }
+
+    @Test
+    void updateReProbesWhenAccessTokenChanges() {
+        login();
+        var agentId = seedAgent("wb-upd-reprobe");
+        var bindingId = seedCloudBinding(agentId, "phone-reprobe");
+        WhatsAppCloudApiProbe.installForTest((p, t) ->
+                new WhatsAppCloudApiProbe.Failed("token revoked"));
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "{\"accessToken\": \"new-bad-token\"}");
+        assertEquals(422, response.status.intValue(),
+                "changing the access token must re-probe and reject on failure");
+    }
+
+    @Test
+    void updateUnrelatedFieldDoesNotReProbe() {
+        login();
+        var agentId = seedAgent("wb-upd-noprobe");
+        var bindingId = seedCloudBinding(agentId, "phone-noprobe");
+        // A probe that fails if called — toggling enabled must not re-probe.
+        WhatsAppCloudApiProbe.installForTest((p, t) -> {
+            throw new AssertionError("an unrelated update must not re-probe");
+        });
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "{\"enabled\": false}");
+        assertIsOk(response);
     }
 
     // ===== Delete =====
