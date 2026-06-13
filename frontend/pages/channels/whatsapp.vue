@@ -140,6 +140,13 @@ function onAgentQueryInput() {
   form.value.agentId = null
 }
 
+/** Copy a form field onto the request body only when it's non-blank (trimmed) —
+ *  the "send only when provided" rule shared by every optional Cloud-API field. */
+function putTrimmed(body: Record<string, unknown>, key: string, raw: string) {
+  const value = raw.trim()
+  if (value) body[key] = value
+}
+
 async function save() {
   if (!canSave.value) return
   errorMessage.value = ''
@@ -154,18 +161,17 @@ async function save() {
   // New bindings default to enabled=true; existing state is preserved on edit
   // (the card toggle is the only control for it).
   if (!editing.value) body.enabled = true
-  // Cloud-API credentials: send only when provided. phoneNumberId is an
-  // identifier (sent as-is); secrets blank-to-keep. WhatsApp-Web sends none.
+  // Cloud-API fields: send only when provided. phoneNumberId/defaultTarget are
+  // identifiers (sent as-is); secrets blank-to-keep. WhatsApp-Web sends none.
+  // (JCLAW-445 template + JCLAW-425 default recipient are optional too.)
   if (isCloud.value) {
-    if (form.value.phoneNumberId.trim()) body.phoneNumberId = form.value.phoneNumberId.trim()
-    if (form.value.accessToken.trim()) body.accessToken = form.value.accessToken.trim()
-    if (form.value.appSecret.trim()) body.appSecret = form.value.appSecret.trim()
-    if (form.value.verifyToken.trim()) body.verifyToken = form.value.verifyToken.trim()
-    // JCLAW-445: optional out-of-window template. Sent only when provided.
-    if (form.value.templateName.trim()) body.templateName = form.value.templateName.trim()
-    if (form.value.templateLanguage.trim()) body.templateLanguage = form.value.templateLanguage.trim()
-    // JCLAW-425: optional proactive-send recipient. Sent only when provided.
-    if (form.value.defaultTarget.trim()) body.defaultTarget = form.value.defaultTarget.trim()
+    putTrimmed(body, 'phoneNumberId', form.value.phoneNumberId)
+    putTrimmed(body, 'accessToken', form.value.accessToken)
+    putTrimmed(body, 'appSecret', form.value.appSecret)
+    putTrimmed(body, 'verifyToken', form.value.verifyToken)
+    putTrimmed(body, 'templateName', form.value.templateName)
+    putTrimmed(body, 'templateLanguage', form.value.templateLanguage)
+    putTrimmed(body, 'defaultTarget', form.value.defaultTarget)
   }
   const result = await mutate(url, { method, body })
   if (result === null) {
