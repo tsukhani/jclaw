@@ -4,6 +4,7 @@ import models.ChannelType;
 import models.Conversation;
 import models.SlackBinding;
 import models.TelegramBinding;
+import models.WhatsAppBinding;
 
 /**
  * JCLAW-141: resolves a {@link Channel} instance for a conversation so dispatch
@@ -59,7 +60,16 @@ public final class ChannelRegistry {
                 var binding = SlackBinding.findByAgentOrAncestor(agent);
                 yield (binding == null || !binding.enabled) ? null : SlackChannel.forToken(binding.botToken);
             }
-            case WHATSAPP -> new WhatsAppChannel();
+            case WHATSAPP -> {
+                // JCLAW-446: prefer the per-agent binding (transport-aware via the
+                // factory). A subagent reaches the user via an ancestor's binding, so
+                // walk the parent chain. Fall back to the app-global config while the
+                // inbound/outbound migration completes (JCLAW-447 removes the fallback).
+                var binding = WhatsAppBinding.findByAgentOrAncestor(agent);
+                yield (binding != null && binding.enabled)
+                        ? WhatsAppChannelFactory.forBinding(binding)
+                        : new WhatsAppChannel();
+            }
             case WEB -> new WebChannel();
         };
     }

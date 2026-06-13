@@ -43,7 +43,7 @@ public final class SlackInbound {
         // JCLAW-357: drop redelivered events (Slack retries when it doesn't get a fast
         // ack) so the agent processes each message exactly once — across either transport.
         var dedupKey = dedupKey(eventCallbackPayload);
-        if (!SlackDedup.firstSeen(dedupKey)) {
+        if (!InboundEventDedup.firstSeen(dedupKey)) {
             EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "Duplicate Slack event %s dropped".formatted(dedupKey));
             return;
@@ -105,7 +105,7 @@ public final class SlackInbound {
      * Dedup key for an {@code event_callback}: the message's identity {@code channel:ts}
      * (its own ts, stable across redeliveries), falling back to the envelope's
      * {@code event_id} (carried verbatim on Events API retries) when the inner event has no
-     * channel/ts. Null when neither is present — {@link SlackDedup#firstSeen} then processes.
+     * channel/ts. Null when neither is present — {@link InboundEventDedup#firstSeen} then processes.
      */
     private static String dedupKey(JsonObject eventCallbackPayload) {
         if (eventCallbackPayload.has("event") && eventCallbackPayload.get("event").isJsonObject()) {

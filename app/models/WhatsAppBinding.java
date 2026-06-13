@@ -70,6 +70,15 @@ public class WhatsAppBinding extends Model {
     public String verifyToken;
 
     /**
+     * The WhatsApp JID of the user who paired a WhatsApp-Web binding (JCLAW-450),
+     * used by {@link channels.WhatsAppAccessPolicy} as the DM owner. Null for
+     * Cloud-API bindings (a business number has no single "owner" — its DMs are
+     * open) and until pairing completes.
+     */
+    @Column(name = "owner_jid")
+    public String ownerJid;
+
+    /**
      * Agent uniqueness is a privacy constraint, not a modelling choice: agent
      * memory is scoped by agentId only, so binding one agent to multiple
      * WhatsApp numbers (and thus multiple owners) would share memories across
@@ -139,5 +148,14 @@ public class WhatsAppBinding extends Model {
 
     public static List<WhatsAppBinding> findAllEnabled() {
         return WhatsAppBinding.find("enabled = true").fetch();
+    }
+
+    /**
+     * All enabled bindings on a given transport. Used by the WhatsApp-Web
+     * connection runner (JCLAW-449) to reconcile live Cobalt sessions, mirroring
+     * {@link SlackBinding#findAllEnabledByTransport}.
+     */
+    public static List<WhatsAppBinding> findAllEnabledByTransport(WhatsAppTransport transport) {
+        return WhatsAppBinding.find("enabled = true and transport = ?1", transport).fetch();
     }
 }

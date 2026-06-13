@@ -39,6 +39,38 @@ public class WhatsAppChannel implements Channel {
         }
     }
 
+    // Per-binding credentials (JCLAW-446). Null on the stateless instance, which
+    // falls back to the app-global config — the pre-444 path, retired once
+    // JCLAW-446/447 migrate their last callers off WhatsAppConfig.load().
+    private final String phoneNumberId;
+    private final String accessToken;
+    private final String appSecret;
+
+    /** Stateless instance using the app-global config (backward-compat path). */
+    public WhatsAppChannel() {
+        this(null, null, null);
+    }
+
+    private WhatsAppChannel(String phoneNumberId, String accessToken, String appSecret) {
+        this.phoneNumberId = phoneNumberId;
+        this.accessToken = accessToken;
+        this.appSecret = appSecret;
+    }
+
+    /** Per-binding instance carrying this binding's Cloud-API credentials (JCLAW-446). */
+    public static WhatsAppChannel forBinding(models.WhatsAppBinding binding) {
+        return new WhatsAppChannel(binding.phoneNumberId, binding.accessToken, binding.appSecret);
+    }
+
+    /** The credentials this instance should use: its own per-binding fields when set,
+     *  else the app-global config (the pre-444 path). */
+    private WhatsAppConfig effectiveConfig() {
+        if (phoneNumberId != null && accessToken != null) {
+            return new WhatsAppConfig(phoneNumberId, accessToken, appSecret, null);
+        }
+        return WhatsAppConfig.load();
+    }
+
     @Override
     public String channelName() { return WHATSAPP; }
 
@@ -80,7 +112,7 @@ public class WhatsAppChannel implements Channel {
 
     @Override
     public SendResult trySend(String peerId, String text) {
-        var config = WhatsAppConfig.load();
+        var config = effectiveConfig();
         if (config == null) return SendResult.FAILED;
         var url = API_BASE + config.phoneNumberId() + "/messages";
         var body = gson.toJson(Map.of(

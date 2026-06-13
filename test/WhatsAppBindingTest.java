@@ -167,6 +167,33 @@ class WhatsAppBindingTest extends UnitTest {
         assertNull(found.phoneNumberId, "WhatsApp-Web has no phone number id until paired");
     }
 
+    @Test
+    void findAllEnabledByTransportFiltersByTransportAndEnabled() {
+        var cloudAgent = createAgent("wb-tx-cloud");
+        var webAgent = createAgent("wb-tx-web");
+        var disabledWebAgent = createAgent("wb-tx-disabled");
+        Tx.run(() -> {
+            seedCloudBinding(cloudAgent, "phone-tx", true);
+            var web = new WhatsAppBinding();
+            web.agent = webAgent;
+            web.transport = WhatsAppTransport.WHATSAPP_WEB;
+            web.save();
+            var disabled = new WhatsAppBinding();
+            disabled.agent = disabledWebAgent;
+            disabled.transport = WhatsAppTransport.WHATSAPP_WEB;
+            disabled.enabled = false;
+            disabled.save();
+        });
+
+        var cloud = Tx.run(() -> WhatsAppBinding.findAllEnabledByTransport(WhatsAppTransport.CLOUD_API));
+        assertEquals(1, cloud.size(), "only the enabled Cloud-API binding matches");
+        assertEquals("phone-tx", cloud.get(0).phoneNumberId);
+
+        var web = Tx.run(() -> WhatsAppBinding.findAllEnabledByTransport(WhatsAppTransport.WHATSAPP_WEB));
+        assertEquals(1, web.size(), "the disabled WhatsApp-Web binding is excluded");
+        assertEquals(WhatsAppTransport.WHATSAPP_WEB, web.get(0).transport);
+    }
+
     private Agent createAgent(String name) {
         return Tx.run(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
     }
