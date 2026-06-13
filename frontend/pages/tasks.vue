@@ -1522,9 +1522,12 @@ function zoneForTaskRender(task: Task): string | undefined {
                         <span>{{ deliveryAdvisories[task.id] }}</span>
                       </p>
 
-                      <!-- Inline editor: raw grammar string → PATCH delivery. -->
+                      <!-- Inline editor: raw grammar string → PATCH delivery. Explicit
+                       v-if (not v-else): the JCLAW-455 advisory <p> above sits between this
+                       and the read-only label, so a v-else would bind to the advisory's
+                       condition and render the editor in read-only mode. -->
                       <div
-                        v-else
+                        v-if="editingDeliveryId === task.id"
                         class="space-y-2"
                       >
                         <input

@@ -39,6 +39,29 @@ registerEndpoint('/api/tasks/1/delivery-advisory', () => ({ advisory: null }))
 describe('Tasks page — delivery editor grammar helper (JCLAW-457)', () => {
   beforeEach(() => clearNuxtData())
 
+  // JCLAW-455 regression guard: the editor (textbox + helper) must NOT render in the
+  // read-only view — only after the Channel "Edit" button is clicked. (A stray v-else
+  // had bound the editor to the advisory's condition, rendering it in read-only mode.)
+  it('hides the editor textbox + helper until Edit is clicked', async () => {
+    const c = await mountSuspended(Tasks)
+    await flushPromises()
+    await c.find('button[aria-label="Toggle details for daily-briefing"]').trigger('click')
+    await flushPromises()
+
+    // Read-only: current value shown, but no editor textbox and no helper.
+    expect(c.find('input[aria-label="Delivery channel"]').exists()).toBe(false)
+    expect(c.find('details').exists()).toBe(false)
+
+    const editBtn = c.findAll('button').find(b => b.text() === 'Edit'
+      && b.element.closest('section')?.textContent?.includes('Channel'))
+    await editBtn!.trigger('click')
+    await flushPromises()
+
+    // Edit mode: textbox + helper appear.
+    expect(c.find('input[aria-label="Delivery channel"]').exists()).toBe(true)
+    expect(c.find('details').exists()).toBe(true)
+  })
+
   it('renders a collapsible helper below the edit input, closed by default', async () => {
     const c = await mountSuspended(Tasks)
     await flushPromises()
