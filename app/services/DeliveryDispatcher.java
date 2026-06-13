@@ -3,12 +3,13 @@ package services;
 import channels.Channel;
 import channels.SlackChannel;
 import channels.TelegramChannel;
-import channels.WhatsAppChannel;
+import channels.WhatsAppChannelFactory;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
 import models.SlackBinding;
 import models.TelegramBinding;
+import models.WhatsAppBinding;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,11 +28,13 @@ import java.util.Map;
  *       configured channel when a {@link models.TaskRun} terminates.</li>
  * </ul>
  *
- * <p>Telegram and Slack route via the per-agent {@link TelegramBinding} /
- * {@link SlackBinding} bot token (each agent has at most one binding by privacy
- * design — see the {@code agent_id} unique constraint on the binding tables).
- * WhatsApp uses a system-wide {@link models.ChannelConfig} row because its Cloud
- * API token is workspace-scoped, not per-agent.
+ * <p>Telegram, Slack, and WhatsApp all route via the per-agent
+ * {@link TelegramBinding} / {@link SlackBinding} / {@link WhatsAppBinding}
+ * (each agent has at most one binding by privacy design — see the {@code agent_id}
+ * unique constraint on the binding tables), parent-walked so a subagent reaches the
+ * user via an ancestor's binding. WhatsApp resolves its outbound channel through
+ * {@link WhatsAppChannelFactory} so the transport (Cloud API / WhatsApp-Web) is
+ * picked in one place (JCLAW-447, replacing the pre-447 app-global config).
  *
  * <p>Retry + rate-limit backoff are inherited from {@link Channel#sendWithRetry}
  * — a single retry with the platform's {@code Retry-After} hint, capped at
@@ -116,7 +119,7 @@ public final class DeliveryDispatcher {
         return switch (canonical) {
             case TELEGRAM -> dispatchTelegram(agent, target, text);
             case SLACK -> dispatchSlack(agent, target, text);
-            case WHATSAPP -> dispatchWhatsApp(target, text);
+            case WHATSAPP -> dispatchWhatsApp(agent, target, text);
             case "web" -> dispatchWeb(agent, target, text);
             default -> DispatchResult.unsupported(channelType);
         };
@@ -208,15 +211,35 @@ public final class DeliveryDispatcher {
                         "Slack API rejected the message (see logs for details).");
     }
 
-    private static DispatchResult dispatchWhatsApp(String phoneNumber, String text) {
-        if (WhatsAppChannel.WhatsAppConfig.load() == null) {
-            return DispatchResult.noConfig(WHATSAPP,
-                    "Configure the WhatsApp Cloud API credentials in Settings → Channels → WhatsApp.");
+    private static DispatchResult dispatchWhatsApp(Agent agent, String phoneNumber, String text) {
+        if (agent == null) {
+            return DispatchResult.failedDelivery(
+                    "WhatsApp dispatch requires an agent context for per-binding lookup.");
         }
-        return new WhatsAppChannel().sendWithRetry(phoneNumber, text)
+        // JCLAW-447: route via the per-agent binding (transport-aware through the
+        // factory), parent-walked so a subagent reaches the user via an ancestor's
+        // binding — mirrors the Telegram/Slack paths above. Replaces the pre-447
+        // app-global WhatsAppConfig path.
+        var binding = WhatsAppBinding.findByAgentOrAncestor(agent);
+        if (binding == null) {
+            return DispatchResult.noConfig(WHATSAPP,
+                    "Connect a WhatsApp binding for agent '" + agent.name
+                            + "' (or any of its ancestors) in Settings → Channels → WhatsApp.");
+        }
+        if (!binding.enabled) {
+            return DispatchResult.noConfig(WHATSAPP,
+                    "WhatsApp binding for agent '" + binding.agent.name + "' is disabled.");
+        }
+        var channel = WhatsAppChannelFactory.forBinding(binding);
+        if (channel == null) {
+            return DispatchResult.noConfig(WHATSAPP,
+                    "WhatsApp transport '" + binding.transport
+                            + "' for agent '" + binding.agent.name + "' has no outbound channel yet.");
+        }
+        return channel.sendText(phoneNumber, text, agent).ok()
                 ? DispatchResult.delivered()
                 : DispatchResult.failedDelivery(
-                        "WhatsApp Cloud API rejected the message (see logs for details).");
+                        "WhatsApp API rejected the message (see logs for details).");
     }
 
     /**
