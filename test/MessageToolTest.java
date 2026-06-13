@@ -2,7 +2,10 @@ import agents.ToolRegistry;
 import channels.TelegramChannel;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.SlackBinding;
 import models.TelegramBinding;
+import models.WhatsAppBinding;
+import models.WhatsAppTransport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -192,17 +195,114 @@ class MessageToolTest extends UnitTest {
     }
 
     @Test
-    void inferenceFromSlackConversationWithoutPeerErrorsOnMissingTarget() throws Exception {
-        // Inference picks channelType from the active conversation; for an external
-        // channel that resolves its target from the conversation peer (slack/whatsapp),
-        // a null peerId leaves no target and the missing-target guard fires. Web
-        // wouldn't trip this (target is ignored for web routing), and telegram no
-        // longer reaches this path — it reads the chat id from its binding, not the
-        // conversation peer (see telegramTargetResolvesFromBindingNotFromConversationPeer).
+    void inferenceFromSlackConversationWithoutPeerAndNoBindingErrorsNotConfigured() throws Exception {
+        // Inference picks channelType="slack" from the active conversation; the null
+        // peerId leaves no conversation target, so JCLAW-425 falls back to the agent's
+        // per-agent Slack binding destination. With no binding either, the tool returns
+        // a clear, agent-named "not configured" error (not the old generic missing-target
+        // message). Web wouldn't trip this (target is ignored for web routing), and
+        // telegram reads its chat id from the binding, not the conversation peer.
         Tx.run(() -> ConversationService.create(agent, "slack", null));
         var result = invokeTool(agent.id, "{\"action\":\"send\",\"message\":\"hi\"}");
-        assertTrue(result.startsWith("Error: no 'target' inferred"),
-                "missing-peerId on an external channel should surface the missing-target error: " + result);
+        assertTrue(result.startsWith("Error: no Slack destination configured"),
+                "missing peer + no Slack binding should surface the per-agent not-configured error: " + result);
+        assertTrue(result.contains(agent.name), "the not-configured error must name the agent: " + result);
+    }
+
+    // ──────── JCLAW-425: per-agent proactive-send destinations (slack/whatsapp) ────────
+
+    @Test
+    void slackProactiveSendResolvesDestinationFromBindingOwner() throws Exception {
+        // No conversation at all. A Slack binding carries the owner as its per-agent
+        // destination. A proactive send (explicit channel, no target) must resolve the
+        // target from SlackBinding.ownerUserId (JCLAW-425) — proven by reaching the
+        // dispatcher's "disabled" branch (binding found, delivery gated) rather than the
+        // pre-dispatch "no Slack destination" error. The binding is disabled so dispatch
+        // short-circuits before any network call, keeping the test deterministic.
+        Tx.run(() -> {
+            var b = new SlackBinding();
+            b.agent = agent;
+            b.botToken = "xoxb-425-owner";
+            b.signingSecret = "sec";
+            b.ownerUserId = "U-OWNER";
+            b.enabled = false;
+            b.save();
+        });
+        var result = invokeTool(agent.id,
+                "{\"action\":\"send\",\"message\":\"daily briefing\",\"channel\":\"slack\"}");
+        assertTrue(result.startsWith("Error: "), result);
+        assertFalse(result.contains("no Slack destination"),
+                "the target must resolve from the binding owner, not hit the no-destination error: " + result);
+        assertTrue(result.contains("disabled"),
+                "with the target resolved, dispatch proceeds and hits the disabled-binding branch: " + result);
+    }
+
+    @Test
+    void whatsappCloudApiProactiveSendResolvesDestinationFromDefaultTarget() throws Exception {
+        // Cloud-API binding with a configured default recipient. A proactive whatsapp
+        // send with no conversation resolves the target from WhatsAppBinding.defaultTarget
+        // (JCLAW-425). Disabled so dispatch short-circuits before the Graph call.
+        Tx.run(() -> {
+            var b = new WhatsAppBinding();
+            b.agent = agent;
+            b.transport = WhatsAppTransport.CLOUD_API;
+            b.phoneNumberId = "pn-425";
+            b.accessToken = "tok";
+            b.defaultTarget = "+15551234567";
+            b.enabled = false;
+            b.save();
+        });
+        var result = invokeTool(agent.id,
+                "{\"action\":\"send\",\"message\":\"briefing\",\"channel\":\"whatsapp\"}");
+        assertTrue(result.startsWith("Error: "), result);
+        assertFalse(result.contains("no WhatsApp destination"),
+                "the target must resolve from the Cloud-API defaultTarget, not the no-destination error: " + result);
+        assertTrue(result.contains("disabled"),
+                "with the target resolved, dispatch proceeds and hits the disabled-binding branch: " + result);
+    }
+
+    @Test
+    void whatsappWebProactiveSendResolvesDestinationFromOwnerJid() throws Exception {
+        // WhatsApp-Web binding: its per-agent destination is the paired owner's JID.
+        // A proactive send with no conversation resolves the target from
+        // WhatsAppBinding.ownerJid (JCLAW-425). Disabled to short-circuit dispatch.
+        Tx.run(() -> {
+            var b = new WhatsAppBinding();
+            b.agent = agent;
+            b.transport = WhatsAppTransport.WHATSAPP_WEB;
+            b.ownerJid = "15559998888@s.whatsapp.net";
+            b.enabled = false;
+            b.save();
+        });
+        var result = invokeTool(agent.id,
+                "{\"action\":\"send\",\"message\":\"briefing\",\"channel\":\"whatsapp\"}");
+        assertTrue(result.startsWith("Error: "), result);
+        assertFalse(result.contains("no WhatsApp destination"),
+                "the WhatsApp-Web target must resolve from ownerJid, not the no-destination error: " + result);
+        assertTrue(result.contains("disabled"),
+                "with the target resolved, dispatch proceeds and hits the disabled-binding branch: " + result);
+    }
+
+    @Test
+    void whatsappCloudApiWithoutDefaultTargetRequiresExplicitTarget() throws Exception {
+        // The Cloud-API carve-out (JCLAW-425): a business number receives from many
+        // customers, so a Cloud-API binding with no defaultTarget has NO per-agent
+        // recipient. A proactive send with no conversation and no explicit target must
+        // surface the clear, agent-named not-configured error rather than guessing.
+        Tx.run(() -> {
+            var b = new WhatsAppBinding();
+            b.agent = agent;
+            b.transport = WhatsAppTransport.CLOUD_API;
+            b.phoneNumberId = "pn-425b";
+            b.accessToken = "tok";
+            b.enabled = true; // enabled — the gap is the missing recipient, not the binding
+            b.save();
+        });
+        var result = invokeTool(agent.id,
+                "{\"action\":\"send\",\"message\":\"hi\",\"channel\":\"whatsapp\"}");
+        assertTrue(result.startsWith("Error: no WhatsApp destination configured"),
+                "a Cloud-API binding without a default recipient must require an explicit target: " + result);
+        assertTrue(result.contains(agent.name), "the not-configured error must name the agent: " + result);
     }
 
     @Test

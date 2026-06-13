@@ -165,6 +165,46 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void createCloudApiBindingRoundTripsDefaultTarget() {
+        // JCLAW-425: the proactive-send recipient is an identifier (like phoneNumberId),
+        // not a secret, so it must round-trip in the projection for the form to display
+        // and edit it.
+        login();
+        var agentId = seedAgent("wb-create-default-target");
+        var body = """
+                {"transport": "CLOUD_API", "phoneNumberId": "phone-dt",
+                 "accessToken": "tok", "defaultTarget": "+15551234567", "agentId": %d}
+                """.formatted(agentId);
+        var response = POST("/api/channels/whatsapp/bindings", "application/json", body);
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals("+15551234567", obj.get("defaultTarget").getAsString(),
+                "the default recipient must round-trip in the projection");
+    }
+
+    @Test
+    void updateSetsAndClearsDefaultTarget() {
+        // JCLAW-425: defaultTarget is plain config (not a secret) — a present key
+        // replaces, including clearing to null. (Secrets are blank-to-keep instead.)
+        login();
+        var agentId = seedAgent("wb-update-default-target");
+        var id = seedCloudBinding(agentId, "phone-dt-upd");
+        // Set it. The update sends only defaultTarget, so no credential re-probe runs.
+        var setResp = PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
+                "{\"defaultTarget\": \"+15559876543\"}");
+        assertIsOk(setResp);
+        var setObj = JsonParser.parseString(getContent(setResp)).getAsJsonObject();
+        assertEquals("+15559876543", setObj.get("defaultTarget").getAsString());
+        // Clear it: a present-but-blank value resets the stored recipient to null.
+        var clrResp = PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
+                "{\"defaultTarget\": \"\"}");
+        assertIsOk(clrResp);
+        var clrObj = JsonParser.parseString(getContent(clrResp)).getAsJsonObject();
+        assertTrue(clrObj.get("defaultTarget").isJsonNull(),
+                "a present-but-blank defaultTarget must clear the stored value");
+    }
+
+    @Test
     void createWhatsappWebBindingNeedsOnlyAgent() {
         login();
         var agentId = seedAgent("wb-create-web");

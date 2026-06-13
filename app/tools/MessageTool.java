@@ -7,7 +7,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
+import models.SlackBinding;
 import models.TelegramBinding;
+import models.WhatsAppBinding;
+import models.WhatsAppTransport;
 import services.DeliveryDispatcher;
 import services.Tx;
 
@@ -374,9 +377,12 @@ public class MessageTool implements ToolRegistry.Tool {
         //     authoritative "telegram channel setting", with NO dependency on a prior
         //     conversation, so a proactive send (e.g. a scheduled task firing in a
         //     web/internal context) reaches the user even with zero telegram history.
-        //   - web / slack / whatsapp: the most-recent conversation peer on that channel
-        //     (no dedicated binding model wired for those yet; web's peer also identifies
-        //     the conversation the dispatcher fires back to).
+        //   - slack / whatsapp: the most-recent conversation peer on that channel
+        //     (reply where the user is), then — JCLAW-425 — the agent's per-agent
+        //     binding destination as a fallback, so a proactive send from an agent
+        //     with no chat history on that channel still reaches the owner.
+        //   - web: the most-recent conversation peer (also identifies the
+        //     conversation the dispatcher fires back to); no binding fallback.
         if (target == null || target.isBlank()) {
             if ("telegram".equalsIgnoreCase(channel)) {
                 var binding = TelegramBinding.findByAgentOrAncestor(agent);
@@ -390,6 +396,12 @@ public class MessageTool implements ToolRegistry.Tool {
                 var cConv = (Conversation) Conversation.find(
                         "agent = ?1 AND channelType = ?2 ORDER BY updatedAt DESC", agent, channel).first();
                 if (cConv != null) target = cConv.peerId;
+                // JCLAW-425: no live conversation peer — fall back to the agent's
+                // authoritative per-agent destination for slack/whatsapp (null for
+                // web, or when no binding/destination is configured).
+                if (target == null || target.isBlank()) {
+                    target = perAgentBindingDestination(agent, channel);
+                }
             }
         }
         // Target is required for external channels (telegram/slack/whatsapp)
@@ -399,9 +411,7 @@ public class MessageTool implements ToolRegistry.Tool {
         // and we don't require it.
         var needsTarget = channel != null && !"web".equalsIgnoreCase(channel);
         if (needsTarget && (target == null || target.isBlank())) {
-            return "Error: no 'target' inferred from the active conversation "
-                    + "(channel '" + channel + "' has no peerId on the current conversation row) "
-                    + "and none was passed. Provide 'target' explicitly.";
+            return noDestinationError(agent, channel);
         }
         if (!DeliveryDispatcher.isSupported(channel)) {
             return "Error: channel '" + channel + "' is not a deliverable channel "
@@ -416,6 +426,67 @@ public class MessageTool implements ToolRegistry.Tool {
             return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
         }
         return "Error: " + result.reason();
+    }
+
+    /**
+     * JCLAW-425: the agent's authoritative per-agent outbound destination for an
+     * external channel, walking the {@link Agent#parentAgent} chain so a subagent
+     * inherits the spawning ancestor's binding (never a sibling top-level agent's).
+     * Used only as a fallback when no explicit {@code target} and no live
+     * conversation peer is available, so a proactive send from an agent with no
+     * chat history on that channel still reaches the owner:
+     * <ul>
+     *   <li>{@code slack} → {@link SlackBinding#ownerUserId}.</li>
+     *   <li>{@code whatsapp} → {@link WhatsAppBinding#ownerJid} for the WhatsApp-Web
+     *       transport (the paired user), {@link WhatsAppBinding#defaultTarget} for
+     *       Cloud-API (the operator-configured recipient — a Cloud-API business
+     *       number has no inherent "owner").</li>
+     *   <li>anything else (e.g. {@code web}) → {@code null}; web is routed by the
+     *       dispatcher to the parent-chain root conversation, not by a peer id.</li>
+     * </ul>
+     * Returns {@code null} when no binding exists or it carries no destination
+     * (e.g. a Cloud-API binding with no {@code defaultTarget} set) — the caller
+     * then surfaces {@link #noDestinationError}. Binding {@code enabled} state is
+     * irrelevant here: that gates delivery (in {@link DeliveryDispatcher}), not
+     * which destination the agent owns.
+     */
+    private static String perAgentBindingDestination(Agent agent, String channel) {
+        if ("slack".equalsIgnoreCase(channel)) {
+            var binding = SlackBinding.findByAgentOrAncestor(agent);
+            return binding == null ? null : binding.ownerUserId;
+        }
+        if ("whatsapp".equalsIgnoreCase(channel)) {
+            var binding = WhatsAppBinding.findByAgentOrAncestor(agent);
+            if (binding == null) return null;
+            return binding.transport == WhatsAppTransport.WHATSAPP_WEB
+                    ? binding.ownerJid
+                    : binding.defaultTarget;
+        }
+        return null;
+    }
+
+    /**
+     * JCLAW-425: the "no destination resolvable" error for a {@code send}, named
+     * by channel and agent so the operator knows exactly what to configure. Slack
+     * and WhatsApp point at their per-agent binding destination (and the explicit
+     * {@code target} escape hatch); any other external channel falls back to the
+     * legacy missing-target message.
+     */
+    private static String noDestinationError(Agent agent, String channel) {
+        if ("slack".equalsIgnoreCase(channel)) {
+            return "Error: no Slack destination configured for agent '" + agent.name
+                    + "'. Set the owner on the agent's Slack binding (Channels settings), "
+                    + "or pass an explicit 'target' (Slack channel or user id).";
+        }
+        if ("whatsapp".equalsIgnoreCase(channel)) {
+            return "Error: no WhatsApp destination configured for agent '" + agent.name
+                    + "'. Set the WhatsApp-Web owner, or the Cloud-API default recipient, "
+                    + "on the agent's WhatsApp binding (Channels settings), or pass an "
+                    + "explicit 'target' (E.164 phone).";
+        }
+        return "Error: no 'target' inferred from the active conversation "
+                + "(channel '" + channel + "' has no peerId on the current conversation row) "
+                + "and none was passed. Provide 'target' explicitly.";
     }
 
     /**

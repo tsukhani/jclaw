@@ -79,6 +79,22 @@ public class WhatsAppBinding extends Model {
     public String ownerJid;
 
     /**
+     * Cloud-API proactive-send recipient (E.164), the agent's per-agent outbound
+     * destination for {@code message(channel="whatsapp")} when there's no explicit
+     * target and no live conversation peer (JCLAW-425). A Cloud-API business number
+     * has no single inherent recipient — it receives from many customers — so the
+     * operator configures the one the agent should proactively reach (typically
+     * their own phone for a personal assistant). DESTINATION ONLY, not access
+     * control: Cloud-API inbound stays open (see {@link channels.WhatsAppAccessPolicy}).
+     * The WhatsApp-Web analog is {@link #ownerJid}; null for WHATSAPP_WEB. An
+     * out-of-window proactive send to it uses {@link #templateName}/{@link
+     * #templateLanguage}. Nullable, so the ALTER on a populated table needs no
+     * {@code @ColumnDefault}.
+     */
+    @Column(name = "default_target")
+    public String defaultTarget;
+
+    /**
      * Meta's verified business name for this Cloud-API number, resolved by the
      * {@link channels.WhatsAppCloudApiProbe} at create/update and cached for
      * display (JCLAW-445). Nullable — null for WHATSAPP_WEB bindings and until a

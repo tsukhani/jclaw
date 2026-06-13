@@ -48,20 +48,23 @@ public class ApiWhatsAppBindingsController extends Controller {
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_TEMPLATE_NAME = "templateName";
     private static final String KEY_TEMPLATE_LANGUAGE = "templateLanguage";
+    private static final String KEY_DEFAULT_TARGET = "defaultTarget";
 
     private static final String EVENT_CATEGORY_CHANNEL = "channel";
     private static final String CHANNEL_WHATSAPP = "whatsapp";
 
     /** Flat projection the frontend consumes. The secrets ({@code accessToken},
      *  {@code appSecret}, {@code verifyToken}) are elided — only presence flags
-     *  are surfaced. {@code phoneNumberId} is an identifier (not a secret) so it
-     *  is returned for display, like Slack's {@code teamId}. */
+     *  are surfaced. {@code phoneNumberId} and {@code defaultTarget} are
+     *  identifiers (not secrets) so they are returned for display, like Slack's
+     *  {@code teamId}. */
     private record BindingView(Long id, Long agentId, String agentName,
                                 String transport, String phoneNumberId,
                                 boolean hasAccessToken, boolean hasAppSecret,
                                 boolean hasVerifyToken,
                                 String verifiedName, String displayPhoneNumber,
                                 String templateName, String templateLanguage,
+                                String defaultTarget,
                                 boolean enabled, String createdAt, String updatedAt) {
         static BindingView of(WhatsAppBinding b) {
             return new BindingView(b.id,
@@ -76,6 +79,7 @@ public class ApiWhatsAppBindingsController extends Controller {
                     b.displayPhoneNumber,
                     b.templateName,
                     b.templateLanguage,
+                    b.defaultTarget,
                     b.enabled,
                     b.createdAt != null ? b.createdAt.toString() : null,
                     b.updatedAt != null ? b.updatedAt.toString() : null);
@@ -140,6 +144,8 @@ public class ApiWhatsAppBindingsController extends Controller {
         binding.verifyToken = readOptionalString(body, KEY_VERIFY_TOKEN);
         binding.templateName = readOptionalString(body, KEY_TEMPLATE_NAME);
         binding.templateLanguage = readOptionalString(body, KEY_TEMPLATE_LANGUAGE);
+        // JCLAW-425: Cloud-API proactive-send recipient. An identifier, not a secret.
+        binding.defaultTarget = readOptionalString(body, KEY_DEFAULT_TARGET);
         binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
 
         // JCLAW-445: verify the Cloud-API credentials against the Graph API BEFORE
@@ -306,6 +312,11 @@ public class ApiWhatsAppBindingsController extends Controller {
         }
         if (body.has(KEY_TEMPLATE_LANGUAGE)) {
             binding.templateLanguage = readOptionalString(body, KEY_TEMPLATE_LANGUAGE);
+        }
+        // JCLAW-425: default recipient is plain config (not a secret) — a present
+        // key replaces, including clearing to null (blank → "no recipient set").
+        if (body.has(KEY_DEFAULT_TARGET)) {
+            binding.defaultTarget = readOptionalString(body, KEY_DEFAULT_TARGET);
         }
         if (body.has(KEY_ENABLED)) binding.enabled = body.get(KEY_ENABLED).getAsBoolean();
     }

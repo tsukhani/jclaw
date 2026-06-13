@@ -102,6 +102,11 @@ export interface WhatsAppBindingSummary {
   templateName: string | null
   /** JCLAW-445: BCP-47 language for {@link templateName}, e.g. en_US. */
   templateLanguage: string | null
+  /** JCLAW-425: Cloud-API proactive-send recipient (E.164) — the agent's
+   *  per-agent outbound destination when a `message(channel="whatsapp")` has no
+   *  explicit target and no live conversation peer. An identifier, not a secret.
+   *  Cloud-API only (WhatsApp-Web uses its paired owner); null when unset. */
+  defaultTarget: string | null
   enabled: boolean
   createdAt: string | null
   updatedAt: string | null

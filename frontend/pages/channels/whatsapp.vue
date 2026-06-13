@@ -52,6 +52,10 @@ interface BindingForm {
   // sent outside WhatsApp's 24-hour window. Cloud-API only, optional.
   templateName: string
   templateLanguage: string
+  // JCLAW-425: Cloud-API proactive-send recipient (E.164). The agent's outbound
+  // destination when a send has no explicit target / live conversation peer.
+  // Cloud-API only, optional (WhatsApp-Web uses its paired owner instead).
+  defaultTarget: string
   agentId: number | null
   agentQuery: string
 }
@@ -64,6 +68,7 @@ const emptyForm = (): BindingForm => ({
   verifyToken: '',
   templateName: '',
   templateLanguage: '',
+  defaultTarget: '',
   agentId: null,
   agentQuery: '',
 })
@@ -107,6 +112,7 @@ function openEdit(binding: WhatsAppBindingSummary) {
     verifyToken: '',
     templateName: binding.templateName ?? '',
     templateLanguage: binding.templateLanguage ?? '',
+    defaultTarget: binding.defaultTarget ?? '',
     agentId: binding.agentId,
     agentQuery: binding.agentName ?? '',
   }
@@ -158,6 +164,8 @@ async function save() {
     // JCLAW-445: optional out-of-window template. Sent only when provided.
     if (form.value.templateName.trim()) body.templateName = form.value.templateName.trim()
     if (form.value.templateLanguage.trim()) body.templateLanguage = form.value.templateLanguage.trim()
+    // JCLAW-425: optional proactive-send recipient. Sent only when provided.
+    if (form.value.defaultTarget.trim()) body.defaultTarget = form.value.defaultTarget.trim()
   }
   const result = await mutate(url, { method, body })
   if (result === null) {
@@ -631,6 +639,31 @@ onBeforeUnmount(stopPoll)
             Used to reply outside WhatsApp's 24-hour customer-service window: after
             24 hours of silence Meta only allows a pre-approved template message, so
             set this to keep late replies deliverable.
+          </p>
+
+          <!-- JCLAW-425: optional proactive-send recipient. A Cloud-API business
+               number receives from many customers, so an agent-initiated send with
+               no active chat needs an explicit destination — set the one this
+               agent should reach (e.g. your own phone). -->
+          <label
+            for="binding-default-target"
+            class="block"
+          >
+            <span class="block text-xs text-fg-muted mb-1">default recipient (optional)</span>
+            <input
+              id="binding-default-target"
+              v-model="form.defaultTarget"
+              type="text"
+              placeholder="e.g. +15551234567 (E.164)"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                     focus:outline-hidden focus:border-ring transition-colors"
+            >
+          </label>
+          <p class="text-xs text-fg-muted">
+            Where this agent sends a proactive message (a progress update or a
+            scheduled briefing) when it isn't replying inside an existing chat. A
+            business number has no single "owner", so set the recipient explicitly;
+            out-of-window sends use the template above.
           </p>
         </template>
 
