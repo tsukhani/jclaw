@@ -397,12 +397,22 @@ public class TaskTool implements ToolRegistry.Tool {
                 "Task '%s' (id=%d, type=%s) created via tool"
                         .formatted(saved.name, saved.id, saved.type));
 
-        return switch (spec.type()) {
+        var base = switch (spec.type()) {
             case IMMEDIATE -> "Task '%s' created and queued for immediate execution.".formatted(name);
             case SCHEDULED -> "Task '%s' scheduled for %s.".formatted(name, formatScheduledAt(saved));
             case INTERVAL -> "Interval task '%s' created (every %ds).".formatted(name, spec.intervalSeconds());
             case CRON -> "Recurring task '%s' created with schedule '%s'.".formatted(name, spec.scheduleDisplay());
         };
+        // JCLAW-455: warn in chat if the declared Slack delivery target isn't reachable
+        // (private/uninvited channel). Non-blocking — the task is still created.
+        return withDeliveryAdvisory(base, agent, saved.delivery);
+    }
+
+    /** JCLAW-455: append a non-blocking delivery-reachability advisory to a tool result,
+     *  or return {@code base} unchanged when none applies. */
+    private static String withDeliveryAdvisory(String base, Agent agent, String deliverySpec) {
+        var advisory = services.DeliveryAdvisor.advisoryFor(agent, deliverySpec);
+        return advisory == null ? base : base + "\n\n⚠️ " + advisory;
     }
 
     /**
@@ -660,7 +670,12 @@ public class TaskTool implements ToolRegistry.Tool {
 
         EventLogger.info("TASK_MGMT_UPDATE", agent.name, null,
                 "Task '%s' (id=%d) updated via tool".formatted(name, taskId));
-        return "Task '%s' updated.".formatted(name);
+        var updated = "Task '%s' updated.".formatted(name);
+        // JCLAW-455: only re-probe reachability when the delivery target was actually changed.
+        if (args.has(KEY_DELIVERY) && patch.task() != null) {
+            return withDeliveryAdvisory(updated, agent, patch.task().delivery);
+        }
+        return updated;
     }
 
     /** Outcome of {@link #applyPatch}: whether anything changed, whether the

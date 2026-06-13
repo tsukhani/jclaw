@@ -1,5 +1,7 @@
 package channels;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.slack.api.Slack;
 import com.slack.api.methods.SlackApiException;
 import com.slack.api.model.ConversationType;
@@ -7,6 +9,7 @@ import com.slack.api.model.block.LayoutBlock;
 import services.EventLogger;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,16 +43,21 @@ public final class SlackWebApi {
                 }
             });
 
-    /** Test seam (JCLAW-454): the {@code conversations.list} name→id lookup, swappable so
-     *  unit tests resolve channels without the network — mirrors {@link SlackFileUploader}'s
-     *  injectable {@code Uploader}. {@code name} is already lowercased with any leading
-     *  {@code #} stripped; returns the channel id or {@code null} if none matches. */
+    /** A matched Slack channel: its id, and whether the bot is a member ({@code conversations.list}
+     *  only returns private channels the bot is in, so found+member ⇒ reachable, found+not-member
+     *  ⇒ a public channel the bot hasn't joined). JCLAW-454/455. */
+    public record ChannelInfo(String id, boolean isMember) {}
+
+    /** Test seam (JCLAW-454/455): the {@code conversations.list} name lookup, swappable so unit
+     *  tests resolve channels without the network — mirrors {@link SlackFileUploader}'s injectable
+     *  {@code Uploader}. {@code name} is already lowercased with any leading {@code #} stripped;
+     *  returns the matched channel or {@code null} if none matches. */
     @FunctionalInterface
     public interface ChannelLister {
-        String idForName(String botToken, String name);
+        ChannelInfo lookup(String botToken, String name);
     }
 
-    static ChannelLister CHANNEL_LISTER = SlackWebApi::lookupChannelIdByNameLive;
+    static ChannelLister CHANNEL_LISTER = SlackWebApi::lookupChannelByNameLive;
 
     /**
      * JCLAW-454: resolve a Slack delivery {@code target} to a channel id. A literal id
@@ -68,16 +76,16 @@ public final class SlackWebApi {
         String key = Integer.toHexString(botToken.hashCode()) + ":" + name;
         var cached = CHANNEL_ID_CACHE.get(key);
         if (cached != null) return cached;
-        String id = CHANNEL_LISTER.idForName(botToken, name);
-        if (id != null) CHANNEL_ID_CACHE.put(key, id);
-        return id;
+        ChannelInfo info = CHANNEL_LISTER.lookup(botToken, name);
+        if (info != null) CHANNEL_ID_CACHE.put(key, info.id());
+        return info != null ? info.id() : null;
     }
 
     /** Live {@link ChannelLister}: page {@code conversations.list} and match by name.
      *  {@code conversations.list} only returns private channels the bot is a member of, and
      *  posting to a public channel the bot hasn't joined additionally needs the
      *  {@code chat:write.public} scope (JCLAW-454). Never throws. */
-    private static String lookupChannelIdByNameLive(String botToken, String name) {
+    private static ChannelInfo lookupChannelByNameLive(String botToken, String name) {
         try {
             String cursor = null;
             do {
@@ -94,7 +102,9 @@ public final class SlackWebApi {
                 }
                 if (resp.getChannels() != null) {
                     for (var ch : resp.getChannels()) {
-                        if (name.equalsIgnoreCase(ch.getName())) return ch.getId();
+                        if (name.equalsIgnoreCase(ch.getName())) {
+                            return new ChannelInfo(ch.getId(), ch.isMember());
+                        }
                     }
                 }
                 cursor = resp.getResponseMetadata() != null
@@ -106,6 +116,82 @@ public final class SlackWebApi {
                     "conversations.list failed: %s".formatted(e.getMessage()));
             return null;
         }
+    }
+
+    // ── JCLAW-455: delivery reachability probe (advisory in chat + on the Tasks page) ──
+
+    /** Reachability of a Slack delivery target for a given bot, from the bot's vantage point. */
+    public enum SlackReach {
+        /** The bot is a member (public or private) — delivery will work. */
+        REACHABLE,
+        /** A public channel the bot hasn't joined — works only with {@code chat:write.public}. */
+        PUBLIC_NOT_MEMBER,
+        /** Not returned by {@code conversations.list} — a private channel the bot isn't in, or a bad name. */
+        UNRESOLVED,
+        /** Can't classify (no token, a literal id, or an API error) — no advisory. */
+        UNKNOWN
+    }
+
+    /** A reachability verdict plus the human advisory to surface (null when no action is needed). */
+    public record SlackReachability(SlackReach status, String channel, String advisory) {
+        public boolean needsAttention() {
+            return status == SlackReach.PUBLIC_NOT_MEMBER || status == SlackReach.UNRESOLVED;
+        }
+    }
+
+    /** Short-TTL cache of probe verdicts keyed by (token-hash, name) so expanding tasks on the
+     *  Tasks page doesn't re-page rate-limited {@code conversations.list}; 60 s keeps a fresh
+     *  invite visible within a minute. */
+    private static final Cache<String, SlackReachability> PROBE_CACHE =
+            Caffeine.newBuilder().maximumSize(512).expireAfterWrite(Duration.ofSeconds(60)).build();
+
+    /**
+     * JCLAW-455: classify whether the bot can deliver to {@code target} and, when not, return an
+     * actionable advisory. A literal channel id is {@code UNKNOWN} (membership isn't cheaply
+     * knowable without {@code conversations.info}); a {@code #name}/bare name is probed via the
+     * shared {@code conversations.list} seam. Never throws.
+     *
+     * <p>Honest limitation: a private channel the bot isn't in is invisible to a normal bot
+     * token, so {@code UNRESOLVED} can't distinguish "private, uninvited" from "no such channel" —
+     * the advisory names both causes.
+     */
+    public static SlackReachability probeChannel(String botToken, String target) {
+        if (botToken == null || botToken.isBlank() || target == null) {
+            return new SlackReachability(SlackReach.UNKNOWN, target, null);
+        }
+        String t = target.trim();
+        if (t.isEmpty() || CHANNEL_ID.matcher(t).matches()) {
+            return new SlackReachability(SlackReach.UNKNOWN, t, null);
+        }
+        String name = (t.startsWith("#") ? t.substring(1) : t).toLowerCase(Locale.ROOT);
+        if (name.isEmpty()) return new SlackReachability(SlackReach.UNKNOWN, target, null);
+        String key = Integer.toHexString(botToken.hashCode()) + ":" + name;
+        var cached = PROBE_CACHE.getIfPresent(key);
+        if (cached != null) return cached;
+        var verdict = classifyReachability(botToken, name);
+        PROBE_CACHE.put(key, verdict);
+        return verdict;
+    }
+
+    private static SlackReachability classifyReachability(String botToken, String name) {
+        String display = "#" + name;
+        ChannelInfo info;
+        try {
+            info = CHANNEL_LISTER.lookup(botToken, name);
+        } catch (RuntimeException e) {
+            return new SlackReachability(SlackReach.UNKNOWN, display, null);
+        }
+        if (info == null) {
+            return new SlackReachability(SlackReach.UNRESOLVED, display,
+                    "Can't find Slack channel " + display + ". If it's a private channel, invite the bot "
+                            + "to it; if it's public, check the name (or grant the bot the chat:write.public scope).");
+        }
+        if (info.isMember()) {
+            return new SlackReachability(SlackReach.REACHABLE, display, null);
+        }
+        return new SlackReachability(SlackReach.PUBLIC_NOT_MEMBER, display,
+                "The bot is not a member of public channel " + display + ". It can post only if it has the "
+                        + "chat:write.public scope; otherwise invite the bot to the channel.");
     }
 
     /**

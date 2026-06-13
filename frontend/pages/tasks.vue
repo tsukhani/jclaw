@@ -247,6 +247,23 @@ const runsByTask = reactive<Record<number, TaskRunView[]>>({})
 const runsLoading = reactive<Record<number, boolean>>({})
 const runsError = reactive<Record<number, string | null>>({})
 
+// JCLAW-455: per-task Slack delivery-reachability advisory, fetched lazily on
+// expand (and refreshed after a delivery edit). null = reachable / not applicable.
+const deliveryAdvisories = reactive<Record<number, string | null>>({})
+
+// force=true re-probes even if already fetched (used after a delivery edit).
+async function loadDeliveryAdvisory(id: number, force = false) {
+  if (!force && deliveryAdvisories[id] !== undefined) return
+  try {
+    const r = await $fetch<{ advisory: string | null }>(`/api/tasks/${id}/delivery-advisory`)
+    deliveryAdvisories[id] = r.advisory
+  }
+  catch {
+    // Best-effort preflight — a probe failure must never block the page.
+    deliveryAdvisories[id] = null
+  }
+}
+
 async function loadRuns(id: number, silent = false) {
   if (!silent) runsLoading[id] = true
   runsError[id] = null
@@ -274,6 +291,8 @@ function toggleExpand(id: number) {
   if (runsByTask[id] === undefined && !runsLoading[id]) {
     void loadRuns(id)
   }
+  // JCLAW-455: probe Slack delivery reachability on first expand.
+  void loadDeliveryAdvisory(id)
 }
 
 // Steps for an expanded row, parsed from its description. Called only inside
@@ -423,6 +442,8 @@ async function saveDelivery(task: Task) {
     editingDeliveryId.value = null
     editDelivery.value = ''
     refresh()
+    // JCLAW-455: the target changed — re-probe so the advisory reflects the new channel.
+    void loadDeliveryAdvisory(task.id, true)
   }
   catch (e) {
     // $fetch surfaces the backend's 400 body on e.data; prefer its message so
@@ -1489,6 +1510,16 @@ function zoneForTaskRender(task: Task): string | undefined {
                         class="text-xs text-fg-primary font-mono"
                       >
                         {{ deliveryLabel(task) }}
+                      </p>
+
+                      <!-- JCLAW-455: preflight reachability advisory for a Slack channel the
+                       bot can't reach (private/uninvited). Lazily fetched on expand. -->
+                      <p
+                        v-if="editingDeliveryId !== task.id && deliveryAdvisories[task.id]"
+                        class="mt-1 flex items-start gap-1 text-[11px] text-amber-400"
+                      >
+                        <span aria-hidden="true">⚠</span>
+                        <span>{{ deliveryAdvisories[task.id] }}</span>
                       </p>
 
                       <!-- Inline editor: raw grammar string → PATCH delivery. -->

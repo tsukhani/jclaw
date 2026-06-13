@@ -30,6 +30,7 @@ POST    /api/transcription/models/{id}/download ApiTranscriptionController.downl
 GET     /api/tasks                              ApiTasksController.list
 GET     /api/tasks/stats                        ApiTasksController.stats
 GET     /api/tasks/{id}/runs                    ApiTasksController.runs
+GET     /api/tasks/{id}/delivery-advisory       ApiTasksController.deliveryAdvisory
 GET     /api/task-runs/search                   ApiTasksController.searchTranscripts
 GET     /api/task-runs/recent                   ApiTasksController.recentRuns
 GET     /api/task-runs/{id}/messages            ApiTasksController.runMessages

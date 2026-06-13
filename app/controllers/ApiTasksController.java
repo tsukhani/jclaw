@@ -387,6 +387,25 @@ public class ApiTasksController extends Controller {
     }
 
     /**
+     * JCLAW-455: preflight Slack delivery reachability for one Task. Returns
+     * {@code {"advisory": "<text>"}} when the task's declared Slack channel target
+     * isn't reachable (private/uninvited channel, or a public channel the bot hasn't
+     * joined), else {@code {"advisory": null}}. The Tasks page fetches this lazily on
+     * row-expand and renders it below the delivery value. Probes are 60 s-cached
+     * server-side; 404 only if the Task is missing.
+     */
+    @SuppressWarnings("java:S2259")
+    @Operation(summary = "Preflight Slack delivery reachability advisory for one task (null when reachable / N/A)")
+    public static void deliveryAdvisory(Long id) {
+        Task task = Task.findById(id);
+        if (task == null) notFound();
+        var advisory = services.DeliveryAdvisor.advisoryFor(task.agent, task.delivery);
+        var payload = new java.util.LinkedHashMap<String, Object>();
+        payload.put("advisory", advisory);
+        renderJSON(gson.toJson(payload));
+    }
+
+    /**
      * Turn-by-turn execution trace for one TaskRun — its
      * {@code task_run_message} rows in turn order. Powers the Tasks UI
      * PeekPanel (JCLAW-22 slice P). Returns {@code []} for a run that
