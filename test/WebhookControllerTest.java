@@ -113,41 +113,15 @@ class WebhookControllerTest extends FunctionalTest {
     }
 
     // ===== WhatsApp =====
-
-    @Test
-    void whatsappWebhookReturns401WhenUnconfigured() {
-        var response = POST("/api/webhooks/whatsapp", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
-        assertSignatureFailureLogged("whatsapp");
-    }
-
-    @Test
-    void whatsappWebhookReturns401WhenAppSecretAbsentInConfig() {
-        // The critical JCLAW-16 fix: the controller used to skip verification
-        // when appSecret was null, silently passing through to agent code.
-        // Now an absent appSecret is an explicit 401.
-        commitInFreshTx(() -> {
-            var cc = new ChannelConfig();
-            cc.channelType = "whatsapp";
-            cc.enabled = true;
-            cc.configJson = "{\"phoneNumberId\":\"PN1\",\"accessToken\":\"AT1\"}"; // no appSecret
-            cc.save();
-            return cc.id;
-        });
-        ChannelConfig.evictCache("whatsapp");
-
-        var response = POST("/api/webhooks/whatsapp", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
-        assertSignatureFailureLogged("whatsapp");
-    }
-
-    @Test
-    void whatsappWebhookReturns401WhenSignatureHeaderMissing() {
-        seedWhatsAppConfig();
-        var response = POST("/api/webhooks/whatsapp", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
-        assertSignatureFailureLogged("whatsapp");
-    }
+    // JCLAW-446 migrated WhatsApp from the app-global ChannelConfig("whatsapp") to
+    // per-binding routing (route by phone_number_id → WhatsAppBinding, verify the
+    // HMAC against that binding's appSecret). The fail-closed-on-missing-appSecret,
+    // signature-rejection, and audit-log coverage moved to WebhookWhatsAppControllerTest
+    // (postFailsClosedWhenBindingHasNoAppSecret / postRejectsMismatchedSignature /
+    // rejectionsAreAuditedAsWebhookSignatureFailure), now tested per-binding. An
+    // unmatched webhook (no binding for the number) acks with 200 and processes
+    // nothing — see WebhookWhatsAppControllerTest.postAcksUnknownPhoneNumberId — so the
+    // old app-global "unconfigured → 401" path no longer exists to assert here.
 
     // ===== Helpers =====
 
@@ -219,19 +193,6 @@ class WebhookControllerTest extends FunctionalTest {
             binding.save();
             return binding.id;
         });
-    }
-
-    private void seedWhatsAppConfig() {
-        commitInFreshTx(() -> {
-            var cc = new ChannelConfig();
-            cc.channelType = "whatsapp";
-            cc.enabled = true;
-            cc.configJson = "{\"phoneNumberId\":\"PN1\",\"accessToken\":\"AT1\","
-                    + "\"appSecret\":\"test-app-secret\",\"verifyToken\":\"VT1\"}";
-            cc.save();
-            return cc.id;
-        });
-        ChannelConfig.evictCache("whatsapp");
     }
 
     private void assertSignatureFailureLogged(String channel) {
