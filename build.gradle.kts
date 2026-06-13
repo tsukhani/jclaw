@@ -381,4 +381,29 @@ dependencies {
     implementation("org.apache.lucene:lucene-analysis-common:10.4.0")
     // QueryParser lives in its own artifact since Lucene 9.
     implementation("org.apache.lucene:lucene-queryparser:10.4.0")
+
+    // JCLAW-448: Cobalt — the unofficial WhatsApp-Web (Baileys-equivalent) stack
+    // for the WHATSAPP_WEB transport (QR-paired, group-capable, ban-warned).
+    // Namespace it.auties.whatsapp.
+    //
+    // RISK: single-maintainer, mid-rewrite library. The published 0.0.x line is
+    // the stable API surface (the master branch is a 0.1.0 rewrite not yet on
+    // Maven Central); we PIN an exact version so a surprise republish can't shift
+    // the API under us. Treat every Cobalt call as load-bearing-but-fragile —
+    // it's isolated behind WhatsAppCobalt* so a breaking bump is contained to
+    // the channels/ package. Pulls a large transitive graph (its own protobuf,
+    // bouncycastle, etc.); excluded slf4j-simple to keep the log4j path clean
+    // (same treatment as the other SDKs above).
+    implementation("com.github.auties00:cobalt:0.0.10") {
+        // aspose-words 22.11 is a commercial, closed-source artifact NOT on
+        // Maven Central (it lives in Aspose's private repo). Cobalt only pulls
+        // it for DOCX→PDF document-preview rendering, which JClaw never uses —
+        // and an unresolvable transitive would fail the whole build. Drop it.
+        exclude(group = "com.aspose", module = "aspose-words")
+        // slf4j-nop / slf4j-simple both grab the SLF4JServiceProvider
+        // ServiceLoader slot that log4j-slf4j2-impl needs (same clash as the
+        // Telegram/Slack/Playwright SDKs above) — exclude so our log4j binding wins.
+        exclude(group = "org.slf4j", module = "slf4j-nop")
+        exclude(group = "org.slf4j", module = "slf4j-simple")
+    }
 }
