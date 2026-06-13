@@ -2,6 +2,7 @@ package jobs;
 
 import channels.SlackSocketModeRunner;
 import channels.TelegramPollingRunner;
+import channels.WhatsAppCobaltRunner;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
@@ -27,5 +28,6 @@ public class ChannelRunnerJob extends Job<Void> {
     public void doJob() {
         TelegramPollingRunner.reconcile();
         SlackSocketModeRunner.reconcile();
+        WhatsAppCobaltRunner.reconcile();
     }
 }

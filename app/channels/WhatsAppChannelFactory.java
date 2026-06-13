@@ -21,8 +21,7 @@ public final class WhatsAppChannelFactory {
         if (binding == null) return null;
         return switch (binding.transport) {
             case CLOUD_API -> WhatsAppChannel.forBinding(binding);
-            // TODO JCLAW-450 (Track B): WhatsAppCobaltChannel.forBinding(binding)
-            case WHATSAPP_WEB -> null;
+            case WHATSAPP_WEB -> WhatsAppCobaltChannel.forBinding(binding);
         };
     }
 }

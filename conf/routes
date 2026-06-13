@@ -160,6 +160,8 @@ GET     /api/channels/whatsapp/bindings         ApiWhatsAppBindingsController.li
 POST    /api/channels/whatsapp/bindings         ApiWhatsAppBindingsController.create
 PUT     /api/channels/whatsapp/bindings/{id}    ApiWhatsAppBindingsController.update
 DELETE  /api/channels/whatsapp/bindings/{id}    ApiWhatsAppBindingsController.delete
+# WhatsApp-Web (Cobalt) QR pairing status (JCLAW-448)
+GET     /api/channels/whatsapp/bindings/{id}/qr  WhatsAppQrController.status
 GET     /api/channels/{channelType}             ApiChannelsController.get
 PUT     /api/channels/{channelType}             ApiChannelsController.save
 
