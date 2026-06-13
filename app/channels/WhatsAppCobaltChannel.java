@@ -77,7 +77,7 @@ public final class WhatsAppCobaltChannel implements Channel {
             wa.sendMessage(jid, text).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             EventLogger.info(LOG_CATEGORY, null, WHATSAPP, "Message sent to %s".formatted(peerId));
             return SendResult.OK;
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return SendResult.FAILED;
         } catch (Exception e) {
@@ -98,7 +98,7 @@ public final class WhatsAppCobaltChannel implements Channel {
             if (image == null) return SendResult.FAILED;
             wa.sendMessage(jid, image).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return SendResult.OK;
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return SendResult.FAILED;
         } catch (Exception e) {
@@ -119,7 +119,7 @@ public final class WhatsAppCobaltChannel implements Channel {
             if (doc == null) return SendResult.FAILED;
             wa.sendMessage(jid, doc).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return SendResult.OK;
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return SendResult.FAILED;
         } catch (Exception e) {
@@ -183,7 +183,7 @@ public final class WhatsAppCobaltChannel implements Channel {
             wa.sendReaction(target, emoji == null ? "" : emoji)
                     .get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return true;
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return false;
         } catch (Exception e) {
@@ -225,7 +225,7 @@ public final class WhatsAppCobaltChannel implements Channel {
         if (peerId == null || peerId.isBlank()) return null;
         try {
             return Jid.of(peerId);
-        } catch (Exception e) {
+        } catch (Exception _) {
             return null;
         }
     }
@@ -233,7 +233,7 @@ public final class WhatsAppCobaltChannel implements Channel {
     private static String detectMime(File file) {
         try {
             return TikaHolder.TIKA.detect(file);
-        } catch (Exception e) {
+        } catch (Exception _) {
             return "application/octet-stream";
         }
     }

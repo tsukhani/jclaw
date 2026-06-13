@@ -58,6 +58,12 @@ public final class WhatsAppCobaltParser {
     /** WhatsApp group-JID server suffix; a chat JID ending in this is a group. */
     static final String GROUP_SERVER_SUFFIX = "@g.us";
 
+    /** The transport-agnostic "envelope" fields shared by every routed message,
+     *  independent of its content type — bundled so the per-type builders stay
+     *  under the parameter limit (Sonar S107). */
+    private record Envelope(String messageId, String from, String chatId, String chatType,
+            boolean botMentioned, String quotedMessageId, String senderDisplayName) {}
+
     /**
      * Translate one Cobalt {@link ChatMessageInfo} into a normalized
      * {@link WhatsAppInboundMessage}, or {@code null} when the message carries no
@@ -91,16 +97,15 @@ public final class WhatsAppCobaltParser {
         var quotedMessageId = quotedId(content);
         boolean botMentioned = !group || mentionsBot(content, botJid);
 
+        var env = new Envelope(messageId, from, chatId, chatType,
+                botMentioned, quotedMessageId, senderDisplayName);
+
         return switch (type) {
-            case TEXT -> textMessage(messageId, from, chatId, chatType, content,
-                    botMentioned, quotedMessageId, senderDisplayName);
-            case LOCATION -> locationMessage(messageId, from, chatId, chatType, content,
-                    botMentioned, quotedMessageId, senderDisplayName);
+            case TEXT -> textMessage(env, content);
+            case LOCATION -> locationMessage(env, content);
             case REACTION -> reactionMessage(messageId, from, chatId, chatType, content,
                     senderDisplayName);
-            case IMAGE, AUDIO, VIDEO, DOCUMENT, STICKER ->
-                    mediaMessage(messageId, from, chatId, chatType, type, content,
-                            botMentioned, quotedMessageId, senderDisplayName);
+            case IMAGE, AUDIO, VIDEO, DOCUMENT, STICKER -> mediaMessage(env, type, content);
         };
     }
 
@@ -134,29 +139,23 @@ public final class WhatsAppCobaltParser {
         };
     }
 
-    private static WhatsAppInboundMessage textMessage(
-            String messageId, String from, String chatId, String chatType,
-            Message content, boolean botMentioned, String quotedMessageId,
-            String senderDisplayName) {
+    private static WhatsAppInboundMessage textMessage(Envelope env, Message content) {
         var text = content instanceof TextMessage tm ? tm.text() : null;
-        return new WhatsAppInboundMessage(messageId, from, chatId, chatType, null,
+        return new WhatsAppInboundMessage(env.messageId(), env.from(), env.chatId(), env.chatType(), null,
                 MessageType.TEXT, text, null, null, List.of(),
-                botMentioned, quotedMessageId, senderDisplayName);
+                env.botMentioned(), env.quotedMessageId(), env.senderDisplayName());
     }
 
-    private static WhatsAppInboundMessage locationMessage(
-            String messageId, String from, String chatId, String chatType,
-            Message content, boolean botMentioned, String quotedMessageId,
-            String senderDisplayName) {
+    private static WhatsAppInboundMessage locationMessage(Envelope env, Message content) {
         WhatsAppInboundMessage.Location loc = null;
         if (content instanceof LocationMessage lm) {
             loc = new WhatsAppInboundMessage.Location(
                     lm.latitude(), lm.longitude(),
                     lm.name().orElse(null), lm.address().orElse(null));
         }
-        return new WhatsAppInboundMessage(messageId, from, chatId, chatType, null,
+        return new WhatsAppInboundMessage(env.messageId(), env.from(), env.chatId(), env.chatType(), null,
                 MessageType.LOCATION, null, loc, null, List.of(),
-                botMentioned, quotedMessageId, senderDisplayName);
+                env.botMentioned(), env.quotedMessageId(), env.senderDisplayName());
     }
 
     private static WhatsAppInboundMessage reactionMessage(
@@ -174,15 +173,12 @@ public final class WhatsAppCobaltParser {
                 true, null, senderDisplayName);
     }
 
-    private static WhatsAppInboundMessage mediaMessage(
-            String messageId, String from, String chatId, String chatType,
-            MessageType type, Message content, boolean botMentioned,
-            String quotedMessageId, String senderDisplayName) {
+    private static WhatsAppInboundMessage mediaMessage(Envelope env, MessageType type, Message content) {
         var caption = mediaCaption(content);
-        var media = pendingMediaFor(messageId, type, content);
-        return new WhatsAppInboundMessage(messageId, from, chatId, chatType, null,
+        var media = pendingMediaFor(env.messageId(), content);
+        return new WhatsAppInboundMessage(env.messageId(), env.from(), env.chatId(), env.chatType(), null,
                 type, caption, null, null, media,
-                botMentioned, quotedMessageId, senderDisplayName);
+                env.botMentioned(), env.quotedMessageId(), env.senderDisplayName());
     }
 
     /** The caption that rides with a media message (image/video/document), or
@@ -204,7 +200,7 @@ public final class WhatsAppCobaltParser {
      * declared size here, so {@code sizeBytes} is 0 (the downloader stream-caps).
      */
     static List<WhatsAppInboundMessage.PendingMedia> pendingMediaFor(
-            String messageId, MessageType type, Message content) {
+            String messageId, Message content) {
         String mime = mediaMime(content);
         String filename = content instanceof DocumentMessage dm
                 ? dm.fileName().orElse(dm.title().orElse(null)) : null;

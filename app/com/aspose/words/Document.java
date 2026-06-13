@@ -29,7 +29,7 @@ public class Document {
         byte[] read;
         try {
             read = in != null ? in.readAllBytes() : new byte[0];
-        } catch (Exception e) {
+        } catch (Exception _) {
             read = new byte[0];
         }
         this.bytes = read;
@@ -40,7 +40,7 @@ public class Document {
     public int getPageCount() {
         try (var doc = Loader.loadPDF(bytes)) {
             return Math.max(1, doc.getNumberOfPages());
-        } catch (Exception e) {
+        } catch (Exception _) {
             return 1;
         }
     }
@@ -63,7 +63,7 @@ public class Document {
             if (doc.getNumberOfPages() == 0) return false;
             BufferedImage img = new PDFRenderer(doc).renderImageWithDPI(0, THUMBNAIL_DPI);
             return ImageIO.write(img, "jpg", out);
-        } catch (Exception e) {
+        } catch (Exception _) {
             return false;
         }
     }
@@ -71,7 +71,7 @@ public class Document {
     private void writeBlankJpeg(OutputStream out) {
         try {
             ImageIO.write(new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB), "jpg", out);
-        } catch (Exception e) {
+        } catch (Exception _) {
             // Best-effort: an unwritten stream yields an empty thumbnail, which
             // Cobalt tolerates — the document message still sends.
         }
