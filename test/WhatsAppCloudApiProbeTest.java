@@ -32,7 +32,7 @@ class WhatsAppCloudApiProbeTest extends UnitTest {
     }
 
     @Test
-    void verifiedNumberReturnsVerifiedWithNameAndDisplayNumber() {
+    void verifiedNumberReturnsVerifiedWithNameAndDisplayNumber() throws Exception {
         server.enqueue(new MockResponse.Builder()
                 .code(200)
                 .body("{\"verified_name\":\"Acme Corp\","

@@ -364,8 +364,10 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
         assertEquals(422, response.status.intValue());
         assertTrue(getContent(response).contains("Invalid OAuth access token"),
                 "422 body should surface the probe reason");
-        // Nothing persisted.
-        long count = commitInFreshTx(WhatsAppBinding::count);
+        // Nothing persisted. (S1612: kept as a lambda — Play enhances each entity
+        // with its own static count(); a method reference binds to the base
+        // GenericModel.count() and fails with "annotate with @Entity" at runtime.)
+        long count = commitInFreshTx(() -> WhatsAppBinding.count());
         assertEquals(0, count, "a failed probe must not persist the binding");
     }
 

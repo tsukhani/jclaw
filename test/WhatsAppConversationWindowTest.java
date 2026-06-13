@@ -77,7 +77,9 @@ class WhatsAppConversationWindowTest extends UnitTest {
             WhatsAppConversationWindow.recordInbound(BINDING, "", Instant.now());
             WhatsAppConversationWindow.recordInbound(BINDING, PEER, null);
         });
-        long count = Tx.run(WhatsAppConversationWindow::count);
+        // S1612: kept as a lambda — Tx.run is overloaded (Function0<T> + Runnable),
+        // so a value-returning method reference is ambiguous here.
+        long count = Tx.run(() -> WhatsAppConversationWindow.count());
         assertEquals(0, count, "null/blank inputs must not write a row");
     }
 }
