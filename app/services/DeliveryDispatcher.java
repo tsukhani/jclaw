@@ -49,6 +49,9 @@ public final class DeliveryDispatcher {
     private static final String SLACK = "slack";
     private static final String WHATSAPP = "whatsapp";
 
+    /** Suffix for the per-channel "binding is disabled" no-config message. */
+    private static final String BINDING_DISABLED_SUFFIX = "' is disabled.";
+
     /**
      * Outcome of a dispatch.
      *
@@ -173,7 +176,7 @@ public final class DeliveryDispatcher {
         }
         if (!binding.enabled) {
             return DispatchResult.noConfig(TELEGRAM,
-                    "Telegram binding for agent '" + binding.agent.name + "' is disabled.");
+                    "Telegram binding for agent '" + binding.agent.name + BINDING_DISABLED_SUFFIX);
         }
         // Use the agent-aware sendText path (not the raw trySend) so agent-emitted
         // markdown like **bold** and # heading is rendered through
@@ -203,7 +206,7 @@ public final class DeliveryDispatcher {
         }
         if (!binding.enabled) {
             return DispatchResult.noConfig(SLACK,
-                    "Slack binding for agent '" + binding.agent.name + "' is disabled.");
+                    "Slack binding for agent '" + binding.agent.name + BINDING_DISABLED_SUFFIX);
         }
         return SlackChannel.forToken(binding.botToken).sendWithRetry(channelId, text)
                 ? DispatchResult.delivered()
@@ -228,7 +231,7 @@ public final class DeliveryDispatcher {
         }
         if (!binding.enabled) {
             return DispatchResult.noConfig(WHATSAPP,
-                    "WhatsApp binding for agent '" + binding.agent.name + "' is disabled.");
+                    "WhatsApp binding for agent '" + binding.agent.name + BINDING_DISABLED_SUFFIX);
         }
         var channel = WhatsAppChannelFactory.forBinding(binding);
         if (channel == null) {

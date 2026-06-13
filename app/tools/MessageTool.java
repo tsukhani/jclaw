@@ -84,6 +84,10 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final String ERR_CALLING_AGENT = "Error: calling agent ";
     private static final String ERR_NOT_FOUND = " not found.";
 
+    // Channel discriminators used in the schema enum + per-channel target resolution.
+    private static final String CHANNEL_SLACK = "slack";
+    private static final String CHANNEL_WHATSAPP = "whatsapp";
+
     private static final String ACTION_SEND = "send";
     private static final String ACTION_DELETE = "delete";
     private static final String ACTION_PIN = "pin";
@@ -240,7 +244,7 @@ public class MessageTool implements ToolRegistry.Tool {
                 "Optional for action=\"poll\": seconds (5-600) the poll stays open "
                         + "before auto-closing. Omit to leave it open indefinitely."));
         props.put(PARAM_CHANNEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                SchemaKeys.ENUM, List.of("telegram", "slack", "whatsapp", "web"),
+                SchemaKeys.ENUM, List.of("telegram", CHANNEL_SLACK, CHANNEL_WHATSAPP, "web"),
                 SchemaKeys.DESCRIPTION,
                 "Channel to deliver on. Defaults to the calling agent's active "
                         + "conversation channel — e.g. a subagent spawned from a Telegram "
@@ -451,11 +455,11 @@ public class MessageTool implements ToolRegistry.Tool {
      * which destination the agent owns.
      */
     private static String perAgentBindingDestination(Agent agent, String channel) {
-        if ("slack".equalsIgnoreCase(channel)) {
+        if (CHANNEL_SLACK.equalsIgnoreCase(channel)) {
             var binding = SlackBinding.findByAgentOrAncestor(agent);
             return binding == null ? null : binding.ownerUserId;
         }
-        if ("whatsapp".equalsIgnoreCase(channel)) {
+        if (CHANNEL_WHATSAPP.equalsIgnoreCase(channel)) {
             var binding = WhatsAppBinding.findByAgentOrAncestor(agent);
             if (binding == null) return null;
             return binding.transport == WhatsAppTransport.WHATSAPP_WEB
@@ -473,12 +477,12 @@ public class MessageTool implements ToolRegistry.Tool {
      * legacy missing-target message.
      */
     private static String noDestinationError(Agent agent, String channel) {
-        if ("slack".equalsIgnoreCase(channel)) {
+        if (CHANNEL_SLACK.equalsIgnoreCase(channel)) {
             return "Error: no Slack destination configured for agent '" + agent.name
                     + "'. Set the owner on the agent's Slack binding (Channels settings), "
                     + "or pass an explicit 'target' (Slack channel or user id).";
         }
-        if ("whatsapp".equalsIgnoreCase(channel)) {
+        if (CHANNEL_WHATSAPP.equalsIgnoreCase(channel)) {
             return "Error: no WhatsApp destination configured for agent '" + agent.name
                     + "'. Set the WhatsApp-Web owner, or the Cloud-API default recipient, "
                     + "on the agent's WhatsApp binding (Channels settings), or pass an "

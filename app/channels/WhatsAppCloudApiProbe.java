@@ -34,6 +34,9 @@ public final class WhatsAppCloudApiProbe {
     private static final String FIELDS = "verified_name,code_verification_status,display_phone_number";
     private static final long PROBE_TIMEOUT_MS = 15_000L;
 
+    /** The Graph error envelope's top-level key ({@code {"error":{"message":...}}}). */
+    private static final String FIELD_ERROR = "error";
+
     /** Outcome of a credential probe. */
     public sealed interface Result permits Verified, Failed {}
 
@@ -145,8 +148,8 @@ public final class WhatsAppCloudApiProbe {
     private static String graphError(String body, int httpCode) {
         try {
             var json = JsonParser.parseString(body).getAsJsonObject();
-            if (json.has("error") && json.get("error").isJsonObject()) {
-                var err = json.getAsJsonObject("error");
+            if (json.has(FIELD_ERROR) && json.get(FIELD_ERROR).isJsonObject()) {
+                var err = json.getAsJsonObject(FIELD_ERROR);
                 var msg = optString(err, "message");
                 if (msg != null) {
                     return msg;

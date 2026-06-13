@@ -305,7 +305,7 @@ public final class WhatsAppMediaDownloader {
             WhatsAppBinding binding, WhatsAppInboundMessage msg, String agentName) {
         var session = WhatsAppCobaltRunner.session(binding.id);
         if (session == null || session.whatsapp() == null) {
-            EventLogger.warn("channel", agentName, "whatsapp",
+            EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
                     "No live WhatsApp-Web session for binding %s; skipping media".formatted(binding.id));
             return List.of();
         }
@@ -326,24 +326,24 @@ public final class WhatsAppMediaDownloader {
             WhatsAppCobaltSession session, WhatsAppInboundMessage.PendingMedia part, String agentName) {
         var info = session.recentMessage(part.mediaId());
         if (info == null) {
-            EventLogger.warn("channel", agentName, "whatsapp",
+            EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
                     "Inbound media message %s no longer cached; skipping".formatted(part.mediaId()));
             return null;
         }
         byte[] bytes;
         try {
             bytes = session.whatsapp().downloadMedia(info).get(DOWNLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return null;
         } catch (Exception e) {
-            EventLogger.warn("channel", agentName, "whatsapp",
+            EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
                     "WhatsApp-Web media download failed for %s: %s".formatted(part.mediaId(), e.getMessage()));
             return null;
         }
         if (bytes == null || bytes.length == 0) return null;
         if (bytes.length > MAX_FILE_BYTES) {
-            EventLogger.warn("channel", agentName, "whatsapp",
+            EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
                     "WhatsApp-Web media %s exceeds %d bytes; skipping".formatted(part.mediaId(), MAX_FILE_BYTES));
             return null;
         }
@@ -363,7 +363,7 @@ public final class WhatsAppMediaDownloader {
             Path stagedPath = AgentService.acquireContained(stagingDir, leaf);
             Files.write(stagedPath, bytes);
         } catch (IOException e) {
-            EventLogger.warn("channel", agentName, "whatsapp",
+            EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
                     "Failed to stage WhatsApp-Web media %s: %s".formatted(part.mediaId(), e.getMessage()));
             return null;
         }

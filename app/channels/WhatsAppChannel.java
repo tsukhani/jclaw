@@ -25,6 +25,9 @@ public class WhatsAppChannel implements Channel {
     private static final String WHATSAPP = "whatsapp";
     private static final String CHANNEL = "channel";
 
+    /** Graph messages-API envelope key, required on every outbound body. */
+    private static final String MESSAGING_PRODUCT = "messaging_product";
+
     public record WhatsAppConfig(String phoneNumberId, String accessToken, String appSecret, String verifyToken) {
         public static WhatsAppConfig load() {
             var cc = ChannelConfig.findByType(WHATSAPP);
@@ -171,7 +174,7 @@ public class WhatsAppChannel implements Channel {
             mediaObj.put("caption", caption);
         }
         var body = gson.toJson(Map.of(
-                "messaging_product", WHATSAPP,
+                MESSAGING_PRODUCT, WHATSAPP,
                 "to", peerId,
                 "type", type,
                 type, mediaObj
@@ -190,7 +193,7 @@ public class WhatsAppChannel implements Channel {
         if (config == null) return SendResult.FAILED;
         if (targetMessageId == null || targetMessageId.isBlank()) return SendResult.FAILED;
         var body = gson.toJson(Map.of(
-                "messaging_product", WHATSAPP,
+                MESSAGING_PRODUCT, WHATSAPP,
                 "to", peerId,
                 "type", "reaction",
                 "reaction", Map.of(
@@ -214,7 +217,7 @@ public class WhatsAppChannel implements Channel {
         var config = effectiveConfig();
         if (config == null) return SendResult.FAILED;
         var body = gson.toJson(Map.of(
-                "messaging_product", WHATSAPP,
+                MESSAGING_PRODUCT, WHATSAPP,
                 "to", peerId,
                 "type", "text",
                 "text", Map.of("body", text)
@@ -325,7 +328,7 @@ public class WhatsAppChannel implements Channel {
         var lang = templateLanguage != null && !templateLanguage.isBlank()
                 ? templateLanguage : DEFAULT_TEMPLATE_LANGUAGE;
         var body = gson.toJson(Map.of(
-                "messaging_product", WHATSAPP,
+                MESSAGING_PRODUCT, WHATSAPP,
                 "to", peerId,
                 "type", "template",
                 "template", Map.of(
@@ -345,7 +348,7 @@ public class WhatsAppChannel implements Channel {
         var fileBody = okhttp3.RequestBody.create(file, okhttp3.MediaType.parse(mime));
         var multipart = new okhttp3.MultipartBody.Builder()
                 .setType(okhttp3.MultipartBody.FORM)
-                .addFormDataPart("messaging_product", WHATSAPP)
+                .addFormDataPart(MESSAGING_PRODUCT, WHATSAPP)
                 .addFormDataPart("type", mime)
                 .addFormDataPart("file", file.getName(), fileBody)
                 .build();
@@ -397,7 +400,7 @@ public class WhatsAppChannel implements Channel {
     public static void markAsRead(WhatsAppConfig config, String messageId) {
         var url = API_BASE + config.phoneNumberId() + "/messages";
         var body = gson.toJson(Map.of(
-                "messaging_product", WHATSAPP,
+                MESSAGING_PRODUCT, WHATSAPP,
                 "status", "read",
                 "message_id", messageId
         ));

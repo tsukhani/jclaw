@@ -43,6 +43,22 @@ public final class WhatsAppCloudApiParser {
 
     private WhatsAppCloudApiParser() {}
 
+    // WhatsApp Cloud-API message-type discriminators (the {@code message.type} value
+    // and the matching sub-object key share the same string).
+    private static final String TYPE_AUDIO = "audio";
+    private static final String TYPE_LOCATION = "location";
+    private static final String TYPE_REACTION = "reaction";
+    private static final String TYPE_INTERACTIVE = "interactive";
+    private static final String FIELD_VOICE = "voice";
+
+    /**
+     * The per-message envelope fields shared by every per-type builder — the
+     * sender/routing identity carried unchanged onto the normalized record.
+     * Grouped so each builder stays under the 7-param limit.
+     */
+    private record Envelope(String messageId, String from, String phoneNumberId,
+                            String senderName, String quotedId) {}
+
     /**
      * Parse the first user message out of a Cloud-API webhook payload, or
      * {@code null} when the payload carries no parseable user message (status
@@ -77,21 +93,18 @@ public final class WhatsAppCloudApiParser {
         var phoneNumberId = metadataPhoneNumberId(value);
         var senderName = contactName(value);
         var quotedId = quotedMessageId(msg);
+        var envelope = new Envelope(messageId, from, phoneNumberId, senderName, quotedId);
 
         return switch (type) {
-            case "text" -> text(msg, messageId, from, phoneNumberId, senderName, quotedId);
-            case "image" -> media(msg, "image", MessageType.IMAGE, false,
-                    messageId, from, phoneNumberId, senderName, quotedId);
-            case "video" -> media(msg, "video", MessageType.VIDEO, false,
-                    messageId, from, phoneNumberId, senderName, quotedId);
-            case "audio" -> audio(msg, messageId, from, phoneNumberId, senderName, quotedId);
-            case "document" -> media(msg, "document", MessageType.DOCUMENT, false,
-                    messageId, from, phoneNumberId, senderName, quotedId);
-            case "sticker" -> media(msg, "sticker", MessageType.STICKER, false,
-                    messageId, from, phoneNumberId, senderName, quotedId);
-            case "location" -> location(msg, messageId, from, phoneNumberId, senderName, quotedId);
-            case "reaction" -> reaction(msg, messageId, from, phoneNumberId, senderName, quotedId);
-            case "interactive" -> interactive(msg, messageId, from, phoneNumberId, senderName, quotedId);
+            case "text" -> text(msg, envelope);
+            case "image" -> media(msg, "image", MessageType.IMAGE, false, envelope);
+            case "video" -> media(msg, "video", MessageType.VIDEO, false, envelope);
+            case TYPE_AUDIO -> audio(msg, envelope);
+            case "document" -> media(msg, "document", MessageType.DOCUMENT, false, envelope);
+            case "sticker" -> media(msg, "sticker", MessageType.STICKER, false, envelope);
+            case TYPE_LOCATION -> location(msg, envelope);
+            case TYPE_REACTION -> reaction(msg, envelope);
+            case TYPE_INTERACTIVE -> interactive(msg, envelope);
             // button (template-reply), contacts, order, system, unsupported, etc.
             // have no normalized mapping — drop them (the webhook still fast-acks).
             default -> null;
@@ -100,12 +113,10 @@ public final class WhatsAppCloudApiParser {
 
     // ── per-type builders ──
 
-    private static WhatsAppInboundMessage text(JsonObject msg, String messageId, String from,
-                                               String phoneNumberId, String senderName, String quotedId) {
+    private static WhatsAppInboundMessage text(JsonObject msg, Envelope envelope) {
         var body = msg.has("text") ? optString(msg.getAsJsonObject("text"), "body") : null;
         if (body == null) return null;
-        return base(MessageType.TEXT, body, null, null, List.of(),
-                messageId, from, phoneNumberId, senderName, quotedId);
+        return base(MessageType.TEXT, body, null, null, List.of(), envelope);
     }
 
     /**
@@ -114,8 +125,7 @@ public final class WhatsAppCloudApiParser {
      * {@code caption} becomes the message text.
      */
     private static WhatsAppInboundMessage media(JsonObject msg, String key, MessageType type,
-                                                boolean voiceNote, String messageId, String from,
-                                                String phoneNumberId, String senderName, String quotedId) {
+                                                boolean voiceNote, Envelope envelope) {
         if (!msg.has(key)) return null;
         var obj = msg.getAsJsonObject(key);
         var mediaId = optString(obj, "id");
@@ -124,50 +134,43 @@ public final class WhatsAppCloudApiParser {
         var filename = optString(obj, "filename");
         var caption = optString(obj, "caption");
         var pending = new WhatsAppInboundMessage.PendingMedia(mediaId, mime, 0L, filename, voiceNote);
-        return base(type, caption, null, null, List.of(pending),
-                messageId, from, phoneNumberId, senderName, quotedId);
+        return base(type, caption, null, null, List.of(pending), envelope);
     }
 
     /** audio — same as {@link #media} but flags voice/PTT clips
      *  ({@code audio.voice == true}). Audio carries no caption. */
-    private static WhatsAppInboundMessage audio(JsonObject msg, String messageId, String from,
-                                                String phoneNumberId, String senderName, String quotedId) {
-        if (!msg.has("audio")) return null;
-        var obj = msg.getAsJsonObject("audio");
+    private static WhatsAppInboundMessage audio(JsonObject msg, Envelope envelope) {
+        if (!msg.has(TYPE_AUDIO)) return null;
+        var obj = msg.getAsJsonObject(TYPE_AUDIO);
         var mediaId = optString(obj, "id");
         if (mediaId == null) return null;
         var mime = optString(obj, "mime_type");
-        var voice = obj.has("voice") && !obj.get("voice").isJsonNull() && obj.get("voice").getAsBoolean();
+        var voice = obj.has(FIELD_VOICE) && !obj.get(FIELD_VOICE).isJsonNull() && obj.get(FIELD_VOICE).getAsBoolean();
         var pending = new WhatsAppInboundMessage.PendingMedia(mediaId, mime, 0L, null, voice);
-        return base(MessageType.AUDIO, null, null, null, List.of(pending),
-                messageId, from, phoneNumberId, senderName, quotedId);
+        return base(MessageType.AUDIO, null, null, null, List.of(pending), envelope);
     }
 
-    private static WhatsAppInboundMessage location(JsonObject msg, String messageId, String from,
-                                                   String phoneNumberId, String senderName, String quotedId) {
-        if (!msg.has("location")) return null;
-        var obj = msg.getAsJsonObject("location");
+    private static WhatsAppInboundMessage location(JsonObject msg, Envelope envelope) {
+        if (!msg.has(TYPE_LOCATION)) return null;
+        var obj = msg.getAsJsonObject(TYPE_LOCATION);
         if (!obj.has("latitude") || !obj.has("longitude")) return null;
         var loc = new WhatsAppInboundMessage.Location(
                 obj.get("latitude").getAsDouble(),
                 obj.get("longitude").getAsDouble(),
                 optString(obj, "name"),
                 optString(obj, "address"));
-        return base(MessageType.LOCATION, null, loc, null, List.of(),
-                messageId, from, phoneNumberId, senderName, quotedId);
+        return base(MessageType.LOCATION, null, loc, null, List.of(), envelope);
     }
 
-    private static WhatsAppInboundMessage reaction(JsonObject msg, String messageId, String from,
-                                                   String phoneNumberId, String senderName, String quotedId) {
-        if (!msg.has("reaction")) return null;
-        var obj = msg.getAsJsonObject("reaction");
+    private static WhatsAppInboundMessage reaction(JsonObject msg, Envelope envelope) {
+        if (!msg.has(TYPE_REACTION)) return null;
+        var obj = msg.getAsJsonObject(TYPE_REACTION);
         var targetId = optString(obj, "message_id");
         if (targetId == null) return null;
         // emoji is omitted when a reaction is REMOVED — normalize to "" (blank).
         var emoji = optString(obj, "emoji");
         var r = new WhatsAppInboundMessage.Reaction(targetId, emoji != null ? emoji : "");
-        return base(MessageType.REACTION, null, null, r, List.of(),
-                messageId, from, phoneNumberId, senderName, quotedId);
+        return base(MessageType.REACTION, null, null, r, List.of(), envelope);
     }
 
     /**
@@ -176,10 +179,9 @@ public final class WhatsAppCloudApiParser {
      * reply {@code id} is the developer-defined payload; the title is what the user
      * read, so it's the natural text. Falls back to the id when no title is present.
      */
-    private static WhatsAppInboundMessage interactive(JsonObject msg, String messageId, String from,
-                                                      String phoneNumberId, String senderName, String quotedId) {
-        if (!msg.has("interactive")) return null;
-        var obj = msg.getAsJsonObject("interactive");
+    private static WhatsAppInboundMessage interactive(JsonObject msg, Envelope envelope) {
+        if (!msg.has(TYPE_INTERACTIVE)) return null;
+        var obj = msg.getAsJsonObject(TYPE_INTERACTIVE);
         JsonObject reply = null;
         if (obj.has("button_reply")) {
             reply = obj.getAsJsonObject("button_reply");
@@ -191,8 +193,7 @@ public final class WhatsAppCloudApiParser {
         var id = optString(reply, "id");
         var body = title != null ? title : id;
         if (body == null) return null;
-        return base(MessageType.TEXT, body, null, null, List.of(),
-                messageId, from, phoneNumberId, senderName, quotedId);
+        return base(MessageType.TEXT, body, null, null, List.of(), envelope);
     }
 
     // ── shared assembly ──
@@ -206,22 +207,21 @@ public final class WhatsAppCloudApiParser {
                                                WhatsAppInboundMessage.Location location,
                                                WhatsAppInboundMessage.Reaction reaction,
                                                List<WhatsAppInboundMessage.PendingMedia> media,
-                                               String messageId, String from, String phoneNumberId,
-                                               String senderName, String quotedId) {
+                                               Envelope envelope) {
         return new WhatsAppInboundMessage(
-                messageId,
-                from,
-                from,                                   // chatId == from for a 1:1
+                envelope.messageId(),
+                envelope.from(),
+                envelope.from(),                        // chatId == from for a 1:1
                 WhatsAppInboundMessage.CHAT_DIRECT,     // Cloud API has no groups
-                phoneNumberId,
+                envelope.phoneNumberId(),
                 type,
                 text,
                 location,
                 reaction,
                 media,
                 true,                                   // DM to a business number is implicitly addressed
-                quotedId,
-                senderName);
+                envelope.quotedId(),
+                envelope.senderName());
     }
 
     // ── payload navigation helpers ──
