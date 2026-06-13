@@ -91,6 +91,17 @@ export interface WhatsAppBindingSummary {
   hasAccessToken: boolean
   hasAppSecret: boolean
   hasVerifyToken: boolean
+  /** JCLAW-445: Meta's verified business name, populated after a successful
+   *  Graph verify probe on save. Cloud-API only; null until verified. */
+  verifiedName: string | null
+  /** JCLAW-445: Meta's human-readable phone number (e.g. +1 555-…). Cloud-API
+   *  only; null until verified. */
+  displayPhoneNumber: string | null
+  /** JCLAW-445: pre-approved template name used for replies sent outside
+   *  WhatsApp's 24-hour customer-service window. Cloud-API only; null when unset. */
+  templateName: string | null
+  /** JCLAW-445: BCP-47 language for {@link templateName}, e.g. en_US. */
+  templateLanguage: string | null
   enabled: boolean
   createdAt: string | null
   updatedAt: string | null

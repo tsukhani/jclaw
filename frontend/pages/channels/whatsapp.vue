@@ -2,8 +2,12 @@
 import {
   ExclamationTriangleIcon,
   PencilIcon,
+  QrCodeIcon,
   TrashIcon,
 } from '@heroicons/vue/24/outline'
+// Privacy: the QR is rendered locally with the qrcode lib. The raw pairing
+// string is NEVER sent to any third-party/external QR service or URL.
+import QRCode from 'qrcode'
 import type { Agent, WhatsAppBindingSummary } from '~/types/api'
 
 const [{ data: bindings, refresh }, { data: agents }] = await Promise.all([
@@ -29,7 +33,7 @@ const availableAgents = computed(() => {
   return enabledAgents.value.filter(a => !taken.has(a.id))
 })
 
-const { mutate, loading: saving } = useApiMutation()
+const { mutate, loading: saving, error: mutationError } = useApiMutation()
 const { confirm } = useConfirm()
 
 const creating = ref(false)
@@ -44,6 +48,10 @@ interface BindingForm {
   accessToken: string
   appSecret: string
   verifyToken: string
+  // JCLAW-445: pre-approved template (name + BCP-47 language) used for replies
+  // sent outside WhatsApp's 24-hour window. Cloud-API only, optional.
+  templateName: string
+  templateLanguage: string
   agentId: number | null
   agentQuery: string
 }
@@ -54,6 +62,8 @@ const emptyForm = (): BindingForm => ({
   accessToken: '',
   appSecret: '',
   verifyToken: '',
+  templateName: '',
+  templateLanguage: '',
   agentId: null,
   agentQuery: '',
 })
@@ -95,6 +105,8 @@ function openEdit(binding: WhatsAppBindingSummary) {
     accessToken: '',
     appSecret: '',
     verifyToken: '',
+    templateName: binding.templateName ?? '',
+    templateLanguage: binding.templateLanguage ?? '',
     agentId: binding.agentId,
     agentQuery: binding.agentName ?? '',
   }
@@ -143,10 +155,19 @@ async function save() {
     if (form.value.accessToken.trim()) body.accessToken = form.value.accessToken.trim()
     if (form.value.appSecret.trim()) body.appSecret = form.value.appSecret.trim()
     if (form.value.verifyToken.trim()) body.verifyToken = form.value.verifyToken.trim()
+    // JCLAW-445: optional out-of-window template. Sent only when provided.
+    if (form.value.templateName.trim()) body.templateName = form.value.templateName.trim()
+    if (form.value.templateLanguage.trim()) body.templateLanguage = form.value.templateLanguage.trim()
   }
   const result = await mutate(url, { method, body })
   if (result === null) {
-    errorMessage.value = 'Save failed — check server logs for details.'
+    // JCLAW-445: a Cloud-API save runs a Graph verify probe server-side and
+    // rejects with 422 when the number isn't a registered WhatsApp Business
+    // number. Surface that specifically; fall back to the generic message
+    // for any other failure (and for WhatsApp-Web, which has no verify probe).
+    errorMessage.value = isCloud.value && mutationError.value?.includes('422')
+      ? 'Couldn\'t verify this Cloud API number — check the phone number id and access token (it must be a registered WhatsApp Business number).'
+      : 'Save failed — check server logs for details.'
     return
   }
   closeModal()
@@ -176,6 +197,87 @@ async function remove(binding: WhatsAppBindingSummary) {
 function transportLabel(t: string | null): string {
   return t === 'WHATSAPP_WEB' ? 'WhatsApp-Web' : 'Cloud API'
 }
+
+// ── JCLAW-448: WhatsApp-Web QR pairing ────────────────────────────────────
+// The pairing string rotates every ~20s while unpaired; we poll the binding's
+// /qr endpoint, re-render the QR image locally whenever the string changes, and
+// stop once the session connects (paired=true). The poll interval is cleaned up
+// on close and on unmount so it can't leak.
+
+interface QrResponse {
+  bindingId: number
+  transport: string
+  paired: boolean
+  qr: string | null
+}
+
+const pairing = ref<WhatsAppBindingSummary | null>(null)
+const pairImageUrl = ref('')
+const pairConnected = ref(false)
+const pairError = ref('')
+const lastQrString = ref('')
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+function stopPoll() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+async function pollQr() {
+  const binding = pairing.value
+  if (!binding) return
+  const result = await mutate<QrResponse>(`/api/channels/whatsapp/bindings/${binding.id}/qr`, { method: 'GET' })
+  // Guard against a late response after the panel was closed/switched.
+  if (!pairing.value || pairing.value.id !== binding.id) return
+  if (result === null) {
+    pairError.value = 'Couldn\'t reach the pairing service — check server logs.'
+    return
+  }
+  pairError.value = ''
+  if (result.paired) {
+    stopPoll()
+    pairConnected.value = true
+    pairImageUrl.value = ''
+    lastQrString.value = ''
+    refresh() // pick up the now-paired state on the card
+    return
+  }
+  // Re-render only when the rotating string actually changed.
+  if (result.qr && result.qr !== lastQrString.value) {
+    lastQrString.value = result.qr
+    try {
+      // Local render only — the raw pairing string never leaves the browser.
+      pairImageUrl.value = await QRCode.toDataURL(result.qr, { margin: 1, width: 256 })
+    }
+    catch {
+      pairError.value = 'Couldn\'t render the QR code.'
+    }
+  }
+}
+
+function openPairing(binding: WhatsAppBindingSummary) {
+  stopPoll()
+  pairing.value = binding
+  pairImageUrl.value = ''
+  pairConnected.value = false
+  pairError.value = ''
+  lastQrString.value = ''
+  pollQr() // immediate first fetch, then on an interval
+  pollTimer = setInterval(pollQr, 2000)
+}
+
+function closePairing() {
+  stopPoll()
+  pairing.value = null
+  pairImageUrl.value = ''
+  pairConnected.value = false
+  pairError.value = ''
+  lastQrString.value = ''
+}
+
+onBeforeUnmount(stopPoll)
 </script>
 
 <template>
@@ -280,9 +382,42 @@ function transportLabel(t: string | null): string {
               not yet paired
             </dd>
           </div>
+          <!-- JCLAW-445: Meta's verified business name + display number, shown
+               once the Cloud-API save's verify probe has succeeded. -->
+          <div
+            v-if="b.transport !== 'WHATSAPP_WEB' && b.verifiedName"
+            class="flex justify-between gap-4 text-emerald-400"
+          >
+            <dt>Verified</dt>
+            <dd
+              class="font-mono truncate"
+              :title="b.displayPhoneNumber ? `${b.verifiedName} (${b.displayPhoneNumber})` : b.verifiedName"
+            >
+              {{ b.verifiedName }}<template v-if="b.displayPhoneNumber">
+                ({{ b.displayPhoneNumber }})
+              </template>
+            </dd>
+          </div>
         </dl>
 
         <div class="flex justify-end items-center gap-1">
+          <!-- JCLAW-448: open the QR-pairing panel for an unofficial
+               WhatsApp-Web binding. -->
+          <button
+            v-if="b.transport === 'WHATSAPP_WEB'"
+            type="button"
+            title="Pair this number by scanning a QR code"
+            aria-label="Pair binding"
+            class="px-2 py-1 mr-auto inline-flex items-center gap-1 text-xs text-fg-muted
+                   hover:text-emerald-400 border border-border transition-colors"
+            @click="openPairing(b)"
+          >
+            <QrCodeIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+            Pair
+          </button>
           <button
             type="button"
             title="Edit binding"
@@ -460,6 +595,43 @@ function transportLabel(t: string | null): string {
                      focus:outline-hidden focus:border-ring transition-colors"
             >
           </label>
+
+          <!-- JCLAW-445: optional pre-approved template for out-of-window replies. -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label
+              for="binding-template-name"
+              class="block"
+            >
+              <span class="block text-xs text-fg-muted mb-1">templateName (optional)</span>
+              <input
+                id="binding-template-name"
+                v-model="form.templateName"
+                type="text"
+                placeholder="e.g. assistant_reply"
+                class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                       focus:outline-hidden focus:border-ring transition-colors"
+              >
+            </label>
+            <label
+              for="binding-template-language"
+              class="block"
+            >
+              <span class="block text-xs text-fg-muted mb-1">templateLanguage (optional)</span>
+              <input
+                id="binding-template-language"
+                v-model="form.templateLanguage"
+                type="text"
+                placeholder="e.g. en_US"
+                class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                       focus:outline-hidden focus:border-ring transition-colors"
+              >
+            </label>
+          </div>
+          <p class="text-xs text-fg-muted">
+            Used to reply outside WhatsApp's 24-hour customer-service window: after
+            24 hours of silence Meta only allows a pre-approved template message, so
+            set this to keep late replies deliverable.
+          </p>
         </template>
 
         <label
@@ -530,6 +702,65 @@ function transportLabel(t: string | null): string {
         >
           Cancel
         </button>
+      </div>
+    </div>
+
+    <!-- JCLAW-448: WhatsApp-Web QR pairing panel. Polls the binding's /qr
+         endpoint and renders the rotating pairing string as a QR image locally
+         (the raw string never leaves the browser). -->
+    <div
+      v-if="pairing"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pair WhatsApp-Web number"
+    >
+      <div class="w-full max-w-sm bg-surface-elevated border border-border p-6">
+        <h2 class="text-sm font-medium text-fg-strong mb-1">
+          Pair {{ pairing.agentName ?? 'binding' }}
+        </h2>
+        <p class="text-xs text-fg-muted mb-4">
+          On the phone you want to link, open WhatsApp → Settings → Linked Devices →
+          Link a Device, then scan this code. It refreshes every few seconds until
+          you scan it.
+        </p>
+
+        <div class="flex flex-col items-center gap-3 min-h-[16rem] justify-center">
+          <p
+            v-if="pairConnected"
+            class="text-sm text-emerald-400 font-medium"
+          >
+            Connected ✓
+          </p>
+          <p
+            v-else-if="pairError"
+            class="text-xs text-red-400 text-center"
+          >
+            {{ pairError }}
+          </p>
+          <img
+            v-else-if="pairImageUrl"
+            :src="pairImageUrl"
+            alt="WhatsApp-Web pairing QR code"
+            class="w-56 h-56 bg-white p-2"
+          >
+          <p
+            v-else
+            class="text-xs text-fg-muted"
+          >
+            Waiting for a pairing code…
+          </p>
+        </div>
+
+        <div class="flex justify-end mt-4">
+          <button
+            type="button"
+            class="px-4 py-1.5 text-sm text-fg-muted hover:text-fg-strong transition-colors"
+            @click="closePairing"
+          >
+            {{ pairConnected ? 'Close' : 'Cancel' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>

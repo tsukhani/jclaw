@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { clearNuxtData } from '#app'
 import { nextTick } from 'vue'
@@ -7,6 +7,14 @@ import WhatsApp from '~/pages/channels/whatsapp.vue'
 // JCLAW-444: per-agent WhatsApp bindings with a per-binding transport choice —
 // CLOUD_API (official Cloud API, credential fields) or WHATSAPP_WEB (unofficial
 // QR-paired Cobalt, ban-warned, no credentials here).
+// JCLAW-445: Cloud-API verification UX (verified name/number, template fields,
+// 422-on-save error). JCLAW-448: WhatsApp-Web QR pairing UI.
+
+// jsdom/happy-dom has no real canvas; stub the qrcode render so toDataURL
+// returns a deterministic data URL without touching a canvas.
+vi.mock('qrcode', () => ({
+  default: { toDataURL: vi.fn(async () => 'data:image/png;base64,STUBQR') },
+}))
 
 const AGENT = { id: 1, name: 'main', enabled: true, isMain: true, modelProvider: 'openrouter', modelId: 'gpt-4.1' }
 
@@ -20,6 +28,10 @@ function binding(overrides: Record<string, unknown> = {}) {
     hasAccessToken: true,
     hasAppSecret: true,
     hasVerifyToken: true,
+    verifiedName: null,
+    displayPhoneNumber: null,
+    templateName: null,
+    templateLanguage: null,
     enabled: true,
     createdAt: null,
     updatedAt: null,
@@ -28,14 +40,18 @@ function binding(overrides: Record<string, unknown> = {}) {
 }
 
 let bindingsResponse: unknown[] = []
+let qrResponse: Record<string, unknown> = { bindingId: 7, transport: 'WHATSAPP_WEB', paired: false, qr: 'pair-string-abc' }
 
 registerEndpoint('/api/agents', () => [AGENT])
 registerEndpoint('/api/channels/whatsapp/bindings', () => bindingsResponse)
+// JCLAW-448: the QR-pairing poll endpoint. Path id varies; match the suffix.
+registerEndpoint('/api/channels/whatsapp/bindings/7/qr', () => qrResponse)
 
 beforeEach(() => {
   // useFetch caches by URL across mounts; clear so each test re-fetches.
   clearNuxtData()
   bindingsResponse = []
+  qrResponse = { bindingId: 7, transport: 'WHATSAPP_WEB', paired: false, qr: 'pair-string-abc' }
 })
 
 describe('whatsapp bindings page — transport choice + cards (JCLAW-444)', () => {
@@ -132,5 +148,100 @@ describe('whatsapp bindings page — transport choice + cards (JCLAW-444)', () =
     const token = c.find('#binding-access-token').element as HTMLInputElement
     expect(token.value).toBe('')
     expect(token.placeholder).toContain('leave blank to keep')
+  })
+})
+
+describe('whatsapp Cloud-API verification UX (JCLAW-445)', () => {
+  it('shows the verified business name + display number on a Cloud-API card', async () => {
+    bindingsResponse = [binding({ verifiedName: 'Acme Bot', displayPhoneNumber: '+1 555-0100' })]
+    const c = await mountSuspended(WhatsApp)
+    const text = c.text()
+    expect(text).toContain('Verified')
+    expect(text).toContain('Acme Bot')
+    expect(text).toContain('+1 555-0100')
+  })
+
+  it('omits the verified row when verifiedName is null', async () => {
+    bindingsResponse = [binding({ verifiedName: null })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.text()).not.toContain('Verified')
+  })
+
+  it('exposes templateName + templateLanguage fields when transport is Cloud-API', async () => {
+    const c = await mountSuspended(WhatsApp)
+    await c.findAll('button').find(b => b.text() === '+ New binding')!.trigger('click')
+    await nextTick()
+    expect(c.find('#binding-template-name').exists()).toBe(true)
+    expect(c.find('#binding-template-language').exists()).toBe(true)
+    expect(c.text()).toContain('24-hour')
+  })
+
+  it('hides the template fields on WhatsApp-Web', async () => {
+    const c = await mountSuspended(WhatsApp)
+    await c.findAll('button').find(b => b.text() === '+ New binding')!.trigger('click')
+    await nextTick()
+    await c.find('#binding-transport').setValue('WHATSAPP_WEB')
+    await nextTick()
+    expect(c.find('#binding-template-name').exists()).toBe(false)
+  })
+
+  it('pre-fills template fields when editing a Cloud-API binding', async () => {
+    bindingsResponse = [binding({ templateName: 'assistant_reply', templateLanguage: 'en_US' })]
+    const c = await mountSuspended(WhatsApp)
+    await c.find('[aria-label="Edit binding"]').trigger('click')
+    await nextTick()
+    expect((c.find('#binding-template-name').element as HTMLInputElement).value).toBe('assistant_reply')
+    expect((c.find('#binding-template-language').element as HTMLInputElement).value).toBe('en_US')
+  })
+})
+
+describe('whatsapp WhatsApp-Web QR pairing (JCLAW-448)', () => {
+  it('exposes a Pair control on a WhatsApp-Web card', async () => {
+    bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find('[aria-label="Pair binding"]').exists()).toBe(true)
+  })
+
+  it('does not show a Pair control on a Cloud-API card', async () => {
+    bindingsResponse = [binding({ transport: 'CLOUD_API' })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find('[aria-label="Pair binding"]').exists()).toBe(false)
+  })
+
+  it('opens the pairing panel and renders the polled QR string as a local image', async () => {
+    bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
+    const c = await mountSuspended(WhatsApp)
+    await c.find('[aria-label="Pair binding"]').trigger('click')
+    // Let the immediate first poll + async QR render settle.
+    await new Promise(r => setTimeout(r, 0))
+    await nextTick()
+    expect(c.find('[role="dialog"]').exists()).toBe(true)
+    const img = c.find('img[alt="WhatsApp-Web pairing QR code"]')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toBe('data:image/png;base64,STUBQR')
+  })
+
+  it('shows a Connected state and stops once paired=true', async () => {
+    bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
+    qrResponse = { bindingId: 7, transport: 'WHATSAPP_WEB', paired: true, qr: null }
+    const c = await mountSuspended(WhatsApp)
+    await c.find('[aria-label="Pair binding"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    await nextTick()
+    expect(c.text()).toContain('Connected')
+    // No QR image while paired.
+    expect(c.find('img[alt="WhatsApp-Web pairing QR code"]').exists()).toBe(false)
+  })
+
+  it('closes the pairing panel on Cancel', async () => {
+    bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
+    const c = await mountSuspended(WhatsApp)
+    await c.find('[aria-label="Pair binding"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    await nextTick()
+    expect(c.find('[role="dialog"]').exists()).toBe(true)
+    await c.findAll('button').find(b => b.text() === 'Cancel' || b.text() === 'Close')!.trigger('click')
+    await nextTick()
+    expect(c.find('[role="dialog"]').exists()).toBe(false)
   })
 })
