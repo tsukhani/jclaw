@@ -1,4 +1,8 @@
+import channels.SlackChannel;
+import channels.SlackChannel.DeliveryOutcome;
+import channels.SlackChannel.DeliverySender;
 import models.Agent;
+import models.SlackBinding;
 import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,6 +14,8 @@ import services.DeliveryDispatcher;
 import services.DeliveryDispatcher.DispatchResult;
 import services.EventLogger;
 import services.Tx;
+
+import java.lang.reflect.Field;
 
 /**
  * JCLAW-327 tests: the shared dispatch backbone for the {@code message}
@@ -23,15 +29,59 @@ import services.Tx;
  */
 class DeliveryDispatcherTest extends UnitTest {
 
+    // JCLAW-454: swap SlackChannel's resolve+post delivery primitive for an in-memory
+    // fake (package-private seam, via reflection — mirrors SlackFileUploaderTest) so the
+    // Slack dispatch path is exercised without the network. No other test class reaches
+    // SlackChannel.sendForDelivery with an enabled binding, so the global swap is race-free.
+    private static final Field SENDER_FIELD;
+    static {
+        try {
+            SENDER_FIELD = SlackChannel.class.getDeclaredField("DELIVERY_SENDER");
+            SENDER_FIELD.setAccessible(true);
+        } catch (NoSuchFieldException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    static final class FakeSender implements DeliverySender {
+        String lastTarget;
+        DeliveryOutcome outcome = DeliveryOutcome.delivered();
+
+        @Override
+        public DeliveryOutcome send(String botToken, String target, String text) {
+            lastTarget = target;
+            return outcome;
+        }
+    }
+
+    private Object originalSender;
+    private FakeSender fakeSender;
+
     @BeforeEach
-    void setup() {
+    void setup() throws Exception {
         Fixtures.deleteDatabase();
         EventLogger.clear();
+        originalSender = SENDER_FIELD.get(null);
+        fakeSender = new FakeSender();
+        SENDER_FIELD.set(null, fakeSender);
     }
 
     @AfterEach
-    void teardown() {
+    void teardown() throws Exception {
+        SENDER_FIELD.set(null, originalSender);
         EventLogger.clear();
+    }
+
+    /** Seed an enabled Slack binding for {@code agent} (unique bot token per agent). */
+    private void enableSlack(Agent agent) {
+        Tx.run(() -> {
+            var b = new SlackBinding();
+            b.agent = agent;
+            b.botToken = "xoxb-454-" + agent.name;
+            b.signingSecret = "sec";
+            b.enabled = true;
+            b.save();
+        });
     }
 
     @Test
@@ -269,6 +319,39 @@ class DeliveryDispatcherTest extends UnitTest {
         assertFalse(result.ok());
         assertEquals(DispatchResult.Status.FAILED_NO_CONFIG, result.status());
         assertTrue(result.reason().contains("Slack"));
+    }
+
+    @Test
+    void slackDeliveryToChannelNameSucceeds() {
+        // JCLAW-454: a human channel-name target ("daily-briefings") flows through to the
+        // resolve+post path; an accepted send yields DELIVERED.
+        var parent = createAgent("ds-slack-ok");
+        enableSlack(parent);
+        fakeSender.outcome = DeliveryOutcome.delivered();
+        var result = Tx.run(() -> DeliveryDispatcher.dispatchSpec(parent, "slack:daily-briefings", "the briefing"));
+        assertTrue(result.ok(), "enabled binding + accepted send must deliver: " + result.reason());
+        assertEquals(DispatchResult.Status.DELIVERED, result.status());
+        assertEquals("daily-briefings", fakeSender.lastTarget,
+                "the channel-name target is handed to the resolve+post path verbatim");
+    }
+
+    @Test
+    void slackDeliveryErrorCodeReachesDeliveryError() {
+        // JCLAW-454 AC#3: the real Slack error code must surface on the DispatchResult.reason
+        // (which TaskExecutor stamps onto delivery_error) instead of a generic "see logs"
+        // message, and carry an actionable remedy that names the channel.
+        var parent = createAgent("ds-slack-notinchan");
+        enableSlack(parent);
+        fakeSender.outcome = DeliveryOutcome.failed("not_in_channel");
+        var result = Tx.run(() -> DeliveryDispatcher.dispatchSpec(parent, "slack:#private-room", "hi"));
+        assertFalse(result.ok());
+        assertEquals(DispatchResult.Status.FAILED_DELIVERY, result.status());
+        assertTrue(result.reason().contains("not_in_channel"),
+                "the real Slack error code must surface on delivery_error: " + result.reason());
+        assertTrue(result.reason().contains("invite the bot"),
+                "the reason must include an actionable remedy: " + result.reason());
+        assertTrue(result.reason().contains("private-room"),
+                "the reason must name the target channel: " + result.reason());
     }
 
     @Test

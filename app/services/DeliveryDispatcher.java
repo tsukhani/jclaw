@@ -208,10 +208,32 @@ public final class DeliveryDispatcher {
             return DispatchResult.noConfig(SLACK,
                     "Slack binding for agent '" + binding.agent.name + BINDING_DISABLED_SUFFIX);
         }
-        return SlackChannel.forToken(binding.botToken).sendWithRetry(channelId, text)
+        // JCLAW-454: channelId may be a channel name (`daily-briefings` / `#daily-briefings`)
+        // or a literal id — sendForDelivery resolves it and reports Slack's real error code
+        // so a failure lands on the run's delivery_error, not just the log.
+        var outcome = SlackChannel.sendForDelivery(binding.botToken, channelId, text);
+        return outcome.ok()
                 ? DispatchResult.delivered()
-                : DispatchResult.failedDelivery(
-                        "Slack API rejected the message (see logs for details).");
+                : DispatchResult.failedDelivery(slackFailureReason(channelId, outcome.error()));
+    }
+
+    /** JCLAW-454: turn Slack's error code into an actionable {@code delivery_error}
+     *  message that names the channel and the likeliest fix. */
+    private static String slackFailureReason(String target, String error) {
+        if (error == null || error.isBlank()) {
+            return "Slack rejected delivery to '" + target + "' (see logs for details).";
+        }
+        String remedy = switch (error) {
+            case "channel_not_found", "not_in_channel" -> " The channel was not found or the bot is not a "
+                    + "member — if it's private, invite the bot to it; if public, check the name or grant "
+                    + "the bot the chat:write.public scope.";
+            case "is_archived" -> " The channel is archived.";
+            case "msg_too_long" -> " The message exceeds Slack's length limit.";
+            case "missing_scope", "not_authed", "invalid_auth", "token_revoked", "account_inactive" ->
+                    " The bot token is missing a required scope or is no longer valid — reconnect the Slack bot.";
+            default -> "";
+        };
+        return "Slack rejected delivery to '" + target + "': " + error + "." + remedy;
     }
 
     private static DispatchResult dispatchWhatsApp(Agent agent, String phoneNumber, String text) {

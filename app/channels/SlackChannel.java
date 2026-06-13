@@ -9,8 +9,12 @@ import com.slack.api.methods.request.chat.ChatPostMessageRequest;
 import com.slack.api.model.event.MessageEvent;
 import com.slack.api.util.json.GsonFactory;
 import services.EventLogger;
+import utils.RetryScheduler;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Slack Web API + Events API client, on the official Slack SDK (com.slack.api).
@@ -120,37 +124,105 @@ public class SlackChannel implements Channel {
     }
 
     private SendResult trySend(String botToken, String channelId, String text, String threadTs) {
+        var a = postOnce(botToken, channelId, text, threadTs);
+        if (a.ok()) return SendResult.OK;
+        if ("ratelimited".equals(a.error())) return SendResult.rateLimited(a.retryAfterMs());
+        return SendResult.FAILED;
+    }
+
+    /** A single {@code chat.postMessage} attempt, surfacing Slack's error code and any
+     *  rate-limit hint (JCLAW-454) so both the {@link SendResult} path and the
+     *  error-reporting delivery path can build on one wire call. Never throws. */
+    private record PostAttempt(boolean ok, String error, long retryAfterMs) {}
+
+    private static PostAttempt postOnce(String botToken, String channelId, String text, String threadTs) {
         try {
             var resp = slack.methods(botToken)
                     .chatPostMessage(postRequest(channelId, text, threadTs));
             if (resp.isOk()) {
                 EventLogger.info(CHANNEL, null, CHANNEL_NAME,
                         "Message sent to channel %s".formatted(channelId));
-                return SendResult.OK;
+                return new PostAttempt(true, null, 0L);
             }
             if ("ratelimited".equals(resp.getError())) {
                 EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "Rate-limited (API error)");
-                return SendResult.rateLimited(0L);
+                return new PostAttempt(false, "ratelimited", 0L);
             }
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                     "Slack API error: %s".formatted(resp.getError()));
-            return SendResult.FAILED;
+            return new PostAttempt(false, resp.getError(), 0L);
         } catch (SlackApiException e) {
             var http = e.getResponse();
             if (http != null && http.code() == 429) {
                 long retryAfterMs = parseRetryAfterMs(http.header("Retry-After"));
                 EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                         "Rate-limited; Retry-After=%sms".formatted(retryAfterMs));
-                return SendResult.rateLimited(retryAfterMs);
+                return new PostAttempt(false, "ratelimited", retryAfterMs);
             }
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                     "Slack API error: %s".formatted(e.getResponseBody()));
-            return SendResult.FAILED;
+            return new PostAttempt(false, "api_error", 0L);
         } catch (IOException e) {
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                     "Send failed: %s".formatted(e.getMessage()));
-            return SendResult.FAILED;
+            return new PostAttempt(false, "io_error", 0L);
         }
+    }
+
+    /**
+     * JCLAW-454: outcome of a task-output delivery send, carrying Slack's error code
+     * ({@code channel_not_found} / {@code not_in_channel} / …) so
+     * {@link services.DeliveryDispatcher} can record the real cause on a
+     * {@code TaskRun}'s {@code delivery_error} instead of a generic message.
+     */
+    public record DeliveryOutcome(boolean ok, String error) {
+        public static DeliveryOutcome delivered() { return new DeliveryOutcome(true, null); }
+        public static DeliveryOutcome failed(String error) { return new DeliveryOutcome(false, error); }
+    }
+
+    /** Test seam (JCLAW-454): the resolve+post delivery primitive, swappable so unit tests
+     *  exercise delivery dispatch without the Slack network — mirrors {@link SlackFileUploader}'s
+     *  injectable {@code Uploader}. */
+    @FunctionalInterface
+    public interface DeliverySender {
+        DeliveryOutcome send(String botToken, String target, String text);
+    }
+
+    static DeliverySender DELIVERY_SENDER = SlackChannel::sendForDeliveryLive;
+
+    /**
+     * JCLAW-454: resolve {@code target} (a channel id, {@code #name}, or bare name) to a
+     * channel id and post {@code text} as the bot, returning Slack's error code on failure.
+     * The single send path {@link services.DeliveryDispatcher} uses for task-output delivery.
+     */
+    public static DeliveryOutcome sendForDelivery(String botToken, String target, String text) {
+        return DELIVERY_SENDER.send(botToken, target, text);
+    }
+
+    static DeliveryOutcome sendForDeliveryLive(String botToken, String target, String text) {
+        if (botToken == null || botToken.isBlank()) return DeliveryOutcome.failed("missing_bot_token");
+        String channelId = SlackWebApi.resolveChannelId(botToken, target);
+        if (channelId == null) return DeliveryOutcome.failed("channel_not_found");
+        String body = SlackMarkdownFormatter.format(text);
+        var a = postOnce(botToken, channelId, body, null);
+        if (a.ok()) return DeliveryOutcome.delivered();
+        // One retry only on a rate-limit hint, scheduled off the VT carrier (JDK-8373224
+        // safe). channel_not_found / not_in_channel are not transient, so don't retry them.
+        if (a.retryAfterMs() > 0) {
+            long delayMs = Math.min(a.retryAfterMs(), 60_000L);
+            try {
+                var retried = RetryScheduler.schedule(
+                                () -> postOnce(botToken, channelId, body, null), delayMs)
+                        .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
+                return retried.ok() ? DeliveryOutcome.delivered() : DeliveryOutcome.failed(retried.error());
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                return DeliveryOutcome.failed("interrupted");
+            } catch (ExecutionException | TimeoutException _) {
+                return DeliveryOutcome.failed(a.error());
+            }
+        }
+        return DeliveryOutcome.failed(a.error());
     }
 
     /**
