@@ -248,6 +248,15 @@ dependencies {
         exclude(group = "com.vladsch.flexmark", module = "flexmark-core-test")
         exclude(group = "info.picocli")
         exclude(group = "org.osgi")
+        // JCLAW-452: drop transitive parser backends with non-standard licenses that
+        // JClaw never invokes directly — junrar (UnRar License, a use-restriction; the
+        // RAR backend of tika-parser-pkg-module) and jhighlight (CDDL; the code-
+        // highlight backend of tika-parser-code-module). Tika discovers parsers via
+        // ServiceLoader, so the two matching parsers simply de-register and every other
+        // format (PDF/Office/HTML/EPUB/zip/7z/tar) is unaffected. The only loss is
+        // extracting text from .rar archives + syntax-highlighting embedded source.
+        exclude(group = "com.github.junrar", module = "junrar")
+        exclude(group = "org.codelibs", module = "jhighlight")
     }
 
     // flexmark — drop test utilities, jmh, pdf-test, assertj.
