@@ -32,7 +32,7 @@ class WhatsAppCobaltSessionTest extends UnitTest {
         var a = new WhatsAppCobaltSession(1L);
         var b = new WhatsAppCobaltSession(2L);
         assertNotSame(a.sessionUuid(), b.sessionUuid());
-        assertFalse(a.sessionUuid().equals(b.sessionUuid()));
+        assertNotEquals(b.sessionUuid(), a.sessionUuid());
     }
 
     @Test

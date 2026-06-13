@@ -2,6 +2,8 @@ import channels.ChannelTransport;
 import models.Agent;
 import models.SlackBinding;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import play.test.*;
 import services.Tx;
 
@@ -165,46 +167,36 @@ class ApiSlackBindingsControllerTest extends FunctionalTest {
                 "application/json", "").status.intValue());
     }
 
-    @Test
-    void createRejectsMissingBotToken() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidCreateBodies")
+    void createRejectsInvalidBody(String name, String body) {
+        // Seeding an agent is harmless for the missing/unknown-agentId cases (they
+        // reject regardless of what agents exist) and supplies the id the
+        // missing-botToken/missing-signingSecret bodies interpolate.
         var agentId = seedAgent("sb-agent");
         login();
-        var body = """
-                {"signingSecret": "s", "agentId": %d}
-                """.formatted(agentId);
         assertEquals(400, POST("/api/channels/slack/bindings",
-                "application/json", body).status.intValue());
+                "application/json", body.formatted(agentId)).status.intValue());
     }
 
-    @Test
-    void createRejectsMissingSigningSecret() {
-        var agentId = seedAgent("sb-agent");
-        login();
-        var body = """
-                {"botToken": "xoxb-t", "agentId": %d}
-                """.formatted(agentId);
-        assertEquals(400, POST("/api/channels/slack/bindings",
-                "application/json", body).status.intValue());
-    }
-
-    @Test
-    void createRejectsMissingAgentId() {
-        login();
-        var body = """
-                {"botToken": "xoxb-t", "signingSecret": "s"}
-                """;
-        assertEquals(400, POST("/api/channels/slack/bindings",
-                "application/json", body).status.intValue());
-    }
-
-    @Test
-    void createRejectsUnknownAgent() {
-        login();
-        var body = """
-                {"botToken": "xoxb-t", "signingSecret": "s", "agentId": 9999999}
-                """;
-        assertEquals(400, POST("/api/channels/slack/bindings",
-                "application/json", body).status.intValue());
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> invalidCreateBodies() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of("missingBotToken",
+                        """
+                        {"signingSecret": "s", "agentId": %d}
+                        """),
+                org.junit.jupiter.params.provider.Arguments.of("missingSigningSecret",
+                        """
+                        {"botToken": "xoxb-t", "agentId": %d}
+                        """),
+                org.junit.jupiter.params.provider.Arguments.of("missingAgentId",
+                        """
+                        {"botToken": "xoxb-t", "signingSecret": "s"}
+                        """),
+                org.junit.jupiter.params.provider.Arguments.of("unknownAgent",
+                        """
+                        {"botToken": "xoxb-t", "signingSecret": "s", "agentId": 9999999}
+                        """));
     }
 
     @Test

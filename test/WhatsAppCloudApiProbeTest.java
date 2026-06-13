@@ -32,7 +32,7 @@ class WhatsAppCloudApiProbeTest extends UnitTest {
     }
 
     @Test
-    void verifiedNumberReturnsVerifiedWithNameAndDisplayNumber() throws Exception {
+    void verifiedNumberReturnsVerifiedWithNameAndDisplayNumber() {
         server.enqueue(new MockResponse.Builder()
                 .code(200)
                 .body("{\"verified_name\":\"Acme Corp\","
@@ -59,7 +59,7 @@ class WhatsAppCloudApiProbeTest extends UnitTest {
     }
 
     @Test
-    void unverifiedNumberWithoutVerifiedNameIsFailed() throws Exception {
+    void unverifiedNumberWithoutVerifiedNameIsFailed() {
         // 200 but no verified_name → the number exists but isn't a verified WABA number.
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -75,7 +75,7 @@ class WhatsAppCloudApiProbeTest extends UnitTest {
     }
 
     @Test
-    void badTokenSurfacesGraphErrorMessage() throws Exception {
+    void badTokenSurfacesGraphErrorMessage() {
         server.enqueue(new MockResponse.Builder()
                 .code(401)
                 .body("{\"error\":{\"message\":\"Invalid OAuth access token\","
