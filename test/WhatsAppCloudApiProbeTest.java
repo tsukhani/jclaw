@@ -27,7 +27,7 @@ class WhatsAppCloudApiProbeTest extends UnitTest {
     }
 
     @AfterEach
-    void tearDown() throws Exception {
+    void tearDown() {
         server.close();
     }
 
