@@ -1,0 +1,136 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { clearNuxtData } from '#app'
+import { nextTick } from 'vue'
+import WhatsApp from '~/pages/channels/whatsapp.vue'
+
+// JCLAW-444: per-agent WhatsApp bindings with a per-binding transport choice —
+// CLOUD_API (official Cloud API, credential fields) or WHATSAPP_WEB (unofficial
+// QR-paired Cobalt, ban-warned, no credentials here).
+
+const AGENT = { id: 1, name: 'main', enabled: true, isMain: true, modelProvider: 'openrouter', modelId: 'gpt-4.1' }
+
+function binding(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 7,
+    agentId: 1,
+    agentName: 'main',
+    transport: 'CLOUD_API',
+    phoneNumberId: 'phone-123',
+    hasAccessToken: true,
+    hasAppSecret: true,
+    hasVerifyToken: true,
+    enabled: true,
+    createdAt: null,
+    updatedAt: null,
+    ...overrides,
+  }
+}
+
+let bindingsResponse: unknown[] = []
+
+registerEndpoint('/api/agents', () => [AGENT])
+registerEndpoint('/api/channels/whatsapp/bindings', () => bindingsResponse)
+
+beforeEach(() => {
+  // useFetch caches by URL across mounts; clear so each test re-fetches.
+  clearNuxtData()
+  bindingsResponse = []
+})
+
+describe('whatsapp bindings page — transport choice + cards (JCLAW-444)', () => {
+  it('shows the Cloud API transport + phone number id on a saved binding card', async () => {
+    bindingsResponse = [binding()]
+    const c = await mountSuspended(WhatsApp)
+    const text = c.text()
+    expect(text).toContain('Cloud API')
+    expect(text).toContain('phone-123')
+  })
+
+  it('shows the WhatsApp-Web transport + not-yet-paired on a web binding card', async () => {
+    bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
+    const c = await mountSuspended(WhatsApp)
+    const text = c.text()
+    expect(text).toContain('WhatsApp-Web')
+    expect(text).toContain('not yet paired')
+  })
+
+  it('renders the Cloud API credential fields + setup guidance on create', async () => {
+    const c = await mountSuspended(WhatsApp)
+    await c.findAll('button').find(b => b.text() === '+ New binding')!.trigger('click')
+    await nextTick()
+    // Cloud API is the default transport: all four credential fields present.
+    expect(c.find('#binding-phone-number-id').exists()).toBe(true)
+    expect(c.find('#binding-access-token').exists()).toBe(true)
+    expect(c.find('#binding-app-secret').exists()).toBe(true)
+    expect(c.find('#binding-verify-token').exists()).toBe(true)
+    expect(c.text()).toContain('Phone number ID')
+  })
+
+  it('switching to WhatsApp-Web hides the Cloud fields and shows the ban-risk warning', async () => {
+    const c = await mountSuspended(WhatsApp)
+    await c.findAll('button').find(b => b.text() === '+ New binding')!.trigger('click')
+    await nextTick()
+    expect(c.find('#binding-phone-number-id').exists()).toBe(true)
+    // Switch transport to the unofficial WhatsApp-Web stack.
+    await c.find('#binding-transport').setValue('WHATSAPP_WEB')
+    await nextTick()
+    // Cloud-API credential fields are gone…
+    expect(c.find('#binding-phone-number-id').exists()).toBe(false)
+    expect(c.find('#binding-access-token').exists()).toBe(false)
+    // …and the prominent ban-risk warning is shown before save.
+    const text = c.text()
+    expect(text).toContain('unofficial client')
+    expect(text).toContain('banned')
+    expect(text).toContain('dedicated secondary number')
+  })
+
+  it('blocks save on a Cloud API binding until phoneNumberId + accessToken are set', async () => {
+    const c = await mountSuspended(WhatsApp)
+    await c.findAll('button').find(b => b.text() === '+ New binding')!.trigger('click')
+    await nextTick()
+    // Pick the only available agent from the searchable dropdown.
+    await c.find('#binding-agent').setValue('main')
+    await c.find('#binding-agent').trigger('input')
+    await nextTick()
+    await c.findAll('button').find(b => b.text().includes('gpt-4.1'))!.trigger('mousedown')
+    await nextTick()
+    const saveBtn = c.findAll('button').find(b => b.text() === 'Save')
+    // Agent picked but no credentials yet → Save disabled.
+    expect(saveBtn!.attributes('disabled')).toBeDefined()
+    await c.find('#binding-phone-number-id').setValue('phone-xyz')
+    await c.find('#binding-access-token').setValue('tok')
+    await nextTick()
+    expect(saveBtn!.attributes('disabled')).toBeUndefined()
+  })
+
+  it('allows save on a WhatsApp-Web binding with only an agent (no credentials)', async () => {
+    const c = await mountSuspended(WhatsApp)
+    await c.findAll('button').find(b => b.text() === '+ New binding')!.trigger('click')
+    await nextTick()
+    await c.find('#binding-transport').setValue('WHATSAPP_WEB')
+    await nextTick()
+    // Pick the only available agent from the searchable dropdown.
+    await c.find('#binding-agent').setValue('main')
+    await c.find('#binding-agent').trigger('input')
+    await nextTick()
+    await c.findAll('button').find(b => b.text().includes('gpt-4.1'))!.trigger('mousedown')
+    await nextTick()
+    const saveBtn = c.findAll('button').find(b => b.text() === 'Save')
+    // WhatsApp-Web carries no credentials here (paired later) → agent is enough.
+    expect(saveBtn!.attributes('disabled')).toBeUndefined()
+  })
+
+  it('leaves secret fields blank-to-keep when editing (placeholders, not values)', async () => {
+    bindingsResponse = [binding({ id: 7 })]
+    const c = await mountSuspended(WhatsApp)
+    await c.find('[aria-label="Edit binding"]').trigger('click')
+    await nextTick()
+    // phoneNumberId (an identifier) is pre-filled; secrets are blank with a keep hint.
+    const phone = c.find('#binding-phone-number-id').element as HTMLInputElement
+    expect(phone.value).toBe('phone-123')
+    const token = c.find('#binding-access-token').element as HTMLInputElement
+    expect(token.value).toBe('')
+    expect(token.placeholder).toContain('leave blank to keep')
+  })
+})

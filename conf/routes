@@ -156,6 +156,10 @@ POST    /api/channels/slack/bindings            ApiSlackBindingsController.creat
 PUT     /api/channels/slack/bindings/{id}       ApiSlackBindingsController.update
 DELETE  /api/channels/slack/bindings/{id}       ApiSlackBindingsController.delete
 POST    /api/channels/slack/bindings/{id}/test  ApiSlackBindingsController.test
+GET     /api/channels/whatsapp/bindings         ApiWhatsAppBindingsController.list
+POST    /api/channels/whatsapp/bindings         ApiWhatsAppBindingsController.create
+PUT     /api/channels/whatsapp/bindings/{id}    ApiWhatsAppBindingsController.update
+DELETE  /api/channels/whatsapp/bindings/{id}    ApiWhatsAppBindingsController.delete
 GET     /api/channels/{channelType}             ApiChannelsController.get
 PUT     /api/channels/{channelType}             ApiChannelsController.save
 

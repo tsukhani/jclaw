@@ -6,10 +6,11 @@ import Channels from '~/pages/channels/index.vue'
 // Mutable so individual tests can vary the Tailscale Funnel status + bindings.
 let tailscaleResponse: Record<string, unknown> = { enabled: false, available: false, publicUrl: null, error: null }
 let slackBindingsResponse: unknown[] = []
+let whatsappBindingsResponse: unknown[] = []
 
-registerEndpoint('/api/channels', () => [])
 registerEndpoint('/api/channels/telegram/bindings', () => [])
 registerEndpoint('/api/channels/slack/bindings', () => slackBindingsResponse)
+registerEndpoint('/api/channels/whatsapp/bindings', () => whatsappBindingsResponse)
 registerEndpoint('/api/tailscale', () => tailscaleResponse)
 
 beforeEach(() => {
@@ -18,27 +19,33 @@ beforeEach(() => {
   clearNuxtData()
   tailscaleResponse = { enabled: false, available: false, publicUrl: null, error: null }
   slackBindingsResponse = []
+  whatsappBindingsResponse = []
 })
 
-describe('channels page — binding-link cards (JCLAW-441) + Tailscale Funnel (JCLAW-84)', () => {
-  it('shows Slack and Telegram as per-binding link cards, not inline config', async () => {
-    // JCLAW-441: Slack joined Telegram on the per-agent binding model, so its
-    // card links to /channels/slack with an active-count badge — the old
-    // app-global inline config (bot token field, scope guidance) is gone.
+describe('channels page — binding-link cards (JCLAW-441/444) + Tailscale Funnel (JCLAW-84)', () => {
+  it('shows Slack, Telegram and WhatsApp as per-binding link cards, not inline config', async () => {
+    // JCLAW-441/444: Slack and WhatsApp joined Telegram on the per-agent binding
+    // model, so each card links to its detail page with an active-count badge —
+    // the old app-global inline config (Slack bot token, WhatsApp Cloud-API
+    // fields) is gone from this page.
     slackBindingsResponse = [{ id: 1, enabled: true }]
+    whatsappBindingsResponse = [{ id: 2, enabled: true }]
     const component = await mountSuspended(Channels)
     const text = component.text()
     expect(text).toContain('Slack')
     expect(text).toContain('Telegram')
+    expect(text).toContain('WhatsApp')
     expect(text).toContain('Manage bindings →')
-    // The enabled binding is reflected as an active-count badge.
+    // Enabled bindings are reflected as active-count badges.
     expect(text).toContain('1 active')
     // The retired app-global Slack config no longer renders on this page.
     expect(text).not.toContain('xoxb-')
     expect(text).not.toContain('chat:write')
-    // The Slack card links to the per-binding detail page.
+    // Each card links to its per-binding detail page.
     const slackLink = component.findAll('a').find(a => a.attributes('href') === '/channels/slack')
     expect(slackLink).toBeDefined()
+    const whatsappLink = component.findAll('a').find(a => a.attributes('href') === '/channels/whatsapp')
+    expect(whatsappLink).toBeDefined()
   })
 
   it('shows the app-level Tailscale Funnel toggle', async () => {

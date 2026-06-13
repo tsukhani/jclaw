@@ -75,6 +75,27 @@ export interface SlackBindingSummary {
   updatedAt: string | null
 }
 
+/** One WhatsApp presence bound to one agent (JCLAW-444). The transport picks the
+ *  integration stack: CLOUD_API (official Cloud API) or WHATSAPP_WEB (unofficial
+ *  QR-paired Cobalt, ban-warned). Secrets are write-only — only presence flags
+ *  come back. */
+export interface WhatsAppBindingSummary {
+  id: number
+  agentId: number | null
+  agentName: string | null
+  /** CLOUD_API or WHATSAPP_WEB. */
+  transport: string
+  /** Cloud-API phone number id (an identifier, not a secret). Null for
+   *  WHATSAPP_WEB (paired later) and until set. */
+  phoneNumberId: string | null
+  hasAccessToken: boolean
+  hasAppSecret: boolean
+  hasVerifyToken: boolean
+  enabled: boolean
+  createdAt: string | null
+  updatedAt: string | null
+}
+
 /** A conversation between a user and an agent. */
 export interface Conversation {
   id: number
