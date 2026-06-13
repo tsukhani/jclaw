@@ -129,7 +129,7 @@ public final class SlackFileUploader {
                 if (h.endsWith(s)) return true;
             }
             return false;
-        } catch (Exception e) {
+        } catch (Exception _) {
             return false;
         }
     }
@@ -138,7 +138,7 @@ public final class SlackFileUploader {
         try {
             var probed = java.nio.file.Files.probeContentType(file.toPath());
             return probed != null ? probed : "application/octet-stream";
-        } catch (IOException e) {
+        } catch (IOException _) {
             return "application/octet-stream";
         }
     }

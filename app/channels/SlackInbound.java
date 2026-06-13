@@ -29,6 +29,8 @@ public final class SlackInbound {
 
     static final String CHANNEL_SLACK = "slack";
     static final String CATEGORY_CHANNEL = "channel";
+    private static final String KEY_EVENT = "event";
+    private static final String KEY_ACTIONS = "actions";
     /** JCLAW-344: cap inbound files per message (matches OpenClaw's MAX_SLACK_MEDIA_FILES). */
     private static final int MAX_INBOUND_FILES = 8;
 
@@ -87,10 +89,10 @@ public final class SlackInbound {
         var fromUserId = blockActionsPayload.has("user")
                 && blockActionsPayload.getAsJsonObject("user").has("id")
                 ? blockActionsPayload.getAsJsonObject("user").get("id").getAsString() : null;
-        if (!blockActionsPayload.has("actions") || !blockActionsPayload.get("actions").isJsonArray()) {
+        if (!blockActionsPayload.has(KEY_ACTIONS) || !blockActionsPayload.get(KEY_ACTIONS).isJsonArray()) {
             return;
         }
-        for (var el : blockActionsPayload.getAsJsonArray("actions")) {
+        for (var el : blockActionsPayload.getAsJsonArray(KEY_ACTIONS)) {
             if (!el.isJsonObject()) continue;
             JsonObject action = el.getAsJsonObject();
             if (!action.has("action_id")) continue;
@@ -108,10 +110,10 @@ public final class SlackInbound {
      * channel/ts. Null when neither is present — {@link InboundEventDedup#firstSeen} then processes.
      */
     private static String dedupKey(JsonObject eventCallbackPayload) {
-        if (eventCallbackPayload.has("event") && eventCallbackPayload.get("event").isJsonObject()) {
-            var event = eventCallbackPayload.getAsJsonObject("event");
-            if (event.has("channel") && event.has("ts")) {
-                return event.get("channel").getAsString() + ":" + event.get("ts").getAsString();
+        if (eventCallbackPayload.has(KEY_EVENT) && eventCallbackPayload.get(KEY_EVENT).isJsonObject()) {
+            var event = eventCallbackPayload.getAsJsonObject(KEY_EVENT);
+            if (event.has(CATEGORY_CHANNEL) && event.has("ts")) {
+                return event.get(CATEGORY_CHANNEL).getAsString() + ":" + event.get("ts").getAsString();
             }
         }
         return eventCallbackPayload.has("event_id") ? eventCallbackPayload.get("event_id").getAsString() : null;

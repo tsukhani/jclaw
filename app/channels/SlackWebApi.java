@@ -34,7 +34,7 @@ public final class SlackWebApi {
             var resp = slack.methods(botToken).chatPostMessage(r -> r
                     .channel(channelId).threadTs(threadTs).text(fallbackText).blocks(blocks));
             return resp.isOk() ? resp.getTs() : null;
-        } catch (IOException | SlackApiException e) {
+        } catch (IOException | SlackApiException _) {
             return null;
         }
     }
@@ -50,7 +50,7 @@ public final class SlackWebApi {
         try {
             return slack.methods(botToken).chatUpdate(r -> r
                     .channel(channelId).ts(ts).text(fallbackText).blocks(blocks)).isOk();
-        } catch (IOException | SlackApiException e) {
+        } catch (IOException | SlackApiException _) {
             return false;
         }
     }

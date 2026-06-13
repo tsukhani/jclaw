@@ -31,6 +31,8 @@ public final class SlackSocketModeRunner {
 
     private static final String LOG_CATEGORY = "channel";
     private static final String LOG_SOURCE = "slack";
+    private static final String KEY_ENVELOPE_ID = "envelope_id";
+    private static final String KEY_PAYLOAD = "payload";
 
     /** bindingId → active app token. Used to detect app-token rotation on reconcile. */
     private static final ConcurrentHashMap<Long, String> ACTIVE = new ConcurrentHashMap<>();
@@ -134,20 +136,20 @@ public final class SlackSocketModeRunner {
         JsonObject envelope;
         try {
             envelope = JsonParser.parseString(message).getAsJsonObject();
-        } catch (Exception e) {
+        } catch (Exception _) {
             return; // non-JSON / unparseable frame
         }
         var type = envelope.has("type") ? envelope.get("type").getAsString() : "";
         boolean dispatchable = "events_api".equals(type) || "interactive".equals(type);
-        if (dispatchable && envelope.has("envelope_id")) {
+        if (dispatchable && envelope.has(KEY_ENVELOPE_ID)) {
             var ack = new JsonObject();
-            ack.addProperty("envelope_id", envelope.get("envelope_id").getAsString());
+            ack.addProperty(KEY_ENVELOPE_ID, envelope.get(KEY_ENVELOPE_ID).getAsString());
             ackSender.accept(ack.toString());
         }
-        if (!dispatchable || !envelope.has("payload") || !envelope.get("payload").isJsonObject()) {
+        if (!dispatchable || !envelope.has(KEY_PAYLOAD) || !envelope.get(KEY_PAYLOAD).isJsonObject()) {
             return; // hello / disconnect / payload-less frame
         }
-        var payload = envelope.getAsJsonObject("payload");
+        var payload = envelope.getAsJsonObject(KEY_PAYLOAD);
         if ("events_api".equals(type)) {
             var binding = Tx.run(() -> {
                 SlackBinding b = SlackBinding.findById(bindingId);
