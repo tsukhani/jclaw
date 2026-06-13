@@ -1531,10 +1531,49 @@ function zoneForTaskRender(task: Task): string | undefined {
                           v-model="editDelivery"
                           type="text"
                           aria-label="Delivery channel"
-                          placeholder="e.g. tool:send_gmail_message, telegram:123, none"
+                          placeholder="e.g. slack:#daily-briefings, telegram:123, tool:send_gmail_message, none"
                           class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors"
                           @keydown.enter.prevent="saveDelivery(task)"
                         >
+
+                        <!-- JCLAW-457: always-present, collapsible grammar helper. Native
+                         <details> keeps it space-conserving (closed by default) and a11y-friendly. -->
+                        <details class="text-[11px] text-fg-muted">
+                          <summary class="cursor-pointer select-none hover:text-fg-strong transition-colors">
+                            What can I put here?
+                          </summary>
+                          <div class="mt-1.5 space-y-1.5 border-l border-input pl-2.5">
+                            <p>Where the task's output goes — a channel destination, an in-run tool, or nowhere:</p>
+                            <ul class="space-y-1">
+                              <li>
+                                <code class="font-mono text-fg-strong">slack:#daily-briefings</code>
+                                — a Slack channel by name (or
+                                <code class="font-mono text-fg-strong">slack:C0123ABCD</code> by id)
+                              </li>
+                              <li>
+                                <code class="font-mono text-fg-strong">telegram:12345</code>
+                                — a Telegram chat id
+                              </li>
+                              <li>
+                                <code class="font-mono text-fg-strong">whatsapp:+15551234567</code>
+                                — a WhatsApp number (E.164)
+                              </li>
+                              <li>
+                                <code class="font-mono text-fg-strong">tool:send_gmail_message</code>
+                                — the agent delivers in-run via that tool
+                              </li>
+                              <li>
+                                <code class="font-mono text-fg-strong">none</code>
+                                — no delivery; the output stays in the run
+                              </li>
+                            </ul>
+                            <p>
+                              Slack private channels: the bot must be invited to the channel, or enable
+                              user-token delivery (Channels → Slack) to post as you.
+                            </p>
+                          </div>
+                        </details>
+
                         <div class="flex items-center gap-2 pt-0.5">
                           <span class="flex-1" />
                           <button
