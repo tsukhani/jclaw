@@ -37,16 +37,23 @@ public final class DeliveryAdvisor {
         if (target == null || target.isBlank()) return null;
 
         final Long agentId = agent.id;
-        String botToken = Tx.run(() -> {
+        // JCLAW-456: probe with the identity delivery will actually use — the user token when
+        // user-token writes are enabled (it reaches private channels the bot isn't in), else
+        // the bot token. So a channel reachable only as the user shows no advisory exactly when
+        // delivery would succeed as the user.
+        String probeToken = Tx.run(() -> {
             var fresh = (Agent) Agent.findById(agentId);
             if (fresh == null) return null;
             var binding = SlackBinding.findByAgentOrAncestor(fresh);
-            return (binding != null && binding.enabled) ? binding.botToken : null;
+            if (binding == null || !binding.enabled) return null;
+            boolean userWrites = binding.userToken != null && !binding.userToken.isBlank()
+                    && !binding.userTokenReadOnly;
+            return userWrites ? binding.userToken : binding.botToken;
         });
-        if (botToken == null) return null;
+        if (probeToken == null || probeToken.isBlank()) return null;
 
         try {
-            return SlackWebApi.probeChannel(botToken, target).advisory();
+            return SlackWebApi.probeChannel(probeToken, target).advisory();
         } catch (RuntimeException e) {
             return null;
         }

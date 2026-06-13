@@ -63,6 +63,10 @@ interface BindingForm {
   transport: string
   // JCLAW-351: app-level token (xapp-…) for Socket Mode. Write-only like the secrets.
   appToken: string
+  // JCLAW-456: optional xoxp user token (write-only like the secrets) + the write gate.
+  // With writes enabled, delivery can post as the user to private channels the bot isn't in.
+  userToken: string
+  userTokenReadOnly: boolean
   agentId: number | null
   agentQuery: string
   // JCLAW-350: Slack user id (e.g. U012ABC) allowed to approve exec / dangerous-tool
@@ -79,6 +83,8 @@ const emptyForm = (): BindingForm => ({
   signingSecret: '',
   transport: 'HTTP',
   appToken: '',
+  userToken: '',
+  userTokenReadOnly: true,
   agentId: null,
   agentQuery: '',
   ownerUserId: '',
@@ -186,6 +192,8 @@ function openEdit(binding: SlackBindingSummary) {
     signingSecret: '',
     transport: binding.transport ?? 'HTTP',
     appToken: '',
+    userToken: '',
+    userTokenReadOnly: binding.userTokenReadOnly ?? true,
     agentId: binding.agentId,
     agentQuery: binding.agentName ?? '',
     ownerUserId: binding.ownerUserId ?? '',
@@ -239,6 +247,10 @@ async function save() {
   if (form.value.botToken.trim()) body.botToken = form.value.botToken.trim()
   if (form.value.signingSecret.trim()) body.signingSecret = form.value.signingSecret.trim()
   if (form.value.appToken.trim()) body.appToken = form.value.appToken.trim()
+  // JCLAW-456: user token (write-only — blank leaves the stored value untouched on edit);
+  // the read-only gate always rides along so the toggle takes effect immediately.
+  if (form.value.userToken.trim()) body.userToken = form.value.userToken.trim()
+  body.userTokenReadOnly = form.value.userTokenReadOnly
   const result = await mutate(url, { method, body })
   if (result === null) {
     errorMessage.value = 'Save failed — check server logs for details.'
@@ -742,6 +754,45 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
             <code class="font-mono px-1 bg-muted text-fg-strong">connections:write</code>
             scope (Basic Information → App-Level Tokens). Enable Socket Mode in the app
             first; you still subscribe to bot events, but no Request URL is needed.
+          </span>
+        </label>
+
+        <label
+          for="binding-user-token"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">
+            userToken <span class="text-fg-muted/70">(optional)</span>
+          </span>
+          <input
+            id="binding-user-token"
+            v-model="form.userToken"
+            type="password"
+            :placeholder="editing && editing.hasUserToken ? 'leave blank to keep existing user token' : 'xoxp-…'"
+            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                   focus:outline-hidden focus:border-ring transition-colors"
+          >
+          <span class="mt-1 block text-xs text-fg-muted">
+            Optional <code class="font-mono px-1 bg-muted text-fg-strong">xoxp-</code> user token.
+            Lets delivery post <em>as you</em> to private channels the bot hasn't been invited to
+            (a user token reaches every channel you're a member of, so no
+            <code class="font-mono px-1 bg-muted text-fg-strong">/invite</code> is needed).
+            More sensitive than the bot token — it acts as you across the workspace.
+          </span>
+        </label>
+
+        <label class="flex items-start gap-2 cursor-pointer">
+          <input
+            id="binding-user-token-readonly"
+            v-model="form.userTokenReadOnly"
+            type="checkbox"
+            class="mt-0.5 shrink-0"
+          >
+          <span class="text-xs text-fg-muted">
+            <span class="text-fg-strong">Keep user token read-only (recommended)</span> —
+            when checked, the user token is used only to find channels; delivery still posts as
+            the bot. Uncheck to let delivery post <em>as you</em> when the bot can't reach the
+            channel (e.g. a private channel it isn't in).
           </span>
         </label>
 

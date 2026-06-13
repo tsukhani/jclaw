@@ -48,7 +48,7 @@ class DeliveryDispatcherTest extends UnitTest {
         DeliveryOutcome outcome = DeliveryOutcome.delivered();
 
         @Override
-        public DeliveryOutcome send(String botToken, String target, String text) {
+        public DeliveryOutcome send(SlackChannel.SlackDeliveryCreds creds, String target, String text) {
             lastTarget = target;
             return outcome;
         }
