@@ -63,6 +63,12 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
             String dialect = productName.contains("postgresql") ? "postgres" : "h2";
             String ddl = readDdl(dialect);
             executeStatements(conn, ddl);
+            // Hikari hands out connections with autoCommit=false. H2 implicitly
+            // commits DDL so this was invisible for years, but PostgreSQL's DDL
+            // is transactional — without an explicit commit the CREATE TABLE
+            // rolls back when the connection closes, leaving db-scheduler with no
+            // scheduled_tasks table. Commit so the schema persists on every engine.
+            conn.commit();
             EventLogger.info("system",
                     "db-scheduler schema applied (" + dialect + " dialect)");
         }
