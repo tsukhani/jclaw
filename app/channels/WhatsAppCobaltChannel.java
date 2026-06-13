@@ -32,14 +32,15 @@ import java.util.concurrent.TimeUnit;
  * {@link it.auties.whatsapp.model.jid.JidProvider}; we parse the peer string back
  * into a {@link Jid}.
  *
- * <p><b>Media-send constraint.</b> Cobalt's image/document builders link through
- * {@code it.auties.whatsapp.util.Medias}, which statically depends on
- * {@code com.aspose:aspose-words} — a commercial, non-Maven-Central artifact this
- * project deliberately excludes. So {@link #sendPhoto}/{@link #sendDocument}
- * degrade to a logged {@link SendResult#FAILED} (the builder's
- * {@link NoClassDefFoundError} is caught), matching the Cloud-API
- * {@link WhatsAppChannel}, which is also text-only outbound today. Text replies,
- * reactions, presence, and ALL inbound (including media download) are unaffected.
+ * <p><b>Media outbound</b> (image/document) works via the PDFBox-backed
+ * {@code com.aspose.words} shim (JCLAW-451): Cobalt's media builders link through
+ * {@code it.auties.whatsapp.util.Medias}, which statically references
+ * {@code com.aspose:aspose-words} (a commercial artifact JClaw excludes) only to
+ * count document pages + render a thumbnail — the shim satisfies that link with the
+ * PDFBox we already ship. {@link #buildImage}/{@link #buildDocument} still catch a
+ * {@link LinkageError} defensively, so a hypothetical missing shim degrades to a
+ * logged {@link SendResult#FAILED} rather than letting an {@link Error} escape the
+ * send thread.
  */
 public final class WhatsAppCobaltChannel implements Channel {
 
@@ -128,15 +129,12 @@ public final class WhatsAppCobaltChannel implements Channel {
     }
 
     /**
-     * Build an outbound image message, or null when Cobalt's media builder can't
-     * link. Cobalt's {@code ImageMessage}/{@code DocumentMessage} builders route
-     * through {@code it.auties.whatsapp.util.Medias}, which statically references
-     * {@code com.aspose:aspose-words} (a commercial, non-Maven-Central artifact we
-     * deliberately exclude — see build.gradle.kts). Without it the class fails to
-     * link with {@link NoClassDefFoundError}; we catch that {@link LinkageError}
-     * and degrade media-send to a logged no-op, keeping WhatsApp-Web outbound at
-     * the same text-only parity the Cloud-API {@link WhatsAppChannel} already
-     * ships. Text replies are unaffected.
+     * Build an outbound image message. Cobalt's media builders route through
+     * {@code it.auties.whatsapp.util.Medias}, whose {@code com.aspose.words} link is
+     * satisfied by the PDFBox-backed shim (JCLAW-451), so this normally succeeds.
+     * The {@link LinkageError} catch is a defensive guard: were the shim ever absent
+     * the class would fail to link, and we degrade to a logged null (→
+     * {@link SendResult#FAILED}) rather than let an {@link Error} escape the send.
      */
     private static it.auties.whatsapp.model.message.standard.ImageMessage buildImage(
             byte[] bytes, String mime, String caption) {
@@ -149,8 +147,8 @@ public final class WhatsAppCobaltChannel implements Channel {
         }
     }
 
-    /** Build an outbound document message, or null on the same aspose-words
-     *  linkage gap documented on {@link #buildImage}. */
+    /** Build an outbound document message; same shim-backed media path + defensive
+     *  linkage guard as {@link #buildImage}. */
     private static it.auties.whatsapp.model.message.standard.DocumentMessage buildDocument(
             byte[] bytes, String fileName, String mime, String title) {
         try {
@@ -164,7 +162,7 @@ public final class WhatsAppCobaltChannel implements Channel {
 
     private static void warnMediaUnavailable(String kind, LinkageError e) {
         EventLogger.warn(LOG_CATEGORY, null, WHATSAPP,
-                "WhatsApp-Web %s send unavailable (Cobalt media builder needs aspose-words, excluded): %s"
+                "WhatsApp-Web %s send failed to link the com.aspose.words shim (JCLAW-451) — media unavailable: %s"
                         .formatted(kind, e.getMessage()));
     }
 

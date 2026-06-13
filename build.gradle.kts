@@ -395,10 +395,14 @@ dependencies {
     // bouncycastle, etc.); excluded slf4j-simple to keep the log4j path clean
     // (same treatment as the other SDKs above).
     implementation("com.github.auties00:cobalt:0.0.10") {
-        // aspose-words 22.11 is a commercial, closed-source artifact NOT on
-        // Maven Central (it lives in Aspose's private repo). Cobalt only pulls
-        // it for DOCX→PDF document-preview rendering, which JClaw never uses —
-        // and an unresolvable transitive would fail the whole build. Drop it.
+        // aspose-words 22.11 is a commercial, closed-source artifact NOT on Maven
+        // Central (it lives in Aspose's private repo). Cobalt links it (in its
+        // Medias helper) only to count document pages + render a first-page
+        // thumbnail for outbound document messages. We drop the commercial artifact
+        // and instead provide a tiny com.aspose.words shim backed by the PDFBox we
+        // already ship — see app/com/aspose/words (JCLAW-451). The shim satisfies
+        // Cobalt's static link, so ALL WhatsApp-Web media outbound works with no
+        // commercial dependency.
         exclude(group = "com.aspose", module = "aspose-words")
         // slf4j-nop / slf4j-simple both grab the SLF4JServiceProvider
         // ServiceLoader slot that log4j-slf4j2-impl needs (same clash as the
