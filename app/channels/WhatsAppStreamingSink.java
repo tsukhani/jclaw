@@ -37,8 +37,11 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
 
     @Override
     public void startTypingHeartbeat() {
-        // No-op in the foundation; a per-transport presence indicator is added in
-        // JCLAW-447 / JCLAW-450.
+        // Cue the transport's presence indicator (COMPOSING on WhatsApp-Web; a no-op
+        // on Cloud-API, which has no typing API). Polymorphic — no transport branch.
+        if (channel != null) {
+            channel.startTyping(peerId);
+        }
     }
 
     @Override

@@ -153,6 +153,10 @@ public class ApiWhatsAppBindingsController extends Controller {
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_WHATSAPP,
                 "Binding %d created".formatted(binding.id));
+        // JCLAW-449: open the WhatsApp-Web (Cobalt) connection now if this binding
+        // uses that transport, rather than waiting for the next app boot. No-op for
+        // Cloud-API bindings (reconcile only touches the WHATSAPP_WEB set).
+        channels.WhatsAppCobaltRunner.reconcile();
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
@@ -189,6 +193,9 @@ public class ApiWhatsAppBindingsController extends Controller {
         EventLogger.info(EVENT_CATEGORY_CHANNEL,
                 binding.agent != null ? binding.agent.name : null, CHANNEL_WHATSAPP,
                 "Binding %d updated".formatted(binding.id));
+        // JCLAW-449: reconcile so a transport/enabled change starts or stops the
+        // WhatsApp-Web connection immediately.
+        channels.WhatsAppCobaltRunner.reconcile();
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
@@ -200,6 +207,8 @@ public class ApiWhatsAppBindingsController extends Controller {
         binding.delete();
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agentName, CHANNEL_WHATSAPP,
                 "Binding %d deleted".formatted(id));
+        // JCLAW-449: close the WhatsApp-Web connection if the deleted binding had one.
+        channels.WhatsAppCobaltRunner.reconcile();
         renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
     }
 

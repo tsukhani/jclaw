@@ -229,9 +229,16 @@ public final class WhatsAppCobaltSession {
     /** Inbound seam: cache the live object, parse, hand to the shared dispatcher.
      *  Re-reads the binding in a Tx so the dispatcher works against a fresh row
      *  (owner/enabled may have changed since connect). */
-    void onNewChatMessage(ChatMessageInfo info) {
+    public void onNewChatMessage(ChatMessageInfo info) {
         try {
             if (info == null) return;
+            // JCLAW-450: drop self-originated frames. WhatsApp-Web is self-paired, so
+            // the bot's identity IS the owner's account and Cobalt syncs the account's
+            // OWN sent messages back as inbound (fromMe=true, from=ownerJid). Without
+            // this guard the bot's own reply re-enters the pipeline, passes the
+            // owner-DM gate, and loops unbounded. This is the WhatsApp-Web analog of
+            // the Cloud API never redelivering your own sends. Drop before caching.
+            if (info.fromMe()) return;
             if (info.id() != null) {
                 recentMessages.put(info.id(), info);
             }

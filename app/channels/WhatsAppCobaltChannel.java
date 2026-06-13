@@ -197,8 +197,10 @@ public final class WhatsAppCobaltChannel implements Channel {
     /**
      * Show the WhatsApp typing indicator ({@link ContactStatus#COMPOSING}) in a
      * chat. Best-effort: a failure to set presence must never break a reply, so
-     * this swallows everything and returns void.
+     * this swallows everything and returns void. Overrides the {@link Channel}
+     * no-op default so {@code WhatsAppStreamingSink} cues it polymorphically.
      */
+    @Override
     public void startTyping(String peerId) {
         var wa = liveSession();
         if (wa == null) return;

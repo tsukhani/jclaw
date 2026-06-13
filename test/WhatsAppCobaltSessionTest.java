@@ -1,5 +1,11 @@
 import channels.WhatsAppCobaltRunner;
 import channels.WhatsAppCobaltSession;
+import it.auties.whatsapp.model.info.ChatMessageInfo;
+import it.auties.whatsapp.model.info.ChatMessageInfoBuilder;
+import it.auties.whatsapp.model.jid.Jid;
+import it.auties.whatsapp.model.message.model.ChatMessageKeyBuilder;
+import it.auties.whatsapp.model.message.model.MessageContainer;
+import it.auties.whatsapp.model.message.standard.TextMessageBuilder;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
@@ -62,5 +68,36 @@ class WhatsAppCobaltSessionTest extends UnitTest {
         assertFalse(WhatsAppCobaltRunner.isPaired(unknown));
         // null binding id resolves to null defensively.
         assertNull(WhatsAppCobaltRunner.session(null));
+    }
+
+    @Test
+    void selfOriginatedMessagesAreDroppedBeforeCaching() {
+        // JCLAW-450 C1: WhatsApp-Web is self-paired, so Cobalt syncs the bot's OWN
+        // sent messages back as inbound (fromMe=true). They must be dropped at the
+        // top of the handler — never cached, parsed, or dispatched — or the bot would
+        // loop on its own replies. The drop returns before any DB/connection touch.
+        var session = new WhatsAppCobaltSession(99L);
+        session.onNewChatMessage(info("SELF-1", true));
+        assertNull(session.recentMessage("SELF-1"), "a fromMe frame must not be cached (dropped)");
+    }
+
+    @Test
+    void inboundMessagesFromOthersAreCached() {
+        // The converse: a genuine inbound (fromMe=false) IS cached for later media
+        // download — proving the drop is specific to fromMe, not a blanket no-op.
+        var session = new WhatsAppCobaltSession(99L);
+        session.onNewChatMessage(info("USER-1", false));
+        assertNotNull(session.recentMessage("USER-1"), "a genuine inbound message must be cached");
+    }
+
+    /** Build a minimal text ChatMessageInfo with the given id + fromMe flag. */
+    private static ChatMessageInfo info(String id, boolean fromMe) {
+        var user = Jid.of("15551230000@s.whatsapp.net");
+        var key = new ChatMessageKeyBuilder()
+                .chatJid(user).senderJid(user).fromMe(fromMe).id(id).build();
+        return new ChatMessageInfoBuilder()
+                .key(key).senderJid(user)
+                .message(MessageContainer.of(new TextMessageBuilder().text("hi").build()))
+                .build();
     }
 }

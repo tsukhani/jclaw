@@ -135,4 +135,16 @@ public interface Channel {
     default SendResult sendDocument(String peerId, File file, String caption) {
         return SendResult.FAILED;
     }
+
+    /**
+     * Show a transient "typing…" / presence indicator to {@code peerId} during the
+     * agent's prologue, when the platform supports one (JCLAW-450). Default no-op —
+     * Cloud-API WhatsApp, Slack, Telegram, and web have no socket presence to push
+     * here; WhatsApp-Web (Cobalt) overrides it with a {@code COMPOSING} presence.
+     * Lets {@code WhatsAppStreamingSink} cue typing polymorphically with no transport
+     * branch. Must not throw.
+     */
+    default void startTyping(String peerId) {
+        // no-op by default
+    }
 }
