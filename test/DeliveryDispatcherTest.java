@@ -355,6 +355,23 @@ class DeliveryDispatcherTest extends UnitTest {
     }
 
     @Test
+    void slackMissingScopeErrorNamesTheScopeNotInviteTheBot() {
+        // JCLAW-458: missing_scope (the bot can't list channels) must yield a scope-specific remedy,
+        // not the "invite the bot" message — the bot may already be a member.
+        var parent = createAgent("ds-slack-missingscope");
+        enableSlack(parent);
+        fakeSender.outcome = DeliveryOutcome.failed("missing_scope");
+        var result = Tx.run(() -> DeliveryDispatcher.dispatchSpec(parent, "slack:daily-briefings", "hi"));
+        assertFalse(result.ok());
+        assertEquals(DispatchResult.Status.FAILED_DELIVERY, result.status());
+        assertTrue(result.reason().contains("missing_scope"), result.reason());
+        assertTrue(result.reason().contains("groups:read"),
+                "the remedy must name the scope, not say 'invite the bot': " + result.reason());
+        assertFalse(result.reason().contains("invite the bot"),
+                "missing_scope must not be misreported as a membership problem: " + result.reason());
+    }
+
+    @Test
     void whatsappWithoutConfigReturnsNoConfig() {
         var parent = createAgent("ds-wa-nocfg");
         var result = Tx.run(() -> DeliveryDispatcher.dispatch(parent, "whatsapp", "+15551234567", "hi"));

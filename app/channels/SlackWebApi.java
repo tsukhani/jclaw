@@ -48,44 +48,67 @@ public final class SlackWebApi {
      *  ⇒ a public channel the bot hasn't joined). JCLAW-454/455. */
     public record ChannelInfo(String id, boolean isMember) {}
 
-    /** Test seam (JCLAW-454/455): the {@code conversations.list} name lookup, swappable so unit
+    /** Outcome of a name lookup (JCLAW-458): the matched {@code channel} (null when no match or the
+     *  list call failed), and the Slack API {@code error} code (e.g. {@code missing_scope}) when the
+     *  {@code conversations.list} call itself failed, else null. Lets the delivery + advisory paths
+     *  tell "no such channel / bot not in it" apart from "the bot can't even list channels". */
+    public record ChannelLookup(ChannelInfo channel, String error) {
+        static final ChannelLookup NOT_FOUND = new ChannelLookup(null, null);
+        static ChannelLookup found(ChannelInfo c) { return new ChannelLookup(c, null); }
+        static ChannelLookup failed(String error) { return new ChannelLookup(null, error); }
+    }
+
+    /** Test seam (JCLAW-454/455/458): the {@code conversations.list} name lookup, swappable so unit
      *  tests resolve channels without the network — mirrors {@link SlackFileUploader}'s injectable
-     *  {@code Uploader}. {@code name} is already lowercased with any leading {@code #} stripped;
-     *  returns the matched channel or {@code null} if none matches. */
+     *  {@code Uploader}. {@code name} is already lowercased with any leading {@code #} stripped. */
     @FunctionalInterface
     public interface ChannelLister {
-        ChannelInfo lookup(String botToken, String name);
+        ChannelLookup lookup(String botToken, String name);
     }
 
     static ChannelLister CHANNEL_LISTER = SlackWebApi::lookupChannelByNameLive;
 
+    /** Resolution of a Slack delivery target (JCLAW-458): the {@code channelId} (null when it
+     *  couldn't be resolved) plus the Slack {@code error} code on failure ({@code missing_scope}
+     *  when the bot can't list channels, else {@code channel_not_found}). */
+    public record ChannelResolution(String channelId, String error) {}
+
     /**
-     * JCLAW-454: resolve a Slack delivery {@code target} to a channel id. A literal id
-     * ({@code C}/{@code G}/{@code D}…) passes through unchanged; a {@code #name} or bare
-     * {@code name} is looked up via {@code conversations.list} (public + private channels
-     * the bot can see) and cached per (token, name). Returns {@code null} when no channel
-     * matches — the caller surfaces an invite/typo remedy. Never throws.
+     * JCLAW-454/458: resolve a Slack delivery {@code target} to a channel id, surfacing the failure
+     * reason. A literal id ({@code C}/{@code G}/{@code D}…) passes through; a {@code #name}/bare name
+     * is looked up via {@code conversations.list} (cached per token+name on success). On failure the
+     * {@code error} is the Slack code — {@code missing_scope} when the bot can't list channels (needs
+     * {@code channels:read}/{@code groups:read}), else {@code channel_not_found}. Never throws.
      */
-    public static String resolveChannelId(String botToken, String target) {
-        if (botToken == null || botToken.isBlank() || target == null) return null;
+    public static ChannelResolution resolveChannel(String botToken, String target) {
+        if (botToken == null || botToken.isBlank() || target == null) return new ChannelResolution(null, null);
         String t = target.trim();
-        if (t.isEmpty()) return null;
-        if (CHANNEL_ID.matcher(t).matches()) return t;
+        if (t.isEmpty()) return new ChannelResolution(null, null);
+        if (CHANNEL_ID.matcher(t).matches()) return new ChannelResolution(t, null);
         String name = (t.startsWith("#") ? t.substring(1) : t).toLowerCase(Locale.ROOT);
-        if (name.isEmpty()) return null;
+        if (name.isEmpty()) return new ChannelResolution(null, null);
         String key = Integer.toHexString(botToken.hashCode()) + ":" + name;
         var cached = CHANNEL_ID_CACHE.get(key);
-        if (cached != null) return cached;
-        ChannelInfo info = CHANNEL_LISTER.lookup(botToken, name);
-        if (info != null) CHANNEL_ID_CACHE.put(key, info.id());
-        return info != null ? info.id() : null;
+        if (cached != null) return new ChannelResolution(cached, null);
+        var lk = CHANNEL_LISTER.lookup(botToken, name);
+        if (lk.channel() != null) {
+            CHANNEL_ID_CACHE.put(key, lk.channel().id());
+            return new ChannelResolution(lk.channel().id(), null);
+        }
+        return new ChannelResolution(null, lk.error() != null ? lk.error() : "channel_not_found");
     }
 
-    /** Live {@link ChannelLister}: page {@code conversations.list} and match by name.
-     *  {@code conversations.list} only returns private channels the bot is a member of, and
-     *  posting to a public channel the bot hasn't joined additionally needs the
+    /** JCLAW-454: id-only convenience over {@link #resolveChannel} — the channel id, or null. */
+    public static String resolveChannelId(String botToken, String target) {
+        return resolveChannel(botToken, target).channelId();
+    }
+
+    /** Live {@link ChannelLister}: page {@code conversations.list} and match by name. Returns the
+     *  Slack error code (e.g. {@code missing_scope}) when the call fails, so callers can tell a scope
+     *  gap from a genuine miss. {@code conversations.list} only returns private channels the bot is a
+     *  member of, and posting to a public channel the bot hasn't joined additionally needs the
      *  {@code chat:write.public} scope (JCLAW-454). Never throws. */
-    private static ChannelInfo lookupChannelByNameLive(String botToken, String name) {
+    private static ChannelLookup lookupChannelByNameLive(String botToken, String name) {
         try {
             String cursor = null;
             do {
@@ -98,24 +121,69 @@ public final class SlackWebApi {
                 if (!resp.isOk()) {
                     EventLogger.warn("channel", null, "slack",
                             "conversations.list error: %s".formatted(resp.getError()));
-                    return null;
+                    return ChannelLookup.failed(resp.getError());
                 }
                 if (resp.getChannels() != null) {
                     for (var ch : resp.getChannels()) {
                         if (name.equalsIgnoreCase(ch.getName())) {
-                            return new ChannelInfo(ch.getId(), ch.isMember());
+                            return ChannelLookup.found(new ChannelInfo(ch.getId(), ch.isMember()));
                         }
                     }
                 }
                 cursor = resp.getResponseMetadata() != null
                         ? resp.getResponseMetadata().getNextCursor() : null;
             } while (cursor != null && !cursor.isBlank());
-            return null;
+            return ChannelLookup.NOT_FOUND;
         } catch (IOException | SlackApiException e) {
             EventLogger.warn("channel", null, "slack",
                     "conversations.list failed: %s".formatted(e.getMessage()));
+            return ChannelLookup.failed("io_error");
+        }
+    }
+
+    // ── JCLAW-458: bind-time delivery-scope check ──
+
+    /** Test seam (JCLAW-458): probe whether {@code botToken} can list channels for name-based
+     *  delivery; returns the Slack error code ({@code missing_scope} when {@code channels:read} /
+     *  {@code groups:read} is absent) or null when the list call succeeds. */
+    @FunctionalInterface
+    public interface ScopeProber {
+        String listError(String botToken);
+    }
+
+    static ScopeProber SCOPE_PROBER = SlackWebApi::probeListScopeLive;
+
+    private static String probeListScopeLive(String botToken) {
+        try {
+            var resp = slack.methods(botToken).conversationsList(r -> r
+                    .types(List.of(ConversationType.PUBLIC_CHANNEL, ConversationType.PRIVATE_CHANNEL))
+                    .limit(1));
+            return resp.isOk() ? null : resp.getError();
+        } catch (IOException | SlackApiException e) {
+            return null; // can't determine scopes (network/other) — don't warn
+        }
+    }
+
+    /**
+     * JCLAW-458: a non-blocking warning if {@code botToken} can't enumerate channels for name-based
+     * delivery (a {@code conversations.list} probe returns {@code missing_scope}), else null. Posting
+     * to a channel the bot is already a member of is unaffected, so this is advisory only. Surfaced at
+     * binding create/update time because {@code auth.test} validates the token but not its scopes.
+     */
+    public static String deliveryScopeWarning(String botToken) {
+        if (botToken == null || botToken.isBlank()) return null;
+        String err;
+        try {
+            err = SCOPE_PROBER.listError(botToken);
+        } catch (RuntimeException e) {
             return null;
         }
+        if (!"missing_scope".equals(err)) return null;
+        return "This bot token can't look up channels by name (missing the channels:read / groups:read "
+                + "scope), so name-based delivery (e.g. slack:#daily-briefings) will fail with "
+                + "channel_not_found. Add the scope under Bot Token Scopes and reinstall the app, or "
+                + "deliver by channel id (slack:C…). Posting to a channel the bot is already a member of "
+                + "still works.";
     }
 
     // ── JCLAW-455: delivery reachability probe (advisory in chat + on the Tasks page) ──
@@ -128,6 +196,9 @@ public final class SlackWebApi {
         PUBLIC_NOT_MEMBER,
         /** Not returned by {@code conversations.list} — a private channel the bot isn't in, or a bad name. */
         UNRESOLVED,
+        /** {@code conversations.list} returned {@code missing_scope} — the bot can't resolve names by
+         *  listing (needs {@code channels:read}/{@code groups:read}); JCLAW-458. */
+        MISSING_SCOPE,
         /** Can't classify (no token, a literal id, or an API error) — no advisory. */
         UNKNOWN
     }
@@ -135,7 +206,8 @@ public final class SlackWebApi {
     /** A reachability verdict plus the human advisory to surface (null when no action is needed). */
     public record SlackReachability(SlackReach status, String channel, String advisory) {
         public boolean needsAttention() {
-            return status == SlackReach.PUBLIC_NOT_MEMBER || status == SlackReach.UNRESOLVED;
+            return status == SlackReach.PUBLIC_NOT_MEMBER || status == SlackReach.UNRESOLVED
+                    || status == SlackReach.MISSING_SCOPE;
         }
     }
 
@@ -175,12 +247,20 @@ public final class SlackWebApi {
 
     private static SlackReachability classifyReachability(String botToken, String name) {
         String display = "#" + name;
-        ChannelInfo info;
+        ChannelLookup lk;
         try {
-            info = CHANNEL_LISTER.lookup(botToken, name);
+            lk = CHANNEL_LISTER.lookup(botToken, name);
         } catch (RuntimeException e) {
             return new SlackReachability(SlackReach.UNKNOWN, display, null);
         }
+        // JCLAW-458: a scope gap masquerades as "not found" — name it precisely.
+        if ("missing_scope".equals(lk.error())) {
+            return new SlackReachability(SlackReach.MISSING_SCOPE, display,
+                    "JClaw can't look up Slack channel " + display + " by name — the bot token is missing the "
+                            + "channels:read / groups:read scope. Add it (Bot Token Scopes) and reinstall the app, "
+                            + "or set the delivery to the channel id (slack:C…).");
+        }
+        var info = lk.channel();
         if (info == null) {
             return new SlackReachability(SlackReach.UNRESOLVED, display,
                     "Can't find Slack channel " + display + ". If it's a private channel, invite the bot "

@@ -1,6 +1,7 @@
 import channels.SlackWebApi;
 import channels.SlackWebApi.ChannelInfo;
 import channels.SlackWebApi.ChannelLister;
+import channels.SlackWebApi.ChannelLookup;
 import models.Agent;
 import models.SlackBinding;
 import org.junit.jupiter.api.AfterEach;
@@ -89,7 +90,7 @@ class DeliveryAdvisorTest extends UnitTest {
     void slackDeliveryToUnreachableChannelReturnsActionableAdvisory() throws Exception {
         var agent = createAgent("da-unreach");
         enableSlack(agent, "xoxb-da-unreach");
-        setLister((token, name) -> null); // channel not found / bot not a member of a private channel
+        setLister((token, name) -> new ChannelLookup(null, null)); // not found / bot not in a private channel
         var advisory = DeliveryAdvisor.advisoryFor(agent, "slack:#daily-briefings");
         assertNotNull(advisory, "an unreachable Slack channel must produce an advisory");
         assertTrue(advisory.contains("#daily-briefings"), advisory);
@@ -100,7 +101,7 @@ class DeliveryAdvisorTest extends UnitTest {
     void slackDeliveryToReachableChannelHasNoAdvisory() throws Exception {
         var agent = createAgent("da-reach");
         enableSlack(agent, "xoxb-da-reach");
-        setLister((token, name) -> new ChannelInfo("C0OK", true)); // bot is a member
+        setLister((token, name) -> new ChannelLookup(new ChannelInfo("C0OK", true), null)); // bot is a member
         assertNull(DeliveryAdvisor.advisoryFor(agent, "slack:ops"));
     }
 }

@@ -73,6 +73,10 @@ export interface SlackBindingSummary {
   replyToMode: string | null
   createdAt: string | null
   updatedAt: string | null
+  /** JCLAW-458: non-blocking warning returned on create/update when the bot token can't list
+   *  channels for name-based delivery (missing channels:read/groups:read). Null when fine, and
+   *  absent on the list endpoint (computed only on save). */
+  deliveryScopeWarning?: string | null
 }
 
 /** One WhatsApp presence bound to one agent (JCLAW-444). The transport picks the

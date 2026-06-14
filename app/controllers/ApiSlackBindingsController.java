@@ -63,8 +63,16 @@ public class ApiSlackBindingsController extends Controller {
                                 boolean hasSigningSecret, boolean hasAppToken,
                                 String botUserId, String teamId,
                                 boolean enabled, String replyToMode,
-                                String createdAt, String updatedAt) {
+                                String createdAt, String updatedAt,
+                                String deliveryScopeWarning) {
         static BindingView of(SlackBinding b) {
+            return of(b, null);
+        }
+
+        /** JCLAW-458: {@code deliveryScopeWarning} is populated only on create/update (a one-off
+         *  {@code conversations.list} scope probe), null on list — so listing N bindings never fans
+         *  out N Slack calls. */
+        static BindingView of(SlackBinding b, String deliveryScopeWarning) {
             return new BindingView(b.id,
                     b.agent != null ? b.agent.id : null,
                     b.agent != null ? b.agent.name : null,
@@ -77,7 +85,8 @@ public class ApiSlackBindingsController extends Controller {
                     b.botUserId, b.teamId,
                     b.enabled, b.replyToMode,
                     b.createdAt != null ? b.createdAt.toString() : null,
-                    b.updatedAt != null ? b.updatedAt.toString() : null);
+                    b.updatedAt != null ? b.updatedAt.toString() : null,
+                    deliveryScopeWarning);
         }
 
         /** The Events API Request URL to register in the Slack app dashboard:
@@ -168,7 +177,9 @@ public class ApiSlackBindingsController extends Controller {
                 "Binding %d created".formatted(binding.id));
         // JCLAW-351: open/close the Socket Mode connection if this binding is SOCKET.
         SlackSocketModeRunner.reconcile();
-        renderJSON(gson.toJson(BindingView.of(binding)));
+        // JCLAW-458: auth.test validated the token but not its scopes — warn now if name-based
+        // delivery can't list channels, instead of failing silently at the first delivery.
+        renderJSON(gson.toJson(BindingView.of(binding, SlackWebApi.deliveryScopeWarning(binding.botToken))));
     }
 
     @SuppressWarnings("java:S2259")
@@ -193,7 +204,8 @@ public class ApiSlackBindingsController extends Controller {
                 "Binding %d updated".formatted(binding.id));
         // JCLAW-351: reconcile Socket Mode (transport/app-token/enabled may have changed).
         SlackSocketModeRunner.reconcile();
-        renderJSON(gson.toJson(BindingView.of(binding)));
+        // JCLAW-458: re-check delivery scopes on update (the token may have changed).
+        renderJSON(gson.toJson(BindingView.of(binding, SlackWebApi.deliveryScopeWarning(binding.botToken))));
     }
 
     /**

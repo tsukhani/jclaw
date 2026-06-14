@@ -201,8 +201,13 @@ public class SlackChannel implements Channel {
 
     static DeliveryOutcome sendForDeliveryLive(String botToken, String target, String text) {
         if (botToken == null || botToken.isBlank()) return DeliveryOutcome.failed("missing_bot_token");
-        String channelId = SlackWebApi.resolveChannelId(botToken, target);
-        if (channelId == null) return DeliveryOutcome.failed("channel_not_found");
+        // JCLAW-458: surface the real resolution failure (missing_scope vs channel_not_found) rather
+        // than always reporting channel_not_found.
+        var res = SlackWebApi.resolveChannel(botToken, target);
+        if (res.channelId() == null) {
+            return DeliveryOutcome.failed(res.error() != null ? res.error() : "channel_not_found");
+        }
+        String channelId = res.channelId();
         String body = SlackMarkdownFormatter.format(text);
         var a = postOnce(botToken, channelId, body, null);
         if (a.ok()) return DeliveryOutcome.delivered();

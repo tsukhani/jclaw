@@ -88,6 +88,9 @@ const emptyForm = (): BindingForm => ({
 const form = ref<BindingForm>(emptyForm())
 const agentDropdownOpen = ref(false)
 const errorMessage = ref('')
+// JCLAW-458: page-level non-blocking warning shown after a save when the bot token can't list
+// channels for name-based delivery (missing channels:read/groups:read). Dismissible.
+const scopeNotice = ref('')
 
 const filteredAgents = computed(() => {
   const q = form.value.agentQuery.toLowerCase().trim()
@@ -244,6 +247,9 @@ async function save() {
     errorMessage.value = 'Save failed — check server logs for details.'
     return
   }
+  // JCLAW-458: the binding saved, but surface a non-blocking scope warning if the bot token
+  // can't resolve channels by name (the save would otherwise look clean and fail at delivery).
+  scopeNotice.value = (result as { deliveryScopeWarning?: string | null }).deliveryScopeWarning ?? ''
   closeModal()
   refresh()
 }
@@ -353,6 +359,24 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
         @click="openCreate"
       >
         + New binding
+      </button>
+    </div>
+
+    <!-- JCLAW-458: scope warning surfaced after a save (bot can't list channels by name). -->
+    <div
+      v-if="scopeNotice"
+      data-testid="scope-notice"
+      class="mb-4 flex items-start gap-2 px-3 py-2 bg-amber-500/10 border border-amber-600/40 text-xs text-amber-300"
+    >
+      <span aria-hidden="true">⚠</span>
+      <span class="flex-1">{{ scopeNotice }}</span>
+      <button
+        type="button"
+        aria-label="Dismiss warning"
+        class="text-amber-300/70 hover:text-amber-200 bg-transparent border-0 cursor-pointer"
+        @click="scopeNotice = ''"
+      >
+        ×
       </button>
     </div>
 

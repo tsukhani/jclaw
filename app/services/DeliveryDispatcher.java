@@ -227,10 +227,15 @@ public final class DeliveryDispatcher {
             case "channel_not_found", "not_in_channel" -> " The channel was not found or the bot is not a "
                     + "member — if it's private, invite the bot to it; if public, check the name or grant "
                     + "the bot the chat:write.public scope.";
+            // JCLAW-458: missing_scope on resolution means the bot can't *list* channels to map the
+            // name to an id — distinct from "not a member". Name the scope and the channel-id escape.
+            case "missing_scope" -> " The bot token can't look up channels by name (missing the "
+                    + "channels:read / groups:read scope). Add it under Bot Token Scopes and reinstall the "
+                    + "app, or set the delivery to the channel id (slack:C…).";
             case "is_archived" -> " The channel is archived.";
             case "msg_too_long" -> " The message exceeds Slack's length limit.";
-            case "missing_scope", "not_authed", "invalid_auth", "token_revoked", "account_inactive" ->
-                    " The bot token is missing a required scope or is no longer valid — reconnect the Slack bot.";
+            case "not_authed", "invalid_auth", "token_revoked", "account_inactive" ->
+                    " The bot token is no longer valid — reconnect the Slack bot.";
             default -> "";
         };
         return "Slack rejected delivery to '" + target + "': " + error + "." + remedy;

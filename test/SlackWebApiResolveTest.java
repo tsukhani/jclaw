@@ -1,6 +1,8 @@
 import channels.SlackWebApi;
 import channels.SlackWebApi.ChannelInfo;
 import channels.SlackWebApi.ChannelLister;
+import channels.SlackWebApi.ChannelLookup;
+import channels.SlackWebApi.ScopeProber;
 import channels.SlackWebApi.SlackReach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,21 +13,25 @@ import java.lang.reflect.Field;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * JCLAW-454/455 unit tests for the shared Slack channel lookup: {@link SlackWebApi#resolveChannelId}
- * (literal-id passthrough, {@code #}-strip + lowercasing, bare-name lookup, per-(token,name) caching,
- * not-found) and {@link SlackWebApi#probeChannel} reachability classification. The
- * {@code conversations.list} lookup is swapped for an in-memory {@link ChannelLister} via the
- * package-private {@code CHANNEL_LISTER} seam (reflection), mirroring {@code SlackFileUploaderTest},
- * so nothing hits the network. Probe tests use a distinct bot token each, since {@code probeChannel}
- * keeps a process-wide 60 s verdict cache.
+ * JCLAW-454/455/458 unit tests for the shared Slack channel lookup: {@link SlackWebApi#resolveChannel}
+ * / {@code resolveChannelId} (literal-id passthrough, {@code #}-strip + lowercasing, bare-name lookup,
+ * per-(token,name) caching, not-found, and the JCLAW-458 {@code missing_scope} surfacing),
+ * {@link SlackWebApi#probeChannel} reachability classification, and
+ * {@link SlackWebApi#deliveryScopeWarning}. The {@code conversations.list} lookup + scope probe are
+ * swapped via the package-private {@code CHANNEL_LISTER} / {@code SCOPE_PROBER} seams (reflection),
+ * mirroring {@code SlackFileUploaderTest}, so nothing hits the network. Probe/resolve tests use a
+ * distinct bot token each, since {@code probeChannel}/resolution keep process-wide caches.
  */
 class SlackWebApiResolveTest extends UnitTest {
 
     private static final Field LISTER_FIELD;
+    private static final Field PROBER_FIELD;
     static {
         try {
             LISTER_FIELD = SlackWebApi.class.getDeclaredField("CHANNEL_LISTER");
             LISTER_FIELD.setAccessible(true);
+            PROBER_FIELD = SlackWebApi.class.getDeclaredField("SCOPE_PROBER");
+            PROBER_FIELD.setAccessible(true);
         } catch (NoSuchFieldException e) {
             throw new RuntimeException(e);
         }
@@ -33,31 +39,40 @@ class SlackWebApiResolveTest extends UnitTest {
 
     static final class CountingLister implements ChannelLister {
         final AtomicInteger calls = new AtomicInteger();
-        String id = "C0RESOLVED"; // returned for any name unless set null (= not found)
+        String id = "C0RESOLVED"; // matched channel id; null = not found
         boolean member = true;    // membership reported for a matched channel
+        String error;             // non-null = conversations.list API error (e.g. missing_scope)
         String lastName;
 
         @Override
-        public ChannelInfo lookup(String botToken, String name) {
+        public ChannelLookup lookup(String botToken, String name) {
             calls.incrementAndGet();
             lastName = name;
-            return id == null ? null : new ChannelInfo(id, member);
+            if (error != null) return new ChannelLookup(null, error);
+            return new ChannelLookup(id == null ? null : new ChannelInfo(id, member), null);
         }
     }
 
     private Object originalLister;
+    private Object originalProber;
     private CountingLister fake;
+    private String scopeProbeError; // what the swapped SCOPE_PROBER returns
 
     @BeforeEach
     void setup() throws Exception {
         originalLister = LISTER_FIELD.get(null);
+        originalProber = PROBER_FIELD.get(null);
         fake = new CountingLister();
         LISTER_FIELD.set(null, fake);
+        scopeProbeError = null;
+        ScopeProber prober = botToken -> scopeProbeError;
+        PROBER_FIELD.set(null, prober);
     }
 
     @AfterEach
     void teardown() throws Exception {
         LISTER_FIELD.set(null, originalLister);
+        PROBER_FIELD.set(null, originalProber);
     }
 
     @Test
@@ -151,5 +166,55 @@ class SlackWebApiResolveTest extends UnitTest {
         SlackWebApi.probeChannel("xoxb-probe-cache", "ops");
         SlackWebApi.probeChannel("xoxb-probe-cache", "ops");
         assertEquals(1, fake.calls.get(), "the probe verdict is cached per (token, name) within the TTL");
+    }
+
+    // ──────── JCLAW-458: missing_scope surfacing + bind-time scope warning ────────
+
+    @Test
+    void resolveChannelSurfacesMissingScope() {
+        fake.error = "missing_scope";
+        var r = SlackWebApi.resolveChannel("xoxb-ms-res", "#daily-briefings");
+        assertNull(r.channelId());
+        assertEquals("missing_scope", r.error(),
+                "a missing_scope list error must surface, not be flattened to channel_not_found");
+    }
+
+    @Test
+    void resolveChannelNotFoundReportsChannelNotFound() {
+        fake.id = null; // found nothing, no API error
+        var r = SlackWebApi.resolveChannel("xoxb-nf-res", "#ghost");
+        assertNull(r.channelId());
+        assertEquals("channel_not_found", r.error());
+    }
+
+    @Test
+    void probeMissingScopeNamesTheScope() {
+        fake.error = "missing_scope";
+        var r = SlackWebApi.probeChannel("xoxb-ms-probe", "#daily-briefings");
+        assertEquals(SlackReach.MISSING_SCOPE, r.status());
+        assertNotNull(r.advisory());
+        assertTrue(r.advisory().contains("groups:read"), r.advisory());
+        assertTrue(r.needsAttention());
+    }
+
+    @Test
+    void deliveryScopeWarningWhenListReturnsMissingScope() {
+        scopeProbeError = "missing_scope";
+        var w = SlackWebApi.deliveryScopeWarning("xoxb-noscope");
+        assertNotNull(w, "a missing_scope probe must produce a warning");
+        assertTrue(w.contains("groups:read"), w);
+    }
+
+    @Test
+    void deliveryScopeWarningNullWhenListOk() {
+        scopeProbeError = null;
+        assertNull(SlackWebApi.deliveryScopeWarning("xoxb-ok"));
+    }
+
+    @Test
+    void deliveryScopeWarningNullForBlankToken() {
+        scopeProbeError = "missing_scope";
+        assertNull(SlackWebApi.deliveryScopeWarning(""));
+        assertNull(SlackWebApi.deliveryScopeWarning(null));
     }
 }
