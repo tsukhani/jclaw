@@ -19,7 +19,6 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,9 +45,9 @@ public final class LocalImageCaptioner implements ImageCaptionService {
     private static final int SIZE = 224;
 
     /** Directory holding {@code encoder.onnx} + {@code decoder.onnx} + {@code tokenizer.json}.
-     *  Populated by the model manager (JCLAW-213 Phase 2 / Settings, JCLAW-214); overridable via
-     *  {@link #setModelDir} for tests and for the manager to point at its download cache. */
-    private static Path modelDir = Paths.get("data", "vlm-models");
+     *  Defaults to {@link VlmModelManager}'s per-model cache for the default model; overridable via
+     *  {@link #setModelDir} (tests, or to select a different downloaded model). */
+    private static Path modelDir = VlmModelManager.localDir(VlmModel.DEFAULT);
 
     private static final Object LOCK = new Object();
     private static volatile boolean loaded;
