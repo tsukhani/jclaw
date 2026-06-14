@@ -93,7 +93,8 @@ describe('Tasks page — delivery editor grammar helper (JCLAW-457)', () => {
     expect(text).toContain('slack:#daily-briefings')
     expect(text).toContain('tool:send_gmail_message')
     expect(text).toContain('none')
-    expect(text.toLowerCase()).toContain('invited')
-    expect(text.toLowerCase()).toContain('user-token')
+    // Private-channel guidance: invite the bot (no user-token path after the JCLAW-456 revert).
+    expect(text.toLowerCase()).toContain('member')
+    expect(text.toLowerCase()).toContain('integrations')
   })
 })

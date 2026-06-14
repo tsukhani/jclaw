@@ -1571,8 +1571,10 @@ function zoneForTaskRender(task: Task): string | undefined {
                               </li>
                             </ul>
                             <p>
-                              Slack private channels: the bot must be invited to the channel, or enable
-                              user-token delivery (Channels → Slack) to post as you.
+                              Slack private channels: the bot must be a member — add it under the
+                              channel's Integrations (or
+                              <code class="font-mono text-fg-strong">/invite</code> it) so it can post
+                              and you get notified.
                             </p>
                           </div>
                         </details>
