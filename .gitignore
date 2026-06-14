@@ -4,6 +4,10 @@
 
 .mcp.json
 
+# JCLAW-213 throwaway PoC (standalone DJL+ONNX image-caption spike + ~245MB downloaded
+# model weights). Never committed; the production captioner lives in app/services/caption.
+/spike/
+
 # Per-clone runtime security material — application secret (PLAY_SECRET)
 # and TLS cert+key. Lives under certs/ (write paths: `./jclaw.sh secret`,
 # `./jclaw.sh cert`, `play secret`, `play enable-https`, the Docker

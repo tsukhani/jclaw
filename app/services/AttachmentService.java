@@ -131,14 +131,20 @@ public final class AttachmentService {
      * which takes raw base64 without the {@code data:...} URL prefix.
      */
     public static String readAsBase64(MessageAttachment att) {
+        return Base64.getEncoder().encodeToString(readBytes(att));
+    }
+
+    /**
+     * Read a finalized attachment's raw bytes from disk. Used by the image
+     * captioner (JCLAW-213), which decodes them into a {@code BufferedImage}.
+     */
+    public static byte[] readBytes(MessageAttachment att) {
         var path = resolveOnDisk(att);
-        byte[] bytes;
         try {
-            bytes = Files.readAllBytes(path);
+            return Files.readAllBytes(path);
         } catch (IOException e) {
             throw new java.io.UncheckedIOException("Failed to read attachment bytes: " + e.getMessage(), e);
         }
-        return Base64.getEncoder().encodeToString(bytes);
     }
 
     /**

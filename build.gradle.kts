@@ -365,6 +365,16 @@ dependencies {
     // linux x64, win x64) so there's no per-platform install dance.
     implementation("io.github.givimad:whisper-jni:1.7.1")
 
+    // JCLAW-213: in-JVM image captioning for non-vision models — the vision analogue of
+    // whisper-jni. DJL + ONNX Runtime run a small VLM (ViT-GPT2) entirely in-process;
+    // onnxruntime-engine bundles cross-platform natives (no per-platform install dance) and
+    // tokenizers bundles the GPT-2 BPE. ONNX Runtime's DJL engine is inference-only, so image
+    // preprocessing + argmax run in plain Java (see LocalImageCaptioner) — no PyTorch engine,
+    // keeping the native footprint small.
+    implementation("ai.djl:api:0.33.0")
+    implementation("ai.djl.onnxruntime:onnxruntime-engine:0.33.0")
+    implementation("ai.djl.huggingface:tokenizers:0.33.0")
+
     // JCLAW-21: db-scheduler — persistent task scheduling backed by a single
     // DB table (scheduled_tasks). Replaces what would otherwise be a custom
     // TaskPollerJob + CronParser + StuckTaskRecoveryJob trio. db-scheduler
