@@ -122,6 +122,32 @@ class MessageAttachmentTest extends UnitTest {
         assertEquals(transcript, found.transcript);
     }
 
+    @Test
+    void captionIsNullByDefault() {
+        var att = persist("photo.png", MessageAttachment.KIND_IMAGE);
+        att.em().flush();
+        att.em().clear();
+
+        var found = MessageAttachment.findByUuid(att.uuid);
+        assertNotNull(found);
+        assertNull(found.caption, "JCLAW-211: caption is null until the captioner writes it");
+    }
+
+    @Test
+    void persistsAndReadsImageCaption() {
+        var att = persist("photo.png", MessageAttachment.KIND_IMAGE);
+        att.caption = "a dog standing next to a red bicycle";
+        att.save();
+        att.em().flush();
+        att.em().clear();
+
+        var found = MessageAttachment.findByUuid(att.uuid);
+        assertNotNull(found);
+        assertEquals("a dog standing next to a red bicycle", found.caption);
+        // caption and transcript are independent columns (a video could carry both).
+        assertNull(found.transcript);
+    }
+
     private MessageAttachment persistAudio(String transcript) {
         var uuid = UUID.randomUUID().toString();
         var att = new MessageAttachment();

@@ -64,6 +64,13 @@ public class MessageAttachment extends Model {
     @Column(columnDefinition = "TEXT")
     public String transcript;
 
+    /** JCLAW-211: cached image caption for the non-vision fallback — computed once via
+     *  {@link services.caption.ImageCaptionService} and reused across replays, history search, and
+     *  the text-only-model path. Deliberately distinct from {@link #transcript} so a video with both
+     *  audio and visual content can carry each. Nullable; the writer is wired in JCLAW-215. */
+    @Column(columnDefinition = "TEXT")
+    public String caption;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
