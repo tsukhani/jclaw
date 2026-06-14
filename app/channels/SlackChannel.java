@@ -180,96 +180,39 @@ public class SlackChannel implements Channel {
         public static DeliveryOutcome failed(String error) { return new DeliveryOutcome(false, error); }
     }
 
-    /**
-     * JCLAW-456: the credentials a delivery may use. {@code botToken} is the app
-     * identity; {@code userToken} ({@code xoxp-}) is the optional user identity that
-     * can reach private channels the bot isn't in. {@code allowUserWrites} gates posting
-     * as the user (false = the user token is read/resolve-only).
-     */
-    public record SlackDeliveryCreds(String botToken, String userToken, boolean allowUserWrites) {
-        public static SlackDeliveryCreds botOnly(String botToken) {
-            return new SlackDeliveryCreds(botToken, null, false);
-        }
-    }
-
     /** Test seam (JCLAW-454): the resolve+post delivery primitive, swappable so unit tests
      *  exercise delivery dispatch without the Slack network — mirrors {@link SlackFileUploader}'s
      *  injectable {@code Uploader}. */
     @FunctionalInterface
     public interface DeliverySender {
-        DeliveryOutcome send(SlackDeliveryCreds creds, String target, String text);
+        DeliveryOutcome send(String botToken, String target, String text);
     }
 
     static DeliverySender DELIVERY_SENDER = SlackChannel::sendForDeliveryLive;
 
-    /** Test seam (JCLAW-456): the post-to-resolved-channel primitive, swappable so the
-     *  bot→user fallback can be unit-tested without the Slack network. */
-    @FunctionalInterface
-    public interface PostFn {
-        DeliveryOutcome post(String token, String channelId, String text);
-    }
-
-    static PostFn POST_FN = SlackChannel::postResolvedWithRetry;
-
     /**
-     * JCLAW-454/456: resolve {@code target} to a channel id and deliver {@code text},
-     * returning Slack's error code on failure. The single send path
-     * {@link services.DeliveryDispatcher} uses for task-output delivery.
+     * JCLAW-454: resolve {@code target} (a channel id, {@code #name}, or bare name) to a
+     * channel id and post {@code text} as the bot, returning Slack's error code on failure.
+     * The single send path {@link services.DeliveryDispatcher} uses for task-output delivery.
      */
-    public static DeliveryOutcome sendForDelivery(SlackDeliveryCreds creds, String target, String text) {
-        return DELIVERY_SENDER.send(creds, target, text);
+    public static DeliveryOutcome sendForDelivery(String botToken, String target, String text) {
+        return DELIVERY_SENDER.send(botToken, target, text);
     }
 
-    static DeliveryOutcome sendForDeliveryLive(SlackDeliveryCreds creds, String target, String text) {
-        String botToken = trimToNull(creds.botToken());
-        String userToken = trimToNull(creds.userToken());
-        boolean allowUser = creds.allowUserWrites() && userToken != null;
-        if (botToken == null && userToken == null) return DeliveryOutcome.failed("missing_bot_token");
-
-        // JCLAW-456: resolution prefers the user token — it sees private channels the bot
-        // isn't a member of (conversations.list under xoxp). Fall back to the bot's view if
-        // the user token can't resolve it (e.g. lacks a read scope).
-        String channelId = SlackWebApi.resolveChannelId(userToken != null ? userToken : botToken, target);
-        if (channelId == null && userToken != null && botToken != null) {
-            channelId = SlackWebApi.resolveChannelId(botToken, target);
-        }
+    static DeliveryOutcome sendForDeliveryLive(String botToken, String target, String text) {
+        if (botToken == null || botToken.isBlank()) return DeliveryOutcome.failed("missing_bot_token");
+        String channelId = SlackWebApi.resolveChannelId(botToken, target);
         if (channelId == null) return DeliveryOutcome.failed("channel_not_found");
-
-        // Write: prefer the bot identity; fall back to posting as the user when the bot
-        // can't reach the channel (not_in_channel / channel_not_found) and user-token
-        // writes are enabled. Mirrors OpenClaw's `write => botToken ?? userToken` rule.
-        if (botToken != null) {
-            var viaBot = POST_FN.post(botToken, channelId, text);
-            if (viaBot.ok() || !(allowUser && botCannotReach(viaBot.error()))) {
-                return viaBot;
-            }
-            return POST_FN.post(userToken, channelId, text); // as the user
-        }
-        return allowUser ? POST_FN.post(userToken, channelId, text)
-                : DeliveryOutcome.failed("missing_bot_token");
-    }
-
-    /** Slack errors that mean the bot identity can't reach the channel — a user token might. */
-    private static boolean botCannotReach(String error) {
-        return "not_in_channel".equals(error) || "channel_not_found".equals(error);
-    }
-
-    private static String trimToNull(String s) {
-        return (s == null || s.isBlank()) ? null : s;
-    }
-
-    /** Post {@code text} to an already-resolved {@code channelId} as {@code token}, with one
-     *  rate-limit retry scheduled off the VT carrier (JDK-8373224 safe). channel_not_found /
-     *  not_in_channel are not transient, so they aren't retried. */
-    static DeliveryOutcome postResolvedWithRetry(String token, String channelId, String text) {
         String body = SlackMarkdownFormatter.format(text);
-        var a = postOnce(token, channelId, body, null);
+        var a = postOnce(botToken, channelId, body, null);
         if (a.ok()) return DeliveryOutcome.delivered();
+        // One retry only on a rate-limit hint, scheduled off the VT carrier (JDK-8373224
+        // safe). channel_not_found / not_in_channel are not transient, so don't retry them.
         if (a.retryAfterMs() > 0) {
             long delayMs = Math.min(a.retryAfterMs(), 60_000L);
             try {
                 var retried = RetryScheduler.schedule(
-                                () -> postOnce(token, channelId, body, null), delayMs)
+                                () -> postOnce(botToken, channelId, body, null), delayMs)
                         .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
                 return retried.ok() ? DeliveryOutcome.delivered() : DeliveryOutcome.failed(retried.error());
             } catch (InterruptedException _) {

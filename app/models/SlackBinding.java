@@ -4,7 +4,6 @@ import channels.ChannelTransport;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
-import org.hibernate.annotations.ColumnDefault;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -62,28 +61,6 @@ public class SlackBinding extends Model {
      */
     @Column(name = "app_token")
     public String appToken;
-
-    /**
-     * Optional Slack user token ({@code xoxp-...}, JCLAW-456). When present, task
-     * delivery can resolve and post <b>as the user</b> to channels the bot identity
-     * can't reach — notably private channels the bot hasn't been invited to (a user
-     * token sees and posts to every channel the user is a member of, so no bot invite
-     * is needed). Null = bot-token-only delivery. Not unique: unlike the bot token,
-     * the same human's user token may legitimately back more than one agent's binding.
-     */
-    @Column(name = "user_token")
-    public String userToken;
-
-    /**
-     * Gate on user-token <i>writes</i> (JCLAW-456). Defaults true (read/resolve only)
-     * so a configured user token never silently changes who authored a delivered
-     * message — the operator must opt in to user-token delivery. {@link ColumnDefault}
-     * is load-bearing: the NOT NULL ALTER on a populated {@code slack_binding} table
-     * needs a DDL default, mirroring {@link Task} / {@link McpServer}.
-     */
-    @Column(name = "user_token_read_only", nullable = false)
-    @ColumnDefault("true")
-    public boolean userTokenReadOnly = true;
 
     /**
      * Agent uniqueness is a privacy constraint, not a modelling choice: agent

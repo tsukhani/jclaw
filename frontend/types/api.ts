@@ -65,10 +65,6 @@ export interface SlackBindingSummary {
   effectiveRequestUrl: string | null
   hasSigningSecret: boolean
   hasAppToken: boolean
-  /** JCLAW-456: whether an optional xoxp user token is configured (presence only — the
-   *  token itself is never returned), and whether user-token writes are gated off. */
-  hasUserToken: boolean
-  userTokenReadOnly: boolean
   /** The bot's own user id, cached from auth.test — used for the self-loop guard
    *  and shown in the health probe. Null until a successful probe. */
   botUserId: string | null

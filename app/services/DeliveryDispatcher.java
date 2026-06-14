@@ -211,11 +211,7 @@ public final class DeliveryDispatcher {
         // JCLAW-454: channelId may be a channel name (`daily-briefings` / `#daily-briefings`)
         // or a literal id — sendForDelivery resolves it and reports Slack's real error code
         // so a failure lands on the run's delivery_error, not just the log.
-        // JCLAW-456: pass the optional user token so delivery can resolve + post as the user
-        // (reaching private channels the bot isn't in) when user-token writes are enabled.
-        var creds = new SlackChannel.SlackDeliveryCreds(
-                binding.botToken, binding.userToken, !binding.userTokenReadOnly);
-        var outcome = SlackChannel.sendForDelivery(creds, channelId, text);
+        var outcome = SlackChannel.sendForDelivery(binding.botToken, channelId, text);
         return outcome.ok()
                 ? DispatchResult.delivered()
                 : DispatchResult.failedDelivery(slackFailureReason(channelId, outcome.error()));

@@ -40,8 +40,6 @@ public class ApiSlackBindingsController extends Controller {
     private static final String KEY_BOT_TOKEN = "botToken";
     private static final String KEY_SIGNING_SECRET = "signingSecret";
     private static final String KEY_APP_TOKEN = "appToken";
-    private static final String KEY_USER_TOKEN = "userToken";
-    private static final String KEY_USER_TOKEN_READ_ONLY = "userTokenReadOnly";
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_OWNER_USER_ID = "ownerUserId";
     private static final String KEY_TRANSPORT = "transport";
@@ -63,7 +61,6 @@ public class ApiSlackBindingsController extends Controller {
                                 String ownerUserId, String transport,
                                 String webhookBaseUrl, String effectiveRequestUrl,
                                 boolean hasSigningSecret, boolean hasAppToken,
-                                boolean hasUserToken, boolean userTokenReadOnly,
                                 String botUserId, String teamId,
                                 boolean enabled, String replyToMode,
                                 String createdAt, String updatedAt) {
@@ -77,10 +74,6 @@ public class ApiSlackBindingsController extends Controller {
                     effectiveRequestUrl(b),
                     b.signingSecret != null && !b.signingSecret.isBlank(),
                     b.appToken != null && !b.appToken.isBlank(),
-                    // JCLAW-456: the user token (xoxp) is a secret — surface presence + the
-                    // write gate, never the token itself.
-                    b.userToken != null && !b.userToken.isBlank(),
-                    b.userTokenReadOnly,
                     b.botUserId, b.teamId,
                     b.enabled, b.replyToMode,
                     b.createdAt != null ? b.createdAt.toString() : null,
@@ -165,11 +158,6 @@ public class ApiSlackBindingsController extends Controller {
         binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
         binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
         binding.replyToMode = readOptionalString(body, KEY_REPLY_TO_MODE);
-        // JCLAW-456: optional user token (xoxp) for delivery-as-user; writes are gated and
-        // default off (read/resolve only) so a user token never silently re-authors messages.
-        binding.userToken = readOptionalString(body, KEY_USER_TOKEN);
-        binding.userTokenReadOnly = !body.has(KEY_USER_TOKEN_READ_ONLY)
-                || body.get(KEY_USER_TOKEN_READ_ONLY).getAsBoolean();
         // Best-effort identity probe: cache botUserId/teamId so the bot-loop guard
         // works immediately. A bad token still saves (the operator fixes it via
         // update + test, mirroring Telegram's save-then-test flow).
@@ -292,10 +280,6 @@ public class ApiSlackBindingsController extends Controller {
             if (v != null) binding.signingSecret = v;   // never null out the required secret
         }
         if (body.has(KEY_APP_TOKEN)) binding.appToken = readOptionalString(body, KEY_APP_TOKEN);
-        if (body.has(KEY_USER_TOKEN)) binding.userToken = readOptionalString(body, KEY_USER_TOKEN);
-        if (body.has(KEY_USER_TOKEN_READ_ONLY)) {
-            binding.userTokenReadOnly = body.get(KEY_USER_TOKEN_READ_ONLY).getAsBoolean();
-        }
         if (body.has(KEY_OWNER_USER_ID)) binding.ownerUserId = readOptionalString(body, KEY_OWNER_USER_ID);
         if (body.has(KEY_TRANSPORT)) binding.transport = parseTransport(body, binding.transport);
         if (body.has(KEY_WEBHOOK_BASE_URL)) binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
