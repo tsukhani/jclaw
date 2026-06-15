@@ -28,9 +28,9 @@ class SlackWebApiResolveTest extends UnitTest {
     private static final Field PROBER_FIELD;
     static {
         try {
-            LISTER_FIELD = SlackWebApi.class.getDeclaredField("CHANNEL_LISTER");
+            LISTER_FIELD = SlackWebApi.class.getDeclaredField("channelLister");
             LISTER_FIELD.setAccessible(true);
-            PROBER_FIELD = SlackWebApi.class.getDeclaredField("SCOPE_PROBER");
+            PROBER_FIELD = SlackWebApi.class.getDeclaredField("scopeProber");
             PROBER_FIELD.setAccessible(true);
         } catch (NoSuchFieldException e) {
             throw new RuntimeException(e);

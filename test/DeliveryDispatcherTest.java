@@ -36,7 +36,7 @@ class DeliveryDispatcherTest extends UnitTest {
     private static final Field SENDER_FIELD;
     static {
         try {
-            SENDER_FIELD = SlackChannel.class.getDeclaredField("DELIVERY_SENDER");
+            SENDER_FIELD = SlackChannel.class.getDeclaredField("deliverySender");
             SENDER_FIELD.setAccessible(true);
         } catch (NoSuchFieldException e) {
             throw new RuntimeException(e);

@@ -66,7 +66,7 @@ public final class SlackWebApi {
         ChannelLookup lookup(String botToken, String name);
     }
 
-    static ChannelLister CHANNEL_LISTER = SlackWebApi::lookupChannelByNameLive;
+    static ChannelLister channelLister = SlackWebApi::lookupChannelByNameLive;
 
     /** Resolution of a Slack delivery target (JCLAW-458): the {@code channelId} (null when it
      *  couldn't be resolved) plus the Slack {@code error} code on failure ({@code missing_scope}
@@ -90,7 +90,7 @@ public final class SlackWebApi {
         String key = Integer.toHexString(botToken.hashCode()) + ":" + name;
         var cached = CHANNEL_ID_CACHE.get(key);
         if (cached != null) return new ChannelResolution(cached, null);
-        var lk = CHANNEL_LISTER.lookup(botToken, name);
+        var lk = channelLister.lookup(botToken, name);
         if (lk.channel() != null) {
             CHANNEL_ID_CACHE.put(key, lk.channel().id());
             return new ChannelResolution(lk.channel().id(), null);
@@ -123,13 +123,8 @@ public final class SlackWebApi {
                             "conversations.list error: %s".formatted(resp.getError()));
                     return ChannelLookup.failed(resp.getError());
                 }
-                if (resp.getChannels() != null) {
-                    for (var ch : resp.getChannels()) {
-                        if (name.equalsIgnoreCase(ch.getName())) {
-                            return ChannelLookup.found(new ChannelInfo(ch.getId(), ch.isMember()));
-                        }
-                    }
-                }
+                var hit = matchByName(resp.getChannels(), name);
+                if (hit != null) return ChannelLookup.found(hit);
                 cursor = resp.getResponseMetadata() != null
                         ? resp.getResponseMetadata().getNextCursor() : null;
             } while (cursor != null && !cursor.isBlank());
@@ -139,6 +134,19 @@ public final class SlackWebApi {
                     "conversations.list failed: %s".formatted(e.getMessage()));
             return ChannelLookup.failed("io_error");
         }
+    }
+
+    /** Find a channel by case-insensitive name in one {@code conversations.list} page; null if not
+     *  present in this page. Extracted from {@link #lookupChannelByNameLive} to keep it under the
+     *  cognitive-complexity bound (Sonar S3776). */
+    private static ChannelInfo matchByName(java.util.List<com.slack.api.model.Conversation> channels, String name) {
+        if (channels == null) return null;
+        for (var ch : channels) {
+            if (name.equalsIgnoreCase(ch.getName())) {
+                return new ChannelInfo(ch.getId(), ch.isMember());
+            }
+        }
+        return null;
     }
 
     // ── JCLAW-458: bind-time delivery-scope check ──
@@ -151,7 +159,7 @@ public final class SlackWebApi {
         String listError(String botToken);
     }
 
-    static ScopeProber SCOPE_PROBER = SlackWebApi::probeListScopeLive;
+    static ScopeProber scopeProber = SlackWebApi::probeListScopeLive;
 
     private static String probeListScopeLive(String botToken) {
         try {
@@ -159,7 +167,7 @@ public final class SlackWebApi {
                     .types(List.of(ConversationType.PUBLIC_CHANNEL, ConversationType.PRIVATE_CHANNEL))
                     .limit(1));
             return resp.isOk() ? null : resp.getError();
-        } catch (IOException | SlackApiException e) {
+        } catch (IOException | SlackApiException _) {
             return null; // can't determine scopes (network/other) — don't warn
         }
     }
@@ -174,8 +182,8 @@ public final class SlackWebApi {
         if (botToken == null || botToken.isBlank()) return null;
         String err;
         try {
-            err = SCOPE_PROBER.listError(botToken);
-        } catch (RuntimeException e) {
+            err = scopeProber.listError(botToken);
+        } catch (RuntimeException _) {
             return null;
         }
         if (!"missing_scope".equals(err)) return null;
@@ -249,8 +257,8 @@ public final class SlackWebApi {
         String display = "#" + name;
         ChannelLookup lk;
         try {
-            lk = CHANNEL_LISTER.lookup(botToken, name);
-        } catch (RuntimeException e) {
+            lk = channelLister.lookup(botToken, name);
+        } catch (RuntimeException _) {
             return new SlackReachability(SlackReach.UNKNOWN, display, null);
         }
         // JCLAW-458: a scope gap masquerades as "not found" — name it precisely.

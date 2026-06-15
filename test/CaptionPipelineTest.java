@@ -71,7 +71,7 @@ class CaptionPipelineTest extends UnitTest {
     }
 
     @AfterEach
-    void tearDown() throws Exception {
+    void tearDown() {
         server.close();
         // Leave no provider selection bleeding into other tests in the lane.
         ConfigService.set("caption.cloud.provider", "");

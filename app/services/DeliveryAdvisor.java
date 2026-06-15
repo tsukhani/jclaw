@@ -47,7 +47,7 @@ public final class DeliveryAdvisor {
 
         try {
             return SlackWebApi.probeChannel(botToken, target).advisory();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             return null;
         }
     }

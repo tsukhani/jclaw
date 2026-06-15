@@ -609,6 +609,15 @@ public class TaskTool implements ToolRegistry.Tool {
         return trimmed;
     }
 
+    /** Parse the optional {@code schedule} shorthand into a spec, or null when absent. Throws
+     *  IllegalArgumentException on a malformed schedule (the caller maps it to a tool error).
+     *  Extracted to keep {@link #updateTask} under the cognitive-complexity bound (Sonar S3776). */
+    private ScheduleShorthandParser.ScheduleSpec resolveScheduleSpec(JsonObject args) {
+        if (!hasValue(args, KEY_SCHEDULE)) return null;
+        var zone = services.TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
+        return ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString(), zone);
+    }
+
     private String updateTask(JsonObject args, Agent agent) {
         if (!hasValue(args, KEY_NAME)) {
             return "Error: 'name' is required to identify the task";
@@ -637,15 +646,10 @@ public class TaskTool implements ToolRegistry.Tool {
 
         // Schedule re-parse, if present, drives type + 4 derived fields.
         final ScheduleShorthandParser.ScheduleSpec spec;
-        if (hasValue(args, KEY_SCHEDULE)) {
-            try {
-                var zone = services.TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
-                spec = ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString(), zone);
-            } catch (IllegalArgumentException e) {
-                return "Error: Invalid schedule: " + e.getMessage();
-            }
-        } else {
-            spec = null;
+        try {
+            spec = resolveScheduleSpec(args);
+        } catch (IllegalArgumentException e) {
+            return "Error: Invalid schedule: " + e.getMessage();
         }
 
         final PatchResult patch;

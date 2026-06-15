@@ -35,6 +35,8 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String INSTRUCTION =
             "Describe this image objectively in one concise sentence for a reader who cannot see it.";
+    /** OpenAI chat-completions message field name (request part + response parse). */
+    private static final String CONTENT = "content";
 
     private final String providerName;
     private final String defaultModel;
@@ -116,7 +118,7 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
         content.add(imagePart);
         var message = new JsonObject();
         message.addProperty("role", "user");
-        message.add("content", content);
+        message.add(CONTENT, content);
         var messages = new JsonArray();
         messages.add(message);
 
@@ -135,10 +137,10 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
             return "";
         }
         var message = choices.get(0).getAsJsonObject().getAsJsonObject("message");
-        if (message == null || !message.has("content") || message.get("content").isJsonNull()) {
+        if (message == null || !message.has(CONTENT) || message.get(CONTENT).isJsonNull()) {
             return "";
         }
-        return message.get("content").getAsString().trim();
+        return message.get(CONTENT).getAsString().trim();
     }
 
     private static String trimTrailingSlash(String s) {

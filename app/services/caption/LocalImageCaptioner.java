@@ -51,6 +51,10 @@ public final class LocalImageCaptioner implements ImageCaptionService {
 
     private static final Object LOCK = new Object();
     private static volatile boolean loaded;
+    // encModel/decModel are retained as fields (not method locals) to keep the native ONNX models
+    // alive for the JVM lifetime — both Predictors below are created from them once in ensureLoaded
+    // and reused across every caption. Letting decModel fall out of scope (Sonar S1450's suggestion)
+    // would make the native model collectable. Load-once, retain-forever — mirrors WhisperJniTranscriber.
     private static ZooModel<NDList, NDList> encModel;
     private static ZooModel<NDList, NDList> decModel;
     private static Predictor<NDList, NDList> encoder;
@@ -127,9 +131,11 @@ public final class LocalImageCaptioner implements ImageCaptionService {
                     NDList decOut = decoder.predict(new NDList(inputIds, hidden));
                     NDArray logits = pickLogits(decOut);
                     long[] ls = logits.getShape().getShape();
-                    int t = (int) ls[1], vocab = (int) ls[2];
+                    int t = (int) ls[1];
+                    int vocab = (int) ls[2];
                     float[] all = logits.toFloatArray();
-                    int off = (t - 1) * vocab, best = 0;
+                    int off = (t - 1) * vocab;
+                    int best = 0;
                     float bv = Float.NEGATIVE_INFINITY;
                     for (int v = 0; v < vocab; v++) {
                         if (all[off + v] > bv) { bv = all[off + v]; best = v; }
@@ -192,7 +198,7 @@ public final class LocalImageCaptioner implements ImageCaptionService {
     }
 
     /** Bilinear resize to 224² + CHW + normalize (x/255−0.5)/0.5, all in plain Java. */
-    private static float[] preprocess(byte[] imageBytes) throws Exception {
+    private static float[] preprocess(byte[] imageBytes) throws java.io.IOException {
         BufferedImage src = ImageIO.read(new ByteArrayInputStream(imageBytes));
         if (src == null) throw new IllegalArgumentException("unreadable image bytes");
         BufferedImage dst = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);

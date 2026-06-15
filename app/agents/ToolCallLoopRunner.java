@@ -65,6 +65,9 @@ public final class ToolCallLoopRunner {
 
     private ToolCallLoopRunner() {}
 
+    /** Passthrough-outcome tag for the audio/image structured logs (AudioRetryStrategy / ImageRetryStrategy). */
+    private static final String OUTCOME_ERROR = "error";
+
     /**
      * JCLAW-291: result wrapper for {@link #callWithToolLoop}. Caller
      * plumbs {@code truncated} into the persist site and (for subagents)
@@ -142,18 +145,9 @@ public final class ToolCallLoopRunner {
             }
             if (attempt.terminal() != null) return attempt.terminal();
 
-            // Successful response. Fire the passthrough-outcome logs when the
-            // request carried audio / image so the field-data set we'll later use to
-            // grow a known-good provider/format matrix has full coverage.
-            if (round == 0 && !audioBearers.isEmpty()) {
-                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
-                        audioState.retryAttempted ? "downgraded" : "accepted",
-                        null, audioState.transcriptAwaited);
-            }
-            if (round == 0 && !imageBearers.isEmpty()) {
-                ImageRetryStrategy.logImagePassthroughOutcome(agent, conversation, primary,
-                        visionState.retryAttempted ? "downgraded" : "accepted", null);
-            }
+            // Successful response. Fire the audio/image passthrough-outcome logs (JCLAW-165/216).
+            logRoundZeroPassthroughOutcomes(round, agent, conversation, primary,
+                    audioBearers, imageBearers, audioState, visionState);
 
             var roundOutcome = handleSyncRoundResponse(attempt.response(), agent, conversation, conversationId, primary,
                     currentMessages, tools, sink, round, taskRunId);
@@ -161,6 +155,29 @@ public final class ToolCallLoopRunner {
         }
 
         return new LoopOutcome("I reached the maximum number of tool execution rounds. Please try a simpler request.");
+    }
+
+    /**
+     * Fire the audio / image passthrough-outcome structured logs (JCLAW-165 / JCLAW-216) on the
+     * first round, so the field-data matrix covers accepted-vs-downgraded per provider. No-op past
+     * round 0 or when the turn carried no media. Extracted to keep {@link #callWithToolLoop} under
+     * the cognitive-complexity bound (Sonar S3776).
+     */
+    @SuppressWarnings("java:S107") // mirrors the loop's per-round media-retry state
+    private static void logRoundZeroPassthroughOutcomes(int round, Agent agent, Conversation conversation,
+            LlmProvider primary, List<VisionAudioAssembler.AudioBearer> audioBearers,
+            List<VisionAudioAssembler.ImageBearer> imageBearers,
+            AudioRetryState audioState, VisionRetryState visionState) {
+        if (round != 0) return;
+        if (!audioBearers.isEmpty()) {
+            AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
+                    audioState.retryAttempted ? "downgraded" : "accepted",
+                    null, audioState.transcriptAwaited);
+        }
+        if (!imageBearers.isEmpty()) {
+            ImageRetryStrategy.logImagePassthroughOutcome(agent, conversation, primary,
+                    visionState.retryAttempted ? "downgraded" : "accepted", null);
+        }
     }
 
     /**
@@ -253,7 +270,7 @@ public final class ToolCallLoopRunner {
                 // notes — better to fail with a clear error than
                 // ship a degraded prompt the user can't tell came
                 // from a transcription failure.
-                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
+                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, OUTCOME_ERROR,
                         "no_transcript_after_rejection", true);
                 EventLogger.warn("llm", agent.name, null,
                         "Audio format rejected and no transcript available — failing turn");
@@ -284,11 +301,11 @@ public final class ToolCallLoopRunner {
         }
         EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
         if (!audioBearers.isEmpty()) {
-            AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
+            AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, OUTCOME_ERROR,
                     AudioRetryStrategy.shortErrorTag(e), audioState.transcriptAwaited);
         }
         if (!imageBearers.isEmpty()) {
-            ImageRetryStrategy.logImagePassthroughOutcome(agent, conversation, primary, "error",
+            ImageRetryStrategy.logImagePassthroughOutcome(agent, conversation, primary, OUTCOME_ERROR,
                     AudioRetryStrategy.shortErrorTag(e));
         }
         return LlmCallExceptionOutcome.terminal(new LoopOutcome(

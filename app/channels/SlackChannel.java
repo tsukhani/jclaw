@@ -40,6 +40,8 @@ public class SlackChannel implements Channel {
     private static final String CHANNEL_NAME = "slack";
     private static final String CHANNEL = "channel";
     private static final String FILES_KEY = "files";
+    /** Slack's rate-limit error code, returned by chat.postMessage on 429. */
+    private static final String ERR_RATELIMITED = "ratelimited";
 
     /** This instance's per-agent bot token (JCLAW-441), or null for instances
      *  used only for inbound/metadata ({@link #channelName}, file-send no-ops).
@@ -126,7 +128,7 @@ public class SlackChannel implements Channel {
     private SendResult trySend(String botToken, String channelId, String text, String threadTs) {
         var a = postOnce(botToken, channelId, text, threadTs);
         if (a.ok()) return SendResult.OK;
-        if ("ratelimited".equals(a.error())) return SendResult.rateLimited(a.retryAfterMs());
+        if (ERR_RATELIMITED.equals(a.error())) return SendResult.rateLimited(a.retryAfterMs());
         return SendResult.FAILED;
     }
 
@@ -144,9 +146,9 @@ public class SlackChannel implements Channel {
                         "Message sent to channel %s".formatted(channelId));
                 return new PostAttempt(true, null, 0L);
             }
-            if ("ratelimited".equals(resp.getError())) {
+            if (ERR_RATELIMITED.equals(resp.getError())) {
                 EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "Rate-limited (API error)");
-                return new PostAttempt(false, "ratelimited", 0L);
+                return new PostAttempt(false, ERR_RATELIMITED, 0L);
             }
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                     "Slack API error: %s".formatted(resp.getError()));
@@ -157,7 +159,7 @@ public class SlackChannel implements Channel {
                 long retryAfterMs = parseRetryAfterMs(http.header("Retry-After"));
                 EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                         "Rate-limited; Retry-After=%sms".formatted(retryAfterMs));
-                return new PostAttempt(false, "ratelimited", retryAfterMs);
+                return new PostAttempt(false, ERR_RATELIMITED, retryAfterMs);
             }
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
                     "Slack API error: %s".formatted(e.getResponseBody()));
@@ -188,7 +190,7 @@ public class SlackChannel implements Channel {
         DeliveryOutcome send(String botToken, String target, String text);
     }
 
-    static DeliverySender DELIVERY_SENDER = SlackChannel::sendForDeliveryLive;
+    static DeliverySender deliverySender = SlackChannel::sendForDeliveryLive;
 
     /**
      * JCLAW-454: resolve {@code target} (a channel id, {@code #name}, or bare name) to a
@@ -196,7 +198,7 @@ public class SlackChannel implements Channel {
      * The single send path {@link services.DeliveryDispatcher} uses for task-output delivery.
      */
     public static DeliveryOutcome sendForDelivery(String botToken, String target, String text) {
-        return DELIVERY_SENDER.send(botToken, target, text);
+        return deliverySender.send(botToken, target, text);
     }
 
     static DeliveryOutcome sendForDeliveryLive(String botToken, String target, String text) {
