@@ -3350,9 +3350,14 @@ async function handleResetPassword() {
 
       <!-- Cloud (preferred) -->
       <fieldset class="bg-surface-elevated border border-border">
-        <legend class="px-4 pt-2.5 text-xs font-medium text-fg-strong">
-          Cloud (preferred)
+        <!-- sr-only legend names the radiogroup for a11y; the visible header is a div so it
+             doesn't straddle/clip the fieldset border (matches the Local block below). -->
+        <legend class="sr-only">
+          Cloud captioning provider
         </legend>
+        <div class="px-4 pt-2.5 text-xs font-medium text-fg-strong">
+          Cloud (preferred)
+        </div>
         <div class="divide-y divide-border">
           <label
             for="caption-cloud-none"
