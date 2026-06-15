@@ -249,26 +249,31 @@ public final class VisionAudioAssembler {
 
     /**
      * Build the {@code [Image description ...]} blocks for the !supportsVision branch (JCLAW-215).
-     * Each block states up front that the image file <b>cannot be opened or read</b> and that the
-     * description is the only available representation — this discourages the LLM from trying to
-     * {@code readDocument}/open the underlying image (a non-vision model can't use the bytes anyway,
-     * and the workspace path it would guess gets rejected by the containment guard). Missing/blank
-     * captions fall back to a note that still preserves the original filename — symmetric with
-     * {@link #collectTranscriptBlocks}.
+     * Each block carries the auto-generated caption (the only representation a non-vision model can
+     * use — it can't read the raw bytes) <b>plus the image's workspace-relative path</b>, so the
+     * agent can still file-manage it (move / copy / forward via the documents or filesystem tools)
+     * with a path that actually resolves — instead of guessing one and tripping the containment
+     * guard. Missing/blank captions fall back to a note that preserves the original filename and
+     * the same workspace path — symmetric with {@link #collectTranscriptBlocks}.
      */
     private static String collectCaptionBlocks(List<models.MessageAttachment> atts) {
         var captionBlocks = new StringBuilder();
         for (var a : atts) {
             if (!a.isImage()) continue;
+            var path = services.AttachmentService.workspaceRelativePath(a);
             var caption = a.caption;
             if (caption != null && !caption.isBlank()) {
-                captionBlocks.append("\n\n[Image description (auto-generated; you cannot open or read the image file itself — this description is the only representation available): ")
+                captionBlocks.append("\n\n[Image description: ")
                         .append(caption.trim())
-                        .append("]");
+                        .append(" (auto-generated — you cannot read the image contents directly; the file is in your workspace at \"")
+                        .append(path)
+                        .append("\", which you can move/copy/send with the documents or filesystem tools)]");
             } else {
-                captionBlocks.append("\n\n[Image (auto-description unavailable; you cannot open or read the image file itself)")
-                        .append(a.originalFilename != null ? ": " + a.originalFilename : "")
-                        .append("]");
+                captionBlocks.append("\n\n[Image: auto-description unavailable")
+                        .append(a.originalFilename != null ? " for \"" + a.originalFilename + "\"" : "")
+                        .append(" — you cannot read the image contents directly; the file is in your workspace at \"")
+                        .append(path)
+                        .append("\", which you can move/copy/send with the documents or filesystem tools]");
             }
         }
         return captionBlocks.toString();

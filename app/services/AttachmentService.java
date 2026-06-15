@@ -171,6 +171,19 @@ public final class AttachmentService {
     }
 
     /**
+     * The attachment's path <b>relative to the agent's workspace root</b> — exactly the form the
+     * documents / filesystem tools expect (they resolve via
+     * {@code AgentService.acquireWorkspacePath(agent.name, path)}). Strips the {@code {agentName}/}
+     * prefix from {@link #toStoragePath storagePath}, mirroring {@link #resolveOnDisk}'s prefix
+     * handling. Surfaced into the caption block (JCLAW-215 follow-up) so a non-vision agent can
+     * move / copy / forward the image file with the tools even though it can't read the bytes.
+     */
+    public static String workspaceRelativePath(MessageAttachment att) {
+        var agentName = att.message.conversation.agent.name;
+        return att.storagePath.substring(agentName.length() + 1);
+    }
+
+    /**
      * Locate the staged file for a given uuid. Scans the staging directory
      * for the first entry whose filename starts with {@code uuid + "."} —
      * the on-disk layout written by {@code ApiChatController.uploadChatFiles}.

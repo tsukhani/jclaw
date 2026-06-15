@@ -102,8 +102,10 @@ class CaptionPipelineTest extends UnitTest {
         var text = (String) textPart.get("text");
         assertTrue(text.contains("Image description") && text.contains("a dog beside a red bicycle"),
                 "text must carry the caption block: " + text);
-        assertTrue(text.contains("cannot open or read the image file"),
-                "caption block must signal the image file isn't directly readable (discourage readDocument): " + text);
+        assertTrue(text.contains("cannot read the image contents"),
+                "caption block must signal the image contents aren't directly readable (discourage readDocument): " + text);
+        assertTrue(text.contains("attachments/" + conversation.id + "/"),
+                "caption block must include the workspace-relative path for file-management: " + text);
     }
 
     @Test
@@ -119,8 +121,10 @@ class CaptionPipelineTest extends UnitTest {
                 "fallback note must carry the original filename: " + text);
         assertTrue(text.contains("auto-description unavailable"),
                 "fallback must signal no caption was produced: " + text);
-        assertTrue(text.contains("cannot open or read the image file"),
-                "fallback must still signal the image file isn't directly readable: " + text);
+        assertTrue(text.contains("cannot read the image contents"),
+                "fallback must still signal the image contents aren't directly readable: " + text);
+        assertTrue(text.contains("attachments/" + conversation.id + "/"),
+                "fallback must include the workspace-relative path for file-management: " + text);
         assertNull(firstPartOfType(parts, "image_url"));
     }
 
@@ -171,6 +175,8 @@ class CaptionPipelineTest extends UnitTest {
         var text = (String) firstPartOfType(parts, "text").get("text");
         assertTrue(text.contains("Image description") && text.contains("a scenic mountain lake"),
                 "rewrite must inject the caption block: " + text);
+        assertTrue(text.contains("attachments/" + message.conversation.id + "/"),
+                "rewrite must include the workspace-relative path: " + text);
     }
 
     @Test
