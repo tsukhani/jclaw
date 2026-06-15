@@ -1482,6 +1482,40 @@ describe('Settings page — Image captioning cloud + local (JCLAW-214)', () => {
 
     expect(removeCaptured.hit).toBe(true)
   })
+
+  it('vision-model picker lists only the provider vision models (not free text)', async () => {
+    registerCommon()
+    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [
+          // Override (not append) the default provider.openai.models so getProviderModels'
+          // .find() picks our vision-tagged list, not the default no-vision one.
+          ...defaultConfigEntries().filter(e => e.key !== 'provider.openai.models'),
+          { key: 'caption.cloud.provider', value: 'openai', updatedAt: '2026-06-15T10:00:00Z' },
+          // Two openai models — one vision-capable, one not. Only the vision one should appear.
+          { key: 'provider.openai.models', updatedAt: '2026-06-15T10:00:00Z', value: JSON.stringify([
+            { id: 'gpt-4o', name: 'GPT-4o', supportsVision: true },
+            { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', supportsVision: false },
+          ]) },
+        ],
+      }),
+    })
+    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const select = component.find('select[aria-label="Caption cloud model"]')
+    expect(select.exists()).toBe(true)
+    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    expect(optionValues).toContain('gpt-4o') // vision model is offered
+    expect(optionValues).not.toContain('gpt-3.5-turbo') // non-vision model is filtered out
+    expect(optionValues).toContain('') // "(provider default)" escape hatch
+    // It's a <select>, not a free-text <input>.
+    expect(component.find('input[aria-label="Caption cloud model"]').exists()).toBe(false)
+  })
 })
 
 describe('Settings page — Password reset confirm dialog', () => {

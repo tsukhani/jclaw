@@ -515,6 +515,22 @@ const captionCloudProvider = computed(() =>
 const captionCloudModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'caption.cloud.model')?.value ?? '',
 )
+// Vision-capable models the operator has configured for the chosen cloud provider — the caption
+// model picker is filtered to these (JCLAW-214 refinement) rather than free text. Reuses the same
+// provider.{name}.models config the LLM Providers section manages; "supports vision" is the gate.
+const captionVisionModels = computed<ProviderModelDef[]>(() => {
+  const p = captionCloudProvider.value
+  if (p !== 'openai' && p !== 'openrouter') return []
+  return getProviderModels(p).filter(m => m.supportsVision === true)
+})
+// Dropdown options: the configured vision models, plus the currently-saved model if it isn't among
+// them (so a value set before the model was marked vision-capable isn't silently dropped).
+const captionVisionModelOptions = computed(() => {
+  const opts = captionVisionModels.value.map(m => ({ id: m.id, label: m.name || m.id }))
+  const cur = captionCloudModel.value
+  if (cur && !opts.some(o => o.id === cur)) opts.unshift({ id: cur, label: `${cur} (not marked vision)` })
+  return opts
+})
 // The single local model (ViT-GPT2). One entry today; helpers stay list-shaped
 // to mirror the transcription pattern and tolerate future models.
 const captionLocalModel = computed<CaptionModelStatus | null>(() =>
@@ -3409,15 +3425,32 @@ async function handleResetPassword() {
           class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
         >
           <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
-          <input
+          <select
             :value="captionCloudModel"
-            type="text"
             aria-label="Caption cloud model"
-            placeholder="e.g. gpt-4o-mini"
             class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            @change="setCaptionCloudModel(($event.target as HTMLInputElement).value)"
+            @change="setCaptionCloudModel(($event.target as HTMLSelectElement).value)"
           >
+            <option value="">
+              (provider default)
+            </option>
+            <option
+              v-for="m in captionVisionModelOptions"
+              :key="m.id"
+              :value="m.id"
+            >
+              {{ m.label }}
+            </option>
+          </select>
         </div>
+        <p
+          v-if="(captionCloudProvider === 'openai' || captionCloudProvider === 'openrouter') && captionVisionModels.length === 0"
+          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+        >
+          No vision-capable models are configured for this provider. Add one under
+          <span class="text-fg-muted">LLM Providers</span> above and mark it “supports vision”, or
+          leave this on “provider default”.
+        </p>
       </fieldset>
 
       <!-- Local (offline fallback) -->
