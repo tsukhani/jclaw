@@ -103,6 +103,7 @@ const MANAGED_PREFIXES = [
   'provider.', // LLM providers — Settings
   'dispatcher.', // OkHttp dispatcher caps — Settings (Performance)
   'transcription.', // Transcription provider + local model — Settings (Transcription)
+  'caption.', // Image captioning cloud + local model (caption.cloud.*) — Settings (Image Captioning)
   'ocr.', // OCR backends — Settings (Tesseract today; GLM-OCR planned)
   'search.', // Search providers — Settings
   'scanner.', // Malware scanners — Settings
@@ -557,7 +558,14 @@ const captionActiveBackend = computed(() => {
 async function setCaptionCloudProvider(value: string) {
   saving.value = true
   try {
-    await $fetch('/api/config', { method: 'POST', body: { key: 'caption.cloud.provider', value } })
+    // Reset the model alongside the provider switch — a model from the previous provider isn't valid
+    // for the new one (and would otherwise linger as "(not marked vision)"). The dropdown then starts
+    // on "(provider default)" and lists the new provider's vision models. Independent keys, so fire
+    // both writes in parallel.
+    await Promise.all([
+      $fetch('/api/config', { method: 'POST', body: { key: 'caption.cloud.provider', value } }),
+      $fetch('/api/config', { method: 'POST', body: { key: 'caption.cloud.model', value: '' } }),
+    ])
     refresh()
   }
   finally { saving.value = false }

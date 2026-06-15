@@ -1391,6 +1391,11 @@ describe('Settings page — Image captioning cloud + local (JCLAW-214)', () => {
     const hit = captured.find(b => b.key === 'caption.cloud.provider')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('openai')
+    // Switching provider must also reset the model so a stale model from the prior provider
+    // doesn't linger.
+    const modelReset = captured.find(b => b.key === 'caption.cloud.model')
+    expect(modelReset).toBeTruthy()
+    expect(modelReset!.value).toBe('')
   })
 
   it('POSTs caption.cloud.provider="" when the None radio is selected (fall back to local)', async () => {
