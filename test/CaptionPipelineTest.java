@@ -73,7 +73,7 @@ class CaptionPipelineTest extends UnitTest {
     void tearDown() throws Exception {
         server.close();
         // Leave no provider selection bleeding into other tests in the lane.
-        ConfigService.set("caption.provider", "");
+        ConfigService.set("caption.cloud.provider", "");
     }
 
     // ── userMessageFor capability routing ────────────────────────────
@@ -139,7 +139,7 @@ class CaptionPipelineTest extends UnitTest {
         var att = persistImageAttachment("photo.jpg", "image/jpeg", new byte[]{1, 2, 3, 4, 5}, null);
         ConfigService.set("provider.openai.baseUrl", server.url("/").toString());
         ConfigService.set("provider.openai.apiKey", "test-key");
-        ConfigService.set("caption.provider", "openai");
+        ConfigService.set("caption.cloud.provider", "openai");
         server.enqueue(new MockResponse.Builder()
                 .code(200).addHeader("Content-Type", "application/json")
                 .body(jsonBuf("{\"choices\":[{\"message\":{\"role\":\"assistant\","
@@ -171,7 +171,7 @@ class CaptionPipelineTest extends UnitTest {
     @Test
     void applyCaptionsNoOpWhenVisionSupported() throws Exception {
         var att = persistImageAttachment("photo.jpg", "image/jpeg", new byte[]{1, 2, 3}, null);
-        ConfigService.set("caption.provider", "openai"); // configured, but must not be called
+        ConfigService.set("caption.cloud.provider", "openai"); // configured, but must not be called
 
         var fresh = Message.<Message>findById(message.id);
         var messages = new ArrayList<ChatMessage>();

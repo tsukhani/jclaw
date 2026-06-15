@@ -26,7 +26,8 @@ import java.io.IOException;
  * <ul>
  *   <li>{@code provider.{name}.baseUrl} — {@code /chat/completions} is appended.</li>
  *   <li>{@code provider.{name}.apiKey} — sent as {@code Authorization: Bearer}.</li>
- *   <li>{@code caption.model} — captioning model id; defaults to the subclass's cheap vision model.</li>
+ *   <li>{@code caption.cloud.model} — captioning model id; defaults to the subclass's cheap vision
+ *       model. Should name a <b>vision-capable</b> model on the chosen provider (JCLAW-214).</li>
  * </ul>
  */
 public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
@@ -75,7 +76,7 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
         if (apiKey == null || apiKey.isBlank()) {
             throw new CaptionException("provider." + providerName + ".apiKey is not configured");
         }
-        var model = ConfigService.get("caption.model");
+        var model = ConfigService.get("caption.cloud.model");
         if (model == null || model.isBlank()) model = defaultModel;
 
         var url = trimTrailingSlash(baseUrl) + "/chat/completions";

@@ -486,6 +486,114 @@ onMounted(() => {
 })
 onUnmounted(() => stopTranscriptionPolling())
 
+// ──────────────────── Image captioning (JCLAW-214) ─────────────────────────
+// Non-vision chat models get a generated image description. Two operator-
+// configured fallbacks with cloud-preferred precedence: a CLOUD provider/model
+// (used first when set), else the LOCAL ViT-GPT2 model (when downloaded).
+// Per-local-model download status comes from /api/caption/state; the cloud
+// selection reads from configData and writes via /api/config.
+type CaptionModelStatus = {
+  id: string
+  displayName: string
+  approxSizeMb: number
+  status: 'ABSENT' | 'DOWNLOADING' | 'VERIFYING' | 'AVAILABLE' | 'ERROR'
+  bytesDownloaded: number
+  totalBytes: number
+  error: string | null
+}
+type CaptionState = {
+  cloudProvider: string | null
+  cloudModel: string | null
+  models: CaptionModelStatus[]
+}
+const { data: captionState, refresh: refreshCaptionState }
+  = await useFetch<CaptionState>('/api/caption/state')
+
+const captionCloudProvider = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'caption.cloud.provider')?.value ?? '',
+)
+const captionCloudModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'caption.cloud.model')?.value ?? '',
+)
+// The single local model (ViT-GPT2). One entry today; helpers stay list-shaped
+// to mirror the transcription pattern and tolerate future models.
+const captionLocalModel = computed<CaptionModelStatus | null>(() =>
+  captionState.value?.models?.[0] ?? null,
+)
+const captionLocalDownloadPct = computed(() => {
+  const s = captionLocalModel.value
+  if (!s || s.totalBytes === 0) return 0
+  return Math.min(100, Math.round((s.bytesDownloaded / s.totalBytes) * 100))
+})
+// Captioning is active when a cloud provider is set OR the local model is ready.
+const captionEnabled = computed(() =>
+  captionCloudProvider.value.trim().length > 0
+  || captionLocalModel.value?.status === 'AVAILABLE',
+)
+// Which fallback actually runs, for the UI hint — mirrors CaptionRouter's
+// cloud-preferred-then-local precedence.
+const captionActiveBackend = computed(() => {
+  if (captionCloudProvider.value === 'openai' || captionCloudProvider.value === 'openrouter') return 'cloud'
+  if (captionLocalModel.value?.status === 'AVAILABLE') return 'local'
+  return 'none'
+})
+
+async function setCaptionCloudProvider(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'caption.cloud.provider', value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function setCaptionCloudModel(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'caption.cloud.model', value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function downloadCaptionModel(modelId: string) {
+  saving.value = true
+  try {
+    await $fetch(`/api/caption/models/${encodeURIComponent(modelId)}/download`, { method: 'POST', body: {} })
+    startCaptionPolling()
+  }
+  finally { saving.value = false }
+}
+async function removeCaptionModel(modelId: string) {
+  saving.value = true
+  try {
+    await $fetch(`/api/caption/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
+    refreshCaptionState()
+  }
+  finally { saving.value = false }
+}
+
+let captionPollTimer: ReturnType<typeof setInterval> | null = null
+function anyCaptionDownloadInFlight(): boolean {
+  const ms = captionState.value?.models ?? []
+  return ms.some(m => m.status === 'DOWNLOADING' || m.status === 'VERIFYING')
+}
+function startCaptionPolling() {
+  if (captionPollTimer != null) return
+  captionPollTimer = setInterval(async () => {
+    await refreshCaptionState()
+    if (!anyCaptionDownloadInFlight()) stopCaptionPolling()
+  }, 1500)
+}
+function stopCaptionPolling() {
+  if (captionPollTimer != null) {
+    clearInterval(captionPollTimer)
+    captionPollTimer = null
+  }
+}
+onMounted(() => {
+  if (anyCaptionDownloadInFlight()) startCaptionPolling()
+})
+onUnmounted(() => stopCaptionPolling())
+
 // JCLAW-131: Uploads settings — per-kind attachment size caps. Values are
 // stored in bytes in the DB (matches services/UploadLimits.java) but
 // surfaced as MB in the UI, where operators actually think. Defaults match
@@ -3181,6 +3289,204 @@ async function handleResetPassword() {
           </div>
         </div>
       </template>
+    </div>
+
+    <!-- Image Captioning (JCLAW-214) -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-fg-muted">
+        Image Captioning
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Let chat models without vision still "see" an uploaded image — it's turned into a short
+        text description before it reaches the LLM (vision-capable models still receive the image
+        natively). Two fallbacks, <span class="text-fg-strong">cloud preferred</span>: a cloud
+        provider/model is used when set; otherwise the offline local model is used when downloaded.
+        Cloud options reuse the API keys configured in
+        <span class="text-fg-muted">LLM Providers</span> above.
+      </p>
+
+      <!-- Active-backend hint -->
+      <div
+        class="px-3 py-2 text-[11px] border"
+        :class="captionEnabled
+          ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
+          : 'bg-muted border-border text-fg-muted'"
+      >
+        <template v-if="captionActiveBackend === 'cloud'">
+          Active: cloud captioning via {{ captionCloudProvider }} ({{ captionCloudModel || 'default model' }}).
+        </template>
+        <template v-else-if="captionActiveBackend === 'local'">
+          Active: local captioning (ViT-GPT2, offline).
+        </template>
+        <template v-else>
+          Image captioning is off — choose a cloud provider below or download the local model.
+          Until then, non-vision models receive a "description unavailable" note for images.
+        </template>
+      </div>
+
+      <!-- Cloud (preferred) -->
+      <fieldset class="bg-surface-elevated border border-border">
+        <legend class="px-4 pt-2.5 text-xs font-medium text-fg-strong">
+          Cloud (preferred)
+        </legend>
+        <div class="divide-y divide-border">
+          <label
+            for="caption-cloud-none"
+            class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+          >
+            <input
+              id="caption-cloud-none"
+              type="radio"
+              name="caption-cloud-provider"
+              value=""
+              :checked="captionCloudProvider === ''"
+              class="accent-emerald-600"
+              @change="setCaptionCloudProvider('')"
+            >
+            <span class="flex-1 text-sm text-fg-primary">None (use local model)</span>
+          </label>
+          <label
+            for="caption-cloud-openrouter"
+            class="px-4 py-2.5 flex items-center gap-3"
+            :class="openrouterApiKeyConfigured
+              ? 'cursor-pointer'
+              : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+            :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
+          >
+            <input
+              id="caption-cloud-openrouter"
+              type="radio"
+              name="caption-cloud-provider"
+              value="openrouter"
+              :checked="captionCloudProvider === 'openrouter'"
+              :disabled="!openrouterApiKeyConfigured"
+              class="accent-emerald-600"
+              @change="setCaptionCloudProvider('openrouter')"
+            >
+            <span
+              class="flex-1 text-sm"
+              :class="openrouterApiKeyConfigured
+                ? 'text-fg-primary'
+                : 'text-amber-800 dark:text-amber-300 opacity-80'"
+            >OpenRouter</span>
+            <span
+              v-if="!openrouterApiKeyConfigured"
+              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+            >no API key — configure in LLM Providers</span>
+          </label>
+          <label
+            for="caption-cloud-openai"
+            class="px-4 py-2.5 flex items-center gap-3"
+            :class="openaiApiKeyConfigured
+              ? 'cursor-pointer'
+              : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+            :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
+          >
+            <input
+              id="caption-cloud-openai"
+              type="radio"
+              name="caption-cloud-provider"
+              value="openai"
+              :checked="captionCloudProvider === 'openai'"
+              :disabled="!openaiApiKeyConfigured"
+              class="accent-emerald-600"
+              @change="setCaptionCloudProvider('openai')"
+            >
+            <span
+              class="flex-1 text-sm"
+              :class="openaiApiKeyConfigured
+                ? 'text-fg-primary'
+                : 'text-amber-800 dark:text-amber-300 opacity-80'"
+            >OpenAI</span>
+            <span
+              v-if="!openaiApiKeyConfigured"
+              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+            >no API key — configure in LLM Providers</span>
+          </label>
+        </div>
+        <div
+          v-if="captionCloudProvider === 'openai' || captionCloudProvider === 'openrouter'"
+          class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
+        >
+          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
+          <input
+            :value="captionCloudModel"
+            type="text"
+            aria-label="Caption cloud model"
+            placeholder="e.g. gpt-4o-mini"
+            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            @change="setCaptionCloudModel(($event.target as HTMLInputElement).value)"
+          >
+        </div>
+      </fieldset>
+
+      <!-- Local (offline fallback) -->
+      <div class="bg-surface-elevated border border-border">
+        <div class="px-4 pt-2.5 text-xs font-medium text-fg-strong">
+          Local (offline fallback)
+        </div>
+        <div
+          v-if="captionLocalModel"
+          class="px-4 py-2.5 flex items-center gap-3"
+        >
+          <span class="flex-1 text-sm text-fg-primary">
+            {{ captionLocalModel.displayName }} (~{{ captionLocalModel.approxSizeMb }} MB)
+          </span>
+          <template v-if="captionLocalModel.status === 'ABSENT'">
+            <button
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+              :disabled="saving"
+              @click="downloadCaptionModel(captionLocalModel.id)"
+            >
+              Download
+            </button>
+          </template>
+          <template v-else-if="captionLocalModel.status === 'DOWNLOADING'">
+            <div class="flex items-center gap-2">
+              <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
+                <div
+                  class="h-full bg-emerald-600 transition-[width] duration-300"
+                  :style="{ width: captionLocalDownloadPct + '%' }"
+                />
+              </div>
+              <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
+                {{ captionLocalDownloadPct }}%
+              </span>
+            </div>
+          </template>
+          <template v-else-if="captionLocalModel.status === 'VERIFYING'">
+            <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
+          </template>
+          <template v-else-if="captionLocalModel.status === 'AVAILABLE'">
+            <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
+            <button
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+              :disabled="saving"
+              @click="removeCaptionModel(captionLocalModel.id)"
+            >
+              Remove
+            </button>
+          </template>
+          <template v-else-if="captionLocalModel.status === 'ERROR'">
+            <button
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+              :disabled="saving"
+              @click="downloadCaptionModel(captionLocalModel.id)"
+            >
+              Retry
+            </button>
+          </template>
+        </div>
+        <div
+          v-if="captionLocalModel?.status === 'ERROR' && captionLocalModel?.error"
+          class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+        >
+          {{ captionLocalModel.error }}
+        </div>
+      </div>
     </div>
 
     <!-- Chat Settings -->

@@ -179,6 +179,31 @@ public final class VlmModelManager {
         }
     }
 
+    /**
+     * Remove a downloaded model's files (JCLAW-214) so the operator can reclaim disk or disable the
+     * local fallback. Deletes the per-model directory and clears any cached status; a no-op when the
+     * model was never downloaded. Returns true if anything was removed.
+     */
+    public static boolean delete(VlmModel model) throws IOException {
+        var dir = localDir(model);
+        statuses.remove(model.id());
+        if (!Files.isDirectory(dir)) return false;
+        try (var paths = Files.walk(dir)) {
+            // Deepest-first so directories are emptied before removal.
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            });
+        } catch (java.io.UncheckedIOException e) {
+            throw e.getCause();
+        }
+        EventLogger.info(CATEGORY, "VLM model %s removed".formatted(model.id()));
+        return true;
+    }
+
     /** Test-only: drop in-memory state so tests don't bleed into each other. */
     public static void resetForTest() {
         inFlight.clear();

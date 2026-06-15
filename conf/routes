@@ -26,6 +26,11 @@ POST    /api/onboarding/tour-progress           ApiOnboardingController.recordPr
 GET     /api/transcription/state                ApiTranscriptionController.state
 POST    /api/transcription/models/{id}/download ApiTranscriptionController.download
 
+# Image captioning API (JCLAW-214)
+GET     /api/caption/state                      ApiCaptionController.state
+POST    /api/caption/models/{id}/download       ApiCaptionController.download
+DELETE  /api/caption/models/{id}                ApiCaptionController.remove
+
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
 GET     /api/tasks/stats                        ApiTasksController.stats

@@ -66,6 +66,16 @@ const DEFAULT_TRANSCRIPTION_STATE = {
   ],
 }
 
+// JCLAW-214: caption state — cloud unset + the single local model ABSENT.
+const DEFAULT_CAPTION_STATE = {
+  cloudProvider: null,
+  cloudModel: null,
+  models: [
+    { id: 'vit-gpt2', displayName: 'ViT-GPT2 (image captioning)', approxSizeMb: 245,
+      status: 'ABSENT', bytesDownloaded: 0, totalBytes: 0, error: null },
+  ],
+}
+
 const DEFAULT_OCR_STATUS = {
   providers: [
     {
@@ -1338,6 +1348,139 @@ describe('Settings page — Transcription enable + provider switch', () => {
     await flushPromises()
 
     expect(downloadCaptured.hit).toBe(true)
+  })
+})
+
+describe('Settings page — Image captioning cloud + local (JCLAW-214)', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  function registerCommon() {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+  }
+
+  it('POSTs caption.cloud.provider on @change of an enabled cloud-provider radio', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    registerCommon()
+    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE)
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: defaultConfigEntries() }) })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key?: string, value?: string }
+        captured.push(body)
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    // OpenAI cloud radio is gated by provider.openai.apiKey (sk-openai-**** in the fixture → enabled).
+    const openaiRadio = component.find('input[name="caption-cloud-provider"][value="openai"]')
+    expect(openaiRadio.exists()).toBe(true)
+    expect(openaiRadio.attributes('disabled')).toBeUndefined()
+    await openaiRadio.trigger('change')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'caption.cloud.provider')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('openai')
+  })
+
+  it('POSTs caption.cloud.provider="" when the None radio is selected (fall back to local)', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    registerCommon()
+    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries(),
+          { key: 'caption.cloud.provider', value: 'openai', updatedAt: '2026-06-15T10:00:00Z' },
+        ],
+      }),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key?: string, value?: string }
+        captured.push(body)
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const noneRadio = component.find('input[name="caption-cloud-provider"][value=""]')
+    expect(noneRadio.exists()).toBe(true)
+    await noneRadio.trigger('change')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'caption.cloud.provider')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('')
+  })
+
+  it('shows the Download button for an ABSENT local model and round-trips the download POST', async () => {
+    const downloadCaptured: { hit?: boolean } = {}
+    registerCommon()
+    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE) // model ABSENT
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: defaultConfigEntries() }) })
+    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
+    registerEndpoint('/api/caption/models/vit-gpt2/download', {
+      method: 'POST',
+      handler: () => {
+        downloadCaptured.hit = true
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    // Transcription is off in the default fixture, so the only Download button is the caption one.
+    const dlBtn = component.findAll('button').find(b => b.text().trim() === 'Download')
+    expect(dlBtn).toBeTruthy()
+    await dlBtn!.trigger('click')
+    await flushPromises()
+
+    expect(downloadCaptured.hit).toBe(true)
+  })
+
+  it('shows Remove for an AVAILABLE local model and round-trips the DELETE', async () => {
+    const removeCaptured: { hit?: boolean } = {}
+    registerCommon()
+    registerEndpoint('/api/caption/state', () => ({
+      ...DEFAULT_CAPTION_STATE,
+      models: [{ ...DEFAULT_CAPTION_STATE.models[0], status: 'AVAILABLE' }],
+    }))
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: defaultConfigEntries() }) })
+    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
+    registerEndpoint('/api/caption/models/vit-gpt2', {
+      method: 'DELETE',
+      handler: () => {
+        removeCaptured.hit = true
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    expect(component.text()).toContain('Ready')
+    const rmBtn = component.findAll('button').find(b => b.text().trim() === 'Remove')
+    expect(rmBtn).toBeTruthy()
+    await rmBtn!.trigger('click')
+    await flushPromises()
+
+    expect(removeCaptured.hit).toBe(true)
   })
 })
 

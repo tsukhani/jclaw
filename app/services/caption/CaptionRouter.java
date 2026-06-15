@@ -5,32 +5,34 @@ import services.ConfigService;
 import java.util.Optional;
 
 /**
- * Picks the {@link ImageCaptionService} implementation matching the operator's
- * {@code caption.provider} config selection (JCLAW-212), mirroring {@code TranscriptionRouter}.
- * Returns {@link Optional#empty()} when no provider is configured or the value is unrecognized —
- * callers treat that as "no captioning backend, skip the fallback."
+ * Picks the {@link ImageCaptionService} for the non-vision-model image fallback, using the operator's
+ * two-tier Image Captioning Settings (JCLAW-214): a <b>cloud</b> option (preferred) and a <b>local</b>
+ * option (offline fallback). Resolution order:
  *
- * <p>Recognised values match the Image Interpretation Settings section (JCLAW-214):
- * <ul>
- *   <li>{@code vlm-local} → {@link LocalImageCaptioner} (in-JVM ONNX)</li>
- *   <li>{@code openai} → {@link OpenAiImageCaptionClient}</li>
- *   <li>{@code openrouter} → {@link OpenRouterImageCaptionClient}</li>
- * </ul>
+ * <ol>
+ *   <li><b>Cloud</b> — when {@code caption.cloud.provider} names a recognised provider
+ *       ({@code openai} → {@link OpenAiImageCaptionClient}, {@code openrouter} →
+ *       {@link OpenRouterImageCaptionClient}).</li>
+ *   <li><b>Local</b> — otherwise, when the local ViT-GPT2 model is downloaded
+ *       ({@link VlmModelManager#availableLocally}) → {@link LocalImageCaptioner}.</li>
+ *   <li><b>None</b> — {@link Optional#empty()} when neither is configured; callers then emit the
+ *       "description unavailable" note rather than blocking the turn.</li>
+ * </ol>
  *
- * <p>Resolved per call so a Settings change takes effect on the next image without a restart.
+ * <p>"If the cloud model is not set, use the local model." Resolved per call so a Settings change
+ * takes effect on the next image without a restart. Mirrors {@code TranscriptionRouter}'s role, but
+ * with cloud-preferred precedence rather than a single-select provider key.
  */
 public final class CaptionRouter {
 
     private CaptionRouter() {}
 
     public static Optional<ImageCaptionService> configuredService() {
-        var provider = ConfigService.get("caption.provider");
-        if (provider == null || provider.isBlank()) return Optional.empty();
-        return switch (provider) {
-            case "vlm-local" -> Optional.of(new LocalImageCaptioner());
-            case "openai" -> Optional.of(new OpenAiImageCaptionClient());
-            case "openrouter" -> Optional.of(new OpenRouterImageCaptionClient());
-            default -> Optional.empty();
-        };
+        var cloud = ConfigService.get("caption.cloud.provider");
+        if ("openai".equals(cloud)) return Optional.of(new OpenAiImageCaptionClient());
+        if ("openrouter".equals(cloud)) return Optional.of(new OpenRouterImageCaptionClient());
+        // Cloud not set (or unrecognised) → fall back to the local model when it's downloaded.
+        if (VlmModelManager.availableLocally(VlmModel.DEFAULT)) return Optional.of(new LocalImageCaptioner());
+        return Optional.empty();
     }
 }

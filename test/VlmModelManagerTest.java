@@ -99,6 +99,28 @@ class VlmModelManagerTest extends UnitTest {
     }
 
     @Test
+    void delete_removesAllManifestFilesAndDir() throws Exception {
+        var dir = VlmModelManager.localDir(VlmModel.VIT_GPT2);
+        Files.createDirectories(dir);
+        for (var f : VlmModel.VIT_GPT2.files()) {
+            Files.write(dir.resolve(f.localName()), "x".getBytes());
+        }
+        assertTrue(VlmModelManager.availableLocally(VlmModel.VIT_GPT2), "precondition: downloaded");
+
+        assertTrue(VlmModelManager.delete(VlmModel.VIT_GPT2), "delete reports removal");
+        assertFalse(Files.exists(dir), "model dir removed");
+        assertFalse(VlmModelManager.availableLocally(VlmModel.VIT_GPT2), "files gone after delete");
+        assertEquals(VlmModelManager.State.ABSENT, VlmModelManager.status(VlmModel.VIT_GPT2).state(),
+                "status reconciles to ABSENT after delete");
+    }
+
+    @Test
+    void delete_isNoOpWhenAbsent() throws Exception {
+        assertFalse(VlmModelManager.delete(VlmModel.VIT_GPT2),
+                "deleting a never-downloaded model returns false (no-op)");
+    }
+
+    @Test
     void ensureAvailable_coalescesConcurrentCallers_toSingleDownload() throws Exception {
         var ready = new CountDownLatch(2);
         var go = new CountDownLatch(1);
