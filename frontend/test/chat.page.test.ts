@@ -233,13 +233,17 @@ describe('Chat page — empty conversation state', () => {
   })
 })
 
-describe('Chat page — JCLAW-25 vision attachment gate', () => {
-  it('rejects image attachments when the selected model does not advertise supportsVision', async () => {
-    // Baseline harness pins kimi-k2.5, which has no supportsVision flag in
-    // its config JSON. visionSupported should therefore compute to false,
-    // and addAttachments is expected to short-circuit image files with the
-    // AC-mandated error string. defineExpose automatically unwraps refs,
-    // so vm.attachError yields the string directly (not a ref wrapper).
+describe('Chat page — JCLAW-215 image attachment on a non-vision model', () => {
+  it('accepts image attachments on a model without supportsVision (captioned server-side)', async () => {
+    // Baseline harness pins kimi-k2.5, which has no supportsVision flag in its
+    // config JSON, so visionSupported computes to false. JCLAW-215 removed the
+    // client-side gate: a non-vision model still accepts the image (the backend
+    // captions it into a text description), so the upload must queue with no
+    // error. defineExpose unwraps refs, so vm.attachError yields the value.
+    // Queuing an image now builds a thumbnail preview URL; happy-dom's
+    // createObjectURL is picky with File, so stub it.
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     setupBaseChatApi()
     const component = await mountSuspended(Chat)
     await flushPromises()
@@ -253,8 +257,9 @@ describe('Chat page — JCLAW-25 vision attachment gate', () => {
     vm.addAttachments([png])
     await flushPromises()
 
-    expect(vm.attachError).toBe('This model does not support images')
-    expect(vm.attachedFiles.length).toBe(0)
+    expect(vm.attachError).toBeNull()
+    expect(vm.attachedFiles.length).toBe(1)
+    expect(vm.attachedFiles[0]!.name).toBe('shot.png')
   })
 
   it('accepts non-image attachments on a non-vision model (file path is orthogonal to the vision gate)', async () => {

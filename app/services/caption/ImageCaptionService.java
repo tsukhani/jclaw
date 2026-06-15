@@ -23,4 +23,18 @@ public interface ImageCaptionService {
      * string when captioning is unavailable or fails. Never returns null.
      */
     String caption(MessageAttachment attachment);
+
+    /**
+     * Describe the image carried by a {@code data:<mime>;base64,...} URL. This is the
+     * transaction-free seam the message pipeline uses (JCLAW-215): the caller reads the
+     * attachment bytes inside a short JPA transaction, releases the connection, then runs the
+     * (slow) caption model via this method with <b>no transaction held</b> — mirroring how the
+     * audio path awaits Whisper outside any {@code Tx.run}.
+     *
+     * <p>Unlike {@link #caption(MessageAttachment)} this raw seam <b>throws</b>
+     * {@link CaptionException} on failure rather than swallowing it; the pipeline catches and
+     * falls through to a "description unavailable" note so a transient backend problem never
+     * blocks the turn.
+     */
+    String captionDataUrl(String dataUrl);
 }

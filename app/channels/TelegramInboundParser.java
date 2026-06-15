@@ -50,18 +50,11 @@ public final class TelegramInboundParser {
             String sendToken, String sendChatId, Agent sendAgent, InboundMessage message) {
         if (message.attachments().isEmpty()) return java.util.List.of();
 
-        boolean hasImage = message.attachments().stream().anyMatch(
-                a -> models.MessageAttachment.KIND_IMAGE.equalsIgnoreCase(a.kind()));
-        if (hasImage && !services.AgentService.supportsVision(sendAgent)) {
-            TelegramChannel.forToken(sendToken).sendText(sendChatId,
-                    "I can't handle images with the current model. Try a vision-capable model.");
-            EventLogger.warn(LOG_CATEGORY, sendAgent.name, CHANNEL_NAME,
-                    "Rejected image upload: model does not support vision");
-            return null;
-        }
-        // JCLAW-165: audio is universally accepted — text-only models get
-        // a transcript text part via the transcription pipeline, audio-
-        // capable models get native input_audio. No model-side gate.
+        // JCLAW-165 / JCLAW-215: audio and images are universally accepted —
+        // text-only models get a transcript / caption text part (via the
+        // transcription + captioning pipelines), audio-/vision-capable models
+        // get native input_audio / image_url. No model-side gate; the rest of
+        // the pipeline (AgentRunner.userMessageFor) handles the downgrade.
 
         var inputs = new java.util.ArrayList<services.AttachmentService.Input>(
                 message.attachments().size());

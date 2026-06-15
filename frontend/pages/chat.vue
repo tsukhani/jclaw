@@ -2387,15 +2387,10 @@ function addAttachments(files: File[]) {
       attachError.value = `${f.name} exceeds ${Math.round(cap / (1024 * 1024))} MB limit for ${label} uploads`
       continue
     }
-    // JCLAW-25 capability gate: refuse image attachments when the selected
-    // model doesn't advertise vision.
-    if (isImageFile(f) && !visionSupported.value) {
-      attachError.value = 'This model does not support images'
-      continue
-    }
-    // JCLAW-165: audio is universally accepted regardless of the model's
-    // supportsAudio flag — the transcription pipeline gives text-only
-    // models a transcript text part. No client-side gate.
+    // JCLAW-215: images are universally accepted regardless of the model's
+    // supportsVision flag — a non-vision model gets a server-generated caption
+    // text part (via the captioning pipeline), exactly as JCLAW-165 gives a
+    // text-only model an audio transcript. No client-side gate for either.
     attachedFiles.value.push(f)
     if (isImageFile(f)) {
       attachmentPreviews.value.set(f, URL.createObjectURL(f))
@@ -3734,17 +3729,16 @@ function exportConversation() {
                   Think
                 </button>
                 <!--
-                  Vision pill: capability indicator only. No LLM provider
-                  exposes a vision-off API parameter, so a client-side
-                  toggle would just mean "don't attach images" — which the
-                  operator can already do by not attaching. Span, not
-                  button. The model-capability gate in addAttachments
-                  still keeps non-vision models from receiving images.
+                  Vision pill: capability indicator only. Shown when the model
+                  accepts images natively (image_url). JCLAW-215: images are
+                  accepted on non-vision models too — they're captioned
+                  server-side into a text description — so this is now a
+                  "native vs captioned" hint, not a gate. Span, not button.
                 -->
                 <span
                   v-if="visionSupported"
                   class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-sky-500/15 text-sky-400 cursor-default"
-                  title="This model accepts image inputs natively."
+                  title="This model accepts image inputs natively. Other models receive a generated text description."
                 >
                   <EyeIcon
                     class="w-3.5 h-3.5"

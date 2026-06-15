@@ -82,6 +82,29 @@ public final class LocalImageCaptioner implements ImageCaptionService {
         }
     }
 
+    /**
+     * Tx-free pipeline seam (JCLAW-215): decode the data URL and run the in-JVM ViT-GPT2 pass.
+     * The base64 round-trip (the pipeline encodes via {@code readAsDataUrl}, this decodes) is
+     * negligible for a single image and keeps the {@link ImageCaptionService} contract uniform
+     * across the local and cloud backends. Throws {@link CaptionException} on failure.
+     */
+    @Override
+    public String captionDataUrl(String dataUrl) {
+        try {
+            return captionImageBytes(decodeBase64DataUrl(dataUrl));
+        } catch (Exception e) {
+            throw new CaptionException("local image captioning failed: " + e.getMessage(), e);
+        }
+    }
+
+    /** Strip the {@code data:<mime>;base64,} prefix (if present) and Base64-decode the payload. */
+    private static byte[] decodeBase64DataUrl(String dataUrl) {
+        if (dataUrl == null) throw new IllegalArgumentException("null data URL");
+        var comma = dataUrl.indexOf(',');
+        var payload = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
+        return java.util.Base64.getDecoder().decode(payload);
+    }
+
     /** Pure pipeline over raw image bytes — the unit/integration-test seam (no JPA needed). */
     public String captionImageBytes(byte[] imageBytes) throws Exception {
         ensureLoaded();

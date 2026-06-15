@@ -97,6 +97,20 @@ public final class VisionAudioAssembler {
     public record AudioBearer(int chatMessageIndex, Long msgId, List<Long> audioAttachmentIds) {}
 
     /**
+     * JCLAW-215: the vision analogue of {@link AudioBearer}. Tracks which user
+     * messages carry image attachments so the post-Tx caption rewrite can
+     * re-target them when the active model lacks {@code supportsVision}: each
+     * image's persisted {@link models.MessageAttachment#caption} (computed on
+     * demand by {@link #applyCaptionsForCapability}) rides inside the text part
+     * in place of the {@code image_url} part a vision model would receive.
+     *
+     * @param chatMessageIndex   position in the returned {@link ChatMessage} list
+     * @param msgId              re-locates the persisted Message at rewrite time
+     * @param imageAttachmentIds the persisted image attachment ids on this turn
+     */
+    public record ImageBearer(int chatMessageIndex, Long msgId, List<Long> imageAttachmentIds) {}
+
+    /**
      * Build the {@link ChatMessage} for a historical user turn, lifting
      * it into OpenAI-style content parts when the row has attachments.
      * Images ride as {@code image_url} parts (JCLAW-25); audio rides as
@@ -136,6 +150,27 @@ public final class VisionAudioAssembler {
      * blocking JPA transaction.
      */
     public static ChatMessage userMessageFor(models.Message msg, boolean supportsAudio) {
+        // Vision-capable by default: images ride as image_url parts, preserving
+        // the pre-JCLAW-215 shape for every caller that doesn't opt into the
+        // caption fallback.
+        return userMessageFor(msg, supportsAudio, true);
+    }
+
+    /**
+     * JCLAW-215 capability-aware overload covering both modalities.
+     * {@code supportsVision=true} emits an {@code image_url} content part for
+     * each image attachment (JCLAW-25); {@code supportsVision=false} emits the
+     * image's cached {@link models.MessageAttachment#caption} as a text block
+     * (or a clear "description unavailable" fallback note when the caption is
+     * null/blank), exactly mirroring the audio transcript downgrade.
+     *
+     * <p>Like the audio path this method is pure with respect to async work: it
+     * reads the {@code caption} field as-is. The caller is responsible for
+     * having computed and persisted captions before calling with
+     * {@code supportsVision=false} — {@link #applyCaptionsForCapability} runs
+     * the (slow) caption model outside any blocking JPA transaction first.
+     */
+    public static ChatMessage userMessageFor(models.Message msg, boolean supportsAudio, boolean supportsVision) {
         // Defensive fallback: in most paths Play's enhancer installs a
         // Hibernate lazy proxy on @OneToMany and the field is non-null;
         // VisionAudioAssemblyTest saw null collections after direct entity
@@ -155,13 +190,17 @@ public final class VisionAudioAssembler {
         // text part so the LLM sees one cohesive prompt rather than fragmented
         // text + transcript. Append after the user's typed content (if any).
         var transcriptBlocks = supportsAudio ? "" : collectTranscriptBlocks(atts);
-        var combinedText = text + fileNotes + transcriptBlocks;
+        // Caption blocks (JCLAW-215) ride in the text part the same way for the
+        // !supportsVision branch, so a text-only model "sees" the image as a
+        // description instead of an image_url part it can't accept.
+        var captionBlocks = supportsVision ? "" : collectCaptionBlocks(atts);
+        var combinedText = text + fileNotes + transcriptBlocks + captionBlocks;
 
         var parts = new ArrayList<Map<String, Object>>();
         if (!combinedText.isBlank()) {
             parts.add(Map.of("type", "text", "text", combinedText));
         }
-        addMediaParts(parts, atts, supportsAudio);
+        addMediaParts(parts, atts, supportsAudio, supportsVision);
         return new ChatMessage(MessageRole.USER.value, parts, null, null, null);
     }
 
@@ -209,14 +248,40 @@ public final class VisionAudioAssembler {
     }
 
     /**
-     * Append {@code image_url} parts for every image attachment, plus
-     * {@code input_audio} parts for every audio attachment when the
-     * active model supports audio.
+     * Build the {@code [Image description: ...]} blocks for the
+     * !supportsVision branch (JCLAW-215). Missing/blank captions fall back to a
+     * "description unavailable" note that preserves the user's original
+     * filename — symmetric with {@link #collectTranscriptBlocks}.
+     */
+    private static String collectCaptionBlocks(List<models.MessageAttachment> atts) {
+        var captionBlocks = new StringBuilder();
+        for (var a : atts) {
+            if (!a.isImage()) continue;
+            var caption = a.caption;
+            if (caption != null && !caption.isBlank()) {
+                captionBlocks.append("\n\n[Image description: ")
+                        .append(caption.trim())
+                        .append("]");
+            } else {
+                captionBlocks.append("\n\n[Image ")
+                        .append(a.originalFilename != null ? a.originalFilename : "unnamed")
+                        .append(": description unavailable]");
+            }
+        }
+        return captionBlocks.toString();
+    }
+
+    /**
+     * Append {@code image_url} parts for every image attachment when the active
+     * model supports vision (else the image rode as a caption text block via
+     * {@link #collectCaptionBlocks}), plus {@code input_audio} parts for every
+     * audio attachment when the active model supports audio.
      */
     private static void addMediaParts(List<Map<String, Object>> parts,
-                                      List<models.MessageAttachment> atts, boolean supportsAudio) {
+                                      List<models.MessageAttachment> atts,
+                                      boolean supportsAudio, boolean supportsVision) {
         for (var a : atts) {
-            if (a.isImage()) {
+            if (a.isImage() && supportsVision) {
                 parts.add(Map.of(
                         "type", "image_url",
                         "image_url", Map.of("url", AttachmentService.readAsDataUrl(a))));
@@ -267,6 +332,104 @@ public final class VisionAudioAssembler {
                 rewritten.set(b.chatMessageIndex(), userMessageFor(msg, false));
             }
             return rewritten;
+        });
+    }
+
+    /**
+     * JCLAW-215 outside-Tx helper, the vision analogue of
+     * {@link #applyTranscriptsForCapability}: when the active model lacks
+     * {@code supportsVision}, ensure every image attachment on the
+     * {@code imageBearers} turns has a caption (computing + persisting any that
+     * are missing via {@link services.caption.CaptionRouter}), then rebuild
+     * those user messages as text-with-caption.
+     *
+     * <p>{@code supportsAudio} is threaded through so a message that carries
+     * <i>both</i> a downgraded voice note and an image is rebuilt once with
+     * both modalities resolved — the caption rewrite never clobbers a transcript
+     * rewrite that {@link #applyTranscriptsForCapability} applied earlier in the
+     * same chain.
+     *
+     * <p>The caption model call (cloud round-trip or in-JVM ONNX pass) runs in
+     * {@link #ensureCaptions} with <b>no JPA transaction held</b>, matching the
+     * codebase rule that slow model calls never occupy a pooled connection.
+     * Returns {@code messages} unchanged when {@code supportsVision} is true or
+     * {@code imageBearers} is empty — the vision-capable happy path pays zero
+     * added latency.
+     *
+     * <p>Exposed as {@code public} (like {@link #userMessageFor}) so
+     * {@code CaptionPipelineTest} can exercise the compute → persist → rewrite
+     * orchestration directly — Play 1.x pins tests to the default package, so
+     * package-private access is unreachable from the test.
+     */
+    public static List<ChatMessage> applyCaptionsForCapability(List<ChatMessage> messages,
+            List<ImageBearer> imageBearers, boolean supportsVision, boolean supportsAudio) {
+        if (supportsVision || imageBearers == null || imageBearers.isEmpty()) return messages;
+
+        // Phase 1 (no Tx during the model call): compute + persist any missing
+        // caption so Phase 2's pure rebuild can read MessageAttachment.caption
+        // as-is.
+        ensureCaptions(imageBearers);
+
+        // Phase 2 (fresh Tx): refetch each affected message + rebuild as
+        // text-with-caption (supportsVision=false), preserving the real
+        // supportsAudio so a co-attached transcript downgrade survives.
+        return Tx.run(() -> {
+            var rewritten = new ArrayList<>(messages);
+            for (var b : imageBearers) {
+                var msg = (models.Message) models.Message.findById(b.msgId());
+                if (msg == null) continue;
+                rewritten.set(b.chatMessageIndex(), userMessageFor(msg, supportsAudio, false));
+            }
+            return rewritten;
+        });
+    }
+
+    /**
+     * For each image attachment lacking a caption, fetch its bytes inside a
+     * short Tx, run the configured caption backend outside any Tx, then persist
+     * the result. No-op when no caption backend is configured — the assembler's
+     * "description unavailable" fallback note then carries the filename.
+     */
+    private static void ensureCaptions(List<ImageBearer> imageBearers) {
+        var svc = services.caption.CaptionRouter.configuredService().orElse(null);
+        if (svc == null) return;
+        for (var b : imageBearers) {
+            for (var attId : b.imageAttachmentIds()) {
+                captionOne(svc, attId);
+            }
+        }
+    }
+
+    /**
+     * Caption a single attachment: skip if already captioned; otherwise read its
+     * data URL in a short Tx, run the (slow) model with no connection held, and
+     * persist. Any failure is logged and swallowed — the fallback note covers it.
+     */
+    private static void captionOne(services.caption.ImageCaptionService svc, Long attId) {
+        var dataUrl = Tx.run(() -> {
+            var att = (models.MessageAttachment) models.MessageAttachment.findById(attId);
+            if (att == null || (att.caption != null && !att.caption.isBlank())) return null;
+            return AttachmentService.readAsDataUrl(att);
+        });
+        if (dataUrl == null) return; // missing row, or already captioned
+
+        String caption;
+        try {
+            caption = svc.captionDataUrl(dataUrl);
+        } catch (RuntimeException e) {
+            EventLogger.warn("caption", "Captioning failed for attachment %d: %s".formatted(attId, e.getMessage()));
+            return;
+        }
+        if (caption == null || caption.isBlank()) return;
+
+        final var resolved = caption.trim();
+        Tx.run(() -> {
+            var att = (models.MessageAttachment) models.MessageAttachment.findById(attId);
+            if (att != null) {
+                att.caption = resolved;
+                att.save();
+            }
+            return null;
         });
     }
 

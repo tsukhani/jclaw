@@ -160,7 +160,8 @@ public class AgentRunner {
         LlmProvider primary,
         LlmProvider secondary,
         List<ToolDef> tools,
-        List<VisionAudioAssembler.AudioBearer> audioBearers
+        List<VisionAudioAssembler.AudioBearer> audioBearers,
+        List<VisionAudioAssembler.ImageBearer> imageBearers
     ) {}
 
     /**
@@ -173,7 +174,8 @@ public class AgentRunner {
         List<ChatMessage> messages,
         List<ToolDef> tools,
         java.util.Set<String> disabledTools,
-        List<VisionAudioAssembler.AudioBearer> audioBearers
+        List<VisionAudioAssembler.AudioBearer> audioBearers,
+        List<VisionAudioAssembler.ImageBearer> imageBearers
     ) {}
 
     /**
@@ -505,7 +507,8 @@ public class AgentRunner {
                 // conversations (parentContext is null).
                 sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
                 var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
-                var messages = MessageHydrator.buildMessages(sysPrompt, conv, audioBearers);
+                var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
+                var messages = MessageHydrator.buildMessages(sysPrompt, conv, audioBearers, imageBearers);
 
                 // JCLAW-108: resolve the provider from the effective provider name
                 // (conversation override when set, agent default otherwise), not
@@ -529,7 +532,7 @@ public class AgentRunner {
                 EventLogger.info("llm", agent.name, conv.channelType,
                         "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
 
-                return new PreparedData(messages, primary, secondary, tools, audioBearers);
+                return new PreparedData(messages, primary, secondary, tools, audioBearers, imageBearers);
             });
 
             if (prepared == null) {
@@ -555,7 +558,13 @@ public class AgentRunner {
             var modelInfoForAudio = ModelResolver.resolveModelInfo(agent, conversation, prepared.primary()).orElse(null);
             var supportsAudioForCall = modelInfoForAudio != null && modelInfoForAudio.supportsAudio();
             finalMessages = VisionAudioAssembler.applyTranscriptsForCapability(finalMessages, prepared.audioBearers(), supportsAudioForCall);
-            prepared = new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers());
+            // JCLAW-215: when the active model lacks supportsVision, caption any
+            // image attachments (outside Tx) and rewrite the user messages as
+            // text-with-caption. supportsAudioForCall is threaded so a turn with
+            // both an image and a downgraded voice note rebuilds correctly.
+            var supportsVisionForCall = modelInfoForAudio != null && modelInfoForAudio.supportsVision();
+            finalMessages = VisionAudioAssembler.applyCaptionsForCapability(finalMessages, prepared.imageBearers(), supportsVisionForCall, supportsAudioForCall);
+            prepared = new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers(), prepared.imageBearers());
             trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
             trace.mark(LatencyTrace.PROLOGUE_DONE);
@@ -846,8 +855,9 @@ public class AgentRunner {
 
         var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
+        var supportsVisionForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsVision();
         var messages = applyAudioCapabilityRewrite(agent, conversation, userMessage, primary, prepared,
-                supportsAudioForStream);
+                supportsAudioForStream, supportsVisionForStream);
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
@@ -958,12 +968,13 @@ public class AgentRunner {
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
             var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
-            var msgs = MessageHydrator.buildMessages(sysPrompt, convo, audioBearers);
+            var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
+            var msgs = MessageHydrator.buildMessages(sysPrompt, convo, audioBearers, imageBearers);
             // Conversation-aware overload: applies the loadtest-agent
             // short-circuit AND the lazy MCP discovery gate (only ship
             // schemas for servers the model has called list_mcp_tools on).
             var toolDefs = ToolRegistry.getToolDefsForAgent(agent, convo);
-            return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools, audioBearers);
+            return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools, audioBearers, imageBearers);
         });
     }
 
@@ -975,7 +986,8 @@ public class AgentRunner {
     private static List<ChatMessage> applyAudioCapabilityRewrite(Agent agent, Conversation conversation,
                                                                   String userMessage, LlmProvider primary,
                                                                   PreparedPrologue prepared,
-                                                                  boolean supportsAudioForStream) {
+                                                                  boolean supportsAudioForStream,
+                                                                  boolean supportsVisionForStream) {
         // JCLAW-38: if the just-built context exceeds the compaction budget,
         // summarize older turns (LLM call, outside Tx) and rebuild.
         // trimToContextWindow below stays as a drop-oldest fallback for
@@ -985,8 +997,12 @@ public class AgentRunner {
                 primary, prepared.messages(), prepared.tools());
         var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
                 primary, prepared.tools());
-        return VisionAudioAssembler.applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(),
+        var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(),
                 supportsAudioForStream);
+        // JCLAW-215: caption image attachments for non-vision models, mirroring
+        // the audio downgrade above.
+        return VisionAudioAssembler.applyCaptionsForCapability(rewritten, prepared.imageBearers(),
+                supportsVisionForStream, supportsAudioForStream);
     }
 
     /**

@@ -412,13 +412,23 @@ class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    void sendRejectsImageAttachmentWhenAgentLacksVision() {
-        // Vision-gate: if any attachment kind=IMAGE and the agent's model
-        // doesn't advertise supportsVision, controller responds 400.
-        // The fixture agent uses a literal model id with no registered
-        // ProviderConfig in the test boot, so supportsVision returns false.
+    void sendAcceptsImageAttachmentWhenAgentLacksVision() throws Exception {
+        // JCLAW-215 removed the vision gate: an image on a non-vision agent is
+        // accepted (a caption text part is generated downstream), exactly as
+        // JCLAW-165 made audio universal. The fixture agent uses a literal
+        // model id with no registered ProviderConfig, so supportsVision is
+        // false — yet the request must get past validation (never 400). We
+        // can't drive the full LLM round here; downstream then fails (no
+        // provider) and surfaces as 500.
         login();
         var id = createAgent("send-image-no-vision");
+        // Stage a fake attachment file so finalizeAttachment can resolve the id
+        // past validation; findStagedFile matches {uuid}.{ext}.
+        var stagingDir = services.AgentService.acquireWorkspacePath(
+                "send-image-no-vision", "attachments/staging");
+        java.nio.file.Files.createDirectories(stagingDir);
+        java.nio.file.Files.write(stagingDir.resolve("img-1.png"),
+                new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47}); // tiny PNG header
         var body = """
                 {"agentId": %s, "message": "describe this",
                  "attachments": [{"attachmentId":"img-1",
@@ -428,10 +438,8 @@ class ApiChatControllerTest extends FunctionalTest {
                                   "kind":"IMAGE"}]}
                 """.formatted(id);
         var response = POST("/api/chat/send", "application/json", body);
-        assertEquals(400, response.status.intValue());
-        var content = getContent(response);
-        assertTrue(content.toLowerCase().contains("image"),
-                "vision-gate rejection must mention images: " + content);
+        assertNotEquals(400, response.status.intValue(),
+                "image attachment must not be gated at validation: " + getContent(response));
     }
 
     @Test

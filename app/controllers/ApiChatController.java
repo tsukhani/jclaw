@@ -89,10 +89,14 @@ public class ApiChatController extends Controller {
      *
      * <p>JCLAW-25: also parses the optional {@code attachments} array — each
      * entry is the per-file metadata the frontend roundtripped from a prior
-     * {@code /api/chat/upload} response. Enforces the vision gate: if any
-     * attachment declares {@code kind=IMAGE} and the resolved model does not
-     * advertise {@code supportsVision}, responds 400 rather than quietly
-     * dropping the images.
+     * {@code /api/chat/upload} response.
+     *
+     * <p>JCLAW-215: images are universally accepted now (mirroring the JCLAW-165
+     * audio change). A vision-capable model receives the image as a native
+     * {@code image_url} part; a non-vision model receives a generated caption as
+     * a text part (via the captioning pipeline + capability routing in
+     * {@code AgentRunner} / {@code VisionAudioAssembler.userMessageFor}). No
+     * model-side gate; the rest of the pipeline handles the downgrade.
      */
     @SuppressWarnings("java:S2259")
     private static ChatContext resolveChatContext(JsonObject body) {
@@ -117,14 +121,12 @@ public class ApiChatController extends Controller {
                 ? body.get(KEY_CONVERSATION_ID).getAsLong() : null;
 
         var attachments = parseAttachments(body);
-        if (services.AttachmentService.anyImage(attachments) && !AgentService.supportsVision(agent)) {
-            error(400, "This model does not support images");
-        }
-        // JCLAW-165: audio attachments are universally accepted now —
-        // text-only models receive a transcript text part (via the
-        // transcription pipeline + capability routing in AgentRunner.
-        // userMessageFor) and audio-capable models receive native input_audio.
-        // No model-side gate; the rest of the pipeline handles the format.
+        // JCLAW-165 / JCLAW-215: audio and image attachments are universally
+        // accepted now. Text-only models receive a transcript / caption text
+        // part (via the transcription + captioning pipelines + capability
+        // routing in AgentRunner.userMessageFor); audio-/vision-capable models
+        // receive native input_audio / image_url parts. No model-side gate; the
+        // rest of the pipeline handles the format.
 
         return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments);
     }
