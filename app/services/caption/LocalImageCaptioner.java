@@ -9,6 +9,7 @@ import ai.djl.ndarray.types.Shape;
 import ai.djl.repository.zoo.Criteria;
 import ai.djl.repository.zoo.ZooModel;
 import ai.djl.translate.NoopTranslator;
+import ai.djl.translate.TranslateException;
 import models.MessageAttachment;
 import services.AttachmentService;
 import services.EventLogger;
@@ -18,6 +19,7 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -110,7 +112,7 @@ public final class LocalImageCaptioner implements ImageCaptionService {
     }
 
     /** Pure pipeline over raw image bytes — the unit/integration-test seam (no JPA needed). */
-    public String captionImageBytes(byte[] imageBytes) throws Exception {
+    public String captionImageBytes(byte[] imageBytes) throws TranslateException, IOException {
         ensureLoaded();
         synchronized (LOCK) {
             // Per-call scope so the NDArrays we allocate are freed after each caption.
@@ -198,7 +200,7 @@ public final class LocalImageCaptioner implements ImageCaptionService {
     }
 
     /** Bilinear resize to 224² + CHW + normalize (x/255−0.5)/0.5, all in plain Java. */
-    private static float[] preprocess(byte[] imageBytes) throws java.io.IOException {
+    private static float[] preprocess(byte[] imageBytes) throws IOException {
         BufferedImage src = ImageIO.read(new ByteArrayInputStream(imageBytes));
         if (src == null) throw new IllegalArgumentException("unreadable image bytes");
         BufferedImage dst = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
