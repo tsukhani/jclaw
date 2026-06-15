@@ -218,7 +218,7 @@ describe('Settings page — form binding', () => {
     await flushPromises()
 
     // Find the first text-shaped input (skips checkboxes/radios) and verify
-    // setValue propagates through happy-dom's input event. This is the most
+    // setValue propagates through jsdom's input event. This is the most
     // basic v-model contract check possible — if Vue's two-way binding
     // pipeline is broken, this fails.
     const textInputs = component.findAll('input')
@@ -436,8 +436,8 @@ describe('Settings page — Subagents section (JCLAW-266)', () => {
 
     expect(postedBody).not.toBeNull()
     expect(postedBody!.key).toBe('subagent.maxDepth')
-    // happy-dom round-trips type="number" input values as JS numbers through
-    // JSON.stringify, so accept either '4' or 4 — the backend coerces both.
+    // A type="number" input may serialize as either '4' or 4 depending on
+    // v-model coercion, so normalize via String() — the backend coerces both.
     expect(String(postedBody!.value)).toBe('4')
   })
 })

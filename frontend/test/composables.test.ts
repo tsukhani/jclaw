@@ -97,7 +97,7 @@ describe('useConfirm', () => {
 // useEventBus
 // ---------------------------------------------------------------------------
 
-// Stub EventSource globally since happy-dom doesn't provide it.
+// Stub EventSource globally since jsdom doesn't provide it.
 // useEventBus is a module-level singleton that connects on first call,
 // so the stub must be installed before any test imports the composable.
 if (typeof globalThis.EventSource === 'undefined') {

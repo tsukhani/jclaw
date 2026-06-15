@@ -105,7 +105,7 @@ function waitForElement(selector: string, timeoutMs = 2000): Promise<Element | n
   return new Promise((resolve) => {
     const start = Date.now()
     const tick = () => {
-      // happy-dom (vitest) can tear down the DOM before a pending tick fires;
+      // jsdom (vitest) can tear down the DOM before a pending tick fires;
       // bail in that case so the timer chain doesn't NPE on document being
       // undefined. Same guard makes this safe to call from SSR contexts.
       if (typeof document === 'undefined') return resolve(null)

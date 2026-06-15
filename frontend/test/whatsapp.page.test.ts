@@ -10,7 +10,7 @@ import WhatsApp from '~/pages/channels/whatsapp.vue'
 // JCLAW-445: Cloud-API verification UX (verified name/number, template fields,
 // 422-on-save error). JCLAW-448: WhatsApp-Web QR pairing UI.
 
-// jsdom/happy-dom has no real canvas; stub the qrcode render so toDataURL
+// jsdom has no real canvas; stub the qrcode render so toDataURL
 // returns a deterministic data URL without touching a canvas.
 vi.mock('qrcode', () => ({
   default: { toDataURL: vi.fn(async () => 'data:image/png;base64,STUBQR') },

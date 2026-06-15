@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import Skills from '~/pages/skills.vue'
 
-// Stub EventSource since happy-dom doesn't provide it and
+// Stub EventSource since jsdom doesn't provide it and
 // the skills page uses useEventBus which creates an EventSource.
 if (typeof globalThis.EventSource === 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: test mock patching a browser global with a minimal stand-in; narrowing adds no value here.

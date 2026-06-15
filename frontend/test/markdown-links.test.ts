@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 
-// jsdom is the default Vitest env — DOMParser is available.
+// jsdom (our Vitest DOM env) provides DOMParser.
 
 function parse(html: string): Document {
   return new DOMParser().parseFromString(`<!doctype html><body>${html}</body>`, 'text/html')

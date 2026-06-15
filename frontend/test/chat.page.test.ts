@@ -240,8 +240,8 @@ describe('Chat page — JCLAW-215 image attachment on a non-vision model', () =>
     // client-side gate: a non-vision model still accepts the image (the backend
     // captions it into a text description), so the upload must queue with no
     // error. defineExpose unwraps refs, so vm.attachError yields the value.
-    // Queuing an image now builds a thumbnail preview URL; happy-dom's
-    // createObjectURL is picky with File, so stub it.
+    // Queuing an image now builds a thumbnail preview URL; jsdom doesn't
+    // implement createObjectURL (no-op), so stub it.
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     setupBaseChatApi()
@@ -1457,7 +1457,7 @@ describe('Chat page — export conversation', () => {
         createdAt: '2026-05-16T10:00:01Z' },
     ])
 
-    // Stub URL.createObjectURL because happy-dom can be picky with Blob inputs.
+    // Stub URL.createObjectURL because jsdom doesn't implement it (no-op).
     const createSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
 
@@ -1582,8 +1582,8 @@ describe('Chat page — input handlers', () => {
     await textarea.setValue('line one\nline two\nline three\nline four')
     await textarea.trigger('input')
     await flushPromises()
-    // We don't assert the exact px value (happy-dom returns 0 for scrollHeight
-    // in headless mode), only that the style attribute was touched without throwing.
+    // We don't assert the exact px value (jsdom returns 0 for scrollHeight —
+    // no layout engine), only that the style attribute was touched without throwing.
     expect(textarea.element.style.height).toBeDefined()
   })
 })

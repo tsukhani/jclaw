@@ -122,7 +122,7 @@ describe('Chat page — POST /api/chat/stream on form submit', () => {
   it('does not POST when the input is empty and no attachments are queued', async () => {
     setupChatApi()
     // Always provide a mock implementation — without one, vi.spyOn falls
-    // through to the real fetch and can hit the network in happy-dom.
+    // through to the real fetch and can hit the network in jsdom.
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
@@ -205,10 +205,9 @@ describe('Chat page — conversation switch via loadConversation', () => {
 
 describe('Chat page — image attachment on a vision-capable model', () => {
   beforeEach(() => {
-    // happy-dom's URL.createObjectURL rejects File (only accepts Blob); the
-    // chat page calls it to build thumbnail preview URLs. Stub it with a
-    // no-op that returns a fake blob URL — the assertion is on the file
-    // queue, not on the preview map.
+    // jsdom doesn't implement URL.createObjectURL; the chat page calls it to
+    // build thumbnail preview URLs. Stub it with a no-op that returns a fake
+    // blob URL — the assertion is on the file queue, not on the preview map.
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:test-fake')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   })

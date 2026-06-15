@@ -249,7 +249,7 @@ describe('ChatContextMeter — trigger button interactions', () => {
     await trigger.trigger('mouseleave')
     // After mouseleave the handleMouseLeave path ran (would have thrown
     // if the ref was wrong); we don't assert focus because Popover's
-    // Teleport + happy-dom focus handling is unreliable.
+    // Teleport + jsdom focus handling is unreliable.
     await trigger.trigger('focus')
     await trigger.trigger('blur')
   })

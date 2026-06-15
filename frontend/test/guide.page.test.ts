@@ -19,9 +19,9 @@ import { sections } from '~/components/guide/sections'
  *     with the expected class and test id;
  *   - the page never hits `/api` on initial load.
  *
- * IntersectionObserver is jsdom-stubbed so the active highlight defaults
- * to the first registered section — the same cold-load behavior the
- * operator sees.
+ * jsdom doesn't provide IntersectionObserver, so the page's guard skips
+ * observing and the active highlight defaults to the first registered
+ * section — the same cold-load behavior the operator sees.
  */
 
 describe('User Guide page', () => {

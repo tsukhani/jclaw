@@ -38,7 +38,7 @@ const SkillsHarness = defineComponent({
  * not the exact HTML scaffolding.
  */
 
-// happy-dom doesn't ship an EventSource shim; the skills page mounts
+// jsdom doesn't ship an EventSource shim; the skills page mounts
 // useEventBus() which constructs one. Mirror the workaround from the
 // existing skills.test.ts so the page setup completes.
 if (typeof globalThis.EventSource === 'undefined') {
