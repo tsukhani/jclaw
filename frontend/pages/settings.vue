@@ -503,32 +503,36 @@ type CaptionModelStatus = {
   error: string | null
 }
 type CaptionState = {
-  cloudProvider: string | null
-  cloudModel: string | null
+  provider: string | null
+  model: string | null
   models: CaptionModelStatus[]
 }
 const { data: captionState, refresh: refreshCaptionState }
   = await useFetch<CaptionState>('/api/caption/state')
 
-const captionCloudProvider = computed(() =>
-  configData.value?.entries?.find(e => e.key === 'caption.cloud.provider')?.value ?? '',
+const captionProvider = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'caption.provider')?.value ?? '',
 )
-const captionCloudModel = computed(() =>
-  configData.value?.entries?.find(e => e.key === 'caption.cloud.model')?.value ?? '',
+const captionModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'caption.model')?.value ?? '',
 )
-// Vision-capable models the operator has configured for the chosen cloud provider — the caption
-// model picker is filtered to these (JCLAW-214 refinement) rather than free text. Reuses the same
-// provider.{name}.models config the LLM Providers section manages; "supports vision" is the gate.
+// Master toggle: presence of a non-empty caption.provider IS the "enabled" state (mirrors
+// transcription). Single-select — the operator picks one backend.
+const captionEnabled = computed(() => captionProvider.value.trim().length > 0)
+const captionIsCloud = computed(() =>
+  captionProvider.value === 'openai' || captionProvider.value === 'openrouter',
+)
+// Vision-capable models the operator configured for the chosen cloud provider — the model picker is
+// filtered to these (reuses provider.{name}.models; "supports vision" is the gate) rather than free text.
 const captionVisionModels = computed<ProviderModelDef[]>(() => {
-  const p = captionCloudProvider.value
-  if (p !== 'openai' && p !== 'openrouter') return []
-  return getProviderModels(p).filter(m => m.supportsVision === true)
+  if (!captionIsCloud.value) return []
+  return getProviderModels(captionProvider.value).filter(m => m.supportsVision === true)
 })
 // Dropdown options: the configured vision models, plus the currently-saved model if it isn't among
 // them (so a value set before the model was marked vision-capable isn't silently dropped).
 const captionVisionModelOptions = computed(() => {
   const opts = captionVisionModels.value.map(m => ({ id: m.id, label: m.name || m.id }))
-  const cur = captionCloudModel.value
+  const cur = captionModel.value
   if (cur && !opts.some(o => o.id === cur)) opts.unshift({ id: cur, label: `${cur} (not marked vision)` })
   return opts
 })
@@ -542,38 +546,41 @@ const captionLocalDownloadPct = computed(() => {
   if (!s || s.totalBytes === 0) return 0
   return Math.min(100, Math.round((s.bytesDownloaded / s.totalBytes) * 100))
 })
-// Captioning is active when a cloud provider is set OR the local model is ready.
-const captionEnabled = computed(() =>
-  captionCloudProvider.value.trim().length > 0
-  || captionLocalModel.value?.status === 'AVAILABLE',
-)
-// Which fallback actually runs, for the UI hint — mirrors CaptionRouter's
-// cloud-preferred-then-local precedence.
+// Which backend is active, for the status line.
 const captionActiveBackend = computed(() => {
-  if (captionCloudProvider.value === 'openai' || captionCloudProvider.value === 'openrouter') return 'cloud'
-  if (captionLocalModel.value?.status === 'AVAILABLE') return 'local'
+  if (captionIsCloud.value) return 'cloud'
+  if (captionProvider.value === 'vlm-local') return 'local'
   return 'none'
 })
 
-async function setCaptionCloudProvider(value: string) {
+// Master toggle: off clears the provider; on defaults to the Self-Hosted captioner (works without an
+// API key — the safest fresh-enable target, mirroring transcription defaulting to whisper-local).
+async function toggleCaptionEnabled() {
   saving.value = true
   try {
-    // Reset the model alongside the provider switch — a model from the previous provider isn't valid
-    // for the new one (and would otherwise linger as "(not marked vision)"). The dropdown then starts
-    // on "(provider default)" and lists the new provider's vision models. Independent keys, so fire
-    // both writes in parallel.
+    const next = captionEnabled.value ? '' : 'vlm-local'
+    await $fetch('/api/config', { method: 'POST', body: { key: 'caption.provider', value: next } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function setCaptionProvider(value: string) {
+  saving.value = true
+  try {
+    // Reset the model on a provider switch — a model from the previous provider isn't valid for the
+    // new one (and would otherwise linger as "(not marked vision)"). Independent keys, fire in parallel.
     await Promise.all([
-      $fetch('/api/config', { method: 'POST', body: { key: 'caption.cloud.provider', value } }),
-      $fetch('/api/config', { method: 'POST', body: { key: 'caption.cloud.model', value: '' } }),
+      $fetch('/api/config', { method: 'POST', body: { key: 'caption.provider', value } }),
+      $fetch('/api/config', { method: 'POST', body: { key: 'caption.model', value: '' } }),
     ])
     refresh()
   }
   finally { saving.value = false }
 }
-async function setCaptionCloudModel(value: string) {
+async function setCaptionModel(value: string) {
   saving.value = true
   try {
-    await $fetch('/api/config', { method: 'POST', body: { key: 'caption.cloud.model', value } })
+    await $fetch('/api/config', { method: 'POST', body: { key: 'caption.model', value } })
     refresh()
   }
   finally { saving.value = false }
@@ -3240,7 +3247,7 @@ async function handleResetPassword() {
                 @change="setTranscriptionProvider('whisper-local')"
               >
               <span class="flex-1 text-sm text-fg-primary">Self-Hosted Whisper</span>
-              <span class="text-[10px] text-fg-muted border border-input px-1">offline</span>
+              <span class="text-[10px] text-fg-muted border border-input px-1">local</span>
             </label>
           </div>
         </fieldset>
@@ -3323,13 +3330,13 @@ async function handleResetPassword() {
       <p class="text-xs text-fg-muted">
         Let chat models without vision still "see" an uploaded image — it's turned into a short
         text description before it reaches the LLM (vision-capable models still receive the image
-        natively). Two fallbacks, <span class="text-fg-strong">cloud preferred</span>: a cloud
-        provider/model is used when set; otherwise the offline local model is used when downloaded.
-        Cloud options reuse the API keys configured in
-        <span class="text-fg-muted">LLM Providers</span> above.
+        natively). Pick one backend: a cloud provider/model (reusing the API keys configured in
+        <span class="text-fg-muted">LLM Providers</span> above), or the Self-Hosted Image Captioner
+        that runs offline. Text-only models then receive the description; with this off they get a
+        "description unavailable" note for images.
       </p>
 
-      <!-- Active-backend hint -->
+      <!-- Active-backend status line. -->
       <div
         class="px-3 py-2 text-[11px] border"
         :class="captionEnabled
@@ -3337,202 +3344,224 @@ async function handleResetPassword() {
           : 'bg-muted border-border text-fg-muted'"
       >
         <template v-if="captionActiveBackend === 'cloud'">
-          Active: cloud captioning via {{ captionCloudProvider }} ({{ captionCloudModel || 'default model' }}).
+          Active: cloud captioning via {{ captionProvider }} ({{ captionModel || 'default model' }}).
         </template>
         <template v-else-if="captionActiveBackend === 'local'">
-          Active: local captioning (ViT-GPT2, offline).
+          Active: Self-Hosted Image Captioner (ViT-GPT2, runs locally).
         </template>
         <template v-else>
-          Image captioning is off — choose a cloud provider below or download the local model.
-          Until then, non-vision models receive a "description unavailable" note for images.
+          Image captioning is off — enable it and pick a backend below. Until then, non-vision
+          models receive a "description unavailable" note for images.
         </template>
       </div>
 
-      <!-- Cloud (preferred) -->
-      <fieldset class="bg-surface-elevated border border-border">
-        <!-- sr-only legend names the radiogroup for a11y; the visible header is a div so it
-             doesn't straddle/clip the fieldset border (matches the Local block below). -->
-        <legend class="sr-only">
-          Cloud captioning provider
-        </legend>
-        <div class="px-4 pt-2.5 text-xs font-medium text-fg-strong">
-          Cloud (preferred)
-        </div>
-        <div class="divide-y divide-border">
-          <label
-            for="caption-cloud-none"
-            class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
-          >
-            <input
-              id="caption-cloud-none"
-              type="radio"
-              name="caption-cloud-provider"
-              value=""
-              :checked="captionCloudProvider === ''"
-              class="accent-emerald-600"
-              @change="setCaptionCloudProvider('')"
-            >
-            <span class="flex-1 text-sm text-fg-primary">None (use local model)</span>
-          </label>
-          <label
-            for="caption-cloud-openrouter"
-            class="px-4 py-2.5 flex items-center gap-3"
-            :class="openrouterApiKeyConfigured
-              ? 'cursor-pointer'
-              : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
-            :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
-          >
-            <input
-              id="caption-cloud-openrouter"
-              type="radio"
-              name="caption-cloud-provider"
-              value="openrouter"
-              :checked="captionCloudProvider === 'openrouter'"
-              :disabled="!openrouterApiKeyConfigured"
-              class="accent-emerald-600"
-              @change="setCaptionCloudProvider('openrouter')"
-            >
-            <span
-              class="flex-1 text-sm"
-              :class="openrouterApiKeyConfigured
-                ? 'text-fg-primary'
-                : 'text-amber-800 dark:text-amber-300 opacity-80'"
-            >OpenRouter</span>
-            <span
-              v-if="!openrouterApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
-            >no API key — configure in LLM Providers</span>
-          </label>
-          <label
-            for="caption-cloud-openai"
-            class="px-4 py-2.5 flex items-center gap-3"
-            :class="openaiApiKeyConfigured
-              ? 'cursor-pointer'
-              : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
-            :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
-          >
-            <input
-              id="caption-cloud-openai"
-              type="radio"
-              name="caption-cloud-provider"
-              value="openai"
-              :checked="captionCloudProvider === 'openai'"
-              :disabled="!openaiApiKeyConfigured"
-              class="accent-emerald-600"
-              @change="setCaptionCloudProvider('openai')"
-            >
-            <span
-              class="flex-1 text-sm"
-              :class="openaiApiKeyConfigured
-                ? 'text-fg-primary'
-                : 'text-amber-800 dark:text-amber-300 opacity-80'"
-            >OpenAI</span>
-            <span
-              v-if="!openaiApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
-            >no API key — configure in LLM Providers</span>
-          </label>
-        </div>
-        <div
-          v-if="captionCloudProvider === 'openai' || captionCloudProvider === 'openrouter'"
-          class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
-        >
-          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
-          <select
-            :value="captionCloudModel"
-            aria-label="Caption cloud model"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            @change="setCaptionCloudModel(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">
-              (provider default)
-            </option>
-            <option
-              v-for="m in captionVisionModelOptions"
-              :key="m.id"
-              :value="m.id"
-            >
-              {{ m.label }}
-            </option>
-          </select>
-        </div>
-        <p
-          v-if="(captionCloudProvider === 'openai' || captionCloudProvider === 'openrouter') && captionVisionModels.length === 0"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
-        >
-          No vision-capable models are configured for this provider. Add one under
-          <span class="text-fg-muted">LLM Providers</span> above and mark it “supports vision”, or
-          leave this on “provider default”.
-        </p>
-      </fieldset>
-
-      <!-- Local (offline fallback) -->
+      <!-- Master toggle: ON when caption.provider is non-empty (mirrors Transcription). -->
       <div class="bg-surface-elevated border border-border">
-        <div class="px-4 pt-2.5 text-xs font-medium text-fg-strong">
-          Local (offline fallback)
-        </div>
-        <div
-          v-if="captionLocalModel"
-          class="px-4 py-2.5 flex items-center gap-3"
-        >
-          <span class="flex-1 text-sm text-fg-primary">
-            {{ captionLocalModel.displayName }} (~{{ captionLocalModel.approxSizeMb }} MB)
+        <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+          <button
+            type="button"
+            :aria-pressed="captionEnabled"
+            aria-label="Enable image captioning"
+            :class="captionEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            @click="toggleCaptionEnabled"
+          >
+            <span
+              :class="captionEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
+          </button>
+          <span class="text-sm font-medium text-fg-strong">Enable image captioning</span>
+          <span class="ml-auto text-[11px] text-fg-muted">
+            {{ captionEnabled ? 'on' : 'off' }}
           </span>
-          <template v-if="captionLocalModel.status === 'ABSENT'">
-            <button
-              type="button"
-              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-              :disabled="saving"
-              @click="downloadCaptionModel(captionLocalModel.id)"
-            >
-              Download
-            </button>
-          </template>
-          <template v-else-if="captionLocalModel.status === 'DOWNLOADING'">
-            <div class="flex items-center gap-2">
-              <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
-                <div
-                  class="h-full bg-emerald-600 transition-[width] duration-300"
-                  :style="{ width: captionLocalDownloadPct + '%' }"
-                />
-              </div>
-              <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
-                {{ captionLocalDownloadPct }}%
-              </span>
-            </div>
-          </template>
-          <template v-else-if="captionLocalModel.status === 'VERIFYING'">
-            <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
-          </template>
-          <template v-else-if="captionLocalModel.status === 'AVAILABLE'">
-            <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
-            <button
-              type="button"
-              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-              :disabled="saving"
-              @click="removeCaptionModel(captionLocalModel.id)"
-            >
-              Remove
-            </button>
-          </template>
-          <template v-else-if="captionLocalModel.status === 'ERROR'">
-            <button
-              type="button"
-              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-              :disabled="saving"
-              @click="downloadCaptionModel(captionLocalModel.id)"
-            >
-              Retry
-            </button>
-          </template>
-        </div>
-        <div
-          v-if="captionLocalModel?.status === 'ERROR' && captionLocalModel?.error"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
-        >
-          {{ captionLocalModel.error }}
         </div>
       </div>
+
+      <template v-if="captionEnabled">
+        <fieldset class="bg-surface-elevated border border-border">
+          <legend class="sr-only">
+            Image captioning backend
+          </legend>
+          <div class="divide-y divide-border">
+            <label
+              for="caption-provider-openrouter"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="openrouterApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
+            >
+              <input
+                id="caption-provider-openrouter"
+                type="radio"
+                name="caption-provider"
+                value="openrouter"
+                :checked="captionProvider === 'openrouter'"
+                :disabled="!openrouterApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setCaptionProvider('openrouter')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="openrouterApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >OpenRouter</span>
+              <span
+                v-if="!openrouterApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <label
+              for="caption-provider-openai"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="openaiApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
+            >
+              <input
+                id="caption-provider-openai"
+                type="radio"
+                name="caption-provider"
+                value="openai"
+                :checked="captionProvider === 'openai'"
+                :disabled="!openaiApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setCaptionProvider('openai')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="openaiApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >OpenAI</span>
+              <span
+                v-if="!openaiApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <label
+              for="caption-provider-vlm-local"
+              class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+            >
+              <input
+                id="caption-provider-vlm-local"
+                type="radio"
+                name="caption-provider"
+                value="vlm-local"
+                :checked="captionProvider === 'vlm-local'"
+                class="accent-emerald-600"
+                @change="setCaptionProvider('vlm-local')"
+              >
+              <span class="flex-1 text-sm text-fg-primary">Self-Hosted Image Captioner</span>
+              <span class="text-[10px] text-fg-muted border border-input px-1">local</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <!-- Cloud vision-model picker (when a cloud provider is selected). -->
+        <div
+          v-if="captionIsCloud"
+          class="bg-surface-elevated border border-border"
+        >
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
+            <select
+              :value="captionModel"
+              aria-label="Caption cloud model"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              @change="setCaptionModel(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">
+                (provider default)
+              </option>
+              <option
+                v-for="m in captionVisionModelOptions"
+                :key="m.id"
+                :value="m.id"
+              >
+                {{ m.label }}
+              </option>
+            </select>
+          </div>
+          <p
+            v-if="captionVisionModels.length === 0"
+            class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+          >
+            No vision-capable models are configured for this provider. Add one under
+            <span class="text-fg-muted">LLM Providers</span> above and mark it “supports vision”, or
+            leave this on “provider default”.
+          </p>
+        </div>
+
+        <!-- Self-Hosted Image Captioner: local model download. -->
+        <div
+          v-if="captionProvider === 'vlm-local' && captionLocalModel"
+          class="bg-surface-elevated border border-border"
+        >
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model</span>
+            <span class="flex-1 text-sm text-fg-strong">
+              {{ captionLocalModel.displayName }} (~{{ captionLocalModel.approxSizeMb }} MB)
+            </span>
+            <template v-if="captionLocalModel.status === 'ABSENT'">
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                :disabled="saving"
+                @click="downloadCaptionModel(captionLocalModel.id)"
+              >
+                Download
+              </button>
+            </template>
+            <template v-else-if="captionLocalModel.status === 'DOWNLOADING'">
+              <div class="flex items-center gap-2">
+                <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
+                  <div
+                    class="h-full bg-emerald-600 transition-[width] duration-300"
+                    :style="{ width: captionLocalDownloadPct + '%' }"
+                  />
+                </div>
+                <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
+                  {{ captionLocalDownloadPct }}%
+                </span>
+              </div>
+            </template>
+            <template v-else-if="captionLocalModel.status === 'VERIFYING'">
+              <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
+            </template>
+            <template v-else-if="captionLocalModel.status === 'AVAILABLE'">
+              <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                :disabled="saving"
+                @click="removeCaptionModel(captionLocalModel.id)"
+              >
+                Remove
+              </button>
+            </template>
+            <template v-else-if="captionLocalModel.status === 'ERROR'">
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                :disabled="saving"
+                @click="downloadCaptionModel(captionLocalModel.id)"
+              >
+                Retry
+              </button>
+            </template>
+          </div>
+          <div
+            v-if="captionLocalModel?.status === 'ERROR' && captionLocalModel?.error"
+            class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+          >
+            {{ captionLocalModel.error }}
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Chat Settings -->

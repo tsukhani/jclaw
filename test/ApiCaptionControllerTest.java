@@ -43,17 +43,17 @@ class ApiCaptionControllerTest extends FunctionalTest {
     }
 
     @Test
-    void stateReturnsModelListAndCloudConfig() {
+    void stateReturnsModelListAndProviderConfig() {
         runInFreshTx(() -> {
-            ConfigService.set("caption.cloud.provider", "openai");
-            ConfigService.set("caption.cloud.model", "gpt-4o-mini");
+            ConfigService.set("caption.provider", "openai");
+            ConfigService.set("caption.model", "gpt-4o-mini");
         });
         var response = GET("/api/caption/state");
         assertIsOk(response);
         assertContentType("application/json", response);
         var body = getContent(response);
-        assertTrue(body.contains("\"cloudProvider\":\"openai\""), "cloudProvider in payload: " + body);
-        assertTrue(body.contains("\"cloudModel\":\"gpt-4o-mini\""), "cloudModel in payload: " + body);
+        assertTrue(body.contains("\"provider\":\"openai\""), "provider in payload: " + body);
+        assertTrue(body.contains("\"model\":\"gpt-4o-mini\""), "model in payload: " + body);
         for (var m : VlmModel.values()) {
             assertTrue(body.contains("\"id\":\"" + m.id() + "\""),
                     "model %s present in payload".formatted(m.id()));

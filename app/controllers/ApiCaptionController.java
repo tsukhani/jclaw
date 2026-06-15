@@ -33,7 +33,7 @@ import static utils.GsonHolder.INSTANCE;
  *       disable the local fallback) via {@link VlmModelManager#delete}.</li>
  * </ul>
  *
- * <p>Writes to {@code caption.cloud.provider} and {@code caption.cloud.model} go through the existing
+ * <p>Writes to {@code caption.provider} and {@code caption.model} go through the existing
  * {@code POST /api/config} endpoint — no new write path here. The cloud provider's API key / base URL
  * are the shared {@code provider.{name}.*} keys from the LLM Providers section.
  */
@@ -46,7 +46,7 @@ public class ApiCaptionController extends Controller {
                                 String status, long bytesDownloaded, Long totalBytes,
                                 String error) {}
 
-    public record CaptionStateResponse(String cloudProvider, String cloudModel,
+    public record CaptionStateResponse(String provider, String model,
                                        List<VlmModelEntry> models) {}
 
     public record DownloadStartedResponse(String status, String modelId) {}
@@ -56,7 +56,7 @@ public class ApiCaptionController extends Controller {
     /** GET /api/caption/state — snapshot for the Settings UI. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CaptionStateResponse.class)))
-    @Operation(summary = "Snapshot caption cloud config and per-local-model download status")
+    @Operation(summary = "Snapshot caption provider/model config and per-local-model download status")
     public static void state() {
         var models = new ArrayList<VlmModelEntry>();
         for (var m : VlmModel.values()) {
@@ -72,8 +72,8 @@ public class ApiCaptionController extends Controller {
         }
 
         var payload = new CaptionStateResponse(
-                ConfigService.get("caption.cloud.provider"),
-                ConfigService.get("caption.cloud.model"),
+                ConfigService.get("caption.provider"),
+                ConfigService.get("caption.model"),
                 models);
         renderJSON(gson.toJson(payload));
     }
