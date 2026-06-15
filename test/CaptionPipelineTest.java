@@ -100,8 +100,10 @@ class CaptionPipelineTest extends UnitTest {
         var textPart = firstPartOfType(parts, "text");
         assertNotNull(textPart, "text part must exist when the image is downgraded");
         var text = (String) textPart.get("text");
-        assertTrue(text.contains("[Image description: a dog beside a red bicycle]"),
+        assertTrue(text.contains("Image description") && text.contains("a dog beside a red bicycle"),
                 "text must carry the caption block: " + text);
+        assertTrue(text.contains("cannot open or read the image file"),
+                "caption block must signal the image file isn't directly readable (discourage readDocument): " + text);
     }
 
     @Test
@@ -113,10 +115,12 @@ class CaptionPipelineTest extends UnitTest {
 
         var parts = (List<?>) VisionAudioAssembler.userMessageFor(fresh, true, false).content();
         var text = (String) firstPartOfType(parts, "text").get("text");
-        assertTrue(text.contains("[Image diagram.png: description unavailable]"),
+        assertTrue(text.contains("diagram.png"),
                 "fallback note must carry the original filename: " + text);
-        assertFalse(text.contains("[Image description:"),
-                "no caption block when the caption is missing: " + text);
+        assertTrue(text.contains("auto-description unavailable"),
+                "fallback must signal no caption was produced: " + text);
+        assertTrue(text.contains("cannot open or read the image file"),
+                "fallback must still signal the image file isn't directly readable: " + text);
         assertNull(firstPartOfType(parts, "image_url"));
     }
 
@@ -165,7 +169,7 @@ class CaptionPipelineTest extends UnitTest {
         assertNull(firstPartOfType(parts, "image_url"),
                 "rewrite must drop image_url for a non-vision model: " + parts);
         var text = (String) firstPartOfType(parts, "text").get("text");
-        assertTrue(text.contains("[Image description: a scenic mountain lake]"),
+        assertTrue(text.contains("Image description") && text.contains("a scenic mountain lake"),
                 "rewrite must inject the caption block: " + text);
     }
 

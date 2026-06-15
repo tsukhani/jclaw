@@ -248,10 +248,13 @@ public final class VisionAudioAssembler {
     }
 
     /**
-     * Build the {@code [Image description: ...]} blocks for the
-     * !supportsVision branch (JCLAW-215). Missing/blank captions fall back to a
-     * "description unavailable" note that preserves the user's original
-     * filename — symmetric with {@link #collectTranscriptBlocks}.
+     * Build the {@code [Image description ...]} blocks for the !supportsVision branch (JCLAW-215).
+     * Each block states up front that the image file <b>cannot be opened or read</b> and that the
+     * description is the only available representation — this discourages the LLM from trying to
+     * {@code readDocument}/open the underlying image (a non-vision model can't use the bytes anyway,
+     * and the workspace path it would guess gets rejected by the containment guard). Missing/blank
+     * captions fall back to a note that still preserves the original filename — symmetric with
+     * {@link #collectTranscriptBlocks}.
      */
     private static String collectCaptionBlocks(List<models.MessageAttachment> atts) {
         var captionBlocks = new StringBuilder();
@@ -259,13 +262,13 @@ public final class VisionAudioAssembler {
             if (!a.isImage()) continue;
             var caption = a.caption;
             if (caption != null && !caption.isBlank()) {
-                captionBlocks.append("\n\n[Image description: ")
+                captionBlocks.append("\n\n[Image description (auto-generated; you cannot open or read the image file itself — this description is the only representation available): ")
                         .append(caption.trim())
                         .append("]");
             } else {
-                captionBlocks.append("\n\n[Image ")
-                        .append(a.originalFilename != null ? a.originalFilename : "unnamed")
-                        .append(": description unavailable]");
+                captionBlocks.append("\n\n[Image (auto-description unavailable; you cannot open or read the image file itself)")
+                        .append(a.originalFilename != null ? ": " + a.originalFilename : "")
+                        .append("]");
             }
         }
         return captionBlocks.toString();
