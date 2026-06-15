@@ -54,7 +54,7 @@
     "axe-core": "^4.11.4",
     "eslint": "^10.4.0",
     "eslint-plugin-vuejs-accessibility": "^2.5.0",
-    "happy-dom": "^20.9.0",
+    "jsdom": "^29.1.1",
     "lint-staged": "^17.0.5",
     "postcss-html": "^1.8.1",
     "stylelint": "^17.11.1",
