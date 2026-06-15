@@ -96,11 +96,20 @@ public final class ToolCallLoopRunner {
         }
     }
 
-    @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is JCLAW-165's single-use audio-format retry
+    /**
+     * Mutable per-turn vision-retry bookkeeping (JCLAW-216), mirroring {@link AudioRetryState}.
+     * Tracks the single-shot image-format-rejection retry for {@link #callWithToolLoop}.
+     */
+    private static final class VisionRetryState {
+        boolean retryAttempted;
+    }
+
+    @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is the single-use audio-format (JCLAW-165) / image-format (JCLAW-216) retry
     static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
                                          List<ChatMessage> messages, List<ToolDef> tools,
                                          LlmProvider primary, LlmProvider secondary,
                                          List<VisionAudioAssembler.AudioBearer> audioBearers,
+                                         List<VisionAudioAssembler.ImageBearer> imageBearers,
                                          AgentExecutionSink sink, Long taskRunId) {
         // Helpers like effectiveModelId / effectiveMaxTokens accept a nullable
         // conversation for use elsewhere, but this loop dereferences
@@ -115,6 +124,7 @@ public final class ToolCallLoopRunner {
         var modelInfoForOutcome = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioInitially = modelInfoForOutcome != null && modelInfoForOutcome.supportsAudio();
         var audioState = new AudioRetryState(!supportsAudioInitially && !audioBearers.isEmpty());
+        var visionState = new VisionRetryState(); // JCLAW-216: single-shot image-format-rejection retry
 
         for (int round = 0; round < AgentRunner.maxToolRounds(); round++) {
             // JCLAW-291: cooperative-cancel checkpoint at the top of each
@@ -124,21 +134,25 @@ public final class ToolCallLoopRunner {
             AgentRunner.checkSubagentCancel(conversation);
             AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
             var attempt = invokeOneRound(agent, conversation, primary, secondary, effectiveModelId, thinkingMode,
-                    currentMessages, tools, audioBearers, audioState);
+                    currentMessages, tools, audioBearers, imageBearers, audioState, visionState, supportsAudioInitially);
             if (attempt.retry()) {
                 currentMessages = attempt.rewrittenMessages();
-                round--;  // JCLAW-165: re-issue this round with the rewritten messages (gated by audioRetryAttempted)
+                round--;  // re-issue this round with the rewritten messages (gated by audio/vision retryAttempted)
                 continue;
             }
             if (attempt.terminal() != null) return attempt.terminal();
 
-            // Successful response. Fire AUDIO_PASSTHROUGH_OUTCOME log when the
-            // request carried audio so the field-data set we'll later use to
+            // Successful response. Fire the passthrough-outcome logs when the
+            // request carried audio / image so the field-data set we'll later use to
             // grow a known-good provider/format matrix has full coverage.
             if (round == 0 && !audioBearers.isEmpty()) {
                 AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
                         audioState.retryAttempted ? "downgraded" : "accepted",
                         null, audioState.transcriptAwaited);
+            }
+            if (round == 0 && !imageBearers.isEmpty()) {
+                ImageRetryStrategy.logImagePassthroughOutcome(agent, conversation, primary,
+                        visionState.retryAttempted ? "downgraded" : "accepted", null);
             }
 
             var roundOutcome = handleSyncRoundResponse(attempt.response(), agent, conversation, conversationId, primary,
@@ -175,7 +189,9 @@ public final class ToolCallLoopRunner {
                                                 LlmProvider secondary, String effectiveModelId, String thinkingMode,
                                                 ArrayList<ChatMessage> currentMessages, List<ToolDef> tools,
                                                 List<VisionAudioAssembler.AudioBearer> audioBearers,
-                                                AudioRetryState audioState) {
+                                                List<VisionAudioAssembler.ImageBearer> imageBearers,
+                                                AudioRetryState audioState, VisionRetryState visionState,
+                                                boolean supportsAudioInitially) {
         // Recompute per-round so the clamp tracks the growing history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, currentMessages, tools);
         ChatResponse response;
@@ -184,7 +200,8 @@ public final class ToolCallLoopRunner {
                     ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType)
                     : primary.chat(effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType);
         } catch (Exception e) {
-            var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, audioState, currentMessages);
+            var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, imageBearers,
+                    audioState, visionState, supportsAudioInitially, currentMessages);
             return retryOutcome.retry()
                     ? RoundAttempt.retry(retryOutcome.rewrittenMessages())
                     : RoundAttempt.terminal(retryOutcome.outcome());
@@ -216,10 +233,13 @@ public final class ToolCallLoopRunner {
      * tells the caller to re-issue the round) or a terminal failure
      * {@link LoopOutcome}.
      */
+    @SuppressWarnings("java:S107") // exception-mapper mirrors the loop's per-round audio + vision retry state
     private static LlmCallExceptionOutcome handleLlmCallException(Exception e, Agent agent, Conversation conversation,
                                                                    LlmProvider primary,
                                                                    List<VisionAudioAssembler.AudioBearer> audioBearers,
-                                                                   AudioRetryState audioState,
+                                                                   List<VisionAudioAssembler.ImageBearer> imageBearers,
+                                                                   AudioRetryState audioState, VisionRetryState visionState,
+                                                                   boolean supportsAudioInitially,
                                                                    ArrayList<ChatMessage> currentMessages) {
         // JCLAW-165: provider-side audio-format rejection — fall back
         // to transcript-as-text and retry once. Only kicks in when the
@@ -247,10 +267,29 @@ public final class ToolCallLoopRunner {
                     currentMessages, audioBearers, false));
             return LlmCallExceptionOutcome.retry(rewritten);
         }
+        // JCLAW-216: provider-side image-format rejection on a vision-capable
+        // model — downgrade the image to a caption and retry once. The caption
+        // is computed on demand (or a "description unavailable" note), so unlike
+        // audio there's no "nothing to fall back to" failure branch.
+        if (!visionState.retryAttempted && !imageBearers.isEmpty() && ImageRetryStrategy.isImageFormatRejection(e)) {
+            visionState.retryAttempted = true;
+            EventLogger.warn("llm", agent.name, null,
+                    "Provider %s rejected image; retrying with caption-as-text".formatted(primary.config().name()));
+            // Preserve the current audio state so a co-attached voice note that was
+            // already downgraded isn't re-inflated to native input_audio by the rebuild.
+            var effectiveSupportsAudio = supportsAudioInitially && !audioState.retryAttempted;
+            var rewritten = new ArrayList<>(VisionAudioAssembler.applyCaptionsForCapability(
+                    currentMessages, imageBearers, false, effectiveSupportsAudio));
+            return LlmCallExceptionOutcome.retry(rewritten);
+        }
         EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
         if (!audioBearers.isEmpty()) {
             AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
                     AudioRetryStrategy.shortErrorTag(e), audioState.transcriptAwaited);
+        }
+        if (!imageBearers.isEmpty()) {
+            ImageRetryStrategy.logImagePassthroughOutcome(agent, conversation, primary, "error",
+                    AudioRetryStrategy.shortErrorTag(e));
         }
         return LlmCallExceptionOutcome.terminal(new LoopOutcome(
                 "I'm sorry, I encountered an error communicating with the AI provider. Please try again."));

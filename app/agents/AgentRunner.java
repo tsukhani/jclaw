@@ -448,7 +448,7 @@ public class AgentRunner {
         Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;
         var outcome = ToolCallLoopRunner.callWithToolLoop(
                 agent, stubConv, null, messages, tools, primary, secondary,
-                new ArrayList<>(), sink, taskRunId);
+                new ArrayList<>(), new ArrayList<>(), sink, taskRunId); // task fire carries no attachments
 
         final var response = outcome.content();
         final var truncated = outcome.truncated();
@@ -571,7 +571,7 @@ public class AgentRunner {
             // LLM call loop — no transaction open, JDBC connection back in pool
             var outcome = ToolCallLoopRunner.callWithToolLoop(agent, conversation, conversationId,
                     prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary(),
-                    prepared.audioBearers(), sink, null);  // JCLAW-414: chat path is not task-cancellable
+                    prepared.audioBearers(), prepared.imageBearers(), sink, null);  // JCLAW-414: chat path is not task-cancellable
             var response = outcome.content();
             var truncated = outcome.truncated();
             trace.mark(LatencyTrace.STREAM_BODY_END);

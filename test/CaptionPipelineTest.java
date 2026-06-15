@@ -1,3 +1,4 @@
+import agents.ImageRetryStrategy;
 import agents.VisionAudioAssembler;
 import agents.VisionAudioAssembler.ImageBearer;
 import llm.LlmTypes.ChatMessage;
@@ -185,6 +186,35 @@ class CaptionPipelineTest extends UnitTest {
         assertNull(MessageAttachment.<MessageAttachment>findById(att.id).caption,
                 "no captioning when the model supports vision");
         assertEquals(0, server.getRequestCount(), "the caption backend must not be called");
+    }
+
+    // ── isImageFormatRejection heuristic (JCLAW-216) ─────────────────
+
+    @Test
+    void isImageFormatRejectionDetectsKnownProviderShapes() {
+        assertTrue(ImageRetryStrategy.isImageFormatRejection(
+                new RuntimeException("HTTP 400 from openai: invalid_image_format")));
+        assertTrue(ImageRetryStrategy.isImageFormatRejection(
+                new RuntimeException("HTTP 400 from openrouter: image format not supported")));
+        assertTrue(ImageRetryStrategy.isImageFormatRejection(
+                new RuntimeException("HTTP 400 from acme: could not decode image")));
+        assertTrue(ImageRetryStrategy.isImageFormatRejection(
+                new RuntimeException("HTTP 400 from acme: image too large for this model")));
+        assertTrue(ImageRetryStrategy.isImageFormatRejection(
+                new RuntimeException("HTTP 422 from x: invalid image_url content part")));
+    }
+
+    @Test
+    void isImageFormatRejectionIgnoresUnrelated400sAnd5xx() {
+        // 400 with no image hints — unrelated client error.
+        assertFalse(ImageRetryStrategy.isImageFormatRejection(
+                new RuntimeException("HTTP 400 from openai: model not found")));
+        // 5xx server error: not a client format rejection.
+        assertFalse(ImageRetryStrategy.isImageFormatRejection(
+                new RuntimeException("HTTP 500 from openai: internal error")));
+        // Null / message-less.
+        assertFalse(ImageRetryStrategy.isImageFormatRejection(null));
+        assertFalse(ImageRetryStrategy.isImageFormatRejection(new RuntimeException()));
     }
 
     // ── helpers ──────────────────────────────────────────────────────
