@@ -3247,7 +3247,12 @@ async function handleResetPassword() {
                 @change="setTranscriptionProvider('whisper-local')"
               >
               <span class="flex-1 text-sm text-fg-primary">Self-Hosted Whisper</span>
-              <span class="text-[10px] text-fg-muted border border-input px-1">local</span>
+              <span
+                class="text-[10px] px-1 border"
+                :class="selectedTranscriptionProvider === 'whisper-local'
+                  ? 'text-green-400 border-green-400/30'
+                  : 'text-fg-muted border-input'"
+              >local</span>
             </label>
           </div>
         </fieldset>
@@ -3456,7 +3461,12 @@ async function handleResetPassword() {
                 @change="setCaptionProvider('vlm-local')"
               >
               <span class="flex-1 text-sm text-fg-primary">Self-Hosted Image Captioner</span>
-              <span class="text-[10px] text-fg-muted border border-input px-1">local</span>
+              <span
+                class="text-[10px] px-1 border"
+                :class="captionProvider === 'vlm-local'
+                  ? 'text-green-400 border-green-400/30'
+                  : 'text-fg-muted border-input'"
+              >local</span>
             </label>
           </div>
         </fieldset>

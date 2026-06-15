@@ -1440,6 +1440,9 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     expect(radios[radios.length - 1]!.attributes('value')).toBe('vlm-local') // local is last
     expect(component.text()).toContain('Self-Hosted Image Captioner')
     expect(component.text()).not.toContain('Cloud (preferred)') // header removed
+    // vlm-local is selected → the "local" badge lights up green as the active cue.
+    const badge = component.findAll('span').find(s => s.text() === 'local')
+    expect(badge?.classes()).toContain('text-green-400')
   })
 
   it('shows the vision-model picker (filtered to vision models) for a cloud provider', async () => {
