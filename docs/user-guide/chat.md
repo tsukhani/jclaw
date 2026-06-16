@@ -32,7 +32,7 @@ If you regret a message, hover over it: you'll see **Edit & resubmit** and **Del
 
 Click the paperclip in the composer to attach files. JClaw supports:
 
-- **Images** — sent natively to vision-capable models. Models without vision get a brief textual description.
+- **Images** — sent natively to vision-capable models. Models without vision get a brief textual description **if** an Image Captioning backend is configured (cloud or a local Ollama VLM — see [Settings → Image Captioning](/guide#settings)); otherwise they receive a "description unavailable" note.
 - **Documents** — PDFs and other text-extractable formats are parsed and inlined into the prompt. Scanned PDFs get OCR'd first (see [Settings → OCR](/guide#settings)).
 - **Voice notes** — recorded directly in the composer (microphone button) or attached. Audio-capable models receive the audio; other models receive a transcript (see [Settings → Transcription](/guide#settings)).
 

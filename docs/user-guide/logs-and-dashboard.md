@@ -7,7 +7,7 @@ Two read-only surfaces give you visibility into what JClaw is doing right now an
 
 ## Dashboard
 
-The [Dashboard](/) is the first thing you see after signing in. Four stat cards at the top, then three live panels below.
+The [Dashboard](/) is the first thing you see after signing in. Five stat cards at the top, then three live panels below.
 
 ### Stat cards
 
@@ -17,6 +17,7 @@ The [Dashboard](/) is the first thing you see after signing in. Four stat cards 
 | **Conversations** | Cumulative count of all conversations you own. Labeled **Total**.                                       |
 | **Channels**      | Number of currently-active external channels — web + Telegram bindings + Slack/WhatsApp configs.       |
 | **Tasks**         | Three sub-stats side by side: **Active** (recurring `CRON` / `INTERVAL` in steady state), **Running** (currently firing), **Pending** (`SCHEDULED` / `IMMEDIATE` waiting). |
+| **Reminders**     | Two sub-stats: **Active** (recurring reminders) and **Pending** (one-shot reminders waiting to fire). |
 
 The Tasks card's three-way split is intentional — you want to see `RUNNING` tick up and back down during a fire without going to the Tasks page.
 
@@ -36,16 +37,16 @@ When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, et
 
 ### Chat Performance
 
-Latency and throughput percentiles for each model, optionally filtered by channel via the in-panel dropdown (web first when present). Two views, toggled in the panel header:
+Latency percentiles for each model, optionally filtered by channel via the in-panel dropdown (web first when present). Two views, toggled in the panel header:
 
-- **Table** — p50 / p95 / p99 latency, tokens/second, min/max for each model.
+- **Table** — per-model latency: sample count (n), p50 / p90 / p99 / p999 percentiles, and min/max.
 - **Overlay chart** — overlapping latency density curves so you can compare distributions across models at a glance.
 
 Use this to spot a slow model or a slow channel before users complain.
 
 ### Recent Activity
 
-A live tail of the last 10 events, with the same column layout the [Logs](/logs) page uses:
+A live tail of the last 10 events. It shows the same message columns as the [Logs](/logs) page, but **without** the expand chevron — events can't be expanded inline here:
 
 | Column      | Width     | Notes                                       |
 |-------------|-----------|---------------------------------------------|

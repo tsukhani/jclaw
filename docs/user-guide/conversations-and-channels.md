@@ -56,16 +56,16 @@ Deleting a conversation cascade-deletes every subagent run spawned from it — b
 [Channels](/channels) lets you reach the same agents from outside JClaw. The page shows three cards, one per supported external surface:
 
 - **Telegram** — per-bot bindings, each routed to its own agent.
-- **Slack** — one workspace binding.
-- **WhatsApp** — one Cloud-API binding.
+- **Slack** — per-app bindings (one Slack app per agent), each routed to its own agent.
+- **WhatsApp** — per-number bindings (one WhatsApp number per agent), each routed to its own agent.
 
-Each card shows its current status: `<N> active`, `not configured`, `active`, or `inactive`.
+Each card shows its current status: `<N> active` (one or more enabled bindings) or `not configured` (no bindings yet).
 
 The shared mental model is the same across all three:
 
-1. You give JClaw the channel-specific credentials (bot tokens, signing secrets, webhook strings).
-2. You bind that channel to an agent — or leave it unbound, in which case the [Main Agent](/guide#agents) handles traffic.
-3. JClaw routes incoming messages to the bound agent and streams replies back over the same channel.
+1. On the channel's card you create one or more **bindings**. Each binding holds that channel's credentials (bot tokens, signing secrets, webhook strings) **and** the [agent](/guide#agents) it routes to — agent selection is required (there is no "unbound → Main Agent" default for external channels).
+2. Add as many bindings as you like — one per agent — so multiple bots/numbers can coexist, each running a different agent.
+3. JClaw routes incoming messages to the binding's agent and streams replies back over the same channel.
 
 External messages flow into the same [Conversations](/conversations) page as web chat, so you can read the full history in-app without bouncing between Slack and Telegram.
 
@@ -82,21 +82,23 @@ The bot starts receiving messages as soon as you save and enable the binding. Te
 
 ### Slack
 
-Configure a single workspace by clicking **Configure** on the Slack card:
+Click the **Slack** card to open its per-app binding list, then **+ New binding**. Each binding pairs one Slack app with the agent it runs as, so multiple Slack apps can coexist (one per agent):
 
 - **botToken** — your Slack app's bot token (`xoxb-…`).
 - **signingSecret** — the signing secret from your Slack app's Basic Information page.
+- **agent** — the [agent](/agents) this Slack app routes to (required).
 
-Save and toggle **Enabled** on. The Main Agent serves Slack traffic by default; bind a specific agent to the workspace through that agent's config if you want a different one.
+Save and toggle **Enabled** on; the bot starts serving immediately.
 
 ### WhatsApp
 
-Cloud-API integration via Meta's WhatsApp Business Platform. You'll need:
+Cloud-API integration via Meta's WhatsApp Business Platform. Like Slack and Telegram it's per-binding — click the **WhatsApp** card, then **+ New binding** (one number per agent; multiple numbers can coexist). Each binding needs:
 
 - **phoneNumberId** — from the WhatsApp Business Platform.
 - **accessToken** — a long-lived access token for the same number.
 - **appSecret** — your Meta app's secret.
 - **verifyToken** — any string you choose; you paste the same string into Meta's webhook config so JClaw can verify incoming traffic.
+- **agent** — the [agent](/agents) this number routes to (required).
 
 Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
 
@@ -105,7 +107,7 @@ Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
 When a message arrives over an external channel, JClaw:
 
 1. Looks up the channel + peer (external user id) to find or create a conversation.
-2. Routes the message to the bound agent (or to the Main Agent if no binding exists).
+2. Routes the message to the binding's agent.
 3. Streams the reply back over the same channel.
 
 The end result: each external user sees a private, persistent thread with the agent, and you see all of it consolidated in [Conversations](/conversations) and [Chat](/chat).

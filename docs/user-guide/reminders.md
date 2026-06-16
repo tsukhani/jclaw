@@ -20,9 +20,10 @@ Reminders are created by **agents** through the same `task_manager` tool that cr
 
 The agent picks the right schedule shape and writes the *description* as the reminder text you want to see:
 
-- A **duration** (`30m`, `2h`, `1d`) for "in N minutes/hours/days."
+- A **duration** (`30m`, `2h`, `1d`) for "in N minutes/hours/days." This is a one-shot.
 - An **absolute date-time** (e.g. `2026-06-13T15:00`, interpreted in the task's timezone) for a **one-time reminder on a specific day** — "remind me at 3pm on June 13." This is a one-shot.
-- A **cron expression** for a **repeating** reminder — "every Monday at 10am."
+- A **recurring interval** (`every 30m`, `every 2h`, `every 1d`) for a **repeating** reminder on a fixed cadence.
+- A **cron expression** for a **repeating** reminder with calendar-aligned timing — "every Monday at 10am."
 
 **A one-time reminder fires once and then completes** (status `PENDING` → `COMPLETED`, and by default it auto-deletes itself — see [Auto-delete after firing](/guide#reminders)). **A repeating reminder stays `ACTIVE`** and keeps firing on its cadence. Use an absolute date-time, not a cron, for something that should happen only once — a cron with a fixed month/day would silently repeat every year.
 

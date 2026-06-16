@@ -4,6 +4,14 @@ The [Settings](/settings) page is the operator's control panel. Configuration is
 
 This page summarizes each section. The settings page itself is the source of truth for current defaults and available knobs; hover any field's info icon for an inline tooltip.
 
+## General
+
+Operator-wide settings.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `app.timezone` | server JVM zone | The IANA timezone the assistant treats as the current wall-clock time ("now") in its system prompt. This is separate from the Tasks `defaultTimezone` (which governs `CRON`/`SCHEDULED` task scheduling). |
+
 ## Auto-update model prices
 
 A standalone opt-in toggle hoisted above LLM Providers. When on, JClaw fetches the community-maintained `model_prices_and_context_window.json` from `github.com/BerriAI/litellm` nightly and fills in missing prices on your configured models. Prices you've set manually are never overwritten. Off by default — the toggle is explicit so the outbound GitHub call is a deliberate opt-in. A **Refresh now** button forces an immediate fetch.
@@ -56,7 +64,19 @@ Master toggle, then a backend radio group:
 - **OpenAI** — reuses your OpenAI API key.
 - **Self-Hosted Whisper** — runs `whisper.cpp` locally; the chosen model file (tiny / base / small / medium / large variants, ~75 MB to ~3 GB) downloads from Hugging Face on first use with a progress bar. Requires `ffmpeg` on PATH; the page warns inline if it's missing.
 
-Cloud backends are disabled in the radio group until their underlying provider key is configured in LLM Providers.
+Cloud backends are disabled in the radio group until their underlying provider key is configured in LLM Providers. An **Active:** status line above the toggle shows the current backend (cloud provider, or Self-Hosted Whisper with the chosen model), or that transcription is off.
+
+## Image Captioning
+
+The vision analogue of Transcription: non-vision chat models get a short **text description** of an uploaded image before it reaches the LLM. Vision-capable models still receive the image natively. WebP and other formats are transcoded to PNG first so every backend can read them.
+
+Master toggle, then a backend radio group:
+
+- **OpenRouter** — reuses your OpenRouter API key from LLM Providers; captions with a vision model on OpenRouter.
+- **OpenAI** — reuses your OpenAI API key.
+- **Local VLM (Ollama)** — captions with a vision model you run in your own local Ollama (at `localhost:11434/v1`). There is **no bundled model**: pull a vision model in Ollama (e.g. `ollama pull moondream` or `llava`), add it under [LLM Providers](#llm-providers) and mark it **supports vision**, then pick it here.
+
+The model picker is a dropdown of that backend's **vision-tagged** models — cloud backends are disabled until their key is set. An **Active:** status line shows the current backend and model. With captioning off, non-vision models receive a "description unavailable" note for images.
 
 ## Chat
 
@@ -64,17 +84,17 @@ Behavior limits for the in-app [Chat](/chat) surface:
 
 | Key                    | Default | Meaning                                                                                          |
 |------------------------|---------|--------------------------------------------------------------------------------------------------|
-| `maxToolRounds`        | 8       | Maximum tool calls the agent can make per turn before it must give a final answer.               |
-| `maxContextMessages`   | 40      | How many recent messages get sent with each LLM request. Older messages are dropped to stay in the context window. |
+| `maxToolRounds`        | 100     | Maximum tool calls the agent can make per turn before it must give a final answer.               |
+| `maxContextMessages`   | 50      | How many recent messages get sent with each LLM request. Older messages are dropped to stay in the context window. |
 
 An **Advanced — context window & compaction** collapsible reveals four lower-level knobs:
 
 | Key                          | Default | Meaning                                                                                                 |
 |------------------------------|---------|---------------------------------------------------------------------------------------------------------|
-| `compactionReserveTokens`    | 8000    | Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed `contextWindow − reserve`. Larger reserve = compaction fires sooner. |
-| `compactionMinTurns`         | 8       | Minimum messages in the to-summarize prefix before auto-compaction will run. Below this, the gate skips and trim drops oldest instead. Manual `/compact` uses a relaxed threshold (2). |
-| `compactionKeepMessages`     | 4       | Minimum messages kept verbatim at the end of the conversation after compaction. Smaller keep = more aggressive summarization. |
-| `jtokkit safety multiplier`  | 1.3×    | Fudge factor applied to jtokkit's token estimate when the model uses a fallback encoding (Kimi, DeepSeek, Gemma, Qwen, GLM, Mistral, Llama). Higher = trim/compact earlier, safer. OpenAI-family models use 1.0× regardless. |
+| `compactionReserveTokens`    | 15000   | Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed `contextWindow − reserve`. Larger reserve = compaction fires sooner. |
+| `compactionMinTurns`         | 10      | Minimum messages in the to-summarize prefix before auto-compaction will run. Below this, the gate skips and trim drops oldest instead. Manual `/compact` uses a relaxed threshold (2). |
+| `compactionKeepMessages`     | 10      | Minimum messages kept verbatim at the end of the conversation after compaction. Smaller keep = more aggressive summarization. |
+| `jtokkit safety multiplier`  | 1.4×    | Fudge factor applied to jtokkit's token estimate when the model uses a fallback encoding (Kimi, DeepSeek, Gemma, Qwen, GLM, Mistral, Llama). Higher = trim/compact earlier, safer. OpenAI-family models use 1.0× regardless. |
 
 ## Subagents
 
@@ -117,7 +137,7 @@ Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIM
 |--------------------|---------|----------------------------------------------------------------|
 | `maxImageBytes`    | 20 MB   | Image uploads (most vision models accept up to 20 MB).         |
 | `maxAudioBytes`    | 100 MB  | Audio uploads (~1 hour at 128 kbps).                           |
-| `maxFileBytes`     | 50 MB   | Every other attachment type (PDFs, text, archives, etc.).      |
+| `maxFileBytes`     | 100 MB  | Every other attachment type (PDFs, text, archives, etc.).      |
 | `maxFiles`         | 5       | Max files per chat message. System-wide ceiling is 5.          |
 
 Takes effect without a restart; raise `play.netty.maxContentLength` in `conf/application.conf` if you need over the bundled 512 MB transport-layer ceiling.

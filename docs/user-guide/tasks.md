@@ -85,6 +85,7 @@ Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks
 | **Schedule**  | Human-readable form of the schedule (the operator's original input — "every 30m", "0 0 9 * * *").       |
 | **Status**    | Color-coded; see *Status states* below.                                                                 |
 | **Agent**     | Which agent owns the task.                                                                              |
+| **Channel**   | Where the task's output is delivered (e.g. a Telegram/Slack target, or `none`), shown as a humanized name. Editable inline when the row is expanded. |
 | **Next Run**  | When the task will fire next, formatted in the task's effective timezone (see *Timezones*).             |
 | **Retries**   | Current attempts / max attempts. Failed fires are retried up to this cap before marking `FAILED`.       |
 | **Actions**   | Per-row controls (see *Per-row actions*).                                                               |
@@ -183,6 +184,10 @@ When in doubt, ask the agent — `task_manager` knows Spring cron and can transl
 Completed and cancelled tasks are kept for **N days**, then swept by a daily cleanup job. The retention TTL is configured at **Settings → Tasks → Retention** and shown next to the page title so you don't get surprised by auto-deletes. Setting retention to `0` disables the sweep.
 
 Independently of that day-based TTL, JClaw keeps only the **10 most recent runs per task** — each new fire prunes older run history for that task. A frequently-recurring task (an every-30-minutes labeler, say) therefore never grows its run table without bound: you always have the latest ten fires, while the day-based sweep removes whole completed/cancelled tasks past the TTL.
+
+## Editing a task's instructions
+
+Expand a task's row to see its **Instructions** — the description the agent runs on. If the description is a list (one step per line), it renders as numbered steps; a plain description renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent and the inline **Channel** editor live in the same expanded detail.
 
 ## What a task run looks like
 

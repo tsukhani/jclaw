@@ -34,17 +34,11 @@ You can also **promote** an agent-specific skill back into the global library by
 
 ### Creating a skill
 
-Click **New skill** to open the editor. A skill has:
+Skills aren't authored on this page — there's no "New skill" button or file import. You create them with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body that becomes part of the system prompt). Once it's good, drag it from the agent's column to **Global Skills** to promote it for reuse.
 
-- **Name** — short identifier.
-- **Description** — what the skill does (shown in the library).
-- **Content** — the markdown body that becomes part of the system prompt.
+### Viewing
 
-You can also drop a `.md` file directly onto the Global Skills column to import it as a new skill.
-
-### Editing
-
-Click any skill row to open the editor. Changes apply to **every agent the skill is attached to** the next time they generate. Past conversations keep the prompt they were created with.
+Click any skill row to open a **read-only** viewer of its files. To change a skill, edit it via the skill-creator skill in an agent's workspace (then re-promote if it's a global skill). Updates apply to every agent using the skill the next time it generates; past conversations keep the prompt they were created with.
 
 :::tip Start broad, then split
 A skill that's too narrow gets duplicated. A skill that's too broad gets attached to agents that don't need most of it. When in doubt, start broad and split when you notice an agent ignoring half the skill's content.
@@ -57,7 +51,7 @@ A skill that's too narrow gets duplicated. A skill that's too broad gets attache
 The [Tools](/tools) page is a catalog of every built-in capability JClaw ships with. Each card shows:
 
 - **Icon and name.**
-- **Category** — `System`, `Web`, `Files`, `Utilities`, or `MCP` (for tools served by [MCP Servers](#mcp-servers) below).
+- **Category** — `System`, `Web`, `Files`, or `Utilities`. (MCP-server tools aren't listed here — they live on the [MCP Servers](#mcp-servers) page.)
 - **Description** — what the tool does in one or two sentences.
 - **Functions** — the individual actions the tool exposes. Expand the card to see the per-function detail.
 
@@ -82,7 +76,7 @@ Tools are a *catalog* and binding tools to agents is an *agent* concern. Keeping
 
 ## MCP Servers
 
-The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps like JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. Anything an MCP server exposes shows up on the [Tools](/tools) page in the `MCP` category, alongside JClaw's first-party tools.
+The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps like JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. An MCP server's tools are managed on the [MCP Servers](/mcp-servers) page — not the Tools page, which lists only JClaw's first-party tools.
 
 The [MCP Servers](/mcp-servers) page is where you register and configure those servers. Once registered, an MCP server's tools become available to any agent that has the server ticked in its config.
 
