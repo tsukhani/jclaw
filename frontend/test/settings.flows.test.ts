@@ -1339,6 +1339,27 @@ describe('Settings page — Transcription enable + provider switch', () => {
 
     expect(downloadCaptured.hit).toBe(true)
   })
+
+  it('shows the active-backend status line (Self-Hosted Whisper + model)', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: [...defaultConfigEntries(),
+        { key: 'transcription.provider', value: 'whisper-local', updatedAt: '2026-04-22T10:00:00Z' },
+        { key: 'transcription.localModel', value: 'small.en', updatedAt: '2026-04-22T10:00:00Z' }] }),
+    })
+    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    // Mirrors the Image Captioning "Active:" line — resolves the whisper model's display name.
+    expect(component.text()).toContain('Active: Self-Hosted Whisper (Small (English))')
+  })
 })
 
 describe('Settings page — Image captioning single-select (JCLAW-214)', () => {

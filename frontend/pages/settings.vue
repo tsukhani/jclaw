@@ -348,6 +348,15 @@ const selectedTranscriptionProvider = computed(() =>
 const transcriptionEnabled = computed(() =>
   selectedTranscriptionProvider.value.trim().length > 0,
 )
+// Which backend is active, for the status line (mirrors captionActiveBackend).
+const transcriptionIsCloud = computed(() =>
+  selectedTranscriptionProvider.value === 'openai' || selectedTranscriptionProvider.value === 'openrouter',
+)
+const transcriptionActiveBackend = computed(() => {
+  if (transcriptionIsCloud.value) return 'cloud'
+  if (selectedTranscriptionProvider.value === 'whisper-local') return 'local'
+  return 'none'
+})
 async function toggleTranscriptionEnabled() {
   saving.value = true
   try {
@@ -3070,6 +3079,25 @@ async function handleResetPassword() {
         from Hugging Face on first use.
       </p>
 
+      <!-- Active-backend status line. -->
+      <div
+        class="px-3 py-2 text-[11px] border"
+        :class="transcriptionEnabled
+          ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
+          : 'bg-muted border-border text-fg-muted'"
+      >
+        <template v-if="transcriptionActiveBackend === 'cloud'">
+          Active: cloud transcription via {{ selectedTranscriptionProvider }}.
+        </template>
+        <template v-else-if="transcriptionActiveBackend === 'local'">
+          Active: Self-Hosted Whisper ({{ selectedLocalModelStatus?.displayName || 'default model' }}).
+        </template>
+        <template v-else>
+          Transcription is off — enable it and pick a backend below. Until then, audio attachments
+          reach the LLM without a transcript.
+        </template>
+      </div>
+
       <!-- Master toggle: ON when transcription.provider is non-empty. -->
       <div class="bg-surface-elevated border border-border">
         <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
@@ -3288,7 +3316,7 @@ async function handleResetPassword() {
           Active: cloud captioning via {{ captionProvider }} ({{ captionModel || 'default model' }}).
         </template>
         <template v-else-if="captionActiveBackend === 'local'">
-          Active: local VLM via Ollama ({{ captionModel || 'llava' }}).
+          Active: local VLM via Ollama ({{ captionModel || 'no model selected' }}).
         </template>
         <template v-else>
           Image captioning is off — enable it and pick a backend below. Until then, non-vision
