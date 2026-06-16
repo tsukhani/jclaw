@@ -6,6 +6,7 @@ import {
   formatConversationCost,
   formatConversationCostTooltip,
   formatCostUsd,
+  formatStatCurrency,
   formatUsageCost,
   formatUsageCostTooltip,
   listChannelsInRows,
@@ -564,5 +565,35 @@ describe('formatCostUsd', () => {
   it('formats normal costs to four decimals', () => {
     expect(formatCostUsd(0.0149)).toBe('$0.0149')
     expect(formatCostUsd(1.2345)).toBe('$1.2345')
+  })
+})
+
+describe('formatStatCurrency', () => {
+  it('renders exact zero as $0', () => {
+    expect(formatStatCurrency(0)).toBe('$0')
+  })
+
+  it('rounds a sub-half-cent amount down to $0', () => {
+    // $0.0001 is well under half a cent → rounds to zero, not up to $0.01.
+    expect(formatStatCurrency(0.0001)).toBe('$0')
+    expect(formatStatCurrency(0.0049)).toBe('$0')
+  })
+
+  it('rounds to the nearest cent, not up', () => {
+    // The reported bug: $0.0101 must read as $0.01 (round), never $0.02 (ceil).
+    expect(formatStatCurrency(0.0101)).toBe('$0.01')
+    expect(formatStatCurrency(0.0149)).toBe('$0.01')
+    expect(formatStatCurrency(0.015)).toBe('$0.02')
+    expect(formatStatCurrency(0.005)).toBe('$0.01')
+  })
+
+  it('drops trailing .00 on whole-dollar amounts', () => {
+    expect(formatStatCurrency(20)).toBe('$20')
+    expect(formatStatCurrency(120)).toBe('$120')
+  })
+
+  it('keeps two decimals on fractional dollar amounts', () => {
+    expect(formatStatCurrency(99.99)).toBe('$99.99')
+    expect(formatStatCurrency(120.0101)).toBe('$120.01')
   })
 })

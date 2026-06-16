@@ -456,6 +456,23 @@ export function formatCostUsd(cost: number): string {
   return '$' + cost.toFixed(4)
 }
 
+/**
+ * Format a stat-strip headline amount in plain-currency style — "$120"
+ * when whole, "$99.99" otherwise. Rounds to the *nearest* cent, so a
+ * sub-half-cent amount reads as "$0" (e.g. $0.0001 → "$0", $0.0149 → "$0.01",
+ * $0.015 → "$0.02"). Used for the Per-Token cost stat, the Subscription fee,
+ * and the Combined Total — every headline figure is consistent. The per-model
+ * table cells keep four-decimal precision via {@link formatCostUsd} because
+ * per-row cost contribution still needs sub-cent granularity, which is why a
+ * row can show "$0.0101" while its rounded headline total shows "$0.01".
+ */
+export function formatStatCurrency(amount: number): string {
+  const cents = Math.round(amount * 100)
+  if (cents === 0) return '$0'
+  const dollars = cents / 100
+  return dollars % 1 === 0 ? `$${dollars.toFixed(0)}` : `$${dollars.toFixed(2)}`
+}
+
 /** Tooltip breakdown showing each billing category separately. */
 export function formatUsageCostTooltip(usage: MessageUsage): string {
   const b = computeUsageCostBreakdown(usage)

@@ -25,6 +25,7 @@ import type { Agent } from '~/types/api'
 import {
   computeFleetCost,
   formatCostUsd,
+  formatStatCurrency,
   listChannelsInRows,
   type FleetCostBreakdown,
   type FleetCostFilter,
@@ -528,22 +529,6 @@ const paidPerModel = computed<FleetCostPerModel[]>(() =>
 // the operator isn't confused about why the table looks empty when the
 // summary row shows positive turn counts.
 const hasPaidData = computed(() => paidPerModel.value.length > 0)
-
-/**
- * Format a stat-strip headline amount in plain-currency style — "$120"
- * when whole, "$99.99" or "$0.05" otherwise. Rounds *up* to the next
- * cent so sub-cent per-token contributions don't silently vanish from
- * the headline figure (e.g., $0.0001 renders as "$0.01" rather than
- * "$0.00"). Used for the Per-Token cost stat, the Subscription fee, and
- * the Combined Total — every headline figure is consistent. The per-
- * model table cells keep four-decimal precision via {@link formatCostUsd}
- * because per-row cost contribution still needs sub-cent granularity.
- */
-function formatStatCurrency(amount: number): string {
-  if (amount === 0) return '$0'
-  const ceiled = Math.ceil(amount * 100) / 100
-  return ceiled % 1 === 0 ? `$${ceiled.toFixed(0)}` : `$${ceiled.toFixed(2)}`
-}
 
 // Effective $/1M rate for a subscription card — fee re-expressed as a
 // per-token price so it lines up with how per-token providers quote. Two
