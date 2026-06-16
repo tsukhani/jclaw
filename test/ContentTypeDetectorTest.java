@@ -32,6 +32,21 @@ class ContentTypeDetectorTest extends UnitTest {
     }
 
     @Test
+    void detectsJsonAfterAStatusPrefix() {
+        // jclaw_api shape: a "HTTP 200" status line, then the JSON body.
+        var content = "HTTP 200\n[{\"id\":1},{\"id\":2},{\"id\":3},{\"id\":4}]";
+        assertEquals(ContentType.JSON, ContentTypeDetector.detect(content));
+    }
+
+    @Test
+    void codeEndingInEmptyBracesStaysCode() {
+        // "public class Bar {}" ends in {} (a valid empty JSON object) but the
+        // JSON is dwarfed by the code prefix — must classify as CODE, not JSON.
+        assertEquals(ContentType.CODE,
+                ContentTypeDetector.detect("package com.foo;\npublic class Bar {}"));
+    }
+
+    @Test
     void malformedJsonIsNotJson() {
         // Starts with { but doesn't parse → falls through to TEXT, never JSON.
         assertEquals(ContentType.TEXT, ContentTypeDetector.detect("{not: valid, json"));

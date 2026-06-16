@@ -58,6 +58,26 @@ class CompressionPipelineTest extends UnitTest {
     }
 
     @Test
+    void compressesStatusPrefixedJsonToolResult() {
+        // The jclaw_api smoke-test case: a tool result of "HTTP 200\n" + big JSON.
+        var sb = new StringBuilder("HTTP 200\n[");
+        for (int i = 0; i < 300; i++) {
+            if (i > 0) sb.append(',');
+            sb.append("{\"id\":").append(i).append(",\"channelType\":\"web\",\"peerId\":\"admin")
+                    .append(i).append("\"}");
+        }
+        sb.append(']');
+        var original = ChatMessage.toolResult("call_1", "jclaw_api", sb.toString());
+
+        var out = CompressionPipeline.compressMessages(List.of(original), MODEL, 250);
+        var content = (String) out.get(0).content();
+        assertTrue(content.startsWith("HTTP 200\n"), "prefix preserved through the pipeline");
+        assertTrue(content.contains("items elided"), "array elided");
+        assertTrue(content.contains("ccr_retrieve(\"" + ContentHash.handle(sb.toString()) + "\")"),
+                "ccr handle keyed by the full original");
+    }
+
+    @Test
     void leavesNonToolRolesUntouched() {
         // Same big JSON, but as a USER turn — never compressed.
         var user = ChatMessage.user(bigJsonArray());

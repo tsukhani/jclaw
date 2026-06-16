@@ -36,6 +36,25 @@ class JsonCompressorTest extends UnitTest {
     }
 
     @Test
+    void compressesJsonAfterAStatusPrefixAndKeepsThePrefix() {
+        // Mirrors jclaw_api: "HTTP 200\n" + a large JSON array.
+        var sb = new StringBuilder("HTTP 200\n[");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) sb.append(',');
+            sb.append("{\"id\":").append(i).append(",\"name\":\"item ").append(i)
+                    .append(" with a moderately long description\"}");
+        }
+        sb.append(']');
+        var content = sb.toString();
+
+        var result = compressor.compress(content);
+        assertTrue(result.changed());
+        assertTrue(result.content().startsWith("HTTP 200\n"), "status prefix preserved");
+        assertTrue(result.content().contains("items elided"));
+        assertTrue(result.content().length() < content.length() / 2);
+    }
+
+    @Test
     void preservesAllObjectKeys() {
         var json = "{\"alpha\":\"" + "x".repeat(100) + "\",\"beta\":1,\"gamma\":true,\"delta\":null}";
         var out = compressor.compress(json).content();

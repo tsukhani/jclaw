@@ -1,7 +1,5 @@
 package services.compression;
 
-import com.google.gson.JsonParser;
-
 import java.util.regex.Pattern;
 
 /**
@@ -12,8 +10,9 @@ import java.util.regex.Pattern;
  *
  * <p>Check order matters and is deliberate:
  * <ol>
- *   <li><b>JSON</b> — decided by an actual {@link JsonParser} parse, gated on a
- *       leading {@code &#123;} / {@code [} so malformed input fast-fails.</li>
+ *   <li><b>JSON</b> — decided by {@link JsonSpan}, which parses an object/array
+ *       even after a short non-JSON prefix (e.g. a {@code "HTTP 200"} status
+ *       line); malformed input fast-fails.</li>
  *   <li><b>CODE</b> — declaration-style keywords anchored to line starts, so a
  *       log line that merely mentions {@code import} doesn't read as code.</li>
  *   <li><b>LOG</b> — log-level tokens ({@code ERROR}, {@code WARN}, …).</li>
@@ -52,23 +51,11 @@ public final class ContentTypeDetector {
         var trimmed = content.strip();
         if (trimmed.isEmpty()) return ContentType.TEXT;
 
-        if (looksLikeJson(trimmed)) return ContentType.JSON;
+        if (JsonSpan.find(content).isPresent()) return ContentType.JSON;
         if (CODE_SIGNAL.matcher(content).find() || CODE_SIGNATURE.matcher(content).find()) {
             return ContentType.CODE;
         }
         if (LOG_LEVEL.matcher(content).find()) return ContentType.LOG;
         return ContentType.TEXT;
-    }
-
-    private static boolean looksLikeJson(String trimmed) {
-        var first = trimmed.charAt(0);
-        if (first != '{' && first != '[') return false;
-        try {
-            var el = JsonParser.parseString(trimmed);
-            return el.isJsonObject() || el.isJsonArray();
-        } catch (Exception _) {
-            // Malformed / partial JSON — not a structured document we can crush.
-            return false;
-        }
     }
 }
