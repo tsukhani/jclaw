@@ -546,9 +546,14 @@ public class AgentRunner {
             // rebuild. trimToContextWindow below stays as a drop-oldest
             // fallback for when compaction is skipped (too few turns) or
             // fails.
+            // JCLAW-465: content-aware compression of TOOL-role outputs, before
+            // compaction so the budget check sees the smaller payload. No-op
+            // unless chat.compression.enabled=true. When compaction fires it
+            // rebuilds from originals; trimToContextWindow below stays the net.
+            var compressedMessages = CompressionPipeline.compress(prepared.messages(), agent, conversation);
             var compactedMessages = CompactionGate.maybeCompactAndRebuild(
                     agent, conversationId, userMessage, null,
-                    prepared.primary(), prepared.messages(), prepared.tools());
+                    prepared.primary(), compressedMessages, prepared.tools());
             var finalMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
                     prepared.primary(), prepared.tools());
             // JCLAW-165: when the active model lacks supportsAudio, await
@@ -992,9 +997,11 @@ public class AgentRunner {
         // summarize older turns (LLM call, outside Tx) and rebuild.
         // trimToContextWindow below stays as a drop-oldest fallback for
         // when compaction is skipped or fails.
+        // JCLAW-465: same content-aware compression hook on the streaming path.
+        var compressedMessages = CompressionPipeline.compress(prepared.messages(), agent, conversation);
         var compactedMessages = CompactionGate.maybeCompactAndRebuild(
                 agent, conversation.id, userMessage, prepared.disabledTools(),
-                primary, prepared.messages(), prepared.tools());
+                primary, compressedMessages, prepared.tools());
         var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
                 primary, prepared.tools());
         var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(),
