@@ -992,4 +992,107 @@ describe('ChatCostSection (JCLAW-28)', () => {
     const swatchStem = swatchToken!.replace(/^bg-/, '').replace(/-500$/, '')
     expect(borderStem).toBe(swatchStem)
   })
+
+  // ==================== Effective $/1M + break-even (scope C) ====================
+  //
+  // Each subscription card re-expresses the flat fee as a per-token rate
+  // (fee ÷ tokens served × 1M) so it can be eyeballed against per-token
+  // providers, and shows the monthly token volume at which the
+  // subscription starts beating the operator's realized per-token rate.
+
+  it('shows the effective $/1M rate and break-even on a subscription card', async () => {
+    // Ollama Cloud $100/mo serving 10M tokens → effective $10.00/1M.
+    // A per-token provider (OpenRouter) bills $1.00 for 1M tokens →
+    // realized reference rate $1.00/1M. Break-even = $100 ÷ $1.00/1M ×
+    // 1M = 100M tokens/month.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openrouter', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0 },
+      ],
+      rows: [
+        // Subscription side: 10M tokens, zero per-token price keeps it in
+        // the SUBSCRIPTION partition.
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 10_000_000, completion: 0, promptPrice: 0, completionPrice: 0,
+        } },
+        // Per-token side: $1.00 over 1M tokens → $1.00/1M reference rate.
+        { agentId: 2, channelType: 'web', usage: {
+          modelId: 'gpt-4.1', modelProvider: 'openrouter',
+          prompt: 1_000_000, completion: 0, promptPrice: 1.0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('$10.00/1M')
+    expect(text).toContain('break-even 100.0M/mo')
+  })
+
+  it('omits break-even when there is no per-token activity to compare against', async () => {
+    // Effective rate still renders (it needs only the fee and the
+    // subscription's own tokens), but with no per-token spend there's no
+    // reference rate, so the break-even line is suppressed rather than
+    // compared against nothing.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 10_000_000, completion: 0, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('$10.00/1M')
+    expect(text).not.toContain('break-even')
+  })
+
+  it('shows just the fee on a subscription card with zero usage this window', async () => {
+    // OpenAI subscribed but unused → its card carries the bare fee with no
+    // derived figures (effective rate is undefined with zero tokens). The
+    // used Ollama Cloud card does carry the effective rate.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 10_000_000, completion: 0, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const chips = wrapper.findAll('button[aria-pressed]')
+    const openaiChip = chips.find(c => c.text().includes('OpenAI'))!
+    const ollamaChip = chips.find(c => c.text().includes('Ollama Cloud'))!
+    // Unused provider's card: no per-token rate line.
+    expect(openaiChip.text()).not.toContain('/1M')
+    // Used provider's card: effective rate present.
+    expect(ollamaChip.text()).toContain('$10.00/1M')
+  })
 })

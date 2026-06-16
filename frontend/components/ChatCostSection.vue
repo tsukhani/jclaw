@@ -472,6 +472,29 @@ function formatStatCurrency(amount: number): string {
   return ceiled % 1 === 0 ? `$${ceiled.toFixed(0)}` : `$${ceiled.toFixed(2)}`
 }
 
+// Effective $/1M rate for a subscription card — fee re-expressed as a
+// per-token price so it lines up with how per-token providers quote. Two
+// decimals in the single-to-double-digit range where these rates usually
+// land, whole dollars above $100, three decimals below $1 so a genuinely
+// cheap effective rate doesn't collapse to "$0.00".
+function formatRatePerMillion(rate: number): string {
+  if (rate >= 100) return `$${rate.toFixed(0)}`
+  if (rate >= 1) return `$${rate.toFixed(2)}`
+  return `$${rate.toFixed(3)}`
+}
+
+// Compact token count for the break-even line — 8_900_000 → "8.9M",
+// 200_000_000 → "200M", 1_200_000_000 → "1.2B". Break-even volumes span
+// orders of magnitude (a $20 fee against a $0.50/1M rate breaks even near
+// 40M tokens; a cheaper rate pushes it into the billions), so a fixed unit
+// would be unreadable.
+function formatTokensCompact(tokens: number): string {
+  if (tokens >= 1_000_000_000) return `${(tokens / 1_000_000_000).toFixed(1)}B`
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K`
+  return `${Math.round(tokens)}`
+}
+
 const sortedPerModel = computed<FleetCostPerModel[]>(() => {
   const rows = [...paidPerModel.value]
   const dir = sortDir.value === 'asc' ? 1 : -1
@@ -584,6 +607,92 @@ const unallocatedSubscriptions = computed(() => {
 // `unallocatedSubscriptions`).
 const subscriptionAllocatedTotal = computed(() =>
   subscriptionPerModelAllocated.value.reduce((sum, m) => sum + m.allocatedCost, 0),
+)
+
+// ── Subscription effective rate & break-even (scope C) ─────────────────────
+// Re-express each subscription as a per-token rate so it can be compared
+// against per-token providers, and surface the monthly volume at which the
+// flat fee starts beating per-token pricing.
+
+// Per-provider total tokens across the whole window, INDEPENDENT of the
+// agent/channel/chip filters. The flat fee buys every turn the provider
+// served, so the effective-rate denominator has to be the provider's full
+// token throughput — narrowing it to a filtered slice while the full fee
+// stays in the numerator would overstate the rate. Distinct from
+// `subscriptionProviderTokenTotals`, which is chip-filtered for the
+// allocation table.
+const subscriptionFleetTokensByProvider = computed(() => {
+  const totals = new Map<string, number>()
+  const fleet = computeFleetCost(subscriptionRows.value, { agentId: null, channelType: null })
+  for (const m of fleet.perModel) {
+    if (!m.modelProvider) continue
+    const tokens = m.prompt + m.completion + m.reasoning + m.cached
+    totals.set(m.modelProvider, (totals.get(m.modelProvider) ?? 0) + tokens)
+  }
+  return totals
+})
+
+// Effective $/1M per subscription provider = pro-rated window fee ÷ tokens
+// served this window × 1M. Null when the provider had no usage this window
+// (can't divide) — the card then shows the bare fee. Both numerator and
+// denominator span the same window, so the rate is stable across the 7d /
+// 30d / all-time toggle.
+const subscriptionEffectiveByProvider = computed(() => {
+  const feeByProvider = new Map(subscriptionProviderBreakdown.value.map(p => [p.name, p.proRatedFee]))
+  const out = new Map<string, number>()
+  for (const [name, tokens] of subscriptionFleetTokensByProvider.value) {
+    const fee = feeByProvider.get(name) ?? 0
+    if (tokens > 0 && fee > 0) out.set(name, (fee / tokens) * 1_000_000)
+  }
+  return out
+})
+
+// The operator's realized per-token rate this window — total per-token
+// spend ÷ total per-token tokens, as $/1M. This is the break-even
+// reference: "what I actually pay per token elsewhere." Fleet-wide (no
+// agent/channel filter) to match the effective-rate denominator. Null when
+// there's no paid per-token activity to derive a rate from, in which case
+// the break-even line is omitted rather than compared against nothing.
+const fleetPerTokenRatePerMillion = computed<number | null>(() => {
+  const fleet = computeFleetCost(perTokenRows.value, { agentId: null, channelType: null })
+  const tokens = fleet.prompt + fleet.completion + fleet.reasoning + fleet.cached
+  if (tokens <= 0 || fleet.total <= 0) return null
+  return (fleet.total / tokens) * 1_000_000
+})
+
+// Monthly token volume at which each subscription's flat fee equals what
+// the same tokens would cost at the operator's per-token rate — push more
+// than this through the subscription and it's the cheaper option. Uses the
+// un-prorated monthly fee so the figure is a stable "per month" capacity
+// regardless of the selected window. Null when there's no reference rate.
+const subscriptionBreakEvenByProvider = computed(() => {
+  const out = new Map<string, number>()
+  const rate = fleetPerTokenRatePerMillion.value
+  if (rate === null || rate <= 0) return out
+  for (const p of configuredSubscriptionProviders.value) {
+    const monthly = Number(p.subscriptionMonthlyUsd) || 0
+    if (monthly > 0) out.set(p.name, (monthly / rate) * 1_000_000)
+  }
+  return out
+})
+
+// View model for the subscription strip cards — each provider's pro-rated
+// fee plus the two derived figures. Bundled into one list so the template
+// iterates a single source instead of cross-referencing three maps by name
+// inside the v-for.
+const subscriptionCards = computed(() =>
+  subscriptionProviderBreakdown.value.map((p) => {
+    const effectivePerMillion = subscriptionEffectiveByProvider.value.get(p.name) ?? null
+    const breakEven = subscriptionBreakEvenByProvider.value.get(p.name) ?? null
+    return {
+      ...p,
+      effectivePerMillion,
+      // Only surface break-even alongside an effective rate — a break-even
+      // volume next to a fee with zero usage this window reads as noise.
+      breakEvenTokensPerMonth: effectivePerMillion !== null ? breakEven : null,
+      fleetTokens: subscriptionFleetTokensByProvider.value.get(p.name) ?? 0,
+    }
+  }),
 )
 
 // Chart geometry. Horizontal bars: one per agent (or per model in chart
@@ -974,11 +1083,11 @@ defineExpose({ refresh })
                muted and not clickable (selecting one would render an
                empty table). -->
           <div
-            v-if="subscriptionProviderBreakdown.length > 0"
+            v-if="subscriptionCards.length > 0"
             class="mt-3 flex flex-wrap gap-2"
           >
             <button
-              v-for="p in subscriptionProviderBreakdown"
+              v-for="p in subscriptionCards"
               :key="p.name"
               type="button"
               :aria-pressed="selectedSubscriptionProvider === p.name"
@@ -1007,6 +1116,27 @@ defineExpose({ refresh })
                 </div>
                 <div class="mt-0.5 font-mono text-sm text-fg-primary">
                   {{ formatStatCurrency(p.proRatedFee) }}
+                </div>
+                <!-- Scope-C derived figures: the flat fee re-expressed as a
+                     per-token rate, and the monthly volume at which the
+                     subscription overtakes the operator's per-token rate.
+                     Both omitted when the provider had no usage this window
+                     (effective rate undefined) or there's no per-token
+                     activity to compare against (break-even reference
+                     undefined) — the card falls back to the bare fee. -->
+                <div
+                  v-if="p.effectivePerMillion !== null"
+                  class="mt-1 font-mono text-[11px] text-fg-secondary"
+                  :title="`Effective rate — ${p.displayName}'s window fee ÷ all ${formatTokensCompact(p.fleetTokens)} tokens it served this window. Compare against a per-token provider's published $/1M.`"
+                >
+                  ≈ {{ formatRatePerMillion(p.effectivePerMillion) }}/1M
+                </div>
+                <div
+                  v-if="p.breakEvenTokensPerMonth !== null"
+                  class="text-[10px] text-fg-muted"
+                  :title="`Break-even — at your ${formatRatePerMillion(fleetPerTokenRatePerMillion ?? 0)}/1M per-token rate, this subscription is the cheaper option above ~${formatTokensCompact(p.breakEvenTokensPerMonth)} tokens/month.`"
+                >
+                  break-even {{ formatTokensCompact(p.breakEvenTokensPerMonth) }}/mo
                 </div>
               </div>
             </button>
