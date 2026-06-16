@@ -540,19 +540,22 @@ const subscriptionPerModel = computed<FleetCostPerModel[]>(() => {
 })
 
 // Per-provider total tokens within the window — denominator for the
-// allocation key. Sums prompt + completion + reasoning + cached: cached
-// is included because the operator paid for that work through the
-// subscription regardless of whether the provider served it from cache,
-// so excluding it would over-allocate to non-cached models. A provider
-// with zero usage this window has no entry; the lookup in
-// `subscriptionPerModelAllocated` defaults to 0 and short-circuits the
-// division to avoid NaN.
+// allocation key. Sums prompt + completion + reasoning. cached is
+// deliberately NOT added: `prompt` is the *total* input count and
+// cache-read tokens are a subset of it (cached ⊂ prompt — see the
+// MessageUsage contract in utils/usage-cost.ts, where uncachedInput =
+// prompt − cached − cacheCreation). Adding cached again would
+// double-count cache reads — harmless for allocation while subscription
+// rows report cached = 0, but it skews any absolute per-token rate built
+// on the same key. A provider with zero usage this window has no entry;
+// the lookup in `subscriptionPerModelAllocated` defaults to 0 and
+// short-circuits the division to avoid NaN.
 const subscriptionProviderTokenTotals = computed(() => {
   const totals = new Map<string, number>()
   for (const m of subscriptionPerModel.value) {
     const provider = m.modelProvider
     if (!provider) continue
-    const tokens = m.prompt + m.completion + m.reasoning + m.cached
+    const tokens = m.prompt + m.completion + m.reasoning
     totals.set(provider, (totals.get(provider) ?? 0) + tokens)
   }
   return totals
@@ -573,7 +576,9 @@ const subscriptionPerModelAllocated = computed<(FleetCostPerModel & { allocatedC
     const provider = m.modelProvider ?? ''
     const providerTokens = subscriptionProviderTokenTotals.value.get(provider) ?? 0
     const providerFee = feeByProvider.get(provider) ?? 0
-    const modelTokens = m.prompt + m.completion + m.reasoning + m.cached
+    // Same key as subscriptionProviderTokenTotals — cached omitted because
+    // it's already counted within prompt.
+    const modelTokens = m.prompt + m.completion + m.reasoning
     const allocatedCost = providerTokens > 0
       ? providerFee * (modelTokens / providerTokens)
       : 0
@@ -626,7 +631,10 @@ const subscriptionFleetTokensByProvider = computed(() => {
   const fleet = computeFleetCost(subscriptionRows.value, { agentId: null, channelType: null })
   for (const m of fleet.perModel) {
     if (!m.modelProvider) continue
-    const tokens = m.prompt + m.completion + m.reasoning + m.cached
+    // prompt + completion + reasoning only — cached ⊂ prompt (see
+    // subscriptionProviderTokenTotals); adding it would double-count cache
+    // reads and understate the effective $/1M.
+    const tokens = m.prompt + m.completion + m.reasoning
     totals.set(m.modelProvider, (totals.get(m.modelProvider) ?? 0) + tokens)
   }
   return totals
@@ -655,7 +663,11 @@ const subscriptionEffectiveByProvider = computed(() => {
 // the break-even line is omitted rather than compared against nothing.
 const fleetPerTokenRatePerMillion = computed<number | null>(() => {
   const fleet = computeFleetCost(perTokenRows.value, { agentId: null, channelType: null })
-  const tokens = fleet.prompt + fleet.completion + fleet.reasoning + fleet.cached
+  // prompt + completion + reasoning — cached ⊂ prompt, so adding it would
+  // double-count cache reads. This bites here (per-token traffic is often
+  // cache-heavy): the double-count understated the rate and overstated the
+  // break-even volume.
+  const tokens = fleet.prompt + fleet.completion + fleet.reasoning
   if (tokens <= 0 || fleet.total <= 0) return null
   return (fleet.total / tokens) * 1_000_000
 })
@@ -1705,7 +1717,7 @@ defineExpose({ refresh })
         role="tooltip"
         data-testid="cost-info-tooltip"
       >
-        Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached).
+        Subscription cost allocated across models by total tokens (prompt + completion + reasoning).
       </div>
     </Teleport>
   </div>

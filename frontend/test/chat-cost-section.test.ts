@@ -402,7 +402,8 @@ describe('ChatCostSection (JCLAW-28)', () => {
   //
   // The Subscription subsection allocates each provider's flat monthly
   // bill across model rows proportionally to total tokens
-  // (prompt + completion + reasoning + cached). Per-provider rows that
+  // (prompt + completion + reasoning; cached is a subset of prompt, not
+  // added on top). Per-provider rows that
   // used to sit in the table footer are gone; the bill breakdown lives
   // in the section subtitle, and any subscription with zero usage this
   // window shows up as an "unallocated" footnote.
@@ -573,26 +574,23 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(text).not.toContain('has no usage this window')
   })
 
-  it('cached + reasoning tokens count toward the allocation key', async () => {
-    // Model A: 100 prompt + 0 completion + 0 reasoning + 0 cached = 100 tokens
-    // Model B: 0 prompt + 0 completion + 50 reasoning + 50 cached = 100 tokens
-    // Equal allocation key → equal $50/$50 split of a $100 bill. If the
-    // allocation accidentally only counted prompt+completion, model B
-    // would get $0 and model A would get $100.
+  it('reasoning counts toward the allocation key but cached is not double-counted', async () => {
+    // cached ⊂ prompt (it's the cache-read subset of the total input), so
+    // the allocation key is prompt + completion + reasoning — cached must
+    // NOT be added on top.
+    // Model A: prompt 100                      → key 100
+    // Model B: prompt 50 (of which cached 50) + reasoning 50 → key 100
+    // Equal key → $50/$50 split of a $100 bill. If the code wrongly added
+    // cached, model B's key would be 150 → a 60/40 split and "$50" would
+    // not appear twice.
     stubSubscriptionFixture({
       providers: [
         { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
       ],
-      rows: [
-        { agentId: 1, channelType: 'web', usage: {
-          modelId: 'model-a', modelProvider: 'ollama-cloud',
-          prompt: 100, completion: 0, promptPrice: 0, completionPrice: 0,
-        } },
-      ],
+      rows: [],
     })
-    // Override the rows endpoint with reasoning + cached on model B —
-    // makeUsage() defaults reasoning and cached to 0 so we need a raw
-    // payload here.
+    // Raw payloads — makeUsage() can't express cached/reasoning, and we
+    // need model B's cached to sit *inside* its prompt count.
     registerEndpoint('/api/metrics/cost', () => ({
       since: '2026-04-10T00:00:00Z',
       rows: [
@@ -604,7 +602,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
           }) },
         { timestamp: '2026-05-09T12:01:00Z', agentId: 1, channelType: 'web',
           usageJson: JSON.stringify({
-            prompt: 0, completion: 0, total: 0, reasoning: 50, cached: 50,
+            prompt: 50, completion: 0, total: 50, reasoning: 50, cached: 50,
             durationMs: 100, promptPrice: 0, completionPrice: 0,
             modelId: 'model-b', modelProvider: 'ollama-cloud',
           }) },
@@ -618,11 +616,9 @@ describe('ChatCostSection (JCLAW-28)', () => {
     await flushPromises()
 
     const text = wrapper.text()
-    // 50/50 split — the $50 appears twice (once per row). It's the
-    // strongest signal that cached + reasoning both made it into the key.
-    // formatStatCurrency drops trailing .00 on whole-dollar values, so
-    // the literal we hunt for is "$50" — but we want a tight match to
-    // avoid colliding with substrings of larger numbers like "$500".
+    // 50/50 split — "$50" appears once per row. formatStatCurrency drops
+    // trailing .00 on whole-dollar values; the tight match avoids colliding
+    // with substrings of larger numbers like "$500".
     const fiftyMatches = text.match(/\$50(?!\d)/g) ?? []
     expect(fiftyMatches.length).toBeGreaterThanOrEqual(2)
   })
@@ -1034,6 +1030,52 @@ describe('ChatCostSection (JCLAW-28)', () => {
     const text = wrapper.text()
     expect(text).toContain('$10.00/1M')
     expect(text).toContain('break-even 100.0M/mo')
+  })
+
+  it('does not double-count cached tokens in the break-even reference rate', async () => {
+    // Regression for the cached double-count: cached ⊂ prompt, so the
+    // realized per-token rate divides cost by prompt + completion +
+    // reasoning, NOT + cached.
+    // Per-token: prompt 1,000,000 (cached 600,000, free reads) → uncached
+    // 400,000 × $1.0/1M = $0.40 over 1,000,000 throughput tokens →
+    // $0.40/1M reference. Break-even = $100 ÷ $0.40/1M = 250.0M tok/mo.
+    // If cached were wrongly added, the denominator would be 1,600,000 →
+    // $0.25/1M → 400.0M, which this asserts against.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openrouter', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0 },
+      ],
+      rows: [],
+    })
+    // Raw payloads — UsagePartial can't express cached / cachedReadPrice.
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: JSON.stringify({
+            prompt: 10_000_000, completion: 0, total: 10_000_000, reasoning: 0, cached: 0,
+            durationMs: 100, promptPrice: 0, completionPrice: 0,
+            modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          }) },
+        { timestamp: '2026-05-09T12:01:00Z', agentId: 2, channelType: 'web',
+          usageJson: JSON.stringify({
+            prompt: 1_000_000, completion: 0, total: 1_000_000, reasoning: 0, cached: 600_000,
+            durationMs: 100, promptPrice: 1.0, completionPrice: 0, cachedReadPrice: 0,
+            modelId: 'gpt-4.1', modelProvider: 'openrouter',
+          }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('break-even 250.0M/mo')
+    expect(text).not.toContain('break-even 400.0M/mo')
   })
 
   it('omits break-even when there is no per-token activity to compare against', async () => {
