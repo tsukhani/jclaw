@@ -66,16 +66,6 @@ const DEFAULT_TRANSCRIPTION_STATE = {
   ],
 }
 
-// JCLAW-214: caption state — provider unset + the single local model ABSENT.
-const DEFAULT_CAPTION_STATE = {
-  provider: null,
-  model: null,
-  models: [
-    { id: 'vit-gpt2', displayName: 'ViT-GPT2 (image captioning)', approxSizeMb: 245,
-      status: 'ABSENT', bytesDownloaded: 0, totalBytes: 0, error: null },
-  ],
-}
-
 const DEFAULT_OCR_STATUS = {
   providers: [
     {
@@ -1374,10 +1364,9 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     })
   }
 
-  it('toggle defaults caption.provider to vlm-local when enabled from off', async () => {
+  it('toggle defaults caption.provider to ollama-local when enabled from off', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerCommon()
-    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE)
     registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: defaultConfigEntries() }) }) // no caption.provider → off
     captureConfig(captured)
 
@@ -1393,13 +1382,12 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
 
     const hit = captured.find(b => b.key === 'caption.provider')
     expect(hit).toBeTruthy()
-    expect(hit!.value).toBe('vlm-local') // safest fresh-enable target (no API key)
+    expect(hit!.value).toBe('ollama-local') // local-first default (no cloud key needed)
   })
 
   it('POSTs caption.provider (and resets the model) on @change of an enabled cloud radio', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerCommon()
-    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE)
     registerEndpoint('/api/config', {
       method: 'GET',
       handler: () => ({ entries: [...defaultConfigEntries(),
@@ -1422,13 +1410,12 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     expect(captured.find(b => b.key === 'caption.model')?.value).toBe('')
   })
 
-  it('offers Self-Hosted Image Captioner as the last radio option', async () => {
+  it('offers Local VLM (Ollama) as the last radio option', async () => {
     registerCommon()
-    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE)
     registerEndpoint('/api/config', {
       method: 'GET',
       handler: () => ({ entries: [...defaultConfigEntries(),
-        { key: 'caption.provider', value: 'vlm-local', updatedAt: '2026-06-15T10:00:00Z' }] }),
+        { key: 'caption.provider', value: 'ollama-local', updatedAt: '2026-06-15T10:00:00Z' }] }),
     })
     registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
 
@@ -1436,18 +1423,16 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     await flushPromises()
 
     const radios = component.findAll('input[name="caption-provider"]')
-    expect(radios.length).toBe(3) // openrouter, openai, vlm-local — no "None"
-    expect(radios[radios.length - 1]!.attributes('value')).toBe('vlm-local') // local is last
-    expect(component.text()).toContain('Self-Hosted Image Captioner')
-    expect(component.text()).not.toContain('Cloud (preferred)') // header removed
-    // vlm-local is selected → the "local" badge lights up green as the active cue.
+    expect(radios.length).toBe(3) // openrouter, openai, ollama-local — no "None"
+    expect(radios[radios.length - 1]!.attributes('value')).toBe('ollama-local') // local is last
+    expect(component.text()).toContain('Local VLM (Ollama)')
+    // ollama-local is selected → the "local" badge lights up green as the active cue.
     const badge = component.findAll('span').find(s => s.text() === 'local')
     expect(badge?.classes()).toContain('text-green-400')
   })
 
   it('shows the vision-model picker (filtered to vision models) for a cloud provider', async () => {
     registerCommon()
-    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE)
     registerEndpoint('/api/config', {
       method: 'GET',
       handler: () => ({
@@ -1474,68 +1459,28 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     expect(optionValues).toContain('gpt-4o') // vision model offered
     expect(optionValues).not.toContain('gpt-3.5-turbo') // non-vision filtered out
     expect(optionValues).toContain('') // "(provider default)" escape hatch
-    expect(component.find('input[aria-label="Caption cloud model"]').exists()).toBe(false) // a <select>, not free text
   })
 
-  it('shows the Download button for the local model when Self-Hosted is selected', async () => {
-    const downloadCaptured: { hit?: boolean } = {}
+  it('shows a free-text vision-model input for the Ollama backend and round-trips caption.model', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
     registerCommon()
-    registerEndpoint('/api/caption/state', () => DEFAULT_CAPTION_STATE) // model ABSENT
     registerEndpoint('/api/config', {
       method: 'GET',
       handler: () => ({ entries: [...defaultConfigEntries(),
-        { key: 'caption.provider', value: 'vlm-local', updatedAt: '2026-06-15T10:00:00Z' }] }),
+        { key: 'caption.provider', value: 'ollama-local', updatedAt: '2026-06-15T10:00:00Z' }] }),
     })
-    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
-    registerEndpoint('/api/caption/models/vit-gpt2/download', {
-      method: 'POST',
-      handler: () => {
-        downloadCaptured.hit = true
-        return { ok: true }
-      },
-    })
+    captureConfig(captured)
 
     const component = await mountSuspended(Settings)
     await flushPromises()
 
-    // Transcription is off in the default fixture, so the only Download button is the caption one.
-    const dlBtn = component.findAll('button').find(b => b.text().trim() === 'Download')
-    expect(dlBtn).toBeTruthy()
-    await dlBtn!.trigger('click')
+    const input = component.find('input[aria-label="Ollama vision model"]')
+    expect(input.exists()).toBe(true) // free text, not a <select>
+    expect(component.find('select[aria-label="Caption cloud model"]').exists()).toBe(false)
+    await input.setValue('moondream')
+    await input.trigger('change')
     await flushPromises()
-    expect(downloadCaptured.hit).toBe(true)
-  })
-
-  it('shows Remove for an AVAILABLE local model and round-trips the DELETE', async () => {
-    const removeCaptured: { hit?: boolean } = {}
-    registerCommon()
-    registerEndpoint('/api/caption/state', () => ({
-      ...DEFAULT_CAPTION_STATE,
-      models: [{ ...DEFAULT_CAPTION_STATE.models[0], status: 'AVAILABLE' }],
-    }))
-    registerEndpoint('/api/config', {
-      method: 'GET',
-      handler: () => ({ entries: [...defaultConfigEntries(),
-        { key: 'caption.provider', value: 'vlm-local', updatedAt: '2026-06-15T10:00:00Z' }] }),
-    })
-    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
-    registerEndpoint('/api/caption/models/vit-gpt2', {
-      method: 'DELETE',
-      handler: () => {
-        removeCaptured.hit = true
-        return { ok: true }
-      },
-    })
-
-    const component = await mountSuspended(Settings)
-    await flushPromises()
-
-    expect(component.text()).toContain('Ready')
-    const rmBtn = component.findAll('button').find(b => b.text().trim() === 'Remove')
-    expect(rmBtn).toBeTruthy()
-    await rmBtn!.trigger('click')
-    await flushPromises()
-    expect(removeCaptured.hit).toBe(true)
+    expect(captured.find(b => b.key === 'caption.model')?.value).toBe('moondream')
   })
 })
 

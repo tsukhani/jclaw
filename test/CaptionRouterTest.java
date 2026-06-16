@@ -4,7 +4,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.caption.CaptionRouter;
-import services.caption.LocalImageCaptioner;
+import services.caption.OpenAiCompatibleImageCaptionClient;
 import services.caption.OpenAiImageCaptionClient;
 import services.caption.OpenRouterImageCaptionClient;
 
@@ -36,9 +36,10 @@ class CaptionRouterTest extends UnitTest {
         assertTrue(CaptionRouter.configuredService().orElseThrow() instanceof OpenAiImageCaptionClient,
                 "openai → OpenAiImageCaptionClient");
 
-        ConfigService.set("caption.provider", "vlm-local");
-        assertTrue(CaptionRouter.configuredService().orElseThrow() instanceof LocalImageCaptioner,
-                "vlm-local → LocalImageCaptioner (Self-Hosted Image Captioner)");
+        ConfigService.set("caption.provider", "ollama-local");
+        assertEquals(OpenAiCompatibleImageCaptionClient.class,
+                CaptionRouter.configuredService().orElseThrow().getClass(),
+                "ollama-local → OpenAiCompatibleImageCaptionClient bound to provider.ollama-local.*");
     }
 
     @Test

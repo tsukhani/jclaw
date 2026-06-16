@@ -488,28 +488,10 @@ onMounted(() => {
 onUnmounted(() => stopTranscriptionPolling())
 
 // ──────────────────── Image captioning (JCLAW-214) ─────────────────────────
-// Non-vision chat models get a generated image description. Two operator-
-// configured fallbacks with cloud-preferred precedence: a CLOUD provider/model
-// (used first when set), else the LOCAL ViT-GPT2 model (when downloaded).
-// Per-local-model download status comes from /api/caption/state; the cloud
-// selection reads from configData and writes via /api/config.
-type CaptionModelStatus = {
-  id: string
-  displayName: string
-  approxSizeMb: number
-  status: 'ABSENT' | 'DOWNLOADING' | 'VERIFYING' | 'AVAILABLE' | 'ERROR'
-  bytesDownloaded: number
-  totalBytes: number
-  error: string | null
-}
-type CaptionState = {
-  provider: string | null
-  model: string | null
-  models: CaptionModelStatus[]
-}
-const { data: captionState, refresh: refreshCaptionState }
-  = await useFetch<CaptionState>('/api/caption/state')
-
+// Non-vision chat models get a generated image description. The operator picks
+// one backend: a CLOUD provider/model, or a LOCAL VLM they run in Ollama
+// (provider.ollama-local.* → localhost:11434/v1). Selection reads from
+// configData and writes via /api/config.
 const captionProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'caption.provider')?.value ?? '',
 )
@@ -536,29 +518,19 @@ const captionVisionModelOptions = computed(() => {
   if (cur && !opts.some(o => o.id === cur)) opts.unshift({ id: cur, label: `${cur} (not marked vision)` })
   return opts
 })
-// The single local model (ViT-GPT2). One entry today; helpers stay list-shaped
-// to mirror the transcription pattern and tolerate future models.
-const captionLocalModel = computed<CaptionModelStatus | null>(() =>
-  captionState.value?.models?.[0] ?? null,
-)
-const captionLocalDownloadPct = computed(() => {
-  const s = captionLocalModel.value
-  if (!s || s.totalBytes === 0) return 0
-  return Math.min(100, Math.round((s.bytesDownloaded / s.totalBytes) * 100))
-})
 // Which backend is active, for the status line.
 const captionActiveBackend = computed(() => {
   if (captionIsCloud.value) return 'cloud'
-  if (captionProvider.value === 'vlm-local') return 'local'
+  if (captionProvider.value === 'ollama-local') return 'local'
   return 'none'
 })
 
-// Master toggle: off clears the provider; on defaults to the Self-Hosted captioner (works without an
-// API key — the safest fresh-enable target, mirroring transcription defaulting to whisper-local).
+// Master toggle: off clears the provider; on defaults to the local Ollama VLM (no cloud key needed,
+// mirroring transcription defaulting to whisper-local). Requires a vision model pulled in Ollama.
 async function toggleCaptionEnabled() {
   saving.value = true
   try {
-    const next = captionEnabled.value ? '' : 'vlm-local'
+    const next = captionEnabled.value ? '' : 'ollama-local'
     await $fetch('/api/config', { method: 'POST', body: { key: 'caption.provider', value: next } })
     refresh()
   }
@@ -585,46 +557,6 @@ async function setCaptionModel(value: string) {
   }
   finally { saving.value = false }
 }
-async function downloadCaptionModel(modelId: string) {
-  saving.value = true
-  try {
-    await $fetch(`/api/caption/models/${encodeURIComponent(modelId)}/download`, { method: 'POST', body: {} })
-    startCaptionPolling()
-  }
-  finally { saving.value = false }
-}
-async function removeCaptionModel(modelId: string) {
-  saving.value = true
-  try {
-    await $fetch(`/api/caption/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
-    refreshCaptionState()
-  }
-  finally { saving.value = false }
-}
-
-let captionPollTimer: ReturnType<typeof setInterval> | null = null
-function anyCaptionDownloadInFlight(): boolean {
-  const ms = captionState.value?.models ?? []
-  return ms.some(m => m.status === 'DOWNLOADING' || m.status === 'VERIFYING')
-}
-function startCaptionPolling() {
-  if (captionPollTimer != null) return
-  captionPollTimer = setInterval(async () => {
-    await refreshCaptionState()
-    if (!anyCaptionDownloadInFlight()) stopCaptionPolling()
-  }, 1500)
-}
-function stopCaptionPolling() {
-  if (captionPollTimer != null) {
-    clearInterval(captionPollTimer)
-    captionPollTimer = null
-  }
-}
-onMounted(() => {
-  if (anyCaptionDownloadInFlight()) startCaptionPolling()
-})
-onUnmounted(() => stopCaptionPolling())
-
 // JCLAW-131: Uploads settings — per-kind attachment size caps. Values are
 // stored in bytes in the DB (matches services/UploadLimits.java) but
 // surfaced as MB in the UI, where operators actually think. Defaults match
@@ -3336,8 +3268,8 @@ async function handleResetPassword() {
         Let chat models without vision still "see" an uploaded image — it's turned into a short
         text description before it reaches the LLM (vision-capable models still receive the image
         natively). Pick one backend: a cloud provider/model (reusing the API keys configured in
-        <span class="text-fg-muted">LLM Providers</span> above), or the Self-Hosted Image Captioner
-        that runs offline. Text-only models then receive the description; with this off they get a
+        <span class="text-fg-muted">LLM Providers</span> above), or a local VLM you run in Ollama.
+        Text-only models then receive the description; with this off they get a
         "description unavailable" note for images.
       </p>
 
@@ -3352,7 +3284,7 @@ async function handleResetPassword() {
           Active: cloud captioning via {{ captionProvider }} ({{ captionModel || 'default model' }}).
         </template>
         <template v-else-if="captionActiveBackend === 'local'">
-          Active: Self-Hosted Image Captioner (ViT-GPT2, runs locally).
+          Active: local VLM via Ollama ({{ captionModel || 'llava' }}).
         </template>
         <template v-else>
           Image captioning is off — enable it and pick a backend below. Until then, non-vision
@@ -3448,22 +3380,22 @@ async function handleResetPassword() {
               >no API key — configure in LLM Providers</span>
             </label>
             <label
-              for="caption-provider-vlm-local"
+              for="caption-provider-ollama-local"
               class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
             >
               <input
-                id="caption-provider-vlm-local"
+                id="caption-provider-ollama-local"
                 type="radio"
                 name="caption-provider"
-                value="vlm-local"
-                :checked="captionProvider === 'vlm-local'"
+                value="ollama-local"
+                :checked="captionProvider === 'ollama-local'"
                 class="accent-emerald-600"
-                @change="setCaptionProvider('vlm-local')"
+                @change="setCaptionProvider('ollama-local')"
               >
-              <span class="flex-1 text-sm text-fg-primary">Self-Hosted Image Captioner</span>
+              <span class="flex-1 text-sm text-fg-primary">Local VLM (Ollama)</span>
               <span
                 class="text-[10px] px-1 border"
-                :class="captionProvider === 'vlm-local'
+                :class="captionProvider === 'ollama-local'
                   ? 'text-green-400 border-green-400/30'
                   : 'text-fg-muted border-input'"
               >local</span>
@@ -3506,70 +3438,27 @@ async function handleResetPassword() {
           </p>
         </div>
 
-        <!-- Self-Hosted Image Captioner: local model download. -->
+        <!-- Local VLM (Ollama): the operator names the vision model they've pulled. -->
         <div
-          v-if="captionProvider === 'vlm-local' && captionLocalModel"
+          v-if="captionProvider === 'ollama-local'"
           class="bg-surface-elevated border border-border"
         >
           <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model</span>
-            <span class="flex-1 text-sm text-fg-strong">
-              {{ captionLocalModel.displayName }} (~{{ captionLocalModel.approxSizeMb }} MB)
-            </span>
-            <template v-if="captionLocalModel.status === 'ABSENT'">
-              <button
-                type="button"
-                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-                :disabled="saving"
-                @click="downloadCaptionModel(captionLocalModel.id)"
-              >
-                Download
-              </button>
-            </template>
-            <template v-else-if="captionLocalModel.status === 'DOWNLOADING'">
-              <div class="flex items-center gap-2">
-                <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
-                  <div
-                    class="h-full bg-emerald-600 transition-[width] duration-300"
-                    :style="{ width: captionLocalDownloadPct + '%' }"
-                  />
-                </div>
-                <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
-                  {{ captionLocalDownloadPct }}%
-                </span>
-              </div>
-            </template>
-            <template v-else-if="captionLocalModel.status === 'VERIFYING'">
-              <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
-            </template>
-            <template v-else-if="captionLocalModel.status === 'AVAILABLE'">
-              <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
-              <button
-                type="button"
-                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-                :disabled="saving"
-                @click="removeCaptionModel(captionLocalModel.id)"
-              >
-                Remove
-              </button>
-            </template>
-            <template v-else-if="captionLocalModel.status === 'ERROR'">
-              <button
-                type="button"
-                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-                :disabled="saving"
-                @click="downloadCaptionModel(captionLocalModel.id)"
-              >
-                Retry
-              </button>
-            </template>
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
+            <input
+              :value="captionModel"
+              type="text"
+              placeholder="llava"
+              aria-label="Ollama vision model"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              @change="setCaptionModel(($event.target as HTMLInputElement).value)"
+            >
           </div>
-          <div
-            v-if="captionLocalModel?.status === 'ERROR' && captionLocalModel?.error"
-            class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
-          >
-            {{ captionLocalModel.error }}
-          </div>
+          <p class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted">
+            Runs against your local Ollama at <span class="font-mono">localhost:11434</span>. Pull a
+            vision model first (e.g. <span class="font-mono">ollama pull llava</span>) and enter its
+            name here; blank uses <span class="font-mono">llava</span>.
+          </p>
         </div>
       </template>
     </div>

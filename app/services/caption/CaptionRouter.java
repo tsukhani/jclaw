@@ -12,7 +12,10 @@ import java.util.Optional;
  * <ul>
  *   <li>{@code openrouter} → {@link OpenRouterImageCaptionClient}</li>
  *   <li>{@code openai} → {@link OpenAiImageCaptionClient}</li>
- *   <li>{@code vlm-local} → {@link LocalImageCaptioner} (Self-Hosted Image Captioner, ViT-GPT2)</li>
+ *   <li>{@code ollama-local} → {@link OpenAiCompatibleImageCaptionClient} bound to the
+ *       {@code provider.ollama-local.*} namespace (local Ollama at {@code localhost:11434/v1});
+ *       caption a non-vision turn with a vision model the operator runs in Ollama (e.g. llava).
+ *       The operator picks the model via {@code caption.model}; defaults to {@code llava}.</li>
  * </ul>
  *
  * <p>Returns {@link Optional#empty()} when unset/unrecognised — callers then emit the "description
@@ -29,7 +32,7 @@ public final class CaptionRouter {
         return switch (provider) {
             case "openrouter" -> Optional.of(new OpenRouterImageCaptionClient());
             case "openai" -> Optional.of(new OpenAiImageCaptionClient());
-            case "vlm-local" -> Optional.of(new LocalImageCaptioner());
+            case "ollama-local" -> Optional.of(new OpenAiCompatibleImageCaptionClient("ollama-local", "llava"));
             default -> Optional.empty();
         };
     }
