@@ -3419,7 +3419,7 @@ async function handleResetPassword() {
               @change="setCaptionModel(($event.target as HTMLSelectElement).value)"
             >
               <option value="">
-                {{ captionProvider === 'ollama-local' ? '(default: llava)' : '(provider default)' }}
+                {{ captionProvider === 'ollama-local' ? '(select a model)' : '(provider default)' }}
               </option>
               <option
                 v-for="m in captionVisionModelOptions"
@@ -3437,7 +3437,7 @@ async function handleResetPassword() {
             <template v-if="captionProvider === 'ollama-local'">
               No vision-capable Ollama models are configured. Add your local Ollama models under
               <span class="text-fg-muted">LLM Providers</span> above and mark the vision ones “supports
-              vision”, or leave this on “default: llava”. Runs against your local Ollama at
+              vision”, then select one here. Runs against your local Ollama at
               <span class="font-mono">localhost:11434</span>.
             </template>
             <template v-else>

@@ -80,6 +80,11 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
         }
         var model = ConfigService.get("caption.model");
         if (model == null || model.isBlank()) model = defaultModel;
+        if (model == null || model.isBlank()) {
+            // No caption.model and no provider default (ollama-local has none — there's no
+            // universally-pulled Ollama vision model). Fail fast rather than POST a blank model.
+            throw new CaptionException("%s captioning: no model configured — set caption.model".formatted(providerName));
+        }
 
         var url = trimTrailingSlash(baseUrl) + "/chat/completions";
         var request = new Request.Builder()

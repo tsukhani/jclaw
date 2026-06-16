@@ -9,6 +9,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.caption.CaptionException;
+import services.caption.OpenAiCompatibleImageCaptionClient;
 import services.caption.OpenAiImageCaptionClient;
 
 /**
@@ -59,6 +60,18 @@ class OpenAiCompatibleImageCaptionClientTest extends UnitTest {
                 () -> client.captionDataUrl("data:image/png;base64,AAAA"),
                 "an HTTP error must surface as a CaptionException");
         assertTrue(ex.getMessage().contains("HTTP 500"), ex.getMessage());
+    }
+
+    @Test
+    void noModelConfiguredFailsFastWithoutHttpCall() {
+        // ollama-local passes a null default; a blank caption.model means "no model" → CaptionException
+        // BEFORE any request, so a misconfigured local backend is a clean no-op, not a doomed POST.
+        var client = new OpenAiCompatibleImageCaptionClient("openai", null, testClient);
+        var ex = assertThrows(CaptionException.class,
+                () -> client.captionDataUrl("data:image/png;base64,AAAA"),
+                "a blank model with no default must fail fast");
+        assertTrue(ex.getMessage().contains("no model"), ex.getMessage());
+        assertEquals(0, server.getRequestCount(), "no HTTP call should be made when there's no model");
     }
 
     private static Buffer jsonBuf(String s) {
