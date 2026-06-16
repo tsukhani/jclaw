@@ -504,10 +504,11 @@ const captionEnabled = computed(() => captionProvider.value.trim().length > 0)
 const captionIsCloud = computed(() =>
   captionProvider.value === 'openai' || captionProvider.value === 'openrouter',
 )
-// Vision-capable models the operator configured for the chosen cloud provider — the model picker is
-// filtered to these (reuses provider.{name}.models; "supports vision" is the gate) rather than free text.
+// Vision-capable models the operator configured for the chosen provider (cloud or ollama-local) —
+// the picker filters provider.{name}.models to the vision-tagged ones (the same "supports vision"
+// gate the LLM Providers section sets), so the operator selects rather than free-types.
 const captionVisionModels = computed<ProviderModelDef[]>(() => {
-  if (!captionIsCloud.value) return []
+  if (!captionIsCloud.value && captionProvider.value !== 'ollama-local') return []
   return getProviderModels(captionProvider.value).filter(m => m.supportsVision === true)
 })
 // Dropdown options: the configured vision models, plus the currently-saved model if it isn't among
@@ -3403,21 +3404,22 @@ async function handleResetPassword() {
           </div>
         </fieldset>
 
-        <!-- Cloud vision-model picker (when a cloud provider is selected). -->
+        <!-- Vision-model picker — vision-tagged models from the chosen provider's LLM-Providers config
+             (cloud provider or local Ollama). -->
         <div
-          v-if="captionIsCloud"
+          v-if="captionIsCloud || captionProvider === 'ollama-local'"
           class="bg-surface-elevated border border-border"
         >
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
             <select
               :value="captionModel"
-              aria-label="Caption cloud model"
+              :aria-label="captionProvider === 'ollama-local' ? 'Ollama vision model' : 'Caption cloud model'"
               class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="setCaptionModel(($event.target as HTMLSelectElement).value)"
             >
               <option value="">
-                (provider default)
+                {{ captionProvider === 'ollama-local' ? '(default: llava)' : '(provider default)' }}
               </option>
               <option
                 v-for="m in captionVisionModelOptions"
@@ -3432,32 +3434,17 @@ async function handleResetPassword() {
             v-if="captionVisionModels.length === 0"
             class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
           >
-            No vision-capable models are configured for this provider. Add one under
-            <span class="text-fg-muted">LLM Providers</span> above and mark it “supports vision”, or
-            leave this on “provider default”.
-          </p>
-        </div>
-
-        <!-- Local VLM (Ollama): the operator names the vision model they've pulled. -->
-        <div
-          v-if="captionProvider === 'ollama-local'"
-          class="bg-surface-elevated border border-border"
-        >
-          <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
-            <input
-              :value="captionModel"
-              type="text"
-              placeholder="llava"
-              aria-label="Ollama vision model"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="setCaptionModel(($event.target as HTMLInputElement).value)"
-            >
-          </div>
-          <p class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted">
-            Runs against your local Ollama at <span class="font-mono">localhost:11434</span>. Pull a
-            vision model first (e.g. <span class="font-mono">ollama pull llava</span>) and enter its
-            name here; blank uses <span class="font-mono">llava</span>.
+            <template v-if="captionProvider === 'ollama-local'">
+              No vision-capable Ollama models are configured. Add your local Ollama models under
+              <span class="text-fg-muted">LLM Providers</span> above and mark the vision ones “supports
+              vision”, or leave this on “default: llava”. Runs against your local Ollama at
+              <span class="font-mono">localhost:11434</span>.
+            </template>
+            <template v-else>
+              No vision-capable models are configured for this provider. Add one under
+              <span class="text-fg-muted">LLM Providers</span> above and mark it “supports vision”, or
+              leave this on “provider default”.
+            </template>
           </p>
         </div>
       </template>

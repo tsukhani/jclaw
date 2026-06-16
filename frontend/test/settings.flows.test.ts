@@ -1461,26 +1461,38 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     expect(optionValues).toContain('') // "(provider default)" escape hatch
   })
 
-  it('shows a free-text vision-model input for the Ollama backend and round-trips caption.model', async () => {
+  it('shows a vision-filtered model select for the Ollama backend (from provider.ollama-local.models) and round-trips caption.model', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerCommon()
     registerEndpoint('/api/config', {
       method: 'GET',
-      handler: () => ({ entries: [...defaultConfigEntries(),
-        { key: 'caption.provider', value: 'ollama-local', updatedAt: '2026-06-15T10:00:00Z' }] }),
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries().filter(e => e.key !== 'provider.ollama-local.models'),
+          { key: 'caption.provider', value: 'ollama-local', updatedAt: '2026-06-15T10:00:00Z' },
+          // Vision metadata the LLM Providers section sets (mirrors Discover Models' vision badge).
+          { key: 'provider.ollama-local.models', updatedAt: '2026-06-15T10:00:00Z', value: JSON.stringify([
+            { id: 'moondream:latest', name: 'moondream', supportsVision: true },
+            { id: 'deepseek-r1:8b', name: 'deepseek-r1', supportsVision: false },
+          ]) },
+        ],
+      }),
     })
     captureConfig(captured)
 
     const component = await mountSuspended(Settings)
     await flushPromises()
 
-    const input = component.find('input[aria-label="Ollama vision model"]')
-    expect(input.exists()).toBe(true) // free text, not a <select>
-    expect(component.find('select[aria-label="Caption cloud model"]').exists()).toBe(false)
-    await input.setValue('moondream')
-    await input.trigger('change')
+    const select = component.find('select[aria-label="Ollama vision model"]')
+    expect(select.exists()).toBe(true) // a <select>, not free text
+    expect(component.find('input[aria-label="Ollama vision model"]').exists()).toBe(false)
+    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    expect(optionValues).toContain('moondream:latest') // vision model listed
+    expect(optionValues).not.toContain('deepseek-r1:8b') // non-vision filtered out
+    expect(optionValues).toContain('') // "(default: llava)" escape hatch
+    await select.setValue('moondream:latest')
     await flushPromises()
-    expect(captured.find(b => b.key === 'caption.model')?.value).toBe('moondream')
+    expect(captured.find(b => b.key === 'caption.model')?.value).toBe('moondream:latest')
   })
 })
 
