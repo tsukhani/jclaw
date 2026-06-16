@@ -67,6 +67,10 @@ describe('Chat page — streaming state machine', () => {
     const textarea = component.find('textarea')
     expect(textarea.exists()).toBe(true)
     expect((textarea.element as HTMLTextAreaElement).disabled).toBe(false)
+    // autoResize caps the height at 200px, so the textarea must scroll (not clip) once long
+    // pasted text exceeds that — i.e. overflow-y must be auto, never hidden.
+    expect(textarea.classes()).toContain('overflow-y-auto')
+    expect(textarea.classes()).not.toContain('overflow-hidden')
   })
 })
 

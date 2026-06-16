@@ -3623,7 +3623,7 @@ function exportConversation() {
               rows="1"
               aria-label="Message input"
               class="w-full px-4 pt-4 pb-6 bg-transparent text-sm text-fg-strong
-                   placeholder-fg-muted focus:outline-hidden resize-none overflow-hidden
+                   placeholder-fg-muted focus:outline-hidden resize-none overflow-y-auto overflow-x-hidden
                    disabled:cursor-not-allowed"
               @keydown.enter.exact="onInputEnter"
               @keydown.down="onInputKeydown"
