@@ -85,6 +85,11 @@ function hideCostTooltip() {
 // to clear. Persisted alongside the other filter dropdowns.
 const selectedSubscriptionProvider = ref<string | null>(null)
 
+// Per-token chip filter — same toggle semantics as the subscription chip,
+// scoping the per-token table / chart / totals to one provider. Persisted
+// alongside the rest.
+const selectedPerTokenProvider = ref<string | null>(null)
+
 // Persist filter choices across page reloads — same convention as Chat
 // Performance's channel selector. Failure-tolerant for SSR / privacy-mode.
 onMounted(() => {
@@ -97,12 +102,14 @@ onMounted(() => {
       channel: string | null
       view: CostView
       subscriptionProvider: string | null
+      perTokenProvider: string | null
     }>
     if (parsed.window && (parsed.window in WINDOW_LABELS)) selectedWindow.value = parsed.window
     if (parsed.agentId !== undefined) selectedAgentId.value = parsed.agentId
     if (parsed.channel !== undefined) selectedChannel.value = parsed.channel
     if (parsed.view === 'chart' || parsed.view === 'table') view.value = parsed.view
     if (parsed.subscriptionProvider !== undefined) selectedSubscriptionProvider.value = parsed.subscriptionProvider
+    if (parsed.perTokenProvider !== undefined) selectedPerTokenProvider.value = parsed.perTokenProvider
   }
   catch { /* ignore */ }
 })
@@ -115,12 +122,16 @@ function persistSettings() {
       channel: selectedChannel.value,
       view: view.value,
       subscriptionProvider: selectedSubscriptionProvider.value,
+      perTokenProvider: selectedPerTokenProvider.value,
     }))
   }
   catch { /* ignore */ }
 }
 
-watch([selectedWindow, selectedAgentId, selectedChannel, view, selectedSubscriptionProvider], persistSettings)
+watch(
+  [selectedWindow, selectedAgentId, selectedChannel, view, selectedSubscriptionProvider, selectedPerTokenProvider],
+  persistSettings,
+)
 
 // Compute the ISO `since` param for the current window. "all" sends a
 // far-past date so the server returns everything; cleaner than special-
@@ -295,9 +306,62 @@ const filteredSubscriptionRows = computed<FleetCostRow[]>(() => {
 // whole-fleet aggregate (still used by the agent/channel filter availability
 // logic and as the source of `hasData`); the partitioned breakdowns drive
 // the rendered subsections.
+// Per-token rows narrowed by the chip filter. When no chip is selected
+// this re-exports perTokenRows. Mirrors filteredSubscriptionRows.
+const filteredPerTokenRows = computed<FleetCostRow[]>(() => {
+  const sel = selectedPerTokenProvider.value
+  if (sel === null) return perTokenRows.value
+  return perTokenRows.value.filter(r => rowBillingProvider(r) === sel)
+})
 const perTokenBreakdown = computed<FleetCostBreakdown>(() =>
+  computeFleetCost(filteredPerTokenRows.value, filter.value),
+)
+// Unfiltered per-token breakdown — drives the provider cards, which must
+// list every provider regardless of the active chip. Mirrors
+// unfilteredSubscriptionBreakdown.
+const unfilteredPerTokenBreakdown = computed<FleetCostBreakdown>(() =>
   computeFleetCost(perTokenRows.value, filter.value),
 )
+
+// Per-token provider rollup cards — total spend and average $/1M per
+// provider, the per-token analogue of a subscription card's effective
+// rate. avg $/1M = total cost ÷ (prompt + completion + reasoning) × 1M —
+// the same cached-excluded token key the rate math uses elsewhere (cached
+// ⊂ prompt). Built off the unfiltered breakdown so every provider shows
+// regardless of the active chip; only providers with paid activity get a
+// card, matching the per-model table's free-tier exclusion. Sorted by
+// spend descending so the priciest provider leads.
+const perTokenProviderBreakdown = computed(() => {
+  const byProvider = new Map<string, { cost: number, tokens: number }>()
+  for (const m of unfilteredPerTokenBreakdown.value.perModel) {
+    const provider = m.modelProvider
+    if (!provider) continue
+    const entry = byProvider.get(provider) ?? { cost: 0, tokens: 0 }
+    entry.cost += m.total
+    entry.tokens += m.prompt + m.completion + m.reasoning
+    byProvider.set(provider, entry)
+  }
+  return [...byProvider.entries()]
+    .filter(([, v]) => v.cost > 0)
+    .map(([name, v]) => ({
+      name,
+      displayName: PROVIDER_DISPLAY_NAMES[name] ?? name,
+      totalCost: v.cost,
+      avgPerMillion: v.tokens > 0 ? (v.cost / v.tokens) * 1_000_000 : null,
+    }))
+    .sort((a, b) => b.totalCost - a.totalCost)
+})
+
+// Clear the per-token chip if its provider drops out of the window (e.g.,
+// the operator changes the agent/channel filter so that provider no longer
+// has paid activity). Mirrors the subscription-chip reset. Placed after
+// perTokenProviderBreakdown so its immediate run doesn't hit the TDZ.
+watchEffect(() => {
+  if (selectedPerTokenProvider.value !== null
+    && !perTokenProviderBreakdown.value.some(p => p.name === selectedPerTokenProvider.value)) {
+    selectedPerTokenProvider.value = null
+  }
+})
 const subscriptionBreakdown = computed<FleetCostBreakdown>(() =>
   computeFleetCost(filteredSubscriptionRows.value, filter.value),
 )
@@ -372,6 +436,15 @@ function onSubscriptionChipClick(name: string) {
   }
   if (!subscriptionProvidersWithUsage.value.has(name)) return
   selectedSubscriptionProvider.value = name
+}
+
+/**
+ * Toggle the per-token chip filter. No disabled-state guard like the
+ * subscription chip needs — every per-token card represents a provider
+ * with paid activity this window, so all of them are always selectable.
+ */
+function onPerTokenChipClick(name: string) {
+  selectedPerTokenProvider.value = selectedPerTokenProvider.value === name ? null : name
 }
 
 // Subscription subsection visibility — render whenever the operator has
@@ -793,10 +866,17 @@ const PROVIDER_PALETTE = [
  */
 const providerPaletteByName = computed<Map<string, typeof PROVIDER_PALETTE[number]>>(() => {
   const map = new Map<string, typeof PROVIDER_PALETTE[number]>()
-  const sorted = [...configuredSubscriptionProviders.value]
-    .sort((a, b) => a.name.localeCompare(b.name))
-  sorted.forEach((p, i) => {
-    map.set(p.name, PROVIDER_PALETTE[i % PROVIDER_PALETTE.length]!)
+  // Union of subscription providers and per-token providers with paid
+  // activity — both kinds render colored chips/rows, so both need a stable
+  // slot. Alphabetical so the assignment is deterministic; adding a
+  // provider can shift the color of providers alphabetically after it
+  // (acceptable for a rarely-changing setup).
+  const names = new Set<string>()
+  for (const p of configuredSubscriptionProviders.value) names.add(p.name)
+  for (const c of perTokenProviderBreakdown.value) names.add(c.name)
+  const sorted = [...names].sort((a, b) => a.localeCompare(b))
+  sorted.forEach((name, i) => {
+    map.set(name, PROVIDER_PALETTE[i % PROVIDER_PALETTE.length]!)
   })
   return map
 })
@@ -1404,8 +1484,52 @@ defineExpose({ refresh })
         v-if="hasPaidData"
         class="border-b border-border"
       >
-        <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
+        <div class="px-4 pt-3 pb-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Per-token
+        </div>
+
+        <!-- Per-provider rollup chips — total per-token spend and average
+             $/1M for each provider (the per-token analogue of the
+             subscription cards' effective rate). Click to scope the table /
+             chart / totals below to that provider; click again to clear.
+             Built from the unfiltered breakdown so every provider stays
+             visible regardless of the active chip. Renders in both table
+             and chart views, like the subscription strip. -->
+        <div
+          v-if="perTokenProviderBreakdown.length > 0"
+          class="px-4 pb-3 flex flex-wrap gap-2"
+        >
+          <button
+            v-for="p in perTokenProviderBreakdown"
+            :key="p.name"
+            type="button"
+            :aria-pressed="selectedPerTokenProvider === p.name"
+            class="border min-w-[9rem] text-left transition-colors flex items-stretch"
+            :class="selectedPerTokenProvider === p.name
+              ? `${providerBorderColor(p.name)} bg-muted/40`
+              : 'border-border bg-muted/20 hover:bg-muted/30 cursor-pointer'"
+            @click="onPerTokenChipClick(p.name)"
+          >
+            <div
+              class="w-1.5 shrink-0"
+              :class="providerSwatchColor(p.name)"
+            />
+            <div class="px-3 py-2 flex-1">
+              <div class="text-[10px] text-fg-muted uppercase tracking-wide">
+                {{ p.displayName }}
+              </div>
+              <div class="mt-0.5 font-mono text-sm text-fg-primary">
+                {{ formatStatCurrency(p.totalCost) }}
+              </div>
+              <div
+                v-if="p.avgPerMillion !== null"
+                class="mt-1 font-mono text-[11px] text-fg-secondary"
+                :title="`Average rate — ${p.displayName}'s total per-token spend ÷ its prompt + completion + reasoning tokens this window.`"
+              >
+                ≈ {{ formatRatePerMillion(p.avgPerMillion) }}/1M
+              </div>
+            </div>
+          </button>
         </div>
 
         <!--

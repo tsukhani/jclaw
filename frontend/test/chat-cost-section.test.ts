@@ -1137,4 +1137,80 @@ describe('ChatCostSection (JCLAW-28)', () => {
     // Used provider's card: effective rate present.
     expect(ollamaChip.text()).toContain('$10.00/1M')
   })
+
+  // ==================== Per-token provider cards ====================
+  //
+  // The per-token section gets the same card treatment as subscription:
+  // a per-provider rollup chip showing total spend + average $/1M, and
+  // clicking it scopes the per-token table/chart/totals to that provider.
+
+  it('renders a per-token provider card with total cost and average $/1M', async () => {
+    // OpenRouter billing $1.00 over 1M throughput tokens → $1.00/1M avg.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'openrouter', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.6', modelProvider: 'openrouter',
+          prompt: 1_000_000, completion: 0, promptPrice: 1.0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const card = wrapper.findAll('button[aria-pressed]').find(c => c.text().includes('OpenRouter'))
+    expect(card).toBeDefined()
+    expect(card!.text()).toContain('$1.00/1M')
+  })
+
+  it('scopes the per-token table to one provider on card click, and clears on re-click', async () => {
+    // Two per-token providers, each with one paid model. Click OpenRouter →
+    // only its model stays in the table; click again → OpenAI's returns.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'openrouter', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0 },
+        { name: 'openai', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.6', modelProvider: 'openrouter',
+          prompt: 1_000_000, completion: 0, promptPrice: 1.0, completionPrice: 0,
+        } },
+        { agentId: 2, channelType: 'web', usage: {
+          modelId: 'gpt-4.1', modelProvider: 'openai',
+          prompt: 1_000_000, completion: 0, promptPrice: 2.0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    // Both per-token models render to start.
+    expect(wrapper.text()).toContain('kimi-k2.6')
+    expect(wrapper.text()).toContain('gpt-4.1')
+
+    const orChip = wrapper.findAll('button[aria-pressed]').find(c => c.text().includes('OpenRouter'))!
+    await orChip.trigger('click')
+    await flushPromises()
+    // Table scoped to OpenRouter — the OpenAI model row (gpt-4.1) is gone.
+    // OpenAI's *card* still renders, but it carries no model id.
+    expect(wrapper.text()).toContain('kimi-k2.6')
+    expect(wrapper.text()).not.toContain('gpt-4.1')
+    expect(orChip.attributes('aria-pressed')).toBe('true')
+
+    await orChip.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('gpt-4.1')
+    expect(orChip.attributes('aria-pressed')).toBe('false')
+  })
 })
