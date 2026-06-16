@@ -23,6 +23,11 @@ public class ToolRegistrationJob extends Job<Void> {
         var toolList = new java.util.ArrayList<ToolRegistry.Tool>();
         toolList.add(new TaskTool());
         toolList.add(new DateTimeTool());
+        // JCLAW-462: ccr_retrieve — fetch the full original of a content-
+        // compressed tool result by its hash. Registered unconditionally
+        // (per-agent disable still applies); only useful once content
+        // compression is enabled and has left a retrieval marker.
+        toolList.add(new CcrRetrieveTool());
         // JClaw user-guide lookup: answers chat questions about JClaw's own
         // features/usage by searching the bundled docs/user-guide/ markdown.
         toolList.add(new UserGuideTool());

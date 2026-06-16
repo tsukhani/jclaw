@@ -97,7 +97,10 @@ public final class ParallelToolExecutor {
         // JCLAW-170: use the rich-output path so search-style tools can emit a
         // structured JSON payload alongside the LLM-visible text. Non-rich
         // tools fall through the default and return a text-only ToolResult.
-        var result = ToolRegistry.executeRich(rawName, rawArgs, agent);
+        // JCLAW-462: expose the conversation id to tools that need it
+        // (ccr_retrieve) via ToolContext, set on this tool's own VT.
+        var result = ToolContext.withConversation(conversationId,
+                () -> ToolRegistry.executeRich(rawName, rawArgs, agent));
         var text = result.text();
         var resultPreview = text.length() > 200
                 ? text.substring(0, 200) + "... (%d chars)".formatted(text.length()) : text;

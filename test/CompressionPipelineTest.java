@@ -2,6 +2,7 @@ import agents.CompressionPipeline;
 import llm.LlmTypes.ChatMessage;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.compression.ContentHash;
 
 import java.util.List;
 
@@ -42,6 +43,18 @@ class CompressionPipelineTest extends UnitTest {
         assertTrue(((String) compressed.content()).length() < bigJsonArray().length() / 2,
                 "compressed content should be much shorter");
         assertTrue(((String) compressed.content()).contains("items elided"));
+    }
+
+    @Test
+    void compressedJsonCarriesCcrRetrieveHandle() {
+        // The compressed message must end with a ccr_retrieve handle keyed by
+        // the hash of the ORIGINAL content, so the LLM can recover the elided data.
+        var json = bigJsonArray();
+        var original = ChatMessage.toolResult("call_1", "web_search", json);
+        var out = CompressionPipeline.compressMessages(List.of(original), MODEL, 250);
+        var content = (String) out.get(0).content();
+        assertTrue(content.contains("ccr_retrieve(\"" + ContentHash.handle(json) + "\")"),
+                "expected a ccr_retrieve handle in: " + content);
     }
 
     @Test

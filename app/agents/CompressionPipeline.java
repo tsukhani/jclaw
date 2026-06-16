@@ -6,6 +6,7 @@ import models.Agent;
 import models.Conversation;
 import models.MessageRole;
 import services.ConfigService;
+import services.compression.ContentHash;
 import services.compression.ContentType;
 import services.compression.ContentTypeDetector;
 import services.compression.JsonCompressor;
@@ -83,7 +84,13 @@ public final class CompressionPipeline {
         var result = JSON.compress(content);
         if (!result.changed()) return msg;
 
-        var candidate = new ChatMessage(msg.role(), result.content(), msg.toolCalls(),
+        // JCLAW-462 (CCR): leave a retrieval handle so the LLM can pull the
+        // full original via ccr_retrieve. The handle is the hash of the ORIGINAL
+        // content, which ccr_retrieve recomputes over the durable Message row.
+        var hinted = result.content()
+                + "\n[compressed — call ccr_retrieve(\"" + ContentHash.handle(content)
+                + "\") for the full original]";
+        var candidate = new ChatMessage(msg.role(), hinted, msg.toolCalls(),
                 msg.toolCallId(), msg.toolName());
         var after = TokenUsageEstimator.estimateMessage(modelId, candidate).tokens();
         if (after >= before) {
