@@ -786,11 +786,11 @@ public class ApiTasksController extends Controller {
     /**
      * Resolve and require the {@code agentId} from the request body.
      *
-     * <p>agentId resolution. Until user-ownership lands (class-level TODO)
-     * the caller can address any agent — admitted by AuthCheck's single
-     * principal. The 400 here is "you typed an id that doesn't resolve";
-     * a non-existent task addressed in /api/tasks/{id} would be 404, but
-     * a non-existent agent named in the request body is bad input.
+     * <p>agentId resolution. Single-operator Personal Edition: the one admin
+     * principal (admitted by AuthCheck) can address any agent. The 400 here is
+     * "you typed an id that doesn't resolve"; a non-existent task addressed in
+     * /api/tasks/{id} would be 404, but a non-existent agent named in the
+     * request body is bad input.
      */
     @SuppressWarnings("java:S2259")
     private static Agent requireAgentFromBody(com.google.gson.JsonObject body) {
