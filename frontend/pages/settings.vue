@@ -511,14 +511,17 @@ const captionVisionModels = computed<ProviderModelDef[]>(() => {
   if (!captionIsCloud.value && captionProvider.value !== 'ollama-local') return []
   return getProviderModels(captionProvider.value).filter(m => m.supportsVision === true)
 })
-// Dropdown options: the configured vision models, plus the currently-saved model if it isn't among
-// them (so a value set before the model was marked vision-capable isn't silently dropped).
-const captionVisionModelOptions = computed(() => {
-  const opts = captionVisionModels.value.map(m => ({ id: m.id, label: m.name || m.id }))
-  const cur = captionModel.value
-  if (cur && !opts.some(o => o.id === cur)) opts.unshift({ id: cur, label: `${cur} (not marked vision)` })
-  return opts
-})
+// Dropdown options: ONLY vision-tagged models — never surface a model that might not support vision.
+const captionVisionModelOptions = computed(() =>
+  captionVisionModels.value.map(m => ({ id: m.id, label: m.name || m.id })),
+)
+// A saved caption.model that isn't among the vision-tagged options (set before it was tagged, or via
+// raw config) is "orphaned": hide it from the picker (show the escape-hatch option instead) and flag
+// it, so the operator re-picks a vision model rather than captioning with a possibly-non-vision one.
+const captionModelOrphaned = computed(() =>
+  captionModel.value !== '' && !captionVisionModelOptions.value.some(o => o.id === captionModel.value),
+)
+const captionModelSelectValue = computed(() => (captionModelOrphaned.value ? '' : captionModel.value))
 // Which backend is active, for the status line.
 const captionActiveBackend = computed(() => {
   if (captionIsCloud.value) return 'cloud'
@@ -3413,7 +3416,7 @@ async function handleResetPassword() {
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Vision model</span>
             <select
-              :value="captionModel"
+              :value="captionModelSelectValue"
               :aria-label="captionProvider === 'ollama-local' ? 'Ollama vision model' : 'Caption cloud model'"
               class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="setCaptionModel(($event.target as HTMLSelectElement).value)"
@@ -3445,6 +3448,14 @@ async function handleResetPassword() {
               <span class="text-fg-muted">LLM Providers</span> above and mark it “supports vision”, or
               leave this on “provider default”.
             </template>
+          </p>
+          <p
+            v-if="captionModelOrphaned"
+            class="px-4 pb-2.5 -mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+          >
+            Saved model “{{ captionModel }}” is hidden because it is not marked vision-capable. Pick a
+            vision model above, or mark it “supports vision” under
+            <span class="text-fg-muted">LLM Providers</span>.
           </p>
         </div>
       </template>

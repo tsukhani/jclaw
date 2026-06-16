@@ -1461,6 +1461,36 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     expect(optionValues).toContain('') // "(provider default)" escape hatch
   })
 
+  it('hides a saved non-vision caption.model from the cloud picker and warns', async () => {
+    registerCommon()
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries().filter(e => e.key !== 'provider.openai.models'),
+          { key: 'caption.provider', value: 'openai', updatedAt: '2026-06-15T10:00:00Z' },
+          // A non-vision model saved as the caption model (e.g. set before vision-filtering landed).
+          { key: 'caption.model', value: 'gpt-3.5-turbo', updatedAt: '2026-06-15T10:00:00Z' },
+          { key: 'provider.openai.models', updatedAt: '2026-06-15T10:00:00Z', value: JSON.stringify([
+            { id: 'gpt-4o', name: 'GPT-4o', supportsVision: true },
+            { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', supportsVision: false },
+          ]) },
+        ],
+      }),
+    })
+    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const select = component.find('select[aria-label="Caption cloud model"]')
+    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    expect(optionValues).toContain('gpt-4o') // vision model shown
+    expect(optionValues).not.toContain('gpt-3.5-turbo') // saved non-vision model is NOT shown
+    expect((select.element as HTMLSelectElement).value).toBe('') // escape hatch, not a phantom selection
+    expect(component.text()).toContain('not marked vision-capable') // orphan warning surfaced
+  })
+
   it('shows a vision-filtered model select for the Ollama backend (from provider.ollama-local.models) and round-trips caption.model', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerCommon()
