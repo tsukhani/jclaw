@@ -86,6 +86,10 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
             throw new CaptionException("%s captioning: no model configured — set caption.model".formatted(providerName));
         }
 
+        // Transcode WebP/etc. → PNG so a caption model that can't decode the source format (notably
+        // local Ollama, which rejects WebP) gets an image it can load.
+        imageDataUrl = CaptionImageNormalizer.toModelSafeDataUrl(imageDataUrl);
+
         var url = trimTrailingSlash(baseUrl) + "/chat/completions";
         var request = new Request.Builder()
                 .url(url)
