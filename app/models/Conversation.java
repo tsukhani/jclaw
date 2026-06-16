@@ -49,7 +49,7 @@ public class Conversation extends Model {
      * placeholder with an interrupt note and clears the field.
      *
      * <p>Scoped to Conversation (not a separate entity) because the
-     * 1:1:1 binding model (one bot per agent per user, JCLAW-89) guarantees at
+     * per-binding model (one bot ↔ one agent, JCLAW-89) guarantees at
      * most one active stream per conversation row at any time.
      */
     @Column(name = "active_stream_message_id")

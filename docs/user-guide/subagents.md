@@ -112,7 +112,7 @@ If the child's reply was cut off by the model's output budget, the announce card
 
 ### 2. The [Subagents](/subagents) page
 
-Lists every run — `RUNNING`, `COMPLETED`, `FAILED`, `KILLED`, `TIMEOUT` — across all parent agents you own. Filter by parent agent, status, and start time. Each row links to the child's transcript. Use this when you want a fleet view across multiple parents and time ranges.
+Lists every run — `RUNNING`, `COMPLETED`, `FAILED`, `KILLED`, `TIMEOUT` — across all parent agents. Filter by parent agent, status, and start time. Each row links to the child's transcript. Use this when you want a fleet view across multiple parents and time ranges.
 
 ### 3. The `/subagent` slash command (in [Chat](/chat))
 

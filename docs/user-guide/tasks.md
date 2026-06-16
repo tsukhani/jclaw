@@ -57,7 +57,7 @@ Two ways to stop a task. They are not the same:
 
 ## The Tasks page
 
-The [Tasks](/tasks) page shows every task you own, with three view modes — Table, Cards, and Calendar — switched from the tab strip on the right. The view selection persists in the URL (`?view=cards`), so refresh and shareable links survive.
+The [Tasks](/tasks) page shows every task, with three view modes — Table, Cards, and Calendar — switched from the tab strip on the right. The view selection persists in the URL (`?view=cards`), so refresh and shareable links survive.
 
 ### Dashboard stats
 

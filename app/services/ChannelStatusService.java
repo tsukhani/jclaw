@@ -13,11 +13,11 @@ import java.util.Set;
  * system:
  *
  * <ul>
- *   <li><b>telegram</b> — multi-tenant by design (one bot per agent per
- *       user, JCLAW-89). The bot token + enabled flag live on
+ *   <li><b>telegram</b> — per-binding by design (one bot per agent,
+ *       JCLAW-89). The bot token + enabled flag live on
  *       {@link TelegramBinding}, NOT {@link ChannelConfig}. The polling
  *       runner reads {@code TelegramBinding} directly.</li>
- *   <li><b>slack / whatsapp / future single-tenant transports</b> — bot
+ *   <li><b>slack / whatsapp / future ChannelConfig-backed transports</b> — bot
  *       token in {@link ChannelConfig#configJson}, enabled flag in
  *       {@link ChannelConfig#enabled}. The transport reads
  *       {@code ChannelConfig.findByType(...)} on each request.</li>
@@ -63,7 +63,7 @@ public final class ChannelStatusService {
             // row whose enabled flag governs whether the transport
             // accepts inbound messages. Trust the channelType column
             // rather than enumerating known kinds — adding a new
-            // single-tenant channel just needs to write a ChannelConfig
+            // ChannelConfig-backed channel just needs to write a ChannelConfig
             // row, no code change here.
             List<ChannelConfig> configs = ChannelConfig.find(ENABLED_TRUE).fetch();
             for (var c : configs) {

@@ -271,7 +271,7 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
         assertIsOk(POST("/api/tasks", "application/json", """
                 {"agentId": %d, "name": "shared-name", "schedule": "every 1h"}
                 """.formatted(agentA)));
-        // Same name on a different agent is fine — multi-tenancy isolation.
+        // Same name on a different agent is fine — agent isolation.
         assertIsOk(POST("/api/tasks", "application/json", """
                 {"agentId": %d, "name": "shared-name", "schedule": "every 1h"}
                 """.formatted(agentB)));

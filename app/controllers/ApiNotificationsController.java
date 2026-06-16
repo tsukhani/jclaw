@@ -25,11 +25,8 @@ import static utils.GsonHolder.INSTANCE;
  * a row read without removing it, so the past-reminders tab can still
  * show acknowledged entries.
  *
- * <h2>TODO: agent-ownership enforcement</h2>
- * Mirrors the same gap called out in {@link ApiTasksController} — no
- * per-user scoping yet, every authenticated caller sees every
- * notification. Re-scope when the multi-tenancy story lands
- * (project_multi_tenancy_design memory).
+ * <p>Single-operator Personal Edition: the one authenticated admin sees every
+ * notification — there is no per-user scoping because there is only one user.
  */
 @With(AuthCheck.class)
 public class ApiNotificationsController extends Controller {

@@ -28,7 +28,7 @@ Skills can also contribute shell commands to an agent's effective allowlist (vis
 The [Skills](/skills) page splits into two columns:
 
 - **Global Skills** (left) — the library you've built. Drag any global skill onto an agent on the right to assign it.
-- **Agents** (right) — every agent you own, with the skills currently attached to each.
+- **Agents** (right) — every agent, with the skills currently attached to each.
 
 You can also **promote** an agent-specific skill back into the global library by dragging it from the right column to the left. This is the workflow for refining a skill on one agent first, then making it reusable everywhere. Promotion routes the skill through an LLM sanitization pass — see [Settings → Skills Promotion](/guide#settings) for the provider/model/timeout knobs.
 

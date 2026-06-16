@@ -27,20 +27,13 @@ import java.util.List;
 /**
  * Tasks API.
  *
- * <h2>TODO: agent-ownership enforcement</h2>
- * Every id-addressed mutation here ({@link #update}, {@link #cancel},
- * {@link #retry}, {@link #run}, {@link #pause}, {@link #resume})
- * currently authenticates via
- * {@link AuthCheck} but does not check that the resolved Task belongs
- * to the caller's agent — because user-ownership infrastructure does
- * not yet exist in JClaw (no {@code User} model, no {@code owner} FK
- * on {@code Agent}; see CLAUDE memory
- * {@code project_multi_tenancy_design}). AuthCheck today admits a
- * single system principal. When the user-ownership story lands, add
- * a {@code task.agent} ↔ {@code currentUser.agents()} guard before
- * the {@code task.save()} call in each handler. The {@link #list}
- * endpoint also needs the same scoping (currently honors an optional
- * {@code agentId} filter but returns ALL tasks when omitted).
+ * <h2>Single-operator scope</h2>
+ * Id-addressed mutations ({@link #update}, {@link #cancel}, {@link #retry},
+ * {@link #run}, {@link #pause}, {@link #resume}) authenticate via {@link AuthCheck}
+ * and don't add a per-caller ownership check: JClaw is single-operator Personal
+ * Edition — one admin owns every agent and task, so there is no other user to scope
+ * against. The {@link #list} endpoint honors an optional {@code agentId} filter and
+ * otherwise returns all tasks.
  */
 @With(AuthCheck.class)
 public class ApiTasksController extends Controller {

@@ -13,8 +13,8 @@ The [Dashboard](/) is the first thing you see after signing in. Five stat cards 
 
 | Card              | What it shows                                                                                          |
 |-------------------|--------------------------------------------------------------------------------------------------------|
-| **Agents**        | Enabled agents / total agents you own. Labeled **Active**.                                              |
-| **Conversations** | Cumulative count of all conversations you own. Labeled **Total**.                                       |
+| **Agents**        | Enabled agents / total agents. Labeled **Active**.                                                      |
+| **Conversations** | Cumulative count of all conversations. Labeled **Total**.                                               |
 | **Channels**      | Number of currently-active external channels — web + Telegram bindings + Slack/WhatsApp configs.       |
 | **Tasks**         | Three sub-stats side by side: **Active** (recurring `CRON` / `INTERVAL` in steady state), **Running** (currently firing), **Pending** (`SCHEDULED` / `IMMEDIATE` waiting). |
 | **Reminders**     | Two sub-stats: **Active** (recurring reminders) and **Pending** (one-shot reminders waiting to fire). |

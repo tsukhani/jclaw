@@ -352,9 +352,8 @@ public class Task extends Model {
 
     /**
      * Recurring (CRON + INTERVAL) Tasks for the given agent that are
-     * still active. Agent-scoped because per the multi-tenancy stance
-     * one agent must never see another agent's recurring schedule —
-     * see CLAUDE memory project_multi_tenancy_design.
+     * still active. Agent-scoped: one agent must never see another agent's
+     * recurring schedule (agent isolation).
      */
     public static List<Task> findRecurring(models.Agent agent) {
         return Task.find(
@@ -371,7 +370,7 @@ public class Task extends Model {
      * {@code /api/tasks?payloadType=reminder} query narrowed to upcoming
      * fires. Exact {@code "reminder"} match mirrors the REST list filter
      * ({@code ApiTasksController.list}). Agent-scoped for the same
-     * multi-tenancy reason as {@link #findRecurring} — one agent must
+     * agent-isolation reason as {@link #findRecurring} — one agent must
      * never see another's reminders.
      */
     public static List<Task> findReminders(models.Agent agent) {

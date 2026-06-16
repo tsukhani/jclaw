@@ -22,10 +22,10 @@ import static utils.GsonHolder.INSTANCE;
  * walkthrough itself is purely in-memory, so reloading mid-tour abandons
  * progress and the user must re-enter from the Guided Tour sidebar button.
  *
- * <p>Single Config key today (single-admin install). When per-user auth
- * lands, scope this per user — the prefix {@code onboarding.} is already
- * reserved in the Settings page's {@code MANAGED_PREFIXES} list so the
- * unmanaged-keys diagnostic doesn't surface this key.
+ * <p>A single Config key — single-admin Personal Edition, so there is no per-user
+ * scoping. The prefix {@code onboarding.} is reserved in the Settings page's
+ * {@code MANAGED_PREFIXES} list so the unmanaged-keys diagnostic doesn't surface
+ * this key.
  */
 @With(AuthCheck.class)
 public class ApiOnboardingController extends Controller {

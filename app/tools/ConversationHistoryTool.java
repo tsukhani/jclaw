@@ -27,15 +27,10 @@ import java.util.Map;
  * for inspection or programmatic post-processing.
  *
  * <p><b>Permission model.</b> The calling agent must equal the
- * {@link SubagentRun#parentAgent}. JClaw is currently single-tenant
- * Personal Edition — there is no operator-role concept in the codebase
- * (no User entity, no RBAC, no admin grant). The AC's "operators can read
- * any" reads at the REST/API endpoint layer (a future {@code /api/subagent-runs/{id}/messages}
- * route would be operator-unconditional once auth lands); the tool path
- * stays strictly parent-owned because a tool call is always made by a
- * concrete agent context and "operator" is not a tool-callable identity.
- * When multi-tenant auth lands, an operator-role check would slot in as a
- * short-circuit ahead of the parentAgent equality gate.
+ * {@link SubagentRun#parentAgent} — a subagent transcript is readable only by the
+ * parent agent that spawned it. JClaw is single-operator Personal Edition: there is
+ * no operator-role / RBAC / multi-user concept, so this parent-agent equality is the
+ * whole gate (a tool call is always made by a concrete agent context).
  *
  * <p><b>Size + pagination.</b> Per AC, the transcript is bounded so a
  * runaway child can't blow up the tool's return string. Per-message content
@@ -155,10 +150,9 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
             if (run == null) {
                 return "Error: no SubagentRun found for runId " + runId + ".";
             }
-            // Parent-ownership gate. See class javadoc on the operator-role
-            // story: single-tenant Personal Edition has no operator concept,
-            // so the gate is strict parentAgent equality. A future
-            // multi-tenant build slots an operator-role short-circuit here.
+            // Parent-ownership gate: a subagent transcript is readable only by the
+            // parent agent that spawned it. Single-operator Personal Edition has no
+            // operator/RBAC concept, so this strict parentAgent equality is the whole gate.
             if (run.parentAgent == null || !callingAgentId.equals(run.parentAgent.id)) {
                 return "Error: runId " + runId + " is not owned by the calling agent.";
             }

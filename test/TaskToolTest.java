@@ -285,7 +285,7 @@ class TaskToolTest extends UnitTest {
 
     @Test
     void createRecurringSameNameDifferentAgentNotAConflict() {
-        // Multi-tenancy: same recurring name on a different agent is fine.
+        // Agent isolation: same recurring name on a different agent is fine.
         assertTrue(tool.execute("""
                 {"action":"createTask","name":"shared","schedule":"@daily"}""", agent)
                 .contains("Recurring task"));
@@ -655,8 +655,8 @@ class TaskToolTest extends UnitTest {
         var reply = tool.execute("""
                 {"action":"pause","name":"private"}""", otherAgent);
         // Agent-scoped finder returns empty → "No task found" rather
-        // than exposing the row. This is the "forbidden" shape per the
-        // multi-tenancy stance.
+        // than exposing the row. This is the "forbidden" shape per
+        // agent isolation.
         assertTrue(reply.contains("No task found"),
                 "cross-agent pause must surface not-found; got: " + reply);
         // Original task still PENDING / unpaused.

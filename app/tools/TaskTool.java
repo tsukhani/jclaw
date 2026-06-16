@@ -32,8 +32,7 @@ import java.util.Map;
  *
  * <h2>Agent-scoped name addressing</h2>
  * Every action that addresses an existing task does so by name + the
- * calling agent (per the multi-tenancy stance —
- * project_multi_tenancy_design memory). Two agents can both have a
+ * calling agent (agent isolation). Two agents can both have a
  * task called "daily summary" without colliding; one agent can't
  * pause/resume/cancel another's.
  *
@@ -902,7 +901,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // JDBC-driven and doesn't need JPA context.
         //
         // Agent-scoped: two agents naming a task "daily summary" must not
-        // be able to cancel each other's — multi-tenancy stance.
+        // be able to cancel each other's — agent isolation.
         var cancelledIds = services.Tx.run(() -> {
             @SuppressWarnings("unchecked")
             var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
@@ -979,8 +978,8 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     private String listRecurringTasks(Agent agent) {
-        // Agent-scoped: per the multi-tenancy stance one agent must not
-        // see another agent's recurring schedule. The finder also now
+        // Agent-scoped: one agent must not see another agent's recurring
+        // schedule (agent isolation). The finder also now
         // includes INTERVAL alongside CRON since both are recurring.
         var tasks = services.Tx.run(() -> Task.findRecurring(agent));
         if (tasks.isEmpty()) return "No recurring tasks configured.";
@@ -1006,7 +1005,7 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     private String listReminders(Agent agent) {
-        // Agent-scoped, same multi-tenancy reason as listRecurringTasks.
+        // Agent-scoped, same agent-isolation reason as listRecurringTasks.
         // Scoped to upcoming fires (PENDING one-shots + ACTIVE recurring) so
         // the agent sees reminders it can still edit or cancel — not fired/
         // auto-deleted history. This is the one-shot-reminder discovery path

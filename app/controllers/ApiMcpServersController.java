@@ -35,8 +35,8 @@ import static utils.GsonHolder.INSTANCE;
  * </ul>
  *
  * <p>Auth: class-level {@code @With(AuthCheck.class)} mirrors every other
- * Api* controller. The {@code mcp_server} table is operator-level and
- * has no per-user concept.
+ * Api* controller. The {@code mcp_server} table is operator-wide — single-operator
+ * Personal Edition, so there is no per-user scoping.
  */
 @With(AuthCheck.class)
 public class ApiMcpServersController extends Controller {

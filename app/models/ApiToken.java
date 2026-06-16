@@ -44,11 +44,9 @@ public class ApiToken extends Model {
     @Column(name = "secret_hash", nullable = false, length = 64, unique = true)
     public String secretHash;
 
-    /** Token owner — only ever {@code "system"} today. Read by the
-     *  bearer-auth filter and stashed in {@code session.username} so
-     *  downstream code that reads identity sees a stable value. Kept
-     *  as a column (rather than hardcoded) so the multi-tenancy
-     *  follow-up has an obvious extension point. */
+    /** Token owner — always {@code "system"} in single-operator Personal Edition.
+     *  Read by the bearer-auth filter and stashed in {@code session.username} so
+     *  downstream code that reads identity sees a stable value. */
     @Column(name = "owner_username", nullable = false, length = 100)
     public String ownerUsername;
 
