@@ -21,8 +21,12 @@ import java.util.concurrent.TimeUnit;
  * <p>Why LiteLLM and not the providers themselves: most direct provider APIs
  * don't expose pricing in their {@code /v1/models} responses. OpenAI, Anthropic
  * direct, Google direct, Mistral direct all return bare model lists with
- * no cost data. OpenRouter and Together AI are the exceptions; their entries
- * are populated at discovery time and skip this service entirely.
+ * no cost data. OpenRouter and Together AI are the exceptions — they publish
+ * per-model pricing that {@link ModelDiscoveryService#inferPrice} captures at
+ * discovery time (OpenRouter via {@code pricing.{prompt,completion}},
+ * Together via {@code pricing.{input,output}}), so this backfill normally
+ * finds their prices already set and is a no-op for them. It still runs over
+ * them, filling only any field discovery left unknown.
  *
  * <p>LiteLLM hand-maintains a JSON catalog the entire community ecosystem
  * relies on (Vercel AI SDK, Helicone, Langfuse, etc.). It's the de-facto

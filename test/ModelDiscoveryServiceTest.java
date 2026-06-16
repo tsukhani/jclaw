@@ -395,6 +395,39 @@ class ModelDiscoveryServiceTest extends UnitTest {
         assertEquals(-1, price, 0.001);
     }
 
+    @Test
+    void inferPriceReadsTogetherInputOutputShape() {
+        // Together AI quotes pricing.{input,output,cached_input} as JSON
+        // numbers in dollars-per-MILLION already — read as-is, NOT scaled by
+        // 1e6 like OpenRouter's per-token prompt/completion strings.
+        var obj = JsonParser.parseString("""
+                {"pricing": {"input": 0.32, "output": 1.28, "cached_input": 0.2}}
+                """).getAsJsonObject();
+        assertEquals(0.32, ModelDiscoveryService.inferPrice(obj, "prompt"), 0.0001);
+        assertEquals(1.28, ModelDiscoveryService.inferPrice(obj, "completion"), 0.0001);
+        assertEquals(0.2, ModelDiscoveryService.inferPrice(obj, "input_cache_read"), 0.0001);
+    }
+
+    @Test
+    void inferPriceTogetherHasNoCacheWritePrice() {
+        // Together exposes no cache-write price → -1 (unknown), never a
+        // mis-mapped value from another field.
+        var obj = JsonParser.parseString("""
+                {"pricing": {"input": 0.32, "output": 1.28}}
+                """).getAsJsonObject();
+        assertEquals(-1, ModelDiscoveryService.inferPrice(obj, "input_cache_write"), 0.0001);
+    }
+
+    @Test
+    void inferPricePrefersOpenRouterShapeWhenBothKeysPresent() {
+        // Defensive: if a payload somehow carried both shapes, the per-token
+        // prompt/completion (×1e6) wins — that's the established convention.
+        var obj = JsonParser.parseString("""
+                {"pricing": {"prompt": "0.000003", "input": 99}}
+                """).getAsJsonObject();
+        assertEquals(3.0, ModelDiscoveryService.inferPrice(obj, "prompt"), 0.0001);
+    }
+
     // --- parseModels ---
 
     @Test
@@ -1168,6 +1201,29 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 """).getAsJsonObject();
         // NumberFormatException short-circuits to false in inferIsFree.
         assertEquals(false, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
+    }
+
+    @Test
+    void parseModelsCapturesTogetherBareArrayPricing() {
+        // End-to-end regression for the unpriced-Together bug: Together's
+        // bare-array /v1/models shape with input/output pricing must land in
+        // promptPrice/completionPrice at per-million units (no 1e6 blowup).
+        var json = JsonParser.parseString("""
+                [{"id":"Qwen/Qwen3.7-Plus","pricing":{"input":0.32,"output":1.28}}]
+                """);
+        var model = ModelDiscoveryService.parseModels(json).get(0);
+        assertEquals(0.32, ((Number) model.get("promptPrice")).doubleValue(), 0.0001);
+        assertEquals(1.28, ((Number) model.get("completionPrice")).doubleValue(), 0.0001);
+    }
+
+    @Test
+    void inferIsFreeTrueForTogetherZeroPricing() {
+        // Together free model (input:0, output:0) is recognized as free now
+        // that inferIsFree understands the input/output shape.
+        var json = JsonParser.parseString("""
+                [{"id":"free/model","pricing":{"input":0,"output":0}}]
+                """);
+        assertEquals(true, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
     }
 
     @Test

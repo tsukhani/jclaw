@@ -67,6 +67,12 @@ public class ModelDiscoveryService {
     private static final String FIELD_PRICING = "pricing";
     private static final String FIELD_PROMPT = "prompt";
     private static final String FIELD_COMPLETION = "completion";
+    // Together AI's /v1/models pricing keys — distinct from OpenRouter's
+    // prompt/completion, and quoted in dollars-per-million (not per-token).
+    private static final String FIELD_TOGETHER_INPUT = "input";
+    private static final String FIELD_TOGETHER_OUTPUT = "output";
+    private static final String FIELD_TOGETHER_CACHED_INPUT = "cached_input";
+    private static final String TYPE_INPUT_CACHE_READ = "input_cache_read";
 
     // --- Value literals ---
     private static final String INSTRUCT_TYPE_DEEPSEEK_R1 = "deepseek-r1";
@@ -251,7 +257,7 @@ public class ModelDiscoveryService {
             model.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, audio.fromProvider());
             model.put(KEY_PROMPT_PRICE, inferPrice(obj, FIELD_PROMPT));
             model.put(KEY_COMPLETION_PRICE, inferPrice(obj, FIELD_COMPLETION));
-            model.put(KEY_CACHED_READ_PRICE, inferPrice(obj, "input_cache_read"));
+            model.put(KEY_CACHED_READ_PRICE, inferPrice(obj, TYPE_INPUT_CACHE_READ));
             model.put(KEY_CACHE_WRITE_PRICE, inferPrice(obj, "input_cache_write"));
             model.put(KEY_IS_FREE, inferIsFree(obj));
 
@@ -507,31 +513,81 @@ public class ModelDiscoveryService {
         return null;
     }
 
+    /**
+     * Extract a per-million-token price for a JClaw price {@code type}
+     * ({@code "prompt"}, {@code "completion"}, {@code "input_cache_read"},
+     * {@code "input_cache_write"}) from a model's {@code pricing} object,
+     * handling both provider conventions seen on {@code /v1/models}:
+     *
+     * <ul>
+     *   <li><b>OpenRouter:</b> {@code pricing.{prompt,completion,...}} quoted
+     *       in dollars <i>per token</i> — multiplied by 1e6 to reach JClaw's
+     *       per-million convention.</li>
+     *   <li><b>Together AI:</b> {@code pricing.{input,output,cached_input}}
+     *       quoted in dollars <i>per million tokens</i> already — used as-is.
+     *       These were previously dropped (returned {@code -1}) because only
+     *       the OpenRouter keys were read, which is why Together models
+     *       discovered unpriced.</li>
+     * </ul>
+     *
+     * <p>The key shape is the discriminator: among JClaw's supported providers
+     * only Together uses {@code input}/{@code output}, and it quotes
+     * per-million, so reading those keys without the 1e6 scale is correct.
+     * Returns {@code -1} ("unknown") when neither shape carries the field.
+     */
     public static double inferPrice(JsonObject obj, String type) {
-        if (obj.has(FIELD_PRICING) && obj.get(FIELD_PRICING).isJsonObject()) {
-            var pricing = obj.getAsJsonObject(FIELD_PRICING);
-            if (pricing.has(type) && !pricing.get(type).isJsonNull()) {
-                try {
-                    var perToken = Double.parseDouble(pricing.get(type).getAsString());
-                    return perToken * 1_000_000;
-                } catch (NumberFormatException _) {}
-            }
-        }
+        if (!obj.has(FIELD_PRICING) || !obj.get(FIELD_PRICING).isJsonObject()) return -1;
+        var pricing = obj.getAsJsonObject(FIELD_PRICING);
+
+        // OpenRouter shape: dollars per token → scale to per-million.
+        var perToken = readPriceField(pricing, type);
+        if (perToken >= 0) return perToken * 1_000_000;
+
+        // Together shape: dollars per million already → no scaling.
+        var perMillion = readPriceField(pricing, togetherPricingKey(type));
+        if (perMillion >= 0) return perMillion;
+
         return -1;
     }
 
-    private static boolean inferIsFree(JsonObject obj) {
-        if (obj.has(FIELD_PRICING) && obj.get(FIELD_PRICING).isJsonObject()) {
-            var pricing = obj.getAsJsonObject(FIELD_PRICING);
-            try {
-                var prompt = pricing.has(FIELD_PROMPT) && !pricing.get(FIELD_PROMPT).isJsonNull()
-                        ? Double.parseDouble(pricing.get(FIELD_PROMPT).getAsString()) : -1;
-                var completion = pricing.has(FIELD_COMPLETION) && !pricing.get(FIELD_COMPLETION).isJsonNull()
-                        ? Double.parseDouble(pricing.get(FIELD_COMPLETION).getAsString()) : -1;
-                return prompt == 0 && completion == 0;
-            } catch (NumberFormatException _) {}
+    /**
+     * Read a numeric price field from a {@code pricing} object. Accepts both
+     * string-encoded (OpenRouter) and bare-number (Together) JSON values via
+     * {@code getAsString}. Returns {@code -1} when the key is null/absent or
+     * unparseable; a {@code NaN} value parses without throwing but fails the
+     * {@code >= 0} guard in {@link #inferPrice}, so it too resolves to -1.
+     */
+    private static double readPriceField(JsonObject pricing, String key) {
+        if (key == null || !pricing.has(key) || pricing.get(key).isJsonNull()) return -1;
+        try {
+            return Double.parseDouble(pricing.get(key).getAsString());
+        } catch (NumberFormatException _) {
+            return -1;
         }
-        return false;
+    }
+
+    /**
+     * Map a JClaw price {@code type} to the equivalent Together AI pricing
+     * key. Returns {@code null} for types Together doesn't expose (it has no
+     * cache-write price), which {@link #readPriceField} treats as absent.
+     */
+    private static String togetherPricingKey(String type) {
+        return switch (type) {
+            case FIELD_PROMPT -> FIELD_TOGETHER_INPUT;
+            case FIELD_COMPLETION -> FIELD_TOGETHER_OUTPUT;
+            case TYPE_INPUT_CACHE_READ -> FIELD_TOGETHER_CACHED_INPUT;
+            default -> null;
+        };
+    }
+
+    /**
+     * A model is "free" when both its input and output prices are explicitly
+     * zero. Delegates to {@link #inferPrice} so both the OpenRouter and
+     * Together pricing shapes are recognized; an unpriced model (either price
+     * unknown / {@code -1}) is not free.
+     */
+    private static boolean inferIsFree(JsonObject obj) {
+        return inferPrice(obj, FIELD_PROMPT) == 0 && inferPrice(obj, FIELD_COMPLETION) == 0;
     }
 
     // --- Leaderboard ---
