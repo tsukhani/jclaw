@@ -2,6 +2,10 @@ import agents.ToolContext;
 import agents.ToolRegistry;
 import models.Agent;
 import models.Conversation;
+import models.MessageRole;
+import models.Task;
+import models.TaskRun;
+import models.TaskRunMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
@@ -11,6 +15,8 @@ import services.ConfigService;
 import services.ConversationService;
 import services.compression.ContentHash;
 import tools.CcrRetrieveTool;
+
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -54,6 +60,45 @@ class CcrRetrieveToolTest extends UnitTest {
     }
 
     @Test
+    void retrievesTaskRunOriginalByHash() {
+        // JCLAW-462: task fires run on a stub Conversation (null id) and persist
+        // tool turns to task_run_message — ccr_retrieve must scan that schema
+        // when scoped by task-run id instead of conversation id.
+        var content = "[{\"id\":1,\"name\":\"alpha\"},{\"id\":2,\"name\":\"beta\"},{\"id\":3,\"name\":\"gamma\"}]";
+        var run = seedTaskRunWithToolResult(content);
+        var handle = ContentHash.handle(content);
+
+        var result = ToolContext.withScope(null, run.id,
+                () -> new CcrRetrieveTool().execute("{\"hash\":\"" + handle + "\"}", agent));
+        assertEquals(content, result, "should return the full original task-run tool result verbatim");
+    }
+
+    private TaskRun seedTaskRunWithToolResult(String content) {
+        var task = new Task();
+        task.agent = agent;
+        task.name = "ccr-task-" + System.nanoTime();
+        task.type = Task.Type.IMMEDIATE;
+        task.status = Task.Status.PENDING;
+        task.scheduledAt = Instant.now();
+        task.nextRunAt = Instant.now();
+        task.save();
+
+        var run = new TaskRun();
+        run.task = task;
+        run.startedAt = Instant.now();
+        run.status = TaskRun.Status.RUNNING;
+        run.save();
+
+        var msg = new TaskRunMessage();
+        msg.taskRun = run;
+        msg.turnIndex = 0;
+        msg.role = MessageRole.TOOL;
+        msg.content = content;
+        msg.save();
+        return run;
+    }
+
+    @Test
     void reportsMissForUnknownHash() {
         ConversationService.appendToolResult(conv, "call_1", "{\"a\":1}");
         var result = ToolContext.withConversation(conv.id,
@@ -65,6 +110,6 @@ class CcrRetrieveToolTest extends UnitTest {
     void errorsWithoutConversationContext() {
         // Called outside any tool dispatch — ToolContext is empty.
         var result = new CcrRetrieveTool().execute("{\"hash\":\"abc123\"}", agent);
-        assertTrue(result.startsWith("Error: ccr_retrieve has no active conversation context"), result);
+        assertTrue(result.startsWith("Error: ccr_retrieve has no active conversation or task-run context"), result);
     }
 }

@@ -65,7 +65,7 @@ public final class ParallelToolExecutor {
      * to call from multiple virtual threads concurrently.
      */
     static ToolRegistry.ToolResult runToolCall(ToolCall toolCall, Agent agent, Long conversationId,
-                                               Consumer<String> onStatus) {
+                                               Long taskRunId, Consumer<String> onStatus) {
         var rawName = toolCall.function().name();
         var rawArgs = toolCall.function().arguments();
         // JCLAW-281: when the model invokes a server-level mcp_<server> handle
@@ -97,9 +97,10 @@ public final class ParallelToolExecutor {
         // JCLAW-170: use the rich-output path so search-style tools can emit a
         // structured JSON payload alongside the LLM-visible text. Non-rich
         // tools fall through the default and return a text-only ToolResult.
-        // JCLAW-462: expose the conversation id to tools that need it
-        // (ccr_retrieve) via ToolContext, set on this tool's own VT.
-        var result = ToolContext.withConversation(conversationId,
+        // JCLAW-462: expose the run scope (conversation id for chat, task-run
+        // id for task fires) to tools that need it (ccr_retrieve) via
+        // ToolContext, set on this tool's own VT.
+        var result = ToolContext.withScope(conversationId, taskRunId,
                 () -> ToolRegistry.executeRich(rawName, rawArgs, agent));
         var text = result.text();
         var resultPreview = text.length() > 200
@@ -164,14 +165,20 @@ public final class ParallelToolExecutor {
         int n = toolCalls.size();
         if (n == 0) return;
 
+        // JCLAW-462: task fires carry no conversation id (stub Conversation,
+        // null id); their tool turns persist to task_run_message via
+        // TaskRunSink. Surface the task-run id so ccr_retrieve can scan that
+        // schema. null for the chat path (ConversationSink).
+        Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;
+
         ToolRegistry.ToolResult[] results = new ToolRegistry.ToolResult[n];
 
         if (n == 1) {
             if (isCancelled == null || !isCancelled.get()) {
-                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, onStatus);
+                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, onStatus);
             }
         } else {
-            dispatchMultiToolCalls(toolCalls, agent, conversationId, results, onStatus, isCancelled);
+            dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, isCancelled);
         }
 
         commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink);
@@ -194,7 +201,7 @@ public final class ParallelToolExecutor {
      * like the safe singletons, see their declared positions.
      */
     private static void dispatchMultiToolCalls(List<ToolCall> toolCalls, Agent agent, Long conversationId,
-                                               ToolRegistry.ToolResult[] results,
+                                               Long taskRunId, ToolRegistry.ToolResult[] results,
                                                Consumer<String> onStatus, AtomicBoolean isCancelled) {
         var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
         var safeCalls = new ArrayList<Integer>();
@@ -211,7 +218,7 @@ public final class ParallelToolExecutor {
         int workUnits = safeCalls.size() + unsafeGroups.size();
         var latch = new CountDownLatch(workUnits);
         var ctx = new DispatchContext(
-                toolCalls, agent, conversationId, onStatus, isCancelled, latch);
+                toolCalls, agent, conversationId, taskRunId, onStatus, isCancelled, latch);
 
         // One virtual thread per parallel-safe call — full concurrency.
         for (int idx : safeCalls) {
@@ -240,7 +247,7 @@ public final class ParallelToolExecutor {
      * separately.
      */
     private record DispatchContext(List<ToolCall> toolCalls, Agent agent, Long conversationId,
-                                   Consumer<String> onStatus,
+                                   Long taskRunId, Consumer<String> onStatus,
                                    AtomicBoolean isCancelled, CountDownLatch latch) {}
 
     /** Body of one parallel-safe work unit: dispatch a single call. */
@@ -248,7 +255,7 @@ public final class ParallelToolExecutor {
         try {
             if (ctx.isCancelled() != null && ctx.isCancelled().get()) return;
             results[i] = runToolCallSafely(
-                    ctx.toolCalls().get(i), ctx.agent(), ctx.conversationId(), ctx.onStatus());
+                    ctx.toolCalls().get(i), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.onStatus());
         } finally {
             ctx.latch().countDown();
         }
@@ -260,7 +267,7 @@ public final class ParallelToolExecutor {
             for (int idx : group) {
                 if (ctx.isCancelled() != null && ctx.isCancelled().get()) break;
                 results[idx] = runToolCallSafely(
-                        ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.onStatus());
+                        ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.onStatus());
             }
         } finally {
             ctx.latch().countDown();
@@ -272,9 +279,9 @@ public final class ParallelToolExecutor {
      * {@code Error executing tool} {@link ToolRegistry.ToolResult}.
      */
     private static ToolRegistry.ToolResult runToolCallSafely(ToolCall tc, Agent agent, Long conversationId,
-                                                             Consumer<String> onStatus) {
+                                                             Long taskRunId, Consumer<String> onStatus) {
         try {
-            return runToolCall(tc, agent, conversationId, onStatus);
+            return runToolCall(tc, agent, conversationId, taskRunId, onStatus);
         } catch (Exception e) {
             EventLogger.error("tool", agent.name, null,
                     "Tool '%s' threw: %s"

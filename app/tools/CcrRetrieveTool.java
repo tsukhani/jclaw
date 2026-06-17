@@ -5,12 +5,15 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Message;
+import models.MessageRole;
+import models.TaskRunMessage;
 import services.ConversationService;
 import services.Tx;
 import services.compression.ContentHash;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * CCR retrieve (JCLAW-462). Returns the full, uncompressed original of a
@@ -20,10 +23,13 @@ import java.util.Map;
  * the LLM passes that handle here when the compressed view (first items +
  * schema + errors) isn't enough.
  *
- * <p>No cache table: the original tool result already lives durably in the
- * {@code Message} row. This tool rescans the active conversation's tool-role
- * messages and matches the handle against the SHA-256 of each content. Scoped
- * to the conversation via {@link ToolContext}.
+ * <p>No cache table: the original tool result already lives durably in a
+ * message row. The active run is either a chat ({@code Message} rows scoped by
+ * conversation) or a task fire ({@code TaskRunMessage} rows scoped by task run —
+ * task fires run on a stub Conversation with no id and persist to
+ * {@code task_run_message}); the scope is surfaced via {@link ToolContext}. This
+ * tool rescans the matching tool-role rows and returns the one whose content
+ * SHA-256 matches the handle.
  */
 public class CcrRetrieveTool implements ToolRegistry.Tool {
 
@@ -84,25 +90,44 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
         }
 
         var conversationId = ToolContext.conversationId();
-        if (conversationId == null) {
-            return "Error: ccr_retrieve has no active conversation context.";
+        var taskRunId = ToolContext.taskRunId();
+        if (conversationId == null && taskRunId == null) {
+            return "Error: ccr_retrieve has no active conversation or task-run context.";
         }
 
         return Tx.run(() -> {
-            var conv = ConversationService.findById(conversationId);
-            if (conv == null) {
-                return "Error: conversation not found.";
-            }
             // Newest-first: a just-compressed result is usually the one wanted.
-            List<Message> toolMsgs = Message.<Message>find(
-                    "conversation = ?1 AND role = ?2 ORDER BY id DESC", conv, "tool").fetch();
-            for (var m : toolMsgs) {
-                if (m.content != null && ContentHash.sha256Hex(m.content).startsWith(handle)) {
-                    return m.content;
+            if (conversationId != null) {
+                var conv = ConversationService.findById(conversationId);
+                if (conv == null) {
+                    return "Error: conversation not found.";
                 }
+                List<Message> rows = Message.<Message>find(
+                        "conversation = ?1 AND role = ?2 ORDER BY id DESC", conv, "tool").fetch();
+                var hit = matchByHash(rows, m -> m.content, handle);
+                if (hit != null) return hit;
+            } else {
+                // JCLAW-462: task fires persist tool turns to task_run_message,
+                // not the chat Message/Conversation tables — scan those instead.
+                List<TaskRunMessage> rows = TaskRunMessage.<TaskRunMessage>find(
+                        "taskRun.id = ?1 AND role = ?2 ORDER BY id DESC", taskRunId, MessageRole.TOOL).fetch();
+                var hit = matchByHash(rows, m -> m.content, handle);
+                if (hit != null) return hit;
             }
-            return "No original found for hash \"" + handle + "\" in this conversation "
-                    + "(it may have been trimmed from history).";
+            return "No original found for hash \"" + handle + "\" in this "
+                    + (conversationId != null ? "conversation" : "task run")
+                    + " (it may have been trimmed from history).";
         });
+    }
+
+    /** First row (in iteration order) whose content SHA-256 starts with {@code handle}, or null. */
+    private static <T> String matchByHash(List<T> rows, Function<T, String> content, String handle) {
+        for (var r : rows) {
+            var c = content.apply(r);
+            if (c != null && ContentHash.sha256Hex(c).startsWith(handle)) {
+                return c;
+            }
+        }
+        return null;
     }
 }
