@@ -60,10 +60,8 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
 
     @Override
     public String description() {
-        return "Retrieve the full, uncompressed original of a content-compressed tool result by its hash. "
-                + "Compressed tool outputs end with a marker like "
-                + "[compressed — call ccr_retrieve(\"<hash>\") for the full original]; pass that <hash> here "
-                + "when the compressed view (first items, schema and errors) isn't enough.";
+        return "Retrieve the full, uncompressed original of a content-compressed tool result — "
+                + "pass the hash from its [compressed — ccr_retrieve(\"<hash>\")] marker.";
     }
 
     @Override
