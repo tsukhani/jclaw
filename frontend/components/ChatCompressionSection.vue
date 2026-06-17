@@ -167,11 +167,12 @@ function fmt(n: number) {
 
 <template>
   <div class="bg-surface-elevated border border-border mb-8">
-    <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-      <h2 class="text-sm font-medium text-fg-primary">
-        Chat Compression
-      </h2>
-      <div class="flex items-center gap-2">
+    <div class="px-4 py-3 border-b border-border grid grid-cols-[auto_1fr_auto] items-center gap-3">
+      <!-- Left: title + view toggle -->
+      <div class="flex items-center gap-3 min-w-0">
+        <h2 class="text-sm font-medium text-fg-primary shrink-0">
+          Chat Compression
+        </h2>
         <div
           class="inline-flex items-center border border-border overflow-hidden"
           role="tablist"
@@ -198,6 +199,58 @@ function fmt(n: number) {
             <ChartBarIcon class="w-4 h-4" />
           </button>
         </div>
+      </div>
+
+      <!-- Center: window + agent + channel filters -->
+      <div class="flex items-center justify-center gap-3 flex-wrap">
+        <div class="inline-flex items-center border border-border overflow-hidden">
+          <button
+            v-for="w in WINDOWS"
+            :key="w.key"
+            type="button"
+            class="px-2.5 py-1 text-xs"
+            :class="selectedWindow === w.key ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
+            @click="selectedWindow = w.key"
+          >
+            {{ w.label }}
+          </button>
+        </div>
+        <select
+          v-model="selectedAgentId"
+          aria-label="Filter by agent"
+          class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
+        >
+          <option :value="null">
+            All agents
+          </option>
+          <option
+            v-for="a in availableAgents"
+            :key="a.id"
+            :value="a.id"
+          >
+            {{ a.name }}
+          </option>
+        </select>
+        <select
+          v-model="selectedChannel"
+          aria-label="Filter by channel"
+          class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
+        >
+          <option :value="null">
+            All channels
+          </option>
+          <option
+            v-for="c in availableChannels"
+            :key="c"
+            :value="c"
+          >
+            {{ c }}
+          </option>
+        </select>
+      </div>
+
+      <!-- Right: reset -->
+      <div class="flex items-center shrink-0">
         <button
           type="button"
           title="Reset compression metrics"
@@ -208,53 +261,6 @@ function fmt(n: number) {
           <TrashIcon class="w-4 h-4" />
         </button>
       </div>
-    </div>
-
-    <div class="px-4 py-2.5 border-b border-border flex flex-wrap items-center gap-3">
-      <div class="inline-flex items-center border border-border overflow-hidden">
-        <button
-          v-for="w in WINDOWS"
-          :key="w.key"
-          type="button"
-          class="px-2.5 py-1 text-xs"
-          :class="selectedWindow === w.key ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
-          @click="selectedWindow = w.key"
-        >
-          {{ w.label }}
-        </button>
-      </div>
-      <select
-        v-model="selectedAgentId"
-        aria-label="Filter by agent"
-        class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
-      >
-        <option :value="null">
-          All agents
-        </option>
-        <option
-          v-for="a in availableAgents"
-          :key="a.id"
-          :value="a.id"
-        >
-          {{ a.name }}
-        </option>
-      </select>
-      <select
-        v-model="selectedChannel"
-        aria-label="Filter by channel"
-        class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
-      >
-        <option :value="null">
-          All channels
-        </option>
-        <option
-          v-for="c in availableChannels"
-          :key="c"
-          :value="c"
-        >
-          {{ c }}
-        </option>
-      </select>
     </div>
 
     <div
@@ -274,7 +280,7 @@ function fmt(n: number) {
         <div
           v-for="(a, i) in agg.alerts"
           :key="i"
-          class="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1"
+          class="text-xs text-amber-600 dark:text-amber-400 bg-surface border border-border px-2 py-1"
         >
           ⚠ {{ a }}
         </div>
