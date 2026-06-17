@@ -1739,6 +1739,129 @@ async function deleteLoggerLevel(logger: string) {
       </div>
     </div>
 
+    <!-- Logging Levels: per-logger runtime level overrides. -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-fg-muted">
+        Logging Levels
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Override the log level for a specific logger — a single class
+        (<span class="font-mono">controllers.ApiChatController</span>) or a whole
+        tree (<span class="font-mono">play</span>). Changes apply immediately, are
+        saved, and survive a restart — overriding the levels in
+        <span class="font-mono">log4j2.xml</span> and
+        <span class="font-mono">application.conf</span>. Use
+        <span class="font-mono">root</span> for the global level. Deleting an entry
+        reverts that logger to its inherited level.
+      </p>
+
+      <div class="bg-surface-elevated border border-border">
+        <!-- Add row -->
+        <div class="px-4 py-2.5 flex items-center gap-3 border-b border-border">
+          <input
+            v-model="newLoggerName"
+            type="text"
+            list="logging-logger-suggestions"
+            placeholder="logger (e.g. play or controllers.ApiChatController)"
+            aria-label="Logger name"
+            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            @keyup.enter="addLoggerLevel"
+          >
+          <datalist id="logging-logger-suggestions">
+            <option
+              v-for="name in knownLoggers"
+              :key="name"
+              :value="name"
+            />
+          </datalist>
+          <select
+            v-model="newLoggerLevel"
+            aria-label="New logger level"
+            class="px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+          >
+            <option
+              v-for="lvl in logLevelOptions"
+              :key="lvl"
+              :value="lvl"
+            >
+              {{ lvl }}
+            </option>
+          </select>
+          <button
+            class="shrink-0 p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Add override"
+            :disabled="saving || !newLoggerName.trim()"
+            @click="addLoggerLevel"
+          >
+            <PlusIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+
+        <!-- Existing overrides -->
+        <div
+          v-if="loggerLevels.length"
+          class="divide-y divide-border"
+        >
+          <div
+            v-for="entry in loggerLevels"
+            :key="entry.logger"
+            class="px-4 py-2.5 flex items-center gap-3"
+          >
+            <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ entry.logger }}</span>
+            <select
+              :value="entry.level"
+              :aria-label="`Level for ${entry.logger}`"
+              class="px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              @change="updateLoggerLevel(entry.logger, ($event.target as HTMLSelectElement).value)"
+            >
+              <option
+                v-for="lvl in logLevelOptions"
+                :key="lvl"
+                :value="lvl"
+              >
+                {{ lvl }}
+              </option>
+            </select>
+            <button
+              class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-40"
+              :title="`Delete override for ${entry.logger}`"
+              :disabled="saving"
+              @click="deleteLoggerLevel(entry.logger)"
+            >
+              <TrashIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+        </div>
+        <div
+          v-else
+          class="px-4 py-2.5 text-xs text-fg-muted"
+        >
+          No overrides — every logger uses its configured level.
+        </div>
+      </div>
+
+      <p
+        v-if="newLoggerUnknown"
+        class="text-xs text-amber-600 dark:text-amber-400"
+      >
+        No logger named <span class="font-mono">{{ newLoggerName.trim() }}</span> has
+        logged yet — double-check the spelling, or add it anyway to pre-set a logger
+        that hasn't run.
+      </p>
+      <p
+        v-if="loggingError"
+        class="text-xs text-red-600 dark:text-red-400"
+      >
+        {{ loggingError }}
+      </p>
+    </div>
+
     <!-- Provider sections -->
     <div
       class="mb-6 space-y-4"
@@ -5127,129 +5250,6 @@ async function deleteLoggerLevel(logger: string) {
           </button>
         </div>
       </div>
-    </div>
-
-    <!-- Logging Levels: per-logger runtime level overrides. -->
-    <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">
-        Logging Levels
-      </h2>
-      <p class="text-xs text-fg-muted">
-        Override the log level for a specific logger — a single class
-        (<span class="font-mono">controllers.ApiChatController</span>) or a whole
-        tree (<span class="font-mono">play</span>). Changes apply immediately, are
-        saved, and survive a restart — overriding the levels in
-        <span class="font-mono">log4j2.xml</span> and
-        <span class="font-mono">application.conf</span>. Use
-        <span class="font-mono">root</span> for the global level. Deleting an entry
-        reverts that logger to its inherited level.
-      </p>
-
-      <div class="bg-surface-elevated border border-border">
-        <!-- Add row -->
-        <div class="px-4 py-2.5 flex items-center gap-3 border-b border-border">
-          <input
-            v-model="newLoggerName"
-            type="text"
-            list="logging-logger-suggestions"
-            placeholder="logger (e.g. play or controllers.ApiChatController)"
-            aria-label="Logger name"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-            @keyup.enter="addLoggerLevel"
-          >
-          <datalist id="logging-logger-suggestions">
-            <option
-              v-for="name in knownLoggers"
-              :key="name"
-              :value="name"
-            />
-          </datalist>
-          <select
-            v-model="newLoggerLevel"
-            aria-label="New logger level"
-            class="px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-          >
-            <option
-              v-for="lvl in logLevelOptions"
-              :key="lvl"
-              :value="lvl"
-            >
-              {{ lvl }}
-            </option>
-          </select>
-          <button
-            class="shrink-0 p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Add override"
-            :disabled="saving || !newLoggerName.trim()"
-            @click="addLoggerLevel"
-          >
-            <PlusIcon
-              class="w-4 h-4"
-              aria-hidden="true"
-            />
-          </button>
-        </div>
-
-        <!-- Existing overrides -->
-        <div
-          v-if="loggerLevels.length"
-          class="divide-y divide-border"
-        >
-          <div
-            v-for="entry in loggerLevels"
-            :key="entry.logger"
-            class="px-4 py-2.5 flex items-center gap-3"
-          >
-            <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ entry.logger }}</span>
-            <select
-              :value="entry.level"
-              :aria-label="`Level for ${entry.logger}`"
-              class="px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-              @change="updateLoggerLevel(entry.logger, ($event.target as HTMLSelectElement).value)"
-            >
-              <option
-                v-for="lvl in logLevelOptions"
-                :key="lvl"
-                :value="lvl"
-              >
-                {{ lvl }}
-              </option>
-            </select>
-            <button
-              class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-40"
-              :title="`Delete override for ${entry.logger}`"
-              :disabled="saving"
-              @click="deleteLoggerLevel(entry.logger)"
-            >
-              <TrashIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-        </div>
-        <div
-          v-else
-          class="px-4 py-2.5 text-xs text-fg-muted"
-        >
-          No overrides — every logger uses its configured level.
-        </div>
-      </div>
-
-      <p
-        v-if="newLoggerUnknown"
-        class="text-xs text-amber-600 dark:text-amber-400"
-      >
-        No logger named <span class="font-mono">{{ newLoggerName.trim() }}</span> has
-        logged yet — double-check the spelling, or add it anyway to pre-set a logger
-        that hasn't run.
-      </p>
-      <p
-        v-if="loggingError"
-        class="text-xs text-red-600 dark:text-red-400"
-      >
-        {{ loggingError }}
-      </p>
     </div>
 
     <!-- Unmanaged config entries (diagnostic) -->
