@@ -95,7 +95,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
             return "Error: ccr_retrieve has no active conversation or task-run context.";
         }
 
-        return Tx.run(() -> {
+        var result = Tx.run(() -> {
             // Newest-first: a just-compressed result is usually the one wanted.
             if (conversationId != null) {
                 var conv = ConversationService.findById(conversationId);
@@ -118,6 +118,12 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
                     + (conversationId != null ? "conversation" : "task run")
                     + " (it may have been trimmed from history).";
         });
+        // JCLAW-467: record the hit/miss for the CCR cache-hit-rate metric. System
+        // errors (no context / conversation not found) aren't a retrieval outcome.
+        if (!result.startsWith("Error:")) {
+            services.CompressionMetrics.recordCcrRetrieval(handle, !result.startsWith("No original found"));
+        }
+        return result;
     }
 
     /** First row (in iteration order) whose content SHA-256 starts with {@code handle}, or null. */

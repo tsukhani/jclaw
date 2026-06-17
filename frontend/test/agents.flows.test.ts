@@ -132,6 +132,13 @@ function setupAgentsApi(opts?: {
     { name: 'exec', description: 'Execute shell', system: false, enabled: false },
     { name: 'filesystem', description: 'Filesystem', system: false, enabled: true },
   ])
+  const emptyMetrics = {
+    tokensSaved24h: 0, tokensSaved7d: 0, tokensSaved30d: 0,
+    ratioByType: [], algorithmUsage: [],
+    inflationGuardCount: 0, ccrRetrievals: 0, ccrHits: 0, ccrHitRate: 0, alerts: [],
+  }
+  registerEndpoint('/api/agents/1/compression-metrics', () => emptyMetrics)
+  registerEndpoint('/api/agents/2/compression-metrics', () => emptyMetrics)
   registerEndpoint('/api/agents/1/skills', () => opts?.agent1Skills ?? [])
   registerEndpoint('/api/agents/2/skills', () => opts?.agent2Skills ?? [
     { name: 'web-search', enabled: true, isGlobal: true, tools: [] },

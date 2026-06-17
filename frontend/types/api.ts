@@ -24,6 +24,20 @@ export interface Agent {
   compressionTargetRatio: number
 }
 
+/** JCLAW-467: per-agent compression metrics (GET /api/agents/{id}/compression-metrics). */
+export interface CompressionMetricsSummary {
+  tokensSaved24h: number
+  tokensSaved7d: number
+  tokensSaved30d: number
+  ratioByType: { contentType: string, tokensBefore: number, tokensAfter: number, ratio: number }[]
+  algorithmUsage: { algorithm: string, count: number, tokensSaved: number }[]
+  inflationGuardCount: number
+  ccrRetrievals: number
+  ccrHits: number
+  ccrHitRate: number
+  alerts: string[]
+}
+
 /**
  * One Telegram bot-agent-user binding, as surfaced by
  * {@code GET /api/channels/telegram/bindings}. The full bot token and webhook
