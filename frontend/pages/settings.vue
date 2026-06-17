@@ -1943,7 +1943,7 @@ async function deleteLoggerLevel(logger: string) {
             {{ group.label }}
           </h3>
           <span class="text-xs text-fg-muted text-right">
-            Enter an API key for at least one provider to enable chat. Base URLs and models are pre-configured.
+            Add an API key to enable chat — URLs and models preset.
           </span>
         </div>
         <div
