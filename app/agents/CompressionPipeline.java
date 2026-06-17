@@ -49,7 +49,8 @@ public final class CompressionPipeline {
      * nothing changed.
      */
     public static List<ChatMessage> compress(List<ChatMessage> messages, Agent agent, Conversation conversation) {
-        if (messages == null || messages.isEmpty() || !enabled() || !jsonEnabled()) return messages;
+        if (messages == null || messages.isEmpty() || agent == null
+                || !agent.compressionEffective() || !jsonEnabled()) return messages;
         var modelId = ModelResolver.effectiveModelId(agent, conversation);
         if (modelId == null || modelId.isBlank()) return messages;
         return compressMessages(messages, modelId, ConfigService.getInt("chat.compression.minTokens", 250));
@@ -110,10 +111,6 @@ public final class CompressionPipeline {
         play.Logger.debug("[compress] %s/%s %d->%d tokens (-%d)",
                 type, result.algorithm(), before, after, before - after);
         return candidate;
-    }
-
-    private static boolean enabled() {
-        return "true".equalsIgnoreCase(ConfigService.get("chat.compression.enabled", "false"));
     }
 
     private static boolean jsonEnabled() {

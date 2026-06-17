@@ -44,6 +44,16 @@ public class Agent extends Model {
     public boolean enabled = true;
 
     /**
+     * JCLAW-465: per-agent content-compression enable. Nullable so rows created
+     * before this column carry no explicit choice — those resolve via
+     * {@link #compressionEffective()} to the role default (main agent on, custom
+     * agents off). New agents get an explicit value at creation; the agent edit
+     * form writes the operator's override.
+     */
+    @Column(name = "compression_enabled")
+    public Boolean compressionEnabled;
+
+    /**
      * Reasoning-effort level for this agent, or {@code null} when reasoning is
      * disabled (or the model doesn't support it). Must be one of the values
      * advertised by the selected model's {@code thinkingLevels}; the API layer
@@ -95,6 +105,15 @@ public class Agent extends Model {
 
     public boolean isMain() {
         return MAIN_AGENT_NAME.equalsIgnoreCase(name);
+    }
+
+    /**
+     * Effective compression-enabled state (JCLAW-465): the explicit per-agent
+     * value when set, otherwise the role default — the main agent on, custom
+     * agents off. The compression pipeline gates per agent through this.
+     */
+    public boolean compressionEffective() {
+        return compressionEnabled != null ? compressionEnabled : isMain();
     }
 
     public static List<Agent> findEnabled() {

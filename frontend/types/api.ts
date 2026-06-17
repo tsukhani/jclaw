@@ -14,6 +14,8 @@ export interface Agent {
   thinkingMode: string | null
   /** True when the selected provider has an API key configured (populated by GET /api/agents). */
   providerConfigured?: boolean
+  /** JCLAW-465: effective per-agent content-compression enable (main on, custom off by default). */
+  compressionEnabled: boolean
 }
 
 /**

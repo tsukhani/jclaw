@@ -82,6 +82,7 @@ interface AgentForm {
   modelId: string
   enabled: boolean
   thinkingMode: string
+  compressionEnabled: boolean
 }
 const form = ref<AgentForm>({
   name: '',
@@ -90,6 +91,7 @@ const form = ref<AgentForm>({
   modelId: '',
   enabled: true,
   thinkingMode: '',
+  compressionEnabled: false,
 })
 // Snapshot of the agent form at load time (or after a successful save). See
 // formDirty below — together they gate the Save button so it's only active
@@ -329,6 +331,7 @@ const agentProviderId = useId()
 const agentModelId = useId()
 const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
+const agentCompressionId = useId()
 
 // --- System prompt breakdown dialog state ---
 // Scoped to a single agent: opened from a per-row button on the agent list, so
@@ -567,6 +570,7 @@ function newAgent() {
     modelId: defaultModel,
     enabled: true,
     thinkingMode: '',
+    compressionEnabled: false,
   }
   formBaseline.value = { ...form.value }
   creating.value = true
@@ -582,6 +586,7 @@ function editAgent(agent: Agent) {
     modelId: agent.modelId,
     enabled: agent.enabled,
     thinkingMode: agent.thinkingMode ?? '',
+    compressionEnabled: agent.compressionEnabled,
   }
   formBaseline.value = { ...form.value }
   editing.value = agent
@@ -1281,6 +1286,23 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           class="mt-5"
           @toggle="toggleFormCapability"
         />
+        <!-- JCLAW-465: per-agent content-compression toggle. Edit-only — new
+             agents take the role default (main on, custom off) applied at
+             creation, then the operator overrides it here. -->
+        <label
+          v-if="!creating"
+          :for="agentCompressionId"
+          class="flex items-center gap-2 mt-4 text-sm cursor-pointer select-none"
+        >
+          <input
+            :id="agentCompressionId"
+            v-model="form.compressionEnabled"
+            type="checkbox"
+            class="accent-emerald-600"
+          >
+          <span>Content compression</span>
+          <span class="text-xs text-fg-muted">shrinks large JSON tool outputs before the model sees them</span>
+        </label>
         <div class="flex items-center mt-4 gap-3">
           <button
             :disabled="saving || !formDirty || !form.name || !form.modelProvider || !form.modelId"

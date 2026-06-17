@@ -125,6 +125,9 @@ public class AgentService {
         // a runtime error at call time, not as a silent disabled state.
         agent.enabled = agent.isMain() || isProviderConfigured(modelProvider, modelId);
         agent.thinkingMode = normalizeThinkingMode(thinkingMode, modelProvider, modelId);
+        // JCLAW-465: content compression defaults on for the main agent, off for
+        // custom agents (same main-vs-custom split as the jclaw_api tool below).
+        agent.compressionEnabled = agent.isMain();
         agent.save();
 
         if (createWorkspace) {

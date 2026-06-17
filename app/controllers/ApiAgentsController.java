@@ -86,7 +86,8 @@ public class ApiAgentsController extends Controller {
     private record AgentView(Long id, String name, String description,
                              String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
-                             String createdAt, String updatedAt, boolean providerConfigured) {
+                             String createdAt, String updatedAt, boolean providerConfigured,
+                             boolean compressionEnabled) {
         static AgentView of(Agent a) {
             return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
         }
@@ -105,7 +106,8 @@ public class ApiAgentsController extends Controller {
         private static AgentView of(Agent a, boolean configured) {
             return new AgentView(a.id, a.name, a.description, a.modelProvider, a.modelId,
                     a.enabled, a.isMain(), a.thinkingMode,
-                    a.createdAt.toString(), a.updatedAt.toString(), configured);
+                    a.createdAt.toString(), a.updatedAt.toString(), configured,
+                    a.compressionEffective());
         }
     }
 
@@ -317,6 +319,13 @@ public class ApiAgentsController extends Controller {
         var description = body.has(KEY_DESCRIPTION)
                 ? readOptionalString(body, KEY_DESCRIPTION)
                 : agent.description;
+
+        // JCLAW-465: per-agent compression toggle. Absent key leaves the stored
+        // value untouched; set directly on the entity so AgentService.update's
+        // save() persists it alongside the other fields.
+        if (body.has("compressionEnabled") && !body.get("compressionEnabled").isJsonNull()) {
+            agent.compressionEnabled = body.get("compressionEnabled").getAsBoolean();
+        }
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);

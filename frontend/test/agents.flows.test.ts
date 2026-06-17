@@ -64,6 +64,7 @@ function setupAgentsApi(opts?: {
       isMain: true,
       providerConfigured: true,
       thinkingMode: null,
+      compressionEnabled: true,
       createdAt: '2026-04-01T10:00:00Z',
       updatedAt: '2026-04-22T10:00:00Z',
     },
@@ -76,6 +77,7 @@ function setupAgentsApi(opts?: {
       isMain: false,
       providerConfigured: true,
       thinkingMode: null,
+      compressionEnabled: false,
       createdAt: '2026-04-10T10:00:00Z',
       updatedAt: '2026-04-20T10:00:00Z',
     },
@@ -272,6 +274,38 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
       modelId: 'gpt-4',
       enabled: true,
     })
+  })
+
+  it('PUTs compressionEnabled: true when the compression toggle is checked', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+
+    // The helper agent defaults to compression OFF; checking the toggle
+    // dirties the form and the partial PUT carries the new flag.
+    const label = component.findAll('label').find(l => l.text().includes('Content compression'))
+    expect(label, 'compression toggle should render in edit mode').toBeTruthy()
+    const checkbox = label!.find<HTMLInputElement>('input[type="checkbox"]')
+    expect(checkbox.element.checked).toBe(false)
+    await checkbox.setValue(true)
+    await flushPromises()
+
+    const saveBtn = component.findAll('button').find(b => (b.attributes('title') ?? '') === 'Save')
+    await saveBtn!.trigger('click')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+
+    expect(putBody!.compressionEnabled).toBe(true)
   })
 })
 
