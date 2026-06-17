@@ -19,6 +19,9 @@ export interface Agent {
   /** JCLAW-463: effective per-type sub-toggles (master AND per-type, both default on under the master). */
   compressionJson: boolean
   compressionCode: boolean
+  /** JCLAW-464: effective Text sub-toggle + the text-compression aggressiveness ratio (0–1, default 0.3). */
+  compressionText: boolean
+  compressionTargetRatio: number
 }
 
 /**

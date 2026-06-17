@@ -305,9 +305,11 @@ const queueMode = ref('queue')
 // Optimization card (immediate-save on toggle, like Queue Mode). Initialised
 // from the agent's effective value when the edit form opens.
 const compressionEnabled = ref(false)
-// JCLAW-463: per-type sub-toggles, gated by the master above.
+// JCLAW-463/464: per-type sub-toggles, gated by the master above.
 const compressionJson = ref(false)
 const compressionCode = ref(false)
+const compressionText = ref(false)
+const compressionTargetRatio = ref(0.3)
 const savingCompression = ref(false)
 const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
@@ -340,6 +342,8 @@ const agentWorkspaceTextareaId = useId()
 const agentCompressionId = useId()
 const agentCompressionJsonId = useId()
 const agentCompressionCodeId = useId()
+const agentCompressionTextId = useId()
+const agentCompressionRatioId = useId()
 
 // --- System prompt breakdown dialog state ---
 // Scoped to a single agent: opened from a per-row button on the agent list, so
@@ -599,6 +603,8 @@ function editAgent(agent: Agent) {
   compressionEnabled.value = agent.compressionEnabled
   compressionJson.value = agent.compressionJson
   compressionCode.value = agent.compressionCode
+  compressionText.value = agent.compressionText
+  compressionTargetRatio.value = agent.compressionTargetRatio
   creating.value = false
   saveError.value = null
   loadWorkspaceFile(agent.id, 'AGENT.md')
@@ -827,7 +833,7 @@ async function saveCompression() {
 // JCLAW-463: per-type sub-toggle saves. Same immediate-save partial-PUT pattern
 // as the master; the field name is the only thing that varies.
 async function persistCompressionField(
-  key: 'compressionJson' | 'compressionCode',
+  key: 'compressionJson' | 'compressionCode' | 'compressionText',
   model: Ref<boolean>,
 ) {
   if (!editing.value) return
@@ -855,6 +861,31 @@ function saveCompressionJson() {
 
 function saveCompressionCode() {
   return persistCompressionField('compressionCode', compressionCode)
+}
+
+function saveCompressionText() {
+  return persistCompressionField('compressionText', compressionText)
+}
+
+// JCLAW-464: targetRatio is a number, not a toggle — its own immediate-save PUT.
+async function saveCompressionRatio() {
+  if (!editing.value) return
+  savingCompression.value = true
+  try {
+    await $fetch(`/api/agents/${editing.value.id}`, {
+      method: 'PUT',
+      body: { compressionTargetRatio: compressionTargetRatio.value },
+    })
+    editing.value.compressionTargetRatio = compressionTargetRatio.value
+    refresh()
+  }
+  catch (e) {
+    console.error('Failed to save compression ratio:', e)
+    compressionTargetRatio.value = editing.value.compressionTargetRatio
+  }
+  finally {
+    savingCompression.value = false
+  }
 }
 
 async function loadExecConfig(agentName: string) {
@@ -1482,6 +1513,51 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :disabled="savingCompression || !compressionEnabled"
               class="accent-emerald-600 shrink-0"
               @change="saveCompressionCode"
+            >
+          </label>
+          <label
+            :for="agentCompressionTextId"
+            class="px-4 py-2.5 pl-9 flex items-center justify-between gap-4 select-none"
+            :class="compressionEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+          >
+            <div>
+              <span class="text-sm text-fg-strong">Text &amp; logs</span>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                Collapse near-duplicate lines, summarize long prose
+              </div>
+            </div>
+            <input
+              :id="agentCompressionTextId"
+              v-model="compressionText"
+              type="checkbox"
+              :disabled="savingCompression || !compressionEnabled"
+              class="accent-emerald-600 shrink-0"
+              @change="saveCompressionText"
+            >
+          </label>
+          <!-- Text aggressiveness (advanced): the minimum shrink the text
+               compressor must hit to keep a rewrite. Gated by master AND Text. -->
+          <label
+            :for="agentCompressionRatioId"
+            class="px-4 py-2.5 pl-9 flex items-center justify-between gap-4 select-none"
+            :class="(compressionEnabled && compressionText) ? '' : 'opacity-50'"
+          >
+            <div>
+              <span class="text-sm text-fg-strong">Text aggressiveness</span>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                Minimum shrink to keep a rewrite — {{ Math.round(compressionTargetRatio * 100) }}%
+              </div>
+            </div>
+            <input
+              :id="agentCompressionRatioId"
+              v-model.number="compressionTargetRatio"
+              type="number"
+              min="0.05"
+              max="0.95"
+              step="0.05"
+              :disabled="savingCompression || !compressionEnabled || !compressionText"
+              class="w-20 px-2 py-1 text-sm bg-surface border border-border text-fg-strong shrink-0"
+              @change="saveCompressionRatio"
             >
           </label>
         </div>

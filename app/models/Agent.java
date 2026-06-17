@@ -66,6 +66,19 @@ public class Agent extends Model {
     @Column(name = "compression_code")
     public Boolean compressionCode;
 
+    @Column(name = "compression_text")
+    public Boolean compressionText;
+
+    /**
+     * JCLAW-464: per-agent text-compression aggressiveness (0–1) — the minimum
+     * shrink the statistical text compressor must achieve to keep its rewrite.
+     * Nullable, resolving to {@code TextCompressor.DEFAULT_TARGET_RATIO} (0.3) in
+     * the pipeline. Held as a raw Double so the model carries no
+     * services.compression dependency.
+     */
+    @Column(name = "compression_target_ratio")
+    public Double compressionTargetRatio;
+
     /**
      * Reasoning-effort level for this agent, or {@code null} when reasoning is
      * disabled (or the model doesn't support it). Must be one of the values
@@ -140,6 +153,10 @@ public class Agent extends Model {
 
     public boolean compressionCodeEffective() {
         return compressionEffective() && (compressionCode == null || compressionCode);
+    }
+
+    public boolean compressionTextEffective() {
+        return compressionEffective() && (compressionText == null || compressionText);
     }
 
     public static List<Agent> findEnabled() {

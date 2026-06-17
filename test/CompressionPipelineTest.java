@@ -13,8 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * JCLAW-465 (core): the compression pipeline's routing and guards. Exercises
- * the pure {@code compressMessages} seam — TOOL-role JSON and CODE above the
- * token floor are compressed; everything else passes through untouched.
+ * the pure {@code compressMessages} seam — TOOL-role JSON, CODE and TEXT/LOG
+ * above the token floor are compressed; everything else passes through untouched.
  */
 class CompressionPipelineTest extends UnitTest {
 
@@ -102,13 +102,15 @@ class CompressionPipelineTest extends UnitTest {
     }
 
     @Test
-    void skipsNonJsonToolContent() {
-        // A large plain-text tool output (>250 tokens). TEXT has no compressor
-        // wired until JCLAW-464, so it passes through untouched.
-        var text = "The build completed successfully. ".repeat(80);
+    void compressesTextToolContent() {
+        // JCLAW-464: TEXT/LOG now route to the statistical TextCompressor.
+        var text = "The build step finished without issues. ".repeat(60);
         var msg = ChatMessage.toolResult("call_3", "shell", text);
         var out = CompressionPipeline.compressMessages(List.of(msg), MODEL, 250);
-        assertSame(msg, out.get(0), "TEXT content is not compressed until JCLAW-464");
+        var compressed = out.get(0);
+        assertNotSame(msg, compressed, "repetitive TEXT should be compressed");
+        assertTrue(((String) compressed.content()).contains(
+                "ccr_retrieve(\"" + ContentHash.handle(text) + "\")"), "ccr handle present");
     }
 
     @Test

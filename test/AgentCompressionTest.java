@@ -42,6 +42,7 @@ class AgentCompressionTest extends UnitTest {
         var a = named(Agent.MAIN_AGENT_NAME, null); // master on by role default
         assertTrue(a.compressionJsonEffective(), "JSON defaults on under the master");
         assertTrue(a.compressionCodeEffective(), "Code defaults on under the master");
+        assertTrue(a.compressionTextEffective(), "Text defaults on under the master");
     }
 
     @Test
@@ -49,8 +50,10 @@ class AgentCompressionTest extends UnitTest {
         var a = named("helper", false); // master explicitly off
         a.compressionJson = true;
         a.compressionCode = true;
+        a.compressionText = true;
         assertFalse(a.compressionJsonEffective(), "master off gates JSON off");
         assertFalse(a.compressionCodeEffective(), "master off gates Code off");
+        assertFalse(a.compressionTextEffective(), "master off gates Text off");
     }
 
     @Test

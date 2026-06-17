@@ -25,10 +25,12 @@ function setupAgentsApi() {
     { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
       enabled: true, isMain: true, providerConfigured: true,
       thinkingMode: null, compressionEnabled: true, compressionJson: true, compressionCode: true,
+      compressionText: true, compressionTargetRatio: 0.3,
       createdAt: '2026-04-01T10:00:00Z', updatedAt: '2026-04-22T10:00:00Z' },
     { id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4',
       enabled: true, isMain: false, providerConfigured: true,
       thinkingMode: null, compressionEnabled: false, compressionJson: false, compressionCode: false,
+      compressionText: false, compressionTargetRatio: 0.3,
       createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z' },
   ])
   registerEndpoint('/api/config', () => ({

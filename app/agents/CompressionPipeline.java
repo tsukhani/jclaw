@@ -12,6 +12,7 @@ import services.compression.ContentHash;
 import services.compression.ContentType;
 import services.compression.ContentTypeDetector;
 import services.compression.JsonCompressor;
+import services.compression.TextCompressor;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -26,16 +27,15 @@ import java.util.Set;
  * check sees the smaller payload and compaction fires less often.
  *
  * <p><b>Routing (JCLAW-460):</b> each eligible body is classified by
- * {@link ContentTypeDetector} and sent to the matching {@link ContentCompressor}.
- * Wired today: JSON (JCLAW-461) and CODE (JCLAW-463); LOG / TEXT join at
- * {@link #compressorFor} when JCLAW-464 lands.
+ * {@link ContentTypeDetector} and sent to the matching {@link ContentCompressor}:
+ * JSON (JCLAW-461), CODE (JCLAW-463), and TEXT/LOG (JCLAW-464, statistical).
  *
- * <p><b>Per-agent gating (JCLAW-463/465):</b> the master enable
- * ({@link Agent#compressionEffective()}) gates everything; under it, a per-type
- * sub-toggle ({@link Agent#compressionJsonEffective()} /
- * {@link Agent#compressionCodeEffective()}) decides which content types are
- * compressed for this agent. {@link #enabledTypesFor} folds those into the type
- * set passed to the router.
+ * <p><b>Per-agent gating (JCLAW-463/464/465):</b> the master enable
+ * ({@link Agent#compressionEffective()}) gates everything; under it, per-type
+ * sub-toggles ({@code compression{Json,Code,Text}Effective()}) decide which
+ * content types are compressed, and {@code compressionTargetRatio} tunes the
+ * text compressor's aggressiveness. {@link #enabledTypesFor} and the agent's
+ * ratio fold into the {@link CompressionSettings} passed to the router.
  *
  * <p><b>Safety:</b> only TOOL-role messages with plain String content are
  * touched — USER / ASSISTANT / SYSTEM turns (intent, instructions) are never
@@ -55,12 +55,15 @@ public final class CompressionPipeline {
     // agents <-> tools package cycle.
     private static final String CCR_RETRIEVE_TOOL = "ccr_retrieve";
 
-    /** The compressor for a content type, or {@code null} when none is wired yet (LOG/TEXT pre-464). */
-    private static ContentCompressor compressorFor(ContentType type) {
+    /** Enabled content types plus the text compressor's aggressiveness for one compress() call. */
+    private record CompressionSettings(Set<ContentType> types, double targetRatio) {}
+
+    /** The compressor for a content type. TEXT/LOG share the statistical compressor, tuned per agent. */
+    private static ContentCompressor compressorFor(ContentType type, double targetRatio) {
         return switch (type) {
             case JSON -> JSON;
             case CODE -> CODE;
-            case LOG, TEXT -> null;
+            case LOG, TEXT -> new TextCompressor(targetRatio);
         };
     }
 
@@ -73,12 +76,15 @@ public final class CompressionPipeline {
         if (messages == null || messages.isEmpty() || agent == null || !agent.compressionEffective()) {
             return messages;
         }
-        var enabled = enabledTypesFor(agent);
-        if (enabled.isEmpty()) return messages;
+        var types = enabledTypesFor(agent);
+        if (types.isEmpty()) return messages;
         var modelId = ModelResolver.effectiveModelId(agent, conversation);
         if (modelId == null || modelId.isBlank()) return messages;
+        var ratio = agent.compressionTargetRatio != null
+                ? agent.compressionTargetRatio : TextCompressor.DEFAULT_TARGET_RATIO;
         return compressMessages(messages, modelId,
-                ConfigService.getInt("chat.compression.minTokens", 250), enabled);
+                ConfigService.getInt("chat.compression.minTokens", 250),
+                new CompressionSettings(types, ratio));
     }
 
     /** Content types compressed for this agent: master on, per-type sub-toggle not opted out. */
@@ -86,25 +92,31 @@ public final class CompressionPipeline {
         var set = EnumSet.noneOf(ContentType.class);
         if (agent.compressionJsonEffective()) set.add(ContentType.JSON);
         if (agent.compressionCodeEffective()) set.add(ContentType.CODE);
+        if (agent.compressionTextEffective()) {
+            set.add(ContentType.TEXT);
+            set.add(ContentType.LOG);
+        }
         return set;
     }
 
     /**
-     * Pure compression core — a test seam that enables every wired content type,
-     * so routing and the token-level inflation guard can be exercised without an
-     * {@link Agent} / {@link Conversation} or per-agent config. Returns the same
-     * list instance when nothing was compressed, so callers can cheaply detect a no-op.
+     * Pure compression core — a test seam that enables every content type at the
+     * default target ratio, so routing and the token-level inflation guard can be
+     * exercised without an {@link Agent} / {@link Conversation} or per-agent
+     * config. Returns the same list instance when nothing was compressed, so
+     * callers can cheaply detect a no-op.
      */
     public static List<ChatMessage> compressMessages(List<ChatMessage> messages, String modelId, int minTokens) {
-        return compressMessages(messages, modelId, minTokens, EnumSet.allOf(ContentType.class));
+        return compressMessages(messages, modelId, minTokens,
+                new CompressionSettings(EnumSet.allOf(ContentType.class), TextCompressor.DEFAULT_TARGET_RATIO));
     }
 
-    public static List<ChatMessage> compressMessages(List<ChatMessage> messages, String modelId, int minTokens,
-                                                     Set<ContentType> enabledTypes) {
+    private static List<ChatMessage> compressMessages(List<ChatMessage> messages, String modelId, int minTokens,
+                                                      CompressionSettings settings) {
         var out = new ArrayList<ChatMessage>(messages.size());
         var anyChanged = false;
         for (var msg : messages) {
-            var compressed = maybeCompress(msg, modelId, minTokens, enabledTypes);
+            var compressed = maybeCompress(msg, modelId, minTokens, settings);
             anyChanged |= compressed != msg;
             out.add(compressed);
         }
@@ -112,7 +124,7 @@ public final class CompressionPipeline {
     }
 
     private static ChatMessage maybeCompress(ChatMessage msg, String modelId, int minTokens,
-                                             Set<ContentType> enabledTypes) {
+                                             CompressionSettings settings) {
         // Only TOOL-role messages with plain String content are eligible:
         // structured tool outputs are where the redundancy lives, and leaving
         // user/assistant/system turns untouched preserves intent + instructions.
@@ -126,11 +138,9 @@ public final class CompressionPipeline {
         if (before < minTokens) return msg; // below the floor — not worth the work
 
         var type = ContentTypeDetector.detect(content);
-        if (!enabledTypes.contains(type)) return msg; // type disabled for this agent
-        var compressor = compressorFor(type);
-        if (compressor == null) return msg; // no compressor wired for this type yet
+        if (!settings.types().contains(type)) return msg; // type disabled for this agent
 
-        var result = compressor.compress(content);
+        var result = compressorFor(type, settings.targetRatio()).compress(content);
         if (!result.changed()) return msg;
 
         // JCLAW-462 (CCR): leave a retrieval handle so the LLM can pull the

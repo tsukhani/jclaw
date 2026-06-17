@@ -88,7 +88,8 @@ public class ApiAgentsController extends Controller {
                              boolean enabled, boolean isMain, String thinkingMode,
                              String createdAt, String updatedAt, boolean providerConfigured,
                              boolean compressionEnabled,
-                             boolean compressionJson, boolean compressionCode) {
+                             boolean compressionJson, boolean compressionCode,
+                             boolean compressionText, double compressionTargetRatio) {
         static AgentView of(Agent a) {
             return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
         }
@@ -109,7 +110,11 @@ public class ApiAgentsController extends Controller {
                     a.enabled, a.isMain(), a.thinkingMode,
                     a.createdAt.toString(), a.updatedAt.toString(), configured,
                     a.compressionEffective(),
-                    a.compressionJsonEffective(), a.compressionCodeEffective());
+                    a.compressionJsonEffective(), a.compressionCodeEffective(),
+                    a.compressionTextEffective(),
+                    a.compressionTargetRatio != null
+                            ? a.compressionTargetRatio
+                            : services.compression.TextCompressor.DEFAULT_TARGET_RATIO);
         }
     }
 
@@ -335,6 +340,13 @@ public class ApiAgentsController extends Controller {
         }
         if (body.has("compressionCode") && !body.get("compressionCode").isJsonNull()) {
             agent.compressionCode = body.get("compressionCode").getAsBoolean();
+        }
+        if (body.has("compressionText") && !body.get("compressionText").isJsonNull()) {
+            agent.compressionText = body.get("compressionText").getAsBoolean();
+        }
+        // JCLAW-464: clamp lives in TextCompressor; persist the operator's raw value.
+        if (body.has("compressionTargetRatio") && !body.get("compressionTargetRatio").isJsonNull()) {
+            agent.compressionTargetRatio = body.get("compressionTargetRatio").getAsDouble();
         }
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
