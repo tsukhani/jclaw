@@ -144,40 +144,6 @@ public class ApiAgentsController extends Controller {
     }
 
     /**
-     * Per-agent compression metrics (JCLAW-467): token savings (24h/7d/30d),
-     * ratio by content type, algorithm usage, inflation-guard count, CCR cache
-     * hit rate, and threshold alerts. {@code ?format=csv} streams the raw events
-     * for external analysis instead of the aggregated JSON summary.
-     */
-    @Operation(summary = "Per-agent compression metrics: savings, ratios, algorithm usage, alerts")
-    public static void compressionMetrics(Long id) {
-        requireAgent(id); // 404 if the agent doesn't exist
-        var agentId = String.valueOf(id);
-        if ("csv".equalsIgnoreCase(params.get("format"))) {
-            renderCompressionMetricsCsv(agentId);
-        }
-        renderJSON(gson.toJson(services.CompressionMetrics.summary(agentId)));
-    }
-
-    private static void renderCompressionMetricsCsv(String agentId) {
-        java.util.List<models.CompressionMetric> rows = models.CompressionMetric.<models.CompressionMetric>find(
-                "agentId = ?1 order by createdAt desc", agentId).fetch();
-        var sb = new StringBuilder("kind,modelId,contentType,algorithm,tokensBefore,tokensAfter,createdAt\n");
-        for (var m : rows) {
-            sb.append(m.kind).append(',')
-                    .append(m.modelId == null ? "" : m.modelId).append(',')
-                    .append(m.contentType == null ? "" : m.contentType).append(',')
-                    .append(m.algorithm == null ? "" : m.algorithm).append(',')
-                    .append(m.tokensBefore).append(',')
-                    .append(m.tokensAfter).append(',')
-                    .append(m.createdAt).append('\n');
-        }
-        response.setHeader("Content-Disposition", "attachment; filename=compression-metrics-" + agentId + ".csv");
-        response.contentType = "text/csv";
-        renderText(sb.toString());
-    }
-
-    /**
      * Return a per-section breakdown of the system prompt this agent would receive
      * on its next turn. Feeds the Settings UI introspection dialog. Memory recall is
      * skipped (null user message) so the breakdown is deterministic for a given

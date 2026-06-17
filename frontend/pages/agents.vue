@@ -1608,12 +1608,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         </div>
       </div>
 
-      <!-- JCLAW-467: per-agent compression metrics (read-only dashboard) -->
-      <CompressionMetricsCard
-        v-if="editing"
-        :agent-id="editing.id"
-      />
-
       <!-- Exec privileges (main agent only) -->
       <div
         v-if="editing && editing.isMain"

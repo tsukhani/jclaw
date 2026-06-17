@@ -56,8 +56,8 @@ public final class CompressionPipeline {
     // agents <-> tools package cycle.
     private static final String CCR_RETRIEVE_TOOL = "ccr_retrieve";
 
-    /** Enabled content types, the text compressor's aggressiveness, and the metrics agent id. */
-    private record CompressionSettings(Set<ContentType> types, double targetRatio, String agentId) {}
+    /** Enabled content types, the text compressor's aggressiveness, and the metrics agent id + channel. */
+    private record CompressionSettings(Set<ContentType> types, double targetRatio, String agentId, String channel) {}
 
     /** The compressor for a content type. TEXT/LOG share the statistical compressor, tuned per agent. */
     private static ContentCompressor compressorFor(ContentType type, double targetRatio) {
@@ -84,9 +84,10 @@ public final class CompressionPipeline {
         var ratio = agent.compressionTargetRatio != null
                 ? agent.compressionTargetRatio : TextCompressor.DEFAULT_TARGET_RATIO;
         var agentId = agent.id != null ? String.valueOf(agent.id) : null;
+        var channel = conversation != null ? conversation.channelType : null;
         return compressMessages(messages, modelId,
                 ConfigService.getInt("chat.compression.minTokens", 250),
-                new CompressionSettings(types, ratio, agentId));
+                new CompressionSettings(types, ratio, agentId, channel));
     }
 
     /** Content types compressed for this agent: master on, per-type sub-toggle not opted out. */
@@ -110,7 +111,7 @@ public final class CompressionPipeline {
      */
     public static List<ChatMessage> compressMessages(List<ChatMessage> messages, String modelId, int minTokens) {
         return compressMessages(messages, modelId, minTokens,
-                new CompressionSettings(EnumSet.allOf(ContentType.class), TextCompressor.DEFAULT_TARGET_RATIO, null));
+                new CompressionSettings(EnumSet.allOf(ContentType.class), TextCompressor.DEFAULT_TARGET_RATIO, null, null));
     }
 
     private static List<ChatMessage> compressMessages(List<ChatMessage> messages, String modelId, int minTokens,
@@ -158,12 +159,12 @@ public final class CompressionPipeline {
             // Char savings didn't translate to token savings — keep the original.
             play.Logger.debug("[compress] inflation guard %s/%s %d->%d tokens, kept original",
                     type, result.algorithm(), before, after);
-            CompressionMetrics.recordInflationGuard(settings.agentId(), modelId, type.name(), before, after);
+            CompressionMetrics.recordInflationGuard(settings.agentId(), settings.channel(), modelId, type.name(), before, after);
             return msg;
         }
         play.Logger.debug("[compress] %s/%s %d->%d tokens (-%d)",
                 type, result.algorithm(), before, after, before - after);
-        CompressionMetrics.recordCompression(settings.agentId(), modelId, type.name(), result.algorithm(), before, after);
+        CompressionMetrics.recordCompression(settings.agentId(), settings.channel(), modelId, type.name(), result.algorithm(), before, after);
         return candidate;
     }
 }

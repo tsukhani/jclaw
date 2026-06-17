@@ -543,6 +543,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- Chat Compression (JCLAW-467): per-window compression savings + breakdowns. -->
+    <ChatCompressionSection :agents="agents" />
+
     <!-- Recent Events -->
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-3 border-b border-border">

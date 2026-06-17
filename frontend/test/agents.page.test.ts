@@ -55,13 +55,6 @@ function setupAgentsApi() {
   registerEndpoint('/api/agents/2/tools', () => [
     { name: 'exec', description: 'Execute shell', system: false, enabled: false },
   ])
-  const emptyMetrics = {
-    tokensSaved24h: 0, tokensSaved7d: 0, tokensSaved30d: 0,
-    ratioByType: [], algorithmUsage: [],
-    inflationGuardCount: 0, ccrRetrievals: 0, ccrHits: 0, ccrHitRate: 0, alerts: [],
-  }
-  registerEndpoint('/api/agents/1/compression-metrics', () => emptyMetrics)
-  registerEndpoint('/api/agents/2/compression-metrics', () => emptyMetrics)
   registerEndpoint('/api/agents/1/skills', () => [])
   registerEndpoint('/api/agents/2/skills', () => [])
 }

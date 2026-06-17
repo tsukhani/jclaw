@@ -65,7 +65,6 @@ GET     /api/agents/{id}                        ApiAgentsController.get
 PUT     /api/agents/{id}                        ApiAgentsController.update
 DELETE  /api/agents/{id}                        ApiAgentsController.delete
 GET     /api/agents/{id}/prompt-breakdown       ApiAgentsController.promptBreakdown
-GET     /api/agents/{id}/compression-metrics    ApiAgentsController.compressionMetrics
 GET     /api/agents/{id}/shell/effective-allowlist  ApiAgentsController.effectiveShellAllowlist
 GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspaceFile
 GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspaceFile
@@ -196,6 +195,8 @@ GET     /api/metrics/latency                    ApiMetricsController.latency
 DELETE  /api/metrics/latency                    ApiMetricsController.resetLatency
 # Cost is durable — aggregates persisted Message.usageJson across conversations
 GET     /api/metrics/cost                       ApiMetricsController.cost
+GET     /api/metrics/compression                ApiMetricsController.compression
+DELETE  /api/metrics/compression                ApiMetricsController.resetCompression
 POST    /api/metrics/loadtest                   ApiMetricsController.loadtest
 DELETE  /api/metrics/loadtest                   ApiMetricsController.stopLoadtest
 DELETE  /api/metrics/loadtest/data              ApiMetricsController.cleanLoadtest

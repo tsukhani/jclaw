@@ -43,7 +43,7 @@ public class ApiMetricsController extends Controller {
 
     private static final String KEY_PROMPTS = "prompts";
 
-    @Before(only = {"latency", "resetLatency", "cost"})
+    @Before(only = {"latency", "resetLatency", "cost", "compression", "resetCompression"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
     }
@@ -59,6 +59,11 @@ public class ApiMetricsController extends Controller {
                           String modelProvider) {}
 
     public record CostResponse(String since, List<CostRow> rows) {}
+
+    public record CompressionRow(String timestamp, String agentId, String channel, String contentType,
+                                 String algorithm, int tokensBefore, int tokensAfter, String kind, Boolean ccrHit) {}
+
+    public record CompressionResponse(String since, List<CompressionRow> rows) {}
 
     /**
      * Loadtest response schema descriptor (JCLAW-278). Used solely for OpenAPI
@@ -108,6 +113,35 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Reset latency segment histograms")
     public static void resetLatency() {
         LatencyStats.reset();
+        renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
+    }
+
+    /**
+     * GET /api/metrics/compression — raw compression-metric rows since a
+     * timestamp, for client-side aggregation in the Chat Compression dashboard
+     * (mirrors {@link #cost()}). The frontend filters by agent/channel and rolls
+     * up savings, ratios, algorithm usage, CCR hit rate, and alerts over the rows.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionResponse.class)))
+    @Operation(summary = "List raw compression-metric rows since a timestamp for client-side aggregation")
+    public static void compression() {
+        java.time.Instant since = parseSinceParam(params.get("since"));
+        java.util.List<models.CompressionMetric> events = models.CompressionMetric.<models.CompressionMetric>find(
+                "createdAt >= ?1 order by createdAt desc", since).fetch();
+        var rows = new java.util.ArrayList<CompressionRow>(events.size());
+        for (var m : events) {
+            rows.add(new CompressionRow(
+                    m.createdAt.toString(), m.agentId, m.channel, m.contentType, m.algorithm,
+                    m.tokensBefore, m.tokensAfter, m.kind.name(), m.ccrHit));
+        }
+        renderJSON(INSTANCE.toJson(new CompressionResponse(since.toString(), rows)));
+    }
+
+    /** DELETE /api/metrics/compression — clear all recorded compression metrics. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Reset (delete) all compression metrics")
+    public static void resetCompression() {
+        services.CompressionMetrics.reset();
         renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
     }
 

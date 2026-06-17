@@ -39,6 +39,10 @@ public class CompressionMetric extends Model {
     @Column(name = "model_id", length = 255)
     public String modelId;
 
+    /** Inbound channel of the conversation (chat only; null for task fires / agent-less events). */
+    @Column(length = 32)
+    public String channel;
+
     /** {@code JSON}/{@code CODE}/{@code LOG}/{@code TEXT}; null for CCR retrieval. */
     @Column(name = "content_type", length = 20)
     public String contentType;
