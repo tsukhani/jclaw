@@ -28,6 +28,7 @@ describe('Settings page — Logging Levels', () => {
     registerEndpoint('/api/logging/levels', () => ({
       entries: [{ logger: 'com.example.WidgetService', level: 'WARN' }],
       validLevels: ['OFF', 'ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'],
+      knownLoggers: ['root', 'play', 'com.example.WidgetService'],
     }))
 
     const component = await mountSuspended(Settings)
@@ -42,6 +43,7 @@ describe('Settings page — Logging Levels', () => {
     registerEndpoint('/api/logging/levels', () => ({
       entries: [],
       validLevels: ['OFF', 'ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'],
+      knownLoggers: ['root', 'play'],
     }))
 
     const component = await mountSuspended(Settings)
@@ -51,5 +53,34 @@ describe('Settings page — Logging Levels', () => {
     expect(html).toContain('>TRACE<')
     expect(html).toContain('>DEBUG<')
     expect(component.text()).toContain('No overrides')
+  })
+
+  it('offers known loggers as autocomplete and warns on an unknown name', async () => {
+    baseEndpoints()
+    registerEndpoint('/api/logging/levels', () => ({
+      entries: [],
+      validLevels: ['OFF', 'ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'],
+      knownLoggers: ['root', 'play', 'controllers.ApiChatController'],
+    }))
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    // Known loggers are surfaced as <datalist> options for the add field.
+    const html = component.html()
+    expect(html).toContain('controllers.ApiChatController')
+
+    const input = component.find('input[list="logging-logger-suggestions"]')
+    expect(input.exists()).toBe(true)
+
+    // A name not in the corpus triggers the soft typo hint…
+    await input.setValue('controlers.Typo')
+    await flushPromises()
+    expect(component.text()).toContain('has logged yet')
+
+    // …while a known name clears it.
+    await input.setValue('play')
+    await flushPromises()
+    expect(component.text()).not.toContain('has logged yet')
   })
 })

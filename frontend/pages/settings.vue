@@ -1564,15 +1564,29 @@ async function handleResetPassword() {
 // reserves the logging.level.* prefix from the generic Config API, so these
 // never appear as raw config rows (and their level value is never masked).
 interface LoggerLevelEntry { logger: string, level: string }
-interface LoggerLevelsResponse { entries: LoggerLevelEntry[], validLevels: string[] }
+interface LoggerLevelsResponse {
+  entries: LoggerLevelEntry[]
+  validLevels: string[]
+  knownLoggers: string[]
+}
 const { data: loggingData, refresh: refreshLogging }
   = await useFetch<LoggerLevelsResponse>('/api/logging/levels')
 
 const loggerLevels = computed(() => loggingData.value?.entries ?? [])
 const logLevelOptions = computed(() => loggingData.value?.validLevels ?? [])
+// Loggers the backend currently knows about (instantiated + file-configured).
+// Drives the add-field autocomplete and the typo hint below. A snapshot — a
+// logger only shows up once its class has logged, so an unknown name is a
+// warning, not an error (you may be pre-setting a dormant logger).
+const knownLoggers = computed(() => loggingData.value?.knownLoggers ?? [])
 const newLoggerName = ref('')
 const newLoggerLevel = ref('DEBUG')
 const loggingError = ref<string | null>(null)
+
+const newLoggerUnknown = computed(() => {
+  const n = newLoggerName.value.trim()
+  return n.length > 0 && n.toLowerCase() !== 'root' && !knownLoggers.value.includes(n)
+})
 
 // The backend returns the rejection text as the response body on a 400
 // (e.g. an invalid level); surface it rather than a generic "fetch failed".
@@ -5135,11 +5149,19 @@ async function deleteLoggerLevel(logger: string) {
           <input
             v-model="newLoggerName"
             type="text"
+            list="logging-logger-suggestions"
             placeholder="logger (e.g. play or controllers.ApiChatController)"
             aria-label="Logger name"
             class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             @keyup.enter="addLoggerLevel"
           >
+          <datalist id="logging-logger-suggestions">
+            <option
+              v-for="name in knownLoggers"
+              :key="name"
+              :value="name"
+            />
+          </datalist>
           <select
             v-model="newLoggerLevel"
             aria-label="New logger level"
@@ -5212,6 +5234,14 @@ async function deleteLoggerLevel(logger: string) {
         </div>
       </div>
 
+      <p
+        v-if="newLoggerUnknown"
+        class="text-xs text-amber-600 dark:text-amber-400"
+      >
+        No logger named <span class="font-mono">{{ newLoggerName.trim() }}</span> has
+        logged yet — double-check the spelling, or add it anyway to pre-set a logger
+        that hasn't run.
+      </p>
       <p
         v-if="loggingError"
         class="text-xs text-red-600 dark:text-red-400"

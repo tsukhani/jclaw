@@ -31,7 +31,8 @@ public class ApiLoggingController extends Controller {
 
     public record LevelEntry(String logger, String level) {}
 
-    public record LevelsResponse(List<LevelEntry> entries, List<String> validLevels) {}
+    public record LevelsResponse(List<LevelEntry> entries, List<String> validLevels,
+                                 List<String> knownLoggers) {}
 
     public record SaveRequest(String logger, String level) {}
 
@@ -45,7 +46,8 @@ public class ApiLoggingController extends Controller {
         var entries = LoggerLevelService.list().stream()
                 .map(l -> new LevelEntry(l.logger(), l.level()))
                 .toList();
-        renderJSON(gson.toJson(new LevelsResponse(entries, LoggerLevelService.VALID_LEVELS)));
+        renderJSON(gson.toJson(new LevelsResponse(
+                entries, LoggerLevelService.VALID_LEVELS, LoggerLevelService.knownLoggers())));
     }
 
     @SuppressWarnings("java:S2259") // badRequest() halts; body is non-null past the guard

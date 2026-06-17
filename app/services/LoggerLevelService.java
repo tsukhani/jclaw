@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Runtime per-logger log-level overrides.
@@ -62,15 +63,57 @@ public final class LoggerLevelService {
 
     public record LoggerLevel(String logger, String level) {}
 
-    /** @return an error message if {@code (logger, level)} is invalid, else {@code null}. */
+    /**
+     * @return an error message if {@code (logger, level)} is invalid, else {@code null}.
+     *
+     * <p>The level is checked against a closed set. The logger name can only be
+     * checked structurally — log4j's logger namespace is open (any dotted string
+     * is a legal name, created lazily), so we reject only malformed input
+     * (whitespace, leading/trailing dots, empty segments) and cannot verify that
+     * a well-formed name actually corresponds to live code. A typo like
+     * {@code controlers.Foo} is accepted and simply never matches anything; the
+     * Settings UI surfaces a soft hint for names not among {@link #knownLoggers}.
+     */
     public static String validate(String logger, String level) {
         if (logger == null || logger.isBlank()) {
             return "Logger name is required.";
+        }
+        String name = logger.trim();
+        if (name.chars().anyMatch(Character::isWhitespace)) {
+            return "Logger name cannot contain spaces.";
+        }
+        if (name.startsWith(".") || name.endsWith(".") || name.contains("..")) {
+            return "Logger name has an empty segment — check for a stray or doubled dot.";
         }
         if (level == null || !VALID_SET.contains(level.trim().toUpperCase())) {
             return "Level must be one of " + VALID_LEVELS + ".";
         }
         return null;
+    }
+
+    /**
+     * Logger names currently known to the running context: every logger that
+     * has been instantiated plus every logger explicitly configured in the
+     * file. A snapshot, not exhaustive — a logger only appears once its class
+     * has logged at least once, and the root logger surfaces as {@code "root"}.
+     * Used purely as an autocomplete / typo-hint corpus in the UI.
+     */
+    public static List<String> knownLoggers() {
+        LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
+        var names = new TreeSet<String>();
+        for (var logger : ctx.getLoggers()) {
+            addKnownName(names, logger.getName());
+        }
+        for (String name : ctx.getConfiguration().getLoggers().keySet()) {
+            addKnownName(names, name);
+        }
+        return new ArrayList<>(names);
+    }
+
+    private static void addKnownName(Set<String> names, String name) {
+        if (name != null) {
+            names.add(name.isEmpty() ? ROOT_ALIAS : name);   // root logger name "" → "root"
+        }
     }
 
     /** Every persisted override, sorted by logger name. */

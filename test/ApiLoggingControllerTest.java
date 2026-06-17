@@ -42,11 +42,13 @@ class ApiLoggingControllerTest extends FunctionalTest {
     }
 
     @Test
-    void listExposesValidLevels() {
+    void listExposesValidLevelsAndKnownLoggers() {
         login();
         var body = getContent(GET("/api/logging/levels"));
         assertTrue(body.contains("\"validLevels\""), "must carry the valid-level set: " + body);
         assertTrue(body.contains("\"DEBUG\""), "valid levels must include DEBUG: " + body);
+        assertTrue(body.contains("\"knownLoggers\""), "must carry the known-logger corpus: " + body);
+        assertTrue(body.contains("\"root\""), "known loggers must always include root: " + body);
     }
 
     @Test
@@ -54,6 +56,14 @@ class ApiLoggingControllerTest extends FunctionalTest {
         login();
         var resp = POST("/api/logging/levels", "application/json",
                 "{\"logger\":\"" + DUMMY + "\",\"level\":\"VERBOSE\"}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void saveRejectsMalformedLoggerName() {
+        login();
+        var resp = POST("/api/logging/levels", "application/json",
+                "{\"logger\":\"com..example.Foo\",\"level\":\"DEBUG\"}");
         assertEquals(400, resp.status.intValue());
     }
 
@@ -74,16 +84,21 @@ class ApiLoggingControllerTest extends FunctionalTest {
         assertIsOk(saveResp);
         assertTrue(getContent(saveResp).contains("\"status\":\"ok\""));
 
+        // Match the entry-specific fragment, not the bare name: once applied,
+        // the logger is instantiated and lingers in the knownLoggers corpus
+        // forever, so a raw substring check would false-match after delete.
+        var entryFragment = "\"logger\":\"" + DUMMY + "\"";
+
         var listBody = getContent(GET("/api/logging/levels"));
-        assertTrue(listBody.contains("\"" + DUMMY + "\""),
-                "the saved override must appear in the list: " + listBody);
+        assertTrue(listBody.contains(entryFragment),
+                "the saved override must appear in the entries: " + listBody);
 
         var delResp = DELETE("/api/logging/levels/" + DUMMY);
         assertIsOk(delResp);
         assertTrue(getContent(delResp).contains("\"status\":\"ok\""));
 
         var afterDelete = getContent(GET("/api/logging/levels"));
-        assertFalse(afterDelete.contains("\"" + DUMMY + "\""),
-                "the deleted override must be gone: " + afterDelete);
+        assertFalse(afterDelete.contains(entryFragment),
+                "the deleted override must be gone from the entries: " + afterDelete);
     }
 }

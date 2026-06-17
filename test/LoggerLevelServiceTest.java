@@ -45,6 +45,37 @@ class LoggerLevelServiceTest extends UnitTest {
         assertNull(LoggerLevelService.validate("root", "info"));
     }
 
+    @Test
+    void validateRejectsMalformedLoggerNames() {
+        assertNotNull(LoggerLevelService.validate("com example.Foo", "DEBUG"),
+                "internal whitespace must be rejected");
+        assertNotNull(LoggerLevelService.validate(".com.example.Foo", "DEBUG"),
+                "leading dot must be rejected");
+        assertNotNull(LoggerLevelService.validate("com.example.Foo.", "DEBUG"),
+                "trailing dot must be rejected");
+        assertNotNull(LoggerLevelService.validate("com..example.Foo", "DEBUG"),
+                "empty segment must be rejected");
+    }
+
+    @Test
+    void validateAcceptsWellFormedNamesIncludingInnerClasses() {
+        // Shape validation must NOT false-reject legitimate names: a bare tree,
+        // a package tree, a class FQN, and an inner-class ($) logger name.
+        assertNull(LoggerLevelService.validate("play", "DEBUG"));
+        assertNull(LoggerLevelService.validate("controllers", "DEBUG"));
+        assertNull(LoggerLevelService.validate("controllers.ApiChatController", "DEBUG"));
+        assertNull(LoggerLevelService.validate("com.example.Outer$Inner", "DEBUG"));
+    }
+
+    @Test
+    void knownLoggersIncludesRoot() {
+        // The root LoggerConfig always exists; knownLoggers() surfaces it as
+        // the "root" alias. Other entries vary by what has logged, so we only
+        // pin the always-present one.
+        assertTrue(LoggerLevelService.knownLoggers().contains("root"),
+                "the root logger must always be a known name");
+    }
+
     // --- apply / revert (unique dummy logger) ---
 
     @Test
