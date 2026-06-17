@@ -999,7 +999,7 @@ defineExpose({ refresh })
             @click="view = 'table'"
           >
             <Bars3Icon
-              class="w-3.5 h-3.5"
+              class="w-4 h-4"
               aria-hidden="true"
             />
           </button>
@@ -1015,7 +1015,7 @@ defineExpose({ refresh })
             @click="view = 'chart'"
           >
             <PresentationChartLineIcon
-              class="w-3.5 h-3.5"
+              class="w-4 h-4"
               aria-hidden="true"
             />
           </button>
@@ -1032,7 +1032,7 @@ defineExpose({ refresh })
           <select
             id="chat-cost-agent"
             v-model="selectedAgentId"
-            class="bg-surface border border-border text-fg-primary text-xs px-2 py-1 focus:outline-none focus:border-fg-muted"
+            class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
           >
             <option :value="null">
               All agents
@@ -1055,7 +1055,7 @@ defineExpose({ refresh })
           <select
             id="chat-cost-channel"
             v-model="selectedChannel"
-            class="bg-surface border border-border text-fg-primary text-xs px-2 py-1 focus:outline-none focus:border-fg-muted"
+            class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
           >
             <option :value="null">
               All channels
@@ -1078,7 +1078,7 @@ defineExpose({ refresh })
           <select
             id="chat-cost-window"
             v-model="selectedWindow"
-            class="bg-surface border border-border text-fg-primary text-xs px-2 py-1 focus:outline-none focus:border-fg-muted"
+            class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
           >
             <option
               v-for="(label, key) in WINDOW_LABELS"
@@ -1100,7 +1100,7 @@ defineExpose({ refresh })
           @click="exportCsv"
         >
           <ArrowDownTrayIcon
-            class="w-3.5 h-3.5"
+            class="w-4 h-4"
             aria-hidden="true"
           />
           <span>CSV</span>

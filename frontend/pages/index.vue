@@ -368,7 +368,7 @@ onBeforeUnmount(() => {
               @click="latencyView = 'table'"
             >
               <Bars3Icon
-                class="w-3.5 h-3.5"
+                class="w-4 h-4"
                 aria-hidden="true"
               />
             </button>
@@ -384,7 +384,7 @@ onBeforeUnmount(() => {
               @click="latencyView = 'chart'"
             >
               <PresentationChartLineIcon
-                class="w-3.5 h-3.5"
+                class="w-4 h-4"
                 aria-hidden="true"
               />
             </button>
@@ -412,7 +412,7 @@ onBeforeUnmount(() => {
             <select
               id="chat-performance-channel"
               :value="selectedChannel"
-              class="bg-surface border border-border text-fg-primary text-xs px-2 py-1 focus:outline-none focus:border-fg-muted"
+              class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
               @change="onSelectChannel(($event.target as HTMLSelectElement).value)"
             >
               <option
@@ -434,7 +434,7 @@ onBeforeUnmount(() => {
             @click="resetLatency"
           >
             <TrashIcon
-              class="w-3.5 h-3.5"
+              class="w-4 h-4"
               aria-hidden="true"
             />
           </button>
