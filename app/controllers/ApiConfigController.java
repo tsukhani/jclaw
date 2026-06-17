@@ -33,6 +33,14 @@ public class ApiConfigController extends Controller {
      *  capability. */
     private static final String AUTH_KEY_PREFIX = "auth.";
 
+    /** Per-logger level overrides ({@code logging.level.*}) are managed solely
+     *  through the dedicated {@code /api/logging/levels} endpoints and the
+     *  Logging Levels section of Settings. Reserving the prefix here keeps them
+     *  out of the generic config list (so they aren't double-managed) and, more
+     *  importantly, off the {@code maskValue} path — a logger name containing
+     *  "token"/"secret"/"key" would otherwise get its level value masked. */
+    private static final String LOGGING_KEY_PREFIX = services.LoggerLevelService.PREFIX;
+
     public record ConfigEntry(String key, String value, String updatedAt) {}
 
     public record ConfigListResponse(List<ConfigEntry> entries) {}
@@ -54,6 +62,7 @@ public class ApiConfigController extends Controller {
         if (key == null) return false;
         return key.startsWith(RESERVED_KEY_PREFIX)
                 || key.startsWith(AUTH_KEY_PREFIX)
+                || key.startsWith(LOGGING_KEY_PREFIX)
                 || key.startsWith(services.InternalApiTokenService.INTERNAL_KEY_PREFIX);
     }
 
