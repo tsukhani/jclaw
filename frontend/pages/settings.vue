@@ -1739,65 +1739,6 @@ async function deleteLoggerLevel(logger: string) {
       </div>
     </div>
 
-    <!--
-      JCLAW-28 follow-up: opt-in pricing refresh. Hoisted above the
-      LLM Providers section so it reads as a global pricing-data toggle
-      that applies to whichever providers the operator subsequently
-      configures, rather than nesting inside one provider group's
-      space. Many provider APIs (OpenAI, Anthropic direct, Google
-      direct, etc.) don't return cost data in their /v1/models
-      response — operators see "$0.00" cost tracking until prices are
-      filled. Toggling this on schedules a nightly fetch from LiteLLM's
-      community pricing manifest to backfill the gaps. Operator-set
-      values are never overwritten. Off by default; the toggle
-      communicates the GitHub network call explicitly so the operator
-      opts in deliberately.
-    -->
-    <div class="bg-surface-elevated border border-border mb-6">
-      <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
-        <button
-          type="button"
-          :aria-pressed="priceRefreshEnabled"
-          aria-label="Auto-update model prices nightly"
-          :class="priceRefreshEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-          class="relative w-9 h-5 rounded-full transition-colors"
-          @click="togglePriceRefresh"
-        >
-          <span
-            :class="priceRefreshEnabled ? 'translate-x-4' : 'translate-x-0.5'"
-            class="block w-4 h-4 bg-white rounded-full transition-transform"
-          />
-        </button>
-        <span class="text-sm font-medium text-fg-strong">Auto-update model prices nightly</span>
-        <span class="ml-auto text-[11px] text-fg-muted">
-          {{ priceRefreshEnabled ? 'on' : 'off' }}
-        </span>
-      </div>
-      <div class="px-4 py-2.5 border-t border-border text-xs text-fg-muted space-y-2">
-        <p>
-          Most provider APIs don't return pricing in their model lists. When this is on, JClaw fetches the community-maintained
-          <span class="font-mono">model_prices_and_context_window.json</span>
-          from
-          <span class="font-mono">github.com/BerriAI/litellm</span>
-          once a night and fills in missing prices on your configured models. Prices you've set manually are never overwritten.
-        </p>
-        <div class="flex items-center gap-3">
-          <button
-            type="button"
-            class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            :disabled="saving || !priceRefreshEnabled"
-            @click="manuallyRefreshPrices"
-          >
-            Refresh now
-          </button>
-          <span
-            v-if="priceRefreshStatus"
-            class="text-[11px] text-fg-muted"
-          >{{ priceRefreshStatus }}</span>
-        </div>
-      </div>
-    </div>
-
     <!-- Provider sections -->
     <div
       class="mb-6 space-y-4"
@@ -1806,6 +1747,67 @@ async function deleteLoggerLevel(logger: string) {
       <h2 class="text-sm font-medium text-fg-muted">
         LLM Providers
       </h2>
+
+      <!--
+        JCLAW-28 follow-up: opt-in nightly pricing refresh, its own "Pricing"
+        subsection at the top of LLM Providers (above the provider groups) so it
+        reads as a global pricing-data toggle for whichever providers the
+        operator configures. Many provider APIs (OpenAI, Anthropic direct,
+        Google direct, etc.) don't return cost data in their /v1/models response,
+        so operators see "$0.00" cost tracking until prices are filled. Toggling
+        this on schedules a nightly fetch from LiteLLM's community pricing
+        manifest to backfill the gaps; operator-set values are never overwritten.
+        Off by default — the toggle names the GitHub network call so the operator
+        opts in deliberately.
+      -->
+      <h3 class="text-[11px] font-semibold text-fg-muted uppercase tracking-wide pt-2 first:pt-0">
+        Pricing
+      </h3>
+      <div class="bg-surface-elevated border border-border">
+        <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+          <button
+            type="button"
+            :aria-pressed="priceRefreshEnabled"
+            aria-label="Auto-update model prices nightly"
+            :class="priceRefreshEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            @click="togglePriceRefresh"
+          >
+            <span
+              :class="priceRefreshEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
+          </button>
+          <span class="text-sm font-medium text-fg-strong">Auto-update model prices nightly</span>
+          <span class="ml-auto text-[11px] text-fg-muted">
+            {{ priceRefreshEnabled ? 'on' : 'off' }}
+          </span>
+        </div>
+        <div class="px-4 py-2.5 border-t border-border text-xs text-fg-muted space-y-2">
+          <p>
+            Most provider APIs don't return pricing in their model lists. When this is on, JClaw fetches the community-maintained
+            <span class="font-mono">model_prices_and_context_window.json</span>
+            from
+            <span class="font-mono">github.com/BerriAI/litellm</span>
+            once a night and fills in missing prices on your configured models. Prices you've set manually are never overwritten.
+          </p>
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              :disabled="saving || !priceRefreshEnabled"
+              @click="manuallyRefreshPrices"
+            >
+              Refresh now
+            </button>
+            <span
+              v-if="priceRefreshStatus"
+              class="text-[11px] text-fg-muted"
+            >{{ priceRefreshStatus }}</span>
+          </div>
+        </div>
+      </div>
+
       <p class="text-xs text-fg-muted">
         Enter an API key for at least one provider to enable chat. Base URLs and models are pre-configured.
       </p>
