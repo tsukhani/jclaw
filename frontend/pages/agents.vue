@@ -311,6 +311,13 @@ const compressionCode = ref(false)
 const compressionText = ref(false)
 const compressionTargetRatio = ref(0.3)
 const savingCompression = ref(false)
+// Section-header count: the master plus each per-type sub-toggle that is
+// effectively on (sub-toggles are off while the master is off).
+const compressionEnabledCount = computed(() => {
+  const m = compressionEnabled.value
+  return [m, m && compressionJson.value, m && compressionCode.value, m && compressionText.value]
+    .filter(Boolean).length
+})
 const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
 const saving = ref(false)
@@ -339,11 +346,6 @@ const agentProviderId = useId()
 const agentModelId = useId()
 const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
-const agentCompressionId = useId()
-const agentCompressionJsonId = useId()
-const agentCompressionCodeId = useId()
-const agentCompressionTextId = useId()
-const agentCompressionRatioId = useId()
 
 // --- System prompt breakdown dialog state ---
 // Scoped to a single agent: opened from a per-row button on the agent list, so
@@ -886,6 +888,25 @@ async function saveCompressionRatio() {
   finally {
     savingCompression.value = false
   }
+}
+
+// Pill-toggle click handlers: flip the ref, then immediate-save via the
+// existing partial-PUT helpers (which read the just-flipped value).
+function toggleCompression() {
+  compressionEnabled.value = !compressionEnabled.value
+  saveCompression()
+}
+function toggleCompressionJson() {
+  compressionJson.value = !compressionJson.value
+  saveCompressionJson()
+}
+function toggleCompressionCode() {
+  compressionCode.value = !compressionCode.value
+  saveCompressionCode()
+}
+function toggleCompressionText() {
+  compressionText.value = !compressionText.value
+  saveCompressionText()
 }
 
 async function loadExecConfig(agentName: string) {
@@ -1441,44 +1462,42 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         </div>
       </div>
 
-      <!-- Optimization: per-agent feature toggles. JCLAW-465 — content
-           compression is the first; future per-agent optimizations (e.g. the
-           json/code/text compression sub-toggles) add as rows here. Each
-           toggle saves immediately via a partial PUT. -->
+      <!-- Content Compression (JCLAW-465/463/464): master enable + per-type
+           sub-toggles + the text-aggressiveness slider. Mirrors the Skills/Tools
+           header (title + N/M enabled + a pill toggle); each control immediate-
+           saves via a partial PUT. -->
       <div
         v-if="editing"
         class="bg-surface-elevated border border-border"
       >
-        <div class="px-4 py-2.5 border-b border-border">
-          <span class="text-sm font-medium text-fg-strong">Optimization</span>
+        <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-fg-strong">Content Compression</span>
+            <span class="text-xs text-neutral-500">{{ compressionEnabledCount }}/4 enabled</span>
+          </div>
+          <button
+            type="button"
+            :title="compressionEnabled ? 'Disable content compression' : 'Enable content compression'"
+            :disabled="savingCompression"
+            class="shrink-0 disabled:opacity-50"
+            @click="toggleCompression"
+          >
+            <div
+              class="relative w-9 h-5 rounded-full transition-colors duration-200"
+              :class="compressionEnabled ? 'bg-emerald-500' : 'bg-muted'"
+            >
+              <div
+                class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                :class="compressionEnabled ? 'left-[18px]' : 'left-0.5'"
+              />
+            </div>
+          </button>
         </div>
         <div class="divide-y divide-border">
-          <label
-            :for="agentCompressionId"
-            class="px-4 py-2.5 flex items-center justify-between gap-4 cursor-pointer select-none"
-          >
-            <div>
-              <span class="text-sm text-fg-strong">Content compression</span>
-              <div class="text-xs text-neutral-500 mt-0.5">
-                Shrink large tool outputs before the model sees them
-              </div>
-            </div>
-            <input
-              :id="agentCompressionId"
-              v-model="compressionEnabled"
-              type="checkbox"
-              :disabled="savingCompression"
-              class="accent-emerald-600 shrink-0"
-              @change="saveCompression"
-            >
-          </label>
-
-          <!-- Per-type sub-toggles (JCLAW-463), gated by the master above:
-               inert + dimmed while the master is off. -->
-          <label
-            :for="agentCompressionJsonId"
-            class="px-4 py-2.5 pl-9 flex items-center justify-between gap-4 select-none"
-            :class="compressionEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+          <!-- Per-type sub-toggles, gated by the master: inert + dimmed when off. -->
+          <div
+            class="px-4 py-2.5 flex items-center justify-between gap-4"
+            :class="compressionEnabled ? '' : 'opacity-50'"
           >
             <div>
               <span class="text-sm text-fg-strong">JSON</span>
@@ -1486,19 +1505,27 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 Crush large JSON arrays — keep schema, first items, and errors
               </div>
             </div>
-            <input
-              :id="agentCompressionJsonId"
-              v-model="compressionJson"
-              type="checkbox"
+            <button
+              type="button"
+              :title="compressionJson ? 'Disable JSON compression' : 'Enable JSON compression'"
               :disabled="savingCompression || !compressionEnabled"
-              class="accent-emerald-600 shrink-0"
-              @change="saveCompressionJson"
+              class="shrink-0"
+              @click="toggleCompressionJson"
             >
-          </label>
-          <label
-            :for="agentCompressionCodeId"
-            class="px-4 py-2.5 pl-9 flex items-center justify-between gap-4 select-none"
-            :class="compressionEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+              <div
+                class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                :class="(compressionEnabled && compressionJson) ? 'bg-emerald-500' : 'bg-muted'"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                  :class="(compressionEnabled && compressionJson) ? 'left-[18px]' : 'left-0.5'"
+                />
+              </div>
+            </button>
+          </div>
+          <div
+            class="px-4 py-2.5 flex items-center justify-between gap-4"
+            :class="compressionEnabled ? '' : 'opacity-50'"
           >
             <div>
               <span class="text-sm text-fg-strong">Code</span>
@@ -1506,19 +1533,27 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 Keep imports and signatures, elide function bodies
               </div>
             </div>
-            <input
-              :id="agentCompressionCodeId"
-              v-model="compressionCode"
-              type="checkbox"
+            <button
+              type="button"
+              :title="compressionCode ? 'Disable code compression' : 'Enable code compression'"
               :disabled="savingCompression || !compressionEnabled"
-              class="accent-emerald-600 shrink-0"
-              @change="saveCompressionCode"
+              class="shrink-0"
+              @click="toggleCompressionCode"
             >
-          </label>
-          <label
-            :for="agentCompressionTextId"
-            class="px-4 py-2.5 pl-9 flex items-center justify-between gap-4 select-none"
-            :class="compressionEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+              <div
+                class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                :class="(compressionEnabled && compressionCode) ? 'bg-emerald-500' : 'bg-muted'"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                  :class="(compressionEnabled && compressionCode) ? 'left-[18px]' : 'left-0.5'"
+                />
+              </div>
+            </button>
+          </div>
+          <div
+            class="px-4 py-2.5 flex items-center justify-between gap-4"
+            :class="compressionEnabled ? '' : 'opacity-50'"
           >
             <div>
               <span class="text-sm text-fg-strong">Text &amp; logs</span>
@@ -1526,40 +1561,50 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 Collapse near-duplicate lines, summarize long prose
               </div>
             </div>
-            <input
-              :id="agentCompressionTextId"
-              v-model="compressionText"
-              type="checkbox"
+            <button
+              type="button"
+              :title="compressionText ? 'Disable text compression' : 'Enable text compression'"
               :disabled="savingCompression || !compressionEnabled"
-              class="accent-emerald-600 shrink-0"
-              @change="saveCompressionText"
+              class="shrink-0"
+              @click="toggleCompressionText"
             >
-          </label>
-          <!-- Text aggressiveness (advanced): the minimum shrink the text
-               compressor must hit to keep a rewrite. Gated by master AND Text. -->
-          <label
-            :for="agentCompressionRatioId"
-            class="px-4 py-2.5 pl-9 flex items-center justify-between gap-4 select-none"
+              <div
+                class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                :class="(compressionEnabled && compressionText) ? 'bg-emerald-500' : 'bg-muted'"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                  :class="(compressionEnabled && compressionText) ? 'left-[18px]' : 'left-0.5'"
+                />
+              </div>
+            </button>
+          </div>
+          <!-- Text aggressiveness: a slider with the live % value. Gated by master AND Text. -->
+          <div
+            class="px-4 py-2.5 flex items-center justify-between gap-4"
             :class="(compressionEnabled && compressionText) ? '' : 'opacity-50'"
           >
             <div>
               <span class="text-sm text-fg-strong">Text aggressiveness</span>
               <div class="text-xs text-neutral-500 mt-0.5">
-                Minimum shrink to keep a rewrite — {{ Math.round(compressionTargetRatio * 100) }}%
+                Minimum shrink to keep a rewrite
               </div>
             </div>
-            <input
-              :id="agentCompressionRatioId"
-              v-model.number="compressionTargetRatio"
-              type="number"
-              min="0.05"
-              max="0.95"
-              step="0.05"
-              :disabled="savingCompression || !compressionEnabled || !compressionText"
-              class="w-20 px-2 py-1 text-sm bg-surface border border-border text-fg-strong shrink-0"
-              @change="saveCompressionRatio"
-            >
-          </label>
+            <div class="flex items-center gap-3 shrink-0">
+              <input
+                v-model.number="compressionTargetRatio"
+                type="range"
+                min="0.05"
+                max="0.95"
+                step="0.05"
+                aria-label="Text aggressiveness"
+                :disabled="savingCompression || !compressionEnabled || !compressionText"
+                class="w-28 accent-emerald-600"
+                @change="saveCompressionRatio"
+              >
+              <span class="text-xs font-mono text-fg-strong w-9 text-right">{{ Math.round(compressionTargetRatio * 100) }}%</span>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -291,7 +291,7 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     })
   })
 
-  it('PUTs a partial { compressionEnabled } immediately when the Optimization toggle is changed', async () => {
+  it('PUTs a partial { compressionEnabled } immediately when the Content Compression toggle is clicked', async () => {
     let putBody: Record<string, unknown> | null = null
     registerEndpoint('/api/agents/2', {
       method: 'PUT',
@@ -307,13 +307,11 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
 
     await openHelperEdit(component)
 
-    // The helper agent defaults to compression OFF. The toggle lives in the
-    // Optimization card and saves immediately on change (no main Save click).
-    const label = component.findAll('label').find(l => l.text().includes('Content compression'))
-    expect(label, 'compression toggle should render in the Optimization card').toBeTruthy()
-    const checkbox = label!.find<HTMLInputElement>('input[type="checkbox"]')
-    expect(checkbox.element.checked).toBe(false)
-    await checkbox.setValue(true)
+    // The helper defaults to compression OFF; the master is a pill toggle in the
+    // Content Compression header and saves immediately on click.
+    const toggle = component.find('button[title="Enable content compression"]')
+    expect(toggle.exists(), 'master compression toggle should render').toBe(true)
+    await toggle.trigger('click')
     await vi.waitFor(() => expect(putBody).not.toBeNull())
 
     expect(putBody).toEqual({ compressionEnabled: true })
@@ -344,13 +342,11 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     await flushPromises()
     await openHelperEdit(component)
 
-    // The JSON sub-toggle sits under the master in the Optimization card and
-    // saves immediately on change, like the master.
-    const jsonLabel = component.findAll('label').find(l => l.text().includes('JSON'))
-    expect(jsonLabel, 'JSON sub-toggle should render in the Optimization card').toBeTruthy()
-    const checkbox = jsonLabel!.find<HTMLInputElement>('input[type="checkbox"]')
-    expect(checkbox.element.checked).toBe(true)
-    await checkbox.setValue(false)
+    // The JSON sub-toggle is a pill toggle (master is on, so it's interactive)
+    // and saves immediately on click.
+    const toggle = component.find('button[title="Disable JSON compression"]')
+    expect(toggle.exists(), 'JSON sub-toggle should render').toBe(true)
+    await toggle.trigger('click')
     await vi.waitFor(() => expect(putBody).not.toBeNull())
 
     expect(putBody).toEqual({ compressionJson: false })
@@ -380,11 +376,10 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     await flushPromises()
     await openHelperEdit(component)
 
-    const ratioLabel = component.findAll('label').find(l => l.text().includes('Text aggressiveness'))
-    expect(ratioLabel, 'aggressiveness control should render').toBeTruthy()
-    const input = ratioLabel!.find<HTMLInputElement>('input[type="number"]')
-    await input.setValue('0.5')
-    await input.trigger('change')
+    const slider = component.find<HTMLInputElement>('input[aria-label="Text aggressiveness"]')
+    expect(slider.exists(), 'aggressiveness slider should render').toBe(true)
+    await slider.setValue('0.5')
+    await slider.trigger('change')
     await vi.waitFor(() => expect(putBody).not.toBeNull())
 
     expect(putBody).toEqual({ compressionTargetRatio: 0.5 })
