@@ -6,7 +6,7 @@
  * are instant. Table/chart view toggle for the by-type and per-algorithm
  * breakdowns, and a reset (trash) that clears the recorded metrics.
  */
-import { ChartBarIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { ChartBarIcon, ExclamationTriangleIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 
 const props = defineProps<{ agents: Agent[] | null | undefined }>()
@@ -278,19 +278,6 @@ function fmt(n: number) {
       v-else
       class="p-4 space-y-5"
     >
-      <div
-        v-if="agg.alerts.length"
-        class="space-y-1"
-      >
-        <div
-          v-for="(a, i) in agg.alerts"
-          :key="i"
-          class="text-xs text-amber-600 dark:text-amber-400 bg-surface border border-border px-2 py-1"
-        >
-          ⚠ {{ a }}
-        </div>
-      </div>
-
       <!-- KPI tiles: every scalar metric in one scannable row. -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div class="bg-surface border border-border p-3">
@@ -462,6 +449,28 @@ function fmt(n: number) {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!--
+        Advisory notices, kept subdued and at the foot so they never compete
+        with the metrics above: borderless, muted-gray text with only a small
+        amber icon as the warning cue.
+      -->
+      <div
+        v-if="agg.alerts.length"
+        class="pt-3 border-t border-border space-y-1.5"
+      >
+        <p
+          v-for="(a, i) in agg.alerts"
+          :key="i"
+          class="flex items-start gap-1.5 text-xs text-fg-muted"
+        >
+          <ExclamationTriangleIcon
+            class="w-3.5 h-3.5 shrink-0 mt-px text-amber-500/80"
+            aria-hidden="true"
+          />
+          <span>{{ a }}</span>
+        </p>
       </div>
     </div>
   </div>
