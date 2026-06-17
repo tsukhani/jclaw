@@ -38,6 +38,11 @@ public final class CompressionPipeline {
 
     private static final JsonCompressor JSON = new JsonCompressor();
 
+    // ccr_retrieve exists to UN-compress; its output must never be recompressed.
+    // Literal rather than tools.CcrRetrieveTool.TOOL_NAME to avoid an
+    // agents <-> tools package cycle.
+    private static final String CCR_RETRIEVE_TOOL = "ccr_retrieve";
+
     /**
      * Compress eligible messages for the agent's effective model. No-op (returns
      * the input list) when disabled, when the model can't be resolved, or when
@@ -72,6 +77,9 @@ public final class CompressionPipeline {
         // structured tool outputs are where the redundancy lives, and leaving
         // user/assistant/system turns untouched preserves intent + instructions.
         if (!MessageRole.TOOL.value.equals(msg.role())) return msg;
+        // Recompressing ccr_retrieve's output would hand the LLM the same elided
+        // view it called the tool to escape — a retrieval loop. Pass it through.
+        if (CCR_RETRIEVE_TOOL.equals(msg.toolName())) return msg;
         if (!(msg.content() instanceof String content) || content.isBlank()) return msg;
 
         var before = TokenUsageEstimator.estimateMessage(modelId, msg).tokens();

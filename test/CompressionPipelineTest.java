@@ -78,6 +78,15 @@ class CompressionPipelineTest extends UnitTest {
     }
 
     @Test
+    void neverCompressesCcrRetrieveOutput() {
+        // ccr_retrieve un-compresses; recompressing its (large JSON) output
+        // would loop the LLM back to the elided view it was escaping.
+        var msg = ChatMessage.toolResult("call_1", "ccr_retrieve", bigJsonArray());
+        var out = CompressionPipeline.compressMessages(List.of(msg), MODEL, 250);
+        assertSame(msg, out.get(0), "ccr_retrieve output must pass through uncompressed");
+    }
+
+    @Test
     void leavesNonToolRolesUntouched() {
         // Same big JSON, but as a USER turn — never compressed.
         var user = ChatMessage.user(bigJsonArray());
