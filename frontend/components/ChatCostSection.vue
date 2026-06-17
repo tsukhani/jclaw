@@ -18,8 +18,8 @@
  * the network surface small.
  */
 import {
-  ArrowDownTrayIcon, Bars3Icon, ChevronDownIcon, ChevronUpIcon,
-  InformationCircleIcon, PresentationChartLineIcon,
+  ArrowDownTrayIcon, ChartBarIcon, ChevronDownIcon, ChevronUpIcon,
+  InformationCircleIcon, TableCellsIcon,
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 import {
@@ -991,14 +991,14 @@ defineExpose({ refresh })
             type="button"
             role="tab"
             :aria-selected="view === 'table'"
-            class="p-1 transition-colors"
+            class="p-1.5 transition-colors"
             :class="view === 'table'
               ? 'bg-muted text-fg-strong'
               : 'text-fg-muted hover:text-fg-strong'"
             title="Table view"
             @click="view = 'table'"
           >
-            <Bars3Icon
+            <TableCellsIcon
               class="w-4 h-4"
               aria-hidden="true"
             />
@@ -1007,14 +1007,14 @@ defineExpose({ refresh })
             type="button"
             role="tab"
             :aria-selected="view === 'chart'"
-            class="p-1 transition-colors border-l border-border"
+            class="p-1.5 transition-colors"
             :class="view === 'chart'
               ? 'bg-muted text-fg-strong'
               : 'text-fg-muted hover:text-fg-strong'"
             title="Bar chart view"
             @click="view = 'chart'"
           >
-            <PresentationChartLineIcon
+            <ChartBarIcon
               class="w-4 h-4"
               aria-hidden="true"
             />
@@ -1022,73 +1022,53 @@ defineExpose({ refresh })
         </div>
       </div>
 
-      <!-- Filters: three dropdowns side by side, centered -->
+      <!-- Filters: bare dropdowns, centered — mirrors Chat Compression. -->
       <div class="flex items-center justify-center gap-3 flex-wrap">
-        <label
-          for="chat-cost-agent"
-          class="inline-flex items-center gap-2 text-xs"
+        <select
+          v-model="selectedAgentId"
+          aria-label="Filter by agent"
+          class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
         >
-          <span class="text-fg-muted">Agent</span>
-          <select
-            id="chat-cost-agent"
-            v-model="selectedAgentId"
-            class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
+          <option :value="null">
+            All agents
+          </option>
+          <option
+            v-for="a in (agents ?? [])"
+            :key="a.id"
+            :value="a.id"
           >
-            <option :value="null">
-              All agents
-            </option>
-            <option
-              v-for="a in (agents ?? [])"
-              :key="a.id"
-              :value="a.id"
-            >
-              {{ a.name }}
-            </option>
-          </select>
-        </label>
-
-        <label
-          for="chat-cost-channel"
-          class="inline-flex items-center gap-2 text-xs"
+            {{ a.name }}
+          </option>
+        </select>
+        <select
+          v-model="selectedChannel"
+          aria-label="Filter by channel"
+          class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
         >
-          <span class="text-fg-muted">Channel</span>
-          <select
-            id="chat-cost-channel"
-            v-model="selectedChannel"
-            class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
+          <option :value="null">
+            All channels
+          </option>
+          <option
+            v-for="ch in availableChannels"
+            :key="ch"
+            :value="ch"
           >
-            <option :value="null">
-              All channels
-            </option>
-            <option
-              v-for="ch in availableChannels"
-              :key="ch"
-              :value="ch"
-            >
-              {{ ch }}
-            </option>
-          </select>
-        </label>
-
-        <label
-          for="chat-cost-window"
-          class="inline-flex items-center gap-2 text-xs"
+            {{ ch }}
+          </option>
+        </select>
+        <select
+          v-model="selectedWindow"
+          aria-label="Filter by time window"
+          class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
         >
-          <span class="text-fg-muted">Window</span>
-          <select
-            id="chat-cost-window"
-            v-model="selectedWindow"
-            class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
+          <option
+            v-for="(label, key) in WINDOW_LABELS"
+            :key="key"
+            :value="key"
           >
-            <option
-              v-for="(label, key) in WINDOW_LABELS"
-              :key="key"
-              :value="key"
-            >
-              {{ label }}
-            </option>
-          </select>
-        </label>
+            {{ label }}
+          </option>
+        </select>
       </div>
 
       <div class="flex items-center gap-3 text-xs shrink-0">

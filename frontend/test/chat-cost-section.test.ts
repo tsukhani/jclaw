@@ -70,9 +70,9 @@ describe('ChatCostSection (JCLAW-28)', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('Chat Cost')
-    expect(wrapper.find('#chat-cost-agent').exists()).toBe(true)
-    expect(wrapper.find('#chat-cost-channel').exists()).toBe(true)
-    expect(wrapper.find('#chat-cost-window').exists()).toBe(true)
+    expect(wrapper.find('select[aria-label="Filter by agent"]').exists()).toBe(true)
+    expect(wrapper.find('select[aria-label="Filter by channel"]').exists()).toBe(true)
+    expect(wrapper.find('select[aria-label="Filter by time window"]').exists()).toBe(true)
   })
 
   it('renders aggregated totals when rows are present', async () => {
@@ -110,7 +110,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    const channelSelect = wrapper.find<HTMLSelectElement>('#chat-cost-channel')
+    const channelSelect = wrapper.find<HTMLSelectElement>('select[aria-label="Filter by channel"]')
     const optionValues = channelSelect.findAll('option').map(o => o.attributes('value'))
     // Vue serializes null v-model values to empty string; the rest are channel kinds.
     expect(optionValues).toContain('web')
@@ -467,7 +467,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
     })
     await flushPromises()
     // 30d default window → full $100 monthly fee is the prorated bill.
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const text = wrapper.text()
@@ -501,7 +501,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const text = wrapper.text()
@@ -544,7 +544,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const text = wrapper.text()
@@ -612,7 +612,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const text = wrapper.text()
@@ -653,7 +653,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     // Before filter: both models render, Total = $120.
@@ -769,7 +769,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     // Flip to chart view. The toggle is in the header; the bar-chart
@@ -814,7 +814,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
     const chartBtn = wrapper.findAll('button')
       .find(b => b.attributes('title') === 'Bar chart view')!
@@ -867,7 +867,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
     const chartBtn = wrapper.findAll('button')
       .find(b => b.attributes('title') === 'Bar chart view')!
@@ -927,7 +927,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     // Each provider should have at least one swatch element in the
@@ -1024,7 +1024,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const text = wrapper.text()
@@ -1070,7 +1070,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const text = wrapper.text()
@@ -1098,7 +1098,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const text = wrapper.text()
@@ -1126,7 +1126,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const chips = wrapper.findAll('button[aria-pressed]')
@@ -1161,7 +1161,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     const card = wrapper.findAll('button[aria-pressed]').find(c => c.text().includes('OpenRouter'))
@@ -1192,7 +1192,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await wrapper.find<HTMLSelectElement>('select[aria-label="Filter by time window"]').setValue('30d')
     await flushPromises()
 
     // Both per-token models render to start.

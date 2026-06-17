@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {
-  Bars3Icon,
-  PresentationChartLineIcon,
+  ChartBarIcon,
+  TableCellsIcon,
   TrashIcon,
 } from '@heroicons/vue/24/outline'
 import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/api'
@@ -360,14 +360,14 @@ onBeforeUnmount(() => {
               type="button"
               role="tab"
               :aria-selected="latencyView === 'table'"
-              class="p-1 transition-colors"
+              class="p-1.5 transition-colors"
               :class="latencyView === 'table'
                 ? 'bg-muted text-fg-strong'
                 : 'text-fg-muted hover:text-fg-strong'"
               title="Table view"
               @click="latencyView = 'table'"
             >
-              <Bars3Icon
+              <TableCellsIcon
                 class="w-4 h-4"
                 aria-hidden="true"
               />
@@ -376,14 +376,14 @@ onBeforeUnmount(() => {
               type="button"
               role="tab"
               :aria-selected="latencyView === 'chart'"
-              class="p-1 transition-colors border-l border-border"
+              class="p-1.5 transition-colors"
               :class="latencyView === 'chart'
                 ? 'bg-muted text-fg-strong'
                 : 'text-fg-muted hover:text-fg-strong'"
               title="Distribution chart"
               @click="latencyView = 'chart'"
             >
-              <PresentationChartLineIcon
+              <ChartBarIcon
                 class="w-4 h-4"
                 aria-hidden="true"
               />
@@ -395,35 +395,25 @@ onBeforeUnmount(() => {
             Channel selector. Hidden entirely when no channels have samples
             (matches the "no samples yet" empty state below). Visible even
             when only one channel has samples so the operator can see which
-            channel they're looking at; the select is just a static display
-            in that case but still communicates context.
-
-            Label both wraps the control and carries for/id to match the
-            repo's established pattern (see pages/channels/telegram.vue).
-            Satisfies both nesting and id-association strategies of
-            vuejs-accessibility/label-has-for.
+            channel they're looking at; a static display in that case but
+            still communicates context. Bare dropdown with aria-label to
+            mirror Chat Compression / Chat Cost.
           -->
-          <label
+          <select
             v-if="latencyChannels.length > 0"
-            for="chat-performance-channel"
-            class="inline-flex items-center gap-2 text-xs"
+            :value="selectedChannel"
+            aria-label="Filter by channel"
+            class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
+            @change="onSelectChannel(($event.target as HTMLSelectElement).value)"
           >
-            <span class="text-fg-muted">Channel</span>
-            <select
-              id="chat-performance-channel"
-              :value="selectedChannel"
-              class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
-              @change="onSelectChannel(($event.target as HTMLSelectElement).value)"
+            <option
+              v-for="channel in latencyChannels"
+              :key="channel.key"
+              :value="channel.key"
             >
-              <option
-                v-for="channel in latencyChannels"
-                :key="channel.key"
-                :value="channel.key"
-              >
-                {{ channel.label }}
-              </option>
-            </select>
-          </label>
+              {{ channel.label }}
+            </option>
+          </select>
         </div>
         <div class="flex items-center gap-3 text-xs shrink-0">
           <span class="text-fg-muted hidden sm:inline">In-memory • resets on JVM restart</span>
