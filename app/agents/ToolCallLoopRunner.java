@@ -209,13 +209,18 @@ public final class ToolCallLoopRunner {
                                                 List<VisionAudioAssembler.ImageBearer> imageBearers,
                                                 AudioRetryState audioState, VisionRetryState visionState,
                                                 boolean supportsAudioInitially) {
+        // JCLAW-465: compress tool outputs — including this turn's, appended
+        // inside the loop — right before the call. Ephemeral view: the caller's
+        // currentMessages keeps the originals for retries, yield detection and
+        // the next round's appends.
+        var sendMessages = CompressionPipeline.compress(currentMessages, agent, conversation);
         // Recompute per-round so the clamp tracks the growing history.
-        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, currentMessages, tools);
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, sendMessages, tools);
         ChatResponse response;
         try {
             response = (secondary != null)
-                    ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType)
-                    : primary.chat(effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType);
+                    ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, sendMessages, tools, maxTokens, thinkingMode, conversation.channelType)
+                    : primary.chat(effectiveModelId, sendMessages, tools, maxTokens, thinkingMode, conversation.channelType);
         } catch (Exception e) {
             var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, imageBearers,
                     audioState, visionState, supportsAudioInitially, currentMessages);
@@ -472,11 +477,14 @@ public final class ToolCallLoopRunner {
         // Continue with streaming after tool results. JCLAW-108: effective
         // model id honors conversation override, same as the round-1 call.
         var effectiveModelIdForCall = ModelResolver.effectiveModelId(agent, conversation);
+        // JCLAW-465: compress tool outputs (incl. this turn's) before the
+        // continuation call. Ephemeral — currentMessages keeps the originals.
+        var sendMessages = CompressionPipeline.compress(currentMessages, agent, conversation);
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
-        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, currentMessages, tools);
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, sendMessages, tools);
         var accumulator = provider.chatStreamAccumulate(
-                effectiveModelIdForCall, currentMessages, tools, cb.onToken(), cb.onReasoning(),
+                effectiveModelIdForCall, sendMessages, tools, cb.onToken(), cb.onReasoning(),
                 maxTokens, thinkingMode, channelType);
 
         try {
