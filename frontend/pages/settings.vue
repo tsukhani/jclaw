@@ -1937,14 +1937,14 @@ async function deleteLoggerLevel(logger: string) {
       >
         <div
           v-if="group.items.length > 0"
-          class="flex items-baseline justify-between gap-4 pt-2 first:pt-0"
+          class="pt-2 first:pt-0"
         >
-          <h3 class="text-[11px] font-semibold text-fg-muted uppercase tracking-wide shrink-0">
+          <h3 class="text-[11px] font-semibold text-fg-muted uppercase tracking-wide">
             {{ group.label }}
           </h3>
-          <span class="text-xs text-fg-muted text-right">
+          <p class="text-xs text-fg-muted mt-1">
             Add an API key to enable chat — URLs and models preset.
-          </span>
+          </p>
         </div>
         <div
           v-for="[name, entries] in group.items"
