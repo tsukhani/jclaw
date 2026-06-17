@@ -84,7 +84,11 @@ const filtered = computed(() => rows.value.filter(r =>
 
 const agg = computed(() => {
   const comp = filtered.value.filter(r => r.kind === 'COMPRESSION')
-  const tokensSaved = comp.reduce((s, r) => s + (r.tokensBefore - r.tokensAfter), 0)
+  const tokensBefore = comp.reduce((s, r) => s + r.tokensBefore, 0)
+  const tokensAfter = comp.reduce((s, r) => s + r.tokensAfter, 0)
+  const tokensSaved = tokensBefore - tokensAfter
+  const reduction = tokensBefore ? tokensSaved / tokensBefore : 0
+  const events = comp.length
 
   const typeMap = new Map<string, { before: number, after: number }>()
   for (const r of comp) {
@@ -133,7 +137,8 @@ const agg = computed(() => {
   }
 
   return {
-    tokensSaved, byType, byAlgo, guards, ccrTotal, ccrHits, ccrHitRate, alerts,
+    tokensBefore, tokensAfter, tokensSaved, reduction, events,
+    byType, byAlgo, guards, ccrTotal, ccrHits, ccrHitRate, alerts,
     hasData: comp.length > 0 || ccrTotal > 0 || guards > 0,
   }
 })
@@ -271,7 +276,7 @@ function fmt(n: number) {
     </div>
     <div
       v-else
-      class="p-4 space-y-4"
+      class="p-4 space-y-5"
     >
       <div
         v-if="agg.alerts.length"
@@ -286,41 +291,87 @@ function fmt(n: number) {
         </div>
       </div>
 
-      <div>
-        <div class="text-xs text-neutral-500">
-          Tokens saved ({{ windowLabel }})
+      <!-- KPI tiles: every scalar metric in one scannable row. -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="bg-surface border border-border p-3">
+          <div class="text-[11px] uppercase tracking-wide text-fg-muted">
+            Tokens saved
+          </div>
+          <div class="mt-1 text-2xl font-semibold leading-none tabular-nums text-emerald-500">
+            {{ fmt(agg.tokensSaved) }}
+          </div>
+          <div class="mt-1.5 text-xs text-fg-muted">
+            over {{ windowLabel }}
+          </div>
         </div>
-        <div class="text-lg font-medium text-fg-strong">
-          {{ fmt(agg.tokensSaved) }}
+        <div class="bg-surface border border-border p-3">
+          <div class="text-[11px] uppercase tracking-wide text-fg-muted">
+            Reduction
+          </div>
+          <div class="mt-1 text-2xl font-semibold leading-none tabular-nums text-fg-strong">
+            {{ pct(agg.reduction) }}%
+          </div>
+          <div class="mt-1.5 text-xs text-fg-muted tabular-nums">
+            {{ fmt(agg.tokensBefore) }} → {{ fmt(agg.tokensAfter) }}
+          </div>
+        </div>
+        <div class="bg-surface border border-border p-3">
+          <div class="text-[11px] uppercase tracking-wide text-fg-muted">
+            CCR hit rate
+          </div>
+          <div class="mt-1 text-2xl font-semibold leading-none tabular-nums text-fg-strong">
+            {{ agg.ccrTotal ? pct(agg.ccrHitRate) + '%' : '—' }}
+          </div>
+          <div class="mt-1.5 text-xs text-fg-muted tabular-nums">
+            {{ agg.ccrTotal ? agg.ccrHits + ' / ' + agg.ccrTotal + ' hits' : 'no retrievals' }}
+          </div>
+        </div>
+        <div class="bg-surface border border-border p-3">
+          <div class="text-[11px] uppercase tracking-wide text-fg-muted">
+            Inflation guards
+          </div>
+          <div class="mt-1 text-2xl font-semibold leading-none tabular-nums text-fg-strong">
+            {{ agg.guards }}
+          </div>
+          <div class="mt-1.5 text-xs text-fg-muted tabular-nums">
+            {{ agg.events }} compressions
+          </div>
         </div>
       </div>
 
+      <!-- Saved by content type -->
       <div v-if="agg.byType.length">
-        <div class="text-xs text-neutral-500 mb-1">
+        <div class="text-[11px] uppercase tracking-wide text-fg-muted mb-2">
           Saved by content type
         </div>
-        <template v-if="view === 'chart'">
+        <div
+          v-if="view === 'chart'"
+          class="space-y-2.5"
+        >
           <div
             v-for="t in agg.byType"
             :key="t.type"
-            class="flex items-center gap-2 mb-1"
+            class="flex items-center gap-3"
           >
-            <span class="text-xs text-fg-strong w-12 shrink-0">{{ t.type }}</span>
-            <div class="flex-1 bg-surface h-3">
+            <span class="text-xs font-medium text-fg-strong w-12 shrink-0">{{ t.type }}</span>
+            <div class="flex-1 h-2 bg-surface rounded-full overflow-hidden">
               <div
-                class="bg-emerald-500 h-3"
+                class="h-full bg-emerald-500 rounded-full transition-[width] duration-500"
                 :style="{ width: (t.saved / maxTypeSaved * 100) + '%' }"
               />
             </div>
-            <span class="text-xs text-neutral-500 w-28 text-right shrink-0">{{ fmt(t.saved) }} ({{ 100 - pct(t.ratio) }}%)</span>
+            <span class="text-xs text-fg-muted tabular-nums w-32 text-right shrink-0">
+              {{ fmt(t.saved) }}
+              <span class="text-emerald-500 ml-1">↓{{ 100 - pct(t.ratio) }}%</span>
+            </span>
           </div>
-        </template>
+        </div>
         <table
           v-else
           class="w-full text-xs"
         >
           <thead>
-            <tr class="text-neutral-500 text-left">
+            <tr class="text-fg-muted text-left">
               <th class="font-normal py-1">
                 Type
               </th>
@@ -341,10 +392,10 @@ function fmt(n: number) {
               <td class="py-1 text-fg-strong">
                 {{ t.type }}
               </td>
-              <td class="py-1 text-right text-fg-strong">
+              <td class="py-1 text-right text-fg-strong tabular-nums">
                 {{ fmt(t.saved) }}
               </td>
-              <td class="py-1 text-right text-neutral-500">
+              <td class="py-1 text-right text-fg-muted tabular-nums">
                 {{ 100 - pct(t.ratio) }}%
               </td>
             </tr>
@@ -352,32 +403,36 @@ function fmt(n: number) {
         </table>
       </div>
 
+      <!-- Algorithm usage -->
       <div v-if="agg.byAlgo.length">
-        <div class="text-xs text-neutral-500 mb-1">
+        <div class="text-[11px] uppercase tracking-wide text-fg-muted mb-2">
           Algorithm usage
         </div>
-        <template v-if="view === 'chart'">
+        <div
+          v-if="view === 'chart'"
+          class="space-y-2.5"
+        >
           <div
             v-for="a in agg.byAlgo"
             :key="a.algorithm"
-            class="flex items-center gap-2 mb-1"
+            class="flex items-center gap-3"
           >
-            <span class="text-xs text-fg-strong w-32 shrink-0 truncate">{{ a.algorithm }}</span>
-            <div class="flex-1 bg-surface h-3">
+            <span class="text-xs font-medium text-fg-strong w-32 shrink-0 truncate">{{ a.algorithm }}</span>
+            <div class="flex-1 h-2 bg-surface rounded-full overflow-hidden">
               <div
-                class="bg-sky-500 h-3"
+                class="h-full bg-sky-500 rounded-full transition-[width] duration-500"
                 :style="{ width: (a.count / maxAlgoCount * 100) + '%' }"
               />
             </div>
-            <span class="text-xs text-neutral-500 w-12 text-right shrink-0">{{ a.count }}</span>
+            <span class="text-xs text-fg-muted tabular-nums w-12 text-right shrink-0">{{ a.count }}</span>
           </div>
-        </template>
+        </div>
         <table
           v-else
           class="w-full text-xs"
         >
           <thead>
-            <tr class="text-neutral-500 text-left">
+            <tr class="text-fg-muted text-left">
               <th class="font-normal py-1">
                 Algorithm
               </th>
@@ -398,38 +453,15 @@ function fmt(n: number) {
               <td class="py-1 text-fg-strong">
                 {{ a.algorithm }}
               </td>
-              <td class="py-1 text-right text-fg-strong">
+              <td class="py-1 text-right text-fg-strong tabular-nums">
                 {{ a.count }}
               </td>
-              <td class="py-1 text-right text-neutral-500">
+              <td class="py-1 text-right text-fg-muted tabular-nums">
                 {{ fmt(a.saved) }}
               </td>
             </tr>
           </tbody>
         </table>
-      </div>
-
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <div class="text-xs text-neutral-500">
-            CCR hit rate
-          </div>
-          <div class="text-sm font-medium text-fg-strong">
-            {{ agg.ccrTotal ? pct(agg.ccrHitRate) + '%' : '—' }}
-            <span
-              v-if="agg.ccrTotal"
-              class="text-xs text-neutral-500"
-            >({{ agg.ccrHits }}/{{ agg.ccrTotal }})</span>
-          </div>
-        </div>
-        <div>
-          <div class="text-xs text-neutral-500">
-            Inflation guards
-          </div>
-          <div class="text-sm font-medium text-fg-strong">
-            {{ agg.guards }}
-          </div>
-        </div>
       </div>
     </div>
   </div>

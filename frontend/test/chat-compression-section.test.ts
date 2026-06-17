@@ -36,7 +36,7 @@ describe('ChatCompressionSection', () => {
     expect(text).toContain('Chat Compression')
     expect(text).toContain('JSON')
     expect(text).toContain('json-smartcrush')
-    expect(text).toContain('(1/2)') // CCR hits / total
+    expect(text).toContain('1 / 2 hits') // CCR hits / total tile
     // JSON ratio 600/10000 = 6% kept (< 10%) → low-ratio alert
     expect(text).toContain('JSON compression ratio is very low')
   })
