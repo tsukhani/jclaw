@@ -1662,7 +1662,7 @@ async function deleteLoggerLevel(logger: string) {
          timezone (which governs CRON scheduling and defaults to UTC). -->
     <div class="mb-6 space-y-4">
       <h2 class="text-sm font-medium text-fg-muted">
-        General
+        Timezone
       </h2>
       <p class="text-xs text-fg-muted">
         Your timezone. The assistant uses this as the current date and time in
