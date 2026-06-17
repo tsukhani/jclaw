@@ -65,6 +65,8 @@ function setupAgentsApi(opts?: {
       providerConfigured: true,
       thinkingMode: null,
       compressionEnabled: true,
+      compressionJson: true,
+      compressionCode: true,
       createdAt: '2026-04-01T10:00:00Z',
       updatedAt: '2026-04-22T10:00:00Z',
     },
@@ -78,6 +80,8 @@ function setupAgentsApi(opts?: {
       providerConfigured: true,
       thinkingMode: null,
       compressionEnabled: false,
+      compressionJson: false,
+      compressionCode: false,
       createdAt: '2026-04-10T10:00:00Z',
       updatedAt: '2026-04-20T10:00:00Z',
     },
@@ -302,6 +306,42 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     await vi.waitFor(() => expect(putBody).not.toBeNull())
 
     expect(putBody).toEqual({ compressionEnabled: true })
+  })
+
+  it('PUTs a partial { compressionJson } when a sub-toggle is changed (master on)', async () => {
+    let putBody: Record<string, unknown> | null = null
+    setupAgentsApi()
+    // Re-register the helper with the master ON so its sub-toggles are interactive.
+    registerEndpoint('/api/agents', () => [
+      {
+        id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4',
+        enabled: true, isMain: false, providerConfigured: true, thinkingMode: null,
+        compressionEnabled: true, compressionJson: true, compressionCode: true,
+        createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
+      },
+    ])
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    // The JSON sub-toggle sits under the master in the Optimization card and
+    // saves immediately on change, like the master.
+    const jsonLabel = component.findAll('label').find(l => l.text().includes('JSON'))
+    expect(jsonLabel, 'JSON sub-toggle should render in the Optimization card').toBeTruthy()
+    const checkbox = jsonLabel!.find<HTMLInputElement>('input[type="checkbox"]')
+    expect(checkbox.element.checked).toBe(true)
+    await checkbox.setValue(false)
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+
+    expect(putBody).toEqual({ compressionJson: false })
   })
 })
 

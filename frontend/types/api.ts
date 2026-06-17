@@ -16,6 +16,9 @@ export interface Agent {
   providerConfigured?: boolean
   /** JCLAW-465: effective per-agent content-compression enable (main on, custom off by default). */
   compressionEnabled: boolean
+  /** JCLAW-463: effective per-type sub-toggles (master AND per-type, both default on under the master). */
+  compressionJson: boolean
+  compressionCode: boolean
 }
 
 /**

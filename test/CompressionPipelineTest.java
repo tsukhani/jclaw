@@ -13,8 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * JCLAW-465 (core): the compression pipeline's routing and guards. Exercises
- * the pure {@code compressMessages} seam — only TOOL-role JSON above the token
- * floor is compressed; everything else passes through untouched.
+ * the pure {@code compressMessages} seam — TOOL-role JSON and CODE above the
+ * token floor are compressed; everything else passes through untouched.
  */
 class CompressionPipelineTest extends UnitTest {
 
@@ -103,12 +103,36 @@ class CompressionPipelineTest extends UnitTest {
 
     @Test
     void skipsNonJsonToolContent() {
-        // A large plain-text tool output (>250 tokens). TEXT isn't routed in the
-        // MVP (JSON only), so it passes through untouched.
+        // A large plain-text tool output (>250 tokens). TEXT has no compressor
+        // wired until JCLAW-464, so it passes through untouched.
         var text = "The build completed successfully. ".repeat(80);
         var msg = ChatMessage.toolResult("call_3", "shell", text);
         var out = CompressionPipeline.compressMessages(List.of(msg), MODEL, 250);
-        assertSame(msg, out.get(0), "non-JSON content is not compressed in the MVP");
+        assertSame(msg, out.get(0), "TEXT content is not compressed until JCLAW-464");
+    }
+
+    @Test
+    void compressesCodeToolContent() {
+        // JCLAW-463: CODE is now routed to the CodeCompressor (it passed through
+        // untouched in the JSON-only MVP).
+        var sb = new StringBuilder("package demo;\n\nimport java.util.List;\n\npublic class Service {\n");
+        for (int i = 0; i < 8; i++) {
+            sb.append("    public int compute").append(i).append("(int a, int b) {\n");
+            for (int j = 0; j < 10; j++) {
+                sb.append("        int temp").append(j).append(" = a * ").append(j).append(" + b;\n");
+            }
+            sb.append("        return a + b;\n    }\n");
+        }
+        sb.append("}\n");
+        var original = ChatMessage.toolResult("call_c", "read_file", sb.toString());
+
+        var out = CompressionPipeline.compressMessages(List.of(original), MODEL, 250);
+        var compressed = out.get(0);
+        assertNotSame(original, compressed, "code tool output should be compressed");
+        var content = (String) compressed.content();
+        assertTrue(content.contains("public class Service"), "signature preserved: " + content);
+        assertTrue(content.contains("ccr_retrieve(\"" + ContentHash.handle(sb.toString()) + "\")"),
+                "ccr handle present");
     }
 
     @Test

@@ -199,6 +199,11 @@ dependencies {
     // parent POM pins for its parser modules; keeps resolved/declared in sync.
     implementation("org.jsoup:jsoup:1.22.2")
 
+    // JavaParser — AST-aware Java compression for CodeCompressor (JCLAW-463).
+    // Self-contained (no transitive deps); its classes load lazily, only when
+    // Java source is actually compressed, so non-Java paths never touch it.
+    implementation("com.github.javaparser:javaparser-core:3.26.4")
+
     // Playwright's POM declares slf4j-simple as a runtime dep, which races
     // log4j-slf4j2-impl for the SLF4JServiceProvider ServiceLoader slot
     // (see JCLAW-88).

@@ -305,6 +305,9 @@ const queueMode = ref('queue')
 // Optimization card (immediate-save on toggle, like Queue Mode). Initialised
 // from the agent's effective value when the edit form opens.
 const compressionEnabled = ref(false)
+// JCLAW-463: per-type sub-toggles, gated by the master above.
+const compressionJson = ref(false)
+const compressionCode = ref(false)
 const savingCompression = ref(false)
 const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
@@ -335,6 +338,8 @@ const agentModelId = useId()
 const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
 const agentCompressionId = useId()
+const agentCompressionJsonId = useId()
+const agentCompressionCodeId = useId()
 
 // --- System prompt breakdown dialog state ---
 // Scoped to a single agent: opened from a per-row button on the agent list, so
@@ -592,6 +597,8 @@ function editAgent(agent: Agent) {
   formBaseline.value = { ...form.value }
   editing.value = agent
   compressionEnabled.value = agent.compressionEnabled
+  compressionJson.value = agent.compressionJson
+  compressionCode.value = agent.compressionCode
   creating.value = false
   saveError.value = null
   loadWorkspaceFile(agent.id, 'AGENT.md')
@@ -815,6 +822,39 @@ async function saveCompression() {
   finally {
     savingCompression.value = false
   }
+}
+
+// JCLAW-463: per-type sub-toggle saves. Same immediate-save partial-PUT pattern
+// as the master; the field name is the only thing that varies.
+async function persistCompressionField(
+  key: 'compressionJson' | 'compressionCode',
+  model: Ref<boolean>,
+) {
+  if (!editing.value) return
+  savingCompression.value = true
+  try {
+    await $fetch(`/api/agents/${editing.value.id}`, {
+      method: 'PUT',
+      body: { [key]: model.value },
+    })
+    editing.value[key] = model.value
+    refresh()
+  }
+  catch (e) {
+    console.error('Failed to save compression sub-toggle:', e)
+    model.value = editing.value[key]
+  }
+  finally {
+    savingCompression.value = false
+  }
+}
+
+function saveCompressionJson() {
+  return persistCompressionField('compressionJson', compressionJson)
+}
+
+function saveCompressionCode() {
+  return persistCompressionField('compressionCode', compressionCode)
 }
 
 async function loadExecConfig(agentName: string) {
@@ -1389,7 +1429,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <div>
               <span class="text-sm text-fg-strong">Content compression</span>
               <div class="text-xs text-neutral-500 mt-0.5">
-                Shrink large JSON tool outputs before the model sees them
+                Shrink large tool outputs before the model sees them
               </div>
             </div>
             <input
@@ -1399,6 +1439,49 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :disabled="savingCompression"
               class="accent-emerald-600 shrink-0"
               @change="saveCompression"
+            >
+          </label>
+
+          <!-- Per-type sub-toggles (JCLAW-463), gated by the master above:
+               inert + dimmed while the master is off. -->
+          <label
+            :for="agentCompressionJsonId"
+            class="px-4 py-2.5 pl-9 flex items-center justify-between gap-4 select-none"
+            :class="compressionEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+          >
+            <div>
+              <span class="text-sm text-fg-strong">JSON</span>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                Crush large JSON arrays — keep schema, first items, and errors
+              </div>
+            </div>
+            <input
+              :id="agentCompressionJsonId"
+              v-model="compressionJson"
+              type="checkbox"
+              :disabled="savingCompression || !compressionEnabled"
+              class="accent-emerald-600 shrink-0"
+              @change="saveCompressionJson"
+            >
+          </label>
+          <label
+            :for="agentCompressionCodeId"
+            class="px-4 py-2.5 pl-9 flex items-center justify-between gap-4 select-none"
+            :class="compressionEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+          >
+            <div>
+              <span class="text-sm text-fg-strong">Code</span>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                Keep imports and signatures, elide function bodies
+              </div>
+            </div>
+            <input
+              :id="agentCompressionCodeId"
+              v-model="compressionCode"
+              type="checkbox"
+              :disabled="savingCompression || !compressionEnabled"
+              class="accent-emerald-600 shrink-0"
+              @change="saveCompressionCode"
             >
           </label>
         </div>

@@ -54,6 +54,19 @@ public class Agent extends Model {
     public Boolean compressionEnabled;
 
     /**
+     * JCLAW-463: per-agent, per-content-type compression sub-toggles, each gated
+     * by the master {@link #compressionEnabled}. Nullable and resolving to ON
+     * under an enabled master (operators opt a type OUT, not in) — see
+     * {@link #compressionJsonEffective()} / {@link #compressionCodeEffective()}.
+     * JSON migrated here from the former global {@code chat.compression.json.enabled}.
+     */
+    @Column(name = "compression_json")
+    public Boolean compressionJson;
+
+    @Column(name = "compression_code")
+    public Boolean compressionCode;
+
+    /**
      * Reasoning-effort level for this agent, or {@code null} when reasoning is
      * disabled (or the model doesn't support it). Must be one of the values
      * advertised by the selected model's {@code thinkingLevels}; the API layer
@@ -114,6 +127,19 @@ public class Agent extends Model {
      */
     public boolean compressionEffective() {
         return compressionEnabled != null ? compressionEnabled : isMain();
+    }
+
+    /**
+     * Whether JSON compression is effective for this agent (JCLAW-463): the
+     * master must be on AND the per-type sub-toggle not explicitly off (null
+     * resolves to on under the master). Mirrored for each content type.
+     */
+    public boolean compressionJsonEffective() {
+        return compressionEffective() && (compressionJson == null || compressionJson);
+    }
+
+    public boolean compressionCodeEffective() {
+        return compressionEffective() && (compressionCode == null || compressionCode);
     }
 
     public static List<Agent> findEnabled() {

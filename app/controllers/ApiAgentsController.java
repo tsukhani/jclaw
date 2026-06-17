@@ -87,7 +87,8 @@ public class ApiAgentsController extends Controller {
                              String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
                              String createdAt, String updatedAt, boolean providerConfigured,
-                             boolean compressionEnabled) {
+                             boolean compressionEnabled,
+                             boolean compressionJson, boolean compressionCode) {
         static AgentView of(Agent a) {
             return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
         }
@@ -107,7 +108,8 @@ public class ApiAgentsController extends Controller {
             return new AgentView(a.id, a.name, a.description, a.modelProvider, a.modelId,
                     a.enabled, a.isMain(), a.thinkingMode,
                     a.createdAt.toString(), a.updatedAt.toString(), configured,
-                    a.compressionEffective());
+                    a.compressionEffective(),
+                    a.compressionJsonEffective(), a.compressionCodeEffective());
         }
     }
 
@@ -325,6 +327,14 @@ public class ApiAgentsController extends Controller {
         // save() persists it alongside the other fields.
         if (body.has("compressionEnabled") && !body.get("compressionEnabled").isJsonNull()) {
             agent.compressionEnabled = body.get("compressionEnabled").getAsBoolean();
+        }
+        // JCLAW-463: per-type sub-toggles, gated by the master above. Absent keys
+        // leave the stored value untouched.
+        if (body.has("compressionJson") && !body.get("compressionJson").isJsonNull()) {
+            agent.compressionJson = body.get("compressionJson").getAsBoolean();
+        }
+        if (body.has("compressionCode") && !body.get("compressionCode").isJsonNull()) {
+            agent.compressionCode = body.get("compressionCode").getAsBoolean();
         }
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
