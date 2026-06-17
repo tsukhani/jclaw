@@ -106,6 +106,13 @@ public class ConfigService {
             utils.HttpFactories.applyDispatcherConfig();
         }
 
+        // Per-logger level overrides apply live: the next log statement on the
+        // affected logger uses the new level. The override is layered on top of
+        // the file config, so it wins. See LoggerLevelService.
+        if (key.startsWith(LoggerLevelService.PREFIX)) {
+            LoggerLevelService.apply(key.substring(LoggerLevelService.PREFIX.length()), value);
+        }
+
         // Convenience linkage: when the operator first sets the Ollama Cloud
         // LLM apiKey, mirror that value into the Ollama search provider's
         // apiKey AND flip search.ollama.enabled to true — but ONLY if the
@@ -155,6 +162,11 @@ public class ConfigService {
         // loadtest mock still triggers a tool re-registration on toggle.
         if (key.equals("provider.loadtest-mock.enabled")) {
             jobs.ToolRegistrationJob.registerAll();
+        }
+        // Deleting a logger override reverts that logger to its inherited level
+        // (root → its captured file baseline). See LoggerLevelService.
+        if (key.startsWith(LoggerLevelService.PREFIX)) {
+            LoggerLevelService.revert(key.substring(LoggerLevelService.PREFIX.length()));
         }
     }
 

@@ -123,6 +123,11 @@ POST    /api/config                             ApiConfigController.save
 GET     /api/config/{key}                       ApiConfigController.get
 DELETE  /api/config/{key}                       ApiConfigController.delete
 
+# Logging API — per-logger runtime level overrides
+GET     /api/logging/levels                     ApiLoggingController.list
+POST    /api/logging/levels                     ApiLoggingController.save
+DELETE  /api/logging/levels/{logger}            ApiLoggingController.delete
+
 # Chat API
 POST    /api/chat/send                          ApiChatController.send
 POST    /api/chat/stream                        ApiChatController.streamChat
