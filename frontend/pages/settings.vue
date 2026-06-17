@@ -1931,20 +1931,21 @@ async function deleteLoggerLevel(logger: string) {
         </div>
       </div>
 
-      <p class="text-xs text-fg-muted">
-        Enter an API key for at least one provider to enable chat. Base URLs and models are pre-configured.
-      </p>
-
       <template
         v-for="group in groupedProviders"
         :key="group.group"
       >
-        <h3
+        <div
           v-if="group.items.length > 0"
-          class="text-[11px] font-semibold text-fg-muted uppercase tracking-wide pt-2 first:pt-0"
+          class="flex items-baseline justify-between gap-4 pt-2 first:pt-0"
         >
-          {{ group.label }}
-        </h3>
+          <h3 class="text-[11px] font-semibold text-fg-muted uppercase tracking-wide shrink-0">
+            {{ group.label }}
+          </h3>
+          <span class="text-xs text-fg-muted text-right">
+            Enter an API key for at least one provider to enable chat. Base URLs and models are pre-configured.
+          </span>
+        </div>
         <div
           v-for="[name, entries] in group.items"
           :key="name"
