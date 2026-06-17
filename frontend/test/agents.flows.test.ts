@@ -276,7 +276,7 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     })
   })
 
-  it('PUTs compressionEnabled: true when the compression toggle is checked', async () => {
+  it('PUTs a partial { compressionEnabled } immediately when the Optimization toggle is changed', async () => {
     let putBody: Record<string, unknown> | null = null
     registerEndpoint('/api/agents/2', {
       method: 'PUT',
@@ -292,20 +292,16 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
 
     await openHelperEdit(component)
 
-    // The helper agent defaults to compression OFF; checking the toggle
-    // dirties the form and the partial PUT carries the new flag.
+    // The helper agent defaults to compression OFF. The toggle lives in the
+    // Optimization card and saves immediately on change (no main Save click).
     const label = component.findAll('label').find(l => l.text().includes('Content compression'))
-    expect(label, 'compression toggle should render in edit mode').toBeTruthy()
+    expect(label, 'compression toggle should render in the Optimization card').toBeTruthy()
     const checkbox = label!.find<HTMLInputElement>('input[type="checkbox"]')
     expect(checkbox.element.checked).toBe(false)
     await checkbox.setValue(true)
-    await flushPromises()
-
-    const saveBtn = component.findAll('button').find(b => (b.attributes('title') ?? '') === 'Save')
-    await saveBtn!.trigger('click')
     await vi.waitFor(() => expect(putBody).not.toBeNull())
 
-    expect(putBody!.compressionEnabled).toBe(true)
+    expect(putBody).toEqual({ compressionEnabled: true })
   })
 })
 

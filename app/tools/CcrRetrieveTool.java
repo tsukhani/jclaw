@@ -41,7 +41,10 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
 
     @Override
     public String icon() {
-        return "archive";
+        // "search" maps to a magnifying glass in the frontend tool-icon set
+        // (pages/tools.vue, pages/agents.vue) — "archive" isn't mapped and
+        // renders blank. The action is a retrieval/look-up by hash.
+        return "search";
     }
 
     @Override

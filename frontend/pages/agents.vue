@@ -82,7 +82,6 @@ interface AgentForm {
   modelId: string
   enabled: boolean
   thinkingMode: string
-  compressionEnabled: boolean
 }
 const form = ref<AgentForm>({
   name: '',
@@ -91,7 +90,6 @@ const form = ref<AgentForm>({
   modelId: '',
   enabled: true,
   thinkingMode: '',
-  compressionEnabled: false,
 })
 // Snapshot of the agent form at load time (or after a successful save). See
 // formDirty below — together they gate the Save button so it's only active
@@ -303,6 +301,11 @@ function toggleMcpExpand(server: string) {
 }
 
 const queueMode = ref('queue')
+// JCLAW-465: per-agent content-compression enable, managed in its own
+// Optimization card (immediate-save on toggle, like Queue Mode). Initialised
+// from the agent's effective value when the edit form opens.
+const compressionEnabled = ref(false)
+const savingCompression = ref(false)
 const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
 const saving = ref(false)
@@ -570,7 +573,6 @@ function newAgent() {
     modelId: defaultModel,
     enabled: true,
     thinkingMode: '',
-    compressionEnabled: false,
   }
   formBaseline.value = { ...form.value }
   creating.value = true
@@ -586,10 +588,10 @@ function editAgent(agent: Agent) {
     modelId: agent.modelId,
     enabled: agent.enabled,
     thinkingMode: agent.thinkingMode ?? '',
-    compressionEnabled: agent.compressionEnabled,
   }
   formBaseline.value = { ...form.value }
   editing.value = agent
+  compressionEnabled.value = agent.compressionEnabled
   creating.value = false
   saveError.value = null
   loadWorkspaceFile(agent.id, 'AGENT.md')
@@ -788,6 +790,30 @@ async function saveQueueMode() {
   }
   catch (e) {
     console.error('Failed to save queue mode:', e)
+  }
+}
+
+// JCLAW-465: immediate-save the per-agent compression toggle via a partial PUT
+// (the update endpoint honours absent-key-leaves-unchanged). Keeps editing.value
+// and the list row in sync so a later edit reopens with the right state.
+async function saveCompression() {
+  if (!editing.value) return
+  savingCompression.value = true
+  try {
+    await $fetch(`/api/agents/${editing.value.id}`, {
+      method: 'PUT',
+      body: { compressionEnabled: compressionEnabled.value },
+    })
+    editing.value.compressionEnabled = compressionEnabled.value
+    refresh()
+  }
+  catch (e) {
+    console.error('Failed to save compression setting:', e)
+    // Revert the toggle to the persisted value on failure.
+    compressionEnabled.value = editing.value.compressionEnabled
+  }
+  finally {
+    savingCompression.value = false
   }
 }
 
@@ -1286,23 +1312,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           class="mt-5"
           @toggle="toggleFormCapability"
         />
-        <!-- JCLAW-465: per-agent content-compression toggle. Edit-only — new
-             agents take the role default (main on, custom off) applied at
-             creation, then the operator overrides it here. -->
-        <label
-          v-if="!creating"
-          :for="agentCompressionId"
-          class="flex items-center gap-2 mt-4 text-sm cursor-pointer select-none"
-        >
-          <input
-            :id="agentCompressionId"
-            v-model="form.compressionEnabled"
-            type="checkbox"
-            class="accent-emerald-600"
-          >
-          <span>Content compression</span>
-          <span class="text-xs text-fg-muted">shrinks large JSON tool outputs before the model sees them</span>
-        </label>
         <div class="flex items-center mt-4 gap-3">
           <button
             :disabled="saving || !formDirty || !form.name || !form.modelProvider || !form.modelId"
@@ -1358,6 +1367,40 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </select>
             </label>
           </div>
+        </div>
+      </div>
+
+      <!-- Optimization: per-agent feature toggles. JCLAW-465 — content
+           compression is the first; future per-agent optimizations (e.g. the
+           json/code/text compression sub-toggles) add as rows here. Each
+           toggle saves immediately via a partial PUT. -->
+      <div
+        v-if="editing"
+        class="bg-surface-elevated border border-border"
+      >
+        <div class="px-4 py-2.5 border-b border-border">
+          <span class="text-sm font-medium text-fg-strong">Optimization</span>
+        </div>
+        <div class="divide-y divide-border">
+          <label
+            :for="agentCompressionId"
+            class="px-4 py-2.5 flex items-center justify-between gap-4 cursor-pointer select-none"
+          >
+            <div>
+              <span class="text-sm text-fg-strong">Content compression</span>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                Shrink large JSON tool outputs before the model sees them
+              </div>
+            </div>
+            <input
+              :id="agentCompressionId"
+              v-model="compressionEnabled"
+              type="checkbox"
+              :disabled="savingCompression"
+              class="accent-emerald-600 shrink-0"
+              @change="saveCompression"
+            >
+          </label>
         </div>
       </div>
 
