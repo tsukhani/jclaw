@@ -1,6 +1,6 @@
 import org.junit.jupiter.api.Test;
 import services.video.FrameSampler;
-import services.video.Tier2VideoAdapter;
+import services.video.MultiImageVideoAdapter;
 import services.video.VideoAdapterException;
 
 import java.util.List;
@@ -9,11 +9,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * JCLAW-221: Tier-2 multi-image content-part construction. Pure structural assertions
- * over synthetic frame bytes — no ffmpeg. (The dispatcher functional happy-path against a
+ * JCLAW-221: multi-image content-part construction. Pure structural assertions over
+ * synthetic frame bytes — no ffmpeg. (The dispatcher functional happy-path against a
  * mocked vision model lives with JCLAW-224's routing tests.)
  */
-class Tier2VideoAdapterTest {
+class MultiImageVideoAdapterTest {
 
     private static List<FrameSampler.Frame> fakeFrames() {
         return List.of(
@@ -24,7 +24,7 @@ class Tier2VideoAdapterTest {
 
     @Test
     void buildsLeadingTextThenImageParts() {
-        var parts = Tier2VideoAdapter.contentParts(fakeFrames(), 130.0);
+        var parts = MultiImageVideoAdapter.contentParts(fakeFrames(), 130.0);
         assertEquals(4, parts.size(), "1 text header + 3 image parts");
 
         var head = parts.get(0);
@@ -45,6 +45,6 @@ class Tier2VideoAdapterTest {
 
     @Test
     void emptyFramesThrowTyped() {
-        assertThrows(VideoAdapterException.class, () -> Tier2VideoAdapter.contentParts(List.of(), 10.0));
+        assertThrows(VideoAdapterException.class, () -> MultiImageVideoAdapter.contentParts(List.of(), 10.0));
     }
 }

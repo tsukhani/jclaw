@@ -115,9 +115,9 @@ public final class VisionAudioAssembler {
     /**
      * JCLAW-224: the video analogue of {@link ImageBearer}/{@link AudioBearer}. Tracks which user
      * messages carry video attachments so {@link #applyVideoForCapability} can splice the chosen
-     * interpretation tier's content parts (Tier-1 native video / Tier-2 frames-as-images / Tier-3
-     * text summary) into the exact slot. Unlike images and audio — whose raw-media part is cheap
-     * to build inline — every video tier samples frames (and Tier-3 also captions), so video is
+     * interpretation strategy's content parts (native video / multi-image / text summary) into the
+     * exact slot. Unlike images and audio — whose raw-media part is cheap to build inline — every
+     * video strategy samples frames (and text-summary also captions), so video is
      * NEVER emitted by {@link #userMessageFor}; it is always resolved in the post-assembly pass.
      *
      * @param chatMessageIndex   position in the returned {@link ChatMessage} list
@@ -410,11 +410,10 @@ public final class VisionAudioAssembler {
 
     /**
      * JCLAW-224 outside-Tx orchestrator: for every user turn carrying a video attachment, route it
-     * through {@link VideoUnderstandingDispatcher} (Tier-1 native / Tier-2 frames-as-images /
-     * Tier-3 text summary, chosen from the agent's capabilities) and splice the resulting content
-     * parts into that turn.
+     * through {@link VideoUnderstandingDispatcher} (native-video / multi-image / text-summary,
+     * chosen from the agent's capabilities) and splice the resulting content parts into that turn.
      *
-     * <p>Every tier samples frames (ffmpeg) and Tier-3 additionally captions + summarizes, so the
+     * <p>Every strategy samples frames (ffmpeg) and text-summary additionally captions + summarizes, so the
      * dispatch runs in Phase 1 with NO JPA transaction held — matching the codebase rule that slow
      * subprocess/model calls never occupy a pooled connection. Phase 2 rebuilds the affected user
      * messages in a fresh Tx, re-deriving any caption/transcript downgrade (so a video co-attached
@@ -431,7 +430,7 @@ public final class VisionAudioAssembler {
             List<VideoBearer> videoBearers, models.Agent agent, boolean supportsAudio, boolean supportsVision) {
         if (videoBearers == null || videoBearers.isEmpty()) return messages;
 
-        // Phase 1 (no Tx during sampling/captioning): dispatch each video attachment to its tier.
+        // Phase 1 (no Tx during sampling/captioning): dispatch each video attachment to its strategy.
         var partsByIndex = new HashMap<Integer, List<Map<String, Object>>>();
         for (var b : videoBearers) {
             var acc = new ArrayList<Map<String, Object>>();

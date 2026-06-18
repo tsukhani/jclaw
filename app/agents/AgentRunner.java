@@ -572,10 +572,9 @@ public class AgentRunner {
             // both an image and a downgraded voice note rebuilds correctly.
             var supportsVisionForCall = modelInfoForAudio != null && modelInfoForAudio.supportsVision();
             finalMessages = VisionAudioAssembler.applyCaptionsForCapability(finalMessages, prepared.imageBearers(), supportsVisionForCall, supportsAudioForCall);
-            // JCLAW-224: route any video attachments through the tier dispatcher (Tier-1 native /
-            // Tier-2 frames-as-images / Tier-3 text summary) and splice the content parts in.
-            // supportsVision/Audio are threaded so a co-attached downgraded image / voice note
-            // survives the rebuild.
+            // JCLAW-224: route any video attachments through the dispatcher (native-video /
+            // multi-image / text-summary) and splice the content parts in. supportsVision/Audio
+            // are threaded so a co-attached downgraded image / voice note survives the rebuild.
             finalMessages = VisionAudioAssembler.applyVideoForCapability(finalMessages, prepared.videoBearers(), agent, supportsAudioForCall, supportsVisionForCall);
             prepared = new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers(), prepared.imageBearers(), prepared.videoBearers());
             trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
@@ -1019,7 +1018,7 @@ public class AgentRunner {
         // the audio downgrade above.
         var captioned = VisionAudioAssembler.applyCaptionsForCapability(rewritten, prepared.imageBearers(),
                 supportsVisionForStream, supportsAudioForStream);
-        // JCLAW-224: route video attachments through the tier dispatcher on the streaming path too.
+        // JCLAW-224: route video attachments through the dispatcher on the streaming path too.
         return VisionAudioAssembler.applyVideoForCapability(captioned, prepared.videoBearers(), agent,
                 supportsAudioForStream, supportsVisionForStream);
     }

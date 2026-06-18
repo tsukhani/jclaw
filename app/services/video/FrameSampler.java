@@ -24,11 +24,11 @@ import java.util.concurrent.TimeUnit;
  * {@code waitFor} so a full pipe can't deadlock the child, a bounded timeout, and
  * {@code destroyForcibly} on a hang.
  *
- * <p>The frames feed all three interpretation tiers (JCLAW-220/221/222): Tier-1
- * hands the list to a native video model as a {@code video} content part, Tier-2
- * threads them in as individual {@code image_url} parts for a vision model, and
- * Tier-3 captions each frame and assembles a {@code [hh:mm:ss]} timeline for a
- * text-only model.
+ * <p>The frames feed all three interpretation strategies (JCLAW-220/221/222): the
+ * native-video strategy hands the list to a video model as a {@code video} content
+ * part, the multi-image strategy threads them in as individual {@code image_url}
+ * parts for a vision model, and the text-summary strategy captions each frame and
+ * assembles a {@code [hh:mm:ss]} timeline for a text-only model.
  *
  * <p>The frame <em>count</em> is duration-aware (see {@link #frameCountFor}) so a
  * 12-second clip isn't oversampled to the same N as a 10-minute one. No ffmpeg on
@@ -44,9 +44,9 @@ public final class FrameSampler {
     public record Frame(byte[] jpeg, double timestampSeconds) {}
 
     /**
-     * The sampled frames plus the source duration. All three interpretation tiers need
-     * the duration (Tier-1 {@code sample_fps}, Tier-2 header text, Tier-3 {@code [hh:mm:ss]}
-     * lines), so it travels with the frames from the single ffprobe pass.
+     * The sampled frames plus the source duration. All three interpretation strategies need
+     * the duration (native-video {@code sample_fps}, multi-image header text, text-summary
+     * {@code [hh:mm:ss]} lines), so it travels with the frames from the single ffprobe pass.
      */
     public record SampleResult(List<Frame> frames, double durationSeconds) {}
 
@@ -119,9 +119,10 @@ public final class FrameSampler {
 
     /**
      * As {@link #sample(MessageAttachment)} but capping the frame count at
-     * {@code maxFrames}. Tier-3 (JCLAW-222) caps below the duration-aware count so its
-     * per-frame caption calls (each a full LLM round-trip) stay bounded even when an
-     * operator raises {@code video.sampleFrames} to densify Tier-1/Tier-2.
+     * {@code maxFrames}. The text-summary strategy (JCLAW-222) caps below the duration-aware
+     * count so its per-frame caption calls (each a full LLM round-trip) stay bounded even when an
+     * operator raises {@code video.sampleFrames} to densify the native-video / multi-image
+     * strategies.
      */
     public static SampleResult sample(MessageAttachment video, int maxFrames) {
         if (video == null) throw new FrameSamplingException("attachment is null");

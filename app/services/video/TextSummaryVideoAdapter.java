@@ -16,34 +16,34 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Tier-3 adapter (JCLAW-222): for text-only models, samples N keyframes, captions each via
- * the image-interpretation epic's {@link services.caption.ImageCaptionService}, and assembles
- * a temporal text summary — a header (duration + frame count) followed by {@code [hh:mm:ss] caption}
+ * Text-summary video adapter (JCLAW-222): for text-only models, samples N keyframes, captions each
+ * via the image-interpretation epic's {@link services.caption.ImageCaptionService}, and assembles a
+ * temporal text summary — a header (duration + frame count) followed by {@code [hh:mm:ss] caption}
  * lines and an optional one-sentence overview. The summary is persisted on
  * {@link MessageAttachment#videoSummary} so replays reuse it instead of re-captioning.
  *
- * <p><b>Cost control.</b> Each frame caption is a full LLM round-trip, so Tier-3 caps the frame
- * count below the duration-aware figure: effective N = {@code min(frameCountFor(duration),
- * TIER3_MAX_FRAMES)}. This keeps caption-call cost bounded even when an operator raises
- * {@code video.sampleFrames} to densify Tier-1/Tier-2.
+ * <p><b>Cost control.</b> Each frame caption is a full LLM round-trip, so this adapter caps the
+ * frame count below the duration-aware figure: effective N = {@code min(frameCountFor(duration),
+ * MAX_FRAMES)}. That keeps caption-call cost bounded even when an operator raises
+ * {@code video.sampleFrames} to densify the native-video / multi-image strategies.
  *
- * <p><b>Resilience.</b> A single frame's caption failing does not fail the whole summary — the
- * line is logged and replaced with a placeholder. The overview line is best-effort: any failure
- * yields a summary without it.
+ * <p><b>Resilience.</b> A single frame's caption failing does not fail the whole summary — the line
+ * is logged and replaced with a placeholder. The overview line is best-effort: any failure yields a
+ * summary without it.
  *
- * <p>Follows the two-phase transaction pattern of {@code VisionAudioAssembler.captionOne}: the
- * slow caption/summarize model calls run with NO JPA transaction held; only the short cache-read
- * and the final persist touch the DB.
+ * <p>Follows the two-phase transaction pattern of {@code VisionAudioAssembler.captionOne}: the slow
+ * caption/summarize model calls run with NO JPA transaction held; only the short cache-read and the
+ * final persist touch the DB.
  */
-public final class Tier3VideoAdapter {
+public final class TextSummaryVideoAdapter {
 
-    private Tier3VideoAdapter() {}
+    private TextSummaryVideoAdapter() {}
 
-    static final String CFG_TIER3_MAX_FRAMES = "video.tier3MaxFrames";
-    static final int DEFAULT_TIER3_MAX_FRAMES = 8;
+    static final String CFG_MAX_FRAMES = "video.textSummaryMaxFrames";
+    static final int DEFAULT_MAX_FRAMES = 8;
     static final String CAPTION_UNAVAILABLE = "(frame caption unavailable)";
 
-    /** Build (or reuse) the Tier-3 temporal-summary text content part for a text-only model. */
+    /** Build (or reuse) the temporal-summary text content part for a text-only model. */
     public static List<Map<String, Object>> contentParts(MessageAttachment video, Agent agent) {
         if (video == null) throw new VideoAdapterException("attachment is null");
         return List.of(Map.of("type", "text", "text", ensureSummary(video, agent)));
@@ -72,24 +72,24 @@ public final class Tier3VideoAdapter {
         return summary;
     }
 
-    /** The Tier-3 effective frame count: the duration-aware count capped at TIER3_MAX_FRAMES. */
+    /** The effective frame count: the duration-aware count capped at the {@link #MAX_FRAMES} limit. */
     public static int effectiveFrameCount(double durationSeconds) {
-        return Math.min(FrameSampler.frameCountFor(durationSeconds), tier3MaxFrames());
+        return Math.min(FrameSampler.frameCountFor(durationSeconds), maxFrames());
     }
 
-    static int tier3MaxFrames() {
+    static int maxFrames() {
         return Math.max(FrameSampler.MIN_FRAMES,
-                ConfigService.getInt(CFG_TIER3_MAX_FRAMES, DEFAULT_TIER3_MAX_FRAMES));
+                ConfigService.getInt(CFG_MAX_FRAMES, DEFAULT_MAX_FRAMES));
     }
 
     /** Sample (capped), caption each frame, assemble the [hh:mm:ss] timeline + a one-sentence overview. */
     static String buildSummary(MessageAttachment video, Agent agent) {
-        var sampled = FrameSampler.sample(video, tier3MaxFrames()); // effective N = min(frameCountFor, cap)
+        var sampled = FrameSampler.sample(video, maxFrames()); // effective N = min(frameCountFor, cap)
         var frames = sampled.frames();
 
         var svc = CaptionRouter.configuredService()
                 .orElseThrow(() -> new VideoAdapterException(
-                        "no caption provider configured (caption.provider) for the Tier-3 video fallback"));
+                        "no caption provider configured (caption.provider) for the text-summary video fallback"));
 
         var lines = new ArrayList<String>(frames.size());
         var realCaptions = new ArrayList<String>(frames.size());
@@ -100,7 +100,7 @@ public final class Tier3VideoAdapter {
                 caption = svc.captionDataUrl(dataUrl);
                 if (caption == null || caption.isBlank()) caption = CAPTION_UNAVAILABLE;
             } catch (RuntimeException e) {
-                EventLogger.warn("video", "Tier-3 frame caption failed at %s: %s"
+                EventLogger.warn("video", "frame caption failed at %s: %s"
                         .formatted(VideoTimecode.format(f.timestampSeconds()), e.getMessage()));
                 caption = CAPTION_UNAVAILABLE;
             }
@@ -132,7 +132,7 @@ public final class Tier3VideoAdapter {
             var text = SessionCompactor.firstChoiceText(resp);
             return (text == null || text.isBlank()) ? null : text.trim();
         } catch (RuntimeException e) {
-            EventLogger.warn("video", "Tier-3 overview summarization failed: " + e.getMessage());
+            EventLogger.warn("video", "overview summarization failed: " + e.getMessage());
             return null;
         }
     }

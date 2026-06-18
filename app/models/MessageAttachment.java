@@ -72,7 +72,7 @@ public class MessageAttachment extends Model {
     @Column(columnDefinition = "TEXT")
     public String caption;
 
-    /** JCLAW-218: cached temporal text summary for the Tier-3 video fallback — the per-frame
+    /** JCLAW-218: cached temporal text summary for the text-only (text-summary) video fallback — the per-frame
      *  captions assembled into a {@code [hh:mm:ss]} timeline, computed once by the
      *  video-understanding pipeline and reused across replays and history search. Each frame
      *  caption is its own LLM call, so re-deriving this is N times costlier than a single image

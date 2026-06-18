@@ -3,8 +3,8 @@ package services.video;
 import java.util.Locale;
 
 /**
- * Format a number of seconds as a {@code hh:mm:ss} timecode for the Tier-2 frame
- * timestamp list (JCLAW-221) and the Tier-3 temporal summary lines (JCLAW-222).
+ * Format a number of seconds as a {@code hh:mm:ss} timecode for the multi-image frame
+ * timestamp list (JCLAW-221) and the text-summary temporal lines (JCLAW-222).
  */
 final class VideoTimecode {
 

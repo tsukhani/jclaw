@@ -503,7 +503,7 @@ public class ModelDiscoveryService {
      * only the OpenAI-compatible discovery path (OpenRouter, and a vLLM-backed
      * custom provider) reaches this; the Ollama and LM Studio native discovery
      * paths never call it, so a Qwen-VL model served there stays
-     * {@code supportsVideo=false} and routes to the Tier-2 frame-multi-image
+     * {@code supportsVideo=false} and routes to the multi-image
      * fallback — those backends are image-only (see JCLAW-208). Gemini is not
      * included: we are not using Gemini.
      */

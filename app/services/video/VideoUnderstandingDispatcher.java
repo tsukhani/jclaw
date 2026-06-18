@@ -10,73 +10,77 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Routes a video attachment to one of the three interpretation tiers based on the agent's
- * model capabilities and returns the OpenAI-style content parts to splice into the outgoing
- * user message (JCLAW-224). The routing order:
+ * Routes a video attachment to one of three interpretation strategies based on the agent's model
+ * capabilities and returns the OpenAI-style content parts to splice into the outgoing user message
+ * (JCLAW-224). The strategy is chosen in preference order:
  * <ol>
- *   <li>{@code supportsVideo} → <b>Tier-1</b> ({@link QwenVideoAdapter}, native Qwen video part);</li>
- *   <li>else {@code supportsVision} → <b>Tier-2</b> ({@link Tier2VideoAdapter}, frames as images),
- *       falling through to Tier-3 if frame extraction fails (no ffmpeg / corrupt video);</li>
- *   <li>else <b>Tier-3</b> ({@link Tier3VideoAdapter}, text temporal summary).</li>
+ *   <li>{@code supportsVideo} → {@link Strategy#NATIVE_VIDEO} ({@link QwenVideoAdapter}, a native
+ *       Qwen video part);</li>
+ *   <li>else {@code supportsVision} → {@link Strategy#MULTI_IMAGE} ({@link MultiImageVideoAdapter},
+ *       sampled frames as still images), falling back to the text summary if frame extraction fails
+ *       (no ffmpeg / corrupt video);</li>
+ *   <li>else {@link Strategy#TEXT_SUMMARY} ({@link TextSummaryVideoAdapter}, a captioned text
+ *       summary).</li>
  * </ol>
  *
- * <p>Call this OUTSIDE any JPA transaction — Tier-1/Tier-2 sample frames (ffmpeg subprocess)
- * and Tier-3 additionally captions each frame and runs a summarize call, all of which must not
- * hold a pooled DB connection. {@code VisionAudioAssembler.applyVideoForCapability} is the
- * orchestrator that runs this in its no-Tx phase and splices the result.
+ * <p>Call this OUTSIDE any JPA transaction — NATIVE_VIDEO/MULTI_IMAGE sample frames (ffmpeg
+ * subprocess) and TEXT_SUMMARY additionally captions each frame and runs a summarize call, all of
+ * which must not hold a pooled DB connection. {@code VisionAudioAssembler.applyVideoForCapability}
+ * is the orchestrator that runs this in its no-Tx phase and splices the result.
  */
 public final class VideoUnderstandingDispatcher {
 
     private VideoUnderstandingDispatcher() {}
 
-    public enum Tier { TIER1_NATIVE, TIER2_FRAMES, TIER3_SUMMARY }
+    /** The interpretation strategy chosen for a video, by the target model's capabilities. */
+    public enum Strategy { NATIVE_VIDEO, MULTI_IMAGE, TEXT_SUMMARY }
 
-    /** Pick the tier and produce the content parts for the given video attachment + agent. */
+    /** Pick the strategy and produce the content parts for the given video attachment + agent. */
     public static List<Map<String, Object>> dispatch(MessageAttachment video, Agent agent) {
         if (video == null || !video.isVideo()) {
             throw new VideoAdapterException("not a video attachment");
         }
-        return switch (tierFor(agent)) {
-            case TIER1_NATIVE -> tier1(video, agent);
-            case TIER2_FRAMES -> tier2OrFallback(video, agent);
-            case TIER3_SUMMARY -> tier3(video, agent);
+        return switch (strategyFor(agent)) {
+            case NATIVE_VIDEO -> nativeVideo(video, agent);
+            case MULTI_IMAGE -> multiImageOrTextSummary(video, agent);
+            case TEXT_SUMMARY -> textSummary(video, agent);
         };
     }
 
     /**
-     * The tier the agent's model would use — {@code supportsVideo} ⇒ Tier-1, else
-     * {@code supportsVision} ⇒ Tier-2, else Tier-3. Exposed for the Settings read-only
-     * "which tier would my model use" display (JCLAW-223) and the routing functional tests.
+     * The strategy the agent's model would use — {@code supportsVideo} ⇒ NATIVE_VIDEO, else
+     * {@code supportsVision} ⇒ MULTI_IMAGE, else TEXT_SUMMARY. Exposed for the Settings read-only
+     * "which strategy would my model use" display (JCLAW-223) and the routing functional tests.
      */
-    public static Tier tierFor(Agent agent) {
-        if (AgentService.supportsVideo(agent)) return Tier.TIER1_NATIVE;
-        if (AgentService.supportsVision(agent)) return Tier.TIER2_FRAMES;
-        return Tier.TIER3_SUMMARY;
+    public static Strategy strategyFor(Agent agent) {
+        if (AgentService.supportsVideo(agent)) return Strategy.NATIVE_VIDEO;
+        if (AgentService.supportsVision(agent)) return Strategy.MULTI_IMAGE;
+        return Strategy.TEXT_SUMMARY;
     }
 
-    private static List<Map<String, Object>> tier1(MessageAttachment video, Agent agent) {
+    private static List<Map<String, Object>> nativeVideo(MessageAttachment video, Agent agent) {
         var sampled = FrameSampler.sample(video);
         var shape = QwenVideoAdapter.shapeForProvider(agent.modelProvider);
-        EventLogger.info("video", "Tier-1 native: %d frames, shape=%s, attachment=%s"
+        EventLogger.info("video", "native-video: %d frames, shape=%s, attachment=%s"
                 .formatted(sampled.frames().size(), shape, video.uuid));
         return QwenVideoAdapter.contentParts(sampled.frames(), sampled.durationSeconds(), shape);
     }
 
-    private static List<Map<String, Object>> tier2OrFallback(MessageAttachment video, Agent agent) {
+    private static List<Map<String, Object>> multiImageOrTextSummary(MessageAttachment video, Agent agent) {
         try {
             var sampled = FrameSampler.sample(video);
-            EventLogger.info("video", "Tier-2 frames-as-images: %d frames, attachment=%s"
+            EventLogger.info("video", "multi-image: %d frames, attachment=%s"
                     .formatted(sampled.frames().size(), video.uuid));
-            return Tier2VideoAdapter.contentParts(sampled.frames(), sampled.durationSeconds());
+            return MultiImageVideoAdapter.contentParts(sampled.frames(), sampled.durationSeconds());
         } catch (FrameSamplingException e) {
-            EventLogger.warn("video", "Tier-2 frame extraction failed (%s); falling through to Tier-3 for attachment %s"
+            EventLogger.warn("video", "multi-image frame extraction failed (%s); falling back to text summary for attachment %s"
                     .formatted(e.getMessage(), video.uuid));
-            return tier3(video, agent);
+            return textSummary(video, agent);
         }
     }
 
-    private static List<Map<String, Object>> tier3(MessageAttachment video, Agent agent) {
-        EventLogger.info("video", "Tier-3 text summary: attachment=" + video.uuid);
-        return Tier3VideoAdapter.contentParts(video, agent);
+    private static List<Map<String, Object>> textSummary(MessageAttachment video, Agent agent) {
+        EventLogger.info("video", "text-summary: attachment=" + video.uuid);
+        return TextSummaryVideoAdapter.contentParts(video, agent);
     }
 }

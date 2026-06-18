@@ -9,7 +9,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.transcription.FfmpegProbe;
 import services.video.FrameSampler;
-import services.video.Tier3VideoAdapter;
+import services.video.TextSummaryVideoAdapter;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,12 +20,12 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * JCLAW-222: Tier-3 temporal-summary adapter. Cache reuse + the TIER3_MAX_FRAMES cap are
- * pure/DB unit tests; the happy path samples a real generated clip and mocks the caption +
- * overview HTTP (one MockWebServer serves both, since both are OpenAI-compatible
+ * JCLAW-222: text-summary adapter. Cache reuse + the frame-count cap are pure/DB unit
+ * tests; the happy path samples a real generated clip and mocks the caption + overview
+ * HTTP (one MockWebServer serves both, since both are OpenAI-compatible
  * /chat/completions calls).
  */
-class Tier3VideoAdapterTest extends UnitTest {
+class TextSummaryVideoAdapterTest extends UnitTest {
 
     private MockWebServer server;
 
@@ -52,22 +52,22 @@ class Tier3VideoAdapterTest extends UnitTest {
         var att = persistVideoAttachment("Video summary (duration 00:00:10, 1 frames sampled):\n[00:00:05] a cat");
         // No ffmpeg, no caption provider configured: a cache MISS here would throw, so reaching
         // the cached value proves the short-circuit.
-        var parts = Tier3VideoAdapter.contentParts(att, null);
+        var parts = TextSummaryVideoAdapter.contentParts(att, null);
         assertEquals(1, parts.size());
         assertEquals("text", parts.get(0).get("type"));
         assertTrue(((String) parts.get(0).get("text")).contains("[00:00:05] a cat"));
     }
 
-    // --- cap binds: Tier-3 effective N is capped below the duration-aware count ---
+    // --- cap binds: the effective N is capped below the duration-aware count ---
 
     @Test
     void capBindsWhenDurationAwareCountExceedsIt() {
-        ConfigService.set("video.sampleFrames", "20"); // raise the Tier-1/2 ceiling above the Tier-3 cap
+        ConfigService.set("video.sampleFrames", "20"); // raise the frame ceiling above the text-summary cap
         ConfigService.clearCache();
         // 300 s at default 10 s/frame → 30, ceilinged to 20 (the raised video.sampleFrames).
-        assertEquals(20, FrameSampler.frameCountFor(300), "Tier-1/2 duration-aware count");
-        // Tier-3 caps it at TIER3_MAX_FRAMES (default 8).
-        assertEquals(8, Tier3VideoAdapter.effectiveFrameCount(300), "Tier-3 cap binds");
+        assertEquals(20, FrameSampler.frameCountFor(300), "duration-aware count");
+        // the text-summary strategy caps it at its limit (default 8).
+        assertEquals(8, TextSummaryVideoAdapter.effectiveFrameCount(300), "text-summary cap binds");
     }
 
     // --- happy path: real frames + mocked caption/overview → persisted [hh:mm:ss] timeline ---
@@ -95,10 +95,10 @@ class Tier3VideoAdapterTest extends UnitTest {
         var agent = newAgent("openai", "gpt-4o-mini");
         var att = persistVideoAttachmentWithFile(agent, 40);
 
-        var parts = Tier3VideoAdapter.contentParts(att, agent);
+        var parts = TextSummaryVideoAdapter.contentParts(att, agent);
         var text = (String) parts.get(0).get("text");
 
-        // 40 s at default 10 s/frame → 4 frames (≤ TIER3_MAX_FRAMES 8); timestamps 5/15/25/35 s.
+        // 40 s at default 10 s/frame → 4 frames (≤ the cap, 8); timestamps 5/15/25/35 s.
         assertTrue(text.contains("4 frames sampled"), "header states frame count: " + text);
         assertTrue(text.contains("[00:00:05] a frame caption"), "timeline line present: " + text);
         assertTrue(text.contains("Overview: a frame caption"), "overview present: " + text);

@@ -93,7 +93,7 @@ public final class MessageHydrator {
     /**
      * JCLAW-224 overload threading {@code videoBearersOut} — the side-map of user turns carrying
      * video attachments — so {@link VisionAudioAssembler#applyVideoForCapability} can splice the
-     * chosen interpretation tier's content parts into the exact slots after assembly.
+     * chosen interpretation strategy's content parts into the exact slots after assembly.
      */
     public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
                                             List<VisionAudioAssembler.AudioBearer> audioBearersOut,

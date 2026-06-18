@@ -9,13 +9,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Tier-2 adapter (JCLAW-221): for models that advertise {@code supportsVision} but not
+ * Multi-image video adapter (JCLAW-221): for models that advertise {@code supportsVision} but not
  * {@code supportsVideo}, sends the sampled frames as a sequence of OpenAI-style
  * {@code image_url} content parts preceded by a text part that frames them as evenly-spaced
  * stills from one video (timestamps + duration). This is the OpenClaw approach — a vision
  * model reasons over the timeline of stills rather than receiving a native video stream.
  *
- * <p>Shares frame extraction with Tier-1 ({@link QwenVideoAdapter}) — both consume
+ * <p>Shares frame extraction with the native-video adapter ({@link QwenVideoAdapter}) — both consume
  * {@link FrameSampler} output; the only difference is the wrapper (independent
  * {@code image_url} parts here vs. a single Qwen {@code video} part there). Frames are JPEG
  * quality ~90 (set by {@link FrameSampler}'s {@code -q:v}).
@@ -23,14 +23,14 @@ import java.util.stream.Collectors;
  * <p>The number of frames is decided upstream by {@link FrameSampler} (duration-aware,
  * ceilinged by {@code video.sampleFrames}); the dispatcher (JCLAW-224) logs the count used.
  */
-public final class Tier2VideoAdapter {
+public final class MultiImageVideoAdapter {
 
-    private Tier2VideoAdapter() {}
+    private MultiImageVideoAdapter() {}
 
     /** Build the leading text part plus one {@code image_url} part per frame. */
     public static List<Map<String, Object>> contentParts(List<Frame> frames, double durationSeconds) {
         if (frames == null || frames.isEmpty()) {
-            throw new VideoAdapterException("no frames to build a Tier-2 multi-image part");
+            throw new VideoAdapterException("no frames to build a multi-image part");
         }
         var parts = new ArrayList<Map<String, Object>>(frames.size() + 1);
         parts.add(Map.of("type", "text", "text", header(frames, durationSeconds)));

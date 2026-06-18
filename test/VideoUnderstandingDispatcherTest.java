@@ -10,7 +10,7 @@ import services.ConfigService;
 import services.transcription.FfmpegProbe;
 import services.video.VideoAdapterException;
 import services.video.VideoUnderstandingDispatcher;
-import services.video.VideoUnderstandingDispatcher.Tier;
+import services.video.VideoUnderstandingDispatcher.Strategy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,10 +24,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * JCLAW-224: tier routing + the end-to-end splice into the assembled request. The {@code tierFor}
- * branches are deterministic (capability flags only); the dispatch + pipeline-splice tests sample a
- * real generated clip (guarded on ffmpeg). Tier-3's caption/summarize HTTP is covered by
- * {@code Tier3VideoAdapterTest}, so the dispatch tests here exercise Tier-1/Tier-2 (no network).
+ * JCLAW-224: strategy routing + the end-to-end splice into the assembled request. The
+ * {@code strategyFor} branches are deterministic (capability flags only); the dispatch +
+ * pipeline-splice tests sample a real generated clip (guarded on ffmpeg). The text-summary
+ * strategy's caption/summarize HTTP is covered by {@code TextSummaryVideoAdapterTest}, so the
+ * dispatch tests here exercise native-video / multi-image (no network).
  */
 class VideoUnderstandingDispatcherTest extends UnitTest {
 
@@ -51,21 +52,21 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
         ConfigService.clearCache();
     }
 
-    // --- routing: capability flags pick the tier ---
+    // --- routing: capability flags pick the strategy ---
 
     @Test
-    void routesToTier1WhenSupportsVideo() {
-        assertEquals(Tier.TIER1_NATIVE, VideoUnderstandingDispatcher.tierFor(agent("vid")));
+    void routesToNativeVideoWhenSupportsVideo() {
+        assertEquals(Strategy.NATIVE_VIDEO, VideoUnderstandingDispatcher.strategyFor(agent("vid")));
     }
 
     @Test
-    void routesToTier2WhenVisionOnly() {
-        assertEquals(Tier.TIER2_FRAMES, VideoUnderstandingDispatcher.tierFor(agent("vis")));
+    void routesToMultiImageWhenVisionOnly() {
+        assertEquals(Strategy.MULTI_IMAGE, VideoUnderstandingDispatcher.strategyFor(agent("vis")));
     }
 
     @Test
-    void routesToTier3WhenTextOnly() {
-        assertEquals(Tier.TIER3_SUMMARY, VideoUnderstandingDispatcher.tierFor(agent("txt")));
+    void routesToTextSummaryWhenTextOnly() {
+        assertEquals(Strategy.TEXT_SUMMARY, VideoUnderstandingDispatcher.strategyFor(agent("txt")));
     }
 
     @Test
@@ -75,25 +76,25 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
         assertThrows(VideoAdapterException.class, () -> VideoUnderstandingDispatcher.dispatch(att, agent));
     }
 
-    // --- dispatch end-to-end (ffmpeg, no network for Tier-1/Tier-2) ---
+    // --- dispatch end-to-end (ffmpeg, no network for native-video / multi-image) ---
 
     @Test
-    void dispatchTier1ProducesNativeVideoPart() throws Exception {
+    void dispatchNativeVideoProducesVideoPart() throws Exception {
         assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
         var agent = agent("vid");
         var att = videoAttachmentWithFile(agent, "web", 40);
         var parts = VideoUnderstandingDispatcher.dispatch(att, agent);
-        assertEquals(1, parts.size(), "Tier-1 is a single native video part");
+        assertEquals(1, parts.size(), "native-video is a single video part");
         assertEquals("video", parts.get(0).get("type"));
     }
 
     @Test
-    void dispatchTier2ProducesImageParts() throws Exception {
+    void dispatchMultiImageProducesImageParts() throws Exception {
         assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
         var agent = agent("vis");
         var att = videoAttachmentWithFile(agent, "web", 40);
         var parts = VideoUnderstandingDispatcher.dispatch(att, agent);
-        assertTrue(parts.size() >= 2, "Tier-2 is a leading text + image parts");
+        assertTrue(parts.size() >= 2, "multi-image is a leading text + image parts");
         assertEquals("text", parts.get(0).get("type"));
         assertEquals("image_url", parts.get(1).get("type"));
     }
@@ -112,7 +113,7 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
 
     private void assertVideoSplicedForChannel(String channel) throws Exception {
         assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
-        var agent = agent("vis"); // Tier-2
+        var agent = agent("vis"); // multi-image
         var att = videoAttachmentWithFile(agent, channel, 40);
 
         var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();

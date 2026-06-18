@@ -9,14 +9,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Tier-1 adapter (JCLAW-220): wraps sampled frames into a Qwen-native video content
+ * Native-video adapter (JCLAW-220): wraps sampled frames into a Qwen-native video content
  * part for models that advertise {@code supportsVideo} (the Qwen-VL family served via
  * OpenRouter/DashScope or vLLM). Unlike Gemini, Qwen ingests a frame list with timing
  * metadata and does its own temporal (mRoPE) alignment — there is no Files-API
  * upload-and-poll to manage.
  *
- * <p>The frames come from {@link FrameSampler} — the same extraction Tier-2
- * (JCLAW-221) uses; the two adapters differ only in how they wrap the frames (a single
+ * <p>The frames come from {@link FrameSampler} — the same extraction the multi-image
+ * adapter (JCLAW-221) uses; the two adapters differ only in how they wrap the frames (a single
  * Qwen {@code video} part with an fps hint here vs. independent {@code image_url} parts
  * there). Building only {@code Map<String,Object>} content parts means Gson serializes
  * them to the wire automatically (see {@code LlmProvider.serializeMessages}); no
@@ -54,7 +54,7 @@ public final class QwenVideoAdapter {
 
     /**
      * Build the Qwen video content part(s) for the given frames. Returned as a singleton
-     * list so the dispatcher (JCLAW-224) can treat every tier's output uniformly as a
+     * list so the dispatcher (JCLAW-224) can treat every strategy's output uniformly as a
      * {@code List<content part>} spliced into the user message.
      *
      * @param frames          sampled frames in ascending timestamp order (from {@link FrameSampler})
