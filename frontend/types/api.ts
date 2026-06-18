@@ -626,6 +626,7 @@ export interface ProviderModelDef {
   alwaysThinks?: boolean
   supportsVision?: boolean
   supportsAudio?: boolean
+  supportsVideo?: boolean
   promptPrice?: number | null
   completionPrice?: number | null
   cachedReadPrice?: number | null
