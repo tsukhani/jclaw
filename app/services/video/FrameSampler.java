@@ -43,6 +43,13 @@ public final class FrameSampler {
     /** One sampled frame: the JPEG bytes and the source timestamp it was taken at. */
     public record Frame(byte[] jpeg, double timestampSeconds) {}
 
+    /**
+     * The sampled frames plus the source duration. All three interpretation tiers need
+     * the duration (Tier-1 {@code sample_fps}, Tier-2 header text, Tier-3 {@code [hh:mm:ss]}
+     * lines), so it travels with the frames from the single ffprobe pass.
+     */
+    public record SampleResult(List<Frame> frames, double durationSeconds) {}
+
     public static class FrameSamplingException extends RuntimeException {
         public FrameSamplingException(String message) { super(message); }
         public FrameSamplingException(String message, Throwable cause) { super(message, cause); }
@@ -106,7 +113,17 @@ public final class FrameSampler {
      * dispatcher (JCLAW-224) calls; resolves the on-disk path the same way the
      * transcription pipeline does ({@code workspaceRoot().resolve(storagePath)}).
      */
-    public static List<Frame> sample(MessageAttachment video) {
+    public static SampleResult sample(MessageAttachment video) {
+        return sample(video, Integer.MAX_VALUE);
+    }
+
+    /**
+     * As {@link #sample(MessageAttachment)} but capping the frame count at
+     * {@code maxFrames}. Tier-3 (JCLAW-222) caps below the duration-aware count so its
+     * per-frame caption calls (each a full LLM round-trip) stay bounded even when an
+     * operator raises {@code video.sampleFrames} to densify Tier-1/Tier-2.
+     */
+    public static SampleResult sample(MessageAttachment video, int maxFrames) {
         if (video == null) throw new FrameSamplingException("attachment is null");
         requireFfmpeg();
         var path = AgentService.workspaceRoot().resolve(video.storagePath);
@@ -114,7 +131,8 @@ public final class FrameSampler {
             throw new FrameSamplingException("video file is not readable: " + path);
         }
         double duration = probeDurationSeconds(path);
-        return sampleFrames(path, duration, frameCountFor(duration));
+        int n = Math.max(MIN_FRAMES, Math.min(frameCountFor(duration), maxFrames));
+        return new SampleResult(sampleFrames(path, duration, n), duration);
     }
 
     /**

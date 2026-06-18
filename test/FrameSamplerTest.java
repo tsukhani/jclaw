@@ -8,7 +8,6 @@ import services.video.FrameSampler;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -108,7 +107,9 @@ class FrameSamplerTest extends UnitTest {
         att.save();
 
         try {
-            List<FrameSampler.Frame> frames = FrameSampler.sample(att);
+            var result = FrameSampler.sample(att);
+            assertEquals(40.0, result.durationSeconds(), 1.0, "ffprobe reads ~40 s duration");
+            var frames = result.frames();
 
             // 40 s at the default 10 s/frame → round(4.0) = 4 frames.
             assertEquals(4, frames.size(), "duration-aware count for a 40 s clip at default density");
