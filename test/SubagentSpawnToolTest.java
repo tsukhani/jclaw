@@ -156,6 +156,73 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void inheritBatchFanOutSummarizesParentOnce() throws Exception {
+        // JCLAW-503: a context=inherit batch fan-out of N children shares ONE parent
+        // conversation, so the parent-context summary must be computed once, not per
+        // child. With 2 children the total LLM calls are 1 summarize + 2 child runs = 3
+        // (it would be 4 if the summarizer ran inside the per-child loop).
+        var calls = new AtomicInteger(0);
+        startLlmServer(exchange -> {
+            int n = calls.incrementAndGet();
+            String body = n == 1
+                    ? simpleResponse("Canned summary of parent turns.")
+                    : simpleResponse("BATCH_CHILD_OK");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+
+        var parent = createAgent("p-inherit-batch", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inherit-batch");
+        // Seed prior turns so summarization is attempted (snapshot is non-empty).
+        ConversationService.appendUserMessage(parentConv, "first user message");
+        ConversationService.appendAssistantMessage(parentConv, "first assistant reply", null);
+        ConversationService.appendUserMessage(parentConv, "second user message");
+        commitAndReopen();
+
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
+                var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+                var yieldTool = ToolRegistry.lookupTool(tools.SubagentYieldTool.TOOL_NAME);
+                var yielded = agents.ToolContext.withScope(null, 8889L, () -> {
+                    spawnTool.execute(
+                            "{\"tasks\":[\"do A\",\"do B\"],\"mode\":\"session\",\"context\":\"inherit\"}", p);
+                    return yieldTool.execute("{\"all\":true}", p);
+                });
+                resultRef.set(yielded);
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(60_000);
+        assertFalse(thread.isAlive(), "inherit batch spawn + yield-all must complete within 60s");
+        if (errorRef.get() != null) throw errorRef.get();
+
+        var results = JsonParser.parseString(resultRef.get()).getAsJsonObject()
+                .get("results").getAsJsonArray();
+        assertEquals(2, results.size(), "yield all must return one result per batch child");
+
+        // The crux: ONE summarize shared across both children (JCLAW-503).
+        assertEquals(3, calls.get(),
+                "inherit batch must summarize the parent ONCE, not per child (1 summarize + 2 child runs)");
+
+        // Both children inherited the same parent-context summary.
+        JPA.em().clear();
+        for (var r : results) {
+            var runId = Long.parseLong(r.getAsJsonObject().get("run_id").getAsString());
+            SubagentRun run = SubagentRun.findById(runId);
+            Conversation childConv = Conversation.findById(run.childConversation.id);
+            assertEquals("Canned summary of parent turns.", childConv.parentContext,
+                    "each inherit-batch child must carry the shared parent-context summary");
+        }
+    }
+
+    @Test
     void batchFanOutRejectedOverBreadthCap() {
         // JCLAW-498: a fan-out larger than the breadth cap (default 5) is rejected
         // up front — no children spawned. Synchronous: no LLM mock needed.

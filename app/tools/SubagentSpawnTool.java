@@ -514,11 +514,17 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         final var fContext = context;
         final var fTimeout = timeoutSeconds;
 
+        // JCLAW-503: every child of the fan-out shares the same parent conversation
+        // and context, so the inherit parent-context summary is identical for all of
+        // them. Compute it ONCE here instead of re-running the summarizer LLM call per
+        // child inside the loop. NONE in fresh mode (no LLM call); a summarization
+        // failure degrades the whole batch to fresh, consistently.
+        var summary = buildInheritSummary(parentAgent, parentConvIdFinal, fContext);
+
         var runIds = new java.util.ArrayList<String>();
         for (var spec : specs) {
             var perArgs = new SpawnArgs(null, spec.task(), spec.label(), spec.agentId(),
                     null, null, fMode, fContext, fTimeout, true);
-            var summary = buildInheritSummary(parentAgent, parentConvIdFinal, fContext);
             var bootstrap = bootstrapChildInTx(parentAgent, parentConv, perArgs, summary);
             if (bootstrap.error() != null) {
                 continue; // skip a child that failed to bootstrap; the rest still run
