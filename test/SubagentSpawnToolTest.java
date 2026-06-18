@@ -174,6 +174,10 @@ class SubagentSpawnToolTest extends UnitTest {
         // harness here — it echoes stdin straight back to stdout.
         ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "cat");
         var parent = createAgent("p-acp", "test-provider", "test-model");
+        // JCLAW-500: acp is now a gated capability — grant it so this non-main
+        // agent may run the external harness.
+        parent.acpAllowed = true;
+        parent.save();
         ConversationService.create(parent, "web", "u-acp");
         commitAndReopen();
 
@@ -189,11 +193,33 @@ class SubagentSpawnToolTest extends UnitTest {
         // JCLAW-499: runtime=acp with no operator-configured harness is rejected —
         // the command comes from config only, never from the model.
         ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "");
+        // JCLAW-500: grant acp so the spawn clears the permission gate and the
+        // rejection under test is specifically the missing-harness one.
         var parent = createAgent("p-acp-none", "test-provider", "test-model");
+        parent.acpAllowed = true;
+        parent.save();
         var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
         var result = tool.execute("{\"task\":\"x\",\"runtime\":\"acp\"}", parent);
-        assertTrue(result.startsWith("Error:") && result.contains("acp"),
-                "runtime=acp without a configured harness must be rejected: " + result);
+        assertTrue(result.startsWith("Error:") && result.contains("acp")
+                        && !result.contains("not permitted"),
+                "runtime=acp without a configured harness must be rejected on the harness, "
+                        + "not on permission: " + result);
+    }
+
+    @Test
+    void acpRejectedForUnprivilegedAgent() {
+        // JCLAW-500 (Change 2): acp launches an external harness outside tool +
+        // workspace confinement, so a non-main agent without an explicit grant
+        // cannot request it — even when a harness command IS configured (so the
+        // only possible rejection reason is permission).
+        ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "cat");
+        var parent = createAgent("p-acp-deny", "test-provider", "test-model");
+        // acpAllowed defaults false for a custom agent — no grant.
+        var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+        var result = tool.execute("{\"task\":\"x\",\"runtime\":\"acp\"}", parent);
+        assertTrue(result.startsWith("Error:") && result.contains("not permitted"),
+                "runtime=acp from an unprivileged non-main agent must be refused on permission: "
+                        + result);
     }
 
     @Test
@@ -245,6 +271,69 @@ class SubagentSpawnToolTest extends UnitTest {
         } finally {
             ToolRegistry.unpublishExternal("testsvc");
         }
+    }
+
+    @Test
+    void freshSubagentInheritsParentToolRestrictions() throws Exception {
+        // JCLAW-500 (Change 1): a child cloned from a restricted parent must be
+        // bounded above by the parent — the parent's explicit tool deny-rows
+        // copy onto the fresh clone, so a tool the parent disabled stays
+        // disabled on the child instead of reverting to the non-main baseline.
+        startLlmServer(simpleResponse("Subagent reply: done."));
+        configureProvider();
+
+        // Non-main parent with the shell "exec" tool explicitly disabled. exec is
+        // enabled by default for non-main agents (only browser/jclaw_api are
+        // seeded off), so a fresh clone would otherwise re-enable it.
+        var parent = createAgent("p-restrict", "test-provider", "test-model");
+        var deny = new AgentToolConfig();
+        deny.agent = parent;
+        deny.toolName = "exec";
+        deny.enabled = false;
+        deny.save();
+        ConversationService.create(parent, "web", "u-restrict");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        assertTrue(ToolRegistry.loadDisabledTools(parent).contains("exec"),
+                "test premise: parent must have exec disabled");
+
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"do work\"}");
+        var runId = Long.parseLong(JsonParser.parseString(reply).getAsJsonObject()
+                .get("run_id").getAsString());
+
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(runId);
+        assertNotNull(run.childAgent, "fresh spawn must create a child agent");
+        Agent child = Agent.findById(run.childAgent.id);
+        ToolRegistry.invalidateDisabledToolsCache(child);
+        assertTrue(ToolRegistry.loadDisabledTools(child).contains("exec"),
+                "a fresh subagent must inherit the parent's tool deny-rows (JCLAW-500)");
+    }
+
+    @Test
+    void agentIdReuseRejectedWhenMoreCapable() throws Exception {
+        // JCLAW-500 (Change 3): reusing an agentId that is MORE capable than the
+        // spawning agent is a privilege escalation and must be refused.
+        startLlmServer(simpleResponse("done."));
+        configureProvider();
+        // Spawning parent restricts exec; the target does not — the target is
+        // more capable, so naming it as the child must be rejected.
+        var parent = createAgent("p-narrow", "test-provider", "test-model");
+        var deny = new AgentToolConfig();
+        deny.agent = parent;
+        deny.toolName = "exec";
+        deny.enabled = false;
+        deny.save();
+        var target = createAgent("a-wide", "test-provider", "test-model"); // exec enabled
+        ConversationService.create(parent, "web", "u-narrow");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        ToolRegistry.invalidateDisabledToolsCache(target);
+
+        var result = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"x\",\"agentId\":" + target.id + "}");
+        assertTrue(result.contains("more capable"),
+                "reusing a more-capable agentId must be refused: " + result);
     }
 
     // ── JCLAW-424: idle/activity-based timeout (awaitFuture) ────────────

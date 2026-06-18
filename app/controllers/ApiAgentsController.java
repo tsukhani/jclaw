@@ -34,6 +34,7 @@ public class ApiAgentsController extends Controller {
     private static final String KEY_COMPRESSION_CODE = "compressionCode";
     private static final String KEY_COMPRESSION_TEXT = "compressionText";
     private static final String KEY_COMPRESSION_TARGET_RATIO = "compressionTargetRatio";
+    private static final String KEY_ACP_ALLOWED = "acpAllowed";
 
     /**
      * Slug regex enforced on every {@code name} received from the public
@@ -94,7 +95,8 @@ public class ApiAgentsController extends Controller {
                              String createdAt, String updatedAt, boolean providerConfigured,
                              boolean compressionEnabled,
                              boolean compressionJson, boolean compressionCode,
-                             boolean compressionText, double compressionTargetRatio) {
+                             boolean compressionText, double compressionTargetRatio,
+                             boolean acpAllowed) {
         static AgentView of(Agent a) {
             return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
         }
@@ -119,7 +121,8 @@ public class ApiAgentsController extends Controller {
                     a.compressionTextEffective(),
                     a.compressionTargetRatio != null
                             ? a.compressionTargetRatio
-                            : services.compression.TextCompressor.DEFAULT_TARGET_RATIO);
+                            : services.compression.TextCompressor.DEFAULT_TARGET_RATIO,
+                    a.acpAllowed);
         }
     }
 
@@ -335,6 +338,12 @@ public class ApiAgentsController extends Controller {
         // JCLAW-463/464/465: apply the per-agent compression fields present in the
         // body. Absent keys leave the stored value untouched.
         applyCompressionSettings(agent, body);
+
+        // JCLAW-500: per-agent acp-runtime grant. Absent/null key leaves it
+        // unchanged (partial-PUT convention, same as the compression fields).
+        if (body.has(KEY_ACP_ALLOWED) && !body.get(KEY_ACP_ALLOWED).isJsonNull()) {
+            agent.acpAllowed = body.get(KEY_ACP_ALLOWED).getAsBoolean();
+        }
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);

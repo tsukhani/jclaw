@@ -22,6 +22,8 @@ export interface Agent {
   /** JCLAW-464: effective Text sub-toggle + the text-compression aggressiveness ratio (0–1, default 0.3). */
   compressionText: boolean
   compressionTargetRatio: number
+  /** JCLAW-500: whether this agent may spawn subagents under the external ACP harness (runtime=acp). The main agent is always allowed; custom agents need this grant. */
+  acpAllowed: boolean
 }
 
 /**

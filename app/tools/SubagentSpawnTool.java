@@ -311,7 +311,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var parsed = parseSpawnArgs(args);
         if (parsed.error() != null) return parsed.error();
         // JCLAW-499: validate the runtime (native | acp) before any DB work.
-        var acpError = acpRuntimeError(args);
+        var acpError = acpRuntimeError(args, parentAgent);
         if (acpError != null) return acpError;
 
         // JCLAW-266: enforce recursion caps before touching the DB. Both checks
@@ -464,7 +464,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
         // JCLAW-499: runtime validation (native | acp) + resolved harness command,
         // applied to every child of the fan-out.
-        var acpError = acpRuntimeError(args);
+        var acpError = acpRuntimeError(args, parentAgent);
         if (acpError != null) return acpError;
         final var acpCommand = isAcpRuntime(args) ? resolveAcpCommand() : null;
 
@@ -1239,6 +1239,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // the fresh/inherit context choice. Scoped to freshly-created children so
         // operator-configured reused (agentId) agents are untouched.
         if (requestedAgentId == null) {
+            // JCLAW-500: bound the fresh clone's tool surface above by the
+            // parent's restrictions before any inherit-mode widening below.
+            copyParentToolRestrictions(parentAgent, childAgent);
             grantParentMcpGrants(parentAgent, childAgent);
         }
 
@@ -1281,6 +1284,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 return ResolvedChildAgent.fail(
                         "Error: agentId %d not found.".formatted(requestedAgentId));
             }
+            // JCLAW-500 (Change 3): a reused agent must not be MORE capable than
+            // the spawning agent, or the spawn is a privilege escalation (a
+            // confined parent naming the main / an unrestricted agent to run
+            // with its tools or acp). Self-reuse and equal-or-narrower agents
+            // pass.
+            var escalation = capabilityEscalationError(parentAgent, existing);
+            if (escalation != null) return ResolvedChildAgent.fail(escalation);
             // Don't mutate Agent.parent_agent_id on a pre-existing row. The
             // lineage of *this* run is already recorded on the SubagentRun
             // (parentAgentId + childAgentId), and stamping parent_agent_id
@@ -1324,6 +1334,45 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         created.parentAgent = parentAgent;
         created.save();
         return ResolvedChildAgent.ok(created);
+    }
+
+    /**
+     * JCLAW-500 (Change 3): bound a reused (agentId) child above by the
+     * spawning agent. A subagent must not be MORE capable than its parent, or
+     * naming an agentId becomes a privilege-escalation hatch (a confined custom
+     * agent reusing the main or an unrestricted agent to act with its tools /
+     * acp). Enforces child_capabilities ⊆ parent_capabilities:
+     * <ul>
+     *   <li>every tool the parent has disabled must also be disabled on the
+     *       named child (so child_enabled ⊆ parent_enabled);</li>
+     *   <li>the child may use the acp runtime only if the parent may.</li>
+     * </ul>
+     * Shell privileges (global paths / allowlist bypass) are main-only, so an
+     * {@code isMain} mismatch is already caught by the tool-subset check — the
+     * main agent disables nothing a restricted parent does. Self-reuse and
+     * equal-or-narrower agents pass. Returns an error string on escalation, or
+     * null when the named agent is within bounds.
+     */
+    private static String capabilityEscalationError(Agent spawningAgent, Agent named) {
+        if (named.id != null && named.id.equals(spawningAgent.id)) {
+            return null; // self-reuse is always within bounds
+        }
+        var parentDisabled = ToolRegistry.loadDisabledTools(spawningAgent);
+        var childDisabled = ToolRegistry.loadDisabledTools(named);
+        if (!childDisabled.containsAll(parentDisabled)) {
+            return ("Error: agentId %d ('%s') is more capable than the spawning agent '%s' "
+                    + "(it enables tools the spawning agent has disabled); a subagent may not "
+                    + "exceed its parent's tool capabilities.")
+                    .formatted(named.id, named.name, spawningAgent.name);
+        }
+        boolean parentAcp = spawningAgent.isMain() || spawningAgent.acpAllowed;
+        boolean childAcp = named.isMain() || named.acpAllowed;
+        if (childAcp && !parentAcp) {
+            return ("Error: agentId %d ('%s') may use the acp runtime but the spawning agent "
+                    + "'%s' may not; a subagent may not exceed its parent's capabilities.")
+                    .formatted(named.id, named.name, spawningAgent.name);
+        }
+        return null;
     }
 
     /**
@@ -1537,6 +1586,49 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (anyGranted) {
             ToolRegistry.invalidateDisabledToolsCache(childAgent);
         }
+    }
+
+    /**
+     * JCLAW-500 (Change 1): copy the parent's explicit tool DENY-rows onto a
+     * freshly-cloned child so the child's capability set is bounded above by
+     * the parent's. {@link AgentService#create} seeds only the standard
+     * non-main defaults (browser, jclaw_api, plus MCP-default-disabled); it
+     * does not carry the parent's custom restrictions, so without this a child
+     * cloned from a restricted custom agent reverts to the broader non-main
+     * baseline and ends up MORE capable than its parent. We copy only the
+     * parent's {@code enabled=false} rows (the restrictions) and leave the
+     * child's own non-main defaults intact, giving
+     * {@code child_disabled = parent_disabled ∪ non-main-default}.
+     *
+     * <p>Ordering: this runs before {@link #grantParentMcpGrants} and
+     * {@link #unionParentToolGrants}. Those only ever widen the child toward
+     * the parent's ENABLED set, and {@code unionParentToolGrants} explicitly
+     * skips any tool in the parent's disabled set, so the deny-rows copied
+     * here survive both. Scoped to freshly-cloned children — the {@code
+     * agentId}-reuse path runs an existing agent that already carries its own
+     * rows.
+     */
+    private static void copyParentToolRestrictions(Agent parentAgent, Agent childAgent) {
+        var childByName = new java.util.HashMap<String, AgentToolConfig>();
+        for (var r : AgentToolConfig.findByAgent(childAgent)) childByName.put(r.toolName, r);
+        boolean any = false;
+        for (var pr : AgentToolConfig.findByAgent(parentAgent)) {
+            if (pr.enabled) continue;                       // copy restrictions only
+            var existing = childByName.get(pr.toolName);
+            if (existing == null) {
+                var row = new AgentToolConfig();
+                row.agent = childAgent;
+                row.toolName = pr.toolName;
+                row.enabled = false;
+                row.save();
+                any = true;
+            } else if (existing.enabled) {
+                existing.enabled = false;
+                existing.save();
+                any = true;
+            }
+        }
+        if (any) ToolRegistry.invalidateDisabledToolsCache(childAgent);
     }
 
     private static boolean isStillRegistered(List<ToolRegistry.Tool> registered, String toolName) {
@@ -1845,14 +1937,28 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * register the configured command for {@code runId} (consumed by
      * {@link #executeChildRun}). Returns an error string to short-circuit the
      * spawn, or null to proceed (native or successfully-registered acp).
+     *
+     * <p>JCLAW-500 (Change 2): acp is a privileged per-agent capability. The
+     * harness is an operator-configured external process that runs OUTSIDE
+     * JClaw's tool gating and workspace confinement, so only the main agent
+     * (always) and agents an operator has granted {@link Agent#acpAllowed} may
+     * request it. The gate is on the SPAWNING agent, so a confined custom agent
+     * cannot break out via acp — and a subagent of main is itself non-main, so
+     * it cannot escalate either.
      */
-    private static String acpRuntimeError(JsonObject args) {
+    private static String acpRuntimeError(JsonObject args, Agent spawningAgent) {
         var runtime = optString(args, "runtime");
         if (runtime == null || runtime.isBlank() || "native".equalsIgnoreCase(runtime)) {
             return null;
         }
         if (!"acp".equalsIgnoreCase(runtime)) {
             return "Error: 'runtime' must be \"native\" (default) or \"acp\" (got '" + runtime + "').";
+        }
+        if (spawningAgent != null && !spawningAgent.isMain() && !spawningAgent.acpAllowed) {
+            return "Error: runtime=\"acp\" is not permitted for agent '" + spawningAgent.name
+                    + "'. The acp runtime launches an external harness outside JClaw's tool and "
+                    + "workspace confinement, so it is restricted to the main agent and agents an "
+                    + "operator has explicitly granted acp.";
         }
         if (resolveAcpCommand().isEmpty()) {
             return "Error: runtime=\"acp\" needs an external harness — the operator must configure '"

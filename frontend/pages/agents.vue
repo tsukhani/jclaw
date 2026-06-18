@@ -311,6 +311,10 @@ const compressionCode = ref(false)
 const compressionText = ref(false)
 const compressionTargetRatio = ref(0.3)
 const savingCompression = ref(false)
+// JCLAW-500: per-agent ACP external-harness grant (custom agents only; the main
+// agent is always allowed and shows no toggle). Immediate-save on toggle.
+const acpAllowed = ref(false)
+const savingAcpAllowed = ref(false)
 // Section-header count: the master plus each per-type sub-toggle that is
 // effectively on (sub-toggles are off while the master is off).
 const compressionEnabledCount = computed(() => {
@@ -607,6 +611,7 @@ function editAgent(agent: Agent) {
   compressionCode.value = agent.compressionCode
   compressionText.value = agent.compressionText
   compressionTargetRatio.value = agent.compressionTargetRatio
+  acpAllowed.value = agent.acpAllowed
   creating.value = false
   saveError.value = null
   loadWorkspaceFile(agent.id, 'AGENT.md')
@@ -830,6 +835,33 @@ async function saveCompression() {
   finally {
     savingCompression.value = false
   }
+}
+
+// JCLAW-500: immediate-save the per-agent ACP grant via a partial PUT, mirroring
+// saveCompression. Keeps editing.value and the list row in sync.
+async function saveAcpAllowed() {
+  if (!editing.value) return
+  savingAcpAllowed.value = true
+  try {
+    await $fetch(`/api/agents/${editing.value.id}`, {
+      method: 'PUT',
+      body: { acpAllowed: acpAllowed.value },
+    })
+    editing.value.acpAllowed = acpAllowed.value
+    refresh()
+  }
+  catch (e) {
+    console.error('Failed to save ACP grant:', e)
+    acpAllowed.value = editing.value.acpAllowed
+  }
+  finally {
+    savingAcpAllowed.value = false
+  }
+}
+
+function toggleAcpAllowed() {
+  acpAllowed.value = !acpAllowed.value
+  saveAcpAllowed()
 }
 
 // JCLAW-463: per-type sub-toggle saves. Same immediate-save partial-PUT pattern
@@ -1459,6 +1491,44 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </select>
             </label>
           </div>
+        </div>
+      </div>
+
+      <!-- JCLAW-500: per-agent ACP external-harness grant. The acp runtime
+           launches an operator-configured external process outside JClaw's tool
+           and workspace confinement, so it is opt-in per custom agent; the main
+           agent always has it and shows no toggle. Immediate-saves via a partial
+           PUT, like the compression card. -->
+      <div
+        v-if="editing && !editing.isMain"
+        class="bg-surface-elevated border border-border"
+      >
+        <div class="px-4 py-2.5 flex items-center justify-between gap-4">
+          <div>
+            <span class="text-sm font-medium text-fg-strong">ACP External Harness</span>
+            <div class="text-xs text-neutral-500 mt-0.5">
+              Allow this agent to spawn subagents under the external ACP runtime
+              (runtime=acp), which runs outside JClaw's tool and workspace
+              confinement.
+            </div>
+          </div>
+          <button
+            type="button"
+            :title="acpAllowed ? 'Revoke ACP runtime' : 'Allow ACP runtime'"
+            :disabled="savingAcpAllowed"
+            class="shrink-0 disabled:opacity-50"
+            @click="toggleAcpAllowed"
+          >
+            <div
+              class="relative w-9 h-5 rounded-full transition-colors duration-200"
+              :class="acpAllowed ? 'bg-emerald-500' : 'bg-muted'"
+            >
+              <div
+                class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                :class="acpAllowed ? 'left-[18px]' : 'left-0.5'"
+              />
+            </div>
+          </button>
         </div>
       </div>
 

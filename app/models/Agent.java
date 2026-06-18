@@ -3,6 +3,7 @@ package models;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.ColumnDefault;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -99,6 +100,20 @@ public class Agent extends Model {
     @ManyToOne
     @JoinColumn(name = "parent_agent_id")
     public Agent parentAgent;
+
+    /**
+     * JCLAW-500: whether this agent may spawn subagents under the external ACP
+     * harness ({@code runtime=acp}). The acp runtime launches an
+     * operator-configured external process that runs OUTSIDE JClaw's per-agent
+     * tool gating and workspace confinement, so it is a privileged capability:
+     * the main agent always has it ({@link #isMain()} short-circuits the gate),
+     * every other agent is denied unless an operator explicitly grants it.
+     * {@code @ColumnDefault} keeps the ALTER safe on a populated table — existing
+     * rows default to false. See {@code tools.SubagentSpawnTool#acpRuntimeError}.
+     */
+    @Column(name = "acp_allowed", nullable = false)
+    @ColumnDefault("false")
+    public boolean acpAllowed = false;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;

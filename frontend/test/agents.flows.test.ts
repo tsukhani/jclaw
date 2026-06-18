@@ -68,7 +68,7 @@ function setupAgentsApi(opts?: {
       compressionJson: true,
       compressionCode: true,
       compressionText: true,
-      compressionTargetRatio: 0.3,
+      compressionTargetRatio: 0.3, acpAllowed: false,
       createdAt: '2026-04-01T10:00:00Z',
       updatedAt: '2026-04-22T10:00:00Z',
     },
@@ -85,7 +85,7 @@ function setupAgentsApi(opts?: {
       compressionJson: false,
       compressionCode: false,
       compressionText: false,
-      compressionTargetRatio: 0.3,
+      compressionTargetRatio: 0.3, acpAllowed: false,
       createdAt: '2026-04-10T10:00:00Z',
       updatedAt: '2026-04-20T10:00:00Z',
     },
@@ -310,6 +310,32 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     expect(putBody).toEqual({ compressionEnabled: true })
   })
 
+  it('PUTs a partial { acpAllowed } immediately when the ACP grant toggle is clicked', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+
+    // The helper (non-main) defaults to acpAllowed OFF; the ACP card renders a
+    // pill toggle that saves immediately on click. The main agent shows no toggle.
+    const toggle = component.find('button[title="Allow ACP runtime"]')
+    expect(toggle.exists(), 'ACP grant toggle should render for a non-main agent').toBe(true)
+    await toggle.trigger('click')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+
+    expect(putBody).toEqual({ acpAllowed: true })
+  })
+
   it('PUTs a partial { compressionJson } when a sub-toggle is changed (master on)', async () => {
     let putBody: Record<string, unknown> | null = null
     setupAgentsApi()
@@ -319,7 +345,7 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
         id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4',
         enabled: true, isMain: false, providerConfigured: true, thinkingMode: null,
         compressionEnabled: true, compressionJson: true, compressionCode: true,
-        compressionText: true, compressionTargetRatio: 0.3,
+        compressionText: true, compressionTargetRatio: 0.3, acpAllowed: false,
         createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
       },
     ])
@@ -353,7 +379,7 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
         id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4',
         enabled: true, isMain: false, providerConfigured: true, thinkingMode: null,
         compressionEnabled: true, compressionJson: true, compressionCode: true,
-        compressionText: true, compressionTargetRatio: 0.3,
+        compressionText: true, compressionTargetRatio: 0.3, acpAllowed: false,
         createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
       },
     ])
