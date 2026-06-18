@@ -376,7 +376,12 @@ public final class ToolCallLoopRunner {
         // its final-assistant-message persist; the parent's logical
         // turn resumes later from tools.SubagentSpawnTool#runAsyncAndAnnounce
         // once the child terminates.
-        if (yieldRequestedInLastRound(currentMessages, toolResultsAnchor)) {
+        // JCLAW-494: a yield only has a resume path in the chat/conversation flow
+        // (taskRunId == null). A task fire has no persisted conversation to resume
+        // into, so it must never return the YIELDED sentinel — async spawns are
+        // already rejected upstream in SubagentSpawnTool; this is the structural
+        // backstop so the sentinel can't escape a task even via some other path.
+        if (taskRunId == null && yieldRequestedInLastRound(currentMessages, toolResultsAnchor)) {
             EventLogger.info("tool", agent.name, null,
                     "Round %d: subagent_yield invoked — suspending parent turn".formatted(round + 1));
             return new LoopOutcome(AgentRunner.YIELDED_RESPONSE);

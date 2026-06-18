@@ -1,6 +1,7 @@
 package tools;
 
 import agents.AgentRunner;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -471,6 +472,15 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var asyncRequested = optBool(args, "async");
         if (asyncRequested && MODE_INLINE.equals(mode)) {
             return SpawnArgs.fail("Error: 'async' is only compatible with mode=\"session\" (inline mode embeds child messages directly into the parent transcript, which has no meaningful semantics before the child finishes).");
+        }
+        // JCLAW-494: async subagents have no resume path inside a scheduled task
+        // fire. The yield/resume model (JCLAW-273) re-invokes the parent via a
+        // persisted conversation + channel announce, but a task fire runs on a
+        // transient stub conversation with a one-shot delivery spec — a yield
+        // would deliver the __JCLAW_273_YIELDED__ sentinel and strand the child's
+        // result in an orphan conversation. Force synchronous spawns in tasks.
+        if (asyncRequested && ToolContext.taskRunId() != null) {
+            return SpawnArgs.fail("Error: 'async' subagents aren't supported inside a scheduled task run — a task fire has no conversation to resume into. Spawn the subagent synchronously (omit 'async' or set async=false) so its result is returned inline and feeds the task's output.");
         }
 
         return new SpawnArgs(null, task, label, requestedAgentId,

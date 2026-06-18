@@ -69,6 +69,24 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals("System", tool.category());
     }
 
+    @Test
+    void asyncSpawnRejectedInsideTaskRun() {
+        // JCLAW-494: an async subagent yields and resumes via a persisted
+        // conversation + channel announce — a scheduled task fire has neither,
+        // so async spawns must be rejected at parse time (before any spawn),
+        // steering the agent to a synchronous spawn whose result feeds the task.
+        var parent = createAgent("p-task-async", "test-provider", "test-model");
+        var tool = (SubagentSpawnTool) ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+
+        // A non-null taskRunId marks a task fire. The guard rejects before any
+        // LLM/DB work, so no provider mock or parent conversation is needed.
+        var rejected = agents.ToolContext.withScope(null, 777L,
+                () -> tool.execute("{\"task\":\"do work\",\"async\":true}", parent));
+        assertNotNull(rejected);
+        assertTrue(rejected.startsWith("Error:") && rejected.contains("scheduled task run"),
+                "async spawn in a task run must be rejected with an actionable error: " + rejected);
+    }
+
     // ── JCLAW-424: idle/activity-based timeout (awaitFuture) ────────────
 
     @Test
