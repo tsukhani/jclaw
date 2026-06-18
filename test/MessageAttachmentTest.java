@@ -148,6 +148,33 @@ class MessageAttachmentTest extends UnitTest {
         assertNull(found.transcript);
     }
 
+    @Test
+    void videoSummaryIsNullByDefault() {
+        var att = persist("clip.mp4", MessageAttachment.KIND_VIDEO);
+        att.em().flush();
+        att.em().clear();
+
+        var found = MessageAttachment.findByUuid(att.uuid);
+        assertNotNull(found);
+        assertNull(found.videoSummary, "JCLAW-218: videoSummary is null until the Tier-3 fallback writes it");
+    }
+
+    @Test
+    void persistsAndReadsVideoSummary() {
+        var att = persist("clip.mp4", MessageAttachment.KIND_VIDEO);
+        att.videoSummary = "[00:00:00] a person opens a door\n[00:00:05] they walk into a kitchen";
+        att.save();
+        att.em().flush();
+        att.em().clear();
+
+        var found = MessageAttachment.findByUuid(att.uuid);
+        assertNotNull(found);
+        assertEquals("[00:00:00] a person opens a door\n[00:00:05] they walk into a kitchen", found.videoSummary);
+        // videoSummary is independent of caption and transcript (a video could carry all three).
+        assertNull(found.caption);
+        assertNull(found.transcript);
+    }
+
     private MessageAttachment persistAudio(String transcript) {
         var uuid = UUID.randomUUID().toString();
         var att = new MessageAttachment();
