@@ -927,6 +927,17 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (resolved.error() != null) return Bootstrap.fail(resolved.error());
         var childAgent = resolved.agent();
 
+        // JCLAW-495: a freshly-cloned subagent is a delegate of its parent and
+        // must inherit the parent's MCP server grants. MCP grouped tools are
+        // default-disabled for non-main agents (ToolRegistry#addMcpDefaultDisabled)
+        // and a new subagent has no explicit grant rows, so without this it sees
+        // zero MCP tools even when the parent has them enabled — independent of
+        // the fresh/inherit context choice. Scoped to freshly-created children so
+        // operator-configured reused (agentId) agents are untouched.
+        if (requestedAgentId == null) {
+            grantParentMcpGrants(parentAgent, childAgent);
+        }
+
         // JCLAW-268: inherit-mode tool union. Snapshot the parent's enabled
         // tool set and flip every tool the parent has enabled but the child
         // currently has disabled (via AgentService.create's default-disabled
@@ -1188,6 +1199,38 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             // path: cached disabled-set is invalidated after every toggle so
             // the very next AgentRunner turn for this child sees the freshly
             // flipped grants.
+            ToolRegistry.invalidateDisabledToolsCache(childAgent);
+        }
+    }
+
+    /**
+     * JCLAW-495: grant a freshly-cloned subagent the parent's enabled MCP server
+     * handles. MCP grouped tools are default-disabled for non-main agents
+     * ({@link ToolRegistry#loadDisabledTools}); a delegate subagent needs the
+     * same MCP surface as its parent to carry out delegated work, so write an
+     * explicit enabled {@link AgentToolConfig} row for every MCP handle the
+     * parent grants but the child (by default) does not. Mirrors the operator
+     * opt-in write path (a single row keyed by the {@code mcp_<group>} handle).
+     * Unlike {@link #unionParentToolGrants}, this <em>creates</em> rows — the
+     * child has none for MCP tools (they are disabled-by-default, not by an
+     * explicit row), so there is nothing to flip.
+     */
+    private static void grantParentMcpGrants(Agent parentAgent, Agent childAgent) {
+        var parentDisabled = ToolRegistry.loadDisabledTools(parentAgent);
+        var childDisabled = ToolRegistry.loadDisabledTools(childAgent);
+        boolean anyGranted = false;
+        for (var tool : ToolRegistry.listTools()) {
+            if (tool.group() == null) continue;                 // MCP-grouped tools only
+            if (parentDisabled.contains(tool.name())) continue; // parent doesn't grant it
+            if (!childDisabled.contains(tool.name())) continue; // child already has it
+            var row = new AgentToolConfig();
+            row.agent = childAgent;
+            row.toolName = tool.name();
+            row.enabled = true;
+            row.save();
+            anyGranted = true;
+        }
+        if (anyGranted) {
             ToolRegistry.invalidateDisabledToolsCache(childAgent);
         }
     }

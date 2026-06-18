@@ -87,6 +87,57 @@ class SubagentSpawnToolTest extends UnitTest {
                 "async spawn in a task run must be rejected with an actionable error: " + rejected);
     }
 
+    @Test
+    void freshSubagentInheritsParentMcpGrants() throws Exception {
+        // JCLAW-495: MCP grouped tools are default-disabled for non-main agents
+        // and a fresh subagent gets no explicit grant rows, so without
+        // inheritance it sees zero MCP tools even when the parent has them. A
+        // delegate subagent must inherit the parent's enabled MCP handles.
+        var mcpHandle = "mcp_testsvc";
+        var mcpTool = new ToolRegistry.Tool() {
+            @Override public String name() { return mcpHandle; }
+            @Override public String description() { return "test mcp"; }
+            @Override public String summary() { return "test mcp"; }
+            @Override public String category() { return "MCP"; }
+            @Override public String group() { return "testsvc"; }
+            @Override public java.util.Map<String, Object> parameters() { return java.util.Map.of(); }
+            @Override public String execute(String argsJson, Agent agent) { return ""; }
+        };
+        ToolRegistry.publishExternal("testsvc", java.util.List.of(mcpTool));
+        try {
+            startLlmServer(simpleResponse("Subagent reply: done."));
+            configureProvider();
+
+            // Non-main parent with the MCP handle explicitly enabled (the operator
+            // opt-in shape). A bare non-main agent would have it default-disabled.
+            var parent = createAgent("p-mcp", "test-provider", "test-model");
+            var grant = new AgentToolConfig();
+            grant.agent = parent;
+            grant.toolName = mcpHandle;
+            grant.enabled = true;
+            grant.save();
+            ConversationService.create(parent, "web", "u-mcp");
+            commitAndReopen();
+            ToolRegistry.invalidateDisabledToolsCache(parent);
+            assertFalse(ToolRegistry.loadDisabledTools(parent).contains(mcpHandle),
+                    "parent must grant the MCP handle for the child to inherit it");
+
+            var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"do work\"}");
+            var parsed = JsonParser.parseString(reply).getAsJsonObject();
+            var runId = Long.parseLong(parsed.get("run_id").getAsString());
+
+            JPA.em().clear();
+            SubagentRun run = SubagentRun.findById(runId);
+            assertNotNull(run.childAgent, "fresh spawn must create a child agent");
+            Agent child = Agent.findById(run.childAgent.id);
+            ToolRegistry.invalidateDisabledToolsCache(child);
+            assertFalse(ToolRegistry.loadDisabledTools(child).contains(mcpHandle),
+                    "a fresh subagent must inherit the parent's enabled MCP handle (JCLAW-495)");
+        } finally {
+            ToolRegistry.unpublishExternal("testsvc");
+        }
+    }
+
     // ── JCLAW-424: idle/activity-based timeout (awaitFuture) ────────────
 
     @Test
