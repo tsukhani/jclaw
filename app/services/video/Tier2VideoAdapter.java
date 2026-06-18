@@ -1,0 +1,54 @@
+package services.video;
+
+import services.video.FrameSampler.Frame;
+
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * Tier-2 adapter (JCLAW-221): for models that advertise {@code supportsVision} but not
+ * {@code supportsVideo}, sends the sampled frames as a sequence of OpenAI-style
+ * {@code image_url} content parts preceded by a text part that frames them as evenly-spaced
+ * stills from one video (timestamps + duration). This is the OpenClaw approach — a vision
+ * model reasons over the timeline of stills rather than receiving a native video stream.
+ *
+ * <p>Shares frame extraction with Tier-1 ({@link QwenVideoAdapter}) — both consume
+ * {@link FrameSampler} output; the only difference is the wrapper (independent
+ * {@code image_url} parts here vs. a single Qwen {@code video} part there). Frames are JPEG
+ * quality ~90 (set by {@link FrameSampler}'s {@code -q:v}).
+ *
+ * <p>The number of frames is decided upstream by {@link FrameSampler} (duration-aware,
+ * ceilinged by {@code video.sampleFrames}); the dispatcher (JCLAW-224) logs the count used.
+ */
+public final class Tier2VideoAdapter {
+
+    private Tier2VideoAdapter() {}
+
+    /** Build the leading text part plus one {@code image_url} part per frame. */
+    public static List<Map<String, Object>> contentParts(List<Frame> frames, double durationSeconds) {
+        if (frames == null || frames.isEmpty()) {
+            throw new VideoAdapterException("no frames to build a Tier-2 multi-image part");
+        }
+        var parts = new ArrayList<Map<String, Object>>(frames.size() + 1);
+        parts.add(Map.of("type", "text", "text", header(frames, durationSeconds)));
+        for (var f : frames) {
+            var dataUrl = "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(f.jpeg());
+            parts.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl)));
+        }
+        return parts;
+    }
+
+    static String header(List<Frame> frames, double durationSeconds) {
+        var timestamps = frames.stream()
+                .map(f -> VideoTimecode.format(f.timestampSeconds()))
+                .collect(Collectors.joining(", "));
+        return ("The following %d images are evenly-spaced frames sampled from a single video of "
+                + "duration %s. They are in chronological order at timestamps [%s]. Treat them as a "
+                + "temporal sequence and describe what happens across the video, not each image in "
+                + "isolation.")
+                .formatted(frames.size(), VideoTimecode.format(durationSeconds), timestamps);
+    }
+}
