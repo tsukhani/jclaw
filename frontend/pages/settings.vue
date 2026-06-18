@@ -229,6 +229,13 @@ const subagentMaxChildrenPerParent = computed(() => {
   return entries.find(e => e.key === 'subagent.maxChildrenPerParent')?.value ?? '5'
 })
 
+// JCLAW-499: external-harness (ACP) runtime command. Empty = disabled
+// (runtime="acp" spawns are refused until set). Operator-set only.
+const subagentAcpCommand = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find(e => e.key === 'subagent.acp.command')?.value ?? ''
+})
+
 const editingSubagentField = ref<string | null>(null)
 const subagentFieldEdit = ref('')
 
@@ -4219,6 +4226,67 @@ async function deleteLoggerLevel(logger: string) {
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Edit"
                 @click="editingSubagentField = 'maxChildrenPerParent'; subagentFieldEdit = subagentMaxChildrenPerParent"
+              >
+                <PencilIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+          </div>
+          <!-- JCLAW-499: external-harness (ACP) runtime command. Empty disables
+               runtime="acp" subagents; the harness is operator-set, never model-supplied. -->
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+              acp.command
+              <span class="relative group/tip">
+                <InformationCircleIcon
+                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                  aria-hidden="true"
+                />
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                  External agent harness for runtime="acp" subagents — e.g. "claude -p" or "codex exec". The task is sent on stdin and stdout becomes the reply. Empty disables ACP (runtime="acp" spawns are refused). Operator-set only; never model-supplied.
+                </span>
+              </span>
+            </span>
+            <template v-if="editingSubagentField === 'acpCommand'">
+              <input
+                v-model="subagentFieldEdit"
+                type="text"
+                placeholder="(disabled)"
+                aria-label="ACP harness command"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveSubagentField('subagent.acp.command', subagentFieldEdit)"
+              >
+                <CheckIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingSubagentField = null"
+              >
+                <XMarkIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+            <template v-else>
+              <span
+                class="flex-1 text-sm font-mono"
+                :class="subagentAcpCommand ? 'text-fg-primary' : 'text-fg-muted'"
+              >{{ subagentAcpCommand || '(disabled)' }}</span>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingSubagentField = 'acpCommand'; subagentFieldEdit = subagentAcpCommand"
               >
                 <PencilIcon
                   class="w-3.5 h-3.5"
