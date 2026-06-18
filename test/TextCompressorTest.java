@@ -1,11 +1,6 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.compression.CompressionResult;
 import services.compression.TextCompressor;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * JCLAW-464: TextCompressor. Validates near-duplicate collapse (Jaccard),

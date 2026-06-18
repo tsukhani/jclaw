@@ -2,10 +2,6 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.compression.ContentHash;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-468: ContentHash — the content-addressed handle that ties a compressed
  * marker to the durable original for CCR retrieval.

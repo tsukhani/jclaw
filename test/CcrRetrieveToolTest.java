@@ -18,10 +18,6 @@ import tools.CcrRetrieveTool;
 
 import java.time.Instant;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-462: ccr_retrieve tool. Verifies it re-finds the original tool-result
  * content by hash within the active conversation (no cache table — the Message

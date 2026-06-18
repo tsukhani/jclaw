@@ -9,7 +9,6 @@ import com.github.javaparser.ast.stmt.BlockStmt;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -37,14 +36,14 @@ import java.util.regex.Pattern;
  */
 public final class CodeCompressor implements ContentCompressor {
 
-    public static final String ALGORITHM = "code-structural";
+    public static final String ALGORITHM_NAME = "code-structural";
 
     /** Recognized source languages; {@link #UNKNOWN} routes through the generic regex fallback. */
     public enum Language { JAVA, PYTHON, JAVASCRIPT, GO, RUST, UNKNOWN }
 
     @Override
     public String algorithm() {
-        return ALGORITHM;
+        return ALGORITHM_NAME;
     }
 
     @Override
@@ -54,13 +53,13 @@ public final class CodeCompressor implements ContentCompressor {
 
     /** Explicit-language entry — the per-language test seam. */
     public CompressionResult compress(String code, Language language) {
-        if (code == null || code.isBlank()) return CompressionResult.unchanged(code, ALGORITHM);
+        if (code == null || code.isBlank()) return CompressionResult.unchanged(code, ALGORITHM_NAME);
 
         String out = null;
         if (language == Language.JAVA) {
             try {
                 out = compressJava(code);
-            } catch (RuntimeException parseFailure) {
+            } catch (RuntimeException _) {
                 out = null; // unparseable / partial Java — fall through to regex
             }
         }
@@ -68,9 +67,9 @@ public final class CodeCompressor implements ContentCompressor {
 
         // Char-level inflation guard; the pipeline re-checks at the token level.
         if (out == null || out.length() >= code.length()) {
-            return CompressionResult.unchanged(code, ALGORITHM);
+            return CompressionResult.unchanged(code, ALGORITHM_NAME);
         }
-        return CompressionResult.compressed(out, ALGORITHM);
+        return CompressionResult.compressed(out, ALGORITHM_NAME);
     }
 
     // ---------------------------------------------------------------- language
@@ -82,11 +81,11 @@ public final class CodeCompressor implements ContentCompressor {
     private static final Pattern PYTHON_HINT = Pattern.compile(
             "(?m)^\\s*(?:def\\s+\\w+\\s*\\(|from\\s+[\\w.]+\\s+import\\s|class\\s+\\w+\\s*[:(])");
     private static final Pattern GO_HINT = Pattern.compile(
-            "(?m)^\\s*(?:package\\s+\\w+\\s*$|func\\s+\\w*\\s*\\(|func\\s+\\(\\s*\\w)");
+            "(?m)^\\s*(?:package\\s+\\w+\\s*$|func\\s++\\w*+\\s*+\\(|func\\s+\\(\\s*\\w)");
     private static final Pattern RUST_HINT = Pattern.compile(
             "(?m)^\\s*(?:fn\\s+\\w+\\s*[(<]|pub\\s+fn\\s|impl\\s+\\w|use\\s+\\w[\\w:]*;)");
     private static final Pattern JS_HINT = Pattern.compile(
-            "(?m)^\\s*(?:function\\s+\\w+\\s*\\(|const\\s+\\w+\\s*=|export\\s+(?:default\\s+)?|import\\s+.*\\bfrom\\b)");
+            "(?m)^\\s*(?:function\\s+\\w+\\s*\\(|const\\s+\\w+\\s*=|export\\s+(?:default\\s+)?|import\\s++.*\\bfrom\\b)");
 
     public static Language detectLanguage(String code) {
         if (code == null || code.isBlank()) return Language.UNKNOWN;
@@ -187,7 +186,7 @@ public final class CodeCompressor implements ContentCompressor {
             // blank lines inside a body run are dropped
         }
         if (eliding) sb.append(marker).append('\n');
-        return sb.length() == 0 ? null : sb.toString();
+        return sb.isEmpty() ? null : sb.toString();
     }
 
     private static boolean isStructural(String line) {

@@ -2,11 +2,6 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.compression.CodeCompressor;
 import services.compression.CodeCompressor.Language;
-import services.compression.CompressionResult;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * JCLAW-463: CodeCompressor. Validates the Java AST path (imports, signatures and

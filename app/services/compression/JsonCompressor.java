@@ -34,7 +34,7 @@ import com.google.gson.JsonPrimitive;
  */
 public final class JsonCompressor implements ContentCompressor {
 
-    public static final String ALGORITHM = "json-smartcrush";
+    public static final String ALGORITHM_NAME = "json-smartcrush";
 
     // Defaults mirror Headroom's json_handler.
     private final int maxArrayItemsFull;
@@ -59,7 +59,7 @@ public final class JsonCompressor implements ContentCompressor {
 
     @Override
     public String algorithm() {
-        return ALGORITHM;
+        return ALGORITHM_NAME;
     }
 
     @Override
@@ -69,15 +69,15 @@ public final class JsonCompressor implements ContentCompressor {
         // is carried through verbatim so the LLM keeps that context.
         var span = JsonSpan.find(content).orElse(null);
         if (span == null) {
-            return CompressionResult.unchanged(content, ALGORITHM);
+            return CompressionResult.unchanged(content, ALGORITHM_NAME);
         }
 
         var out = span.prefix() + COMPACT.toJson(transform(span.json()));
         if (out.length() >= content.length()) {
             // Crushing didn't help (already compact / tiny) — don't inflate.
-            return CompressionResult.unchanged(content, ALGORITHM);
+            return CompressionResult.unchanged(content, ALGORITHM_NAME);
         }
-        return CompressionResult.compressed(out, ALGORITHM);
+        return CompressionResult.compressed(out, ALGORITHM_NAME);
     }
 
     private JsonElement transform(JsonElement el) {

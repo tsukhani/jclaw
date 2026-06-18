@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
  */
 public final class TextCompressor implements ContentCompressor {
 
-    public static final String ALGORITHM = "text-statistical";
+    public static final String ALGORITHM_NAME = "text-statistical";
     public static final double DEFAULT_TARGET_RATIO = 0.3;
 
     private static final double JACCARD_THRESHOLD = 0.9;
@@ -49,17 +49,17 @@ public final class TextCompressor implements ContentCompressor {
 
     public TextCompressor(double targetRatio) {
         // Clamp to a sane band so a bad config can't disable or invert the guard.
-        this.targetRatio = Math.max(0.05, Math.min(0.95, targetRatio));
+        this.targetRatio = Math.clamp(targetRatio, 0.05, 0.95);
     }
 
     @Override
     public String algorithm() {
-        return ALGORITHM;
+        return ALGORITHM_NAME;
     }
 
     @Override
     public CompressionResult compress(String content) {
-        if (content == null || content.isBlank()) return CompressionResult.unchanged(content, ALGORITHM);
+        if (content == null || content.isBlank()) return CompressionResult.unchanged(content, ALGORITHM_NAME);
 
         var normalized = normalizeWhitespace(content);
         var out = new ArrayList<String>();
@@ -71,9 +71,9 @@ public final class TextCompressor implements ContentCompressor {
 
         // Effectiveness guard: only keep the rewrite if it hit the target shrink.
         if (result.length() > content.length() * (1.0 - targetRatio)) {
-            return CompressionResult.unchanged(content, ALGORITHM);
+            return CompressionResult.unchanged(content, ALGORITHM_NAME);
         }
-        return CompressionResult.compressed(result, ALGORITHM);
+        return CompressionResult.compressed(result, ALGORITHM_NAME);
     }
 
     private static String compressBlock(String block) {
@@ -133,7 +133,7 @@ public final class TextCompressor implements ContentCompressor {
     private static String normalizeWhitespace(String text) {
         return text
                 .replace('\t', ' ')
-                .replaceAll("(?m)[ ]+$", "")   // trailing spaces per line
+                .replaceAll("(?m)[ ]++$", "")   // trailing spaces per line (possessive: no ReDoS backtracking)
                 .replaceAll("[ ]{2,}", " ")    // runs of spaces
                 .replaceAll("\\n{3,}", "\n\n"); // 3+ newlines -> a single blank line
     }

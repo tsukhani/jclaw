@@ -5,8 +5,6 @@ import play.test.UnitTest;
 import services.compression.ContentType;
 import services.compression.ContentTypeDetector;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 /**
  * JCLAW-460: content-type detection for the compression pipeline. Locks the
  * routing decisions — JSON via parse, code via anchored declarations, logs via

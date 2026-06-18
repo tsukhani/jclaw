@@ -93,35 +93,43 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
             return "Error: ccr_retrieve has no active conversation or task-run context.";
         }
 
-        var result = Tx.run(() -> {
-            // Newest-first: a just-compressed result is usually the one wanted.
-            if (conversationId != null) {
-                var conv = ConversationService.findById(conversationId);
-                if (conv == null) {
-                    return "Error: conversation not found.";
-                }
-                List<Message> rows = Message.<Message>find(
-                        "conversation = ?1 AND role = ?2 ORDER BY id DESC", conv, "tool").fetch();
-                var hit = matchByHash(rows, m -> m.content, handle);
-                if (hit != null) return hit;
-            } else {
-                // JCLAW-462: task fires persist tool turns to task_run_message,
-                // not the chat Message/Conversation tables — scan those instead.
-                List<TaskRunMessage> rows = TaskRunMessage.<TaskRunMessage>find(
-                        "taskRun.id = ?1 AND role = ?2 ORDER BY id DESC", taskRunId, MessageRole.TOOL).fetch();
-                var hit = matchByHash(rows, m -> m.content, handle);
-                if (hit != null) return hit;
-            }
-            return "No original found for hash \"" + handle + "\" in this "
-                    + (conversationId != null ? "conversation" : "task run")
-                    + " (it may have been trimmed from history).";
-        });
+        var result = Tx.run(() -> findOriginal(conversationId, taskRunId, handle));
         // JCLAW-467: record the hit/miss for the CCR cache-hit-rate metric. System
         // errors (no context / conversation not found) aren't a retrieval outcome.
         if (!result.startsWith("Error:")) {
-            services.CompressionMetrics.recordCcrRetrieval(handle, !result.startsWith("No original found"));
+            services.CompressionMetrics.recordCcrRetrieval(!result.startsWith("No original found"));
         }
         return result;
+    }
+
+    /**
+     * Locate the original tool-output whose content hash starts with {@code handle},
+     * scanning newest-first — chat {@link Message} rows when in a conversation, or
+     * {@link TaskRunMessage} rows (JCLAW-462) when in a task fire. Returns the content,
+     * or an explanatory "Error:"/"No original found" string.
+     */
+    private static String findOriginal(Long conversationId, Long taskRunId, String handle) {
+        // Newest-first: a just-compressed result is usually the one wanted.
+        if (conversationId != null) {
+            var conv = ConversationService.findById(conversationId);
+            if (conv == null) {
+                return "Error: conversation not found.";
+            }
+            List<Message> rows = Message.<Message>find(
+                    "conversation = ?1 AND role = ?2 ORDER BY id DESC", conv, "tool").fetch();
+            var hit = matchByHash(rows, m -> m.content, handle);
+            if (hit != null) return hit;
+        } else {
+            // JCLAW-462: task fires persist tool turns to task_run_message,
+            // not the chat Message/Conversation tables — scan those instead.
+            List<TaskRunMessage> rows = TaskRunMessage.<TaskRunMessage>find(
+                    "taskRun.id = ?1 AND role = ?2 ORDER BY id DESC", taskRunId, MessageRole.TOOL).fetch();
+            var hit = matchByHash(rows, m -> m.content, handle);
+            if (hit != null) return hit;
+        }
+        return "No original found for hash \"" + handle + "\" in this "
+                + (conversationId != null ? "conversation" : "task run")
+                + " (it may have been trimmed from history).";
     }
 
     /** First row (in iteration order) whose content SHA-256 starts with {@code handle}, or null. */

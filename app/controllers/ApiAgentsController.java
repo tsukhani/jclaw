@@ -29,6 +29,11 @@ public class ApiAgentsController extends Controller {
     private static final String KEY_THINKING_MODE = "thinkingMode";
     private static final String KEY_DESCRIPTION = "description";
     private static final String KEY_CONTENT = "content";
+    private static final String KEY_COMPRESSION_ENABLED = "compressionEnabled";
+    private static final String KEY_COMPRESSION_JSON = "compressionJson";
+    private static final String KEY_COMPRESSION_CODE = "compressionCode";
+    private static final String KEY_COMPRESSION_TEXT = "compressionText";
+    private static final String KEY_COMPRESSION_TARGET_RATIO = "compressionTargetRatio";
 
     /**
      * Slug regex enforced on every {@code name} received from the public
@@ -327,31 +332,38 @@ public class ApiAgentsController extends Controller {
                 ? readOptionalString(body, KEY_DESCRIPTION)
                 : agent.description;
 
-        // JCLAW-465: per-agent compression toggle. Absent key leaves the stored
-        // value untouched; set directly on the entity so AgentService.update's
-        // save() persists it alongside the other fields.
-        if (body.has("compressionEnabled") && !body.get("compressionEnabled").isJsonNull()) {
-            agent.compressionEnabled = body.get("compressionEnabled").getAsBoolean();
-        }
-        // JCLAW-463: per-type sub-toggles, gated by the master above. Absent keys
-        // leave the stored value untouched.
-        if (body.has("compressionJson") && !body.get("compressionJson").isJsonNull()) {
-            agent.compressionJson = body.get("compressionJson").getAsBoolean();
-        }
-        if (body.has("compressionCode") && !body.get("compressionCode").isJsonNull()) {
-            agent.compressionCode = body.get("compressionCode").getAsBoolean();
-        }
-        if (body.has("compressionText") && !body.get("compressionText").isJsonNull()) {
-            agent.compressionText = body.get("compressionText").getAsBoolean();
-        }
-        // JCLAW-464: clamp lives in TextCompressor; persist the operator's raw value.
-        if (body.has("compressionTargetRatio") && !body.get("compressionTargetRatio").isJsonNull()) {
-            agent.compressionTargetRatio = body.get("compressionTargetRatio").getAsDouble();
-        }
+        // JCLAW-463/464/465: apply the per-agent compression fields present in the
+        // body. Absent keys leave the stored value untouched.
+        applyCompressionSettings(agent, body);
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);
         renderJSON(gson.toJson(AgentView.of(agent)));
+    }
+
+    /**
+     * JCLAW-463/464/465: apply the per-agent compression fields present in {@code body}
+     * onto {@code agent}. Absent or explicit-null keys leave the stored value untouched;
+     * the master toggle gates the per-type sub-toggles downstream. Values are set directly
+     * on the entity so {@link AgentService#update}'s save() persists them with the rest.
+     */
+    private static void applyCompressionSettings(Agent agent, com.google.gson.JsonObject body) {
+        if (body.has(KEY_COMPRESSION_ENABLED) && !body.get(KEY_COMPRESSION_ENABLED).isJsonNull()) {
+            agent.compressionEnabled = body.get(KEY_COMPRESSION_ENABLED).getAsBoolean();
+        }
+        if (body.has(KEY_COMPRESSION_JSON) && !body.get(KEY_COMPRESSION_JSON).isJsonNull()) {
+            agent.compressionJson = body.get(KEY_COMPRESSION_JSON).getAsBoolean();
+        }
+        if (body.has(KEY_COMPRESSION_CODE) && !body.get(KEY_COMPRESSION_CODE).isJsonNull()) {
+            agent.compressionCode = body.get(KEY_COMPRESSION_CODE).getAsBoolean();
+        }
+        if (body.has(KEY_COMPRESSION_TEXT) && !body.get(KEY_COMPRESSION_TEXT).isJsonNull()) {
+            agent.compressionText = body.get(KEY_COMPRESSION_TEXT).getAsBoolean();
+        }
+        // JCLAW-464: clamp lives in TextCompressor; persist the operator's raw value.
+        if (body.has(KEY_COMPRESSION_TARGET_RATIO) && !body.get(KEY_COMPRESSION_TARGET_RATIO).isJsonNull()) {
+            agent.compressionTargetRatio = body.get(KEY_COMPRESSION_TARGET_RATIO).getAsDouble();
+        }
     }
 
     /**

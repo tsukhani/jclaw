@@ -6,11 +6,6 @@ import services.compression.ContentHash;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-465 (core): the compression pipeline's routing and guards. Exercises
  * the pure {@code compressMessages} seam — TOOL-role JSON, CODE and TEXT/LOG
