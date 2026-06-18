@@ -70,21 +70,48 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void asyncSpawnRejectedInsideTaskRun() {
-        // JCLAW-494: an async subagent yields and resumes via a persisted
-        // conversation + channel announce — a scheduled task fire has neither,
-        // so async spawns must be rejected at parse time (before any spawn),
-        // steering the agent to a synchronous spawn whose result feeds the task.
-        var parent = createAgent("p-task-async", "test-provider", "test-model");
-        var tool = (SubagentSpawnTool) ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+    void asyncSubagentWorksInTaskRun() throws Exception {
+        // JCLAW-497: inside a task fire the agent can spawn an async subagent
+        // (parallel) and collect its result via subagent_yield, which block-awaits
+        // and returns the child reply inline — no conversation resume, no YIELDED
+        // sentinel. Both sync and async subagents are usable in a task.
+        startLlmServer(simpleResponse("Async child reply: done."));
+        configureProvider();
 
-        // A non-null taskRunId marks a task fire. The guard rejects before any
-        // LLM/DB work, so no provider mock or parent conversation is needed.
-        var rejected = agents.ToolContext.withScope(null, 777L,
-                () -> tool.execute("{\"task\":\"do work\",\"async\":true}", parent));
-        assertNotNull(rejected);
-        assertTrue(rejected.startsWith("Error:") && rejected.contains("scheduled task run"),
-                "async spawn in a task run must be rejected with an actionable error: " + rejected);
+        var parent = createAgent("p-task-async", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-task-async");
+        commitAndReopen();
+
+        // Drive subagent_spawn(async) then subagent_yield inside a task scope
+        // (taskRunId set) on a VT — mirrors how ParallelToolExecutor binds the
+        // scope for a task fire's tool dispatch.
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
+                var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+                var yieldTool = ToolRegistry.lookupTool(tools.SubagentYieldTool.TOOL_NAME);
+                var yielded = agents.ToolContext.withScope(null, 9999L, () -> {
+                    var spawn = spawnTool.execute(
+                            "{\"task\":\"do work\",\"async\":true,\"mode\":\"session\"}", p);
+                    var runId = JsonParser.parseString(spawn).getAsJsonObject()
+                            .get("run_id").getAsString();
+                    return yieldTool.execute("{\"runId\":\"" + runId + "\"}", p);
+                });
+                resultRef.set(yielded);
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "async spawn + yield must complete within 30s");
+        if (errorRef.get() != null) throw errorRef.get();
+
+        var yieldJson = JsonParser.parseString(resultRef.get()).getAsJsonObject();
+        assertEquals("Async child reply: done.", yieldJson.get("reply").getAsString(),
+                "subagent_yield in a task must return the async child's reply inline (JCLAW-497)");
+        assertEquals("COMPLETED", yieldJson.get("status").getAsString());
     }
 
     @Test

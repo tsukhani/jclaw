@@ -358,6 +358,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // was already rejected up top so this branch can hard-assume session
         // mode (inlineMode == false, runIdForMarker == null).
         if (parsed.asyncRequested()) {
+            // JCLAW-497: a task fire has no persistent conversation to resume into,
+            // so the announce/resume model can't deliver there. Use a block-await
+            // handoff instead — dispatch the child (parallel) and let subagent_yield
+            // collect its result inline. Chat keeps the announce/resume path.
+            if (ToolContext.taskRunId() != null) {
+                return launchAsyncSpawnForTask(runId, childAgentId, childConvId,
+                        parentAgent.name, parsed, runIdStr);
+            }
             return launchAsyncSpawn(runId, childAgentId, childConvId, parentConvIdFinal,
                     parentAgent.name, parsed, runIdStr);
         }
@@ -473,15 +481,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (asyncRequested && MODE_INLINE.equals(mode)) {
             return SpawnArgs.fail("Error: 'async' is only compatible with mode=\"session\" (inline mode embeds child messages directly into the parent transcript, which has no meaningful semantics before the child finishes).");
         }
-        // JCLAW-494: async subagents have no resume path inside a scheduled task
-        // fire. The yield/resume model (JCLAW-273) re-invokes the parent via a
-        // persisted conversation + channel announce, but a task fire runs on a
-        // transient stub conversation with a one-shot delivery spec — a yield
-        // would deliver the __JCLAW_273_YIELDED__ sentinel and strand the child's
-        // result in an orphan conversation. Force synchronous spawns in tasks.
-        if (asyncRequested && ToolContext.taskRunId() != null) {
-            return SpawnArgs.fail("Error: 'async' subagents aren't supported inside a scheduled task run — a task fire has no conversation to resume into. Spawn the subagent synchronously (omit 'async' or set async=false) so its result is returned inline and feeds the task's output.");
-        }
+        // JCLAW-497: async subagents ARE supported in task fires (a block-await
+        // handoff collected by subagent_yield — see launchAsyncSpawnForTask),
+        // superseding JCLAW-494's interim rejection.
 
         return new SpawnArgs(null, task, label, requestedAgentId,
                 modelProviderOverride, modelIdOverride,
@@ -578,6 +580,105 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         asyncPayload.put("conversation_id", String.valueOf(childConvId));
         asyncPayload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
         return utils.GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
+    }
+
+    /** JCLAW-497: async subagent OUTCOMES spawned inside a task fire, keyed by
+     *  runId, handed off from {@link #launchAsyncSpawnForTask} to the inline
+     *  block-await in subagent_yield ({@link #awaitTaskAsyncOutcome}). A task has
+     *  no persistent conversation to resume into, so the chat announce/resume
+     *  path doesn't apply; the parent collects the result via a blocking yield. */
+    private static final java.util.concurrent.ConcurrentHashMap<Long, CompletableFuture<SyncRunOutcome>>
+            TASK_ASYNC_OUTCOMES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * JCLAW-497: async spawn inside a task fire. Dispatch the child on a VT
+     * (parallel — the agent can spawn more before awaiting) and stash a future
+     * that completes with the child's terminal outcome for subagent_yield to
+     * block-await inline. No announce / parent-resume (a task has no conversation
+     * to resume into). Returns run_id immediately.
+     */
+    private static String launchAsyncSpawnForTask(Long runId, Long childAgentId, Long childConvId,
+                                                   String parentAgentName, SpawnArgs parsed, String runIdStr) {
+        var outcomeFuture = new CompletableFuture<SyncRunOutcome>();
+        TASK_ASYNC_OUTCOMES.put(runId, outcomeFuture);
+        Thread.ofVirtual().name("subagent-async-task-" + runId).start(() ->
+                runAsyncForTask(runId, childAgentId, childConvId, parentAgentName,
+                        parsed.mode(), parsed.context(), parsed.timeoutSeconds(),
+                        parsed.task(), outcomeFuture));
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("run_id", runIdStr);
+        payload.put("conversation_id", String.valueOf(childConvId));
+        payload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
+        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+    }
+
+    /**
+     * JCLAW-497: run an async task-fire child to completion and hand its terminal
+     * outcome to the awaiting subagent_yield. Mirrors {@link #runAsyncAndAnnounce}
+     * minus the announce + parent-resume (which need a persistent conversation):
+     * run the child, do the terminal audit + lifecycle bookkeeping, then complete
+     * {@code outcomeFuture}.
+     */
+    @SuppressWarnings("java:S1181")
+    private static void runAsyncForTask(Long runId, Long childAgentId, Long childConvId,
+                                        String parentAgentName, String mode, String context,
+                                        int timeoutSeconds, String task,
+                                        CompletableFuture<SyncRunOutcome> outcomeFuture) {
+        try {
+            var future = startAsyncChild(runId, childAgentId, childConvId, task);
+            SyncRunOutcome outcome;
+            try {
+                outcome = awaitAsyncFuture(future, timeoutSeconds,
+                        ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS), runId);
+            } finally {
+                services.SubagentRegistry.unregister(runId);
+            }
+            if (!outcome.killedByOperator()) {
+                persistAsyncTerminalRun(runId, outcome);
+                emitTerminalEvent(parentAgentName, lookupAgentName(childAgentId), String.valueOf(runId),
+                        mode, context, outcome.terminalStatus(), outcome.errorReason());
+            }
+            EventLogger.flush();
+            outcomeFuture.complete(outcome);
+        } catch (Throwable t) {
+            outcomeFuture.completeExceptionally(t);
+        }
+    }
+
+    /**
+     * JCLAW-497: block-await the outcome of an async subagent spawned inside the
+     * current task fire (called by subagent_yield in a task context) and return
+     * it as the same JSON shape a synchronous spawn returns. Returns an error
+     * string when no such pending run is registered (already awaited, or the run
+     * wasn't an async task spawn).
+     */
+    public static String awaitTaskAsyncOutcome(Long runId) {
+        var outcomeFuture = TASK_ASYNC_OUTCOMES.remove(runId);
+        if (outcomeFuture == null) {
+            return "Error: no pending async subagent for runId " + runId
+                    + " in this task run (already awaited, or not an async task spawn).";
+        }
+        SyncRunOutcome outcome;
+        try {
+            // The child is self-bounded by its idle/ceiling budgets inside
+            // runAsyncForTask; wait a little past the absolute ceiling so this
+            // await can't hang even if completion signalling misbehaves.
+            int ceiling = ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS);
+            outcome = ceiling <= 0
+                    ? outcomeFuture.get()
+                    : outcomeFuture.get(ceiling + 30L, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "Error: interrupted while awaiting async subagent " + runId + ".";
+        } catch (Exception e) {
+            return "Error: failed awaiting async subagent " + runId + ": " + e.getMessage();
+        }
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("run_id", String.valueOf(runId));
+        payload.put("reply", outcome.reply());
+        payload.put(FIELD_STATUS, outcome.terminalStatus().name());
+        if (outcome.replyTruncated()) payload.put("truncated", Boolean.TRUE);
+        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /**

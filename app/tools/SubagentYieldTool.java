@@ -186,6 +186,20 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         var parsed = parseYieldArgs(args);
         if (parsed.error() != null) return parsed.error();
 
+        // JCLAW-497: inside a task fire there is no conversation to resume into,
+        // so yield BLOCK-AWAITS the async child's outcome and returns it inline —
+        // the agent then synthesizes and the task delivers the real output —
+        // rather than emitting the YIELDED sentinel that suspends a chat turn.
+        // (The chat announce/resume side effects below — the yielded flag and the
+        // yield-timeout watchdog — are deliberately skipped on this path.)
+        if (agents.ToolContext.taskRunId() != null) {
+            if (parsed.runId() == null) {
+                return "Error: subagent_yield inside a task run requires the 'runId' "
+                        + "returned by the async subagent_spawn call.";
+            }
+            return SubagentSpawnTool.awaitTaskAsyncOutcome(parsed.runId());
+        }
+
         final var parentAgentId = callingAgent.id;
         // Either an error string (returned verbatim to the LLM) OR an
         // already-terminal structured JSON envelope (when the child raced
