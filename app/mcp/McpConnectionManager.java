@@ -83,11 +83,53 @@ public final class McpConnectionManager {
 
     // ==================== lifecycle ====================
 
-    /** Load every enabled MCP server row and start a connector for each. */
+    /** JCLAW-496: max time {@link #startAll} waits for all enabled servers'
+     *  first-connect attempts to resolve before returning. The db-scheduler
+     *  starts after MCP startup (priority ordering), so this bounds how long
+     *  boot-time task fires wait for MCP tools; slower servers keep retrying
+     *  via the watchdog after it elapses. */
+    private static final Duration STARTUP_CONNECT_BUDGET = Duration.ofSeconds(20);
+
+    /** Load every enabled MCP server row, start a connector for each, then wait
+     *  (bounded) for the first-connect attempts to resolve. The scheduler starts
+     *  after this {@code @OnApplicationStart} job (DbSchedulerBootstrapJob,
+     *  priority 100), so joining here keeps the first task fires from racing
+     *  still-in-flight MCP connections (JCLAW-496). Connects run concurrently —
+     *  we only join them. */
     public static void startAll() {
         ensureScheduler();
         var configs = Tx.run(McpServer::findEnabled);
-        for (var server : configs) connect(server);
+        var futures = new ArrayList<CompletableFuture<Void>>();
+        for (var server : configs) futures.add(connectAndAwait(server));
+        awaitFirstConnects(futures, STARTUP_CONNECT_BUDGET);
+    }
+
+    /**
+     * JCLAW-496: await every first-connect future, bounded by {@code budget}.
+     * Each resolves on success OR failure (see {@link #signalFirstAttemptResolved}),
+     * so only genuinely slow / still-in-flight connects consume the budget —
+     * failed servers resolve immediately and keep retrying via the watchdog.
+     * Never throws: a slow or unreachable server must not block boot indefinitely.
+     *
+     * @return true if every future resolved within the budget.
+     */
+    public static boolean awaitFirstConnects(List<CompletableFuture<Void>> futures, Duration budget) {
+        if (futures.isEmpty()) return true;
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(budget.toMillis(), TimeUnit.MILLISECONDS);
+            return true;
+        } catch (java.util.concurrent.TimeoutException e) {
+            EventLogger.warn("system", "MCP startup: %d/%d servers connected within the %ds budget; proceeding (slow servers keep retrying)"
+                    .formatted(connectionCount(), futures.size(), budget.toSeconds()));
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.CancellationException e) {
+            EventLogger.warn("system", "MCP startup await ended early: " + e.getMessage());
+            return false;
+        }
     }
 
     /** Connect (or restart) one configured server. Idempotent: replaces
