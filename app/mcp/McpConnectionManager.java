@@ -83,25 +83,34 @@ public final class McpConnectionManager {
 
     // ==================== lifecycle ====================
 
-    /** JCLAW-496: max time {@link #startAll} waits for all enabled servers'
-     *  first-connect attempts to resolve before returning. The db-scheduler
-     *  starts after MCP startup (priority ordering), so this bounds how long
-     *  boot-time task fires wait for MCP tools; slower servers keep retrying
-     *  via the watchdog after it elapses. */
+    /** JCLAW-496: max time the deferred scheduler start waits for all enabled
+     *  servers' first-connect attempts to resolve before it begins firing tasks.
+     *  Slower servers keep retrying via the watchdog after it elapses. */
     private static final Duration STARTUP_CONNECT_BUDGET = Duration.ofSeconds(20);
 
-    /** Load every enabled MCP server row, start a connector for each, then wait
-     *  (bounded) for the first-connect attempts to resolve. The scheduler starts
-     *  after this {@code @OnApplicationStart} job (DbSchedulerBootstrapJob,
-     *  priority 100), so joining here keeps the first task fires from racing
-     *  still-in-flight MCP connections (JCLAW-496). Connects run concurrently —
-     *  we only join them. */
+    /** JCLAW-496: the most recent {@link #startAll}'s first-connect futures, for
+     *  the deferred scheduler start ({@link #awaitStartupConnected}) to join. */
+    private static volatile List<CompletableFuture<Void>> startupConnectFutures = List.of();
+
+    /** Load every enabled MCP server row, start a connector for each, then record
+     *  the first-connect futures for the scheduler to join. Does NOT block boot
+     *  (JCLAW-496): the web UI comes up immediately; only task-firing waits for
+     *  MCP readiness, via {@link #awaitStartupConnected} on the scheduler's
+     *  deferred-start thread. Connects run concurrently. */
     public static void startAll() {
         ensureScheduler();
         var configs = Tx.run(McpServer::findEnabled);
         var futures = new ArrayList<CompletableFuture<Void>>();
         for (var server : configs) futures.add(connectAndAwait(server));
-        awaitFirstConnects(futures, STARTUP_CONNECT_BUDGET);
+        startupConnectFutures = futures;
+    }
+
+    /** JCLAW-496: block (bounded) until every enabled server's first-connect
+     *  attempt from boot has resolved. Called off the boot thread (the scheduler's
+     *  deferred start) so the web UI stays up while task-firing waits for MCP
+     *  readiness. Returns true if all resolved within the budget. */
+    public static boolean awaitStartupConnected() {
+        return awaitFirstConnects(startupConnectFutures, STARTUP_CONNECT_BUDGET);
     }
 
     /**

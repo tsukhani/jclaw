@@ -183,31 +183,35 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         // 100 — so an overdue boot-time fire no longer races an empty
         // ToolRegistry. (Pre-1.13.27 this job called ToolRegistrationJob.registerAll()
         // inline as a workaround for the lack of startup-job ordering.)
+        // Publish the SchedulerClient synchronously so web-UI CRUD can schedule
+        // tasks immediately (TaskSchedulingService.register writes via 'built').
         TaskExecutionHandler.setSchedulerClient(built);
         scheduler = built;
-        built.start();
 
-        EventLogger.info("task", null, null,
-                "db-scheduler started (polling 2s, virtual-thread executor, "
-                + "registered task '%s')".formatted(TaskExecutionHandler.TASK_NAME));
-
-        // Run the consistency sweep inline now that the scheduler is alive.
-        // Even with startup-job priority ordering (1.13.27+), the sweep stays
-        // inline because it needs the live SchedulerClient ('built') we just
-        // created — not merely a guarantee of running after this job. (Pre-1.13.27
-        // it was also the only way to dodge the unordered-sibling race that left
-        // it logging "scheduler not bootstrapped; skipping sweep".)
-        try {
-            BootConsistencyCheck.sweep(built, bootInstant);
-        } catch (Exception e) {
-            // Don't crash the bootstrap if sweep throws — the scheduler
-            // is already alive and TaskSchedulingService.register
-            // calls from CRUD operations will keep the system live for
-            // newly-created Tasks. Pre-existing PENDING orphans get
-            // picked up on the next restart.
-            EventLogger.warn("task", null, null,
-                    "BootConsistencyCheck.sweep raised at startup: %s".formatted(e.getMessage()));
-        }
+        // JCLAW-496: DEFER the polling start and the overdue-task sweep onto a
+        // background thread that first waits (bounded) for MCP connections to
+        // resolve. Boot — and the web UI — stay fast (this job returns now),
+        // while no due/overdue task FIRES before its MCP tools are registered:
+        // a task scheduled at boot otherwise raced the async MCP connect (the
+        // root trigger behind JCLAW-495). Nothing fires until built.start() runs.
+        Thread.ofVirtual().name("scheduler-mcp-gate").start(() -> {
+            mcp.McpConnectionManager.awaitStartupConnected();
+            built.start();
+            EventLogger.info("task", null, null,
+                    "db-scheduler started (polling 2s, virtual-thread executor, "
+                    + "registered task '%s')".formatted(TaskExecutionHandler.TASK_NAME));
+            // The sweep needs the live SchedulerClient ('built') we just started.
+            try {
+                BootConsistencyCheck.sweep(built, bootInstant);
+            } catch (Exception e) {
+                // Don't crash the gate thread if sweep throws — the scheduler
+                // is already alive and TaskSchedulingService.register calls from
+                // CRUD operations keep the system live for newly-created Tasks.
+                // Pre-existing PENDING orphans get picked up on the next restart.
+                EventLogger.warn("task", null, null,
+                        "BootConsistencyCheck.sweep raised at startup: %s".formatted(e.getMessage()));
+            }
+        });
     }
 
     /**
