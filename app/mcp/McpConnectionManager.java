@@ -128,11 +128,11 @@ public final class McpConnectionManager {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                     .get(budget.toMillis(), TimeUnit.MILLISECONDS);
             return true;
-        } catch (java.util.concurrent.TimeoutException e) {
+        } catch (java.util.concurrent.TimeoutException _) {
             EventLogger.warn("system", "MCP startup: %d/%d servers connected within the %ds budget; proceeding (slow servers keep retrying)"
                     .formatted(connectionCount(), futures.size(), budget.toSeconds()));
             return false;
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return false;
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.CancellationException e) {

@@ -78,6 +78,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
     private static final String PARAM_RUN_ID = "runId";
     private static final String PARAM_CONVERSATION_ID = "conversationId";
     private static final String PARAM_TIMEOUT_SECONDS = "timeoutSeconds";
+    private static final String PARAM_RUN_IDS = "runIds";
 
     /** Default resume budget when the caller does not supply
      *  {@code timeoutSeconds}. Matches the JCLAW-326 AC. */
@@ -146,7 +147,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION,
                 "Run id returned by a prior subagent_spawn call with async=true. "
                         + "Provide this OR conversationId (runId wins when both set)."));
-        props.put("runIds", Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
+        props.put(PARAM_RUN_IDS, Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
                 SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
                 SchemaKeys.DESCRIPTION,
                 "BATCH COLLECT: the run_ids from a subagent_spawn batch (tasks[]). Block-awaits "
@@ -258,12 +259,12 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         if (args.has("all") && !args.get("all").isJsonNull() && args.get("all").getAsBoolean()) {
             return tools.SubagentSpawnTool.outstandingForCurrentScope();
         }
-        if (args.has("runIds") && args.get("runIds").isJsonArray()) {
+        if (args.has(PARAM_RUN_IDS) && args.get(PARAM_RUN_IDS).isJsonArray()) {
             var list = new java.util.ArrayList<Long>();
-            for (var el : args.get("runIds").getAsJsonArray()) {
+            for (var el : args.get(PARAM_RUN_IDS).getAsJsonArray()) {
                 try {
                     list.add(el.getAsLong());
-                } catch (RuntimeException ignore) {
+                } catch (RuntimeException _) {
                     // skip a non-numeric entry rather than failing the whole collect
                 }
             }

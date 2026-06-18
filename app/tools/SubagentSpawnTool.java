@@ -101,6 +101,17 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     private static final String FIELD_STATUS = "status";
     private static final String FIELD_LABEL = "label";
+    // JCLAW-S1192: request-arg and response-field key constants.
+    private static final String ARG_TASKS = "tasks";
+    private static final String ARG_AGENT_ID = "agentId";
+    private static final String ARG_CONTEXT = "context";
+    private static final String ARG_RUN_TIMEOUT_SECONDS = "runTimeoutSeconds";
+    private static final String ARG_RUNTIME = "runtime";
+    private static final String FIELD_RUN_ID = "run_id";
+    private static final String FIELD_CONVERSATION_ID = "conversation_id";
+    private static final String FIELD_REPLY = "reply";
+    private static final String FIELD_TRUNCATED = "truncated";
+    private static final String FIELD_ERROR = "error";
 
     /**
      * Default value for the per-spawn {@code runTimeoutSeconds} arg.
@@ -232,7 +243,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var props = new LinkedHashMap<String, Object>();
         props.put("task", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Instruction for the child subagent (required unless you pass 'tasks' for a batch)"));
-        props.put("tasks", Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
+        props.put(ARG_TASKS, Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
                 SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
                 SchemaKeys.DESCRIPTION,
                 "BATCH FAN-OUT: an array of task strings to run as async subagents IN PARALLEL "
@@ -241,7 +252,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "all=true). Session mode only."));
         props.put(FIELD_LABEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Optional short display name for the spawn"));
-        props.put("agentId", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+        props.put(ARG_AGENT_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
                 "Optional id of an existing Agent row to run as the child; "
                         + "defaults to a fresh clone of the calling agent"));
@@ -255,13 +266,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION, "Optional provider override for the child"));
         props.put("modelId", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Optional model id override for the child"));
-        props.put("context", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+        props.put(ARG_CONTEXT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Context inheritance mode: \"fresh\" (default) for an empty child history, "
                         + "or \"inherit\" to summarize the parent's recent turns into the "
                         + "child's system prompt and grant the child the union of the parent's "
                         + "enabled tools and its own."));
-        props.put("runTimeoutSeconds", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+        props.put(ARG_RUN_TIMEOUT_SECONDS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
                 "Idle budget: seconds of inactivity (no LLM round/tool call) before the run times out; "
                         + "active work resets it, so it need not cover total runtime (default 300)"));
@@ -271,7 +282,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "spawn more or do other work, then collect with subagent_yield. In a chat "
                         + "a completion card is posted to your conversation; in a task fire you "
                         + "block-await the result with subagent_yield. Only with mode=\"session\"."));
-        props.put("runtime", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+        props.put(ARG_RUNTIME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Child runtime: \"native\" (default) runs a JClaw subagent, or \"acp\" runs the "
                         + "operator-configured external agent harness (e.g. a Codex/Claude/Gemini CLI) "
@@ -305,7 +316,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         // JCLAW-498: batch fan-out — a tasks[] array spawns N async children in
         // parallel; the single-child flow below handles a scalar task.
-        if (args.has("tasks") && !args.get("tasks").isJsonNull()) {
+        if (args.has(ARG_TASKS) && !args.get(ARG_TASKS).isJsonNull()) {
             return executeBatch(args, parentAgent);
         }
         var parsed = parseSpawnArgs(args);
@@ -426,14 +437,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
         // Tool return — the LLM will see this JSON string.
         var payload = new LinkedHashMap<String, Object>();
-        payload.put("run_id", runIdStr);
-        payload.put("conversation_id", String.valueOf(childConvId));
-        payload.put("reply", runOutcome.reply());
+        payload.put(FIELD_RUN_ID, runIdStr);
+        payload.put(FIELD_CONVERSATION_ID, String.valueOf(childConvId));
+        payload.put(FIELD_REPLY, runOutcome.reply());
         payload.put(FIELD_STATUS, runOutcome.terminalStatus().name());
         // JCLAW-291: hint to the parent LLM that the child's reply was cut
         // off — useful when the parent decides whether to re-summarize or
         // to surface the truncation to the user.
-        if (runOutcome.replyTruncated()) payload.put("truncated", Boolean.TRUE);
+        if (runOutcome.replyTruncated()) payload.put(FIELD_TRUNCATED, Boolean.TRUE);
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
@@ -445,7 +456,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * children are detached (no announce/resume), collected via block-await.
      */
     private String executeBatch(JsonObject args, Agent parentAgent) {
-        var tasksEl = args.get("tasks");
+        var tasksEl = args.get(ARG_TASKS);
         if (!tasksEl.isJsonArray() || tasksEl.getAsJsonArray().isEmpty()) {
             return "Error: 'tasks' must be a non-empty array of task strings or {task, ...} objects.";
         }
@@ -455,12 +466,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (MODE_INLINE.equals(mode)) {
             return "Error: batch 'tasks' is only compatible with mode=\"session\" (inline embeds a single child into the parent transcript).";
         }
-        var rawContext = optString(args, "context");
+        var rawContext = optString(args, ARG_CONTEXT);
         var context = (rawContext == null || rawContext.isBlank()) ? DEFAULT_CONTEXT : rawContext.toLowerCase();
         if (!ALLOWED_CONTEXTS.contains(context)) {
             return "Error: 'context' must be one of " + ALLOWED_CONTEXTS + ".";
         }
-        var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
+        var timeoutSeconds = optInt(args, ARG_RUN_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
         if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
         // JCLAW-499: runtime validation (native | acp) + resolved harness command,
         // applied to every child of the fan-out.
@@ -478,7 +489,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 var o = el.getAsJsonObject();
                 var t = optString(o, "task");
                 if (t == null || t.isBlank()) return "Error: each 'tasks' object must have a non-blank 'task'.";
-                specs.add(new BatchTaskSpec(t, optString(o, FIELD_LABEL), optLong(o, "agentId")));
+                specs.add(new BatchTaskSpec(t, optString(o, FIELD_LABEL), optLong(o, ARG_AGENT_ID)));
             } else {
                 return "Error: each 'tasks' entry must be a string or an object.";
             }
@@ -567,10 +578,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             return SpawnArgs.fail("Error: 'task' is required.");
         }
         var label = optString(args, FIELD_LABEL);
-        var requestedAgentId = optLong(args, "agentId");
+        var requestedAgentId = optLong(args, ARG_AGENT_ID);
         var modelProviderOverride = optString(args, "modelProvider");
         var modelIdOverride = optString(args, "modelId");
-        var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
+        var timeoutSeconds = optInt(args, ARG_RUN_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
         if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
         // JCLAW-267: mode parameter — "session" (default) materializes a fresh
         // child Conversation; "inline" runs the child in the parent's
@@ -586,7 +597,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // behavior; "inherit" summarizes the parent's recent turns and unions
         // tool grants. Validate strictly so an LLM typo produces a clear
         // error rather than silently degrading.
-        var requestedContext = optString(args, "context");
+        var requestedContext = optString(args, ARG_CONTEXT);
         var context = requestedContext == null || requestedContext.isBlank()
                 ? DEFAULT_CONTEXT
                 : requestedContext.toLowerCase();
@@ -702,8 +713,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         parentAgentName, parsed.mode(), parsed.context(), parsed.label(),
                         parsed.timeoutSeconds(), parsed.task()));
         var asyncPayload = new LinkedHashMap<String, Object>();
-        asyncPayload.put("run_id", runIdStr);
-        asyncPayload.put("conversation_id", String.valueOf(childConvId));
+        asyncPayload.put(FIELD_RUN_ID, runIdStr);
+        asyncPayload.put(FIELD_CONVERSATION_ID, String.valueOf(childConvId));
         asyncPayload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
         return utils.GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
     }
@@ -770,8 +781,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         dispatchDetachedAsync(runId, childAgentId, childConvId, parentAgentName,
                 parsed.mode(), parsed.context(), parsed.timeoutSeconds(), parsed.task(), currentScopeKey());
         var payload = new LinkedHashMap<String, Object>();
-        payload.put("run_id", runIdStr);
-        payload.put("conversation_id", String.valueOf(childConvId));
+        payload.put(FIELD_RUN_ID, runIdStr);
+        payload.put(FIELD_CONVERSATION_ID, String.valueOf(childConvId));
         payload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
@@ -818,10 +829,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     private static LinkedHashMap<String, Object> outcomeMap(Long runId, SyncRunOutcome outcome) {
         var m = new LinkedHashMap<String, Object>();
-        m.put("run_id", String.valueOf(runId));
-        m.put("reply", outcome.reply());
+        m.put(FIELD_RUN_ID, String.valueOf(runId));
+        m.put(FIELD_REPLY, outcome.reply());
         m.put(FIELD_STATUS, outcome.terminalStatus().name());
-        if (outcome.replyTruncated()) m.put("truncated", Boolean.TRUE);
+        if (outcome.replyTruncated()) m.put(FIELD_TRUNCATED, Boolean.TRUE);
         return m;
     }
 
@@ -838,7 +849,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
         try {
             return utils.GsonHolder.INSTANCE.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return "Error: interrupted while awaiting async subagent " + runId + ".";
         } catch (Exception e) {
@@ -860,26 +871,26 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             forgetOutstanding(runId);
             if (f == null) {
                 var miss = new LinkedHashMap<String, Object>();
-                miss.put("run_id", String.valueOf(runId));
+                miss.put(FIELD_RUN_ID, String.valueOf(runId));
                 miss.put(FIELD_STATUS, "UNKNOWN");
-                miss.put("error", "no pending async subagent (already collected, or not an async spawn)");
+                miss.put(FIELD_ERROR, "no pending async subagent (already collected, or not an async spawn)");
                 results.add(miss);
                 continue;
             }
             try {
                 results.add(outcomeMap(runId, awaitOutcomeFuture(f)));
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 var err = new LinkedHashMap<String, Object>();
-                err.put("run_id", String.valueOf(runId));
+                err.put(FIELD_RUN_ID, String.valueOf(runId));
                 err.put(FIELD_STATUS, "FAILED");
-                err.put("error", "interrupted while awaiting");
+                err.put(FIELD_ERROR, "interrupted while awaiting");
                 results.add(err);
             } catch (Exception e) {
                 var err = new LinkedHashMap<String, Object>();
-                err.put("run_id", String.valueOf(runId));
+                err.put(FIELD_RUN_ID, String.valueOf(runId));
                 err.put(FIELD_STATUS, "FAILED");
-                err.put("error", e.getMessage());
+                err.put(FIELD_ERROR, e.getMessage());
                 results.add(err);
             }
         }
@@ -1904,12 +1915,21 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             String stdout = out.get(10, TimeUnit.SECONDS);
             if (exit != 0) {
                 String stderr = err.get(10, TimeUnit.SECONDS);
-                String detail = !stderr.isBlank() ? stderr.strip() : (stdout.isBlank() ? "(no output)" : stdout.strip());
+                String detail;
+                if (!stderr.isBlank()) {
+                    detail = stderr.strip();
+                } else if (!stdout.isBlank()) {
+                    detail = stdout.strip();
+                } else {
+                    detail = "(no output)";
+                }
                 throw new IllegalStateException("ACP harness exited %d: %s".formatted(exit, detail));
             }
             return new AgentRunner.RunResult(stdout.strip(), null);
         } catch (InterruptedException e) {
-            if (proc != null) proc.destroyForcibly();
+            // proc is non-null here: InterruptedException only comes from waitFor(),
+            // which runs after ProcessBuilder.start() above has already succeeded.
+            proc.destroyForcibly();
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted awaiting the ACP harness.", e);
         } catch (java.io.IOException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
@@ -1925,7 +1945,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             try (in) {
                 var bytes = in.readNBytes(ACP_MAX_OUTPUT_BYTES);
                 f.complete(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
-            } catch (java.io.IOException e) {
+            } catch (java.io.IOException _) {
                 f.complete("");
             }
         });
@@ -1947,7 +1967,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * it cannot escalate either.
      */
     private static String acpRuntimeError(JsonObject args, Agent spawningAgent) {
-        var runtime = optString(args, "runtime");
+        var runtime = optString(args, ARG_RUNTIME);
         if (runtime == null || runtime.isBlank() || "native".equalsIgnoreCase(runtime)) {
             return null;
         }
@@ -1968,7 +1988,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     }
 
     private static boolean isAcpRuntime(JsonObject args) {
-        return "acp".equalsIgnoreCase(optString(args, "runtime"));
+        return "acp".equalsIgnoreCase(optString(args, ARG_RUNTIME));
     }
 
     /** Operator-configured ACP harness command, whitespace-split. Empty when unset. */
@@ -2154,7 +2174,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         payload.put("runId", runId);
         payload.put(FIELD_LABEL, label != null ? label : "");
         payload.put(FIELD_STATUS, status.name());
-        payload.put("reply", truncatedReply != null ? truncatedReply : "");
+        payload.put(FIELD_REPLY, truncatedReply != null ? truncatedReply : "");
         payload.put("childConversationId", childConvId);
         payload.put("yielded", yielded);
         // JCLAW-291: separate from {@code truncatedReply} (which is the
@@ -2162,7 +2182,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // CHILD'S underlying reply was cut off by max_tokens. The chat-page
         // announce card reads this and renders a "Reply was truncated by
         // the model" marker.
-        if (modelOutputTruncated) payload.put("truncated", Boolean.TRUE);
+        if (modelOutputTruncated) payload.put(FIELD_TRUNCATED, Boolean.TRUE);
 
         var fallbackLabel = label != null && !label.isBlank() ? label : "subagent run";
         var fallback = "Subagent " + status.name().toLowerCase() + " (" + fallbackLabel + ")"
