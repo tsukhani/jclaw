@@ -168,6 +168,35 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void acpRuntimeRunsExternalHarnessAndCapturesStdout() throws Exception {
+        // JCLAW-499: runtime=acp runs the operator-configured external harness with
+        // the task on stdin and captures stdout as the reply. `cat` is the stub
+        // harness here — it echoes stdin straight back to stdout.
+        ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "cat");
+        var parent = createAgent("p-acp", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-acp");
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"ACP_PING\",\"runtime\":\"acp\"}");
+        var json = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", json.get("status").getAsString());
+        assertEquals("ACP_PING", json.get("reply").getAsString(),
+                "ACP harness (cat) must echo the task from stdin back as the reply (JCLAW-499)");
+    }
+
+    @Test
+    void acpRuntimeRejectedWithoutConfiguredCommand() {
+        // JCLAW-499: runtime=acp with no operator-configured harness is rejected —
+        // the command comes from config only, never from the model.
+        ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "");
+        var parent = createAgent("p-acp-none", "test-provider", "test-model");
+        var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+        var result = tool.execute("{\"task\":\"x\",\"runtime\":\"acp\"}", parent);
+        assertTrue(result.startsWith("Error:") && result.contains("acp"),
+                "runtime=acp without a configured harness must be rejected: " + result);
+    }
+
+    @Test
     void freshSubagentInheritsParentMcpGrants() throws Exception {
         // JCLAW-495: MCP grouped tools are default-disabled for non-main agents
         // and a fresh subagent gets no explicit grant rows, so without

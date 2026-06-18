@@ -271,6 +271,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "spawn more or do other work, then collect with subagent_yield. In a chat "
                         + "a completion card is posted to your conversation; in a task fire you "
                         + "block-await the result with subagent_yield. Only with mode=\"session\"."));
+        props.put("runtime", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "Child runtime: \"native\" (default) runs a JClaw subagent, or \"acp\" runs the "
+                        + "operator-configured external agent harness (e.g. a Codex/Claude/Gemini CLI) "
+                        + "with your task on stdin, capturing its output as the reply. Composes with "
+                        + "sync, async, and batch."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,
@@ -304,6 +310,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
         var parsed = parseSpawnArgs(args);
         if (parsed.error() != null) return parsed.error();
+        // JCLAW-499: validate the runtime (native | acp) before any DB work.
+        var acpError = acpRuntimeError(args);
+        if (acpError != null) return acpError;
 
         // JCLAW-266: enforce recursion caps before touching the DB. Both checks
         // run inside a Tx so the ancestor walk and the RUNNING-row count see a
@@ -346,6 +355,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         EventLogger.recordSubagentSpawn(
                 parentAgent.name, childAgentName,
                 runIdStr, parsed.mode(), parsed.context());
+
+        // JCLAW-499: register the external-harness command for this run when
+        // runtime=acp (already validated above); executeChildRun consumes it.
+        if (isAcpRuntime(args)) {
+            ACP_RUNS.put(runId, resolveAcpCommand());
+        }
 
         // JCLAW-268: surface inherit-mode summarization failure as a SUBAGENT_ERROR
         // immediately after spawn. The child still runs (degraded to fresh-mode
@@ -447,6 +462,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
         var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
         if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+        // JCLAW-499: runtime validation (native | acp) + resolved harness command,
+        // applied to every child of the fan-out.
+        var acpError = acpRuntimeError(args);
+        if (acpError != null) return acpError;
+        final var acpCommand = isAcpRuntime(args) ? resolveAcpCommand() : null;
 
         var specs = new java.util.ArrayList<BatchTaskSpec>();
         for (var el : tasksEl.getAsJsonArray()) {
@@ -496,6 +516,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                     parentConvIdFinal, bootstrap.childConvId(), spec.label());
             EventLogger.recordSubagentSpawn(parentAgent.name, bootstrap.childAgentName(),
                     String.valueOf(runId), fMode, fContext);
+            if (acpCommand != null) {
+                ACP_RUNS.put(runId, acpCommand);
+            }
             dispatchDetachedAsync(runId, bootstrap.childAgentId(), bootstrap.childConvId(),
                     parentAgent.name, fMode, fContext, fTimeout, spec.task(), scopeKey);
             runIds.add(String.valueOf(runId));
@@ -888,7 +911,6 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     private static SyncRunOutcome runChildSynchronously(Long runId, Long childAgentId,
                                                         Long childConvId, String task,
                                                         int timeoutSeconds, boolean inlineMode) {
-        final Long runIdForMarker = inlineMode ? runId : null;
         var future = new java.util.concurrent.CompletableFuture<AgentRunner.RunResult>();
         services.SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-" + runId).start(() -> {
@@ -899,20 +921,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                     throw new IllegalStateException(
                             "Subagent rows vanished before AgentRunner.run");
                 }
-                AgentRunner.RunResult result;
-                if (runIdForMarker == null) {
-                    result = AgentRunner.run(childAgent, childConv, task);
-                } else {
-                    // JCLAW-267: inline mode runs in the parent Conversation,
-                    // whose queue the parent already owns. Use runWithOwnedQueue
-                    // to bypass the redundant tryAcquire (which would queue the
-                    // child's "user message" behind the parent's still-running
-                    // turn). The ThreadLocal marker stamps every Message
-                    // AgentRunner persists during the child run.
-                    result = ConversationService.withSubagentRunIdMarker(runIdForMarker,
-                            () -> AgentRunner.runWithOwnedQueue(childAgent, childConv, task));
-                }
-                future.complete(result);
+                future.complete(executeChildRun(runId, childAgent, childConv, task, inlineMode));
             } catch (Throwable t) {
                 future.completeExceptionally(t);
             }
@@ -1729,12 +1738,138 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                     throw new IllegalStateException(
                             "Subagent rows vanished before AgentRunner.run");
                 }
-                future.complete(AgentRunner.run(childAgent, childConv, task));
+                future.complete(executeChildRun(runId, childAgent, childConv, task, false));
             } catch (Throwable t) {
                 future.completeExceptionally(t);
             }
         });
         return future;
+    }
+
+    /** JCLAW-499: the per-spawn external-harness command for a run, set when
+     *  runtime=acp, consumed once by {@link #executeChildRun}. */
+    private static final java.util.concurrent.ConcurrentHashMap<Long, java.util.List<String>>
+            ACP_RUNS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** JCLAW-499: config key for the operator-configured external agent harness
+     *  command (e.g. {@code claude -p} or {@code codex exec}). The command is NOT
+     *  model-supplied — runtime=acp runs this configured command, so a subagent
+     *  can't be steered into executing arbitrary shell. */
+    public static final String ACP_COMMAND_KEY = "subagent.acp.command";
+    private static final int ACP_MAX_OUTPUT_BYTES = 400_000;
+
+    /**
+     * JCLAW-499: run the child body — the configured external harness
+     * ({@code runtime:"acp"}) when an ACP command was registered for this run,
+     * otherwise the native {@link AgentRunner}. Shared by the sync and detached
+     * dispatch paths so ACP composes with sync, async, and batch fan-out.
+     */
+    private static AgentRunner.RunResult executeChildRun(Long runId, Agent childAgent,
+                                                         Conversation childConv, String task, boolean inlineMode) {
+        var acpCommand = ACP_RUNS.remove(runId);
+        if (acpCommand != null) {
+            return runAcpHarness(acpCommand, task);
+        }
+        if (inlineMode) {
+            // JCLAW-267: inline runs in the parent Conversation (queue owned), with
+            // a ThreadLocal marker stamping every Message AgentRunner persists.
+            return ConversationService.withSubagentRunIdMarker(runId,
+                    () -> AgentRunner.runWithOwnedQueue(childAgent, childConv, task));
+        }
+        return AgentRunner.run(childAgent, childConv, task);
+    }
+
+    /**
+     * JCLAW-499: run an external agent harness (Codex / Claude / Gemini CLI, …):
+     * launch the operator-configured command, deliver {@code task} on stdin, and
+     * capture stdout (bounded) as the child reply. Bounded by the wall-clock
+     * ceiling — a runaway harness is force-killed. A non-zero exit raises with the
+     * harness's stderr so the spawn records a FAILED outcome.
+     */
+    private static AgentRunner.RunResult runAcpHarness(java.util.List<String> command, String task) {
+        Process proc = null;
+        try {
+            proc = new ProcessBuilder(command).start();
+            try (var stdin = proc.getOutputStream()) {
+                stdin.write(task.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                stdin.flush();
+            }
+            var out = drainAsync(proc.getInputStream());
+            var err = drainAsync(proc.getErrorStream());
+            int ceiling = ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS);
+            boolean done;
+            if (ceiling <= 0) {
+                proc.waitFor();   // no ceiling configured — wait until the harness exits
+                done = true;
+            } else {
+                done = proc.waitFor(ceiling, TimeUnit.SECONDS);
+            }
+            if (!done) {
+                proc.destroyForcibly();
+                throw new IllegalStateException("ACP harness exceeded the %ds ceiling and was killed.".formatted(ceiling));
+            }
+            int exit = proc.exitValue();
+            String stdout = out.get(10, TimeUnit.SECONDS);
+            if (exit != 0) {
+                String stderr = err.get(10, TimeUnit.SECONDS);
+                String detail = !stderr.isBlank() ? stderr.strip() : (stdout.isBlank() ? "(no output)" : stdout.strip());
+                throw new IllegalStateException("ACP harness exited %d: %s".formatted(exit, detail));
+            }
+            return new AgentRunner.RunResult(stdout.strip(), null);
+        } catch (InterruptedException e) {
+            if (proc != null) proc.destroyForcibly();
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted awaiting the ACP harness.", e);
+        } catch (java.io.IOException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+            if (proc != null) proc.destroyForcibly();
+            throw new IllegalStateException("ACP harness failed: " + e.getMessage(), e);
+        }
+    }
+
+    /** Drain a process stream on a VT, bounded to {@link #ACP_MAX_OUTPUT_BYTES}. */
+    private static CompletableFuture<String> drainAsync(java.io.InputStream in) {
+        var f = new CompletableFuture<String>();
+        Thread.ofVirtual().start(() -> {
+            try (in) {
+                var bytes = in.readNBytes(ACP_MAX_OUTPUT_BYTES);
+                f.complete(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+            } catch (java.io.IOException e) {
+                f.complete("");
+            }
+        });
+        return f;
+    }
+
+    /**
+     * JCLAW-499: if {@code runtime} requests the ACP harness, validate it and
+     * register the configured command for {@code runId} (consumed by
+     * {@link #executeChildRun}). Returns an error string to short-circuit the
+     * spawn, or null to proceed (native or successfully-registered acp).
+     */
+    private static String acpRuntimeError(JsonObject args) {
+        var runtime = optString(args, "runtime");
+        if (runtime == null || runtime.isBlank() || "native".equalsIgnoreCase(runtime)) {
+            return null;
+        }
+        if (!"acp".equalsIgnoreCase(runtime)) {
+            return "Error: 'runtime' must be \"native\" (default) or \"acp\" (got '" + runtime + "').";
+        }
+        if (resolveAcpCommand().isEmpty()) {
+            return "Error: runtime=\"acp\" needs an external harness — the operator must configure '"
+                    + ACP_COMMAND_KEY + "' (e.g. \"claude -p\" or \"codex exec\").";
+        }
+        return null;
+    }
+
+    private static boolean isAcpRuntime(JsonObject args) {
+        return "acp".equalsIgnoreCase(optString(args, "runtime"));
+    }
+
+    /** Operator-configured ACP harness command, whitespace-split. Empty when unset. */
+    private static java.util.List<String> resolveAcpCommand() {
+        var configured = ConfigService.get(ACP_COMMAND_KEY, null);
+        if (configured == null || configured.isBlank()) return java.util.List.of();
+        return java.util.List.of(configured.strip().split("\\s+"));
     }
 
     /**
