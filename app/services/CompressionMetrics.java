@@ -43,10 +43,10 @@ public final class CompressionMetrics {
         persist(m);
     }
 
-    public static void recordCcrRetrieval(String hash, boolean hit) {
+    public static void recordCcrRetrieval(boolean hit) {
         var m = new CompressionMetric();
         m.kind = Kind.CCR_RETRIEVAL;
-        m.algorithm = "ccr"; // hash itself isn't stored — only the hit/miss matters for the rate
+        m.algorithm = "ccr"; // the hash isn't stored — only the hit/miss matters for the rate
         m.ccrHit = hit;
         persist(m);
     }

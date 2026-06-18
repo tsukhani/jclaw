@@ -2,10 +2,6 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.compression.JsonCompressor;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-461: JSON SmartCrusher. Verifies schema/key preservation, array
  * elision with anomaly survival, value truncation, and the inflation guard.

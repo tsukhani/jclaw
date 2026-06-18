@@ -2,9 +2,6 @@ import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-465: per-agent compression default resolution. When the explicit flag
  * is unset (null), the effective state follows the agent's role — main on,

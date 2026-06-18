@@ -6,8 +6,6 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.CompressionMetrics;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 /**
  * JCLAW-467: CompressionMetrics recording + reset. Aggregation is done client-side
  * over the raw rows the metrics endpoint returns (like the Chat Cost dashboard),
@@ -40,8 +38,8 @@ class CompressionMetricsTest extends UnitTest {
 
     @Test
     void ccrRetrievalRecordsHitAndMiss() {
-        CompressionMetrics.recordCcrRetrieval("abc", true);
-        CompressionMetrics.recordCcrRetrieval("def", false);
+        CompressionMetrics.recordCcrRetrieval(true);
+        CompressionMetrics.recordCcrRetrieval(false);
 
         assertEquals(2L, CompressionMetric.count("kind = ?1", Kind.CCR_RETRIEVAL));
         assertEquals(1L, CompressionMetric.count("kind = ?1 and ccrHit = ?2", Kind.CCR_RETRIEVAL, true));
@@ -50,7 +48,7 @@ class CompressionMetricsTest extends UnitTest {
     @Test
     void resetClearsAllMetrics() {
         CompressionMetrics.recordCompression("1", "web", "m", "JSON", "json-smartcrush", 1000, 100);
-        CompressionMetrics.recordCcrRetrieval("abc", true);
+        CompressionMetrics.recordCcrRetrieval(true);
         assertEquals(2L, CompressionMetric.count());
 
         assertEquals(2L, CompressionMetrics.reset());

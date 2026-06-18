@@ -2,9 +2,6 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.compression.JsonSpan;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-468: JsonSpan — prefix-tolerant JSON detection. It locates a JSON body
  * after a short non-JSON prefix (a status line) but refuses to read trailing

@@ -14,10 +14,6 @@ import tools.CcrRetrieveTool;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-468: cross-component integration + regression for the compression
  * pipeline. Proves the disabled-agent no-op (the compaction/trim stages see the
