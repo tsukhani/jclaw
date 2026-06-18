@@ -161,7 +161,8 @@ public class AgentRunner {
         LlmProvider secondary,
         List<ToolDef> tools,
         List<VisionAudioAssembler.AudioBearer> audioBearers,
-        List<VisionAudioAssembler.ImageBearer> imageBearers
+        List<VisionAudioAssembler.ImageBearer> imageBearers,
+        List<VisionAudioAssembler.VideoBearer> videoBearers
     ) {}
 
     /**
@@ -175,7 +176,8 @@ public class AgentRunner {
         List<ToolDef> tools,
         java.util.Set<String> disabledTools,
         List<VisionAudioAssembler.AudioBearer> audioBearers,
-        List<VisionAudioAssembler.ImageBearer> imageBearers
+        List<VisionAudioAssembler.ImageBearer> imageBearers,
+        List<VisionAudioAssembler.VideoBearer> videoBearers
     ) {}
 
     /**
@@ -508,7 +510,8 @@ public class AgentRunner {
                 sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
                 var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
                 var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
-                var messages = MessageHydrator.buildMessages(sysPrompt, conv, audioBearers, imageBearers);
+                var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
+                var messages = MessageHydrator.buildMessages(sysPrompt, conv, audioBearers, imageBearers, videoBearers);
 
                 // JCLAW-108: resolve the provider from the effective provider name
                 // (conversation override when set, agent default otherwise), not
@@ -532,7 +535,7 @@ public class AgentRunner {
                 EventLogger.info("llm", agent.name, conv.channelType,
                         "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
 
-                return new PreparedData(messages, primary, secondary, tools, audioBearers, imageBearers);
+                return new PreparedData(messages, primary, secondary, tools, audioBearers, imageBearers, videoBearers);
             });
 
             if (prepared == null) {
@@ -569,7 +572,12 @@ public class AgentRunner {
             // both an image and a downgraded voice note rebuilds correctly.
             var supportsVisionForCall = modelInfoForAudio != null && modelInfoForAudio.supportsVision();
             finalMessages = VisionAudioAssembler.applyCaptionsForCapability(finalMessages, prepared.imageBearers(), supportsVisionForCall, supportsAudioForCall);
-            prepared = new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers(), prepared.imageBearers());
+            // JCLAW-224: route any video attachments through the tier dispatcher (Tier-1 native /
+            // Tier-2 frames-as-images / Tier-3 text summary) and splice the content parts in.
+            // supportsVision/Audio are threaded so a co-attached downgraded image / voice note
+            // survives the rebuild.
+            finalMessages = VisionAudioAssembler.applyVideoForCapability(finalMessages, prepared.videoBearers(), agent, supportsAudioForCall, supportsVisionForCall);
+            prepared = new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers(), prepared.imageBearers(), prepared.videoBearers());
             trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
             trace.mark(LatencyTrace.PROLOGUE_DONE);
@@ -974,12 +982,13 @@ public class AgentRunner {
             sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
             var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
             var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
-            var msgs = MessageHydrator.buildMessages(sysPrompt, convo, audioBearers, imageBearers);
+            var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
+            var msgs = MessageHydrator.buildMessages(sysPrompt, convo, audioBearers, imageBearers, videoBearers);
             // Conversation-aware overload: applies the loadtest-agent
             // short-circuit AND the lazy MCP discovery gate (only ship
             // schemas for servers the model has called list_mcp_tools on).
             var toolDefs = ToolRegistry.getToolDefsForAgent(agent, convo);
-            return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools, audioBearers, imageBearers);
+            return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools, audioBearers, imageBearers, videoBearers);
         });
     }
 
@@ -1008,8 +1017,11 @@ public class AgentRunner {
                 supportsAudioForStream);
         // JCLAW-215: caption image attachments for non-vision models, mirroring
         // the audio downgrade above.
-        return VisionAudioAssembler.applyCaptionsForCapability(rewritten, prepared.imageBearers(),
+        var captioned = VisionAudioAssembler.applyCaptionsForCapability(rewritten, prepared.imageBearers(),
                 supportsVisionForStream, supportsAudioForStream);
+        // JCLAW-224: route video attachments through the tier dispatcher on the streaming path too.
+        return VisionAudioAssembler.applyVideoForCapability(captioned, prepared.videoBearers(), agent,
+                supportsAudioForStream, supportsVisionForStream);
     }
 
     /**

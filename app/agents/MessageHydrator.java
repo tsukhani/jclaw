@@ -87,6 +87,18 @@ public final class MessageHydrator {
     public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
                                             List<VisionAudioAssembler.AudioBearer> audioBearersOut,
                                             List<VisionAudioAssembler.ImageBearer> imageBearersOut) {
+        return buildMessages(systemPrompt, conversation, audioBearersOut, imageBearersOut, new ArrayList<>());
+    }
+
+    /**
+     * JCLAW-224 overload threading {@code videoBearersOut} — the side-map of user turns carrying
+     * video attachments — so {@link VisionAudioAssembler#applyVideoForCapability} can splice the
+     * chosen interpretation tier's content parts into the exact slots after assembly.
+     */
+    public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
+                                            List<VisionAudioAssembler.AudioBearer> audioBearersOut,
+                                            List<VisionAudioAssembler.ImageBearer> imageBearersOut,
+                                            List<VisionAudioAssembler.VideoBearer> videoBearersOut) {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(systemPrompt));
 
@@ -102,7 +114,7 @@ public final class MessageHydrator {
         for (var msg : history) {
             var role = MessageRole.fromValue(msg.role);
             messages.add(switch (role != null ? role : MessageRole.USER) {
-                case USER -> hydrateUserMessage(msg, messages.size(), audioBearersOut, imageBearersOut);
+                case USER -> hydrateUserMessage(msg, messages.size(), audioBearersOut, imageBearersOut, videoBearersOut);
                 case ASSISTANT -> hydrateAssistantMessage(msg, toolNamesById);
                 // JCLAW-119: sanitize the tool_call_id on the TOOL-role row so
                 // it matches the normalized id on the assistant-row tool_calls.
@@ -128,20 +140,26 @@ public final class MessageHydrator {
      */
     private static ChatMessage hydrateUserMessage(models.Message msg, int chatMessageIndex,
                                                   List<VisionAudioAssembler.AudioBearer> audioBearersOut,
-                                                  List<VisionAudioAssembler.ImageBearer> imageBearersOut) {
+                                                  List<VisionAudioAssembler.ImageBearer> imageBearersOut,
+                                                  List<VisionAudioAssembler.VideoBearer> videoBearersOut) {
         var atts = msg.attachments;
         if (atts == null) atts = models.MessageAttachment.findByMessage(msg);
         var audioIds = new ArrayList<Long>();
         var imageIds = new ArrayList<Long>();
+        var videoIds = new ArrayList<Long>();
         for (var a : atts) {
             if (a.isAudio() && a.id != null) audioIds.add(a.id);
             if (a.isImage() && a.id != null) imageIds.add(a.id);
+            if (a.isVideo() && a.id != null) videoIds.add(a.id);
         }
         if (!audioIds.isEmpty()) {
             audioBearersOut.add(new VisionAudioAssembler.AudioBearer(chatMessageIndex, msg.id, audioIds));
         }
         if (!imageIds.isEmpty()) {
             imageBearersOut.add(new VisionAudioAssembler.ImageBearer(chatMessageIndex, msg.id, imageIds));
+        }
+        if (!videoIds.isEmpty()) {
+            videoBearersOut.add(new VisionAudioAssembler.VideoBearer(chatMessageIndex, msg.id, videoIds));
         }
         return VisionAudioAssembler.userMessageFor(msg);
     }

@@ -1,6 +1,7 @@
 package agents;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,7 @@ import services.EventLogger;
 import services.MimeExtensions;
 import services.Tx;
 import services.transcription.PendingTranscripts;
+import services.video.VideoUnderstandingDispatcher;
 
 /**
  * Build-time assembly of a historical user turn into the OpenAI-style
@@ -111,6 +113,20 @@ public final class VisionAudioAssembler {
     public record ImageBearer(int chatMessageIndex, Long msgId, List<Long> imageAttachmentIds) {}
 
     /**
+     * JCLAW-224: the video analogue of {@link ImageBearer}/{@link AudioBearer}. Tracks which user
+     * messages carry video attachments so {@link #applyVideoForCapability} can splice the chosen
+     * interpretation tier's content parts (Tier-1 native video / Tier-2 frames-as-images / Tier-3
+     * text summary) into the exact slot. Unlike images and audio — whose raw-media part is cheap
+     * to build inline — every video tier samples frames (and Tier-3 also captions), so video is
+     * NEVER emitted by {@link #userMessageFor}; it is always resolved in the post-assembly pass.
+     *
+     * @param chatMessageIndex   position in the returned {@link ChatMessage} list
+     * @param msgId              re-locates the persisted Message at splice time
+     * @param videoAttachmentIds the persisted video attachment ids on this turn
+     */
+    public record VideoBearer(int chatMessageIndex, Long msgId, List<Long> videoAttachmentIds) {}
+
+    /**
      * Build the {@link ChatMessage} for a historical user turn, lifting
      * it into OpenAI-style content parts when the row has attachments.
      * Images ride as {@code image_url} parts (JCLAW-25); audio rides as
@@ -206,14 +222,14 @@ public final class VisionAudioAssembler {
 
     /**
      * FILE-kind attachments are surfaced to the LLM as a filename +
-     * workspace path it can read via the filesystem tool. Images and
-     * audio ride as structured content parts elsewhere, so they skip
-     * this branch.
+     * workspace path it can read via the filesystem tool. Images, audio,
+     * and video ride as structured content parts elsewhere (video via
+     * {@link #applyVideoForCapability}, JCLAW-224), so they skip this branch.
      */
     private static String collectFileNotes(List<models.MessageAttachment> atts) {
         var fileNotes = new StringBuilder();
         for (var a : atts) {
-            if (a.isImage() || a.isAudio()) continue;
+            if (a.isImage() || a.isAudio() || a.isVideo()) continue;
             fileNotes.append("\n[Attached file: ")
                     .append(a.originalFilename)
                     .append(" — workspace:")
@@ -390,6 +406,79 @@ public final class VisionAudioAssembler {
             }
             return rewritten;
         });
+    }
+
+    /**
+     * JCLAW-224 outside-Tx orchestrator: for every user turn carrying a video attachment, route it
+     * through {@link VideoUnderstandingDispatcher} (Tier-1 native / Tier-2 frames-as-images /
+     * Tier-3 text summary, chosen from the agent's capabilities) and splice the resulting content
+     * parts into that turn.
+     *
+     * <p>Every tier samples frames (ffmpeg) and Tier-3 additionally captions + summarizes, so the
+     * dispatch runs in Phase 1 with NO JPA transaction held — matching the codebase rule that slow
+     * subprocess/model calls never occupy a pooled connection. Phase 2 rebuilds the affected user
+     * messages in a fresh Tx, re-deriving any caption/transcript downgrade (so a video co-attached
+     * with a downgraded image / voice note survives) and appending the video parts.
+     *
+     * <p>Returns {@code messages} unchanged when {@code videoBearers} is empty — the no-video path
+     * pays zero added latency. A per-attachment dispatch failure degrades to a short text note
+     * rather than failing the whole turn.
+     *
+     * <p>Exposed as {@code public} (like {@link #applyCaptionsForCapability}) so the routing
+     * functional test can drive it directly from the default test package.
+     */
+    public static List<ChatMessage> applyVideoForCapability(List<ChatMessage> messages,
+            List<VideoBearer> videoBearers, models.Agent agent, boolean supportsAudio, boolean supportsVision) {
+        if (videoBearers == null || videoBearers.isEmpty()) return messages;
+
+        // Phase 1 (no Tx during sampling/captioning): dispatch each video attachment to its tier.
+        var partsByIndex = new HashMap<Integer, List<Map<String, Object>>>();
+        for (var b : videoBearers) {
+            var acc = new ArrayList<Map<String, Object>>();
+            for (var attId : b.videoAttachmentIds()) {
+                var att = Tx.run(() -> (models.MessageAttachment) models.MessageAttachment.findById(attId));
+                if (att == null) continue;
+                try {
+                    acc.addAll(VideoUnderstandingDispatcher.dispatch(att, agent));
+                } catch (RuntimeException e) {
+                    EventLogger.warn("video", "Video understanding failed for attachment %d: %s"
+                            .formatted(attId, e.getMessage()));
+                    acc.add(Map.of("type", "text", "text",
+                            "[A video attachment was included but could not be processed.]"));
+                }
+            }
+            partsByIndex.put(b.chatMessageIndex(), acc);
+        }
+
+        // Phase 2 (fresh Tx): rebuild each affected user message and append the video parts.
+        return Tx.run(() -> {
+            var rewritten = new ArrayList<>(messages);
+            for (var b : videoBearers) {
+                var msg = (models.Message) models.Message.findById(b.msgId());
+                if (msg == null) continue;
+                var base = userMessageFor(msg, supportsAudio, supportsVision);
+                rewritten.set(b.chatMessageIndex(),
+                        spliceVideoParts(base, partsByIndex.get(b.chatMessageIndex())));
+            }
+            return rewritten;
+        });
+    }
+
+    /**
+     * Append the dispatched video content parts to a base user message, normalizing its content
+     * to the parts-array form (a plain-text base becomes a single text part first).
+     */
+    @SuppressWarnings("unchecked")
+    private static ChatMessage spliceVideoParts(ChatMessage base, List<Map<String, Object>> videoParts) {
+        if (videoParts == null || videoParts.isEmpty()) return base;
+        var parts = new ArrayList<Map<String, Object>>();
+        if (base.content() instanceof List<?> list) {
+            for (var p : list) parts.add((Map<String, Object>) p);
+        } else if (base.content() instanceof String s && !s.isBlank()) {
+            parts.add(Map.of("type", "text", "text", s));
+        }
+        parts.addAll(videoParts);
+        return new ChatMessage(MessageRole.USER.value, parts, null, null, null);
     }
 
     /**
