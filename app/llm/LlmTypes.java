@@ -267,6 +267,7 @@ public final class LlmTypes {
             boolean supportsThinking,
             boolean supportsVision,
             boolean supportsAudio,
+            boolean supportsVideo,
             double promptPrice,
             double completionPrice,
             double cachedReadPrice,
@@ -278,7 +279,7 @@ public final class LlmTypes {
          *  the {@code -1} unknown sentinel, vision/audio off, and no explicit
          *  thinking levels. */
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking) {
-            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, -1, -1, -1, -1, null, false);
+            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, false, -1, -1, -1, -1, null, false);
         }
 
         /** Convenience constructor — capabilities plus the four pricing fields;
@@ -286,7 +287,7 @@ public final class LlmTypes {
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking,
                          double promptPrice, double completionPrice,
                          double cachedReadPrice, double cacheWritePrice) {
-            this(id, name, contextWindow, maxTokens, supportsThinking, false, false,
+            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, false,
                     promptPrice, completionPrice, cachedReadPrice, cacheWritePrice, null, false);
         }
 

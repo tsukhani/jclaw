@@ -44,6 +44,19 @@ public class AgentService {
     }
 
     /**
+     * JCLAW-217: does the agent's default model accept native video input? The
+     * video-understanding dispatcher uses this to pick Tier-1 (native video) over
+     * the frame-based Tier-2/Tier-3 fallbacks. False when the model can't be
+     * resolved — better to fall back to frame sampling than assume native video.
+     */
+    public static boolean supportsVideo(Agent agent) {
+        if (agent == null) return false;
+        return findModel(agent.modelProvider, agent.modelId)
+                .map(llm.LlmTypes.ModelInfo::supportsVideo)
+                .orElse(false);
+    }
+
+    /**
      * Resolve a {@code provider:modelId} pair to its registered
      * {@link llm.LlmTypes.ModelInfo}. Empty when either id is null, the
      * provider isn't registered, or the model isn't in that provider's list.

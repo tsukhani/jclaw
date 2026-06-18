@@ -219,4 +219,10 @@ public final class AttachmentService {
         if (inputs == null) return false;
         return inputs.stream().anyMatch(i -> MessageAttachment.KIND_AUDIO.equalsIgnoreCase(i.kind()));
     }
+
+    /** Mirror of {@link #anyImage} for the JCLAW-217 video gate. */
+    public static boolean anyVideo(List<Input> inputs) {
+        if (inputs == null) return false;
+        return inputs.stream().anyMatch(i -> MessageAttachment.KIND_VIDEO.equalsIgnoreCase(i.kind()));
+    }
 }

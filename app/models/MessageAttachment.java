@@ -33,6 +33,7 @@ public class MessageAttachment extends Model {
 
     public static final String KIND_IMAGE = "IMAGE";
     public static final String KIND_AUDIO = "AUDIO";
+    public static final String KIND_VIDEO = "VIDEO";
     public static final String KIND_FILE = "FILE";
 
     @ManyToOne(optional = false)
@@ -87,11 +88,16 @@ public class MessageAttachment extends Model {
         return KIND_AUDIO.equals(kind);
     }
 
-    /** Classify a MIME string into one of the three persisted kinds. */
+    public boolean isVideo() {
+        return KIND_VIDEO.equals(kind);
+    }
+
+    /** Classify a MIME string into one of the persisted kinds. */
     public static String kindForMime(String mime) {
         if (mime == null) return KIND_FILE;
         if (mime.startsWith("image/")) return KIND_IMAGE;
         if (mime.startsWith("audio/")) return KIND_AUDIO;
+        if (mime.startsWith("video/")) return KIND_VIDEO;
         return KIND_FILE;
     }
 

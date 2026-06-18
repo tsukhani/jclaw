@@ -334,6 +334,39 @@ class ModelDiscoveryServiceTest extends UnitTest {
         assertFalse(result.fromProvider());
     }
 
+    // --- detectVideoSupport (JCLAW-217) ---
+
+    /**
+     * Video support: provider modality array (OpenRouter advertises "video" for
+     * Qwen-VL routes, fromProvider=true) and the Qwen-VL id heuristic
+     * (fromProvider=false). Provider-awareness comes from the discovery routing —
+     * only the OpenAI-compatible path reaches this; Ollama/LM Studio use their
+     * own native paths, so a Qwen-VL model served there stays video=false.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "OpenRouterModalities | {\"id\":\"qwen/qwen2.5-vl-72b-instruct\",\"architecture\":{\"input_modalities\":[\"text\",\"image\",\"video\"]}} | true",
+            "Qwen25VlIdHeuristic   | {\"id\":\"qwen/qwen2.5-vl-7b-instruct\"}                                                                       | false",
+            "Qwen3VlIdHeuristic    | {\"id\":\"qwen/qwen3-vl-30b-a3b-instruct\"}                                                                    | false"
+    })
+    void detectVideoConfirmed(String label, String json, boolean expectedFromProvider) {
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVideoSupport(obj);
+        assertTrue(result.confirmed());
+        assertEquals(expectedFromProvider, result.fromProvider());
+    }
+
+    @Test
+    void detectVideoUnknownModel() {
+        // A non-Qwen-VL model with no provider modality metadata is not video-native.
+        var obj = JsonParser.parseString("""
+                {"id": "openai/gpt-4o"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVideoSupport(obj);
+        assertFalse(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
     @Test
     void detectAudioFallbackAudioPreviewSuffix() {
         // JCLAW-160: OpenAI's /v1/models endpoint returns plain entries

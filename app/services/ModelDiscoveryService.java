@@ -41,6 +41,8 @@ public class ModelDiscoveryService {
     private static final String KEY_VISION_DETECTED_FROM_PROVIDER = "visionDetectedFromProvider";
     private static final String KEY_SUPPORTS_AUDIO = "supportsAudio";
     private static final String KEY_AUDIO_DETECTED_FROM_PROVIDER = "audioDetectedFromProvider";
+    private static final String KEY_SUPPORTS_VIDEO = "supportsVideo";
+    private static final String KEY_VIDEO_DETECTED_FROM_PROVIDER = "videoDetectedFromProvider";
     private static final String KEY_PROMPT_PRICE = "promptPrice";
     private static final String KEY_COMPLETION_PRICE = "completionPrice";
     private static final String KEY_CACHED_READ_PRICE = "cachedReadPrice";
@@ -255,6 +257,9 @@ public class ModelDiscoveryService {
             var audio = detectAudioSupport(obj);
             model.put(KEY_SUPPORTS_AUDIO, audio.confirmed());
             model.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, audio.fromProvider());
+            var video = detectVideoSupport(obj);
+            model.put(KEY_SUPPORTS_VIDEO, video.confirmed());
+            model.put(KEY_VIDEO_DETECTED_FROM_PROVIDER, video.fromProvider());
             model.put(KEY_PROMPT_PRICE, inferPrice(obj, FIELD_PROMPT));
             model.put(KEY_COMPLETION_PRICE, inferPrice(obj, FIELD_COMPLETION));
             model.put(KEY_CACHED_READ_PRICE, inferPrice(obj, TYPE_INPUT_CACHE_READ));
@@ -484,6 +489,31 @@ public class ModelDiscoveryService {
                 || id.contains("-audio-preview")
                 || id.contains("gemini-2.5-flash-audio") || id.contains("whisper")
                 || id.contains("qwen2-audio") || id.contains("voxtral")) {
+            return new CapabilityDetection(true, false);
+        }
+
+        return new CapabilityDetection(false, false);
+    }
+
+    /**
+     * JCLAW-217: detect native video input support. Same precedence as
+     * vision/audio: provider modality arrays (OpenRouter advertises {@code video}
+     * in {@code architecture.input_modalities} for Qwen-VL routes) then a
+     * model-ID heuristic for the Qwen-VL family. Provider-aware by construction:
+     * only the OpenAI-compatible discovery path (OpenRouter, and a vLLM-backed
+     * custom provider) reaches this; the Ollama and LM Studio native discovery
+     * paths never call it, so a Qwen-VL model served there stays
+     * {@code supportsVideo=false} and routes to the Tier-2 frame-multi-image
+     * fallback — those backends are image-only (see JCLAW-208). Gemini is not
+     * included: we are not using Gemini.
+     */
+    public static CapabilityDetection detectVideoSupport(JsonObject obj) {
+        var provider = extractModalities(obj, "video");
+        if (provider != null) return provider;
+
+        var id = getString(obj, KEY_ID, "").toLowerCase();
+        if (id.contains("qwen2.5-vl") || id.contains("qwen3-vl") || id.contains("qwen-vl")
+                || id.contains("qwen2.5-omni") || id.contains("qwen3-omni")) {
             return new CapabilityDetection(true, false);
         }
 
