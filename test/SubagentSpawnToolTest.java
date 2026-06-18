@@ -115,6 +115,59 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void batchAsyncFanOutSpawnsParallelAndYieldsAll() throws Exception {
+        // JCLAW-498: ONE subagent_spawn with tasks[] spawns N children in parallel;
+        // ONE subagent_yield with all=true block-awaits and returns them all inline.
+        startLlmServer(simpleResponse("BATCH_CHILD_OK"));
+        configureProvider();
+
+        var parent = createAgent("p-batch", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-batch");
+        commitAndReopen();
+
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
+                var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+                var yieldTool = ToolRegistry.lookupTool(tools.SubagentYieldTool.TOOL_NAME);
+                var yielded = agents.ToolContext.withScope(null, 8888L, () -> {
+                    spawnTool.execute("{\"tasks\":[\"do A\",\"do B\",\"do C\"],\"mode\":\"session\"}", p);
+                    return yieldTool.execute("{\"all\":true}", p);
+                });
+                resultRef.set(yielded);
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(60_000);
+        assertFalse(thread.isAlive(), "batch spawn + yield-all must complete within 60s");
+        if (errorRef.get() != null) throw errorRef.get();
+
+        var results = JsonParser.parseString(resultRef.get()).getAsJsonObject()
+                .get("results").getAsJsonArray();
+        assertEquals(3, results.size(), "yield all must return one result per batch child (JCLAW-498)");
+        for (var r : results) {
+            var o = r.getAsJsonObject();
+            assertEquals("COMPLETED", o.get("status").getAsString());
+            assertEquals("BATCH_CHILD_OK", o.get("reply").getAsString());
+        }
+    }
+
+    @Test
+    void batchFanOutRejectedOverBreadthCap() {
+        // JCLAW-498: a fan-out larger than the breadth cap (default 5) is rejected
+        // up front — no children spawned. Synchronous: no LLM mock needed.
+        var parent = createAgent("p-batch-cap", "test-provider", "test-model");
+        var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+        var result = agents.ToolContext.withScope(null, 7777L, () ->
+                spawnTool.execute("{\"tasks\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"],\"mode\":\"session\"}", parent));
+        assertTrue(result.startsWith("Subagent spawn refused") && result.contains("breadth"),
+                "a batch exceeding the breadth cap must be refused: " + result);
+    }
+
+    @Test
     void freshSubagentInheritsParentMcpGrants() throws Exception {
         // JCLAW-495: MCP grouped tools are default-disabled for non-main agents
         // and a fresh subagent gets no explicit grant rows, so without

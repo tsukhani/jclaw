@@ -146,6 +146,16 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION,
                 "Run id returned by a prior subagent_spawn call with async=true. "
                         + "Provide this OR conversationId (runId wins when both set)."));
+        props.put("runIds", Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
+                SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
+                SchemaKeys.DESCRIPTION,
+                "BATCH COLLECT: the run_ids from a subagent_spawn batch (tasks[]). Block-awaits "
+                        + "ALL of them and returns {results:[...]} inline. Use instead of runId to "
+                        + "collect a whole fan-out in one call."));
+        props.put("all", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                SchemaKeys.DESCRIPTION,
+                "BATCH COLLECT: when true, block-await EVERY outstanding async child you spawned "
+                        + "in this turn/task and return them all — no need to list run_ids."));
         props.put(PARAM_CONVERSATION_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Child conversation id returned by the prior subagent_spawn call. "
@@ -183,6 +193,15 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
+
+        // JCLAW-498: batch collect — runIds[] or all=true block-awaits MANY async
+        // children (the fan-out from subagent_spawn tasks[]) and returns them all
+        // inline. Works in chat and task fires; no YIELDED sentinel.
+        var batchRunIds = collectBatchRunIds(args);
+        if (batchRunIds != null) {
+            return SubagentSpawnTool.awaitAsyncOutcomes(batchRunIds);
+        }
+
         var parsed = parseYieldArgs(args);
         if (parsed.error() != null) return parsed.error();
 
@@ -197,7 +216,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 return "Error: subagent_yield inside a task run requires the 'runId' "
                         + "returned by the async subagent_spawn call.";
             }
-            return SubagentSpawnTool.awaitTaskAsyncOutcome(parsed.runId());
+            return SubagentSpawnTool.awaitAsyncOutcome(parsed.runId());
         }
 
         final var parentAgentId = callingAgent.id;
@@ -229,6 +248,28 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         payload.put("action", "yielded");
         payload.put(PARAM_RUN_ID, String.valueOf(runId));
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+    }
+
+    /** JCLAW-498: resolve a batch-collect request — {@code all:true} collects every
+     *  outstanding async child this parent fanned out (current scope); {@code
+     *  runIds:[...]} collects exactly those. Returns null when neither is present
+     *  (the single-yield path takes over). */
+    private static java.util.List<Long> collectBatchRunIds(JsonObject args) {
+        if (args.has("all") && !args.get("all").isJsonNull() && args.get("all").getAsBoolean()) {
+            return tools.SubagentSpawnTool.outstandingForCurrentScope();
+        }
+        if (args.has("runIds") && args.get("runIds").isJsonArray()) {
+            var list = new java.util.ArrayList<Long>();
+            for (var el : args.get("runIds").getAsJsonArray()) {
+                try {
+                    list.add(el.getAsLong());
+                } catch (RuntimeException ignore) {
+                    // skip a non-numeric entry rather than failing the whole collect
+                }
+            }
+            return list.isEmpty() ? null : list;
+        }
+        return null;
     }
 
     /** Parsed-args bundle. {@code error} non-null short-circuits execute.

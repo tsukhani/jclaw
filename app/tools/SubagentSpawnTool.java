@@ -231,7 +231,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     public Map<String, Object> parameters() {
         var props = new LinkedHashMap<String, Object>();
         props.put("task", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                SchemaKeys.DESCRIPTION, "Instruction for the child subagent (required)"));
+                SchemaKeys.DESCRIPTION, "Instruction for the child subagent (required unless you pass 'tasks' for a batch)"));
+        props.put("tasks", Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
+                SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
+                SchemaKeys.DESCRIPTION,
+                "BATCH FAN-OUT: an array of task strings to run as async subagents IN PARALLEL "
+                        + "from one call (provide this INSTEAD of 'task'). Returns {run_ids:[...]} "
+                        + "immediately; collect them all with ONE subagent_yield using runIds (or "
+                        + "all=true). Session mode only."));
         props.put(FIELD_LABEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Optional short display name for the spawn"));
         props.put("agentId", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
@@ -260,13 +267,15 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "active work resets it, so it need not cover total runtime (default 300)"));
         props.put("async", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                 SchemaKeys.DESCRIPTION,
-                "When true (default false), return the child's run id immediately and "
-                        + "post a structured completion card to your conversation when the "
-                        + "child terminates. Only compatible with mode=\"session\"."));
+                "When true (default false), return the child's run id immediately so you can "
+                        + "spawn more or do other work, then collect with subagent_yield. In a chat "
+                        + "a completion card is posted to your conversation; in a task fire you "
+                        + "block-await the result with subagent_yield. Only with mode=\"session\"."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,
-                SchemaKeys.REQUIRED, List.of("task")
+                // task XOR tasks — validated at runtime (single vs batch path).
+                SchemaKeys.REQUIRED, List.of()
         );
     }
 
@@ -288,6 +297,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent parentAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
+        // JCLAW-498: batch fan-out — a tasks[] array spawns N async children in
+        // parallel; the single-child flow below handles a scalar task.
+        if (args.has("tasks") && !args.get("tasks").isJsonNull()) {
+            return executeBatch(args, parentAgent);
+        }
         var parsed = parseSpawnArgs(args);
         if (parsed.error() != null) return parsed.error();
 
@@ -407,6 +421,95 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (runOutcome.replyTruncated()) payload.put("truncated", Boolean.TRUE);
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
+
+    /**
+     * JCLAW-498: batch async fan-out. Spawn one async child per entry in
+     * {@code tasks[]} concurrently (each on its own VT), returning the run_ids
+     * immediately so the parent can keep working and later collect them all with
+     * one subagent_yield (runIds / all). Works in chat and task fires alike — the
+     * children are detached (no announce/resume), collected via block-await.
+     */
+    private String executeBatch(JsonObject args, Agent parentAgent) {
+        var tasksEl = args.get("tasks");
+        if (!tasksEl.isJsonArray() || tasksEl.getAsJsonArray().isEmpty()) {
+            return "Error: 'tasks' must be a non-empty array of task strings or {task, ...} objects.";
+        }
+        // Batch is inherently async + session-scoped; inline has no batch semantics.
+        var rawMode = optString(args, "mode");
+        var mode = (rawMode == null || rawMode.isBlank()) ? DEFAULT_MODE : rawMode.toLowerCase();
+        if (MODE_INLINE.equals(mode)) {
+            return "Error: batch 'tasks' is only compatible with mode=\"session\" (inline embeds a single child into the parent transcript).";
+        }
+        var rawContext = optString(args, "context");
+        var context = (rawContext == null || rawContext.isBlank()) ? DEFAULT_CONTEXT : rawContext.toLowerCase();
+        if (!ALLOWED_CONTEXTS.contains(context)) {
+            return "Error: 'context' must be one of " + ALLOWED_CONTEXTS + ".";
+        }
+        var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
+        if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+
+        var specs = new java.util.ArrayList<BatchTaskSpec>();
+        for (var el : tasksEl.getAsJsonArray()) {
+            if (el.isJsonPrimitive()) {
+                var t = el.getAsString();
+                if (t.isBlank()) return "Error: each 'tasks' entry must be a non-blank task.";
+                specs.add(new BatchTaskSpec(t, null, null));
+            } else if (el.isJsonObject()) {
+                var o = el.getAsJsonObject();
+                var t = optString(o, "task");
+                if (t == null || t.isBlank()) return "Error: each 'tasks' object must have a non-blank 'task'.";
+                specs.add(new BatchTaskSpec(t, optString(o, FIELD_LABEL), optLong(o, "agentId")));
+            } else {
+                return "Error: each 'tasks' entry must be a string or an object.";
+            }
+        }
+
+        // Breadth cap for the whole fan-out (running + N must fit).
+        final int n = specs.size();
+        var refusal = Tx.run(() -> enforceRecursionLimits(parentAgent, n));
+        if (refusal != null) {
+            EventLogger.recordSubagentLimitExceeded(parentAgent.name, refusal);
+            return "Subagent spawn refused: " + refusal;
+        }
+
+        final var parentAgentId = parentAgent.id;
+        var parentConv = Tx.run(() -> resolveParentConversation(parentAgentId));
+        if (parentConv == null) {
+            return "Error: Could not resolve a parent conversation for agent '%s'.".formatted(parentAgent.name);
+        }
+        final var parentConvIdFinal = parentConv.id;
+        final var scopeKey = currentScopeKey();
+        final var fMode = mode;
+        final var fContext = context;
+        final var fTimeout = timeoutSeconds;
+
+        var runIds = new java.util.ArrayList<String>();
+        for (var spec : specs) {
+            var perArgs = new SpawnArgs(null, spec.task(), spec.label(), spec.agentId(),
+                    null, null, fMode, fContext, fTimeout, true);
+            var summary = buildInheritSummary(parentAgent, parentConvIdFinal, fContext);
+            var bootstrap = bootstrapChildInTx(parentAgent, parentConv, perArgs, summary);
+            if (bootstrap.error() != null) {
+                continue; // skip a child that failed to bootstrap; the rest still run
+            }
+            var runId = insertSubagentRun(parentAgentId, bootstrap.childAgentId(),
+                    parentConvIdFinal, bootstrap.childConvId(), spec.label());
+            EventLogger.recordSubagentSpawn(parentAgent.name, bootstrap.childAgentName(),
+                    String.valueOf(runId), fMode, fContext);
+            dispatchDetachedAsync(runId, bootstrap.childAgentId(), bootstrap.childConvId(),
+                    parentAgent.name, fMode, fContext, fTimeout, spec.task(), scopeKey);
+            runIds.add(String.valueOf(runId));
+        }
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("run_ids", runIds);
+        payload.put("count", runIds.size());
+        payload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
+        payload.put("hint", "children run in parallel; collect them all with one subagent_yield using runIds (or all=true)");
+        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+    }
+
+    /** JCLAW-498: one entry of a batch fan-out. */
+    private record BatchTaskSpec(String task, String label, Long agentId) {}
 
     /** Parsed-args bundle for the spawn flow. {@code error} non-null
      *  short-circuits execute. */
@@ -582,29 +685,67 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         return utils.GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
     }
 
-    /** JCLAW-497: async subagent OUTCOMES spawned inside a task fire, keyed by
-     *  runId, handed off from {@link #launchAsyncSpawnForTask} to the inline
-     *  block-await in subagent_yield ({@link #awaitTaskAsyncOutcome}). A task has
-     *  no persistent conversation to resume into, so the chat announce/resume
-     *  path doesn't apply; the parent collects the result via a blocking yield. */
+    /** JCLAW-497/498: detached async subagent OUTCOMES, keyed by runId, handed off
+     *  from a spawn (single async-in-task or a batch fan-out) to the inline
+     *  block-await in subagent_yield. These children have no persistent
+     *  conversation to resume into, so the chat announce/resume path doesn't
+     *  apply; the parent collects results via a blocking yield. */
     private static final java.util.concurrent.ConcurrentHashMap<Long, CompletableFuture<SyncRunOutcome>>
-            TASK_ASYNC_OUTCOMES = new java.util.concurrent.ConcurrentHashMap<>();
+            ASYNC_OUTCOMES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** JCLAW-498: outstanding async-child runIds grouped by the spawning parent's
+     *  scope ({@code task:<id>} or {@code conv:<id>}), so subagent_yield all=true
+     *  can collect every child this parent fanned out without re-listing run ids. */
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.Set<Long>>
+            OUTSTANDING_BY_SCOPE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** JCLAW-498: the current tool-dispatch scope key — {@code task:<id>} in a task
+     *  fire, {@code conv:<id>} in a chat turn, or null when neither is bound. */
+    private static String currentScopeKey() {
+        var t = ToolContext.taskRunId();
+        if (t != null) return "task:" + t;
+        var c = ToolContext.conversationId();
+        return c != null ? "conv:" + c : null;
+    }
+
+    /** JCLAW-498: the outstanding async-child runIds for the current scope, for
+     *  subagent_yield all=true. */
+    public static java.util.List<Long> outstandingForCurrentScope() {
+        var key = currentScopeKey();
+        if (key == null) return java.util.List.of();
+        var set = OUTSTANDING_BY_SCOPE.get(key);
+        return set == null ? java.util.List.of() : new java.util.ArrayList<>(set);
+    }
+
+    private static void forgetOutstanding(Long runId) {
+        for (var set : OUTSTANDING_BY_SCOPE.values()) set.remove(runId);
+    }
 
     /**
-     * JCLAW-497: async spawn inside a task fire. Dispatch the child on a VT
-     * (parallel — the agent can spawn more before awaiting) and stash a future
-     * that completes with the child's terminal outcome for subagent_yield to
-     * block-await inline. No announce / parent-resume (a task has no conversation
-     * to resume into). Returns run_id immediately.
+     * JCLAW-497/498: dispatch a child on a VT (parallel) and stash a future that
+     * completes with its terminal outcome for subagent_yield to block-await inline.
+     * No announce / parent-resume — the parent collects via a blocking yield. Used
+     * by the single async-in-task path and by batch fan-out (chat or task).
      */
+    private static void dispatchDetachedAsync(Long runId, Long childAgentId, Long childConvId,
+                                              String parentAgentName, String mode, String context,
+                                              int timeoutSeconds, String task, String scopeKey) {
+        var outcomeFuture = new CompletableFuture<SyncRunOutcome>();
+        ASYNC_OUTCOMES.put(runId, outcomeFuture);
+        if (scopeKey != null) {
+            OUTSTANDING_BY_SCOPE.computeIfAbsent(scopeKey, _ -> java.util.concurrent.ConcurrentHashMap.newKeySet())
+                    .add(runId);
+        }
+        Thread.ofVirtual().name("subagent-async-task-" + runId).start(() ->
+                runAsyncDetached(runId, childAgentId, childConvId, parentAgentName,
+                        mode, context, timeoutSeconds, task, outcomeFuture));
+    }
+
+    /** JCLAW-497: single async spawn inside a task fire. Returns run_id immediately. */
     private static String launchAsyncSpawnForTask(Long runId, Long childAgentId, Long childConvId,
                                                    String parentAgentName, SpawnArgs parsed, String runIdStr) {
-        var outcomeFuture = new CompletableFuture<SyncRunOutcome>();
-        TASK_ASYNC_OUTCOMES.put(runId, outcomeFuture);
-        Thread.ofVirtual().name("subagent-async-task-" + runId).start(() ->
-                runAsyncForTask(runId, childAgentId, childConvId, parentAgentName,
-                        parsed.mode(), parsed.context(), parsed.timeoutSeconds(),
-                        parsed.task(), outcomeFuture));
+        dispatchDetachedAsync(runId, childAgentId, childConvId, parentAgentName,
+                parsed.mode(), parsed.context(), parsed.timeoutSeconds(), parsed.task(), currentScopeKey());
         var payload = new LinkedHashMap<String, Object>();
         payload.put("run_id", runIdStr);
         payload.put("conversation_id", String.valueOf(childConvId));
@@ -613,17 +754,16 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     }
 
     /**
-     * JCLAW-497: run an async task-fire child to completion and hand its terminal
+     * JCLAW-497/498: run a detached async child to completion and hand its terminal
      * outcome to the awaiting subagent_yield. Mirrors {@link #runAsyncAndAnnounce}
-     * minus the announce + parent-resume (which need a persistent conversation):
-     * run the child, do the terminal audit + lifecycle bookkeeping, then complete
-     * {@code outcomeFuture}.
+     * minus the announce + parent-resume: run the child, do the terminal audit +
+     * lifecycle bookkeeping, then complete {@code outcomeFuture}.
      */
     @SuppressWarnings("java:S1181")
-    private static void runAsyncForTask(Long runId, Long childAgentId, Long childConvId,
-                                        String parentAgentName, String mode, String context,
-                                        int timeoutSeconds, String task,
-                                        CompletableFuture<SyncRunOutcome> outcomeFuture) {
+    private static void runAsyncDetached(Long runId, Long childAgentId, Long childConvId,
+                                         String parentAgentName, String mode, String context,
+                                         int timeoutSeconds, String task,
+                                         CompletableFuture<SyncRunOutcome> outcomeFuture) {
         try {
             var future = startAsyncChild(runId, childAgentId, childConvId, task);
             SyncRunOutcome outcome;
@@ -645,39 +785,84 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
     }
 
+    /** Block-await one detached async outcome, bounded a little past the ceiling so
+     *  it can't hang even if completion signalling misbehaves. */
+    private static SyncRunOutcome awaitOutcomeFuture(CompletableFuture<SyncRunOutcome> f)
+            throws InterruptedException, java.util.concurrent.ExecutionException, TimeoutException {
+        int ceiling = ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS);
+        return ceiling <= 0 ? f.get() : f.get(ceiling + 30L, TimeUnit.SECONDS);
+    }
+
+    private static LinkedHashMap<String, Object> outcomeMap(Long runId, SyncRunOutcome outcome) {
+        var m = new LinkedHashMap<String, Object>();
+        m.put("run_id", String.valueOf(runId));
+        m.put("reply", outcome.reply());
+        m.put(FIELD_STATUS, outcome.terminalStatus().name());
+        if (outcome.replyTruncated()) m.put("truncated", Boolean.TRUE);
+        return m;
+    }
+
     /**
-     * JCLAW-497: block-await the outcome of an async subagent spawned inside the
-     * current task fire (called by subagent_yield in a task context) and return
-     * it as the same JSON shape a synchronous spawn returns. Returns an error
-     * string when no such pending run is registered (already awaited, or the run
-     * wasn't an async task spawn).
+     * JCLAW-497: block-await ONE async subagent's outcome (subagent_yield with a
+     * single runId) and return it as the same JSON a synchronous spawn returns.
      */
-    public static String awaitTaskAsyncOutcome(Long runId) {
-        var outcomeFuture = TASK_ASYNC_OUTCOMES.remove(runId);
-        if (outcomeFuture == null) {
+    public static String awaitAsyncOutcome(Long runId) {
+        var f = ASYNC_OUTCOMES.remove(runId);
+        forgetOutstanding(runId);
+        if (f == null) {
             return "Error: no pending async subagent for runId " + runId
-                    + " in this task run (already awaited, or not an async task spawn).";
+                    + " (already collected, or not an async spawn).";
         }
-        SyncRunOutcome outcome;
         try {
-            // The child is self-bounded by its idle/ceiling budgets inside
-            // runAsyncForTask; wait a little past the absolute ceiling so this
-            // await can't hang even if completion signalling misbehaves.
-            int ceiling = ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS);
-            outcome = ceiling <= 0
-                    ? outcomeFuture.get()
-                    : outcomeFuture.get(ceiling + 30L, TimeUnit.SECONDS);
+            return utils.GsonHolder.INSTANCE.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return "Error: interrupted while awaiting async subagent " + runId + ".";
         } catch (Exception e) {
             return "Error: failed awaiting async subagent " + runId + ": " + e.getMessage();
         }
+    }
+
+    /**
+     * JCLAW-498: block-await MANY async subagents (subagent_yield runIds[] / all)
+     * and return {@code {results:[...], count:n}}. Each entry mirrors a sync spawn's
+     * shape; a missing/already-collected runId is reported in-line rather than
+     * failing the whole batch. The children ran concurrently, so the wall-clock of
+     * this collect ≈ the slowest still-running child.
+     */
+    public static String awaitAsyncOutcomes(java.util.List<Long> runIds) {
+        var results = new java.util.ArrayList<Object>();
+        for (var runId : runIds) {
+            var f = ASYNC_OUTCOMES.remove(runId);
+            forgetOutstanding(runId);
+            if (f == null) {
+                var miss = new LinkedHashMap<String, Object>();
+                miss.put("run_id", String.valueOf(runId));
+                miss.put(FIELD_STATUS, "UNKNOWN");
+                miss.put("error", "no pending async subagent (already collected, or not an async spawn)");
+                results.add(miss);
+                continue;
+            }
+            try {
+                results.add(outcomeMap(runId, awaitOutcomeFuture(f)));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                var err = new LinkedHashMap<String, Object>();
+                err.put("run_id", String.valueOf(runId));
+                err.put(FIELD_STATUS, "FAILED");
+                err.put("error", "interrupted while awaiting");
+                results.add(err);
+            } catch (Exception e) {
+                var err = new LinkedHashMap<String, Object>();
+                err.put("run_id", String.valueOf(runId));
+                err.put(FIELD_STATUS, "FAILED");
+                err.put("error", e.getMessage());
+                results.add(err);
+            }
+        }
         var payload = new LinkedHashMap<String, Object>();
-        payload.put("run_id", String.valueOf(runId));
-        payload.put("reply", outcome.reply());
-        payload.put(FIELD_STATUS, outcome.terminalStatus().name());
-        if (outcome.replyTruncated()) payload.put("truncated", Boolean.TRUE);
+        payload.put("results", results);
+        payload.put("count", results.size());
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
@@ -964,6 +1149,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * Agent row would close the window if/when it matters.
      */
     static String enforceRecursionLimits(Agent parentAgent) {
+        return enforceRecursionLimits(parentAgent, 1);
+    }
+
+    /** JCLAW-498: as above, but for spawning {@code additionalChildren} at once
+     *  (batch fan-out) — the breadth check refuses when the running count plus the
+     *  requested count would exceed the cap, so a single fan-out can't blow it. */
+    static String enforceRecursionLimits(Agent parentAgent, int additionalChildren) {
         // Read from the runtime Config table so the Settings page can edit
         // these without a restart. ConfigService.getInt falls back to the
         // hard-coded default when the row is absent or unparseable; values
@@ -992,9 +1184,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         long running = SubagentRun.count(
                 "parentAgent = ?1 AND status = ?2",
                 managed, SubagentRun.Status.RUNNING);
-        if (running >= breadthLimit) {
-            return "breadth limit %d exceeded (running children: %d).".formatted(
-                    breadthLimit, running);
+        if (running + additionalChildren > breadthLimit) {
+            return additionalChildren == 1
+                    ? "breadth limit %d exceeded (running children: %d).".formatted(breadthLimit, running)
+                    : "breadth limit %d exceeded: %d already running + %d requested.".formatted(
+                            breadthLimit, running, additionalChildren);
         }
         return null;
     }
