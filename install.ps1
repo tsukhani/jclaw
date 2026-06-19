@@ -3,8 +3,8 @@
 
     irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
 
-  Downloads the self-contained jclaw-bundle.zip from GitHub Releases, verifies
-  Java 25+ (the bundle's only runtime dependency), extracts it to %USERPROFILE%\.jclaw,
+  Downloads the self-contained jclaw-bundle.zip from GitHub Releases, ensures a
+  Java 25+ runtime (the bundle's only dependency), extracts it to %USERPROFILE%\.jclaw,
   and starts JClaw on http://localhost:9000.
 
   The bundle's launcher is jclaw.sh (a POSIX shell script), so JClaw runs through
@@ -12,11 +12,18 @@
   verify); if only WSL is present it launches there (and checks WSL's own Java);
   if neither is found it installs and prints how to run it.
 
+  When the Git Bash / Windows path has no Java 25+, the installer offers to
+  download a self-contained Zulu JRE 25 into %USERPROFILE%\.jclaw\jre (no admin,
+  no system change); jclaw.sh finds it there on every later start. The WSL path
+  uses WSL's own Java, so install that inside your distro.
+
   Configuration (all optional, via environment variables):
-    JCLAW_HOME      install directory        (default: %USERPROFILE%\.jclaw)
-    JCLAW_VERSION   release tag, or "latest"  (default: latest)
-    JCLAW_PORT      port to report on launch  (default: 9000)
-    JCLAW_NO_START  set to 1 to install only, not start
+    JCLAW_HOME        install directory        (default: %USERPROFILE%\.jclaw)
+    JCLAW_VERSION     release tag, or "latest"  (default: latest)
+    JCLAW_PORT        port to report on launch  (default: 9000)
+    JCLAW_NO_START    set to 1 to install only, not start
+    JCLAW_INSTALL_JRE set to 1 to download the Zulu JRE without prompting
+    JCLAW_NO_JRE      set to 1 to never auto-install a JRE (fail if Java is missing)
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -27,9 +34,19 @@ $JclawHome = if ($env:JCLAW_HOME)    { $env:JCLAW_HOME }    else { Join-Path $en
 $Version   = if ($env:JCLAW_VERSION) { $env:JCLAW_VERSION } else { 'latest' }
 $Port      = if ($env:JCLAW_PORT)    { $env:JCLAW_PORT }    else { '9000' }
 $NoStart   = [bool]$env:JCLAW_NO_START
+$NoJre      = [bool]$env:JCLAW_NO_JRE
+$InstallJre = [bool]$env:JCLAW_INSTALL_JRE
 $Asset     = 'jclaw-bundle.zip'
 $MinJava   = 25
 $AppDir    = Join-Path $JclawHome 'jclaw'   # bundle zip extracts under a jclaw\ prefix
+$JreDir    = Join-Path $JclawHome 'jre'     # managed Zulu JRE, sibling of jclaw\ (jclaw.sh finds it)
+$AzulApi   = 'https://api.azul.com/metadata/v1/zulu/packages/'
+# Azul arch token for this host (x64 / aarch64); '' means an arch we don't auto-install for.
+$WinArch   = switch ($env:PROCESSOR_ARCHITECTURE) {
+    'AMD64' { 'x64' }
+    'ARM64' { 'aarch64' }
+    default { switch ($env:PROCESSOR_ARCHITEW6432) { 'AMD64' { 'x64' } 'ARM64' { 'aarch64' } default { '' } } }
+}
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
 function Step    ($m) { Write-Host '==> ' -ForegroundColor Green -NoNewline; Write-Host $m }
@@ -60,13 +77,68 @@ function Get-JavaMajor([scriptblock]$Invoker) {
     return $null
 }
 
-function Show-JavaHelp {
+function Show-JavaHelp([switch]$Auto) {
     Write-Host ''
     Write-Host "JClaw needs a Java $MinJava+ runtime (Zulu or Temurin recommended)." -ForegroundColor Yellow
+    if ($Auto) { Write-Host '  auto:    ' -NoNewline; Write-Host "re-run with JCLAW_INSTALL_JRE=1 (downloads a Zulu JRE $MinJava)" -ForegroundColor Cyan }
     Write-Host '  winget:  ' -NoNewline; Write-Host "winget install Azul.Zulu.$MinJava" -ForegroundColor Cyan
     Write-Host '  scoop:   ' -NoNewline; Write-Host "scoop install zulu$MinJava-jdk"   -ForegroundColor Cyan
-    Write-Host '  or get:  ' -NoNewline; Write-Host "https://www.azul.com/downloads/?version=java-$MinJava" -ForegroundColor Cyan
+    Write-Host '  or get:  ' -NoNewline; Write-Host "https://www.azul.com/downloads/?package=jre" -ForegroundColor Cyan
     Write-Host ''
+}
+
+# Decide whether to auto-install the JRE. Forced by JCLAW_INSTALL_JRE; else prompt on
+# an interactive console (default yes); non-interactive proceeds (pulling the runtime
+# is the point of a one-liner) unless JCLAW_NO_JRE opted out (checked by the caller).
+function Test-WantJre($reason) {
+    if ($InstallJre) { return $true }
+    if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        Write-Host ''
+        Write-Host $reason -ForegroundColor Yellow
+        $ans = Read-Host "Download a self-contained Zulu JRE $MinJava (~50 MB) into $JreDir? [Y/n]"
+        return ($ans -notmatch '^(?i)n')
+    }
+    Substep "$reason Auto-installing Zulu JRE $MinJava (set JCLAW_NO_JRE=1 to skip)"
+    return $true
+}
+
+# Resolve, download, checksum-verify, and unpack the newest GA plain Zulu JRE
+# (windows/$WinArch) into $JreDir, then confirm it runs. Throws on any failure.
+function Get-ZuluJre {
+    Step "Installing Zulu JRE $MinJava (windows/$WinArch)"
+    $api = "${AzulApi}?java_version=$MinJava&os=windows&arch=$WinArch&archive_type=zip" +
+           "&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20"
+    try { $pkgs = Invoke-RestMethod -Uri $api } catch { throw "couldn't reach the Azul JRE catalog: $($_.Exception.Message)" }
+    # Skip the JavaFX-bundled (fx) and CRaC variants — take the first plain JRE.
+    $pkg = $pkgs | Where-Object { $_.name -notmatch '(?i)fx|crac' } | Select-Object -First 1
+    if (-not $pkg -or -not $pkg.download_url) { throw "no Zulu JRE $MinJava found for windows/$WinArch in the Azul catalog." }
+    Substep ([System.IO.Path]::GetFileName($pkg.download_url))
+
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("jclaw-jre-" + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        $zip = Join-Path $tmp 'jre.zip'
+        Invoke-WebRequest -Uri $pkg.download_url -OutFile $zip
+        if ($pkg.sha256_hash) {
+            $got = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash
+            if ($got -ne $pkg.sha256_hash.ToUpper()) { throw "JRE checksum mismatch (wanted $($pkg.sha256_hash), got $got)" }
+            Substep 'checksum verified (sha256)'
+        } else {
+            Warn 'Azul returned no checksum - skipping JRE verification.'
+        }
+        if (Test-Path $JreDir) { Remove-Item -Recurse -Force $JreDir }
+        New-Item -ItemType Directory -Path $JreDir -Force | Out-Null
+        Expand-Archive -Path $zip -DestinationPath $JreDir -Force
+    } finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+
+    $java = Get-ChildItem -Path $JreDir -Recurse -Filter 'java.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\bin\\java\.exe$' } | Select-Object -First 1
+    if (-not $java) { throw "unpacked the JRE but found no bin\java.exe under $JreDir." }
+    $jv = Get-JavaMajor { & $java.FullName -version }
+    if ($null -eq $jv -or $jv -lt $MinJava) { throw "managed JRE reports Java $jv, expected $MinJava+." }
+    Substep "installed -> $(Split-Path $java.FullName)"
 }
 
 # ─── Launcher discovery ──────────────────────────────────────────────────────
@@ -113,9 +185,17 @@ if ($useWsl) {
     Substep "Java $jv detected (in WSL)"
 } else {
     $jv = Get-JavaMajor { java -version }
-    if ($null -eq $jv) { Show-JavaHelp; Die "Java was not found on your PATH." }
-    if ($jv -lt $MinJava) { Show-JavaHelp; Die "Found Java $jv, but JClaw needs $MinJava or newer." }
-    Substep "Java $jv detected"
+    if ($null -ne $jv -and $jv -ge $MinJava) {
+        Substep "Java $jv detected"
+    } else {
+        $reason = if ($null -eq $jv) { 'Java was not found on your PATH.' } else { "Found Java $jv, but JClaw needs $MinJava or newer." }
+        if (-not $NoJre -and $WinArch -and (Test-WantJre $reason)) {
+            try { Get-ZuluJre; Substep "Java $MinJava ready (managed JRE)" }
+            catch { Show-JavaHelp -Auto:([bool]$WinArch); Die $_.Exception.Message }
+        } else {
+            Show-JavaHelp -Auto:([bool]$WinArch); Die $reason
+        }
+    }
     if (-not $gitBash) { Substep 'Neither Git Bash nor WSL found - will install, then print run instructions.' }
 }
 

@@ -17,6 +17,23 @@ if [[ -x "$SCRIPT_DIR/play" ]]; then
     export PATH="$SCRIPT_DIR:$PATH"
 fi
 
+# Co-located managed JRE. The one-line installers (install.sh / install.ps1) drop a
+# self-contained Zulu JRE 25 at <home>/jre — a sibling of this script's dir — when the
+# host has no system Java 25. Prefer it on PATH so `jclaw start/restart/...` run without
+# a system-wide Java. No-op in a dev clone (no ../jre) and whenever JCLAW_JRE_SKIP is set.
+# Matches both `java` (Unix) and `java.exe` (Windows, run via Git Bash) and handles the
+# macOS Contents/Home nesting.
+if [[ -z "${JCLAW_JRE_SKIP:-}" && -d "$SCRIPT_DIR/../jre" ]]; then
+    _jre_java=$(find "$SCRIPT_DIR/../jre" -type f \( -name java -o -name java.exe \) 2>/dev/null \
+        | grep -E '/bin/java(\.exe)?$' | head -1)
+    if [[ -n "$_jre_java" ]]; then
+        JAVA_HOME="$(cd "$(dirname "$(dirname "$_jre_java")")" && pwd)"
+        export JAVA_HOME
+        export PATH="$JAVA_HOME/bin:$PATH"
+    fi
+    unset _jre_java
+fi
+
 # Audience detection: developers run from a `git clone`, end users run
 # from an unzipped `play dist` tarball with no .git/ in tow. Used by
 # both show_intro (bare invocation banner) and usage (--help / unknown
