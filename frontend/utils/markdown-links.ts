@@ -37,11 +37,14 @@
  * and safe for absolute / external URLs alike.
  */
 function stripAngleWrapping(url: string): string {
+  // The model wraps with a single <…>, so single-char anchored strips are enough — and
+  // they avoid the `>+$` backtracking shape Sonar flags (S5852). replaceAll() is the
+  // preferred form for the global decode regexes (S7781).
   return url
-    .replace(/(?:\\|%5c)u003c/gi, '<')
-    .replace(/(?:\\|%5c)u003e/gi, '>')
-    .replace(/^<+/, '')
-    .replace(/>+$/, '')
+    .replaceAll(/(?:\\|%5c)u003c/gi, '<')
+    .replaceAll(/(?:\\|%5c)u003e/gi, '>')
+    .replace(/^</, '')
+    .replace(/>$/, '')
 }
 
 export function rewriteWorkspaceLinks(html: string, agentId: number): string {
