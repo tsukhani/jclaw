@@ -9,7 +9,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * JCLAW-220: Tier-1 Qwen video content-part construction for both serving-endpoint
+ * JCLAW-220: native-video (Qwen) content-part construction for both serving-endpoint
  * wire shapes. Pure structural assertions over synthetic frame bytes — no ffmpeg.
  */
 class QwenVideoAdapterTest {
@@ -25,7 +25,7 @@ class QwenVideoAdapterTest {
     @Test
     void openRouterShapeIsVideoArrayWithFps() {
         var parts = QwenVideoAdapter.contentParts(fakeFrames(), 40.0, WireShape.OPENAI_VIDEO_ARRAY);
-        assertEquals(1, parts.size(), "Tier-1 emits a single video part");
+        assertEquals(1, parts.size(), "native-video emits a single video part");
         var part = parts.get(0);
         assertEquals("video", part.get("type"));
 

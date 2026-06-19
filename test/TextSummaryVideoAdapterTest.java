@@ -74,7 +74,7 @@ class TextSummaryVideoAdapterTest extends UnitTest {
 
     @Test
     void buildsAndPersistsTimelineSummary() throws Exception {
-        assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required for Tier-3 happy path");
+        assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required for the text-summary happy path");
 
         server = new MockWebServer();
         server.start();

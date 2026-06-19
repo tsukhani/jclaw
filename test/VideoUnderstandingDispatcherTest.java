@@ -129,7 +129,7 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
         @SuppressWarnings("unchecked")
         var parts = (List<Map<String, Object>>) userMsg.content();
         assertTrue(parts.stream().anyMatch(p -> "image_url".equals(p.get("type"))),
-                "Tier-2 image_url parts spliced for " + channel + ": " + parts);
+                "multi-image image_url parts spliced for " + channel + ": " + parts);
     }
 
     // --- helpers ---
