@@ -431,6 +431,29 @@ public final class VisionAudioAssembler {
         if (videoBearers == null || videoBearers.isEmpty()) return messages;
 
         // Phase 1 (no Tx during sampling/captioning): dispatch each video attachment to its strategy.
+        var partsByIndex = dispatchVideoParts(videoBearers, agent);
+
+        // Phase 2 (fresh Tx): rebuild each affected user message and append the video parts.
+        return Tx.run(() -> {
+            var rewritten = new ArrayList<>(messages);
+            for (var b : videoBearers) {
+                var msg = (models.Message) models.Message.findById(b.msgId());
+                if (msg == null) continue;
+                var base = userMessageFor(msg, supportsAudio, supportsVision);
+                rewritten.set(b.chatMessageIndex(),
+                        spliceVideoParts(base, partsByIndex.get(b.chatMessageIndex())));
+            }
+            return rewritten;
+        });
+    }
+
+    /**
+     * Phase 1 (no Tx held): dispatch every bearer's video attachments to their interpretation
+     * strategy, accumulating the content parts keyed by the user turn's slot index. A per-attachment
+     * dispatch failure degrades to a short text note rather than failing the turn.
+     */
+    private static Map<Integer, List<Map<String, Object>>> dispatchVideoParts(
+            List<VideoBearer> videoBearers, models.Agent agent) {
         var partsByIndex = new HashMap<Integer, List<Map<String, Object>>>();
         for (var b : videoBearers) {
             var acc = new ArrayList<Map<String, Object>>();
@@ -448,19 +471,7 @@ public final class VisionAudioAssembler {
             }
             partsByIndex.put(b.chatMessageIndex(), acc);
         }
-
-        // Phase 2 (fresh Tx): rebuild each affected user message and append the video parts.
-        return Tx.run(() -> {
-            var rewritten = new ArrayList<>(messages);
-            for (var b : videoBearers) {
-                var msg = (models.Message) models.Message.findById(b.msgId());
-                if (msg == null) continue;
-                var base = userMessageFor(msg, supportsAudio, supportsVision);
-                rewritten.set(b.chatMessageIndex(),
-                        spliceVideoParts(base, partsByIndex.get(b.chatMessageIndex())));
-            }
-            return rewritten;
-        });
+        return partsByIndex;
     }
 
     /**

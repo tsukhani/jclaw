@@ -35,6 +35,8 @@ public final class VideoUnderstandingDispatcher {
     /** The interpretation strategy chosen for a video, by the target model's capabilities. */
     public enum Strategy { NATIVE_VIDEO, MULTI_IMAGE, TEXT_SUMMARY }
 
+    private static final String EVENT_CATEGORY = "video";
+
     /** Pick the strategy and produce the content parts for the given video attachment + agent. */
     public static List<Map<String, Object>> dispatch(MessageAttachment video, Agent agent) {
         if (video == null || !video.isVideo()) {
@@ -61,7 +63,7 @@ public final class VideoUnderstandingDispatcher {
     private static List<Map<String, Object>> nativeVideo(MessageAttachment video, Agent agent) {
         var sampled = FrameSampler.sample(video);
         var shape = QwenVideoAdapter.shapeForProvider(agent.modelProvider);
-        EventLogger.info("video", "native-video: %d frames, shape=%s, attachment=%s"
+        EventLogger.info(EVENT_CATEGORY, "native-video: %d frames, shape=%s, attachment=%s"
                 .formatted(sampled.frames().size(), shape, video.uuid));
         return QwenVideoAdapter.contentParts(sampled.frames(), sampled.durationSeconds(), shape);
     }
@@ -69,18 +71,18 @@ public final class VideoUnderstandingDispatcher {
     private static List<Map<String, Object>> multiImageOrTextSummary(MessageAttachment video, Agent agent) {
         try {
             var sampled = FrameSampler.sample(video);
-            EventLogger.info("video", "multi-image: %d frames, attachment=%s"
+            EventLogger.info(EVENT_CATEGORY, "multi-image: %d frames, attachment=%s"
                     .formatted(sampled.frames().size(), video.uuid));
             return MultiImageVideoAdapter.contentParts(sampled.frames(), sampled.durationSeconds());
         } catch (FrameSamplingException e) {
-            EventLogger.warn("video", "multi-image frame extraction failed (%s); falling back to text summary for attachment %s"
+            EventLogger.warn(EVENT_CATEGORY, "multi-image frame extraction failed (%s); falling back to text summary for attachment %s"
                     .formatted(e.getMessage(), video.uuid));
             return textSummary(video, agent);
         }
     }
 
     private static List<Map<String, Object>> textSummary(MessageAttachment video, Agent agent) {
-        EventLogger.info("video", "text-summary: attachment=" + video.uuid);
+        EventLogger.info(EVENT_CATEGORY, "text-summary: attachment=" + video.uuid);
         return TextSummaryVideoAdapter.contentParts(video, agent);
     }
 }
