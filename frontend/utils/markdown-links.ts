@@ -20,6 +20,30 @@
  * Extracted from `chat.vue` so the behavior is unit-testable outside a
  * component mount; the component re-exports it via its normal import path.
  */
+
+/**
+ * Normalize a link destination that arrived angle-bracket-wrapped. Some models wrap
+ * a URL in angle brackets (a markdown habit) and — notably JSON-escaping-prone models
+ * like deepseek — emit those brackets as the escape-SEQUENCE text (backslash-u-003c /
+ * backslash-u-003e) rather than real angle-bracket characters. `marked` strips a real
+ * angle-bracket wrapper but not the escaped form, and it URL-encodes the stray
+ * backslash to %5C — so by the time the rewriter sees the href it looks like
+ * `%5Cu003c…/jclaw-explainer.html%5Cu003e`. Left alone, the workspace URL we build
+ * 404s ("File wasn't available on site").
+ *
+ * Decode both the raw (backslash) and marked-encoded (%5C) escape forms back to angle
+ * brackets, then strip a leading/trailing wrapper. A real angle bracket is never valid
+ * raw in a URL or path, so this is a no-op for clean links (and for %-encoded spaces)
+ * and safe for absolute / external URLs alike.
+ */
+function stripAngleWrapping(url: string): string {
+  return url
+    .replace(/(?:\\|%5c)u003c/gi, '<')
+    .replace(/(?:\\|%5c)u003e/gi, '>')
+    .replace(/^<+/, '')
+    .replace(/>+$/, '')
+}
+
 export function rewriteWorkspaceLinks(html: string, agentId: number): string {
   if (typeof DOMParser === 'undefined') return html
   const parser = new DOMParser()
@@ -28,7 +52,12 @@ export function rewriteWorkspaceLinks(html: string, agentId: number): string {
   if (!root) return html
   const workspacePrefix = `/api/agents/${agentId}/files/`
   root.querySelectorAll('a[href]').forEach((a) => {
-    const href = a.getAttribute('href') || ''
+    const raw = a.getAttribute('href') || ''
+    if (!raw) return
+    // Defend against angle-bracket-wrapped / escaped destinations (see
+    // stripAngleWrapping) before any branch decides what to do with the href.
+    const href = stripAngleWrapping(raw)
+    if (href !== raw) a.setAttribute('href', href)
     if (!href) return
     if (href.startsWith('#')) return
     if (href.startsWith(workspacePrefix)) {
@@ -58,7 +87,10 @@ export function rewriteWorkspaceLinks(html: string, agentId: number): string {
   // 404 → broken-image placeholder in the bubble. Rewriting to the absolute
   // workspace URL makes these resolve to the real file.
   root.querySelectorAll('img[src]').forEach((img) => {
-    const src = img.getAttribute('src') || ''
+    const raw = img.getAttribute('src') || ''
+    if (!raw) return
+    const src = stripAngleWrapping(raw)
+    if (src !== raw) img.setAttribute('src', src)
     if (!src) return
     if (src.startsWith('#')) return
     if (src.startsWith(workspacePrefix)) return

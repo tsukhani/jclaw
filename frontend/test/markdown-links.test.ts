@@ -123,6 +123,67 @@ describe('rewriteWorkspaceLinks', () => {
     })
   })
 
+  // Model-quirk repro (conversation 55568): deepseek-style models wrap a download
+  // link's path in angle brackets and emit them as the escape-sequence TEXT
+  // (backslash-u-003c/-003e), not real angle brackets. marked URL-encodes the stray
+  // backslash to %5C, so rewriteWorkspaceLinks actually receives `%5Cu003c…%5Cu003e`
+  // — which 404s ("File wasn't available on site"). The earlier fix only matched the
+  // raw-backslash form and missed the %5C marked encoding; these pin both.
+  describe('angle-bracket / escaped-bracket wrapped destinations', () => {
+    it('strips the marked-encoded %5Cu003c…%5Cu003e wrapping (the actual 55568 shape)', () => {
+      // Exactly what rewriteWorkspaceLinks sees after marked + DOMPurify.
+      const input = '<a href="%5Cu003cvisual-explainer/jclaw-explainer.html%5Cu003e">jclaw-explainer.html</a>'
+      const a = firstAnchor(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(a.getAttribute('href')).toBe('/api/agents/1/files/visual-explainer/jclaw-explainer.html')
+      expect(a.hasAttribute('download')).toBe(true)
+      expect(a.classList.contains('workspace-file')).toBe(true)
+    })
+
+    it('also strips the raw-backslash form \\u003c…\\u003e', () => {
+      const input = '<a href="\\u003cvisual-explainer/jclaw-explainer.html\\u003e">x</a>'
+      const a = firstAnchor(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(a.getAttribute('href')).toBe('/api/agents/1/files/visual-explainer/jclaw-explainer.html')
+    })
+
+    it('strips a real <…> wrapper from a relative href', () => {
+      const input = '<a href="&lt;report.pdf&gt;">report</a>'
+      const a = firstAnchor(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(a.getAttribute('href')).toBe('/api/agents/1/files/report.pdf')
+    })
+
+    it('strips a trailing-only %5Cu003e', () => {
+      const input = '<a href="report.pdf%5Cu003e">report</a>'
+      const a = firstAnchor(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(a.getAttribute('href')).toBe('/api/agents/1/files/report.pdf')
+    })
+
+    it('cleans a %5C-wrapped absolute workspace URL and keeps the download affordance', () => {
+      const input = '<a href="%5Cu003c/api/agents/1/files/diagram.png%5Cu003e">diagram</a>'
+      const a = firstAnchor(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(a.getAttribute('href')).toBe('/api/agents/1/files/diagram.png')
+      expect(a.hasAttribute('download')).toBe(true)
+      expect(a.classList.contains('workspace-file')).toBe(true)
+    })
+
+    it('strips escaped wrapping from an img src', () => {
+      const input = '<img src="%5Cu003cchart.png%5Cu003e" alt="chart">'
+      const img = parse(rewriteWorkspaceLinks(input, AGENT_ID)).querySelector('img')!
+      expect(img.getAttribute('src')).toBe('/api/agents/1/files/chart.png')
+    })
+
+    it('does NOT touch a %-encoded space (no false positive)', () => {
+      const input = '<a href="my%20notes.md">notes</a>'
+      const a = firstAnchor(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(a.getAttribute('href')).toBe('/api/agents/1/files/my%20notes.md')
+    })
+
+    it('leaves a clean relative href untouched', () => {
+      const input = '<a href="visual-explainer/jclaw-explainer.html">x</a>'
+      const a = firstAnchor(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(a.getAttribute('href')).toBe('/api/agents/1/files/visual-explainer/jclaw-explainer.html')
+    })
+  })
+
   // JCLAW-124: img src handling. The LLM sometimes emits `![alt](filename.png)`
   // with a bare filename, which marked renders as <img src="filename.png"> —
   // broken in the browser because it resolves against /chat → /filename.png →
