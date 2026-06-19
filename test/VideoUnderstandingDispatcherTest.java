@@ -1,6 +1,5 @@
 import agents.MessageHydrator;
 import agents.VisionAudioAssembler;
-import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.*;
 import org.junit.jupiter.api.*;
@@ -20,7 +19,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**

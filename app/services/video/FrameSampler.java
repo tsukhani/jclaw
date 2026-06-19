@@ -132,7 +132,7 @@ public final class FrameSampler {
             throw new FrameSamplingException("video file is not readable: " + path);
         }
         double duration = probeDurationSeconds(path);
-        int n = Math.max(MIN_FRAMES, Math.min(frameCountFor(duration), maxFrames));
+        int n = Math.clamp(frameCountFor(duration), MIN_FRAMES, maxFrames);
         return new SampleResult(sampleFrames(path, duration, n), duration);
     }
 
@@ -246,7 +246,7 @@ public final class FrameSampler {
             } finally {
                 Files.deleteIfExists(stderrFile);
             }
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             Logger.warn("FrameSampler: unparseable ffprobe duration; using fallback " + FALLBACK_DURATION_SECONDS + "s");
             return FALLBACK_DURATION_SECONDS;
         } catch (IOException e) {

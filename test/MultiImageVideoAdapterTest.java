@@ -45,6 +45,7 @@ class MultiImageVideoAdapterTest {
 
     @Test
     void emptyFramesThrowTyped() {
-        assertThrows(VideoAdapterException.class, () -> MultiImageVideoAdapter.contentParts(List.of(), 10.0));
+        var noFrames = List.<FrameSampler.Frame>of();
+        assertThrows(VideoAdapterException.class, () -> MultiImageVideoAdapter.contentParts(noFrames, 10.0));
     }
 }

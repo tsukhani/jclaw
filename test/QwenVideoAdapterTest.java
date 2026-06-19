@@ -61,7 +61,8 @@ class QwenVideoAdapterTest {
 
     @Test
     void emptyFramesThrowTyped() {
+        var noFrames = List.<FrameSampler.Frame>of();
         assertThrows(VideoAdapterException.class,
-                () -> QwenVideoAdapter.contentParts(List.of(), 40.0, WireShape.OPENAI_VIDEO_ARRAY));
+                () -> QwenVideoAdapter.contentParts(noFrames, 40.0, WireShape.OPENAI_VIDEO_ARRAY));
     }
 }
