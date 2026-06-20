@@ -37,6 +37,7 @@ JCLAW_BIN_DIR="${JCLAW_BIN_DIR:-$HOME/.local/bin}"
 JCLAW_NO_START="${JCLAW_NO_START:-}"
 JCLAW_NO_JRE="${JCLAW_NO_JRE:-}"            # skip the auto JRE download
 JCLAW_INSTALL_JRE="${JCLAW_INSTALL_JRE:-}"  # auto-install the JRE without prompting
+JCLAW_NO_RC_EDIT="${JCLAW_NO_RC_EDIT:-}"    # don't touch shell rc files (PATH + completion wiring)
 JCLAW_BUNDLE_URL="${JCLAW_BUNDLE_URL:-}"    # override bundle source (URL or file://) — air-gap/mirror/test
 
 APP_DIR="$JCLAW_HOME/jclaw"     # bundle zip extracts under a jclaw/ prefix
@@ -279,6 +280,46 @@ extract() {
     fi
 }
 
+# Make the `jclaw` shim reachable from future shells by ensuring $JCLAW_BIN_DIR is
+# on PATH. Sentinel-guarded, idempotent, existing-rc-only, honors JCLAW_NO_RC_EDIT.
+# The appended line re-checks PATH at every shell start, so it never stacks dupes.
+wire_path() {
+    case ":$PATH:" in
+        *":$JCLAW_BIN_DIR:"*) substep "${DIM}$JCLAW_BIN_DIR already on PATH${RESET}"; return 0 ;;
+    esac
+
+    _hint="export PATH=\"$JCLAW_BIN_DIR:\$PATH\""
+    if [ -n "$JCLAW_NO_RC_EDIT" ]; then
+        substep "skipped PATH wiring (JCLAW_NO_RC_EDIT set) — add it yourself: ${CYAN}$_hint${RESET}"
+        return 0
+    fi
+
+    _sh="${SHELL:-}"; _sh="${_sh##*/}"
+    case "$_sh" in
+        bash) _rc="$HOME/.bashrc" ;;
+        zsh)  _rc="$HOME/.zshrc" ;;
+        *)    substep "shell '${_sh:-unknown}' — add to your shell rc: ${CYAN}$_hint${RESET}"; return 0 ;;
+    esac
+
+    if [ ! -f "$_rc" ]; then
+        substep "no $_rc yet — add this to it: ${CYAN}$_hint${RESET}"
+        return 0
+    fi
+    if grep -q 'jclaw PATH (managed)' "$_rc" 2>/dev/null; then
+        substep "PATH already wired in ${DIM}$_rc${RESET} ${DIM}(restart your shell)${RESET}"
+        return 0
+    fi
+    if {
+        printf '\n# >>> jclaw PATH (managed) >>>\n'
+        printf 'case ":$PATH:" in *":%s:"*) ;; *) export PATH="%s:$PATH" ;; esac\n' "$JCLAW_BIN_DIR" "$JCLAW_BIN_DIR"
+        printf '# <<< jclaw PATH (managed) <<<\n'
+    } >>"$_rc" 2>/dev/null; then
+        substep "added ${CYAN}$JCLAW_BIN_DIR${RESET} to PATH in ${DIM}$_rc${RESET} ${DIM}(restart your shell or: source $_rc)${RESET}"
+    else
+        substep "could not write $_rc — add this line yourself: ${CYAN}$_hint${RESET}"
+    fi
+}
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 banner
 detect_os
@@ -322,6 +363,9 @@ substep "linked ${CYAN}jclaw${RESET} → $JCLAW_BIN_DIR/jclaw"
 step "Enabling shell completion"
 "$APP_DIR/jclaw.sh" completion install || substep "completion setup skipped (non-fatal)"
 
+step "Putting jclaw on PATH"
+wire_path
+
 # Past this point a failure shouldn't roll back a good extract.
 ROLLBACK=''
 
@@ -342,11 +386,4 @@ printf '  Manage     %sjclaw status%s · %sjclaw stop%s · %sjclaw restart%s\n' 
 printf '  Installed  %s%s\n' "$DIM" "$APP_DIR$RESET"
 printf '  Uninstall  %sjclaw uninstall%s %s(removes %s, undoes completion)%s\n' \
     "$CYAN" "$RESET" "$DIM" "$JCLAW_HOME" "$RESET"
-
-# Nudge if the shim dir isn't on PATH yet.
-case ":$PATH:" in
-    *":$JCLAW_BIN_DIR:"*) ;;
-    *) printf '\n%snote:%s %s is not on your PATH. Add it:\n       %sexport PATH="%s:$PATH"%s\n' \
-            "$YELLOW" "$RESET" "$JCLAW_BIN_DIR" "$CYAN" "$JCLAW_BIN_DIR" "$RESET" ;;
-esac
 printf '\n'

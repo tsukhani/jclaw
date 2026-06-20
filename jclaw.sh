@@ -3287,20 +3287,21 @@ _completion_uninstall() {
     for f in "$data_dir/bash-completion/completions/jclaw" "$data_dir/zsh/site-functions/_jclaw"; do
         [[ -e "$f" ]] && rm -f "$f" && echo "    removed $f"
     done
-    _rc_unwire "$HOME/.bashrc"
-    _rc_unwire "$HOME/.zshrc"
+    _rc_unwire "$HOME/.bashrc" completion
+    _rc_unwire "$HOME/.zshrc" completion
     return 0
 }
 
-# Strip the sentinel-bounded managed block from an rc file, if present. Rewrites
-# in place (preserving the file's inode/permissions). Always returns 0.
+# Strip a sentinel-bounded managed block (by label, e.g. "completion" or "PATH")
+# from an rc file, if present. Rewrites in place (preserving inode/permissions).
+# Always returns 0.
 _rc_unwire() {
-    local rc="$1" tmp
+    local rc="$1" label="$2" tmp
     [[ -f "$rc" ]] || return 0
-    grep -q 'jclaw completion (managed)' "$rc" 2>/dev/null || return 0
+    grep -q "jclaw $label (managed)" "$rc" 2>/dev/null || return 0
     tmp="$(mktemp 2>/dev/null)" || return 0
-    if sed '/# >>> jclaw completion (managed) >>>/,/# <<< jclaw completion (managed) <<</d' "$rc" >"$tmp" 2>/dev/null; then
-        cat "$tmp" >"$rc" && echo "    removed completion block from $rc"
+    if sed "/# >>> jclaw $label (managed) >>>/,/# <<< jclaw $label (managed) <<</d" "$rc" >"$tmp" 2>/dev/null; then
+        cat "$tmp" >"$rc" && echo "    removed jclaw $label block from $rc"
     fi
     rm -f "$tmp"
     return 0
@@ -3337,7 +3338,7 @@ do_uninstall() {
 
     echo "This will permanently:"
     echo "  • stop JClaw if it is running"
-    echo "  • remove shell-completion scripts and the managed block from ~/.bashrc and ~/.zshrc"
+    echo "  • remove the jclaw completion and PATH entries from ~/.bashrc and ~/.zshrc"
     [[ -n "$shim" ]] && echo "  • remove the jclaw command:  $shim"
     echo "  • delete the install directory (including the bundled JRE):"
     echo "        $root"
@@ -3364,8 +3365,10 @@ do_uninstall() {
     echo "Stopping JClaw (if running)…"
     do_stop_prod || true
 
-    echo "Removing shell completion…"
+    echo "Removing shell completion and PATH entries…"
     _completion_uninstall
+    _rc_unwire "$HOME/.bashrc" PATH
+    _rc_unwire "$HOME/.zshrc" PATH
 
     if [[ -n "$shim" ]]; then
         rm -f "$shim" && echo "    removed $shim"
