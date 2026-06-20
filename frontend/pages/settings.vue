@@ -1253,7 +1253,7 @@ const editingModelIdx = ref<number | null>(null)
 // previously silently wrote 131072 (kimi-k2.5 is actually 256K), which
 // then broke /usage and compaction-budget math. Show 0 honestly instead
 // and let the user enter the real value from the provider's docs.
-const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
+const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, supportsVideo: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
 const addingModel = ref(false)
 
 function getProviderModels(providerName: string): ProviderModelDef[] {
@@ -1371,6 +1371,7 @@ function startEditModel(providerName: string, idx: number) {
     alwaysThinks: m.alwaysThinks || false,
     supportsVision: m.supportsVision || false,
     supportsAudio: m.supportsAudio || false,
+    supportsVideo: m.supportsVideo || false,
     promptPrice: m.promptPrice ?? -1,
     completionPrice: m.completionPrice ?? -1,
     cachedReadPrice: m.cachedReadPrice ?? -1,
@@ -1381,7 +1382,7 @@ function startEditModel(providerName: string, idx: number) {
 }
 
 function startAddModel() {
-  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
+  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, supportsVideo: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
   addingModel.value = true
   editingModelIdx.value = null
 }
@@ -1413,6 +1414,7 @@ function modelFormToSaved(): ProviderModelDef {
     ...(f.supportsThinking && f.alwaysThinks ? { alwaysThinks: true } : {}),
     supportsVision: f.supportsVision,
     supportsAudio: f.supportsAudio,
+    supportsVideo: f.supportsVideo,
   }
   if (f.promptPrice >= 0) out.promptPrice = f.promptPrice
   if (f.completionPrice >= 0) out.completionPrice = f.completionPrice
@@ -1568,6 +1570,7 @@ async function addDiscoveredModels() {
       ...(m.alwaysThinks ? { alwaysThinks: true } : {}),
       supportsVision: m.visionDetectedFromProvider ? m.supportsVision : false,
       supportsAudio: m.audioDetectedFromProvider ? m.supportsAudio : false,
+      supportsVideo: m.videoDetectedFromProvider ? m.supportsVideo : false,
       ...((m.promptPrice ?? -1) >= 0 ? { promptPrice: m.promptPrice } : {}),
       ...((m.completionPrice ?? -1) >= 0 ? { completionPrice: m.completionPrice } : {}),
       ...((m.cachedReadPrice ?? -1) >= 0 ? { cachedReadPrice: m.cachedReadPrice } : {}),
@@ -2576,6 +2579,17 @@ async function deleteLoggerLevel(logger: string) {
                           class="accent-white"
                         > Supports Audio
                       </label>
+                      <label
+                        :for="`model-video-${name}`"
+                        class="flex items-center gap-1.5 text-xs text-fg-muted"
+                      >
+                        <input
+                          :id="`model-video-${name}`"
+                          v-model="modelForm.supportsVideo"
+                          type="checkbox"
+                          class="accent-white"
+                        > Supports Video
+                      </label>
                     </div>
                     <div class="flex items-center gap-1">
                       <button
@@ -2649,6 +2663,10 @@ async function deleteLoggerLevel(logger: string) {
                           v-if="model.supportsAudio"
                           class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1"
                         >audio</span>
+                        <span
+                          v-if="model.supportsVideo"
+                          class="ml-2 text-[10px] text-purple-400 border border-purple-400/30 px-1"
+                        >video</span>
                       </div>
                     </div>
                     <div class="flex items-center gap-2">
@@ -2835,6 +2853,17 @@ async function deleteLoggerLevel(logger: string) {
                         type="checkbox"
                         class="accent-white"
                       > Supports Audio
+                    </label>
+                    <label
+                      :for="`addmodel-video-${name}`"
+                      class="flex items-center gap-1.5 text-xs text-fg-muted"
+                    >
+                      <input
+                        :id="`addmodel-video-${name}`"
+                        v-model="modelForm.supportsVideo"
+                        type="checkbox"
+                        class="accent-white"
+                      > Supports Video
                     </label>
                   </div>
                   <div class="flex items-center gap-1">
@@ -3093,6 +3122,16 @@ async function deleteLoggerLevel(logger: string) {
                       class="text-[10px] text-fg-muted border border-input px-1"
                       title="Audio support guessed from model name (not confirmed by provider)"
                     >audio?</span>
+                    <span
+                      v-if="model.supportsVideo && model.videoDetectedFromProvider"
+                      class="text-[10px] text-purple-400 border border-purple-400/30 px-1"
+                      title="Video support confirmed by provider"
+                    >video</span>
+                    <span
+                      v-else-if="model.supportsVideo"
+                      class="text-[10px] text-fg-muted border border-input px-1"
+                      title="Video support guessed from model name (not confirmed by provider)"
+                    >video?</span>
                     <span
                       v-if="model.contextWindow"
                       class="text-[10px] text-fg-muted font-mono"

@@ -653,6 +653,7 @@ export interface DiscoveredModel extends ProviderModelDef {
   alwaysThinksDetectedFromProvider?: boolean
   visionDetectedFromProvider?: boolean
   audioDetectedFromProvider?: boolean
+  videoDetectedFromProvider?: boolean
 }
 
 /** Shape returned by POST /api/providers/:name/discover-models. */

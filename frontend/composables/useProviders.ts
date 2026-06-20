@@ -17,6 +17,8 @@ export interface ProviderModel {
   supportsVision?: boolean
   /** True when the model accepts audio inputs. */
   supportsAudio?: boolean
+  /** True when the model accepts native video inputs (Qwen-VL family). */
+  supportsVideo?: boolean
   /** Total context window size in tokens. 0/undefined when the provider did not advertise it. */
   contextWindow?: number
   [key: string]: unknown

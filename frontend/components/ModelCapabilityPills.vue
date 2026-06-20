@@ -27,7 +27,7 @@
  * such fallback today, so the pill is even more strictly informational.
  */
 import type { ProviderModel } from '~/composables/useProviders'
-import { Lightbulb, Eye, Volume2 } from 'lucide-vue-next'
+import { Lightbulb, Eye, Volume2, Video } from 'lucide-vue-next'
 
 export type Capability = 'thinking'
 
@@ -45,7 +45,7 @@ const props = withDefaults(defineProps<{
 defineEmits<(e: 'toggle', capability: Capability) => void>()
 
 interface PillDef {
-  capability: Capability | 'vision' | 'audio'
+  capability: Capability | 'vision' | 'audio' | 'video'
   label: string
   icon: typeof Lightbulb
   supported: boolean
@@ -102,6 +102,16 @@ const pills = computed<PillDef[]>(() => {
       interactive: false,
       locked: false,
     },
+    {
+      capability: 'video',
+      label: 'video',
+      icon: Video,
+      supported: !!m.supportsVideo,
+      enabled: true,
+      onCls: 'text-purple-400 border-purple-400/40 bg-purple-400/5',
+      interactive: false,
+      locked: false,
+    },
   ]
   return all.filter(p => p.supported)
 })
@@ -122,6 +132,9 @@ function tooltip(p: PillDef): string {
     }
     if (p.capability === 'vision') {
       return 'vision — this model accepts image inputs natively'
+    }
+    if (p.capability === 'video') {
+      return 'video — this model accepts video inputs natively; others use the dedicated video model or frame fallback'
     }
     if (p.capability === 'thinking') {
       return 'thinking — this model always reasons; the toggle is fixed on'

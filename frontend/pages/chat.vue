@@ -9,6 +9,7 @@ import {
   DocumentIcon,
   ExclamationTriangleIcon,
   EyeIcon,
+  FilmIcon,
   FolderIcon,
   GlobeAltIcon,
   LightBulbIcon,
@@ -268,6 +269,10 @@ const visionSupported = computed(() => selectedModelInfo.value?.supportsVision =
 // to non-supportsAudio models go through the transcription pipeline
 // transparently.
 const audioSupported = computed(() => selectedModelInfo.value?.supportsAudio === true)
+// Capability indicator only — uploaded videos work on any model. A
+// supportsVideo model watches the clip natively; others route to the dedicated
+// video model (Settings → Video Interpretation), then to frames/captions.
+const videoSupported = computed(() => selectedModelInfo.value?.supportsVideo === true)
 
 // --- Pill toggle state ---
 
@@ -3763,6 +3768,24 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                   Audio
+                </span>
+                <!--
+                  Video pill: capability indicator only. Shown when the model
+                  accepts video natively (Qwen-VL). Uploaded videos work on any
+                  model — non-video models route to the dedicated video model
+                  (Settings → Video Interpretation), else frames/captions. Span,
+                  not a gate.
+                -->
+                <span
+                  v-if="videoSupported"
+                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-purple-500/15 text-purple-400 cursor-default"
+                  title="This model accepts video natively. Other models route to the dedicated video model, then to frames or a captioned summary."
+                >
+                  <FilmIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                  Video
                 </span>
               </div>
               <div class="flex items-center gap-1 justify-self-end">

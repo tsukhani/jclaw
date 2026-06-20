@@ -80,6 +80,18 @@ describe('ModelCapabilityPills', () => {
     expect(wrapper.text()).toContain('vision')
   })
 
+  it('video pill renders as non-interactive (no toggle event)', async () => {
+    // Capability indicator only — same treatment as vision/audio. A supportsVideo
+    // model watches videos natively; others route to the dedicated video model.
+    const wrapper = await mountSuspended(ModelCapabilityPills, {
+      props: { model: { id: 'm', supportsVideo: true } },
+    })
+    await nextTick()
+    const buttons = wrapper.findAll('button')
+    expect(buttons.length).toBe(0)
+    expect(wrapper.text()).toContain('video')
+  })
+
   it('emits toggle event only for the thinking pill (the sole interactive one)', async () => {
     const wrapper = await mountSuspended(ModelCapabilityPills, {
       props: {
