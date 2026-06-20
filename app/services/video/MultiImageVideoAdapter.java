@@ -15,10 +15,9 @@ import java.util.stream.Collectors;
  * stills from one video (timestamps + duration). This is the OpenClaw approach — a vision
  * model reasons over the timeline of stills rather than receiving a native video stream.
  *
- * <p>Shares frame extraction with the native-video adapter ({@link QwenVideoAdapter}) — both consume
- * {@link FrameSampler} output; the only difference is the wrapper (independent
- * {@code image_url} parts here vs. a single Qwen {@code video} part there). Frames are JPEG
- * quality ~90 (set by {@link FrameSampler}'s {@code -q:v}).
+ * <p>This is the degraded fallback for a video-capable model whose clip is too large to inline as a
+ * {@code video_url} ({@link VideoUrlAdapter}), and the primary path for a vision-but-not-video model.
+ * Frames are {@link FrameSampler} output at JPEG quality ~90 (its {@code -q:v}).
  *
  * <p>The number of frames is decided upstream by {@link FrameSampler} (duration-aware,
  * ceilinged by {@code video.sampleFrames}); the dispatcher (JCLAW-224) logs the count used.

@@ -142,18 +142,19 @@ class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
-    void videoModelsReturnsOnlyQwenVlModels() throws Exception {
-        // The dedicated interpreter sends Qwen's native video format, so the picker must offer ONLY
-        // Qwen-VL — a non-Qwen "video-capable" model (Gemini, here also flagged video via modalities)
-        // must be filtered out. Mock a mixed /models catalog and assert only the Qwen model survives.
+    void videoModelsReturnsVideoCapableModelsOnly() throws Exception {
+        // The picker offers any model whose input_modalities include "video" (the interpreter sends a
+        // provider-agnostic video_url). Mock a mixed catalog: a video model (Gemini), an image-only
+        // model (a Qwen-VL route, which on OpenRouter really is image-only), and a text model — only
+        // the video one survives.
         login();
         try (var server = new mockwebserver3.MockWebServer()) {
             server.start();
             ConfigService.set("provider.test-provider.baseUrl", server.url("/").toString());
             ConfigService.set("provider.test-provider.apiKey", "sk-test");
             var catalog = "{\"data\":["
-                    + "{\"id\":\"qwen/qwen3-vl-30b\",\"architecture\":{\"input_modalities\":[\"text\",\"image\",\"video\"]}},"
-                    + "{\"id\":\"google/gemini-pro\",\"architecture\":{\"input_modalities\":[\"text\",\"image\",\"video\"]}},"
+                    + "{\"id\":\"google/gemini-2.5-flash\",\"architecture\":{\"input_modalities\":[\"text\",\"image\",\"video\"]}},"
+                    + "{\"id\":\"qwen/qwen3-vl-30b\",\"architecture\":{\"input_modalities\":[\"text\",\"image\"]}},"
                     + "{\"id\":\"qwen/qwen3-32b\",\"architecture\":{\"input_modalities\":[\"text\"]}}]}";
             var buf = new okio.Buffer();
             buf.writeUtf8(catalog);
@@ -163,10 +164,10 @@ class ApiProvidersControllerTest extends FunctionalTest {
             var resp = GET("/api/providers/test-provider/video-models");
             assertIsOk(resp);
             var body = getContent(resp);
-            assertTrue(body.contains("qwen/qwen3-vl-30b"), "Qwen-VL model must be offered: " + body);
-            assertFalse(body.contains("gemini-pro"), "non-Qwen video model must be excluded: " + body);
-            assertFalse(body.contains("qwen3-32b"), "Qwen text model (no video) must be excluded: " + body);
-            assertTrue(body.contains("\"count\":1"), "exactly one Qwen-VL model expected: " + body);
+            assertTrue(body.contains("gemini-2.5-flash"), "video-capable model must be offered: " + body);
+            assertFalse(body.contains("qwen3-vl-30b"), "image-only model must be excluded: " + body);
+            assertFalse(body.contains("qwen3-32b"), "text-only model must be excluded: " + body);
+            assertTrue(body.contains("\"count\":1"), "exactly one video-capable model expected: " + body);
         }
     }
 

@@ -38,10 +38,9 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
         ConfigService.set("provider.test.baseUrl", "http://127.0.0.1:1");
         ConfigService.set("provider.test.apiKey", "sk-test");
         ConfigService.set("provider.test.models",
-                // qwen3-vl: Qwen-VL → native inline video. gemini-pro: supportsVideo but NOT Qwen, so
-                // it can't ingest our Qwen video part — must fall back to frames-as-images.
-                "[{\"id\":\"qwen3-vl\",\"name\":\"Qwen3 VL\",\"contextWindow\":32000,\"maxTokens\":4096,\"supportsVision\":true,\"supportsVideo\":true},"
-                        + "{\"id\":\"gemini-pro\",\"name\":\"Gemini Pro\",\"contextWindow\":1000000,\"maxTokens\":4096,\"supportsVision\":true,\"supportsVideo\":true},"
+                // gemini-pro: any video-capable model (supportsVideo from input_modalities) → native
+                // video_url. vis: vision-only → frames. txt: text-only → captioned summary.
+                "[{\"id\":\"gemini-pro\",\"name\":\"Gemini Pro\",\"contextWindow\":1000000,\"maxTokens\":4096,\"supportsVision\":true,\"supportsVideo\":true},"
                         + "{\"id\":\"vis\",\"name\":\"Vis\",\"contextWindow\":128000,\"maxTokens\":4096,\"supportsVision\":true},"
                         + "{\"id\":\"txt\",\"name\":\"Txt\",\"contextWindow\":8000,\"maxTokens\":4096}]");
         ConfigService.clearCache();
@@ -56,15 +55,9 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
     // --- routing: capability flags pick the strategy ---
 
     @Test
-    void routesToNativeVideoWhenQwenVideoModel() {
-        assertEquals(Strategy.NATIVE_VIDEO, VideoUnderstandingDispatcher.strategyFor(agent("qwen3-vl")));
-    }
-
-    @Test
-    void routesToMultiImageWhenSupportsVideoButNotQwen() {
-        // JCLAW: a non-Qwen model that advertises supportsVideo (e.g. Gemini) can't ingest our Qwen
-        // inline video part, so it must degrade to frames-as-images — not the native path.
-        assertEquals(Strategy.MULTI_IMAGE, VideoUnderstandingDispatcher.strategyFor(agent("gemini-pro")));
+    void routesToNativeVideoWhenSupportsVideo() {
+        // Any video-capable model (here Gemini) → native video_url. No Qwen-family special-casing.
+        assertEquals(Strategy.NATIVE_VIDEO, VideoUnderstandingDispatcher.strategyFor(agent("gemini-pro")));
     }
 
     @Test
@@ -87,47 +80,60 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
     // --- dispatch end-to-end (ffmpeg, no network for native-video / multi-image) ---
 
     @Test
-    void dispatchNativeVideoProducesVideoPart() throws Exception {
+    void dispatchNativeVideoProducesVideoUrlPart() throws Exception {
+        // A video-capable model + a clip within the inline cap → the whole video as a video_url part.
         assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
-        var agent = agent("qwen3-vl");
-        var att = videoAttachmentWithFile(agent, "web", 40);
+        var agent = agent("gemini-pro");
+        var att = videoAttachmentWithFile(agent, "web", 40); // small generated clip, under the cap
         var parts = VideoUnderstandingDispatcher.dispatch(att, agent);
-        assertEquals(1, parts.size(), "native-video is a single video part");
-        assertEquals("video", parts.get(0).get("type"));
+        assertEquals(1, parts.size(), "native-video is a single video_url part");
+        assertEquals("video_url", parts.get(0).get("type"));
+        @SuppressWarnings("unchecked")
+        var url = (Map<String, Object>) parts.get(0).get("video_url");
+        assertTrue(String.valueOf(url.get("url")).startsWith("data:video/mp4;base64,"),
+                "video_url carries the whole clip as a data URL");
     }
 
     @Test
-    void dispatchNonQwenVideoModelProducesImageParts() throws Exception {
-        // The Gemini case from the bug report: supportsVideo but not Qwen → frames-as-images, so the
-        // model actually receives the visual content instead of an ignored Qwen video part.
+    void dispatchOversizeVideoFallsBackToImages() throws Exception {
+        // A video-capable model but a clip over the inline cap → frames-as-images (it has vision too).
         assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
-        var agent = agent("gemini-pro");
-        var att = videoAttachmentWithFile(agent, "web", 40);
-        var parts = VideoUnderstandingDispatcher.dispatch(att, agent);
-        assertTrue(parts.size() >= 2, "non-Qwen video model degrades to leading text + image parts");
-        assertEquals("image_url", parts.get(1).get("type"));
+        ConfigService.set("video.maxInlineMb", "1"); // 1 MiB cap
+        ConfigService.clearCache();
+        try {
+            var agent = agent("gemini-pro");
+            var att = videoAttachmentWithFile(agent, "web", 40);
+            att.sizeBytes = 2L * 1024 * 1024; // mark it over the cap (the real file stays small for sampling)
+            att.save();
+            var parts = VideoUnderstandingDispatcher.dispatch(att, agent);
+            assertTrue(parts.size() >= 2, "over-cap clip degrades to leading text + image parts");
+            assertEquals("image_url", parts.get(1).get("type"));
+        } finally {
+            ConfigService.set("video.maxInlineMb", "");
+            ConfigService.clearCache();
+        }
     }
 
     @Test
     void videoCapableChatModelBypassesDedicatedModel() throws Exception {
         // Rule 1 precedence: when the chat model is video-capable, IT handles the video — a dedicated
         // model configured in Settings is NOT consulted. Point a live dedicated model at a mock server
-        // and assert the gemini-pro turn produces frames-as-images (chat model) and never hits it.
+        // and assert the gemini-pro turn produces a native video_url part and never hits it.
         assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
         try (var server = new mockwebserver3.MockWebServer()) {
             server.start();
             ConfigService.set("provider.openrouter.baseUrl", server.url("/").toString());
             ConfigService.set("provider.openrouter.apiKey", "sk-test");
             ConfigService.set("video.provider", "openrouter");
-            ConfigService.set("video.model", "qwen/qwen3-vl-instruct");
+            ConfigService.set("video.model", "google/gemini-2.5-flash");
             ConfigService.clearCache();
 
-            var agent = agent("gemini-pro"); // video-capable (non-Qwen) + vision
+            var agent = agent("gemini-pro"); // video-capable + vision
             var att = videoAttachmentWithFile(agent, "web", 40);
             var parts = VideoUnderstandingDispatcher.dispatch(att, agent);
 
-            assertEquals("image_url", parts.get(1).get("type"),
-                    "video-capable chat model uses its own frames, not the dedicated model");
+            assertEquals("video_url", parts.get(0).get("type"),
+                    "video-capable chat model interprets natively, not via the dedicated model");
             assertEquals(0, server.getRequestCount(), "dedicated video model must not be called");
         } finally {
             ConfigService.set("video.provider", "");

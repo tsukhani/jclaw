@@ -634,20 +634,13 @@ const defaultVideoModel = computed<ProviderModelDef | null>(() => {
   if (!a) return null
   return getProviderModels(a.modelProvider).find(m => m.id === a.modelId) ?? null
 })
-// Native inline video works only for the Qwen-VL family — the sole wire format the backend emits.
-// Other video-capable chat models (e.g. Gemini) can't ingest it and silently drop it, so they're
-// handled as vision (frames as images). Mirrors QwenVideoAdapter.isQwenVideoModel.
-function isQwenVideoModel(id: string | undefined): boolean {
-  if (!id) return false
-  const s = id.toLowerCase()
-  return s.includes('qwen2.5-vl') || s.includes('qwen3-vl') || s.includes('qwen-vl')
-    || s.includes('qwen2.5-omni') || s.includes('qwen3-omni')
-}
-// Mirror of VideoUnderstandingDispatcher.strategyFor — the fallback used when no dedicated
-// video model is configured (the agent's own chat model interprets the video).
+// Mirror of VideoUnderstandingDispatcher.strategyFor: a video-capable model (supportsVideo, from the
+// provider's input_modalities) watches the clip natively via a video_url part; else vision → frames;
+// else a captioned text summary. (Does not model the inline size cap — an over-cap clip degrades to
+// frames at dispatch time.)
 const defaultVideoStrategy = computed(() => {
   const m = defaultVideoModel.value
-  if (m?.supportsVideo === true && isQwenVideoModel(m.id)) return 'native'
+  if (m?.supportsVideo === true) return 'native'
   if (m?.supportsVision === true) return 'multiImage'
   return 'textSummary'
 })
@@ -743,8 +736,8 @@ watch([videoEnabled, videoProvider, vllmReachable], () => {
   discoverVideoModels()
 }, { immediate: true })
 
-// Master toggle: off clears the provider (and model); on defaults to OpenRouter (the common Qwen-VL
-// host) — the operator then picks a video model. Mirrors caption's toggle.
+// Master toggle: off clears the provider (and model); on defaults to OpenRouter (the common
+// video-capable-model host) — the operator then picks a video model. Mirrors caption's toggle.
 async function toggleVideoEnabled() {
   saving.value = true
   try {
@@ -4050,10 +4043,10 @@ async function deleteLoggerLevel(logger: string) {
       </h2>
       <p class="text-xs text-fg-muted">
         A chat model that supports video natively watches uploaded videos directly. When it can't, a
-        dedicated video model (Qwen-VL via OpenRouter or vLLM) interprets the clip and hands your chat
-        model a text description — so even a text-only chat model can “watch” videos, mirroring how
-        Transcription and Image Captioning work. With none set, videos fall back to your chat model's own
-        capability (frames as images, else a captioned summary).
+        dedicated video model (any video-capable model via OpenRouter or vLLM) interprets the clip and
+        hands your chat model a text description — so even a text-only chat model can “watch” videos,
+        mirroring how Transcription and Image Captioning work. With none set, videos fall back to your
+        chat model's own capability (frames as images, else a captioned summary).
       </p>
 
       <!-- Master toggle -->
@@ -4248,11 +4241,10 @@ async function deleteLoggerLevel(logger: string) {
             v-else-if="!videoModelsLoading && videoModelOptions.length === 0"
             class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
           >
-            No Qwen-VL models found on {{ videoProvider }}. {{ videoProvider === 'vllm'
-              ? 'Make sure vLLM is serving a Qwen-VL model.'
-              : 'OpenRouter offers the Qwen-VL family (qwen3-vl, qwen2.5-vl, …).' }}
-            Only Qwen-VL models can be used as a dedicated video model — the interpreter sends video
-            in Qwen's native format, which other models don't accept.
+            No video-capable models found on {{ videoProvider }}. {{ videoProvider === 'vllm'
+              ? 'Make sure vLLM is serving a model that accepts video input.'
+              : 'On OpenRouter these are models with a video input modality (e.g. Gemini, Qwen3.5).' }}
+            (Note: OpenRouter's Qwen-VL routes are image-only — they don't accept video.)
           </p>
         </div>
       </template>

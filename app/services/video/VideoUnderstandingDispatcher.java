@@ -14,15 +14,17 @@ import java.util.Map;
  * to splice into the outgoing user message (JCLAW-224).
  *
  * <p>Capability-gated, mirroring transcription and image captioning: a chat model that supports video
- * natively watches the clip directly. Only when it can't does a configured dedicated video model
+ * natively ({@code supportsVideo}, from the provider's {@code input_modalities}) watches the clip
+ * directly — we send the whole video as an OpenAI-compatible {@code video_url} part
+ * ({@link VideoUrlAdapter}). Only when it can't does a configured dedicated video model
  * ({@code video.provider}/{@code video.model} in Settings → Video Interpretation) step in —
  * interpreting the clip in a separate call ({@link VideoInterpretationRouter}/{@link
  * VideoInterpretationClient}) whose prose is spliced back as a text part, so even a text-only chat
- * model gains video understanding. On any failure (or no dedicated model) the video falls back to what
- * the chat model itself can do, in preference order:
+ * model gains video understanding. The interpretation strategy, in preference order:
  * <ol>
- *   <li>{@code supportsVideo} → {@link Strategy#NATIVE_VIDEO} ({@link QwenVideoAdapter}, a native
- *       Qwen video part);</li>
+ *   <li>{@code supportsVideo} + clip within the inline size cap → {@link Strategy#NATIVE_VIDEO}
+ *       ({@link VideoUrlAdapter}, the whole video as a {@code video_url}); an over-cap clip degrades
+ *       to frames-as-images (a video model also has vision);</li>
  *   <li>else {@code supportsVision} → {@link Strategy#MULTI_IMAGE} ({@link MultiImageVideoAdapter},
  *       sampled frames as still images), falling back to the text summary if frame extraction fails
  *       (no ffmpeg / corrupt video);</li>
@@ -30,9 +32,9 @@ import java.util.Map;
  *       summary).</li>
  * </ol>
  *
- * <p>Call this OUTSIDE any JPA transaction — NATIVE_VIDEO/MULTI_IMAGE sample frames (ffmpeg
- * subprocess) and TEXT_SUMMARY additionally captions each frame and runs a summarize call, all of
- * which must not hold a pooled DB connection. {@code VisionAudioAssembler.applyVideoForCapability}
+ * <p>Call this OUTSIDE any JPA transaction — NATIVE_VIDEO reads the file off disk, MULTI_IMAGE samples
+ * frames (ffmpeg subprocess), and TEXT_SUMMARY additionally captions each frame and runs a summarize
+ * call, none of which must hold a pooled DB connection. {@code VisionAudioAssembler.applyVideoForCapability}
  * is the orchestrator that runs this in its no-Tx phase and splices the result.
  */
 public final class VideoUnderstandingDispatcher {
@@ -52,21 +54,21 @@ public final class VideoUnderstandingDispatcher {
         var supportsVideo = AgentService.supportsVideo(agent);
         var supportsVision = AgentService.supportsVision(agent);
 
-        // Rule 1 — the chat model the user picked is video-capable, so IT interprets the video.
-        // Qwen-VL ingests our native frame-array; any other video-capable model (e.g. Gemini) can't
-        // (it would silently ignore the Qwen part), so it gets the sampled frames as images — robust,
-        // since every vision model reads image_url. A model tagged video but neither Qwen nor vision
-        // can take neither, so it falls through to the dedicated/captioning ladder.
+        // Rule 1 — the chat model the user picked is video-capable, so IT interprets the video. Send
+        // the whole clip as a video_url part (the format video-capable models accept; validated live),
+        // when it's small enough to inline. An over-cap clip would blow past provider body limits, so
+        // it degrades to frames-as-images — a video-capable model also has vision, so it reads them.
         if (supportsVideo) {
-            if (QwenVideoAdapter.isQwenVideoModel(agent.modelId)) return nativeVideo(video, agent);
-            if (supportsVision) return multiImageOrTextSummary(video, agent);
+            return VideoUrlAdapter.isWithinInlineCap(video)
+                    ? nativeVideo(video)
+                    : multiImageOrTextSummary(video, agent);
         }
 
         // Rule 2 — the chat model can't do video → use the dedicated video model from Settings →
         // Video Interpretation (video.provider/video.model) if one is configured. It interprets the
         // clip in a separate call and we splice the prose back as a text part, so even a text-only
-        // chat model gains video understanding. On any failure (missing config, frame sampling, HTTP)
-        // fall through to what the chat model itself can do.
+        // chat model gains video understanding. On any failure (oversize, config, HTTP) fall through
+        // to what the chat model itself can do.
         var dedicated = VideoInterpretationRouter.configuredService();
         if (dedicated.isPresent()) {
             try {
@@ -100,25 +102,22 @@ public final class VideoUnderstandingDispatcher {
     }
 
     /**
-     * The strategy the agent's chat model would use — NATIVE_VIDEO only when it's a Qwen-VL model
-     * (the sole family that ingests our inline video format), else {@code supportsVision} ⇒
-     * MULTI_IMAGE, else TEXT_SUMMARY. Exposed for the Settings read-only "which strategy would my
-     * model use" display (JCLAW-223) and the routing functional tests.
+     * The strategy the agent's chat model would use — {@code supportsVideo} ⇒ NATIVE_VIDEO (the whole
+     * clip as a {@code video_url}), else {@code supportsVision} ⇒ MULTI_IMAGE, else TEXT_SUMMARY.
+     * Exposed for the Settings read-only "which strategy would my model use" display (JCLAW-223) and
+     * the routing functional tests. Does not model the inline size cap (an over-cap clip on a
+     * video-capable model degrades to MULTI_IMAGE at dispatch time).
      */
     public static Strategy strategyFor(Agent agent) {
-        if (AgentService.supportsVideo(agent) && QwenVideoAdapter.isQwenVideoModel(agent.modelId)) {
-            return Strategy.NATIVE_VIDEO;
-        }
+        if (AgentService.supportsVideo(agent)) return Strategy.NATIVE_VIDEO;
         if (AgentService.supportsVision(agent)) return Strategy.MULTI_IMAGE;
         return Strategy.TEXT_SUMMARY;
     }
 
-    private static List<Map<String, Object>> nativeVideo(MessageAttachment video, Agent agent) {
-        var sampled = FrameSampler.sample(video);
-        var shape = QwenVideoAdapter.shapeForProvider(agent.modelProvider);
-        EventLogger.info(EVENT_CATEGORY, "native-video: %d frames, shape=%s, attachment=%s"
-                .formatted(sampled.frames().size(), shape, video.uuid));
-        return QwenVideoAdapter.contentParts(sampled.frames(), sampled.durationSeconds(), shape);
+    private static List<Map<String, Object>> nativeVideo(MessageAttachment video) {
+        EventLogger.info(EVENT_CATEGORY, "native-video: video_url whole clip (%d bytes), attachment=%s"
+                .formatted(video.sizeBytes, video.uuid));
+        return List.of(VideoUrlAdapter.contentPart(video));
     }
 
     private static List<Map<String, Object>> multiImageOrTextSummary(MessageAttachment video, Agent agent) {

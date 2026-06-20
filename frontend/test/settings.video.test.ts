@@ -93,21 +93,13 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     expect(c.text()).toContain('still images')
   })
 
-  it('shows Tier 1 when the default model is a Qwen-VL model with native video', async () => {
-    setupApi({ agentModelId: 'qwen3-vl', models: '[{"id":"qwen3-vl","name":"Qwen3 VL","contextWindow":262144,"maxTokens":65535,"supportsVision":true,"supportsVideo":true}]' })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
-    expect(c.text()).toContain('supports native video')
-  })
-
-  it('falls back to frames-as-images when the model claims video but is not Qwen (e.g. Gemini)', async () => {
-    // The bug case: kimi-k2.5 advertises supportsVideo but can't ingest our Qwen video part, so it
-    // must degrade to vision (frames as images), not native video.
+  it('shows Tier 1 when the default model supports video natively (any video-capable model)', async () => {
+    // Any model with supportsVideo (e.g. Gemini, here also kimi for the test) → native video_url.
+    // No Qwen-family special-casing anymore.
     setupApi({ models: '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535,"supportsVision":true,"supportsVideo":true}]' })
     const c = await mountSuspended(Settings)
     await flushPromises()
-    expect(c.text()).toContain('still images')
-    expect(c.text()).not.toContain('supports native video')
+    expect(c.text()).toContain('supports native video')
   })
 
   it('POSTs video.sampleFrames on change', async () => {
@@ -181,8 +173,8 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
         { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
       ],
       videoModels: [
-        { id: 'qwen/qwen3-vl-235b', name: 'Qwen3 VL 235B' },
-        { id: 'qwen/qwen3-vl-30b-instruct', name: 'Qwen3 VL 30B Instruct' },
+        { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+        { id: 'qwen/qwen3.5-flash', name: 'Qwen3.5 Flash' },
       ],
     })
     const c = await mountSuspended(Settings)
@@ -190,8 +182,8 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     const select = c.find('select[aria-label="Video model"]')
     expect(select.exists()).toBe(true)
     const opts = select.findAll('option').map(o => o.text())
-    expect(opts.join(' | ')).toContain('Qwen3 VL 235B')
-    expect(opts.join(' | ')).toContain('Qwen3 VL 30B Instruct')
+    expect(opts.join(' | ')).toContain('Gemini 2.5 Flash')
+    expect(opts.join(' | ')).toContain('Qwen3.5 Flash')
   })
 
   it('shows an empty-state hint when the provider has no video models', async () => {
@@ -204,7 +196,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     })
     const c = await mountSuspended(Settings)
     await flushPromises()
-    expect(c.text()).toContain('No Qwen-VL models found on openrouter')
+    expect(c.text()).toContain('No video-capable models found on openrouter')
   })
 
   it('enables the vLLM video radio only when vLLM is reachable', async () => {

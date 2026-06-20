@@ -133,20 +133,19 @@ public class ApiProvidersController extends Controller {
     }
 
     /**
-     * GET /api/providers/{name}/video-models — the provider's live catalog filtered to the models
-     * usable as a dedicated video interpreter, projected to {@code id} + display name. Backs the
-     * Settings → Video Interpretation model picker.
+     * GET /api/providers/{name}/video-models — the provider's live catalog filtered to video-capable
+     * models ({@code supportsVideo}, from the provider's {@code input_modalities}), projected to
+     * {@code id} + display name. Backs the Settings → Video Interpretation model picker.
      *
-     * <p>The filter is {@code supportsVideo} AND Qwen-VL specifically, not merely {@code supportsVideo}:
-     * {@link services.video.VideoInterpretationClient} sends the clip as a Qwen-native video part
-     * ({@link services.video.QwenVideoAdapter}), so a non-Qwen "video-capable" model (e.g. Gemini)
-     * would silently ignore it. Offering only Qwen-VL models prevents picking a backend the client
-     * can't actually drive. Lists models available from the provider rather than the operator's
+     * <p>{@link services.video.VideoInterpretationClient} sends the clip as a provider-agnostic
+     * {@code video_url} part, so any model that advertises the {@code video} input modality can drive
+     * it (Gemini, Qwen3.5/3.6, etc. — note that OpenRouter's Qwen-VL routes are image-only and are
+     * correctly excluded). Lists models available from the provider rather than the operator's
      * manually-configured set (a dedicated model needn't be pre-added — the client calls it by id).
      * Unlike {@link #discoverModels} the API key is optional, so a self-hosted vLLM with no auth works.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
-    @Operation(summary = "List a provider's Qwen-VL video models from its live API")
+    @Operation(summary = "List a provider's video-capable models from its live API")
     public static void videoModels(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
         if (baseUrl == null || baseUrl.isBlank()) {
@@ -160,7 +159,7 @@ public class ApiProvidersController extends Controller {
                 for (var m : models) {
                     if (!Boolean.TRUE.equals(m.get("supportsVideo"))) continue;
                     var id = String.valueOf(m.getOrDefault("id", ""));
-                    if (id.isBlank() || !services.video.QwenVideoAdapter.isQwenVideoModel(id)) continue;
+                    if (id.isBlank()) continue;
                     var displayName = String.valueOf(m.getOrDefault("name", ""));
                     refs.add(new ModelRef(id, displayName.isBlank() ? deriveName(id) : displayName));
                 }

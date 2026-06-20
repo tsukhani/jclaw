@@ -8,37 +8,34 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import services.AttachmentService;
 import services.ConfigService;
-import utils.GsonHolder;
 import utils.HttpFactories;
 import utils.HttpKeys;
 
 import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 
 /**
- * Dedicated video-interpretation backend: sends a sampled video as a single Qwen-native video
- * content part to a configured video model ({@code video.provider} + {@code video.model}) and
- * returns a prose interpretation. Mirrors {@link services.caption.OpenAiCompatibleImageCaptionClient}
- * but for whole-video understanding — one call for the whole clip rather than per-frame captioning.
+ * Dedicated video-interpretation backend: sends the whole video as an OpenAI-compatible {@code video_url}
+ * content part to a configured video model ({@code video.provider} + {@code video.model}) and returns a
+ * prose interpretation. Mirrors {@link services.caption.OpenAiCompatibleImageCaptionClient} but for
+ * whole-video understanding — one call for the whole clip.
  *
  * <p>The returned text is spliced into the chat model's message by {@link VideoUnderstandingDispatcher},
- * so any chat model — even text-only — gains video understanding. This is the transcription/captioning
- * pattern (a dedicated media model produces text the chat model consumes), and is "always on when
- * configured": once {@code video.provider}/{@code video.model} are set, every video routes here.
+ * so even a text-only chat model gains video understanding (the transcription/captioning pattern: a
+ * dedicated media model produces text the chat model consumes).
  *
  * <p>Configuration:
  * <ul>
  *   <li>{@code provider.{name}.baseUrl} — {@code /chat/completions} is appended (required).</li>
  *   <li>{@code provider.{name}.apiKey} — {@code Authorization: Bearer} when present; omitted when
  *       blank, so a self-hosted vLLM with no auth still works.</li>
- *   <li>{@code video.model} — a video-capable model id on the chosen provider (required; no default,
- *       like {@code ollama-local} captioning).</li>
+ *   <li>{@code video.model} — a video-capable model id on the chosen provider (required; no default).</li>
  * </ul>
  *
- * <p>The wire shape ({@code video} array + {@code sample_fps} for OpenRouter/DashScope, base64
- * {@code video/jpeg} for vLLM) is chosen from the provider name by {@link QwenVideoAdapter}.
+ * <p>The clip is inlined as base64 in the {@code video_url}, so it is bounded by the same size cap as
+ * the chat-native path ({@link VideoUrlAdapter#isWithinInlineCap}); an over-cap clip throws so the
+ * dispatcher falls back to frames on the chat model.
  */
 public class VideoInterpretationClient {
 
@@ -66,24 +63,26 @@ public class VideoInterpretationClient {
     }
 
     /**
-     * Sample the video, send it as a native Qwen video part to {@code video.model}, and return the
-     * model's prose interpretation. Throws {@link VideoAdapterException} (or
-     * {@link FrameSampler.FrameSamplingException}) on any failure so the dispatcher can fall back to
-     * the chat-model-capability path.
+     * Send the whole video as a {@code video_url} part to {@code video.model} and return the model's
+     * prose interpretation. Throws {@link VideoAdapterException} on any failure (including an over-cap
+     * clip) so the dispatcher can fall back to the chat-model path.
      */
     public String interpret(MessageAttachment video) {
-        var sampled = FrameSampler.sample(video); // may throw FrameSamplingException (ffmpeg layer)
-        return interpret(sampled.frames(), sampled.durationSeconds());
+        if (!VideoUrlAdapter.isWithinInlineCap(video)) {
+            throw new VideoAdapterException(
+                    "video too large to send to the dedicated model (%d bytes; cap %d) — set video.maxInlineMb higher or use a smaller clip"
+                            .formatted(video.sizeBytes, VideoUrlAdapter.maxInlineBytes()));
+        }
+        return interpretDataUrl(AttachmentService.readAsDataUrl(video));
     }
 
     /**
-     * HTTP core — interpret pre-sampled frames. Reads {@code provider.{name}.*} + {@code video.model}
-     * from config, wraps the frames as a Qwen video part, POSTs to {@code /chat/completions}, and
-     * returns the prose. Split out from {@link #interpret(MessageAttachment)} so it's unit-testable
-     * without ffmpeg or an on-disk attachment (mirrors {@code captionDataUrl}). Throws
-     * {@link VideoAdapterException} on any failure.
+     * HTTP core — interpret a video given its {@code data:} URL. Reads {@code provider.{name}.*} +
+     * {@code video.model} from config, wraps the URL as a {@code video_url} part, POSTs to
+     * {@code /chat/completions}, and returns the prose. Split out so it's unit-testable without an
+     * on-disk attachment (mirrors {@code captionDataUrl}). Throws {@link VideoAdapterException} on failure.
      */
-    public String interpret(List<FrameSampler.Frame> frames, double durationSeconds) {
+    public String interpretDataUrl(String videoDataUrl) {
         var baseUrl = ConfigService.get("provider." + providerName + ".baseUrl");
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new VideoAdapterException("provider." + providerName + ".baseUrl is not configured");
@@ -93,12 +92,9 @@ public class VideoInterpretationClient {
             throw new VideoAdapterException("no video model configured — set video.model");
         }
 
-        var shape = QwenVideoAdapter.shapeForProvider(providerName);
-        var videoPart = QwenVideoAdapter.contentParts(frames, durationSeconds, shape).get(0);
-
         var builder = new Request.Builder()
                 .url(trimTrailingSlash(baseUrl) + "/chat/completions")
-                .post(RequestBody.create(buildRequestJson(model, videoPart), JSON));
+                .post(RequestBody.create(buildRequestJson(model, videoDataUrl), JSON));
         var apiKey = ConfigService.get("provider." + providerName + ".apiKey");
         if (apiKey != null && !apiKey.isBlank()) {
             builder.header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey);
@@ -117,15 +113,21 @@ public class VideoInterpretationClient {
         }
     }
 
-    /** One user message: a text instruction followed by the Qwen video content part. */
-    private String buildRequestJson(String model, Map<String, Object> videoPart) {
+    /** One user message: a text instruction followed by a {@code video_url} content part. */
+    private String buildRequestJson(String model, String videoDataUrl) {
         var textPart = new JsonObject();
         textPart.addProperty("type", "text");
         textPart.addProperty("text", INSTRUCTION);
 
+        var urlObj = new JsonObject();
+        urlObj.addProperty("url", videoDataUrl);
+        var videoPart = new JsonObject();
+        videoPart.addProperty("type", "video_url");
+        videoPart.add("video_url", urlObj);
+
         var content = new JsonArray();
         content.add(textPart);
-        content.add(GsonHolder.INSTANCE.toJsonTree(videoPart));
+        content.add(videoPart);
 
         var message = new JsonObject();
         message.addProperty("role", "user");
