@@ -48,7 +48,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion|help>
+Usage: jclaw.sh [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -102,6 +102,9 @@ Commands:
   completion Print a shell completion script (completion <bash|zsh>) so
             \`jclaw <TAB>\` completes subcommands. The installer wires this up;
             run it by hand for dev clones or after an upgrade.
+  uninstall Remove an installed JClaw: undo completion wiring, drop the \`jclaw\`
+            shim, and delete the install dir (~/.jclaw). Warns first, then
+            confirms. Not applicable to a developer git clone.
   help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
@@ -191,7 +194,7 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: jclaw.sh [options] <https|no-https|reset|start|stop|restart|status|logs|completion|help>
+Usage: jclaw.sh [options] <https|no-https|reset|start|stop|restart|status|logs|completion|uninstall|help>
 
 Commands:
   https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
@@ -210,6 +213,8 @@ Commands:
   logs      Tail the application log
   completion Print a shell completion script (completion <bash|zsh>) so
             \`jclaw <TAB>\` completes subcommands. The installer wires this up.
+  uninstall Remove JClaw: undo completion wiring, drop the \`jclaw\` shim, and
+            delete the install dir (~/.jclaw). Warns first, then confirms.
   help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
@@ -245,7 +250,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
@@ -275,8 +280,26 @@ usage_for() {
         dist)     usage_dist     ;;
         bundle)   usage_bundle   ;;
         completion) usage_completion ;;
+        uninstall)  usage_uninstall  ;;
         *)        usage          ;;
     esac
+}
+
+usage_uninstall() {
+    cat <<EOF
+Usage: jclaw.sh uninstall [--yes]
+
+Remove this installed JClaw: stop it if running, undo the shell-completion
+wiring (the generated scripts and the managed block in your shell rc), remove
+the \`jclaw\` command shim, and delete the install directory (e.g. ~/.jclaw,
+including the managed JRE). The install directory is resolved from where this
+script lives, never from your CWD.
+
+Prompts for confirmation after printing exactly what it will remove. Pass --yes
+(or -y) to skip the prompt for scripted removal. Not available on a developer
+git clone — there's nothing installed to remove (use \`completion uninstall\` to
+undo just the completion wiring).
+EOF
 }
 
 usage_completion() {
@@ -890,6 +913,7 @@ BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
 COMMAND=""
 COMPLETION_SHELL=""   # shell name for the `completion` subcommand (bash|zsh)
+UNINSTALL_YES=""      # `uninstall` confirmation bypass (--yes / -y)
 LT_CONCURRENCY="10"
 LT_TURNS="5"
 LT_TTFT_MS="100"
@@ -990,8 +1014,13 @@ while [[ $# -gt 0 ]]; do
             HTTPS_INSTALL_CA=true
             shift
             ;;
-        https|no-https|secret|reset|start|stop|restart|status|logs)
+        https|no-https|secret|reset|start|stop|restart|status|logs|uninstall)
             COMMAND="$1"
+            shift
+            ;;
+        --yes|-y)
+            # Skip the uninstall confirmation prompt (for scripted removal).
+            UNINSTALL_YES=true
             shift
             ;;
         completion)
@@ -3107,6 +3136,7 @@ do_completion() {
     fi
     pairs+=(
         completion "Print a shell completion script"
+        uninstall  "Remove JClaw and undo completion"
         help       "Show usage"
     )
 
@@ -3117,11 +3147,12 @@ do_completion() {
     is_developer_clone && opts="--dev --backend-port --frontend-port --help"
 
     case "$COMPLETION_SHELL" in
-        bash)    _completion_bash "$names" "$opts" ;;
-        zsh)     _completion_zsh "${pairs[@]}" ;;
-        install) _completion_install "$names" "$opts" "${pairs[@]}" ;;
-        "")      echo "Usage: jclaw.sh completion <bash|zsh|install>" >&2; exit 1 ;;
-        *)       echo "Error: unknown target '$COMPLETION_SHELL' (expected bash, zsh, or install)." >&2; exit 1 ;;
+        bash)      _completion_bash "$names" "$opts" ;;
+        zsh)       _completion_zsh "${pairs[@]}" ;;
+        install)   _completion_install "$names" "$opts" "${pairs[@]}" ;;
+        uninstall) _completion_uninstall ;;
+        "")        echo "Usage: jclaw.sh completion <bash|zsh|install|uninstall>" >&2; exit 1 ;;
+        *)         echo "Error: unknown target '$COMPLETION_SHELL' (expected bash, zsh, install, or uninstall)." >&2; exit 1 ;;
     esac
 }
 
@@ -3249,6 +3280,107 @@ _rc_wire() {
     return 0
 }
 
+# Reverse of `completion install`: delete the generated scripts and strip the
+# managed block from both shell rc files. Best-effort; always returns 0.
+_completion_uninstall() {
+    local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}" f
+    for f in "$data_dir/bash-completion/completions/jclaw" "$data_dir/zsh/site-functions/_jclaw"; do
+        [[ -e "$f" ]] && rm -f "$f" && echo "    removed $f"
+    done
+    _rc_unwire "$HOME/.bashrc"
+    _rc_unwire "$HOME/.zshrc"
+    return 0
+}
+
+# Strip the sentinel-bounded managed block from an rc file, if present. Rewrites
+# in place (preserving the file's inode/permissions). Always returns 0.
+_rc_unwire() {
+    local rc="$1" tmp
+    [[ -f "$rc" ]] || return 0
+    grep -q 'jclaw completion (managed)' "$rc" 2>/dev/null || return 0
+    tmp="$(mktemp 2>/dev/null)" || return 0
+    if sed '/# >>> jclaw completion (managed) >>>/,/# <<< jclaw completion (managed) <<</d' "$rc" >"$tmp" 2>/dev/null; then
+        cat "$tmp" >"$rc" && echo "    removed completion block from $rc"
+    fi
+    rm -f "$tmp"
+    return 0
+}
+
+# Remove an installed JClaw entirely. Refuses on a dev clone. Resolves the
+# install root from SCRIPT_DIR (never CWD), guards against unsafe targets, prints
+# exactly what it will do, confirms (unless --yes; no-TTY without --yes refuses),
+# then: stop → undo completion → remove shim → delete the install dir LAST (so
+# this running script's already-open fd keeps it readable to EOF).
+do_uninstall() {
+    if is_developer_clone; then
+        echo "Refusing to uninstall: this is a developer git clone, not an installed copy." >&2
+        echo "Delete the clone manually; to undo completion wiring run: ./jclaw.sh completion uninstall" >&2
+        exit 1
+    fi
+
+    local root shim
+    root="$(cd "$SCRIPT_DIR/.." && pwd)"
+    case "$root" in
+        ""|"/"|"$HOME") echo "Refusing: install root resolved to '${root:-empty}' (unsafe)." >&2; exit 1 ;;
+    esac
+    if [[ ! -f "$root/jclaw/jclaw.sh" ]]; then
+        echo "Refusing: '$root' does not look like a JClaw install (no jclaw/jclaw.sh)." >&2
+        exit 1
+    fi
+
+    # The shell shim, only if it points at THIS install (don't touch a stranger's `jclaw`).
+    shim="$(command -v jclaw 2>/dev/null || true)"
+    [[ -z "$shim" && -f "$HOME/.local/bin/jclaw" ]] && shim="$HOME/.local/bin/jclaw"
+    if [[ -n "$shim" ]] && ! grep -qF "$root/jclaw/jclaw.sh" "$shim" 2>/dev/null; then
+        shim=""
+    fi
+
+    echo "This will permanently:"
+    echo "  • stop JClaw if it is running"
+    echo "  • remove shell-completion scripts and the managed block from ~/.bashrc and ~/.zshrc"
+    [[ -n "$shim" ]] && echo "  • remove the jclaw command:  $shim"
+    echo "  • delete the install directory (including the bundled JRE):"
+    echo "        $root"
+    echo
+
+    if [[ -z "$UNINSTALL_YES" ]]; then
+        # Try to actually open the terminal — a bare `[ -r /dev/tty ]` passes on the
+        # device node even when there's no controlling tty (CI, `docker run` without -t).
+        if { : >/dev/tty; } 2>/dev/null; then
+            printf 'Proceed with uninstall? [y/N] ' >/dev/tty
+            local ans=''
+            read -r ans </dev/tty 2>/dev/null || ans=''
+            case "$ans" in
+                [Yy]|[Yy][Ee][Ss]) ;;
+                *) echo "Aborted — nothing was removed."; exit 0 ;;
+            esac
+        else
+            echo "Refusing to uninstall without confirmation (no terminal). Re-run with --yes." >&2
+            exit 1
+        fi
+    fi
+
+    echo
+    echo "Stopping JClaw (if running)…"
+    do_stop_prod || true
+
+    echo "Removing shell completion…"
+    _completion_uninstall
+
+    if [[ -n "$shim" ]]; then
+        rm -f "$shim" && echo "    removed $shim"
+    fi
+
+    cd / 2>/dev/null || true   # step out of the tree before deleting it
+    if rm -rf "$root"; then
+        echo "    removed $root"
+    else
+        echo "    WARNING: could not fully remove $root — delete it by hand." >&2
+    fi
+    echo
+    echo "JClaw has been uninstalled."
+}
+
 # ─── Execute ───
 
 case "$COMMAND" in
@@ -3311,6 +3443,9 @@ case "$COMMAND" in
         ;;
     completion)
         do_completion
+        ;;
+    uninstall)
+        do_uninstall
         ;;
     loadtest)
         do_loadtest

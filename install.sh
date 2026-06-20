@@ -147,7 +147,10 @@ java_ok() {
 # runtime is the point of a one-liner — unless JCLAW_NO_JRE is set.
 want_jre() {
     [ -n "$JCLAW_INSTALL_JRE" ] && return 0
-    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    # Try to actually open the terminal — `[ -r /dev/tty ]` passes on the device
+    # node even with no controlling tty (CI, `docker run` without -t), which would
+    # then make the prompt's redirect fail under `set -e`.
+    if { : >/dev/tty; } 2>/dev/null; then
         printf '\n%s%s%s\n' "$YELLOW" "$REASON" "$RESET" >/dev/tty
         printf 'Download a self-contained Zulu JRE %s (~50 MB) into %s? [Y/n] ' \
             "$MIN_JAVA" "$JRE_DIR" >/dev/tty
@@ -328,6 +331,8 @@ printf '\n%s✓ JClaw is installed.%s\n\n' "$BOLD$EMERALD" "$RESET"
 printf '  Manage     %sjclaw status%s · %sjclaw stop%s · %sjclaw restart%s\n' \
     "$CYAN" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET"
 printf '  Installed  %s%s\n' "$DIM" "$APP_DIR$RESET"
+printf '  Uninstall  %sjclaw uninstall%s %s(removes %s, undoes completion)%s\n' \
+    "$CYAN" "$RESET" "$DIM" "$JCLAW_HOME" "$RESET"
 
 # Nudge if the shim dir isn't on PATH yet.
 case ":$PATH:" in

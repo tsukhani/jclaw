@@ -291,6 +291,8 @@ if ($started) {
     Write-Host '  Open       ' -NoNewline; Write-Host "http://localhost:$Port" -ForegroundColor Cyan
 }
 Write-Host "  Installed  $AppDir" -ForegroundColor DarkGray
+Write-Host '  Uninstall  ' -NoNewline; Write-Host './jclaw.sh uninstall' -ForegroundColor Cyan -NoNewline
+Write-Host "  (run via your shell; removes $JclawHome, undoes completion)" -ForegroundColor DarkGray
 if (-not $started) {
     Write-Host ''
     if ($gitBash) {
