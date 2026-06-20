@@ -77,7 +77,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     await flushPromises()
 
     expect(c.text()).toContain('Video Interpretation')
-    const input = c.find<HTMLInputElement>('input[aria-label="Frames sampled per video"]')
+    const input = c.find<HTMLInputElement>('input[aria-label="Max frames per video"]')
     expect(input.exists()).toBe(true)
     expect(input.element.value).toBe('8')
     // kimi-k2.5 declares neither vision nor video → Tier 3 (text summary).
@@ -116,7 +116,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     const c = await mountSuspended(Settings)
     await flushPromises()
 
-    const input = c.find('input[aria-label="Frames sampled per video"]')
+    const input = c.find('input[aria-label="Max frames per video"]')
     await input.setValue('16')
     await input.trigger('change')
     await flushPromises()
@@ -126,13 +126,45 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     expect(hit!.value).toBe('16')
   })
 
+  it('renders the seconds-per-frame input and POSTs video.secondsPerFrame on change', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ capturePost: b => captured.push(b), extraEntries: [{ key: 'video.secondsPerFrame', value: '10' }] })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+
+    const input = c.find<HTMLInputElement>('input[aria-label="Seconds per frame"]')
+    expect(input.exists()).toBe(true)
+    expect(input.element.value).toBe('10')
+
+    await input.setValue('2')
+    await input.trigger('change')
+    await flushPromises()
+    const hit = captured.find(b => b.key === 'video.secondsPerFrame')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('2')
+  })
+
+  it('clamps seconds-per-frame to the 60 ceiling', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ capturePost: b => captured.push(b) })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+
+    const input = c.find('input[aria-label="Seconds per frame"]')
+    await input.setValue('999')
+    await input.trigger('change')
+    await flushPromises()
+    const hit = captured.find(b => b.key === 'video.secondsPerFrame')
+    expect(hit!.value).toBe('60')
+  })
+
   it('clamps an out-of-range value to the 32 ceiling', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ capturePost: b => captured.push(b), videoFrames: '8' })
     const c = await mountSuspended(Settings)
     await flushPromises()
 
-    const input = c.find('input[aria-label="Frames sampled per video"]')
+    const input = c.find('input[aria-label="Max frames per video"]')
     await input.setValue('99')
     await input.trigger('change')
     await flushPromises()

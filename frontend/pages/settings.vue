@@ -604,6 +604,30 @@ async function saveVideoSampleFrames(value: string | number) {
   }
   finally { saving.value = false }
 }
+// Sampling density: one frame per N seconds of video (FrameSampler.video.secondsPerFrame).
+// Lower = denser. The actual frame count = clamp(round(duration / secondsPerFrame), 2, sampleFrames),
+// so this is what densifies SHORT clips (which otherwise floor at 2 frames) while sampleFrames caps
+// long ones. Backend defaults/clamps: 10, [1, 60].
+const VIDEO_SPF_DEFAULT = 10
+const VIDEO_SPF_MIN = 1
+const VIDEO_SPF_MAX = 60
+const videoSecondsPerFrame = computed(() => {
+  const raw = configData.value?.entries?.find(e => e.key === 'video.secondsPerFrame')?.value
+  if (!raw) return VIDEO_SPF_DEFAULT
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n)) return VIDEO_SPF_DEFAULT
+  return Math.max(VIDEO_SPF_MIN, Math.min(VIDEO_SPF_MAX, n))
+})
+async function saveVideoSecondsPerFrame(value: string | number) {
+  saving.value = true
+  try {
+    const n = Math.max(VIDEO_SPF_MIN,
+      Math.min(VIDEO_SPF_MAX, Number.parseInt(String(value), 10) || VIDEO_SPF_DEFAULT))
+    await $fetch('/api/config', { method: 'POST', body: { key: 'video.secondsPerFrame', value: String(n) } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
 // The default model = the main agent's model (mirrors the Subagents section's resolution).
 const defaultVideoModel = computed<ProviderModelDef | null>(() => {
   const a = mainAgent.value
@@ -4231,16 +4255,44 @@ async function deleteLoggerLevel(logger: string) {
         </div>
       </template>
 
-      <!-- Frames sampled per video — applies to the dedicated model and the fallback alike. -->
+      <!-- Sampling controls — apply to the dedicated model and the chat-model fallback alike.
+           Effective frame count = clamp(round(duration / secondsPerFrame), 2, framesCeiling). -->
+      <label
+        for="video-seconds-per-frame"
+        class="bg-surface-elevated border border-border px-4 py-3 flex items-center gap-3"
+      >
+        <span class="flex-1">
+          <span class="block text-sm font-medium text-fg-strong">Seconds per frame</span>
+          <span class="block text-[11px] text-fg-muted mt-0.5">
+            Sampling density — grab one frame per this many seconds of video (1–60). Lower means more
+            frames, finer detail, higher cost. This is what densifies <span class="text-fg-muted">short</span>
+            clips, which otherwise floor at 2 frames; the ceiling below caps long ones.
+          </span>
+        </span>
+        <input
+          id="video-seconds-per-frame"
+          type="number"
+          :min="1"
+          :max="60"
+          :value="videoSecondsPerFrame"
+          :disabled="saving"
+          class="w-20 px-2 py-1 text-sm text-right bg-surface border border-border text-fg-primary"
+          aria-label="Seconds per frame"
+          @change="saveVideoSecondsPerFrame(($event.target as HTMLInputElement).value)"
+        >
+      </label>
+
+      <!-- Hard ceiling on total frames, regardless of duration. -->
       <label
         for="video-sample-frames"
         class="bg-surface-elevated border border-border px-4 py-3 flex items-center gap-3"
       >
         <span class="flex-1">
-          <span class="block text-sm font-medium text-fg-strong">Frames sampled per video</span>
+          <span class="block text-sm font-medium text-fg-strong">Max frames per video</span>
           <span class="block text-[11px] text-fg-muted mt-0.5">
-            How many frames to extract from each video (2–32). More frames mean finer detail but higher
-            cost. Long videos are sampled at this density up to this ceiling.
+            Hard ceiling on how many frames are ever extracted from one video (2–32), regardless of
+            length. A long clip is sampled at the density above up to this cap; raising it lets long
+            videos be sampled more finely.
           </span>
         </span>
         <input
@@ -4251,7 +4303,7 @@ async function deleteLoggerLevel(logger: string) {
           :value="videoSampleFrames"
           :disabled="saving"
           class="w-20 px-2 py-1 text-sm text-right bg-surface border border-border text-fg-primary"
-          aria-label="Frames sampled per video"
+          aria-label="Max frames per video"
           @change="saveVideoSampleFrames(($event.target as HTMLInputElement).value)"
         >
       </label>
