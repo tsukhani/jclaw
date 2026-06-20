@@ -898,21 +898,22 @@ public class AgentRunner {
         // so conversation overrides take effect on the wire. Failover (line 706)
         // and tool-loop continuations (line 781) use the same effective id.
         var effectiveModelIdForCall = ModelResolver.effectiveModelId(agent, conversation);
-        var accumulator = streamFirstRoundWithRetry(primary, effectiveModelIdForCall, messages, tools,
-                cb, maxTokens, thinkingMode, channelType, isCancelled, agent);
-        if (accumulator == null) return;
+        // Round-1 stream, with a transient-5xx retry and (JCLAW) an audio-format-rejection →
+        // Whisper-transcript re-stream. When the audio fallback fires it rewrites the message to the
+        // transcript and returns it, so the tool-call continuation loop below reuses the rewritten
+        // (no-longer-audio) messages rather than re-sending the rejected audio.
+        var round1 = streamRound1WithAudioFallback(primary, effectiveModelIdForCall, messages, tools, cb,
+                maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, supportsAudioForStream);
+        if (round1 == null) return; // cancelled mid-stream
+        var accumulator = round1.accumulator();
+        messages = round1.messages();
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
-        // JCLAW-165: fire AUDIO_PASSTHROUGH_OUTCOME for the round-1 LLM call
-        // when the request carried audio. Streaming has no retry (you can't
-        // un-send streamed tokens) so the outcome here is binary — accepted
-        // or error. transcript_awaited is true when the rewrite already ran
-        // (text-only model), false when the audio rode native (passthrough
-        // happy path on a supportsAudio model).
-        boolean hasAudioForStream = !prepared.audioBearers().isEmpty();
-        if (!logStreamingAudioOutcomeAndCheckOk(accumulator, hasAudioForStream, agent, conversation, primary,
-                supportsAudioForStream, cb)) {
+        // The AUDIO_PASSTHROUGH_OUTCOME log already fired inside the helper; here we only surface a
+        // terminal round-1 error to the caller (a streamed error can't be un-sent, so this ends the turn).
+        if (accumulator.error != null) {
+            cb.onError().accept(accumulator.error);
             return;
         }
 
@@ -1050,6 +1051,65 @@ public class AgentRunner {
         return accumulator;
     }
 
+    /** Round-1 streaming outcome: the accumulator plus the messages actually sent (transcript-rewritten
+     *  when the audio fallback fired, so the tool-loop continuation reuses them). */
+    private record StreamRound1(LlmProvider.StreamAccumulator accumulator, List<ChatMessage> messages) {}
+
+    /**
+     * Round-1 stream with the 5xx retry ({@link #streamFirstRoundWithRetry}) AND a JCLAW-165 audio
+     * fallback, owning the {@code AUDIO_PASSTHROUGH_OUTCOME} log for the round.
+     *
+     * <p>When a {@code supportsAudio} model rejects the audio FORMAT (e.g. Xiaomi accepts only
+     * mp3/flac/m4a/wav/ogg) <b>before any tokens stream</b>, the passthrough request is recoverable:
+     * nothing has been emitted, so we await the Whisper transcript (the future was registered at send
+     * time), rewrite audio→text via {@link VisionAudioAssembler#applyTranscriptsForCapability}, and
+     * re-stream once. This is the streaming analogue of the {@code ToolCallLoopRunner} sync-path retry,
+     * which interactive voice notes never reached — they just errored. The {@code content.isEmpty()}
+     * guard is what makes the re-stream safe (a partially-streamed reply can't be un-sent). When no
+     * usable transcript results (Whisper failed/timed out) the original 4xx is surfaced unchanged.
+     */
+    @SuppressWarnings("java:S107") // mirrors streamFirstRoundWithRetry's call surface + audio context
+    private static StreamRound1 streamRound1WithAudioFallback(
+            LlmProvider primary, String effectiveModelId, List<ChatMessage> messages, List<ToolDef> tools,
+            StreamingCallbacks cb, Integer maxTokens, String thinkingMode, String channelType,
+            AtomicBoolean isCancelled, Agent agent, Conversation conversation, PreparedPrologue prepared,
+            boolean supportsAudio) throws InterruptedException {
+        var acc = streamFirstRoundWithRetry(primary, effectiveModelId, messages, tools, cb, maxTokens,
+                thinkingMode, channelType, isCancelled, agent);
+        if (acc == null) return null;
+
+        if (prepared.audioBearers().isEmpty()) return new StreamRound1(acc, messages); // no audio → no log
+
+        // Audio rode native (passthrough) and the model rejected the FORMAT before any token streamed:
+        // await the transcript and re-stream as text.
+        if (acc.error != null && supportsAudio && acc.content.isEmpty()
+                && AudioRetryStrategy.isAudioFormatRejection(acc.error)) {
+            var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(messages, prepared.audioBearers(), false);
+            if (!AudioRetryStrategy.anyTranscriptAvailable(prepared.audioBearers())) {
+                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
+                        "no_transcript_after_rejection", true);
+                return new StreamRound1(acc, messages); // surface the original 4xx — nothing to retry with
+            }
+            EventLogger.warn("llm", agent.name, channelType,
+                    "Provider %s rejected the audio format; retrying with a Whisper transcript"
+                            .formatted(primary.config().name()));
+            var retry = streamFirstRoundWithRetry(primary, effectiveModelId, rewritten, tools, cb, maxTokens,
+                    thinkingMode, channelType, isCancelled, agent);
+            if (retry == null) return null;
+            AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
+                    retry.error == null ? "downgraded" : "error",
+                    retry.error == null ? null : AudioRetryStrategy.shortErrorTag(retry.error), true);
+            return new StreamRound1(retry, rewritten);
+        }
+
+        // No fallback fired — log the plain passthrough outcome (accepted / error). transcript_awaited
+        // is false for a happy native passthrough, true when the rewrite already ran (text-only model).
+        AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
+                acc.error == null ? "accepted" : "error",
+                acc.error == null ? null : AudioRetryStrategy.shortErrorTag(acc.error), !supportsAudio);
+        return new StreamRound1(acc, messages);
+    }
+
     /**
      * Outcome of {@link #runPostAccumulatorToolLoop}: the (possibly tool-loop-extended)
      * content, plus the round-1 reply-truncation flag that rides through to the persist
@@ -1136,31 +1196,6 @@ public class AgentRunner {
         utils.LatencyStats.record(channelType, "persist",
                 (System.nanoTime() - persistStartNs) / 1_000_000L);
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
-    }
-
-    /**
-     * JCLAW-165: fire the AUDIO_PASSTHROUGH_OUTCOME log for the round-1
-     * streaming call. Returns {@code false} (with onError fired) when
-     * the accumulator carried an error; {@code true} otherwise.
-     */
-    private static boolean logStreamingAudioOutcomeAndCheckOk(LlmProvider.StreamAccumulator accumulator,
-                                                              boolean hasAudioForStream, Agent agent,
-                                                              Conversation conversation, LlmProvider primary,
-                                                              boolean supportsAudioForStream,
-                                                              StreamingCallbacks cb) {
-        if (accumulator.error != null) {
-            if (hasAudioForStream) {
-                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
-                        AudioRetryStrategy.shortErrorTag(accumulator.error), !supportsAudioForStream);
-            }
-            cb.onError().accept(accumulator.error);
-            return false;
-        }
-        if (hasAudioForStream) {
-            AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "accepted",
-                    null, !supportsAudioForStream);
-        }
-        return true;
     }
 
     /**

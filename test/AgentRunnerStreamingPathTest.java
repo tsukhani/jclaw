@@ -2,6 +2,7 @@ import agents.AgentRunner;
 import models.Agent;
 import models.Conversation;
 import models.Message;
+import models.MessageAttachment;
 import models.MessageRole;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,11 +13,14 @@ import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
 
+import java.nio.file.Files;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -211,6 +215,45 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 "persisted assistant content must match the streamed payload");
     }
 
+    // ─── Audio-format-rejection → transcript re-stream recovery ─────────
+
+    @Test
+    void runStreamingRecoversFromAudioFormatRejectionViaTranscript() throws Exception {
+        // A supportsAudio model rejects the audio FORMAT (Xiaomi: mp3/flac/m4a/wav/ogg only) on the
+        // round-1 passthrough, BEFORE any tokens stream. streamRound1WithAudioFallback must await the
+        // Whisper transcript, rewrite audio→text, and re-stream — recovering the turn instead of
+        // surfacing the 400 as onError (the old behaviour, which interactive voice notes always hit).
+        var requestBodies = new CopyOnWriteArrayList<String>();
+        var calls = new AtomicInteger(0);
+        startAudioRejectThenSucceedServer(requestBodies, calls);
+        configureAudioProvider();
+
+        var agent = persistAgent("stream-audio-retry", "test-provider", "test-model");
+        var convo = persistConversation(agent, "web", "u-audio-retry");
+        seedAudioMessage(agent, convo, "The spoken words were: meet me at noon.");
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var harness = streamAndAwait(agent, convo, "and then what?");
+        assertTrue(harness.terminated.await(60, TimeUnit.SECONDS),
+                "runStreaming must terminate within 60s on the audio-retry path");
+
+        assertNull(harness.error.get(),
+                "audio-format rejection must be recovered, not surfaced as onError; got: "
+                        + (harness.error.get() != null ? harness.error.get().getMessage() : "(none)"));
+        assertNotNull(harness.completed.get(), "the transcript re-stream must reach onComplete");
+        assertEquals("Recovered reply", harness.completed.get());
+        assertEquals(2, calls.get(),
+                "exactly two LLM calls: the rejected passthrough + the transcript retry");
+        assertTrue(requestBodies.get(0).contains("input_audio"),
+                "round 1 must carry native audio: " + requestBodies.get(0));
+        assertTrue(requestBodies.get(1).contains("meet me at noon"),
+                "round 2 must carry the Whisper transcript text: " + requestBodies.get(1));
+        assertFalse(requestBodies.get(1).contains("input_audio"),
+                "round 2 must NOT re-send native audio");
+    }
+
     // ─── Truncated reply (finish_reason=length, no tool calls) ──────────
 
     @Test
@@ -367,5 +410,61 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         ConfigService.set("provider.test-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
+    }
+
+    private void configureAudioProvider() {
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.test-provider.apiKey", "sk-test");
+        ConfigService.set("provider.test-provider.models",
+                "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096,\"supportsAudio\":true}]");
+        llm.ProviderRegistry.refresh();
+    }
+
+    /** First /chat/completions → 400 audio-format rejection; subsequent → 200 SSE success. Records bodies. */
+    private void startAudioRejectThenSucceedServer(List<String> bodies, AtomicInteger calls) throws Exception {
+        llmServer = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.createContext("/chat/completions", exchange -> {
+            bodies.add(new String(exchange.getRequestBody().readAllBytes()));
+            if (calls.incrementAndGet() == 1) {
+                var err = "{\"error\":{\"message\":\"invalid audio format, only mp3/flac/m4a/wav/ogg are supported\"}}";
+                var bytes = err.getBytes();
+                exchange.sendResponseHeaders(400, bytes.length);
+                try (var os = exchange.getResponseBody()) { os.write(bytes); }
+            } else {
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                var sse = "data: {\"id\":\"r\",\"object\":\"chat.completion.chunk\",\"model\":\"x\","
+                        + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Recovered reply\"},\"finish_reason\":\"stop\"}]}\n\n"
+                        + "data: [DONE]\n\n";
+                var bytes = sse.getBytes();
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (var os = exchange.getResponseBody()) { os.write(bytes); }
+            }
+        });
+        llmServer.start();
+        port = llmServer.getAddress().getPort();
+    }
+
+    /** Persist a prior USER turn carrying a voice note (staged file + a known transcript). */
+    private void seedAudioMessage(Agent agent, Conversation convo, String transcript) throws Exception {
+        var uuid = UUID.randomUUID().toString();
+        var dir = services.AgentService.acquireWorkspacePath(agent.name, "attachments/" + convo.id);
+        Files.createDirectories(dir);
+        Files.write(dir.resolve(uuid + ".mp3"), new byte[]{0, 1, 2, 3, 4, 5, 6, 7});
+        var msg = new Message();
+        msg.conversation = convo;
+        msg.role = MessageRole.USER.value;
+        msg.content = "(voice note)";
+        msg.save();
+        var att = new MessageAttachment();
+        att.message = msg;
+        att.uuid = uuid;
+        att.kind = MessageAttachment.KIND_AUDIO;
+        att.mimeType = "audio/mp3";
+        att.originalFilename = "voice.mp3";
+        att.storagePath = agent.name + "/attachments/" + convo.id + "/" + uuid + ".mp3";
+        att.sizeBytes = 8;
+        att.transcript = transcript;
+        att.save();
     }
 }
