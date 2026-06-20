@@ -4,6 +4,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRONTEND_PID_FILE="frontend.pid"
 
+# How to refer to this script in help/usage text: the global `jclaw` shim when
+# it's on PATH and resolves to THIS install (the shim `exec`s jclaw.sh, so $0
+# can't tell a shim call from a direct ./jclaw.sh call — we detect the shim
+# instead), otherwise ./jclaw.sh. Computed once; referenced as ${INVOKE} in every
+# user-facing command example below.
+INVOKE='./jclaw.sh'
+_invoke_shim="$(command -v jclaw 2>/dev/null || true)"
+if [[ -n "$_invoke_shim" ]] && grep -qF "$SCRIPT_DIR/jclaw.sh" "$_invoke_shim" 2>/dev/null; then
+    INVOKE='jclaw'
+fi
+unset _invoke_shim
+
 # Bundle-mode play resolution. Runs unconditionally on every dispatch
 # (including stop, secret, status, logs) so any code path that shells
 # out to `play` finds the bundled launcher next to this script before
@@ -48,7 +60,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -100,7 +112,7 @@ Commands:
             with only a Java 25 JRE (no Gradle/Play install). Same artifact the
             Dockerfile ships inside the container image.
   completion Print a shell completion script (completion <bash|zsh>) so
-            \`jclaw <TAB>\` completes subcommands. The installer wires this up;
+            \`${INVOKE} <TAB>\` completes subcommands. The installer wires this up;
             run it by hand for dev clones or after an upgrade.
   uninstall Remove an installed JClaw: undo completion wiring, drop the \`jclaw\`
             shim, and delete the install dir (~/.jclaw). Warns first, then
@@ -118,7 +130,7 @@ Environment:
                           2g) to avoid committing 2 GB at boot on idle deploys;
                           ZGC handles resize without pauses, so a fixed heap
                           isn't required for latency.
-                          Example: JCLAW_JVM_HEAP=4g ./jclaw.sh start
+                          Example: JCLAW_JVM_HEAP=4g ${INVOKE} start
   JCLAW_JVM_XMS           Override -Xms only (default: 512m).
   JCLAW_JVM_XMX           Override -Xmx only (default: 2g).
   JCLAW_JVM_OPTS          Extra JVM flags appended after the built-in set.
@@ -171,18 +183,18 @@ Load-test options (only used with the 'loadtest' command):
                           50 fair-comparison prompts for convenience.
 
 Examples:
-  ./jclaw.sh setup                                    # One-time setup after fresh clone
-  ./jclaw.sh --dev start                              # Start in dev mode
-  ./jclaw.sh --dev --backend-port 8080 start          # Dev mode with custom backend port
-  ./jclaw.sh start                                    # Start production in current directory
-  ./jclaw.sh dist                                     # Build dist/jclaw.zip (then unzip wherever)
-  ./jclaw.sh --dev stop                               # Stop dev mode services
-  ./jclaw.sh stop                                     # Stop production in current directory
-  ./jclaw.sh loadtest                                 # Drive default 10 workers x 5-turn conversations against :9000
-  ./jclaw.sh --concurrency 50 --turns 1 loadtest      # 50 fresh single-turn conversations (cold-start at scale)
-  ./jclaw.sh --concurrency 5 --turns 50 loadtest      # 5 deep conversations of 50 turns each (history growth)
-  ./jclaw.sh --turns 10 --prompts loadtest/prompts.txt loadtest             # varied prompt per turn (mock)
-  ./jclaw.sh --provider openrouter --model amazon/nova-micro-v1 loadtest    # real provider
+  ${INVOKE} setup                                    # One-time setup after fresh clone
+  ${INVOKE} --dev start                              # Start in dev mode
+  ${INVOKE} --dev --backend-port 8080 start          # Dev mode with custom backend port
+  ${INVOKE} start                                    # Start production in current directory
+  ${INVOKE} dist                                     # Build dist/jclaw.zip (then unzip wherever)
+  ${INVOKE} --dev stop                               # Stop dev mode services
+  ${INVOKE} stop                                     # Stop production in current directory
+  ${INVOKE} loadtest                                 # Drive default 10 workers x 5-turn conversations against :9000
+  ${INVOKE} --concurrency 50 --turns 1 loadtest      # 50 fresh single-turn conversations (cold-start at scale)
+  ${INVOKE} --concurrency 5 --turns 50 loadtest      # 5 deep conversations of 50 turns each (history growth)
+  ${INVOKE} --turns 10 --prompts loadtest/prompts.txt loadtest             # varied prompt per turn (mock)
+  ${INVOKE} --provider openrouter --model amazon/nova-micro-v1 loadtest    # real provider
 EOF
     else
         # User-facing reference: trimmed to the runtime commands and
@@ -194,7 +206,7 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: jclaw.sh [options] <https|no-https|reset|start|stop|restart|status|logs|completion|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|completion|uninstall|help>
 
 Commands:
   https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
@@ -212,7 +224,7 @@ Commands:
   status    Show whether the backend is running
   logs      Tail the application log
   completion Print a shell completion script (completion <bash|zsh>) so
-            \`jclaw <TAB>\` completes subcommands. The installer wires this up.
+            \`${INVOKE} <TAB>\` completes subcommands. The installer wires this up.
   uninstall Remove JClaw: undo completion wiring, drop the \`jclaw\` shim, and
             delete the install dir (~/.jclaw). Warns first, then confirms.
   help      Print this usage reference and exit. Equivalent to --help / -h.
@@ -225,7 +237,7 @@ Environment:
                           to the same value. Default is asymmetric (Xms 512m,
                           Xmx 2g): JClaw commits ~512 MB at boot and grows
                           to 2 GB on demand. ZGC resizes without pauses.
-                          Example: JCLAW_JVM_HEAP=4g ./jclaw.sh start
+                          Example: JCLAW_JVM_HEAP=4g ${INVOKE} start
   JCLAW_JVM_XMS           Override -Xms only (default: 512m).
   JCLAW_JVM_XMX           Override -Xmx only (default: 2g).
   JCLAW_JVM_OPTS          Extra JVM flags appended after the built-in set.
@@ -234,12 +246,12 @@ Environment:
                           Example: JCLAW_JVM_OPTS='-XX:MaxDirectMemorySize=512m'
 
 Examples:
-  ./jclaw.sh start                              # Start on default port 9000
-  ./jclaw.sh --backend-port 8080 start          # Start on a custom port
-  ./jclaw.sh status                             # Check whether it's running
-  ./jclaw.sh logs                               # Tail the application log
-  ./jclaw.sh stop                               # Stop the running instance
-  JCLAW_JVM_HEAP=4g ./jclaw.sh start            # Start with a 4 GB heap
+  ${INVOKE} start                              # Start on default port 9000
+  ${INVOKE} --backend-port 8080 start          # Start on a custom port
+  ${INVOKE} status                             # Check whether it's running
+  ${INVOKE} logs                               # Tail the application log
+  ${INVOKE} stop                               # Stop the running instance
+  JCLAW_JVM_HEAP=4g ${INVOKE} start            # Start with a 4 GB heap
 EOF
     fi
 }
@@ -287,7 +299,7 @@ usage_for() {
 
 usage_uninstall() {
     cat <<EOF
-Usage: jclaw.sh uninstall [--yes]
+Usage: ${INVOKE} uninstall [--yes]
 
 Remove this installed JClaw: stop it if running, undo the shell-completion
 wiring (the generated scripts and the managed block in your shell rc), remove
@@ -304,9 +316,9 @@ EOF
 
 usage_completion() {
     cat <<EOF
-Usage: jclaw.sh completion <bash|zsh|install>
+Usage: ${INVOKE} completion <bash|zsh|install>
 
-Generate shell completion for \`jclaw\`/\`jclaw.sh\` so \`jclaw <TAB>\` completes
+Generate shell completion for \`jclaw\`/\`jclaw.sh\` so \`${INVOKE} <TAB>\` completes
 subcommands. The emitted command list reflects this install (a dist exposes
 fewer commands than a developer clone).
 
@@ -314,22 +326,22 @@ fewer commands than a developer clone).
            wire your shell's rc file (idempotent; honors JCLAW_NO_RC_EDIT=1).
            This is what the one-line installer runs; also handy on a dev clone.
   bash     Print a bash completion script to stdout. Enable for this shell:
-             source <(jclaw completion bash)
+             source <(${INVOKE} completion bash)
            or permanently where bash-completion looks:
-             jclaw completion bash > ~/.local/share/bash-completion/completions/jclaw
+             ${INVOKE} completion bash > ~/.local/share/bash-completion/completions/jclaw
   zsh      Print a zsh completion script to stdout. Enable by putting it on your
            \$fpath before compinit, e.g.:
-             jclaw completion zsh > "\${fpath[1]}/_jclaw"   # then: compinit
+             ${INVOKE} completion zsh > "\${fpath[1]}/_jclaw"   # then: compinit
 EOF
 }
 
 usage_https() {
     cat <<EOF
-Usage: jclaw.sh https [--install-ca]
+Usage: ${INVOKE} https [--install-ca]
 
 Generate a TLS PEM cert+key at certs/host.cert and certs/host.key,
 overwriting any existing pair. After this completes, the next
-'jclaw.sh start' enables the 9443 HTTPS listener (HTTP/2 + HTTP/3
+'${INVOKE} start' enables the 9443 HTTPS listener (HTTP/2 + HTTP/3
 via ALPN) at runtime via -Dhttps.port=9443, gated by a strict
 validity check on the cert+key. conf/application.conf is NOT
 modified — the toggle is purely a function of cert presence + validity.
@@ -356,29 +368,29 @@ Options:
                  when mkcert is absent (no openssl fallback for this
                  flag — only mkcert can install a reusable local CA).
 
-After this command, restart the app to apply: 'jclaw.sh restart'.
+After this command, restart the app to apply: '${INVOKE} restart'.
 EOF
 }
 
 usage_no_https() {
     cat <<EOF
-Usage: jclaw.sh no-https
+Usage: ${INVOKE} no-https
 
 Disable HTTPS by deleting certs/host.cert and certs/host.key. The
-next 'jclaw.sh start' will see no valid pair (certs_valid → false)
+next '${INVOKE} start' will see no valid pair (certs_valid → false)
 and skip the -Dhttps.port=9443 override, so Play boots HTTP-1.1 only
 on port 9000. Idempotent — no-op when the files are already absent.
 
-To re-enable, run 'jclaw.sh https' (regenerates a fresh cert+key).
+To re-enable, run '${INVOKE} https' (regenerates a fresh cert+key).
 conf/application.conf is NOT modified by either command.
 
-After this command, restart the app to apply: 'jclaw.sh restart'.
+After this command, restart the app to apply: '${INVOKE} restart'.
 EOF
 }
 
 usage_secret() {
     cat <<EOF
-Usage: jclaw.sh secret
+Usage: ${INVOKE} secret
 
 Generate or rotate the application secret. Delegates to 'play secret',
 which writes the variable named in conf/application.conf's \${...}
@@ -389,15 +401,15 @@ file is created with mode 600 on first run and preserved across rotations
 Restart the app to pick up the new value.
 
 Examples:
-  ./jclaw.sh secret              # Generate or rotate
-  ./jclaw.sh restart             # Pick up the new value
+  ${INVOKE} secret              # Generate or rotate
+  ${INVOKE} restart             # Pick up the new value
 EOF
 }
 
 usage_setup() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh setup
+Usage: ${INVOKE} setup
 
 One-time per-clone bootstrap (developer flow). Wires git hooks
 (.githooks/), installs frontend dependencies so pre-commit's
@@ -407,18 +419,18 @@ application secret if missing, and verifies both 'origin' and
 every fresh clone.
 
 Example:
-  ./jclaw.sh setup
+  ${INVOKE} setup
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh setup
+Usage: ${INVOKE} setup
 
 Not available in this distribution. The 'setup' command is part of
 the developer flow (run after a fresh git clone — wires git hooks,
 installs frontend deps, etc.). End-user 'play dist' installs don't
-need it: start the app directly with ./jclaw.sh start.
+need it: start the app directly with ${INVOKE} start.
 
-For the full list of commands in this distribution: ./jclaw.sh help
+For the full list of commands in this distribution: ${INVOKE} help
 EOF
     fi
 }
@@ -426,7 +438,7 @@ EOF
 usage_init_worktree() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh init-worktree
+Usage: ${INVOKE} init-worktree
 
 Slim per-worktree bootstrap (developer flow). Ensures certs/.env exists
 with a fresh application secret (only if missing — never rotates) and
@@ -441,24 +453,24 @@ Idempotent — safe to re-run; preserves any existing PLAY_SECRET and
 PLAY_TEST_PORT values.
 
 Example:
-  ./jclaw.sh init-worktree
+  ${INVOKE} init-worktree
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh init-worktree
+Usage: ${INVOKE} init-worktree
 
 Not available in this distribution. The 'init-worktree' command is part
 of the developer flow (used by the post-checkout hook to prep fresh git
 worktrees for parallel \`play autotest\`).
 
-For the full list of commands in this distribution: ./jclaw.sh help
+For the full list of commands in this distribution: ${INVOKE} help
 EOF
     fi
 }
 
 usage_reset() {
     cat <<EOF
-Usage: jclaw.sh reset
+Usage: ${INVOKE} reset
 
 Clear the admin password hash from the Config DB so the next launch
 routes through the in-app /setup-password flow. Use when the operator
@@ -474,15 +486,15 @@ Environment:
   JCLAW_RESET_YES=1       Skip the y/N confirmation prompt.
 
 Examples:
-  ./jclaw.sh reset                       # Interactive
-  JCLAW_RESET_YES=1 ./jclaw.sh reset     # No prompt
+  ${INVOKE} reset                       # Interactive
+  JCLAW_RESET_YES=1 ${INVOKE} reset     # No prompt
 EOF
 }
 
 usage_start() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] start
+Usage: ${INVOKE} [options] start
 
 Start JClaw in production mode (Play backend serving the bundled SPA),
 or with --dev start the Play dev backend plus the Nuxt frontend on
@@ -503,14 +515,14 @@ Environment:
                           flags, e.g. -XX:MaxDirectMemorySize=512m).
 
 Examples:
-  ./jclaw.sh start                              # Production in current directory
-  ./jclaw.sh --dev start                        # Dev mode
-  ./jclaw.sh --dev --backend-port 8080 start    # Dev with custom backend port
-  JCLAW_JVM_HEAP=4g ./jclaw.sh start            # 4 GB heap
+  ${INVOKE} start                              # Production in current directory
+  ${INVOKE} --dev start                        # Dev mode
+  ${INVOKE} --dev --backend-port 8080 start    # Dev with custom backend port
+  JCLAW_JVM_HEAP=4g ${INVOKE} start            # 4 GB heap
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh [options] start
+Usage: ${INVOKE} [options] start
 
 Start JClaw on the bundled Play backend (which serves the SPA from
 this distribution package). First run auto-generates certs/.env with
@@ -527,9 +539,9 @@ Environment:
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins).
 
 Examples:
-  ./jclaw.sh start                              # Default port 9000
-  ./jclaw.sh --backend-port 8080 start          # Custom port
-  JCLAW_JVM_HEAP=4g ./jclaw.sh start            # 4 GB heap
+  ${INVOKE} start                              # Default port 9000
+  ${INVOKE} --backend-port 8080 start          # Custom port
+  JCLAW_JVM_HEAP=4g ${INVOKE} start            # 4 GB heap
 EOF
     fi
 }
@@ -537,7 +549,7 @@ EOF
 usage_stop() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] stop
+Usage: ${INVOKE} [options] stop
 
 Stop the running JClaw instance. Reads the PID file the matching
 start path wrote; in --dev mode also stops the Nuxt frontend.
@@ -546,18 +558,18 @@ Options:
   --dev                   Stop dev-mode services
 
 Examples:
-  ./jclaw.sh stop                # Stop production in current directory
-  ./jclaw.sh --dev stop          # Stop dev mode
+  ${INVOKE} stop                # Stop production in current directory
+  ${INVOKE} --dev stop          # Stop dev mode
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh stop
+Usage: ${INVOKE} stop
 
 Stop the running JClaw instance. Reads the PID file written by
 the matching start path.
 
 Example:
-  ./jclaw.sh stop
+  ${INVOKE} stop
 EOF
     fi
 }
@@ -565,7 +577,7 @@ EOF
 usage_restart() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] restart
+Usage: ${INVOKE} [options] restart
 
 Stop and start as one operation. Accepts the same flags as 'start'.
 
@@ -578,12 +590,12 @@ Environment:
   JCLAW_JVM_HEAP, JCLAW_JVM_XMS, JCLAW_JVM_XMX, JCLAW_JVM_OPTS — see 'start --help'.
 
 Examples:
-  ./jclaw.sh restart
-  ./jclaw.sh --dev restart
+  ${INVOKE} restart
+  ${INVOKE} --dev restart
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh [options] restart
+Usage: ${INVOKE} [options] restart
 
 Stop and start as one operation. Accepts the same flags as 'start'.
 
@@ -594,7 +606,7 @@ Environment:
   JCLAW_JVM_HEAP, JCLAW_JVM_XMS, JCLAW_JVM_XMX, JCLAW_JVM_OPTS — see 'start --help'.
 
 Example:
-  ./jclaw.sh restart
+  ${INVOKE} restart
 EOF
     fi
 }
@@ -602,7 +614,7 @@ EOF
 usage_status() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] status
+Usage: ${INVOKE} [options] status
 
 Show whether the Play backend (and, in --dev, the Nuxt frontend) is
 running. Reports PID and port when up; "not running" otherwise.
@@ -611,17 +623,17 @@ Options:
   --dev                   Check dev-mode services
 
 Example:
-  ./jclaw.sh status
+  ${INVOKE} status
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh status
+Usage: ${INVOKE} status
 
 Show whether the backend is running. Reports PID and port when up;
 "not running" otherwise.
 
 Example:
-  ./jclaw.sh status
+  ${INVOKE} status
 EOF
     fi
 }
@@ -629,7 +641,7 @@ EOF
 usage_logs() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] logs
+Usage: ${INVOKE} [options] logs
 
 Tail the production application log (logs/application.log) — equivalent
 to 'tail -f' on that file. Ctrl+C to exit.
@@ -638,17 +650,17 @@ Options:
   --dev                   Tail the dev-mode backend log instead
 
 Example:
-  ./jclaw.sh logs
+  ${INVOKE} logs
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh logs
+Usage: ${INVOKE} logs
 
 Tail the application log (logs/application.log) — equivalent to
 'tail -f' on that file. Ctrl+C to exit.
 
 Example:
-  ./jclaw.sh logs
+  ${INVOKE} logs
 EOF
     fi
 }
@@ -656,7 +668,7 @@ EOF
 usage_loadtest() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] loadtest
+Usage: ${INVOKE} [options] loadtest
 
 Drive the in-process load-test harness against /api/chat/stream. The
 harness simulates LLM streaming with controllable TTFT and throughput
@@ -709,26 +721,26 @@ Options:
                           with 50 fair-comparison prompts.
 
 Examples:
-  ./jclaw.sh loadtest                                                                                # 10 workers x 5-turn conversations, mock
-  ./jclaw.sh --concurrency 50 --turns 1 loadtest                                                     # 50 cold starts in parallel, mock
-  ./jclaw.sh --concurrency 5 --turns 50 loadtest                                                     # 5 deep conversations, mock
-  ./jclaw.sh --provider ollama-local --model gemma4:latest loadtest                                  # local real provider
-  ./jclaw.sh --provider ollama-cloud --model kimi-k2.5 loadtest                                      # cloud
-  ./jclaw.sh --provider openrouter --model google/gemini-3-flash-preview loadtest                    # alt cloud
-  ./jclaw.sh --turns 10 --prompts loadtest/prompts.txt loadtest                                      # varied prompts (mock)
-  ./jclaw.sh --turns 10 --prompts loadtest/prompts.txt --provider openrouter --model amazon/nova-micro-v1 loadtest  # varied prompts (real)
-  ./jclaw.sh --clean loadtest                                                                        # cleanup only
+  ${INVOKE} loadtest                                                                                # 10 workers x 5-turn conversations, mock
+  ${INVOKE} --concurrency 50 --turns 1 loadtest                                                     # 50 cold starts in parallel, mock
+  ${INVOKE} --concurrency 5 --turns 50 loadtest                                                     # 5 deep conversations, mock
+  ${INVOKE} --provider ollama-local --model gemma4:latest loadtest                                  # local real provider
+  ${INVOKE} --provider ollama-cloud --model kimi-k2.5 loadtest                                      # cloud
+  ${INVOKE} --provider openrouter --model google/gemini-3-flash-preview loadtest                    # alt cloud
+  ${INVOKE} --turns 10 --prompts loadtest/prompts.txt loadtest                                      # varied prompts (mock)
+  ${INVOKE} --turns 10 --prompts loadtest/prompts.txt --provider openrouter --model amazon/nova-micro-v1 loadtest  # varied prompts (real)
+  ${INVOKE} --clean loadtest                                                                        # cleanup only
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh loadtest
+Usage: ${INVOKE} loadtest
 
 Not available in this distribution. The 'loadtest' command is a
 developer/operator tool that exercises /api/chat/stream with a
 synthetic LLM stream — it lives in the dev workflow, not the
 end-user runtime.
 
-For the full list of commands in this distribution: ./jclaw.sh help
+For the full list of commands in this distribution: ${INVOKE} help
 EOF
     fi
 }
@@ -736,7 +748,7 @@ EOF
 usage_test() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh test
+Usage: ${INVOKE} test
 
 Run the full pre-push validation suite — backend tests (play autotest),
 frontend tests (pnpm test), and frontend quality gates (stylelint, lint,
@@ -745,18 +757,18 @@ logs/test-*.log per check. Exits non-zero if any check fails, so it's
 safe to wire into git hooks or CI.
 
 Example:
-  ./jclaw.sh test
+  ${INVOKE} test
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh test
+Usage: ${INVOKE} test
 
 Not available in this distribution. The 'test' command runs the
 backend + frontend suites against a developer checkout (it needs the
 test/ directory and the frontend Vitest project, neither of which
 ship with 'play dist' tarballs).
 
-For the full list of commands in this distribution: ./jclaw.sh help
+For the full list of commands in this distribution: ${INVOKE} help
 EOF
     fi
 }
@@ -764,36 +776,36 @@ EOF
 usage_dist() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh dist
+Usage: ${INVOKE} dist
 
 Build the developer-distribution zip at dist/jclaw.zip and exit.
 Runs precompile + frontend build + \`play dist\`; the resulting zip
 contains the source tree (filtered by .gitignore + .distignore) plus
 precompiled/ and public/spa/. Operators unzip it wherever they want
-to install JClaw, then run ./jclaw.sh start inside the unzipped tree.
+to install JClaw, then run ${INVOKE} start inside the unzipped tree.
 
 The resulting tarball is NOT self-contained: framework jar, framework
 lib, and Gradle-resolved app deps are excluded. Operators need a local
-Java 25 + Gradle + Play 1 fork install — the bundled \`./jclaw.sh start\`
+Java 25 + Gradle + Play 1 fork install — the bundled \`${INVOKE} start\`
 delegates to \`play run\`, which uses the host's Gradle to assemble the
 runtime classpath. For a self-contained tarball that runs with only a
 JRE, see the Dockerfile (\`play bundle\` instead of \`play dist\`).
 
 Example:
-  ./jclaw.sh dist
+  ${INVOKE} dist
   unzip -o dist/jclaw.zip -d /opt
-  cd /opt/jclaw && ./jclaw.sh start
+  cd /opt/jclaw && ${INVOKE} start
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh dist
+Usage: ${INVOKE} dist
 
 Not available in this distribution. The 'dist' command builds a
 distribution artifact from a developer checkout — needs app/ sources
 and frontend/ to (re)build, neither of which ship with 'play dist'
 tarballs.
 
-For the full list of commands in this distribution: ./jclaw.sh help
+For the full list of commands in this distribution: ${INVOKE} help
 EOF
     fi
 }
@@ -801,7 +813,7 @@ EOF
 usage_bundle() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh bundle
+Usage: ${INVOKE} bundle
 
 Build the self-contained bundle zip at dist/jclaw-bundle.zip and exit.
 Unlike 'dist', the bundle bakes in the framework jar + lib, the
@@ -811,18 +823,18 @@ no Gradle or Play 1 fork install on the host. Same artifact the
 Dockerfile ships inside the container image.
 
 Example:
-  ./jclaw.sh bundle
+  ${INVOKE} bundle
 EOF
     else
         cat <<EOF
-Usage: jclaw.sh bundle
+Usage: ${INVOKE} bundle
 
 Not available in this distribution. The 'bundle' command builds a
 self-contained artifact from a developer checkout — needs app/ sources
 and frontend/ to (re)build, neither of which ship with 'play dist'
 tarballs.
 
-For the full list of commands in this distribution: ./jclaw.sh help
+For the full list of commands in this distribution: ${INVOKE} help
 EOF
     fi
 }
@@ -875,10 +887,10 @@ EOF
     if is_developer_clone; then
         # Developer view: cloned repo
         cat <<EOF
-  ${cyan}./jclaw.sh setup${reset}     One-time setup for a fresh clone
+  ${cyan}${INVOKE} setup${reset}     One-time setup for a fresh clone
                        (validates prereqs, wires git hooks, installs deps,
                         adds github remote)
-  ${cyan}./jclaw.sh help${reset}      Full command reference
+  ${cyan}${INVOKE} help${reset}      Full command reference
 
 EOF
 
@@ -891,22 +903,15 @@ EOF
         local hooks_path
         hooks_path=$(/usr/bin/git -C "$SCRIPT_DIR" config --local core.hooksPath 2>/dev/null || true)
         if [[ "$hooks_path" != ".githooks" ]]; then
-            echo "${yellow}${bold}→ Setup hasn't run on this clone yet. Run ${cyan}./jclaw.sh setup${yellow} to wire things up.${reset}"
+            echo "${yellow}${bold}→ Setup hasn't run on this clone yet. Run ${cyan}${INVOKE} setup${yellow} to wire things up.${reset}"
             echo ""
         fi
     else
-        # User view: installed bundle / unzipped distribution. Show the command
-        # the user can actually type — the global `jclaw` shim when it's on PATH
-        # and resolves to THIS install (the shim `exec`s jclaw.sh, so $0 can't
-        # tell us; we detect the shim instead), else ./jclaw.sh.
-        local invoke='./jclaw.sh' _shim
-        _shim=$(command -v jclaw 2>/dev/null || true)
-        if [[ -n "$_shim" ]] && grep -qF "$SCRIPT_DIR/jclaw.sh" "$_shim" 2>/dev/null; then
-            invoke='jclaw'
-        fi
-        # Description column aligns on command-name length (longest is
-        # 'uninstall', 9) + a 2-space gap, so it's independent of the prefix.
-        _intro_cmd() { printf '  %s%s %s%s%*s%s\n' "$cyan" "$invoke" "$1" "$reset" "$(( 11 - ${#1} ))" '' "$2"; }
+        # User view: installed bundle / unzipped distribution. ${INVOKE} is the
+        # command the user can actually type (jclaw or ./jclaw.sh — see the top
+        # of this script). Description column aligns on command-name length
+        # (longest is 'uninstall', 9) + a 2-space gap, independent of the prefix.
+        _intro_cmd() { printf '  %s%s %s%s%*s%s\n' "$cyan" "$INVOKE" "$1" "$reset" "$(( 11 - ${#1} ))" '' "$2"; }
         _intro_cmd start     "Start JClaw (backend on :9000)"
         _intro_cmd stop      "Stop the running instance"
         _intro_cmd status    "Show whether the backend is running"
@@ -1257,7 +1262,7 @@ validate_corepack_pnpm() {
         echo "       tarball against tampering — refusing to launch."
         echo ""
         echo "       Fix with one of:"
-        echo "         ./jclaw.sh setup"
+        echo "         ${INVOKE} setup"
         echo "         cd frontend && corepack use ${current_pin}"
         exit 1
     fi
@@ -1442,7 +1447,7 @@ do_https() {
     # falling through to the openssl fallback would be wrong.
     if [[ "$HTTPS_INSTALL_CA" == true ]]; then
         if ! command -v mkcert >/dev/null 2>&1; then
-            cat >&2 <<'EOF'
+            cat >&2 <<EOF
 ERROR: --install-ca requires mkcert, which is not on PATH.
 
 Install it once:
@@ -1453,7 +1458,7 @@ Install it once:
   Windows:  choco install mkcert  (or scoop install mkcert)
   Other:    https://github.com/FiloSottile/mkcert#installation
 
-Then re-run: ./jclaw.sh https --install-ca
+Then re-run: ${INVOKE} https --install-ca
 EOF
             return 1
         fi
@@ -1471,7 +1476,7 @@ EOF
             echo "(Local CA installed in system trust store — Chrome will accept HTTP/3.)"
         else
             echo "(Trusted by the system store after 'mkcert -install' — Chrome will accept HTTP/3.)"
-            echo "Tip: run './jclaw.sh https --install-ca' once to install the CA automatically."
+            echo "Tip: run '${INVOKE} https --install-ca' once to install the CA automatically."
         fi
     elif command -v openssl >/dev/null 2>&1; then
         # 10-year lifetime (3650 days) — local-dev cert that's never reachable
@@ -1950,7 +1955,7 @@ do_setup() {
         echo "    Skipped: frontend/ directory not found."
     elif ! command -v pnpm &>/dev/null; then
         echo "    Warning: pnpm not on PATH. Install with: npm install -g pnpm"
-        echo "             Then re-run: ./jclaw.sh setup"
+        echo "             Then re-run: ${INVOKE} setup"
     else
         (cd frontend && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install))
     fi
@@ -1967,7 +1972,7 @@ do_setup() {
     # --directory pins it to this clone (otherwise it asks).
     if ! command -v npx &>/dev/null; then
         echo "    Warning: npx not on PATH. Install Node.js to enable BMAD."
-        echo "             Then re-run: ./jclaw.sh setup"
+        echo "             Then re-run: ${INVOKE} setup"
     else
         npx bmad-method install \
             --directory "$SCRIPT_DIR" \
@@ -2002,9 +2007,9 @@ do_setup() {
     echo "==> Setup complete."
     echo ""
     echo "Next steps:"
-    echo "  Start dev:        ./jclaw.sh --dev start"
-    echo "  Start prod:       ./jclaw.sh start"
-    echo "  Run tests:        ./jclaw.sh test"
+    echo "  Start dev:        ${INVOKE} --dev start"
+    echo "  Start prod:       ${INVOKE} start"
+    echo "  Run tests:        ${INVOKE} test"
 }
 
 # ─── Production deploy ───
@@ -2306,12 +2311,12 @@ do_start_prod() {
         # are missing!!" with no hint at the operator-side cause.
         if [[ ! -d precompiled/java ]]; then
             echo "Error: dist install is missing precompiled/java."
-            echo "       The tarball was built without a precompile pass — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
+            echo "       The tarball was built without a precompile pass — re-run \`${INVOKE} dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
             exit 1
         fi
         if [[ ! -d public/spa ]]; then
             echo "Error: dist install is missing public/spa."
-            echo "       The tarball was built without a frontend build — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
+            echo "       The tarball was built without a frontend build — re-run \`${INVOKE} dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
             exit 1
         fi
         echo "==> Dist install detected (no app/, no frontend/) — skipping precompile + SPA build"
@@ -2753,7 +2758,7 @@ do_status() {
         if [[ -f "$SCRIPT_DIR/public/spa/index.html" ]]; then
             echo "  Frontend: built (served from public/spa/)"
         else
-            echo "  Frontend: not built (run ./jclaw.sh dist or nuxi generate)"
+            echo "  Frontend: not built (run ${INVOKE} dist or nuxi generate)"
         fi
     fi
 }
@@ -3161,7 +3166,7 @@ do_completion() {
         zsh)       _completion_zsh "${pairs[@]}" ;;
         install)   _completion_install "$names" "$opts" "${pairs[@]}" ;;
         uninstall) _completion_uninstall ;;
-        "")        echo "Usage: jclaw.sh completion <bash|zsh|install|uninstall>" >&2; exit 1 ;;
+        "")        echo "Usage: ${INVOKE} completion <bash|zsh|install|uninstall>" >&2; exit 1 ;;
         *)         echo "Error: unknown target '$COMPLETION_SHELL' (expected bash, zsh, install, or uninstall)." >&2; exit 1 ;;
     esac
 }
@@ -3325,7 +3330,7 @@ _rc_unwire() {
 do_uninstall() {
     if is_developer_clone; then
         echo "Refusing to uninstall: this is a developer git clone, not an installed copy." >&2
-        echo "Delete the clone manually; to undo completion wiring run: ./jclaw.sh completion uninstall" >&2
+        echo "Delete the clone manually; to undo completion wiring run: ${INVOKE} completion uninstall" >&2
         exit 1
     fi
 
