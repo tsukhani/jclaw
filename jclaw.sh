@@ -897,11 +897,12 @@ EOF
     else
         # User view: unzipped distribution, no git context
         cat <<EOF
-  ${cyan}./jclaw.sh start${reset}     Start JClaw (backend on :9000)
-  ${cyan}./jclaw.sh stop${reset}      Stop the running instance
-  ${cyan}./jclaw.sh status${reset}    Show whether the backend is running
-  ${cyan}./jclaw.sh logs${reset}      Tail the application log
-  ${cyan}./jclaw.sh help${reset}      Full command reference
+  ${cyan}./jclaw.sh start${reset}      Start JClaw (backend on :9000)
+  ${cyan}./jclaw.sh stop${reset}       Stop the running instance
+  ${cyan}./jclaw.sh status${reset}     Show whether the backend is running
+  ${cyan}./jclaw.sh logs${reset}       Tail the application log
+  ${cyan}./jclaw.sh uninstall${reset}  Remove JClaw (deletes ~/.jclaw, undoes completion)
+  ${cyan}./jclaw.sh help${reset}       Full command reference
 
 EOF
     fi
