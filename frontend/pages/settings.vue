@@ -1455,6 +1455,9 @@ const discoveredModels = ref<DiscoveredModel[]>([])
 const discoverySearch = ref('')
 const discoverySelected = ref<Set<string>>(new Set())
 const discoveryFilterThinking = ref('all') // 'all' | 'yes' | 'no'
+const discoveryFilterVision = ref('all') // 'all' | 'yes' | 'no'
+const discoveryFilterAudio = ref('all') // 'all' | 'yes' | 'no'
+const discoveryFilterVideo = ref('all') // 'all' | 'yes' | 'no'
 const discoveryFilterCost = ref('all') // 'all' | 'free' | 'paid'
 const discoveryFilterPopular = ref('all') // 'all' | 'ranked' | 'top10' | 'top25'
 
@@ -1475,6 +1478,30 @@ const filteredDiscoveredModels = computed(() => {
   }
   else if (discoveryFilterThinking.value === 'no') {
     list = list.filter(m => !m.supportsThinking)
+  }
+
+  // Vision filter
+  if (discoveryFilterVision.value === 'yes') {
+    list = list.filter(m => m.supportsVision)
+  }
+  else if (discoveryFilterVision.value === 'no') {
+    list = list.filter(m => !m.supportsVision)
+  }
+
+  // Audio filter
+  if (discoveryFilterAudio.value === 'yes') {
+    list = list.filter(m => m.supportsAudio)
+  }
+  else if (discoveryFilterAudio.value === 'no') {
+    list = list.filter(m => !m.supportsAudio)
+  }
+
+  // Video filter
+  if (discoveryFilterVideo.value === 'yes') {
+    list = list.filter(m => m.supportsVideo)
+  }
+  else if (discoveryFilterVideo.value === 'no') {
+    list = list.filter(m => !m.supportsVideo)
   }
 
   // Cost filter
@@ -1499,9 +1526,17 @@ const filteredDiscoveredModels = computed(() => {
   return list
 })
 
-// Whether pricing data is available for this provider's models
-const discoveryHasPricing = computed(() =>
-  discoveredModels.value.some(m => (m.promptPrice ?? -1) >= 0),
+// Capability filters are only shown when at least one discovered model has the
+// capability — no point offering a "Video: Yes/No" filter for a provider with no
+// video models (mirrors the Cost/Popular gating below).
+const discoveryHasVision = computed(() => discoveredModels.value.some(m => m.supportsVision))
+const discoveryHasAudio = computed(() => discoveredModels.value.some(m => m.supportsAudio))
+const discoveryHasVideo = computed(() => discoveredModels.value.some(m => m.supportsVideo))
+
+// Whether the provider offers free models — gates the Cost filter, since the
+// free/paid split is only meaningful when some model is actually free.
+const discoveryHasFreeModels = computed(() =>
+  discoveredModels.value.some(m => m.isFree),
 )
 
 // Whether leaderboard ranking data is available
@@ -1517,6 +1552,9 @@ async function startDiscovery(providerName: string) {
   discoverySearch.value = ''
   discoverySelected.value = new Set()
   discoveryFilterThinking.value = 'all'
+  discoveryFilterVision.value = 'all'
+  discoveryFilterAudio.value = 'all'
+  discoveryFilterVideo.value = 'all'
   discoveryFilterCost.value = 'all'
   discoveryFilterPopular.value = 'all'
   expandedModelsProvider.value = null
@@ -2969,7 +3007,7 @@ async function deleteLoggerLevel(logger: string) {
             <!-- Results -->
             <template v-else-if="discoveredModels.length">
               <!-- Search + filters -->
-              <div class="px-4 py-2 flex items-center gap-2 border-b border-border">
+              <div class="px-4 py-2 flex flex-wrap items-center gap-2 border-b border-border">
                 <MagnifyingGlassIcon
                   class="w-3.5 h-3.5 text-fg-muted shrink-0"
                   aria-hidden="true"
@@ -2996,7 +3034,55 @@ async function deleteLoggerLevel(logger: string) {
                   </option>
                 </select>
                 <select
-                  v-if="discoveryHasPricing"
+                  v-if="discoveryHasVision"
+                  v-model="discoveryFilterVision"
+                  aria-label="Filter by vision support"
+                  class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                >
+                  <option value="all">
+                    Vision: All
+                  </option>
+                  <option value="yes">
+                    Vision: Yes
+                  </option>
+                  <option value="no">
+                    Vision: No
+                  </option>
+                </select>
+                <select
+                  v-if="discoveryHasAudio"
+                  v-model="discoveryFilterAudio"
+                  aria-label="Filter by audio support"
+                  class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                >
+                  <option value="all">
+                    Audio: All
+                  </option>
+                  <option value="yes">
+                    Audio: Yes
+                  </option>
+                  <option value="no">
+                    Audio: No
+                  </option>
+                </select>
+                <select
+                  v-if="discoveryHasVideo"
+                  v-model="discoveryFilterVideo"
+                  aria-label="Filter by video support"
+                  class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                >
+                  <option value="all">
+                    Video: All
+                  </option>
+                  <option value="yes">
+                    Video: Yes
+                  </option>
+                  <option value="no">
+                    Video: No
+                  </option>
+                </select>
+                <select
+                  v-if="discoveryHasFreeModels"
                   v-model="discoveryFilterCost"
                   aria-label="Filter by cost"
                   class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"

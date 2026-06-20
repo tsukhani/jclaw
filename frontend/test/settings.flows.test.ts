@@ -589,6 +589,55 @@ describe('Settings page — model management', () => {
     // false negative we check the count rather than the absence.
     expect(component.text()).toContain('1 available')
   })
+
+  it('gates capability + cost filters on the discovered models and filters by them', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: defaultConfigEntries() }) })
+    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
+    // One vision+video+free model, one plain paid model. So: vision & video & cost
+    // filters appear (a model has each); audio filter does NOT (no audio model).
+    registerEndpoint('/api/providers/ollama-cloud/discover-models', {
+      method: 'POST',
+      handler: () => ({
+        models: [
+          { id: 'discover-vidcap', name: 'Discover VidCap',
+            supportsThinking: false, supportsVision: true, visionDetectedFromProvider: true,
+            supportsAudio: false, audioDetectedFromProvider: false,
+            supportsVideo: true, videoDetectedFromProvider: true,
+            isFree: true, promptPrice: -1, completionPrice: -1,
+            alwaysThinks: false, cachedReadPrice: -1, cacheWritePrice: -1 },
+          { id: 'discover-plain', name: 'Discover Plain',
+            supportsThinking: false, supportsVision: false, visionDetectedFromProvider: false,
+            supportsAudio: false, audioDetectedFromProvider: false,
+            supportsVideo: false, videoDetectedFromProvider: false,
+            isFree: false, promptPrice: 1, completionPrice: 2,
+            alwaysThinks: false, cachedReadPrice: -1, cacheWritePrice: -1 },
+        ],
+      }),
+    })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+    await component.find('button[title="Discover models from provider"]').trigger('click')
+    await flushPromises()
+
+    // Gated on presence: vision + video shown (a model has each), audio hidden.
+    expect(component.find('select[aria-label="Filter by vision support"]').exists()).toBe(true)
+    expect(component.find('select[aria-label="Filter by video support"]').exists()).toBe(true)
+    expect(component.find('select[aria-label="Filter by audio support"]').exists()).toBe(false)
+    // Cost filter shown because one model is free.
+    expect(component.find('select[aria-label="Filter by cost"]').exists()).toBe(true)
+
+    // Filtering by Video: Yes narrows to the video-capable model only.
+    await component.find('select[aria-label="Filter by video support"]').setValue('yes')
+    await flushPromises()
+    expect(component.text()).toContain('discover-vidcap')
+    expect(component.text()).not.toContain('discover-plain')
+  })
 })
 
 describe('Settings page — Search Providers', () => {
