@@ -24,6 +24,10 @@
     JCLAW_NO_START    set to 1 to install only, not start
     JCLAW_INSTALL_JRE set to 1 to download the Zulu JRE without prompting
     JCLAW_NO_JRE      set to 1 to never auto-install a JRE (fail if Java is missing)
+    JCLAW_NO_RC_EDIT  set to 1 to generate completion scripts but not edit your shell rc
+
+  Shell completion: the bundle's jclaw.sh runs through Git Bash or WSL, so the
+  installer wires bash/zsh tab-completion into that shell's rc (jclaw.sh <TAB>).
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -248,6 +252,24 @@ function Start-ViaWsl($appDir) {
     $wp = (wsl.exe wslpath -a "$appDir").Trim()
     wsl.exe bash -lc "cd '$wp' && ./jclaw.sh start"
     if ($LASTEXITCODE -ne 0) { throw "jclaw.sh start exited $LASTEXITCODE" }
+}
+
+# Shell tab-completion for jclaw.sh. Delegated to the bundle's own `completion
+# install` (single source of truth for the command list), run through the same
+# shell that runs JClaw so it wires that shell's rc. Honors JCLAW_NO_RC_EDIT.
+function Install-Completion($appDir) {
+    if ($gitBash) {
+        $u = $appDir -replace '\\','/'
+        & $gitBash -lc "'$u/jclaw.sh' completion install"
+    } elseif ($useWsl) {
+        $wp = (wsl.exe wslpath -a "$appDir").Trim()
+        wsl.exe bash -lc "'$wp/jclaw.sh' completion install"
+    }
+}
+
+if ($gitBash -or $useWsl) {
+    Step 'Enabling shell completion'
+    try { Install-Completion $AppDir } catch { Warn "shell completion setup skipped: $($_.Exception.Message)" }
 }
 
 $started = $false

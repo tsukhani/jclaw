@@ -6,7 +6,8 @@
 # Downloads the self-contained jclaw-bundle.zip from GitHub Releases, ensures a
 # Java 25+ runtime (the bundle's only dependency) — auto-installing a self-contained
 # Zulu JRE 25 into ~/.jclaw/jre when none is found — extracts the bundle to ~/.jclaw,
-# and starts JClaw on http://localhost:9000.
+# installs a `jclaw` command with bash/zsh tab-completion, and starts JClaw on
+# http://localhost:9000.
 #
 # The bundle bakes in the Play framework, app deps, precompiled classes, the
 # prebuilt SPA, and a ./play launcher — so a Java 25 JRE is all the host needs.
@@ -19,6 +20,7 @@
 #   JCLAW_NO_START  set to 1 to install only, not start
 #   JCLAW_NO_JRE    set to 1 to never auto-install a JRE (just print instructions)
 #   JCLAW_INSTALL_JRE  set to 1 to auto-install the JRE without prompting
+#   JCLAW_NO_RC_EDIT   set to 1 to generate completion scripts but not edit your shell rc
 #   NO_COLOR        set to disable ANSI color
 #
 # POSIX sh — no bashisms; runnable under dash/ash via `| sh`.
@@ -301,6 +303,12 @@ exec "$APP_DIR/jclaw.sh" "\$@"
 EOF
 chmod +x "$JCLAW_BIN_DIR/jclaw"
 substep "linked ${CYAN}jclaw${RESET} → $JCLAW_BIN_DIR/jclaw"
+
+# Shell tab-completion for `jclaw`/`jclaw.sh`. Delegated to the bundle's own
+# `completion install` so the command list stays single-sourced; best-effort,
+# never fails the install. Honors JCLAW_NO_RC_EDIT.
+step "Enabling shell completion"
+"$APP_DIR/jclaw.sh" completion install || substep "completion setup skipped (non-fatal)"
 
 # Past this point a failure shouldn't roll back a good extract.
 ROLLBACK=''

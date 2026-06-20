@@ -48,7 +48,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|help>
+Usage: jclaw.sh [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -99,6 +99,9 @@ Commands:
             resolved deps, and a `./play` launcher, so the unzipped tree runs
             with only a Java 25 JRE (no Gradle/Play install). Same artifact the
             Dockerfile ships inside the container image.
+  completion Print a shell completion script (completion <bash|zsh>) so
+            \`jclaw <TAB>\` completes subcommands. The installer wires this up;
+            run it by hand for dev clones or after an upgrade.
   help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
@@ -188,7 +191,7 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: jclaw.sh [options] <https|no-https|reset|start|stop|restart|status|logs|help>
+Usage: jclaw.sh [options] <https|no-https|reset|start|stop|restart|status|logs|completion|help>
 
 Commands:
   https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
@@ -205,6 +208,8 @@ Commands:
   restart   Stop and start (combines stop + start)
   status    Show whether the backend is running
   logs      Tail the application log
+  completion Print a shell completion script (completion <bash|zsh>) so
+            \`jclaw <TAB>\` completes subcommands. The installer wires this up.
   help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
@@ -240,7 +245,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion)
             return 0
             ;;
         *)
@@ -269,8 +274,30 @@ usage_for() {
         test)     usage_test     ;;
         dist)     usage_dist     ;;
         bundle)   usage_bundle   ;;
+        completion) usage_completion ;;
         *)        usage          ;;
     esac
+}
+
+usage_completion() {
+    cat <<EOF
+Usage: jclaw.sh completion <bash|zsh|install>
+
+Generate shell completion for \`jclaw\`/\`jclaw.sh\` so \`jclaw <TAB>\` completes
+subcommands. The emitted command list reflects this install (a dist exposes
+fewer commands than a developer clone).
+
+  install  Write the bash + zsh scripts to your per-user completion dirs and
+           wire your shell's rc file (idempotent; honors JCLAW_NO_RC_EDIT=1).
+           This is what the one-line installer runs; also handy on a dev clone.
+  bash     Print a bash completion script to stdout. Enable for this shell:
+             source <(jclaw completion bash)
+           or permanently where bash-completion looks:
+             jclaw completion bash > ~/.local/share/bash-completion/completions/jclaw
+  zsh      Print a zsh completion script to stdout. Enable by putting it on your
+           \$fpath before compinit, e.g.:
+             jclaw completion zsh > "\${fpath[1]}/_jclaw"   # then: compinit
+EOF
 }
 
 usage_https() {
@@ -862,6 +889,7 @@ DEV_MODE=false
 BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
 COMMAND=""
+COMPLETION_SHELL=""   # shell name for the `completion` subcommand (bash|zsh)
 LT_CONCURRENCY="10"
 LT_TURNS="5"
 LT_TTFT_MS="100"
@@ -965,6 +993,18 @@ while [[ $# -gt 0 ]]; do
         https|no-https|secret|reset|start|stop|restart|status|logs)
             COMMAND="$1"
             shift
+            ;;
+        completion)
+            # Universal (dev + dist): emit a shell completion script. Takes one
+            # positional, the shell name (bash|zsh), consumed here so it doesn't
+            # fall through to the unknown-argument arm. A leading-dash next token
+            # (e.g. `completion --help`) is left for the --help arm to handle.
+            COMMAND="$1"
+            shift
+            if [[ -n "${1:-}" && "${1:-}" != -* ]]; then
+                COMPLETION_SHELL="$1"
+                shift
+            fi
             ;;
         setup|init-worktree|loadtest|test|dist|bundle)
             # Developer-only commands. Available on a `git clone` because
@@ -3037,6 +3077,178 @@ do_test() {
     fi
 }
 
+# Emit a shell completion script for `jclaw` (the installed shim) and `jclaw.sh`.
+# The completable command + option lists track this install's audience, so a
+# dist exposes the end-user surface and a developer clone the full one — driven
+# by is_developer_clone, the same gate the parser and usage banners use.
+do_completion() {
+    # (name description) pairs — names feed bash, name:desc feed zsh. Order is
+    # most-used first so the menu reads sensibly.
+    local -a pairs=(
+        start    "Start JClaw"
+        stop     "Stop the running instance"
+        restart  "Stop and start (restart)"
+        status   "Show whether it is running"
+        logs     "Tail the application log"
+        https    "Enable HTTPS (generate cert+key)"
+        no-https "Disable HTTPS"
+        secret   "Generate or rotate the application secret"
+        reset    "Clear the admin password hash"
+    )
+    if is_developer_clone; then
+        pairs+=(
+            setup         "One-time per-clone bootstrap"
+            init-worktree "Per-worktree bootstrap"
+            loadtest      "Run the load-test harness"
+            test          "Run backend + frontend tests"
+            dist          "Build the developer-distribution zip"
+            bundle        "Build the self-contained bundle zip"
+        )
+    fi
+    pairs+=(
+        completion "Print a shell completion script"
+        help       "Show usage"
+    )
+
+    local names="" i
+    for ((i=0; i<${#pairs[@]}; i+=2)); do names+="${pairs[i]} "; done
+    names="${names% }"
+    local opts="--backend-port --help"
+    is_developer_clone && opts="--dev --backend-port --frontend-port --help"
+
+    case "$COMPLETION_SHELL" in
+        bash)    _completion_bash "$names" "$opts" ;;
+        zsh)     _completion_zsh "${pairs[@]}" ;;
+        install) _completion_install "$names" "$opts" "${pairs[@]}" ;;
+        "")      echo "Usage: jclaw.sh completion <bash|zsh|install>" >&2; exit 1 ;;
+        *)       echo "Error: unknown target '$COMPLETION_SHELL' (expected bash, zsh, or install)." >&2; exit 1 ;;
+    esac
+}
+
+# Bash completer. $1 = space-separated command names, $2 = option list. Registers
+# for both `jclaw` and `jclaw.sh`. Resolves the already-typed subcommand by scan
+# (so `jclaw --backend-port 8080 <TAB>` still offers commands), then: bash/zsh
+# after `completion`, commands after `help`, options for a leading dash, else
+# the command list. No dependency on the bash-completion package.
+_completion_bash() {
+    cat <<EOF
+# jclaw(1) bash completion — generated by \`jclaw completion bash\`.
+_jclaw() {
+    local cur prev cmd="" i
+    cur="\${COMP_WORDS[COMP_CWORD]}"
+    prev="\${COMP_WORDS[COMP_CWORD-1]}"
+    local commands="$1"
+    local options="$2"
+    for ((i=1; i<COMP_CWORD; i++)); do
+        case " \$commands " in *" \${COMP_WORDS[i]} "*) cmd="\${COMP_WORDS[i]}"; break ;; esac
+    done
+    if [[ "\$cmd" == completion && "\$prev" == completion ]]; then
+        COMPREPLY=( \$(compgen -W "bash zsh" -- "\$cur") ); return
+    fi
+    if [[ "\$cmd" == help ]]; then
+        COMPREPLY=( \$(compgen -W "\$commands" -- "\$cur") ); return
+    fi
+    if [[ "\$cur" == -* ]]; then
+        COMPREPLY=( \$(compgen -W "\$options" -- "\$cur") ); return
+    fi
+    if [[ -z "\$cmd" ]]; then
+        COMPREPLY=( \$(compgen -W "\$commands" -- "\$cur") ); return
+    fi
+}
+complete -F _jclaw jclaw jclaw.sh
+EOF
+}
+
+# Zsh completer. Args are the (name desc) pairs. Works both as an fpath autoload
+# file (#compdef) and via \`source <(jclaw completion zsh)\` — the funcstack guard
+# picks the right registration path (the docker/podman idiom).
+_completion_zsh() {
+    local entries="" name desc
+    while [[ $# -gt 0 ]]; do
+        name="$1"; desc="$2"; shift 2
+        entries="${entries}        '${name}:${desc}'"$'\n'
+    done
+    cat <<EOF
+#compdef jclaw jclaw.sh
+# jclaw(1) zsh completion — generated by \`jclaw completion zsh\`.
+_jclaw() {
+    local curcontext="\$curcontext" state line
+    typeset -A opt_args
+    local -a _jclaw_cmds
+    _jclaw_cmds=(
+$entries    )
+    _arguments -C '1: :->cmd' '*:: :->args'
+    case "\$state" in
+        cmd) _describe -t commands 'jclaw command' _jclaw_cmds ;;
+        args)
+            case "\$line[1]" in
+                completion) _values 'shell' bash zsh ;;
+                help)       _describe -t commands 'jclaw command' _jclaw_cmds ;;
+            esac
+            ;;
+    esac
+}
+if [ "\$funcstack[1]" = "_jclaw" ]; then
+    _jclaw "\$@"
+else
+    compdef _jclaw jclaw jclaw.sh
+fi
+EOF
+}
+
+# Generate completion scripts to standard per-user dirs and wire the active
+# shell's rc file (idempotent, sentinel-guarded, existing-rc-only). Best-effort:
+# never aborts (always returns 0) so the one-line installer can't fail on it.
+# Honors JCLAW_NO_RC_EDIT=1. Args: names opts pair...  (forwarded from do_completion)
+_completion_install() {
+    local names="$1" opts="$2"; shift 2   # remaining args = (name desc) pairs
+    local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
+    local bash_file="$data_dir/bash-completion/completions/jclaw"
+    local zsh_dir="$data_dir/zsh/site-functions"
+
+    if mkdir -p "${bash_file%/*}" 2>/dev/null && _completion_bash "$names" "$opts" >"$bash_file" 2>/dev/null; then
+        echo "    bash completion → $bash_file"
+    fi
+    if mkdir -p "$zsh_dir" 2>/dev/null && _completion_zsh "$@" >"$zsh_dir/_jclaw" 2>/dev/null; then
+        echo "    zsh completion → $zsh_dir/_jclaw"
+    fi
+
+    if [[ -n "${JCLAW_NO_RC_EDIT:-}" ]]; then
+        echo "    (skipped shell-rc wiring: JCLAW_NO_RC_EDIT is set)"
+        return 0
+    fi
+    local shell_name="${SHELL:-}"; shell_name="${shell_name##*/}"
+    case "$shell_name" in
+        bash) _rc_wire "$HOME/.bashrc" "[ -f \"$bash_file\" ] && . \"$bash_file\"" ;;
+        zsh)  _rc_wire "$HOME/.zshrc" "fpath=(\"$zsh_dir\" \$fpath); autoload -Uz compinit; compinit" ;;
+        *)    echo "    shell '${shell_name:-unknown}' not auto-wired — source the generated script to enable completion" ;;
+    esac
+    return 0
+}
+
+# Append a sentinel-guarded line to an existing rc file, once. Always returns 0.
+_rc_wire() {
+    local rc="$1" line="$2"
+    if [[ ! -f "$rc" ]]; then
+        echo "    no $rc yet — add this line to enable completion: $line"
+        return 0
+    fi
+    if grep -q 'jclaw completion (managed)' "$rc" 2>/dev/null; then
+        echo "    shell completion already enabled in $rc"
+        return 0
+    fi
+    if {
+        printf '\n# >>> jclaw completion (managed) >>>\n'
+        printf '%s\n' "$line"
+        printf '# <<< jclaw completion (managed) <<<\n'
+    } >>"$rc" 2>/dev/null; then
+        echo "    enabled tab-completion in $rc (restart your shell to load it)"
+    else
+        echo "    could not write $rc — add this line yourself: $line"
+    fi
+    return 0
+}
+
 # ─── Execute ───
 
 case "$COMMAND" in
@@ -3096,6 +3308,9 @@ case "$COMMAND" in
         ;;
     logs)
         do_logs
+        ;;
+    completion)
+        do_completion
         ;;
     loadtest)
         do_loadtest
