@@ -133,6 +133,40 @@ public class ApiProvidersController extends Controller {
     }
 
     /**
+     * GET /api/providers/{name}/video-models — the provider's live catalog filtered to
+     * video-capable models ({@code supportsVideo}), projected to {@code id} + display name.
+     * Backs the Settings → Video Interpretation model picker, which lists video-native models
+     * available from the provider rather than the operator's manually-configured set (a dedicated
+     * video model needn't be pre-added; {@link services.video.VideoInterpretationClient} calls it
+     * directly by id). Unlike {@link #discoverModels} the API key is optional, so a self-hosted
+     * vLLM with no auth works.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
+    @Operation(summary = "List a provider's video-capable models from its live API")
+    public static void videoModels(String name) {
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
+        if (baseUrl == null || baseUrl.isBlank()) {
+            error(400, "Provider '%s' has no base URL configured".formatted(name));
+        }
+        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
+        var result = ModelDiscoveryService.discover(name, baseUrl, apiKey == null ? "" : apiKey);
+        switch (result) {
+            case DiscoveryResult.Ok(var models) -> {
+                var refs = new ArrayList<ModelRef>();
+                for (var m : models) {
+                    if (!Boolean.TRUE.equals(m.get("supportsVideo"))) continue;
+                    var id = String.valueOf(m.getOrDefault("id", ""));
+                    if (id.isBlank()) continue;
+                    var displayName = String.valueOf(m.getOrDefault("name", ""));
+                    refs.add(new ModelRef(id, displayName.isBlank() ? deriveName(id) : displayName));
+                }
+                renderJSON(gson.toJson(new ProviderModelsResponse(name, refs, refs.size())));
+            }
+            case DiscoveryResult.Error(var statusCode, var message) -> error(statusCode, message);
+        }
+    }
+
+    /**
      * GET /api/providers/{name}/models — the provider's operator-configured
      * model list, projected to {@code id} + human-readable {@code name}.
      *

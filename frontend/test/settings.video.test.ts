@@ -33,7 +33,7 @@ function configEntries(videoFrames: string | undefined, modelsJson: string, extr
   return base
 }
 
-function setupApi(opts?: { capturePost?: (b: { key?: string, value?: string }) => void, videoFrames?: string, models?: string, agentModelId?: string, extraEntries?: Array<{ key: string, value: string }>, vllmReachable?: boolean }) {
+function setupApi(opts?: { capturePost?: (b: { key?: string, value?: string }) => void, videoFrames?: string, models?: string, agentModelId?: string, extraEntries?: Array<{ key: string, value: string }>, vllmReachable?: boolean, videoModels?: Array<{ id: string, name: string }> }) {
   registerEndpoint('/api/agents', () => [
     { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: opts?.agentModelId ?? 'kimi-k2.5', enabled: true, isMain: true, providerConfigured: true },
   ])
@@ -46,6 +46,11 @@ function setupApi(opts?: { capturePost?: (b: { key?: string, value?: string }) =
     reachable: opts?.vllmReachable ?? false,
     modelCount: opts?.vllmReachable ? 1 : 0,
     reason: opts?.vllmReachable ? null : 'vllm not running',
+  }))
+  registerEndpoint('/api/providers/openrouter/video-models', () => ({
+    provider: 'openrouter',
+    models: opts?.videoModels ?? [],
+    count: (opts?.videoModels ?? []).length,
   }))
   registerEndpoint('/api/config', {
     method: 'GET',
@@ -135,6 +140,39 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     const hit = captured.find(b => b.key === 'video.sampleFrames')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('32')
+  })
+
+  it('populates the video-model dropdown with live-discovered video models from OpenRouter', async () => {
+    setupApi({
+      extraEntries: [
+        { key: 'video.provider', value: 'openrouter' },
+        { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
+      ],
+      videoModels: [
+        { id: 'qwen/qwen3-vl-235b', name: 'Qwen3 VL 235B' },
+        { id: 'qwen/qwen3-vl-30b-instruct', name: 'Qwen3 VL 30B Instruct' },
+      ],
+    })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+    const select = c.find('select[aria-label="Video model"]')
+    expect(select.exists()).toBe(true)
+    const opts = select.findAll('option').map(o => o.text())
+    expect(opts.join(' | ')).toContain('Qwen3 VL 235B')
+    expect(opts.join(' | ')).toContain('Qwen3 VL 30B Instruct')
+  })
+
+  it('shows an empty-state hint when the provider has no video models', async () => {
+    setupApi({
+      extraEntries: [
+        { key: 'video.provider', value: 'openrouter' },
+        { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
+      ],
+      videoModels: [],
+    })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+    expect(c.text()).toContain('No video-capable models found on openrouter')
   })
 
   it('enables the vLLM video radio only when vLLM is reachable', async () => {

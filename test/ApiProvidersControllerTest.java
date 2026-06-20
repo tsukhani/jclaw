@@ -113,6 +113,34 @@ class ApiProvidersControllerTest extends FunctionalTest {
         assertTrue(body.contains("not configured"), "expected 'not configured' reason: " + body);
     }
 
+    // --- video-models ---
+
+    @Test
+    void videoModelsRequiresAuth() {
+        assertEquals(401, GET("/api/providers/openrouter/video-models").status.intValue());
+    }
+
+    @Test
+    void videoModelsReturns400WhenBaseUrlMissing() {
+        login();
+        var resp = GET("/api/providers/test-provider/video-models");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).toLowerCase().contains("base url"),
+                "error should mention base URL: " + getContent(resp));
+    }
+
+    @Test
+    void videoModelsDoesNotRequireApiKey() {
+        // Unlike discover-models, the video-models endpoint tolerates a missing API key (vLLM has
+        // none): with a baseUrl set but no key it proceeds to the discovery call (which fails to
+        // connect to the bogus host → 502), never a 400 "no API key".
+        login();
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:1/v1");
+        var resp = GET("/api/providers/test-provider/video-models");
+        assertNotEquals(400, resp.status.intValue(),
+                "missing API key must not 400 on video-models: " + resp.status);
+    }
+
     // --- list ---
 
     @Test

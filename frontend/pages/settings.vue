@@ -678,15 +678,46 @@ watch([videoEnabled, vllmConfigured], ([on, configured]) => {
 // Video-capable models the operator configured for the chosen provider — filtered to the
 // supportsVideo-tagged ones (the same flag the dispatcher routes on), so the operator selects
 // rather than free-types a model that may not handle video.
-const videoModels = computed<ProviderModelDef[]>(() => {
-  if (videoProvider.value !== 'openrouter' && videoProvider.value !== 'vllm') return []
-  return getProviderModels(videoProvider.value).filter(m => m.supportsVideo === true)
-})
-const videoModelOptions = computed(() => videoModels.value.map(m => ({ id: m.id, label: m.name || m.id })))
+// The dedicated video model is picked from the provider's LIVE catalog, filtered to video-capable
+// models (supportsVideo) — not the operator's manually-configured set, since a dedicated video model
+// needn't be pre-added (VideoInterpretationClient calls it by id). Discovered lazily when the section
+// is on + a provider is selected (see the watch below); GET /api/providers/{name}/video-models.
+const videoModelOptions = ref<Array<{ id: string, label: string }>>([])
+const videoModelsLoading = ref(false)
+const videoModelsError = ref<string | null>(null)
+async function discoverVideoModels() {
+  const p = videoProvider.value
+  if (!videoEnabled.value || (p !== 'openrouter' && p !== 'vllm')) {
+    videoModelOptions.value = []
+    return
+  }
+  // Don't probe vLLM's catalog until we know it's reachable (avoids a guaranteed-failing call).
+  if (p === 'vllm' && !vllmReachable.value) {
+    videoModelOptions.value = []
+    return
+  }
+  videoModelsLoading.value = true
+  videoModelsError.value = null
+  try {
+    const r = await $fetch<{ models: Array<{ id: string, name: string }> }>(`/api/providers/${p}/video-models`)
+    videoModelOptions.value = (r.models || []).map(m => ({ id: m.id, label: m.name || m.id }))
+  }
+  catch (e: unknown) {
+    const err = e as { data?: { message?: string }, message?: string } | undefined
+    videoModelsError.value = err?.data?.message || err?.message || 'Failed to load video models'
+    videoModelOptions.value = []
+  }
+  finally { videoModelsLoading.value = false }
+}
+// A saved video.model not in the discovered list (transient discovery failure, or a model the
+// provider no longer flags video) stays selectable so the operator doesn't silently lose it.
 const videoModelOrphaned = computed(() =>
   videoModel.value !== '' && !videoModelOptions.value.some(o => o.id === videoModel.value),
 )
-const videoModelSelectValue = computed(() => (videoModelOrphaned.value ? '' : videoModel.value))
+const videoModelSelectValue = computed(() => videoModel.value)
+watch([videoEnabled, videoProvider, vllmReachable], () => {
+  discoverVideoModels()
+}, { immediate: true })
 
 // Master toggle: off clears the provider (and model); on defaults to OpenRouter (the common Qwen-VL
 // host) — the operator then picks a video model. Mirrors caption's toggle.
@@ -4144,18 +4175,19 @@ async function deleteLoggerLevel(logger: string) {
           </div>
         </fieldset>
 
-        <!-- Video-model picker — supportsVideo-tagged models from the chosen provider's config. -->
+        <!-- Video-model picker — video-capable models discovered live from the chosen provider. -->
         <div class="bg-surface-elevated border border-border">
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Video model</span>
             <select
               :value="videoModelSelectValue"
               aria-label="Video model"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              :disabled="videoModelsLoading"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden disabled:opacity-50"
               @change="setVideoModel(($event.target as HTMLSelectElement).value)"
             >
               <option value="">
-                (select a model)
+                {{ videoModelsLoading ? 'loading…' : '(select a model)' }}
               </option>
               <option
                 v-for="m in videoModelOptions"
@@ -4164,22 +4196,37 @@ async function deleteLoggerLevel(logger: string) {
               >
                 {{ m.label }}
               </option>
+              <!-- Keep a saved-but-not-discovered model selectable so it isn't silently dropped. -->
+              <option
+                v-if="videoModelOrphaned"
+                :value="videoModel"
+              >
+                {{ videoModel }} (saved)
+              </option>
             </select>
+            <button
+              type="button"
+              class="text-[10px] text-fg-muted underline hover:text-fg-strong disabled:opacity-50 shrink-0"
+              :disabled="videoModelsLoading"
+              title="Re-fetch video models from the provider"
+              @click="discoverVideoModels"
+            >
+              {{ videoModelsLoading ? 'loading…' : 'refresh' }}
+            </button>
           </div>
           <p
-            v-if="videoModels.length === 0"
-            class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
-          >
-            No video-capable models are configured for this provider. Add one under
-            <span class="text-fg-muted">LLM Providers</span> above and mark it “supports video”.
-          </p>
-          <p
-            v-if="videoModelOrphaned"
+            v-if="videoModelsError"
             class="px-4 pb-2.5 -mt-1 text-[11px] text-amber-700 dark:text-amber-400"
           >
-            Saved model “{{ videoModel }}” is hidden because it is not marked video-capable. Pick a video
-            model above, or mark it “supports video” under
-            <span class="text-fg-muted">LLM Providers</span>.
+            Couldn't load video models from {{ videoProvider }}: {{ videoModelsError }}
+          </p>
+          <p
+            v-else-if="!videoModelsLoading && videoModelOptions.length === 0"
+            class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+          >
+            No video-capable models found on {{ videoProvider }}. {{ videoProvider === 'vllm'
+              ? 'Make sure vLLM is serving a video model (e.g. a Qwen-VL).'
+              : 'OpenRouter exposes the Qwen-VL family as video-capable.' }}
           </p>
         </div>
       </template>

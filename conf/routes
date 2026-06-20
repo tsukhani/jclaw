@@ -111,6 +111,7 @@ GET     /api/events                             ApiEventsController.stream
 GET     /api/providers                          ApiProvidersController.list
 POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
 GET     /api/providers/{name}/reachable         ApiProvidersController.reachable
+GET     /api/providers/{name}/video-models      ApiProvidersController.videoModels
 GET     /api/providers/{name}/models            ApiProvidersController.models
 POST    /api/providers/{name}/models            ApiProvidersController.addModel
 POST    /api/providers/refresh-prices           ApiProvidersController.refreshPrices
