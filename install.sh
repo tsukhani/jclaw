@@ -28,6 +28,13 @@
 # POSIX sh — no bashisms; runnable under dash/ash via `| sh`.
 set -eu
 
+# Run from a stable directory. If launched from a deleted/unreadable CWD (common
+# right after removing a dir you were standing in), every subshell otherwise spews
+# "shell-init: getcwd: ... Operation not permitted" and that noise pollutes command
+# output (e.g. the java -version parse below). The installer only uses absolute
+# paths, so moving to $HOME is safe.
+cd "${HOME:-/}" 2>/dev/null || cd / 2>/dev/null || true
+
 # ─── Configuration ───────────────────────────────────────────────────────────
 JCLAW_REPO="tsukhani/jclaw"
 JCLAW_HOME="${JCLAW_HOME:-$HOME/.jclaw}"
@@ -142,7 +149,10 @@ check_java() {
 #   java version "1.8.0_412"           →  1  (correctly rejected)
 java_ok() {
     command -v java >/dev/null 2>&1 || return 1
-    JV=$(java -version 2>&1 | head -n1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p')
+    # Pull the version from whichever line carries `version "…"` — never blindly
+    # head -n1, since stderr noise (a broken-CWD `getcwd` warning, a
+    # `Picked up JAVA_TOOL_OPTIONS` line) can precede it and break the parse.
+    JV=$(java -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -n1)
     [ -n "$JV" ] && [ "$JV" -ge "$MIN_JAVA" ]
 }
 
