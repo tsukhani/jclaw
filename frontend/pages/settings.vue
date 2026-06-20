@@ -610,11 +610,20 @@ const defaultVideoModel = computed<ProviderModelDef | null>(() => {
   if (!a) return null
   return getProviderModels(a.modelProvider).find(m => m.id === a.modelId) ?? null
 })
+// Native inline video works only for the Qwen-VL family — the sole wire format the backend emits.
+// Other video-capable chat models (e.g. Gemini) can't ingest it and silently drop it, so they're
+// handled as vision (frames as images). Mirrors QwenVideoAdapter.isQwenVideoModel.
+function isQwenVideoModel(id: string | undefined): boolean {
+  if (!id) return false
+  const s = id.toLowerCase()
+  return s.includes('qwen2.5-vl') || s.includes('qwen3-vl') || s.includes('qwen-vl')
+    || s.includes('qwen2.5-omni') || s.includes('qwen3-omni')
+}
 // Mirror of VideoUnderstandingDispatcher.strategyFor — the fallback used when no dedicated
 // video model is configured (the agent's own chat model interprets the video).
 const defaultVideoStrategy = computed(() => {
   const m = defaultVideoModel.value
-  if (m?.supportsVideo === true) return 'native'
+  if (m?.supportsVideo === true && isQwenVideoModel(m.id)) return 'native'
   if (m?.supportsVision === true) return 'multiImage'
   return 'textSummary'
 })

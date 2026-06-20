@@ -50,12 +50,15 @@ public final class VideoUnderstandingDispatcher {
             throw new VideoAdapterException("not a video attachment");
         }
         // Capability-gated, mirroring transcription (audio → native vs transcript) and captioning
-        // (image → native vs caption): a chat model that supports video natively watches the clip
-        // directly.
-        if (AgentService.supportsVideo(agent)) {
+        // (image → native vs caption): a chat model that natively watches video gets the clip inline.
+        // BUT the only inline format we emit is Qwen's ({@link QwenVideoAdapter}), so we gate on the
+        // model actually being Qwen-VL — a non-Qwen model that advertises supportsVideo (e.g. Gemini)
+        // would silently ignore the Qwen part. Non-Qwen video models fall through to the dedicated
+        // model / frames-as-images path below, which they CAN ingest.
+        if (AgentService.supportsVideo(agent) && QwenVideoAdapter.isQwenVideoModel(agent.modelId)) {
             return nativeVideo(video, agent);
         }
-        // The chat model can't do video. Prefer a configured dedicated video model
+        // The chat model can't ingest our native video. Prefer a configured dedicated video model
         // (video.provider/video.model): it interprets the clip in a separate call and we splice the
         // prose back as a text part, so even a text-only chat model gains video understanding. On any
         // failure (missing config, frame sampling, HTTP) — or when no dedicated model is set — fall
@@ -89,12 +92,15 @@ public final class VideoUnderstandingDispatcher {
     }
 
     /**
-     * The strategy the agent's model would use — {@code supportsVideo} ⇒ NATIVE_VIDEO, else
-     * {@code supportsVision} ⇒ MULTI_IMAGE, else TEXT_SUMMARY. Exposed for the Settings read-only
-     * "which strategy would my model use" display (JCLAW-223) and the routing functional tests.
+     * The strategy the agent's chat model would use — NATIVE_VIDEO only when it's a Qwen-VL model
+     * (the sole family that ingests our inline video format), else {@code supportsVision} ⇒
+     * MULTI_IMAGE, else TEXT_SUMMARY. Exposed for the Settings read-only "which strategy would my
+     * model use" display (JCLAW-223) and the routing functional tests.
      */
     public static Strategy strategyFor(Agent agent) {
-        if (AgentService.supportsVideo(agent)) return Strategy.NATIVE_VIDEO;
+        if (AgentService.supportsVideo(agent) && QwenVideoAdapter.isQwenVideoModel(agent.modelId)) {
+            return Strategy.NATIVE_VIDEO;
+        }
         if (AgentService.supportsVision(agent)) return Strategy.MULTI_IMAGE;
         return Strategy.TEXT_SUMMARY;
     }

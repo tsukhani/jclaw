@@ -53,6 +53,22 @@ public final class QwenVideoAdapter {
     }
 
     /**
+     * True for the Qwen-VL / Omni family — the only models that ingest the native video content part
+     * this adapter emits ({@code {"type":"video","video":[...]}}). Other models that advertise
+     * {@code supportsVideo} (e.g. Gemini) accept video only in their own provider-native format and
+     * <b>silently ignore</b> this one (OpenRouter drops the unrecognized part, no error), so the
+     * dispatcher must route only Qwen models through the inline native path — everything else falls
+     * back to frames-as-images or a dedicated video model. Mirrors the id heuristic in
+     * {@code ModelDiscoveryService.detectVideoSupport}.
+     */
+    public static boolean isQwenVideoModel(String modelId) {
+        if (modelId == null) return false;
+        var id = modelId.toLowerCase();
+        return id.contains("qwen2.5-vl") || id.contains("qwen3-vl") || id.contains("qwen-vl")
+                || id.contains("qwen2.5-omni") || id.contains("qwen3-omni");
+    }
+
+    /**
      * Build the Qwen video content part(s) for the given frames. Returned as a singleton
      * list so the dispatcher (JCLAW-224) can treat every strategy's output uniformly as a
      * {@code List<content part>} spliced into the user message.
