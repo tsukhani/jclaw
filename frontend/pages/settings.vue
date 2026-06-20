@@ -4248,9 +4248,11 @@ async function deleteLoggerLevel(logger: string) {
             v-else-if="!videoModelsLoading && videoModelOptions.length === 0"
             class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
           >
-            No video-capable models found on {{ videoProvider }}. {{ videoProvider === 'vllm'
-              ? 'Make sure vLLM is serving a video model (e.g. a Qwen-VL).'
-              : 'OpenRouter exposes the Qwen-VL family as video-capable.' }}
+            No Qwen-VL models found on {{ videoProvider }}. {{ videoProvider === 'vllm'
+              ? 'Make sure vLLM is serving a Qwen-VL model.'
+              : 'OpenRouter offers the Qwen-VL family (qwen3-vl, qwen2.5-vl, …).' }}
+            Only Qwen-VL models can be used as a dedicated video model — the interpreter sends video
+            in Qwen's native format, which other models don't accept.
           </p>
         </div>
       </template>

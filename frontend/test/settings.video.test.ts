@@ -204,7 +204,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     })
     const c = await mountSuspended(Settings)
     await flushPromises()
-    expect(c.text()).toContain('No video-capable models found on openrouter')
+    expect(c.text()).toContain('No Qwen-VL models found on openrouter')
   })
 
   it('enables the vLLM video radio only when vLLM is reachable', async () => {

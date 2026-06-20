@@ -65,4 +65,19 @@ class QwenVideoAdapterTest {
         assertThrows(VideoAdapterException.class,
                 () -> QwenVideoAdapter.contentParts(noFrames, 40.0, WireShape.OPENAI_VIDEO_ARRAY));
     }
+
+    @Test
+    void isQwenVideoModelMatchesOnlyTheQwenVlOmniFamily() {
+        // Drives the native-inline gate (chat model) AND the dedicated-model dropdown filter — only
+        // these accept the Qwen video part; everything else must be excluded.
+        assertTrue(QwenVideoAdapter.isQwenVideoModel("qwen/qwen3-vl-30b-instruct"));
+        assertTrue(QwenVideoAdapter.isQwenVideoModel("Qwen2.5-VL-72B"));
+        assertTrue(QwenVideoAdapter.isQwenVideoModel("qwen2.5-omni-7b"));
+        assertTrue(QwenVideoAdapter.isQwenVideoModel("some/qwen3-omni"));
+
+        assertFalse(QwenVideoAdapter.isQwenVideoModel("google/gemini-pro-latest"));
+        assertFalse(QwenVideoAdapter.isQwenVideoModel("qwen/qwen3-32b")); // a Qwen text model, not -VL/-omni
+        assertFalse(QwenVideoAdapter.isQwenVideoModel("gpt-4o"));
+        assertFalse(QwenVideoAdapter.isQwenVideoModel(null));
+    }
 }
