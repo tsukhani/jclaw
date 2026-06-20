@@ -639,11 +639,42 @@ const videoModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'video.model')?.value ?? '',
 )
 const videoEnabled = computed(() => videoProvider.value.trim().length > 0)
-// vLLM is self-hosted (no API key) — gate it on a configured base URL instead.
+// vLLM is self-hosted (no API key). It's offered as a video backend only when it's actually
+// running and reachable, not merely configured — so we live-probe provider.vllm.baseUrl via
+// GET /api/providers/vllm/reachable (a short GET /models with a 7s timeout). vllmConfigured gates
+// whether we even probe; vllmReachable is the answer used to enable the radio.
 const vllmConfigured = computed(() => {
   const v = configData.value?.entries?.find(e => e.key === 'provider.vllm.baseUrl')?.value
   return !!v && v.trim().length > 0
 })
+const vllmReachable = ref(false)
+const vllmReachableReason = ref<string | null>(null)
+const vllmProbing = ref(false)
+async function probeVllm() {
+  if (!vllmConfigured.value) {
+    vllmReachable.value = false
+    vllmReachableReason.value = 'not configured'
+    return
+  }
+  vllmProbing.value = true
+  try {
+    const r = await $fetch<{ reachable: boolean, modelCount: number, reason: string | null }>(
+      '/api/providers/vllm/reachable',
+    )
+    vllmReachable.value = r.reachable
+    vllmReachableReason.value = r.reachable ? null : (r.reason || 'not reachable')
+  }
+  catch {
+    vllmReachable.value = false
+    vllmReachableReason.value = 'probe failed'
+  }
+  finally { vllmProbing.value = false }
+}
+// Probe when the dedicated-model section is in use and vLLM is configured (on mount + whenever
+// either condition flips). Cheap and lazy: no probe for the common "video off" or "no vLLM" case.
+watch([videoEnabled, vllmConfigured], ([on, configured]) => {
+  if (on && configured) probeVllm()
+}, { immediate: true })
 // Video-capable models the operator configured for the chosen provider — filtered to the
 // supportsVideo-tagged ones (the same flag the dispatcher routes on), so the operator selects
 // rather than free-types a model that may not handle video.
@@ -4066,10 +4097,10 @@ async function deleteLoggerLevel(logger: string) {
             <label
               for="video-provider-vllm"
               class="px-4 py-2.5 flex items-center gap-3"
-              :class="vllmConfigured
+              :class="vllmReachable
                 ? 'cursor-pointer'
                 : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
-              :title="vllmConfigured ? '' : 'Add a vLLM base URL (provider.vllm.baseUrl) in LLM Providers above to enable.'"
+              :title="vllmReachable ? '' : 'A self-hosted vLLM must be running and reachable at provider.vllm.baseUrl to use it for video.'"
             >
               <input
                 id="video-provider-vllm"
@@ -4077,25 +4108,38 @@ async function deleteLoggerLevel(logger: string) {
                 name="video-provider"
                 value="vllm"
                 :checked="videoProvider === 'vllm'"
-                :disabled="!vllmConfigured"
+                :disabled="!vllmReachable"
                 class="accent-emerald-600"
                 @change="setVideoProvider('vllm')"
               >
               <span
                 class="flex-1 text-sm"
-                :class="vllmConfigured
+                :class="vllmReachable
                   ? 'text-fg-primary'
                   : 'text-amber-800 dark:text-amber-300 opacity-80'"
               >vLLM (self-hosted)</span>
+              <button
+                v-if="vllmConfigured && !vllmReachable"
+                type="button"
+                class="text-[10px] text-fg-muted underline hover:text-fg-strong disabled:opacity-50"
+                :disabled="vllmProbing"
+                title="Re-check whether vLLM is reachable now"
+                @click.prevent="probeVllm"
+              >{{ vllmProbing ? 'checking…' : 'recheck' }}</button>
               <span
                 v-if="!vllmConfigured"
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no base URL — configure in LLM Providers</span>
               <span
+                v-else-if="!vllmReachable"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+                :title="vllmReachableReason || ''"
+              >not reachable</span>
+              <span
                 v-else
                 class="text-[10px] px-1 border"
                 :class="videoProvider === 'vllm' ? 'text-green-400 border-green-400/30' : 'text-fg-muted border-input'"
-              >self-hosted</span>
+              >reachable</span>
             </label>
           </div>
         </fieldset>

@@ -109,6 +109,34 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
     }
 
     @Test
+    void videoCapableChatModelBypassesDedicatedModel() throws Exception {
+        // Rule 1 precedence: when the chat model is video-capable, IT handles the video — a dedicated
+        // model configured in Settings is NOT consulted. Point a live dedicated model at a mock server
+        // and assert the gemini-pro turn produces frames-as-images (chat model) and never hits it.
+        assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.openrouter.baseUrl", server.url("/").toString());
+            ConfigService.set("provider.openrouter.apiKey", "sk-test");
+            ConfigService.set("video.provider", "openrouter");
+            ConfigService.set("video.model", "qwen/qwen3-vl-instruct");
+            ConfigService.clearCache();
+
+            var agent = agent("gemini-pro"); // video-capable (non-Qwen) + vision
+            var att = videoAttachmentWithFile(agent, "web", 40);
+            var parts = VideoUnderstandingDispatcher.dispatch(att, agent);
+
+            assertEquals("image_url", parts.get(1).get("type"),
+                    "video-capable chat model uses its own frames, not the dedicated model");
+            assertEquals(0, server.getRequestCount(), "dedicated video model must not be called");
+        } finally {
+            ConfigService.set("video.provider", "");
+            ConfigService.set("video.model", "");
+            ConfigService.clearCache();
+        }
+    }
+
+    @Test
     void dispatchMultiImageProducesImageParts() throws Exception {
         assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
         var agent = agent("vis");

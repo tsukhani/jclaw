@@ -49,21 +49,24 @@ public final class VideoUnderstandingDispatcher {
         if (video == null || !video.isVideo()) {
             throw new VideoAdapterException("not a video attachment");
         }
-        // Capability-gated, mirroring transcription (audio → native vs transcript) and captioning
-        // (image → native vs caption): a chat model that natively watches video gets the clip inline.
-        // BUT the only inline format we emit is Qwen's ({@link QwenVideoAdapter}), so we gate on the
-        // model actually being Qwen-VL — a non-Qwen model that advertises supportsVideo (e.g. Gemini)
-        // would silently ignore the Qwen part. Non-Qwen video models fall through to the dedicated
-        // model / frames-as-images path below, which they CAN ingest.
-        if (AgentService.supportsVideo(agent) && QwenVideoAdapter.isQwenVideoModel(agent.modelId)) {
-            return nativeVideo(video, agent);
+        var supportsVideo = AgentService.supportsVideo(agent);
+        var supportsVision = AgentService.supportsVision(agent);
+
+        // Rule 1 — the chat model the user picked is video-capable, so IT interprets the video.
+        // Qwen-VL ingests our native frame-array; any other video-capable model (e.g. Gemini) can't
+        // (it would silently ignore the Qwen part), so it gets the sampled frames as images — robust,
+        // since every vision model reads image_url. A model tagged video but neither Qwen nor vision
+        // can take neither, so it falls through to the dedicated/captioning ladder.
+        if (supportsVideo) {
+            if (QwenVideoAdapter.isQwenVideoModel(agent.modelId)) return nativeVideo(video, agent);
+            if (supportsVision) return multiImageOrTextSummary(video, agent);
         }
-        // The chat model can't ingest our native video. Prefer a configured dedicated video model
-        // (video.provider/video.model): it interprets the clip in a separate call and we splice the
-        // prose back as a text part, so even a text-only chat model gains video understanding. On any
-        // failure (missing config, frame sampling, HTTP) — or when no dedicated model is set — fall
-        // back to what the chat model CAN do: frames-as-images for a vision model, else a captioned
-        // text summary.
+
+        // Rule 2 — the chat model can't do video → use the dedicated video model from Settings →
+        // Video Interpretation (video.provider/video.model) if one is configured. It interprets the
+        // clip in a separate call and we splice the prose back as a text part, so even a text-only
+        // chat model gains video understanding. On any failure (missing config, frame sampling, HTTP)
+        // fall through to what the chat model itself can do.
         var dedicated = VideoInterpretationRouter.configuredService();
         if (dedicated.isPresent()) {
             try {
@@ -73,7 +76,12 @@ public final class VideoUnderstandingDispatcher {
                         .formatted(e.getMessage(), video.uuid));
             }
         }
-        return AgentService.supportsVision(agent)
+
+        // Rule 5 — the chat model has vision → sampled frames as images. Rule 3 — no vision but an
+        // Image Captioning provider is configured → caption each frame into a text summary. Rule 4 —
+        // captioning also off → textSummary throws and the caller splices a "could not be interpreted"
+        // note (so the model tells the user rather than the turn crashing).
+        return supportsVision
                 ? multiImageOrTextSummary(video, agent)
                 : textSummary(video, agent);
     }

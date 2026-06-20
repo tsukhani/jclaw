@@ -9,12 +9,12 @@ import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.TimeUnit;
 
-final class LocalProviderProbeSupport {
+public final class LocalProviderProbeSupport {
 
     /** Boot probes don't need the LLM single-shot's 180s default — 7s is plenty. */
     private static final long PROBE_TIMEOUT_SECONDS = 7;
 
-    record Result(boolean available, int modelCount, String reason, boolean connectionRefused) { }
+    public record Result(boolean available, int modelCount, String reason, boolean connectionRefused) { }
 
     private LocalProviderProbeSupport() {}
 
@@ -25,7 +25,7 @@ final class LocalProviderProbeSupport {
      * upgrade-event hang that the JDK driver had to dodge is structurally
      * absent here. Both probes share one client, no special-casing.
      */
-    static Result probeModels(String baseUrl, String notRunningLabel) {
+    public static Result probeModels(String baseUrl, String notRunningLabel) {
         var req = new Request.Builder()
                 .url(baseUrl + "/models")
                 .get()

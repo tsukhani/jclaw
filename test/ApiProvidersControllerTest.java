@@ -94,6 +94,25 @@ class ApiProvidersControllerTest extends FunctionalTest {
         assertEquals(400, response.status.intValue());
     }
 
+    // --- reachable ---
+
+    @Test
+    void reachableRequiresAuth() {
+        assertEquals(401, GET("/api/providers/vllm/reachable").status.intValue());
+    }
+
+    @Test
+    void reachableReturnsNotConfiguredWhenBaseUrlMissing() {
+        login();
+        // No provider.vllm.baseUrl → 200 with reachable=false + "not configured" (never an error,
+        // so the UI renders a hint rather than failing).
+        var resp = GET("/api/providers/vllm/reachable");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"reachable\":false"), "expected reachable=false: " + body);
+        assertTrue(body.contains("not configured"), "expected 'not configured' reason: " + body);
+    }
+
     // --- list ---
 
     @Test

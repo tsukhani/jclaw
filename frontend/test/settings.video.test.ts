@@ -20,7 +20,7 @@ const OCR = { providers: [] }
 // Default main-agent model (kimi-k2.5) declares neither vision nor video → Tier 3.
 const MODELS_TEXT_ONLY = '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535}]'
 
-function configEntries(videoFrames: string | undefined, modelsJson: string) {
+function configEntries(videoFrames: string | undefined, modelsJson: string, extra?: Array<{ key: string, value: string }>) {
   const base = [
     { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1', updatedAt: '2026-06-19T10:00:00Z' },
     { key: 'provider.ollama-cloud.apiKey', value: 'sk-cloud-****', updatedAt: '2026-06-19T10:00:00Z' },
@@ -29,10 +29,11 @@ function configEntries(videoFrames: string | undefined, modelsJson: string) {
   if (videoFrames !== undefined) {
     base.push({ key: 'video.sampleFrames', value: videoFrames, updatedAt: '2026-06-19T10:00:00Z' })
   }
+  for (const e of extra ?? []) base.push({ ...e, updatedAt: '2026-06-19T10:00:00Z' })
   return base
 }
 
-function setupApi(opts?: { capturePost?: (b: { key?: string, value?: string }) => void, videoFrames?: string, models?: string, agentModelId?: string }) {
+function setupApi(opts?: { capturePost?: (b: { key?: string, value?: string }) => void, videoFrames?: string, models?: string, agentModelId?: string, extraEntries?: Array<{ key: string, value: string }>, vllmReachable?: boolean }) {
   registerEndpoint('/api/agents', () => [
     { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: opts?.agentModelId ?? 'kimi-k2.5', enabled: true, isMain: true, providerConfigured: true },
   ])
@@ -40,9 +41,15 @@ function setupApi(opts?: { capturePost?: (b: { key?: string, value?: string }) =
   registerEndpoint('/api/providers', () => PROVIDERS)
   registerEndpoint('/api/ocr/status', () => OCR)
   registerEndpoint('/api/transcription/state', () => TRANSCRIPTION)
+  registerEndpoint('/api/providers/vllm/reachable', () => ({
+    provider: 'vllm',
+    reachable: opts?.vllmReachable ?? false,
+    modelCount: opts?.vllmReachable ? 1 : 0,
+    reason: opts?.vllmReachable ? null : 'vllm not running',
+  }))
   registerEndpoint('/api/config', {
     method: 'GET',
-    handler: () => ({ entries: configEntries(opts?.videoFrames, opts?.models ?? MODELS_TEXT_ONLY) }),
+    handler: () => ({ entries: configEntries(opts?.videoFrames, opts?.models ?? MODELS_TEXT_ONLY, opts?.extraEntries) }),
   })
   registerEndpoint('/api/config', {
     method: 'POST',
@@ -128,5 +135,39 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     const hit = captured.find(b => b.key === 'video.sampleFrames')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('32')
+  })
+
+  it('enables the vLLM video radio only when vLLM is reachable', async () => {
+    // Dedicated model on (video.provider set) + vLLM base URL configured + probe says reachable.
+    setupApi({
+      extraEntries: [
+        { key: 'video.provider', value: 'openrouter' },
+        { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
+        { key: 'provider.vllm.baseUrl', value: 'http://localhost:8000/v1' },
+      ],
+      vllmReachable: true,
+    })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+    const radio = c.find<HTMLInputElement>('#video-provider-vllm')
+    expect(radio.exists()).toBe(true)
+    expect(radio.element.disabled).toBe(false)
+    expect(c.text()).toContain('reachable')
+  })
+
+  it('disables the vLLM video radio with a "not reachable" hint when vLLM is down', async () => {
+    setupApi({
+      extraEntries: [
+        { key: 'video.provider', value: 'openrouter' },
+        { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
+        { key: 'provider.vllm.baseUrl', value: 'http://localhost:8000/v1' },
+      ],
+      vllmReachable: false,
+    })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+    const radio = c.find<HTMLInputElement>('#video-provider-vllm')
+    expect(radio.element.disabled).toBe(true)
+    expect(c.text()).toContain('not reachable')
   })
 })

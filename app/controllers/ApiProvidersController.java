@@ -51,6 +51,9 @@ public class ApiProvidersController extends Controller {
 
     public record AddModelResponse(String provider, ModelRef model, int count) {}
 
+    /** Live reachability of a (typically local) provider's OpenAI-compatible endpoint. */
+    public record ReachableResponse(String provider, boolean reachable, int modelCount, String reason) {}
+
     /**
      * GET /api/providers — billing-shape projection of each configured
      * provider. Returns name, selected modality, subscription monthly
@@ -104,6 +107,29 @@ public class ApiProvidersController extends Controller {
             case DiscoveryResult.Error(var statusCode, var message) ->
                     error(statusCode, message);
         }
+    }
+
+    /**
+     * GET /api/providers/{name}/reachable — a live liveness check of a provider's
+     * OpenAI-compatible {@code /models} endpoint (a short GET with a 7s timeout).
+     * Used by Settings → Video Interpretation to offer the vLLM option only when a
+     * self-hosted vLLM is actually running and reachable, not merely configured.
+     * Always 200 with {@code reachable=false} + a reason when down/unconfigured, so
+     * the UI can render a "not reachable" hint rather than treating it as an error.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReachableResponse.class)))
+    @Operation(summary = "Check whether a provider's endpoint is reachable right now")
+    public static void reachable(String name) {
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
+        if (baseUrl == null || baseUrl.isBlank()) {
+            renderJSON(gson.toJson(new ReachableResponse(name, false, 0, "not configured")));
+        }
+        var r = services.LocalProviderProbeSupport.probeModels(trimTrailingSlash(baseUrl), name);
+        renderJSON(gson.toJson(new ReachableResponse(name, r.available(), r.modelCount(), r.reason())));
+    }
+
+    private static String trimTrailingSlash(String s) {
+        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 
     /**

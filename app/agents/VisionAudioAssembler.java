@@ -466,7 +466,9 @@ public final class VisionAudioAssembler {
                     EventLogger.warn("video", "Video understanding failed for attachment %d: %s"
                             .formatted(attId, e.getMessage()));
                     acc.add(Map.of("type", "text", "text",
-                            "[A video attachment was included but could not be processed.]"));
+                            "[A video was attached but could not be interpreted. To handle videos, "
+                            + "pick a video- or image-capable model, set a dedicated video model in "
+                            + "Settings → Video Interpretation, or enable Image Captioning.]"));
                 }
             }
             partsByIndex.put(b.chatMessageIndex(), acc);
