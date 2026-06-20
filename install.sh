@@ -28,12 +28,16 @@
 # POSIX sh — no bashisms; runnable under dash/ash via `| sh`.
 set -eu
 
-# Run from a stable directory. If launched from a deleted/unreadable CWD (common
-# right after removing a dir you were standing in), every subshell otherwise spews
-# "shell-init: getcwd: ... Operation not permitted" and that noise pollutes command
-# output (e.g. the java -version parse below). The installer only uses absolute
-# paths, so moving to $HOME is safe.
-cd "${HOME:-/}" 2>/dev/null || cd / 2>/dev/null || true
+# Only escape the CWD if it's actually broken. A deleted/unreadable working
+# directory makes every subshell spew "shell-init: getcwd: ... Operation not
+# permitted", which can pollute command output (e.g. the java -version parse).
+# But cd'ing away unconditionally breaks per-directory toolchains — jenv / asdf /
+# sdkman / a .java-version file pin Java by directory, so leaving the dir would
+# resolve a different (often older) java and misreport the version. `pwd -P` runs
+# getcwd, so it fails exactly when the CWD is unusable; only then move to $HOME.
+if ! pwd -P >/dev/null 2>&1; then
+    cd "${HOME:-/}" 2>/dev/null || cd / 2>/dev/null || true
+fi
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 JCLAW_REPO="tsukhani/jclaw"
