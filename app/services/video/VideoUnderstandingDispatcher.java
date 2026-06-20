@@ -10,9 +10,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Routes a video attachment to one of three interpretation strategies based on the agent's model
- * capabilities and returns the OpenAI-style content parts to splice into the outgoing user message
- * (JCLAW-224). The strategy is chosen in preference order:
+ * Routes a video attachment to an interpretation strategy and returns the OpenAI-style content parts
+ * to splice into the outgoing user message (JCLAW-224).
+ *
+ * <p>Capability-gated, mirroring transcription and image captioning: a chat model that supports video
+ * natively watches the clip directly. Only when it can't does a configured dedicated video model
+ * ({@code video.provider}/{@code video.model} in Settings → Video Interpretation) step in —
+ * interpreting the clip in a separate call ({@link VideoInterpretationRouter}/{@link
+ * VideoInterpretationClient}) whose prose is spliced back as a text part, so even a text-only chat
+ * model gains video understanding. On any failure (or no dedicated model) the video falls back to what
+ * the chat model itself can do, in preference order:
  * <ol>
  *   <li>{@code supportsVideo} → {@link Strategy#NATIVE_VIDEO} ({@link QwenVideoAdapter}, a native
  *       Qwen video part);</li>
@@ -42,11 +49,43 @@ public final class VideoUnderstandingDispatcher {
         if (video == null || !video.isVideo()) {
             throw new VideoAdapterException("not a video attachment");
         }
-        return switch (strategyFor(agent)) {
-            case NATIVE_VIDEO -> nativeVideo(video, agent);
-            case MULTI_IMAGE -> multiImageOrTextSummary(video, agent);
-            case TEXT_SUMMARY -> textSummary(video, agent);
-        };
+        // Capability-gated, mirroring transcription (audio → native vs transcript) and captioning
+        // (image → native vs caption): a chat model that supports video natively watches the clip
+        // directly.
+        if (AgentService.supportsVideo(agent)) {
+            return nativeVideo(video, agent);
+        }
+        // The chat model can't do video. Prefer a configured dedicated video model
+        // (video.provider/video.model): it interprets the clip in a separate call and we splice the
+        // prose back as a text part, so even a text-only chat model gains video understanding. On any
+        // failure (missing config, frame sampling, HTTP) — or when no dedicated model is set — fall
+        // back to what the chat model CAN do: frames-as-images for a vision model, else a captioned
+        // text summary.
+        var dedicated = VideoInterpretationRouter.configuredService();
+        if (dedicated.isPresent()) {
+            try {
+                return dedicatedInterpretation(video, dedicated.get());
+            } catch (RuntimeException e) {
+                EventLogger.warn(EVENT_CATEGORY, "dedicated video model failed (%s); falling back to the chat model for attachment %s"
+                        .formatted(e.getMessage(), video.uuid));
+            }
+        }
+        return AgentService.supportsVision(agent)
+                ? multiImageOrTextSummary(video, agent)
+                : textSummary(video, agent);
+    }
+
+    /** Interpret the whole video with the dedicated model and wrap its prose as a single text part. */
+    private static List<Map<String, Object>> dedicatedInterpretation(MessageAttachment video, VideoInterpretationClient client) {
+        var text = client.interpret(video);
+        if (text == null || text.isBlank()) {
+            throw new VideoAdapterException("dedicated video model returned no text");
+        }
+        EventLogger.info(EVENT_CATEGORY, "dedicated-video: %d chars, attachment=%s".formatted(text.length(), video.uuid));
+        var part = new java.util.LinkedHashMap<String, Object>();
+        part.put("type", "text");
+        part.put("text", "Video interpretation:\n" + text);
+        return List.of(part);
     }
 
     /**
