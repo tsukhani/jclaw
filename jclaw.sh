@@ -895,16 +895,25 @@ EOF
             echo ""
         fi
     else
-        # User view: unzipped distribution, no git context
-        cat <<EOF
-  ${cyan}./jclaw.sh start${reset}      Start JClaw (backend on :9000)
-  ${cyan}./jclaw.sh stop${reset}       Stop the running instance
-  ${cyan}./jclaw.sh status${reset}     Show whether the backend is running
-  ${cyan}./jclaw.sh logs${reset}       Tail the application log
-  ${cyan}./jclaw.sh uninstall${reset}  Remove JClaw (deletes ~/.jclaw, undoes completion)
-  ${cyan}./jclaw.sh help${reset}       Full command reference
-
-EOF
+        # User view: installed bundle / unzipped distribution. Show the command
+        # the user can actually type — the global `jclaw` shim when it's on PATH
+        # and resolves to THIS install (the shim `exec`s jclaw.sh, so $0 can't
+        # tell us; we detect the shim instead), else ./jclaw.sh.
+        local invoke='./jclaw.sh' _shim
+        _shim=$(command -v jclaw 2>/dev/null || true)
+        if [[ -n "$_shim" ]] && grep -qF "$SCRIPT_DIR/jclaw.sh" "$_shim" 2>/dev/null; then
+            invoke='jclaw'
+        fi
+        # Description column aligns on command-name length (longest is
+        # 'uninstall', 9) + a 2-space gap, so it's independent of the prefix.
+        _intro_cmd() { printf '  %s%s %s%s%*s%s\n' "$cyan" "$invoke" "$1" "$reset" "$(( 11 - ${#1} ))" '' "$2"; }
+        _intro_cmd start     "Start JClaw (backend on :9000)"
+        _intro_cmd stop      "Stop the running instance"
+        _intro_cmd status    "Show whether the backend is running"
+        _intro_cmd logs      "Tail the application log"
+        _intro_cmd uninstall "Remove JClaw (deletes ~/.jclaw, undoes completion)"
+        _intro_cmd help      "Full command reference"
+        echo ""
     fi
 }
 
