@@ -21,6 +21,8 @@
 #   JCLAW_NO_JRE    set to 1 to never auto-install a JRE (just print instructions)
 #   JCLAW_INSTALL_JRE  set to 1 to auto-install the JRE without prompting
 #   JCLAW_NO_RC_EDIT   set to 1 to generate completion scripts but not edit your shell rc
+#   JCLAW_BUNDLE_URL   override the bundle source (any URL, incl. file://) for
+#                      air-gapped / mirror / fork / test installs
 #   NO_COLOR        set to disable ANSI color
 #
 # POSIX sh — no bashisms; runnable under dash/ash via `| sh`.
@@ -35,6 +37,7 @@ JCLAW_BIN_DIR="${JCLAW_BIN_DIR:-$HOME/.local/bin}"
 JCLAW_NO_START="${JCLAW_NO_START:-}"
 JCLAW_NO_JRE="${JCLAW_NO_JRE:-}"            # skip the auto JRE download
 JCLAW_INSTALL_JRE="${JCLAW_INSTALL_JRE:-}"  # auto-install the JRE without prompting
+JCLAW_BUNDLE_URL="${JCLAW_BUNDLE_URL:-}"    # override bundle source (URL or file://) — air-gap/mirror/test
 
 APP_DIR="$JCLAW_HOME/jclaw"     # bundle zip extracts under a jclaw/ prefix
 JRE_DIR="$JCLAW_HOME/jre"       # self-contained Zulu JRE lands here when Java is missing
@@ -247,6 +250,12 @@ download() {
 }
 
 resolve_url() {
+    # Explicit override: a full URL (incl. file://) to the bundle zip. For
+    # air-gapped/mirror/fork installs and end-to-end testing.
+    if [ -n "$JCLAW_BUNDLE_URL" ]; then
+        echo "$JCLAW_BUNDLE_URL"
+        return
+    fi
     if [ "$JCLAW_VERSION" = "latest" ]; then
         # GitHub redirects this to the newest release's asset.
         echo "https://github.com/$JCLAW_REPO/releases/latest/download/$ASSET"
