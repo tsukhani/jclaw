@@ -34,6 +34,7 @@ public class ApiProvidersController extends Controller {
 
     private static final Gson gson = INSTANCE;
     private static final String PROVIDER_CONFIG_PREFIX = "provider.";
+    private static final String BASE_URL_SUFFIX = ".baseUrl";
 
     public record DiscoverModelsResponse(List<Map<String, Object>> models, int count) {}
 
@@ -90,7 +91,7 @@ public class ApiProvidersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
     @Operation(summary = "Discover a provider's available models from its live API")
     public static void discoverModels(String name) {
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
 
         if (baseUrl == null || baseUrl.isBlank()) {
@@ -117,10 +118,11 @@ public class ApiProvidersController extends Controller {
      * Always 200 with {@code reachable=false} + a reason when down/unconfigured, so
      * the UI can render a "not reachable" hint rather than treating it as an error.
      */
+    @SuppressWarnings("java:S2259") // null guard halts via Play's renderJSON() throwing — baseUrl is non-null at the probe call (same as discoverModels)
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReachableResponse.class)))
     @Operation(summary = "Check whether a provider's endpoint is reachable right now")
     public static void reachable(String name) {
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             renderJSON(gson.toJson(new ReachableResponse(name, false, 0, "not configured")));
         }
@@ -147,7 +149,7 @@ public class ApiProvidersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's video-capable models from its live API")
     public static void videoModels(String name) {
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             error(400, "Provider '%s' has no base URL configured".formatted(name));
         }
@@ -157,9 +159,8 @@ public class ApiProvidersController extends Controller {
             case DiscoveryResult.Ok(var models) -> {
                 var refs = new ArrayList<ModelRef>();
                 for (var m : models) {
-                    if (!Boolean.TRUE.equals(m.get("supportsVideo"))) continue;
                     var id = String.valueOf(m.getOrDefault("id", ""));
-                    if (id.isBlank()) continue;
+                    if (!Boolean.TRUE.equals(m.get("supportsVideo")) || id.isBlank()) continue;
                     var displayName = String.valueOf(m.getOrDefault("name", ""));
                     refs.add(new ModelRef(id, displayName.isBlank() ? deriveName(id) : displayName));
                 }
@@ -259,7 +260,7 @@ public class ApiProvidersController extends Controller {
 
     /** 404s unless {@code name} is a configured provider (has a base URL). */
     private static void requireConfiguredProvider(String name) {
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".baseUrl");
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             error(404, "Provider '%s' is not configured".formatted(name));
         }

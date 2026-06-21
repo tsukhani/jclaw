@@ -433,9 +433,12 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 try (var os = exchange.getResponseBody()) { os.write(bytes); }
             } else {
                 exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-                var sse = "data: {\"id\":\"r\",\"object\":\"chat.completion.chunk\",\"model\":\"x\","
-                        + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Recovered reply\"},\"finish_reason\":\"stop\"}]}\n\n"
-                        + "data: [DONE]\n\n";
+                var sse = """
+                        data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"Recovered reply"},"finish_reason":"stop"}]}
+
+                        data: [DONE]
+
+                        """;
                 var bytes = sse.getBytes();
                 exchange.sendResponseHeaders(200, bytes.length);
                 try (var os = exchange.getResponseBody()) { os.write(bytes); }

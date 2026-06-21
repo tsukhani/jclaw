@@ -34,7 +34,7 @@ public final class VideoUrlAdapter {
     public static long maxInlineBytes() {
         int mb = Math.clamp(ConfigService.getInt(CFG_MAX_INLINE_MB, DEFAULT_MAX_INLINE_MB),
                 MAX_INLINE_MB_MIN, MAX_INLINE_MB_MAX);
-        return (long) mb * 1024L * 1024L;
+        return mb * 1024L * 1024L;
     }
 
     /** True when the clip is small enough to inline as a base64 {@code video_url}. */

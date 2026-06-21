@@ -48,6 +48,9 @@ public class AgentRunner {
     private static final String QUEUED_MESSAGE_RESPONSE =
             "Your message has been queued and will be processed shortly.";
 
+    /** Outcome label for the {@code AUDIO_PASSTHROUGH_OUTCOME} log when the audio passthrough fails (provider error or no usable transcript). */
+    private static final String OUTCOME_ERROR = "error";
+
     // Package-private so ToolCallLoopRunner (JCLAW-299) can read the
     // operator-configurable per-turn round cap.
     static int maxToolRounds() {
@@ -1086,7 +1089,7 @@ public class AgentRunner {
                 && AudioRetryStrategy.isAudioFormatRejection(acc.error)) {
             var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(messages, prepared.audioBearers(), false);
             if (!AudioRetryStrategy.anyTranscriptAvailable(prepared.audioBearers())) {
-                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, "error",
+                AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, OUTCOME_ERROR,
                         "no_transcript_after_rejection", true);
                 return new StreamRound1(acc, messages); // surface the original 4xx — nothing to retry with
             }
@@ -1097,7 +1100,7 @@ public class AgentRunner {
                     thinkingMode, channelType, isCancelled, agent);
             if (retry == null) return null;
             AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
-                    retry.error == null ? "downgraded" : "error",
+                    retry.error == null ? "downgraded" : OUTCOME_ERROR,
                     retry.error == null ? null : AudioRetryStrategy.shortErrorTag(retry.error), true);
             return new StreamRound1(retry, rewritten);
         }
@@ -1105,7 +1108,7 @@ public class AgentRunner {
         // No fallback fired — log the plain passthrough outcome (accepted / error). transcript_awaited
         // is false for a happy native passthrough, true when the rewrite already ran (text-only model).
         AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
-                acc.error == null ? "accepted" : "error",
+                acc.error == null ? "accepted" : OUTCOME_ERROR,
                 acc.error == null ? null : AudioRetryStrategy.shortErrorTag(acc.error), !supportsAudio);
         return new StreamRound1(acc, messages);
     }
