@@ -41,7 +41,11 @@ irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
 > POSIX shell script). The installer prefers Git Bash; if only WSL is present it
 > launches there; if neither is found it installs and prints how to run it.
 
-Once running, manage it with `jclaw status`, `jclaw stop`, `jclaw restart`.
+Once running, manage it with `jclaw status`, `jclaw stop`, `jclaw restart` from
+any new shell — the installer puts the `jclaw` command on your `PATH` (via
+`~/.local/bin`) and wires up `<TAB>` completion for bash and zsh. To remove JClaw
+entirely, run `jclaw uninstall`: it stops the app, undoes the PATH and completion
+wiring, and deletes `~/.jclaw`.
 
 **Requirements:** a Java 25+ runtime ([Zulu](https://www.azul.com/downloads/?version=java-25)
 or Temurin). Nothing else — the bundle bakes in the framework, app dependencies,
@@ -52,14 +56,15 @@ precompiled classes, and the prebuilt SPA.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `JCLAW_HOME` | `~/.jclaw` | Install directory |
-| `JCLAW_VERSION` | `latest` | Pin a release tag, e.g. `v0.13.40` |
+| `JCLAW_VERSION` | `latest` | Pin a release tag, e.g. `v0.14.7` |
 | `JCLAW_PORT` | `9000` | Port reported on launch |
 | `JCLAW_NO_START` | — | Set to `1` to install without starting |
+| `JCLAW_BUNDLE_URL` | — | Install from a specific bundle URL (including `file://`) instead of GitHub Releases |
 
 ```bash
 # Pin a version and install without auto-starting:
 curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh \
-  | JCLAW_VERSION=v0.13.40 JCLAW_NO_START=1 sh
+  | JCLAW_VERSION=v0.14.7 JCLAW_NO_START=1 sh
 ```
 
 ---

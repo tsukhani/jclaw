@@ -29,8 +29,8 @@ For each provider you can:
 - Set the **API key** (stored encrypted at rest).
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
-- **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability badges (vision, audio, thinking) confirmed by the provider or guessed from the model name.
-- **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in.
+- **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability badges (vision, audio, video, thinking) confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess).
+- **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
 
 If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
 
@@ -77,6 +77,26 @@ Master toggle, then a backend radio group:
 - **Local VLM (Ollama)** — captions with a vision model you run in your own local Ollama (at `localhost:11434/v1`). There is **no bundled model**: pull a vision model in Ollama (e.g. `ollama pull moondream` or `llava`), add it under [LLM Providers](#llm-providers) and mark it **supports vision**, then pick it here.
 
 The model picker is a dropdown of that backend's **vision-tagged** models — cloud backends are disabled until their key is set. An **Active:** status line shows the current backend and model. With captioning off, non-vision models receive a "description unavailable" note for images.
+
+## Video Interpretation
+
+How JClaw makes a video attachment legible to your chat model. The strategy is chosen automatically, in this order:
+
+1. **The chat model handles video natively** — it watches the clip directly; nothing else runs.
+2. **A dedicated video-interpretation model is configured** — when the chat model can't do video, this model interprets the clip and its description is spliced into the conversation as text.
+3. **The chat model has vision** — JClaw samples still frames from the clip and sends them as images.
+4. **Text-only chat model with [Image Captioning](#image-captioning) on** — sampled frames are captioned into a timestamped text summary.
+
+The **dedicated video-interpretation model** has a master toggle, then a provider and a model picker; the picker is live-discovered from the provider and filtered to its **video-capable** models — the same shape as Image Captioning above.
+
+Two knobs govern the frame-sampling fallbacks (strategies 3 and 4):
+
+| Key             | Default | Meaning                                                                                                 |
+|-----------------|---------|---------------------------------------------------------------------------------------------------------|
+| `secondsPerFrame` | 10    | Sampling density — one frame is grabbed per this many seconds of video (1–60). Lower = denser sampling, more detail, higher cost. |
+| `sampleFrames`    | 8     | Hard ceiling on frames extracted from a single clip (2–32), regardless of length.                        |
+
+The effective frame count is `clamp(round(duration ÷ secondsPerFrame), 2, sampleFrames)`. An **Active:** status line shows which strategy your current main-agent model would use — watch, summarize, sample, or caption. If none apply, the video comes through with a note telling you to enable one of the above.
 
 ## Chat
 

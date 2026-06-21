@@ -35,8 +35,9 @@ Click the paperclip in the composer to attach files. JClaw supports:
 - **Images** — sent natively to vision-capable models. Models without vision get a brief textual description **if** an Image Captioning backend is configured (cloud or a local Ollama VLM — see [Settings → Image Captioning](/guide#settings)); otherwise they receive a "description unavailable" note.
 - **Documents** — PDFs and other text-extractable formats are parsed and inlined into the prompt. Scanned PDFs get OCR'd first (see [Settings → OCR](/guide#settings)).
 - **Voice notes** — recorded directly in the composer (microphone button) or attached. Audio-capable models receive the audio; other models receive a transcript (see [Settings → Transcription](/guide#settings)).
+- **Video** — clips attached in the composer. Models that support video natively watch the clip directly; otherwise JClaw interprets it for them — a dedicated video-interpretation model summarizes the clip, or, failing that, frames are sampled and sent to a vision model as images, or captioned into a timestamped text summary for text-only models. Tune the sampling in [Settings → Video Interpretation](/guide#settings).
 
-The image and audio icons in the composer light up green when the active model supports those inputs natively, so you can tell at a glance whether the model will see the file or just a transcript/description.
+The image and audio icons in the composer light up green when the active model supports those inputs natively, and a video capability pill appears for video — so you can tell at a glance whether the model will see the file or just a transcript, description, or summary.
 
 ## Slash commands
 
