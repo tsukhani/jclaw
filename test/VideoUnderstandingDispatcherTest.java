@@ -186,6 +186,45 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
                 "multi-image image_url parts spliced for " + channel + ": " + parts);
     }
 
+    @Test
+    void dedicatedTextInterpretationSplicesAsPlainStringForTextOnlyChatModel() throws Exception {
+        // Regression: a text-only chat model (kimi via ollama-cloud) silently ignored an all-text
+        // content-PARTS array, so the dedicated model's interpretation never reached it ("I don't see
+        // a video"). The splice must keep a pure-text interpretation as a plain content STRING.
+        assumeTrue(FfmpegProbe.isAvailable(), "ffmpeg required");
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.openrouter.baseUrl", server.url("/").toString());
+            ConfigService.set("provider.openrouter.apiKey", "sk-test");
+            ConfigService.set("video.provider", "openrouter");
+            ConfigService.set("video.model", "google/gemini-2.5-flash");
+            ConfigService.clearCache();
+            server.enqueue(new mockwebserver3.MockResponse.Builder().code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body(new okio.Buffer().writeUtf8(
+                            "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"A waterfall cascades into a green pool.\"}}]}"))
+                    .build());
+
+            var agent = agent("txt"); // text-only chat model → dedicated video model path
+            var att = videoAttachmentWithFile(agent, "web", 40);
+            var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
+            var messages = MessageHydrator.buildMessages("sys", att.message.conversation,
+                    new ArrayList<>(), new ArrayList<>(), videoBearers);
+
+            var spliced = VisionAudioAssembler.applyVideoForCapability(messages, videoBearers, agent, false, false);
+            var userMsg = spliced.get(videoBearers.get(0).chatMessageIndex());
+            assertInstanceOf(String.class, userMsg.content(),
+                    "a pure-text interpretation must splice as a plain string, not a parts array");
+            var content = (String) userMsg.content();
+            assertTrue(content.contains("Video interpretation"), content);
+            assertTrue(content.contains("waterfall cascades"), content);
+        } finally {
+            ConfigService.set("video.provider", "");
+            ConfigService.set("video.model", "");
+            ConfigService.clearCache();
+        }
+    }
+
     // --- helpers ---
 
     private Agent agent(String modelId) {

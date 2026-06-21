@@ -477,12 +477,22 @@ public final class VisionAudioAssembler {
     }
 
     /**
-     * Append the dispatched video content parts to a base user message, normalizing its content
-     * to the parts-array form (a plain-text base becomes a single text part first).
+     * Append the dispatched video content parts to a base user message.
+     *
+     * <p>The dedicated-model and text-summary strategies produce pure <b>prose</b> (text parts); the
+     * native-video and multi-image strategies produce {@code video_url}/{@code image_url} parts. When
+     * EVERY part (base + spliced) is text — the dedicated-model / text-summary case onto a text-only
+     * turn — the result is flattened to a plain {@code content} STRING: a text-only chat model (e.g.
+     * kimi via ollama-cloud) reads string content reliably but silently ignores an all-text
+     * content-parts array, dropping the interpretation. A single non-text part keeps the parts-array
+     * form (which the video/vision-capable models that produce those parts do handle). Note the base
+     * of a text-only turn is itself an all-text parts array, so the discriminator is "are all parts
+     * text", not "is the base a String".
      */
     @SuppressWarnings("unchecked")
     private static ChatMessage spliceVideoParts(ChatMessage base, List<Map<String, Object>> videoParts) {
         if (videoParts == null || videoParts.isEmpty()) return base;
+
         var parts = new ArrayList<Map<String, Object>>();
         if (base.content() instanceof List<?> list) {
             for (var p : list) parts.add((Map<String, Object>) p);
@@ -490,6 +500,15 @@ public final class VisionAudioAssembler {
             parts.add(Map.of("type", "text", "text", s));
         }
         parts.addAll(videoParts);
+
+        if (parts.stream().allMatch(p -> "text".equals(p.get("type")))) {
+            var sb = new StringBuilder();
+            for (var p : parts) {
+                if (!sb.isEmpty()) sb.append("\n\n");
+                sb.append(String.valueOf(p.get("text")));
+            }
+            return new ChatMessage(MessageRole.USER.value, sb.toString(), null, null, null);
+        }
         return new ChatMessage(MessageRole.USER.value, parts, null, null, null);
     }
 
