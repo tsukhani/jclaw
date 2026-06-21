@@ -44,6 +44,7 @@ public enum PaymentModality {
             Map.entry("ollama-cloud", Set.of(SUBSCRIPTION)),
             Map.entry("ollama-local", Set.of()),
             Map.entry("lm-studio", Set.of()),
+            Map.entry("vllm", Set.of()),
             Map.entry("loadtest-mock", Set.of())
     );
 

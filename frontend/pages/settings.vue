@@ -1743,6 +1743,7 @@ const PROVIDER_GROUPS: Record<string, 'remote' | 'local'> = {
   'together': 'remote',
   'ollama-local': 'local',
   'lm-studio': 'local',
+  'vllm': 'local',
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -1752,6 +1753,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   'together': 'TogetherAI',
   'ollama-local': 'Ollama Local',
   'lm-studio': 'LM Studio',
+  'vllm': 'vLLM',
 }
 
 function providerGroup(name: string): 'remote' | 'local' {
@@ -2302,8 +2304,8 @@ async function deleteLoggerLevel(logger: string) {
             <!-- JCLAW-280: paymentModality row — dropdown when the provider supports
                  more than one modality (OpenAI), locked label otherwise (OpenRouter,
                  Together = per-token only; Ollama Cloud = subscription only). Local
-                 providers (lm-studio, ollama-local) have an empty supported set and
-                 skip the row entirely — they're free at point of use so billing
+                 providers (lm-studio, ollama-local, vllm) have an empty supported set
+                 and skip the row entirely — they're free at point of use so billing
                  modality is meaningless. -->
             <div
               v-if="supportedModalitiesFor(name).length > 0"

@@ -45,4 +45,13 @@ class PaymentModalityTest extends UnitTest {
         var result = PaymentModality.parseOrDefault(null, "completely-unknown-provider");
         assertNotNull(result);
     }
+
+    @Test
+    void vllmIsLocalWithNoBillingModality() {
+        // vLLM is a self-hosted/local provider — free at point of use, so it carries no payment
+        // modality (mirrors ollama-local / lm-studio) and the Settings UI skips its billing row.
+        assertTrue(PaymentModality.supportedFor("vllm").isEmpty(),
+                "vllm must be classified local (empty modality set)");
+        assertTrue(PaymentModality.supportedFor("ollama-local").isEmpty(), "sanity: ollama-local is local too");
+    }
 }

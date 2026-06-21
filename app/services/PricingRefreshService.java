@@ -69,7 +69,7 @@ public final class PricingRefreshService {
      * an explicit decision.
      */
     private static final java.util.Set<String> SKIPPED_PROVIDERS = java.util.Set.of(
-            "ollama-cloud", "ollama-local", "lm-studio", "loadtest-mock"
+            "ollama-cloud", "ollama-local", "lm-studio", "vllm", "loadtest-mock"
     );
 
     /**

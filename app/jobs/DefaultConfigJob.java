@@ -113,6 +113,15 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.lm-studio.apiKey", "lm-studio");
         seedIfAbsent("provider.lm-studio.models", "[]");
 
+        // vLLM (self-hosted): OpenAI-compatible /v1/chat/completions + /v1/models, the same factory
+        // default (OpenAiProvider) and discovery path (OpenAI-compat /v1/models) as lm-studio. Default
+        // serving port is 8000. Same non-blank sentinel apiKey so ProviderRegistry registers the row
+        // (vLLM ignores Authorization unless --api-key was set, in which case the operator overrides
+        // this). Backs the Settings → Video Interpretation "vLLM" backend.
+        seedIfAbsent("provider.vllm.baseUrl", "http://localhost:8000/v1");
+        seedIfAbsent("provider.vllm.apiKey", "vllm");
+        seedIfAbsent("provider.vllm.models", "[]");
+
         seedIfAbsent("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
         seedIfAbsent("provider.openrouter.apiKey", "");
         seedIfAbsent("provider.openrouter.leaderboardUrl", "https://openrouter.ai/rankings");
