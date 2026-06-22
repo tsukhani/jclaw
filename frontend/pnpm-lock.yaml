@@ -28,7 +28,7 @@ importers:
         version: 2.1.1
       cronstrue:
         specifier: ^3.14.0
-        version: 3.14.0
+        version: 3.20.0
       dompurify:
         specifier: ^3.4.3
         version: 3.4.9
@@ -3165,8 +3165,8 @@ packages:
     resolution: {integrity: sha512-ixNtAJndqh173VQ4KodSdJEI6nuioBWI0V1ITNKhZZsO0pEMoDxz539T4FTTbSZ/xIOSuDnzxLVRqBVSvPNE2g==}
     engines: {node: '>=18.0'}
 
-  cronstrue@3.14.0:
-    resolution: {integrity: sha512-XnW4vuK/jPJjmTyDWiej1Zq36Od7ITwxaV2O1pzHZuyMVvdy7NAvyvIBzybt+idqSpfqYuoDG7uf/ocGtJVWxA==}
+  cronstrue@3.20.0:
+    resolution: {integrity: sha512-2VOOE8DSemXhqEtlU23GBMoeowHnhcto+HPelhtCfM5cP+PB59UOuoeOIBQATzKSW+RfOGF7OJjcwfaUxRW6QQ==}
     hasBin: true
 
   cross-spawn@7.0.6:
@@ -5157,6 +5157,11 @@ packages:
 
   semver@7.8.4:
     resolution: {integrity: sha512-rUCObTnP32Q08R2uuIrt7r9PlEonuTmtuXYcW6s5kjdlj3xbnwe+21yXptAUYcMAABLkYYTtnmzb3w3EDZfueA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
+  semver@7.8.5:
+    resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
     engines: {node: '>=10'}
     hasBin: true
 
@@ -8941,7 +8946,7 @@ snapshots:
 
   croner@10.0.1: {}
 
-  cronstrue@3.14.0: {}
+  cronstrue@3.20.0: {}
 
   cross-spawn@7.0.6:
     dependencies:
