@@ -384,7 +384,7 @@ dependencies {
     // JClaw contributes the TaskExecutionHandler that knows how to fire each
     // Task. Core artifact has no Spring dependency (the spring-boot starter
     // is a separate optional module we don't pull in).
-    implementation("com.github.kagkarlsson:db-scheduler:16.11.0")
+    implementation("com.github.kagkarlsson:db-scheduler:16.12.0")
 
     // Lucene 10: full-text index for task_run_message.content (transcript
     // search) via DirectLuceneMessageSearchRepository. We dropped H2's
