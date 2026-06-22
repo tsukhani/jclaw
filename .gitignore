@@ -176,6 +176,10 @@ _bmad-output/
 # rather than tracked in git. SKILL.md stays; the binary under tools/ does not.
 skills/whatsapp-wacli-mac/tools/wacli
 
+# Python bytecode from skill scripts (regenerated on every run, never tracked)
+__pycache__/
+*.pyc
+
 # Note: per-skill `credentials/` directories ARE tracked here, but only as
 # README templates that document the expected JSON shape. Real secret files
 # (radarr.json, etc.) live operator-local in workspace/main/skills/<skill>/
