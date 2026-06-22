@@ -22,6 +22,7 @@ The most important section. Each row is a model provider JClaw can talk to:
 
 - **OpenAI, Anthropic, Google, Mistral, etc.** — first-party APIs. Paste in your API key and toggle **Enabled**.
 - **Ollama (local or cloud)** — runs models on your hardware or on Ollama's cloud. Set the base URL; no API key needed for local.
+- **LM Studio, vLLM** — other self-hosted, OpenAI-compatible servers running on your own hardware. Set the base URL (vLLM defaults to `http://localhost:8000/v1`); no API key needed. With Ollama Local these make up the **Local** group of the provider list.
 - **OpenRouter, Groq, DeepSeek, Z.AI, Kimi, etc.** — aggregators and frontier-model providers. Same shape: base URL + API key.
 
 For each provider you can:
