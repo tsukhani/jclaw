@@ -339,11 +339,11 @@ dependencies {
     // OkHttp 5.x JVM artifact (the bare `okhttp` artifact is Gradle-Metadata
     // only and Play 1.x's Ivy didn't understand it; under Gradle Metadata is
     // native, but we keep the jvm-suffixed coord to mirror the python config).
-    implementation("com.squareup.okhttp3:okhttp-jvm:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp-jvm:5.4.0")
 
     // JCLAW-185: SSE + MockWebServer 5.x (plain POMs, no -jvm suffix).
-    implementation("com.squareup.okhttp3:okhttp-sse:5.3.2")
-    implementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp-sse:5.4.0")
+    implementation("com.squareup.okhttp3:mockwebserver3:5.4.0")
 
     // JCLAW-83: Slack SDK (official com.slack.api), a la carte — slack-api-client
     // (Web API + Block Kit) + slack-app-backend (SlackSignature.Verifier + event
