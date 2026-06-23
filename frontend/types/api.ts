@@ -211,6 +211,9 @@ export interface MessageAttachment {
   generated?: boolean
   /** JCLAW-227: JSON metadata (prompt, model, provider) for a generated image; absent for uploads. */
   generationMetadata?: string
+  /** JCLAW-209: true once the bytes have been deleted from the workspace. The record is retained so
+   *  the chip can show a "deleted from workspace" marker; the file (and inline preview) is gone. */
+  deleted?: boolean
 }
 
 /**

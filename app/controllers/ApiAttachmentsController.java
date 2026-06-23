@@ -31,7 +31,9 @@ public class ApiAttachmentsController extends Controller {
     @Operation(summary = "Stream the raw bytes of a persisted chat-message attachment (inline for media, attachment otherwise)")
     public static void download(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
-        if (att == null) notFound();
+        // JCLAW-209: a deleted attachment's bytes are gone from the workspace; the
+        // row is retained only as a record, so there is nothing to stream.
+        if (att == null || att.deleted) notFound();
 
         // storagePath is workspace-relative and looks like
         // "<agentName>/attachments/<conversationId>/<uuid>.<ext>". Strip the
@@ -62,6 +64,29 @@ public class ApiAttachmentsController extends Controller {
                 + "; filename*=UTF-8''" + percentEncodeFilename(att.originalFilename));
         response.setHeader("Cache-Control", "private, max-age=300");
         renderBinary(file);
+    }
+
+    /**
+     * DELETE /api/attachments/{uuid} — Free an attachment's bytes from the
+     * workspace while retaining its record. The on-disk file is removed but the
+     * row is kept (with {@code deleted=true}) so the chat UI can show a "deleted
+     * from workspace" marker on reload, preserving the prompt/provenance as a
+     * permanent record. Idempotent: deleting an already-deleted attachment is a
+     * no-op success.
+     *
+     * @param uuid the attachment's client-facing key
+     */
+    @SuppressWarnings("java:S2259")
+    @Operation(summary = "Delete an attachment's bytes from the workspace, retaining its record")
+    public static void deleteAttachment(String uuid) {
+        var att = MessageAttachment.findByUuid(uuid);
+        if (att == null) notFound();
+        if (!att.deleted) {
+            services.AttachmentService.deleteImageFile(att);
+            att.deleted = true;
+            att.save();
+        }
+        ok();
     }
 
     /**

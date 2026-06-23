@@ -204,6 +204,20 @@ public final class AttachmentService {
     }
 
     /**
+     * JCLAW-209: remove an attachment's bytes from the workspace. Best-effort —
+     * an already-missing file is treated as success so the caller's {@code deleted}
+     * flag still flips. The DB row is intentionally retained by the caller; only the
+     * on-disk bytes are freed (the chip keeps the prompt/provenance as a record).
+     */
+    public static void deleteImageFile(MessageAttachment att) {
+        try {
+            Files.deleteIfExists(resolveOnDisk(att));
+        } catch (IOException | SecurityException e) {
+            play.Logger.warn("Failed to delete attachment file %s: %s", att.uuid, e.getMessage());
+        }
+    }
+
+    /**
      * Canonical {@code storagePath} layout for a finalized attachment:
      * {@code {agentName}/attachments/{conversationId}/{leaf}}. The
      * {@code agentName} prefix is what {@link #resolveOnDisk} strips back off

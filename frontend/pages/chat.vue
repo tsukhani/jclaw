@@ -999,6 +999,23 @@ async function deleteMessage(msg: Message) {
     console.error('Failed to delete message:', e)
   }
 }
+
+/**
+ * JCLAW-209: delete a generated image's bytes from the workspace. Soft delete —
+ * the server frees the on-disk file and flags the row, so the chip persists with
+ * a "deleted from workspace" marker rather than vanishing. Flip the local flag
+ * and triggerRef (messages is a shallowRef) instead of refetching the transcript.
+ */
+async function deleteAttachment(att: MessageAttachment) {
+  try {
+    await $fetch(`/api/attachments/${att.uuid}`, { method: 'DELETE' })
+    att.deleted = true
+    triggerRef(messages)
+  }
+  catch (e) {
+    console.error('Failed to delete attachment:', e)
+  }
+}
 async function editUserMessage(msg: Message) {
   if (streaming.value) return
   input.value = msg.content ?? ''
@@ -3122,12 +3139,17 @@ function exportConversation() {
                         v-for="att in msg.attachments"
                         :key="att.uuid"
                       >
-                        <!-- Generated image: inline preview (click to open full size) + download link. -->
+                        <!-- Generated image: inline preview + a chip carrying the full
+                             prompt, a download button, and a delete button. Deleting frees
+                             the workspace file but keeps the record, so a deleted image
+                             collapses to the chip with a "deleted from workspace" marker. -->
                         <div
                           v-if="att.generated && att.kind === 'IMAGE'"
                           class="flex flex-col gap-1.5 items-start"
                         >
+                          <!-- Inline preview — only while the bytes still exist in the workspace. -->
                           <a
+                            v-if="!att.deleted"
                             :href="`/api/attachments/${att.uuid}`"
                             target="_blank"
                             rel="noopener"
@@ -3139,14 +3161,12 @@ function exportConversation() {
                               class="max-w-[320px] max-h-[320px] rounded-lg border border-border object-contain"
                             >
                           </a>
-                          <!-- Download link labelled with the full generation prompt (the
-                               synthetic filename carries no meaning). Wraps so the whole
+                          <!-- Info + actions chip. Labelled with the full generation prompt
+                               (the synthetic filename carries no meaning); wraps so the whole
                                prompt is visible. -->
-                          <a
-                            :href="`/api/attachments/${att.uuid}`"
-                            target="_blank"
-                            rel="noopener"
-                            class="flex items-start gap-2 max-w-[320px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-fg-strong hover:bg-muted/60 transition-colors"
+                          <div
+                            class="flex items-start gap-2 max-w-[320px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs"
+                            :class="att.deleted ? 'text-fg-muted' : 'text-fg-strong'"
                             :title="generatedImageLabel(att)"
                           >
                             <PhotoIcon
@@ -3154,12 +3174,47 @@ function exportConversation() {
                               aria-hidden="true"
                             />
                             <span class="min-w-0 break-words">{{ generatedImageLabel(att) }}</span>
-                            <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
+                            <span
+                              v-if="!att.deleted"
+                              class="text-fg-muted shrink-0"
+                            >{{ formatSize(att.sizeBytes) }}</span>
                             <span
                               class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
                               :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated image'"
                             >gen</span>
-                          </a>
+                            <!-- Actions while the file exists: download + delete. -->
+                            <a
+                              v-if="!att.deleted"
+                              :href="`/api/attachments/${att.uuid}`"
+                              :download="att.originalFilename"
+                              class="shrink-0 -my-0.5 p-0.5 text-fg-muted hover:text-fg-strong transition-colors"
+                              title="Download image"
+                              aria-label="Download image"
+                            >
+                              <ArrowDownTrayIcon
+                                class="w-4 h-4"
+                                aria-hidden="true"
+                              />
+                            </a>
+                            <button
+                              v-if="!att.deleted"
+                              type="button"
+                              class="shrink-0 -my-0.5 p-0.5 text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                              title="Delete image from workspace"
+                              @click="deleteAttachment(att)"
+                            >
+                              <TrashIcon
+                                class="w-4 h-4"
+                                aria-hidden="true"
+                              />
+                            </button>
+                            <!-- Once the bytes are gone: an in-chip deletion marker in place
+                                 of the size + action buttons. -->
+                            <span
+                              v-else
+                              class="shrink-0 text-[11px] italic text-red-500/90"
+                            >deleted from workspace</span>
+                          </div>
                         </div>
                         <!-- Everything else: the compact chip. -->
                         <a

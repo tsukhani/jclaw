@@ -122,6 +122,11 @@ class ImageGenerationClientTest extends UnitTest {
 
     @Test
     void routerSelectsClientByProvider() {
+        // ConfigService's static cache outlives Fixtures.deleteDatabase(), so a prior test's
+        // ConfigService.set("imagegen.provider", ...) can leak into this "key absent → off"
+        // assertion. Clear the one key this test owns so the assertion is hermetic regardless
+        // of test ordering across the concurrent unit/functional lanes.
+        ConfigService.delete("imagegen.provider");
         assertTrue(ImageGenerationRouter.configuredService().isEmpty(),
                 "no imagegen.provider → empty (off)");
 

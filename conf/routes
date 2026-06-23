@@ -137,6 +137,8 @@ POST    /api/chat/upload                        ApiChatController.uploadChatFile
 
 # Persisted attachment downloads (JCLAW-279)
 GET     /api/attachments/{uuid}                 ApiAttachmentsController.download
+# Delete an attachment's bytes from the workspace, retaining the record (JCLAW-209)
+DELETE  /api/attachments/{uuid}                 ApiAttachmentsController.deleteAttachment
 
 # Conversations API
 GET     /api/conversations                      ApiConversationsController.listConversations

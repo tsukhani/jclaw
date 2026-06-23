@@ -96,6 +96,14 @@ public class MessageAttachment extends Model {
     @Column(name = "generation_metadata", columnDefinition = "TEXT")
     public String generationMetadata;
 
+    /** JCLAW-209: true once the user deletes this attachment's file from the workspace via the chat UI.
+     *  The on-disk bytes are removed but the row is retained so the chip can show a "deleted from
+     *  workspace" marker on reload (the prompt/provenance stays a permanent record). {@code @ColumnDefault}
+     *  keeps the ALTER safe on the populated table — existing rows default false without a migration. */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    public boolean deleted = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

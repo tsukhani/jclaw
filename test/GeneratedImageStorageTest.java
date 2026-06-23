@@ -89,6 +89,44 @@ class GeneratedImageStorageTest extends UnitTest {
     }
 
     @Test
+    void deleteImageFileRemovesBytesButLeavesTheRow() {
+        var agent = new Agent();
+        agent.name = "imagegen-delete-test";
+        agent.modelProvider = "openrouter";
+        agent.modelId = "gpt-4.1";
+        agent.enabled = true;
+        agent.save();
+        var conv = new Conversation();
+        conv.agent = agent;
+        conv.channelType = "web";
+        conv.peerId = "local";
+        conv.save();
+        var msg = new Message();
+        msg.conversation = conv;
+        msg.role = "assistant";
+        msg.content = "here is your image";
+        msg.createdAt = Instant.now();
+        msg.save();
+
+        var bytes = new byte[]{(byte) 0x89, 'P', 'N', 'G', 9, 8, 7};
+        var att = AttachmentService.persistGeneratedImage(agent, msg, bytes, "image/png", "{\"prompt\":\"x\"}");
+
+        // Bytes are on disk to begin with.
+        assertArrayEquals(bytes, AttachmentService.readBytes(att));
+
+        AttachmentService.deleteImageFile(att);
+
+        // The bytes are gone — the reader the download/vision paths use now fails.
+        assertThrows(java.io.UncheckedIOException.class, () -> AttachmentService.readBytes(att),
+                "bytes must be gone from disk after deleteImageFile");
+        // Idempotent: a second call on the already-missing file is a quiet no-op.
+        AttachmentService.deleteImageFile(att);
+        // The row itself is untouched by the file delete (the caller flips deleted + saves).
+        var reloaded = MessageAttachment.findByUuid(att.uuid);
+        assertNotNull(reloaded, "deleting the file must not remove the attachment row");
+    }
+
+    @Test
     void persistGeneratedImageRejectsEmptyBytes() {
         var agent = new Agent();
         agent.name = "imagegen-empty-test";

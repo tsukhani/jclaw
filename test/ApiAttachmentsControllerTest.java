@@ -352,6 +352,57 @@ class ApiAttachmentsControllerTest extends FunctionalTest {
         assertEquals("private, max-age=300", cacheControl.value());
     }
 
+    // ===== Delete (JCLAW-209): free workspace bytes, retain the record =====
+
+    @Test
+    void deleteRequiresAuth() {
+        var response = DELETE("/api/attachments/" + java.util.UUID.randomUUID());
+        assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    void deleteReturns404ForUnknownUuid() {
+        login();
+        var response = DELETE("/api/attachments/" + java.util.UUID.randomUUID());
+        assertEquals(404, response.status.intValue());
+    }
+
+    @Test
+    void deleteFlagsRowRetainsItAndBlocksDownload() throws Exception {
+        login();
+        var uuid = seedAttachment("att-agent-del", java.util.UUID.randomUUID().toString(),
+                "gen.png", "image/png", MessageAttachment.KIND_IMAGE,
+                new byte[]{(byte) 0x89, 'P', 'N', 'G'}, true);
+
+        // Present and downloadable before the delete.
+        assertIsOk(GET("/api/attachments/" + uuid));
+
+        var del = DELETE("/api/attachments/" + uuid);
+        assertIsOk(del);
+
+        // The row is retained and flagged deleted (read in a fresh tx so the
+        // HTTP-committed change is visible).
+        var deleted = commitInFreshTx(() -> {
+            var att = MessageAttachment.findByUuid(uuid);
+            return att != null && att.deleted;
+        });
+        assertTrue(deleted, "row must be retained and flagged deleted after a delete");
+
+        // Download now 404s — the bytes are gone and the deleted guard fires.
+        assertEquals(404, GET("/api/attachments/" + uuid).status.intValue());
+    }
+
+    @Test
+    void deleteIsIdempotent() throws Exception {
+        login();
+        var uuid = seedAttachment("att-agent-del2", java.util.UUID.randomUUID().toString(),
+                "gen.png", "image/png", MessageAttachment.KIND_IMAGE,
+                new byte[]{1, 2, 3}, true);
+        assertIsOk(DELETE("/api/attachments/" + uuid));
+        // A second delete on the already-deleted row is still a no-op success.
+        assertIsOk(DELETE("/api/attachments/" + uuid));
+    }
+
     // --- asciiSafeFilename helper (reflection) ---
 
     private String asciiSafeFilename(String name) throws Exception {
