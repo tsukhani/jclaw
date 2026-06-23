@@ -21,6 +21,9 @@ import java.util.List;
  */
 public final class AttachmentService {
 
+    /** Workspace-relative prefix for a conversation's attachment directory ({@code attachments/{conversationId}}). */
+    private static final String ATTACHMENTS_DIR = "attachments/";
+
     private AttachmentService() {}
 
     /**
@@ -87,7 +90,7 @@ public final class AttachmentService {
 
         var leaf = stagedFile.getFileName().toString();
         var conversationDir = AgentService.acquireWorkspacePath(
-                agent.name, "attachments/" + message.conversation.id);
+                agent.name, ATTACHMENTS_DIR + message.conversation.id);
         try {
             Files.createDirectories(conversationDir);
         } catch (IOException e) {
@@ -135,7 +138,7 @@ public final class AttachmentService {
         var ext = extensionForMime(mime);
         var leaf = uuid + "." + ext;
         var conversationDir = AgentService.acquireWorkspacePath(
-                agent.name, "attachments/" + message.conversation.id);
+                agent.name, ATTACHMENTS_DIR + message.conversation.id);
         try {
             Files.createDirectories(conversationDir);
         } catch (IOException e) {
@@ -228,7 +231,7 @@ public final class AttachmentService {
         if (agentName == null) return;
         Path dir;
         try {
-            dir = AgentService.acquireWorkspacePath(agentName, "attachments/" + conversationId);
+            dir = AgentService.acquireWorkspacePath(agentName, ATTACHMENTS_DIR + conversationId);
         } catch (SecurityException e) {
             play.Logger.warn("Refused attachment-dir resolution for conversation %d: %s", conversationId, e.getMessage());
             return;

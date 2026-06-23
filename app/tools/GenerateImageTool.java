@@ -83,7 +83,7 @@ public class GenerateImageTool implements ToolRegistry.Tool {
         JsonObject args;
         try {
             args = JsonParser.parseString(argsJson).getAsJsonObject();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             return ToolRegistry.ToolResult.text("Error: invalid arguments for generate_image.");
         }
         var prompt = optString(args, ARG_PROMPT);
@@ -130,10 +130,10 @@ public class GenerateImageTool implements ToolRegistry.Tool {
 
     private static String buildMetadata(String prompt, String generatedBy, Integer width, Integer height) {
         var meta = new JsonObject();
-        meta.addProperty("prompt", prompt);
+        meta.addProperty(ARG_PROMPT, prompt);
         meta.addProperty("generatedBy", generatedBy);
-        if (width != null) meta.addProperty("width", width);
-        if (height != null) meta.addProperty("height", height);
+        if (width != null) meta.addProperty(ARG_WIDTH, width);
+        if (height != null) meta.addProperty(ARG_HEIGHT, height);
         return meta.toString();
     }
 

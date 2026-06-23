@@ -28,6 +28,9 @@ public class BflImageGenerationClient implements ImageGenerationService {
     private static final String KEY_HEADER = "x-key";
     private static final String DEFAULT_MODEL = "flux-2-pro";
     private static final long POLL_INTERVAL_MS = 1000L;
+    private static final String POLLING_URL = "polling_url";
+    private static final String STATUS = "status";
+    private static final String SAMPLE = "sample";
 
     private final OkHttpClient client;
 
@@ -73,14 +76,14 @@ public class BflImageGenerationClient implements ImageGenerationService {
                 .post(RequestBody.create(root.toString(), JSON))
                 .build();
         try (var response = client.newCall(request).execute()) {
-            var body = response.body() == null ? "" : response.body().string();
+            var body = response.body().string();
             if (!response.isSuccessful()) {
                 throw new ImageGenerationException("bfl submit failed: HTTP %d %s%s".formatted(
                         response.code(), response.message(), body.isEmpty() ? "" : (" — " + truncate(body, 500))));
             }
             var json = JsonParser.parseString(body).getAsJsonObject();
-            if (json.has("polling_url") && !json.get("polling_url").isJsonNull()) {
-                return json.get("polling_url").getAsString();
+            if (json.has(POLLING_URL) && !json.get(POLLING_URL).isJsonNull()) {
+                return json.get(POLLING_URL).getAsString();
             }
             if (json.has("id") && !json.get("id").isJsonNull()) {
                 return baseUrl + "/get_result?id=" + json.get("id").getAsString();
@@ -95,46 +98,62 @@ public class BflImageGenerationClient implements ImageGenerationService {
         long timeoutMs = ConfigService.getInt("imagegen.timeoutSeconds", 60) * 1000L;
         long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
         while (true) {
-            var request = new Request.Builder().url(pollingUrl).header(KEY_HEADER, apiKey).get().build();
-            try (var response = client.newCall(request).execute()) {
-                var body = response.body() == null ? "" : response.body().string();
-                if (!response.isSuccessful()) {
-                    throw new ImageGenerationException("bfl poll failed: HTTP %d %s".formatted(
-                            response.code(), response.message()));
-                }
-                var json = JsonParser.parseString(body).getAsJsonObject();
-                var status = json.has("status") && !json.get("status").isJsonNull()
-                        ? json.get("status").getAsString() : "";
-                if ("Ready".equalsIgnoreCase(status)) {
-                    var result = json.getAsJsonObject("result");
-                    if (result != null && result.has("sample") && !result.get("sample").isJsonNull()) {
-                        return result.get("sample").getAsString();
-                    }
-                    throw new ImageGenerationException("bfl result Ready but no sample URL");
-                }
-                if ("Error".equalsIgnoreCase(status) || "Failed".equalsIgnoreCase(status)) {
-                    throw new ImageGenerationException("bfl generation failed: " + truncate(body, 500));
-                }
-                // Pending / Queued / Processing — keep polling until the deadline.
-            } catch (IOException e) {
-                throw new ImageGenerationException("bfl poll transport failed: " + e.getMessage(), e);
+            var sampleUrl = pollOnce(pollingUrl, apiKey);
+            if (sampleUrl != null) {
+                return sampleUrl;
             }
             if (System.nanoTime() >= deadline) {
                 throw new ImageGenerationException("bfl generation timed out after " + (timeoutMs / 1000) + "s");
             }
-            try {
-                Thread.sleep(POLL_INTERVAL_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new ImageGenerationException("bfl generation interrupted", e);
+            sleepBetweenPolls();
+        }
+    }
+
+    /** One poll: the sample URL once the job is Ready, or {@code null} while it is still pending. Throws on Error/HTTP failure. */
+    private String pollOnce(String pollingUrl, String apiKey) {
+        var request = new Request.Builder().url(pollingUrl).header(KEY_HEADER, apiKey).get().build();
+        try (var response = client.newCall(request).execute()) {
+            var body = response.body().string();
+            if (!response.isSuccessful()) {
+                throw new ImageGenerationException("bfl poll failed: HTTP %d %s".formatted(
+                        response.code(), response.message()));
             }
+            var json = JsonParser.parseString(body).getAsJsonObject();
+            var status = json.has(STATUS) && !json.get(STATUS).isJsonNull()
+                    ? json.get(STATUS).getAsString() : "";
+            if ("Ready".equalsIgnoreCase(status)) {
+                return readySampleUrl(json);
+            }
+            if ("Error".equalsIgnoreCase(status) || "Failed".equalsIgnoreCase(status)) {
+                throw new ImageGenerationException("bfl generation failed: " + truncate(body, 500));
+            }
+            return null; // Pending / Queued / Processing — keep polling until the deadline.
+        } catch (IOException e) {
+            throw new ImageGenerationException("bfl poll transport failed: " + e.getMessage(), e);
+        }
+    }
+
+    private String readySampleUrl(JsonObject json) {
+        var result = json.getAsJsonObject("result");
+        if (result != null && result.has(SAMPLE) && !result.get(SAMPLE).isJsonNull()) {
+            return result.get(SAMPLE).getAsString();
+        }
+        throw new ImageGenerationException("bfl result Ready but no sample URL");
+    }
+
+    private static void sleepBetweenPolls() {
+        try {
+            Thread.sleep(POLL_INTERVAL_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ImageGenerationException("bfl generation interrupted", e);
         }
     }
 
     private byte[] fetchBytes(String imageUrl) {
         var req = new Request.Builder().url(imageUrl).get().build();
         try (var resp = HttpFactories.general().newCall(req).execute()) {
-            if (!resp.isSuccessful() || resp.body() == null) {
+            if (!resp.isSuccessful()) {
                 throw new ImageGenerationException("bfl image fetch failed: HTTP " + resp.code());
             }
             return resp.body().bytes();

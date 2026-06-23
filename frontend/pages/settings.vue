@@ -594,12 +594,15 @@ const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
 
 // Master toggle: off clears the provider; on defaults to the first cloud provider that has a key
 // (no keyless cloud option exists, unlike captioning's local Ollama), falling back to OpenAI.
+function defaultImagegenProvider(): string {
+  if (openaiApiKeyConfigured.value) return 'openai'
+  if (bflApiKeyConfigured.value) return 'bfl'
+  return 'openai'
+}
 async function toggleImagegenEnabled() {
   saving.value = true
   try {
-    const next = imagegenEnabled.value
-      ? ''
-      : (openaiApiKeyConfigured.value ? 'openai' : (bflApiKeyConfigured.value ? 'bfl' : 'openai'))
+    const next = imagegenEnabled.value ? '' : defaultImagegenProvider()
     await $fetch('/api/config', { method: 'POST', body: { key: 'imagegen.provider', value: next } })
     refresh()
   }
@@ -1773,7 +1776,7 @@ function closeDiscovery() {
 // JCLAW-229: image-generation-only providers are NOT chat LLM providers (excluded from the backend
 // ProviderRegistry too) — their keys are set in the Image Generation section, not here, so skip them
 // when grouping the LLM Providers list.
-const IMAGE_ONLY_PROVIDERS = ['bfl', 'replicate']
+const IMAGE_ONLY_PROVIDERS = new Set(['bfl', 'replicate'])
 
 // Group config entries by LLM provider; everything else (non-managed) falls through
 // to the generic Configuration list.
@@ -1786,7 +1789,7 @@ const providerEntries = computed(() => {
     if (e.key.startsWith('provider.')) {
       const parts = e.key.split('.')
       const name = parts[1]!
-      if (IMAGE_ONLY_PROVIDERS.includes(name)) continue // set in the Image Generation section
+      if (IMAGE_ONLY_PROVIDERS.has(name)) continue // set in the Image Generation section
       if (!providers.has(name)) providers.set(name, [])
       providers.get(name)!.push(e)
     }

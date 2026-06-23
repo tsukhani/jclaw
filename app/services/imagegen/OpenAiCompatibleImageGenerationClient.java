@@ -32,6 +32,7 @@ import java.util.Base64;
 public class OpenAiCompatibleImageGenerationClient implements ImageGenerationService {
 
     private static final MediaType JSON = MediaType.parse("application/json");
+    private static final String B64_JSON = "b64_json";
 
     private final String providerName;
     private final String defaultModel;
@@ -74,7 +75,7 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
                 .build();
 
         try (var response = client.newCall(request).execute()) {
-            var body = response.body() == null ? "" : response.body().string();
+            var body = response.body().string();
             if (!response.isSuccessful()) {
                 throw new ImageGenerationException("%s image generation failed: HTTP %d %s%s".formatted(
                         providerName, response.code(), response.message(),
@@ -103,8 +104,8 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
             throw new ImageGenerationException(providerName + " image generation: no image data in response");
         }
         var first = data.get(0).getAsJsonObject();
-        if (first.has("b64_json") && !first.get("b64_json").isJsonNull()) {
-            byte[] bytes = Base64.getDecoder().decode(first.get("b64_json").getAsString());
+        if (first.has(B64_JSON) && !first.get(B64_JSON).isJsonNull()) {
+            byte[] bytes = Base64.getDecoder().decode(first.get(B64_JSON).getAsString());
             return new GeneratedImage(bytes, "image/png", providerName + ":" + model);
         }
         if (first.has("url") && !first.get("url").isJsonNull()) {
@@ -118,7 +119,7 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
     private byte[] fetchBytes(String imageUrl) {
         var req = new Request.Builder().url(imageUrl).get().build();
         try (var resp = HttpFactories.general().newCall(req).execute()) {
-            if (!resp.isSuccessful() || resp.body() == null) {
+            if (!resp.isSuccessful()) {
                 throw new ImageGenerationException(providerName + " image fetch failed: HTTP " + resp.code());
             }
             return resp.body().bytes();

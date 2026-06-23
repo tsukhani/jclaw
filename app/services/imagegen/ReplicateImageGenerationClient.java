@@ -30,6 +30,8 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String DEFAULT_MODEL = "black-forest-labs/flux-schnell";
     private static final long POLL_INTERVAL_MS = 1000L;
+    private static final String STATUS = "status";
+    private static final String OUTPUT = "output";
 
     private final OkHttpClient client;
 
@@ -74,7 +76,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
                 .post(RequestBody.create(root.toString(), JSON))
                 .build();
         try (var response = client.newCall(request).execute()) {
-            var body = response.body() == null ? "" : response.body().string();
+            var body = response.body().string();
             if (!response.isSuccessful()) {
                 throw new ImageGenerationException("replicate create failed: HTTP %d %s%s".formatted(
                         response.code(), response.message(), body.isEmpty() ? "" : (" — " + truncate(body, 500))));
@@ -91,8 +93,8 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
         var current = prediction;
         while (true) {
-            var status = current.has("status") && !current.get("status").isJsonNull()
-                    ? current.get("status").getAsString() : "";
+            var status = current.has(STATUS) && !current.get(STATUS).isJsonNull()
+                    ? current.get(STATUS).getAsString() : "";
             if ("succeeded".equalsIgnoreCase(status)) {
                 return extractUrl(current);
             }
@@ -125,7 +127,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         var request = new Request.Builder()
                 .url(getUrl).header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey).get().build();
         try (var response = client.newCall(request).execute()) {
-            var body = response.body() == null ? "" : response.body().string();
+            var body = response.body().string();
             if (!response.isSuccessful()) {
                 throw new ImageGenerationException("replicate poll failed: HTTP " + response.code());
             }
@@ -137,10 +139,10 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
 
     /** {@code output} is a URL string or an array of URL strings — take the first. */
     private String extractUrl(JsonObject prediction) {
-        if (!prediction.has("output") || prediction.get("output").isJsonNull()) {
+        if (!prediction.has(OUTPUT) || prediction.get(OUTPUT).isJsonNull()) {
             throw new ImageGenerationException("replicate succeeded but produced no output");
         }
-        var output = prediction.get("output");
+        var output = prediction.get(OUTPUT);
         if (output.isJsonArray()) {
             JsonArray arr = output.getAsJsonArray();
             if (arr.isEmpty()) throw new ImageGenerationException("replicate output array is empty");
@@ -153,7 +155,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
     private GeneratedImage fetchImage(String imageUrl, String generatedBy) {
         var req = new Request.Builder().url(imageUrl).get().build();
         try (var resp = HttpFactories.general().newCall(req).execute()) {
-            if (!resp.isSuccessful() || resp.body() == null) {
+            if (!resp.isSuccessful()) {
                 throw new ImageGenerationException("replicate image fetch failed: HTTP " + resp.code());
             }
             var ct = resp.body().contentType();
