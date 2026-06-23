@@ -3,6 +3,7 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.video.VideoInterpretationClient;
 import services.video.VideoInterpretationRouter;
 
 /**
@@ -32,6 +33,19 @@ class VideoInterpretationRouterTest extends UnitTest {
         ConfigService.set("video.provider", "vllm");
         assertTrue(VideoInterpretationRouter.configuredService().isPresent(),
                 "vllm → a VideoInterpretationClient");
+    }
+
+    @Test
+    void wireModeIsNativeForOpenrouterAndMultiImageForVllm() {
+        ConfigService.set("video.provider", "openrouter");
+        assertEquals(VideoInterpretationClient.WireMode.NATIVE_VIDEO,
+                VideoInterpretationRouter.configuredService().orElseThrow().wireMode(),
+                "openrouter → native video_url");
+
+        ConfigService.set("video.provider", "vllm");
+        assertEquals(VideoInterpretationClient.WireMode.MULTI_IMAGE,
+                VideoInterpretationRouter.configuredService().orElseThrow().wireMode(),
+                "vllm → multi-image frames");
     }
 
     @Test

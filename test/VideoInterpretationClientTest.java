@@ -8,8 +8,11 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.video.FrameSampler;
 import services.video.VideoAdapterException;
 import services.video.VideoInterpretationClient;
+
+import java.util.List;
 
 
 /**
@@ -56,6 +59,29 @@ class VideoInterpretationClientTest extends UnitTest {
         var sent = server.takeRequest().getBody().utf8();
         assertTrue(sent.contains("\"video_url\""), "request must use a video_url content part: " + sent);
         assertTrue(sent.contains(VIDEO_URL), "request must carry the video data URL");
+    }
+
+    @Test
+    void multiImageModeSendsImageUrlPartsNotVideoUrl() throws Exception {
+        var body = "{\"choices\":[{\"message\":{\"role\":\"assistant\","
+                + "\"content\":\"The camera pans left across a waterfall, then settles on a forest path.\"}}]}";
+        server.enqueue(new MockResponse.Builder()
+                .code(200).addHeader("Content-Type", "application/json").body(jsonBuf(body)).build());
+
+        var frames = List.of(
+                new FrameSampler.Frame(new byte[]{1, 2, 3}, 0.0),
+                new FrameSampler.Frame(new byte[]{4, 5, 6}, 6.0));
+        var text = new VideoInterpretationClient(
+                "openrouter", VideoInterpretationClient.WireMode.MULTI_IMAGE, testClient)
+                .interpretFrames(frames, 12.0);
+        assertEquals("The camera pans left across a waterfall, then settles on a forest path.", text);
+
+        // MULTI_IMAGE must send image_url frame parts, never a native video_url part.
+        var sent = server.takeRequest().getBody().utf8();
+        assertTrue(sent.contains("\"image_url\""), "request must use image_url parts: " + sent);
+        assertFalse(sent.contains("\"video_url\""), "request must NOT use a video_url part: " + sent);
+        int imageParts = sent.split("data:image/jpeg;base64,", -1).length - 1;
+        assertEquals(2, imageParts, "one image_url part per sampled frame");
     }
 
     @Test

@@ -11,9 +11,12 @@ import java.util.Optional;
  *
  * <ul>
  *   <li>{@code openrouter} → {@link VideoInterpretationClient} on the {@code provider.openrouter.*}
- *       namespace (Qwen-VL via OpenRouter/DashScope; OpenAI {@code video} array wire shape).</li>
- *   <li>{@code vllm} → {@link VideoInterpretationClient} on the {@code provider.vllm.*} namespace
- *       (a self-hosted vLLM serving a Qwen-VL model; base64 {@code video/jpeg} wire shape).</li>
+ *       namespace in {@link VideoInterpretationClient.WireMode#NATIVE_VIDEO} mode (Qwen-VL via
+ *       OpenRouter/DashScope, which the model watches as a {@code video_url}).</li>
+ *   <li>{@code vllm} → {@link VideoInterpretationClient} on the {@code provider.vllm.*} namespace in
+ *       {@link VideoInterpretationClient.WireMode#MULTI_IMAGE} mode (a self-hosted vLLM serving Qwen-VL,
+ *       whose native {@code video_url} path is broken, so sampled frames are sent as {@code image_url}
+ *       parts — preserving temporal understanding such as panning).</li>
  * </ul>
  *
  * <p>Returns {@link Optional#empty()} when unset/unrecognised — the dispatcher then falls back to
@@ -28,8 +31,10 @@ public final class VideoInterpretationRouter {
         var provider = ConfigService.get("video.provider");
         if (provider == null || provider.isBlank()) return Optional.empty();
         return switch (provider) {
-            case "openrouter" -> Optional.of(new VideoInterpretationClient("openrouter"));
-            case "vllm" -> Optional.of(new VideoInterpretationClient("vllm"));
+            case "openrouter" -> Optional.of(
+                    new VideoInterpretationClient("openrouter", VideoInterpretationClient.WireMode.NATIVE_VIDEO));
+            case "vllm" -> Optional.of(
+                    new VideoInterpretationClient("vllm", VideoInterpretationClient.WireMode.MULTI_IMAGE));
             default -> Optional.empty();
         };
     }
