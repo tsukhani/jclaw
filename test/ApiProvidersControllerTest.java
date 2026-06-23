@@ -35,6 +35,7 @@ class ApiProvidersControllerTest extends FunctionalTest {
         ConfigService.delete("provider.test-provider.baseUrl");
         ConfigService.delete("provider.test-provider.apiKey");
         ConfigService.delete("provider.test-provider.models");
+        ConfigService.delete("provider.vllm.baseUrl");
         ConfigService.clearCache();
     }
 
@@ -168,6 +169,36 @@ class ApiProvidersControllerTest extends FunctionalTest {
             assertFalse(body.contains("qwen3-vl-30b"), "image-only model must be excluded: " + body);
             assertFalse(body.contains("qwen3-32b"), "text-only model must be excluded: " + body);
             assertTrue(body.contains("\"count\":1"), "exactly one video-capable model expected: " + body);
+        }
+    }
+
+    @Test
+    void videoModelsForMultiImageProviderIncludesVisionModels() throws Exception {
+        // A MULTI_IMAGE provider (vLLM/Ollama) interprets sampled frames, so the picker offers ANY
+        // vision-capable model, not just video-capable ones. Mock a mixed catalog: a vision-only model,
+        // a video model (also vision), and a text model — the first two survive, the text one is excluded.
+        login();
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.vllm.baseUrl", server.url("/").toString());
+            var catalog = "{\"data\":["
+                    + "{\"id\":\"vendor/vision-only\",\"architecture\":{\"input_modalities\":[\"text\",\"image\"]}},"
+                    + "{\"id\":\"google/gemini-2.5-flash\",\"architecture\":{\"input_modalities\":[\"text\",\"image\",\"video\"]}},"
+                    + "{\"id\":\"vendor/text-only\",\"architecture\":{\"input_modalities\":[\"text\"]}}]}";
+            var buf = new okio.Buffer();
+            buf.writeUtf8(catalog);
+            server.enqueue(new mockwebserver3.MockResponse.Builder()
+                    .code(200).addHeader("Content-Type", "application/json").body(buf).build());
+
+            var resp = GET("/api/providers/vllm/video-models");
+            assertIsOk(resp);
+            var body = getContent(resp);
+            assertTrue(body.contains("vision-only"), "vision-only model must be offered for MULTI_IMAGE: " + body);
+            assertTrue(body.contains("gemini-2.5-flash"), "video model must also be offered: " + body);
+            assertFalse(body.contains("text-only"), "text-only model must be excluded: " + body);
+            assertTrue(body.contains("\"count\":2"), "two vision-capable models expected: " + body);
+        } finally {
+            ConfigService.delete("provider.vllm.baseUrl");
         }
     }
 

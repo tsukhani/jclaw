@@ -20,6 +20,8 @@ import services.ConfigService;
 import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
 import services.PricingRefreshService;
+import services.video.VideoInterpretationClient;
+import services.video.VideoInterpretationRouter;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -135,16 +137,18 @@ public class ApiProvidersController extends Controller {
     }
 
     /**
-     * GET /api/providers/{name}/video-models — the provider's live catalog filtered to video-capable
-     * models ({@code supportsVideo}, from the provider's {@code input_modalities}), projected to
-     * {@code id} + display name. Backs the Settings → Video Interpretation model picker.
+     * GET /api/providers/{name}/video-models — the provider's live catalog filtered to the models that
+     * can drive its video-interpretation wire mode ({@link VideoInterpretationRouter#wireModeFor}),
+     * projected to {@code id} + display name. Backs the Settings → Video Interpretation model picker.
      *
-     * <p>{@link services.video.VideoInterpretationClient} sends the clip as a provider-agnostic
-     * {@code video_url} part, so any model that advertises the {@code video} input modality can drive
-     * it (Gemini, Qwen3.5/3.6, etc. — note that OpenRouter's Qwen-VL routes are image-only and are
-     * correctly excluded). Lists models available from the provider rather than the operator's
+     * <p>A {@code NATIVE_VIDEO} provider (OpenRouter) needs true video input, so it filters
+     * {@code supportsVideo}. A {@code MULTI_IMAGE} provider (vLLM, Ollama) interprets sampled frames as
+     * images, so it filters {@code supportsVision} (which subsumes any {@code supportsVideo} model, since
+     * a video-capable model is also vision-capable). An unrecognized provider keeps the legacy
+     * {@code supportsVideo} filter. Lists models available from the provider rather than the operator's
      * manually-configured set (a dedicated model needn't be pre-added — the client calls it by id).
-     * Unlike {@link #discoverModels} the API key is optional, so a self-hosted vLLM with no auth works.
+     * Unlike {@link #discoverModels} the API key is optional, so a self-hosted vLLM or Ollama with no
+     * auth works.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's video-capable models from its live API")
@@ -155,12 +159,23 @@ public class ApiProvidersController extends Controller {
         }
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
         var result = ModelDiscoveryService.discover(name, baseUrl, apiKey == null ? "" : apiKey);
+        // MULTI_IMAGE providers (vLLM, Ollama) interpret sampled frames, so any vision-capable model
+        // qualifies; a NATIVE_VIDEO provider (OpenRouter) needs true video input; an unrecognized
+        // provider keeps the legacy supportsVideo filter. A video-capable model is also vision-capable,
+        // so the MULTI_IMAGE filter naturally subsumes any supportsVideo model.
+        var multiImage = VideoInterpretationRouter.wireModeFor(name)
+                .filter(mode -> mode == VideoInterpretationClient.WireMode.MULTI_IMAGE)
+                .isPresent();
         switch (result) {
             case DiscoveryResult.Ok(var models) -> {
                 var refs = new ArrayList<ModelRef>();
                 for (var m : models) {
                     var id = String.valueOf(m.getOrDefault("id", ""));
-                    if (!Boolean.TRUE.equals(m.get("supportsVideo")) || id.isBlank()) continue;
+                    if (id.isBlank()) continue;
+                    var qualifies = multiImage
+                            ? Boolean.TRUE.equals(m.get("supportsVision")) || Boolean.TRUE.equals(m.get("supportsVideo"))
+                            : Boolean.TRUE.equals(m.get("supportsVideo"));
+                    if (!qualifies) continue;
                     var displayName = String.valueOf(m.getOrDefault("name", ""));
                     refs.add(new ModelRef(id, displayName.isBlank() ? deriveName(id) : displayName));
                 }

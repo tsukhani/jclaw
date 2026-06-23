@@ -17,6 +17,9 @@ import java.util.Optional;
  *       {@link VideoInterpretationClient.WireMode#MULTI_IMAGE} mode (a self-hosted vLLM serving Qwen-VL,
  *       whose native {@code video_url} path is broken, so sampled frames are sent as {@code image_url}
  *       parts — preserving temporal understanding such as panning).</li>
+ *   <li>{@code ollama-local} / {@code ollama-cloud} → {@link VideoInterpretationClient} in
+ *       {@link VideoInterpretationClient.WireMode#MULTI_IMAGE} mode (Ollama has no native video input,
+ *       so a vision model interprets sampled frames as {@code image_url} parts).</li>
  * </ul>
  *
  * <p>Returns {@link Optional#empty()} when unset/unrecognised — the dispatcher then falls back to
@@ -27,15 +30,27 @@ public final class VideoInterpretationRouter {
 
     private VideoInterpretationRouter() {}
 
+    /**
+     * The wire mode for a video-interpretation provider, or empty when the name isn't a recognized
+     * video backend. Single source of truth shared by {@link #configuredService()} and the Settings
+     * video-model picker ({@code controllers.ApiProvidersController.videoModels}), so the picker filters
+     * models by the capability the mode needs: {@code NATIVE_VIDEO} → {@code supportsVideo},
+     * {@code MULTI_IMAGE} → {@code supportsVision} (a video-capable model is also vision-capable, so the
+     * MULTI_IMAGE filter naturally includes any {@code supportsVideo} model).
+     */
+    public static Optional<VideoInterpretationClient.WireMode> wireModeFor(String provider) {
+        if (provider == null) return Optional.empty();
+        return switch (provider) {
+            case "openrouter" -> Optional.of(VideoInterpretationClient.WireMode.NATIVE_VIDEO);
+            case "vllm", "ollama-local", "ollama-cloud" ->
+                    Optional.of(VideoInterpretationClient.WireMode.MULTI_IMAGE);
+            default -> Optional.empty();
+        };
+    }
+
     public static Optional<VideoInterpretationClient> configuredService() {
         var provider = ConfigService.get("video.provider");
         if (provider == null || provider.isBlank()) return Optional.empty();
-        return switch (provider) {
-            case "openrouter" -> Optional.of(
-                    new VideoInterpretationClient("openrouter", VideoInterpretationClient.WireMode.NATIVE_VIDEO));
-            case "vllm" -> Optional.of(
-                    new VideoInterpretationClient("vllm", VideoInterpretationClient.WireMode.MULTI_IMAGE));
-            default -> Optional.empty();
-        };
+        return wireModeFor(provider).map(mode -> new VideoInterpretationClient(provider, mode));
     }
 }

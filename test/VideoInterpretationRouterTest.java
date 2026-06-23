@@ -16,6 +16,9 @@ class VideoInterpretationRouterTest extends UnitTest {
     @BeforeEach
     void setUp() {
         Fixtures.deleteDatabase();
+        // Config is cached: deleteDatabase clears the row but not the cache, so a video.provider set
+        // by a sibling test would leak into emptyWhenProviderUnset (order-dependent). Evict to isolate.
+        ConfigService.clearCache();
     }
 
     @Test
@@ -46,6 +49,35 @@ class VideoInterpretationRouterTest extends UnitTest {
         assertEquals(VideoInterpretationClient.WireMode.MULTI_IMAGE,
                 VideoInterpretationRouter.configuredService().orElseThrow().wireMode(),
                 "vllm → multi-image frames");
+    }
+
+    @Test
+    void wireModeForMapsProvidersToModes() {
+        assertEquals(VideoInterpretationClient.WireMode.NATIVE_VIDEO,
+                VideoInterpretationRouter.wireModeFor("openrouter").orElseThrow());
+        assertEquals(VideoInterpretationClient.WireMode.MULTI_IMAGE,
+                VideoInterpretationRouter.wireModeFor("vllm").orElseThrow());
+        assertEquals(VideoInterpretationClient.WireMode.MULTI_IMAGE,
+                VideoInterpretationRouter.wireModeFor("ollama-local").orElseThrow());
+        assertEquals(VideoInterpretationClient.WireMode.MULTI_IMAGE,
+                VideoInterpretationRouter.wireModeFor("ollama-cloud").orElseThrow());
+        assertTrue(VideoInterpretationRouter.wireModeFor("bogus").isEmpty(),
+                "unrecognized provider → no wire mode");
+        assertTrue(VideoInterpretationRouter.wireModeFor(null).isEmpty(),
+                "null provider → no wire mode");
+    }
+
+    @Test
+    void routesOllamaProvidersAsMultiImage() {
+        ConfigService.set("video.provider", "ollama-local");
+        assertEquals(VideoInterpretationClient.WireMode.MULTI_IMAGE,
+                VideoInterpretationRouter.configuredService().orElseThrow().wireMode(),
+                "ollama-local → multi-image frames");
+
+        ConfigService.set("video.provider", "ollama-cloud");
+        assertEquals(VideoInterpretationClient.WireMode.MULTI_IMAGE,
+                VideoInterpretationRouter.configuredService().orElseThrow().wireMode(),
+                "ollama-cloud → multi-image frames");
     }
 
     @Test

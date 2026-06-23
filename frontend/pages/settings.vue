@@ -711,6 +711,18 @@ const vllmConfigured = computed(() => {
   const v = configData.value?.entries?.find(e => e.key === 'provider.vllm.baseUrl')?.value
   return !!v && v.trim().length > 0
 })
+// Ollama (local and cloud) are MULTI_IMAGE video backends: no native video, so a vision model
+// interprets sampled frames. Gated on a configured base URL (the universal requirement; the
+// video-models endpoint tolerates a missing API key). If the daemon isn't running the model fetch
+// surfaces an error rather than the radio being disabled — same graceful path as any provider.
+const ollamaLocalConfigured = computed(() => {
+  const v = configData.value?.entries?.find(e => e.key === 'provider.ollama-local.baseUrl')?.value
+  return !!v && v.trim().length > 0
+})
+const ollamaCloudConfigured = computed(() => {
+  const v = configData.value?.entries?.find(e => e.key === 'provider.ollama-cloud.baseUrl')?.value
+  return !!v && v.trim().length > 0
+})
 const vllmReachable = ref(false)
 const vllmReachableReason = ref<string | null>(null)
 const vllmProbing = ref(false)
@@ -751,7 +763,7 @@ const videoModelsLoading = ref(false)
 const videoModelsError = ref<string | null>(null)
 async function discoverVideoModels() {
   const p = videoProvider.value
-  if (!videoEnabled.value || (p !== 'openrouter' && p !== 'vllm')) {
+  if (!videoEnabled.value || !['openrouter', 'vllm', 'ollama-local', 'ollama-cloud'].includes(p)) {
     videoModelOptions.value = []
     return
   }
@@ -4351,10 +4363,11 @@ async function deleteLoggerLevel(logger: string) {
       </h2>
       <p class="text-xs text-fg-muted">
         A chat model that supports video natively watches uploaded videos directly. When it can't, a
-        dedicated video model (any video-capable model via OpenRouter or vLLM) interprets the clip and
-        hands your chat model a text description — so even a text-only chat model can “watch” videos,
-        mirroring how Transcription and Image Captioning work. With none set, videos fall back to your
-        chat model's own capability (frames as images, else a captioned summary).
+        dedicated video model interprets the clip and hands your chat model a text description — so even
+        a text-only chat model can “watch” videos, mirroring how Transcription and Image Captioning work.
+        OpenRouter watches the clip natively; a self-hosted vLLM or Ollama vision model reads sampled
+        frames instead (preserving motion such as panning). With none set, videos fall back to your chat
+        model's own capability (frames as images, else a captioned summary).
       </p>
 
       <!-- Master toggle -->
@@ -4496,6 +4509,64 @@ async function deleteLoggerLevel(logger: string) {
                 class="text-[10px] px-1 border"
                 :class="videoProvider === 'vllm' ? 'text-green-400 border-green-400/30' : 'text-fg-muted border-input'"
               >reachable</span>
+            </label>
+            <label
+              for="video-provider-ollama-local"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="ollamaLocalConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="ollamaLocalConfigured ? '' : 'Configure provider.ollama-local.baseUrl in LLM Providers above to enable.'"
+            >
+              <input
+                id="video-provider-ollama-local"
+                type="radio"
+                name="video-provider"
+                value="ollama-local"
+                :checked="videoProvider === 'ollama-local'"
+                :disabled="!ollamaLocalConfigured"
+                class="accent-emerald-600"
+                @change="setVideoProvider('ollama-local')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="ollamaLocalConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >Ollama (local)</span>
+              <span
+                v-if="!ollamaLocalConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no base URL — configure in LLM Providers</span>
+            </label>
+            <label
+              for="video-provider-ollama-cloud"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="ollamaCloudConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="ollamaCloudConfigured ? '' : 'Configure provider.ollama-cloud.baseUrl in LLM Providers above to enable.'"
+            >
+              <input
+                id="video-provider-ollama-cloud"
+                type="radio"
+                name="video-provider"
+                value="ollama-cloud"
+                :checked="videoProvider === 'ollama-cloud'"
+                :disabled="!ollamaCloudConfigured"
+                class="accent-emerald-600"
+                @change="setVideoProvider('ollama-cloud')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="ollamaCloudConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >Ollama (cloud)</span>
+              <span
+                v-if="!ollamaCloudConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no base URL — configure in LLM Providers</span>
             </label>
           </div>
         </fieldset>

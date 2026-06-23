@@ -232,4 +232,57 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     expect(radio.element.disabled).toBe(true)
     expect(c.text()).toContain('not reachable')
   })
+
+  it('offers Ollama local/cloud video radios, enabled when their base URL is configured', async () => {
+    // ollama-cloud baseUrl is seeded by the base config; we add ollama-local.baseUrl → both enabled.
+    setupApi({
+      extraEntries: [
+        { key: 'video.provider', value: 'openrouter' },
+        { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
+        { key: 'provider.ollama-local.baseUrl', value: 'http://localhost:11434/v1' },
+      ],
+    })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+    const local = c.find<HTMLInputElement>('#video-provider-ollama-local')
+    const cloud = c.find<HTMLInputElement>('#video-provider-ollama-cloud')
+    expect(local.exists()).toBe(true)
+    expect(cloud.exists()).toBe(true)
+    expect(local.element.disabled).toBe(false)
+    expect(cloud.element.disabled).toBe(false)
+  })
+
+  it('disables the Ollama local video radio when its base URL is not configured', async () => {
+    setupApi({
+      extraEntries: [
+        { key: 'video.provider', value: 'openrouter' },
+        { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
+      ],
+    })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+    const local = c.find<HTMLInputElement>('#video-provider-ollama-local')
+    expect(local.exists()).toBe(true)
+    expect(local.element.disabled).toBe(true)
+  })
+
+  it('loads the video-model list for ollama-local when it is the selected provider', async () => {
+    registerEndpoint('/api/providers/ollama-local/video-models', () => ({
+      provider: 'ollama-local',
+      models: [{ id: 'qwen3-vl:8b', name: 'qwen3-vl:8b' }],
+      count: 1,
+    }))
+    setupApi({
+      extraEntries: [
+        { key: 'video.provider', value: 'ollama-local' },
+        { key: 'provider.ollama-local.baseUrl', value: 'http://localhost:11434/v1' },
+      ],
+    })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+    const select = c.find('select[aria-label="Video model"]')
+    expect(select.exists()).toBe(true)
+    const opts = select.findAll('option').map(o => o.text())
+    expect(opts.join(' | ')).toContain('qwen3-vl:8b')
+  })
 })
