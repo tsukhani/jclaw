@@ -371,6 +371,8 @@ public class ApiConversationsController extends Controller {
             av.put("mimeType", a.mimeType);
             av.put("sizeBytes", a.sizeBytes);
             av.put("kind", a.kind);
+            av.put("generated", a.generated); // JCLAW-227: chat UI badges tool-generated images
+            if (a.generationMetadata != null) av.put("generationMetadata", a.generationMetadata);
             return av;
         }).toList();
     }

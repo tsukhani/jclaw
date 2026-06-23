@@ -30,6 +30,8 @@ export const MessageAttachmentSchema = z.object({
   mimeType: z.string(),
   sizeBytes: z.number(),
   kind: z.enum(['IMAGE', 'AUDIO', 'FILE']),
+  generated: z.boolean().optional(),
+  generationMetadata: z.string().optional(),
 })
 
 /**

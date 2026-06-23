@@ -3,6 +3,7 @@ package models;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.ColumnDefault;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -81,6 +82,19 @@ public class MessageAttachment extends Model {
      *  wired in JCLAW-222. */
     @Column(columnDefinition = "TEXT")
     public String videoSummary;
+
+    /** JCLAW-227: true when this image was produced by the {@code generate_image} tool (image-generation
+     *  epic) rather than uploaded by the user. Lets the chat UI badge generated images and keeps
+     *  generated/uploaded provenance distinguishable. {@code @ColumnDefault} keeps the ALTER safe on a
+     *  populated table (existing rows default false without a manual migration). */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    public boolean generated = false;
+
+    /** JCLAW-227: JSON metadata for a generated image (prompt, model, provider, seed) — surfaced in the
+     *  chat UI tooltip. Null for uploaded attachments. Nullable TEXT, mirroring {@link #caption} etc. */
+    @Column(name = "generation_metadata", columnDefinition = "TEXT")
+    public String generationMetadata;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;

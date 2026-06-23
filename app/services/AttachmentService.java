@@ -115,6 +115,62 @@ public final class AttachmentService {
         return att;
     }
 
+    private static final java.time.format.DateTimeFormatter GENERATED_TS =
+            java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+
+    /**
+     * Persist a tool-generated image (JCLAW-227). Unlike {@link #finalizeAttachment}, the bytes come
+     * straight from {@code services.imagegen.ImageGenerationService} (not a staged upload), so they're
+     * written directly to the conversation-keyed final directory and the {@link MessageAttachment} row
+     * is flagged {@code generated = true} with the supplied {@code generationMetadata} JSON (prompt,
+     * model, provider). Caller must be inside a JPA transaction — this only calls {@code save()}.
+     */
+    public static MessageAttachment persistGeneratedImage(Agent agent, Message message, byte[] bytes,
+            String mimeType, String generationMetadata) {
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("generated image bytes are required");
+        }
+        var mime = (mimeType == null || mimeType.isBlank()) ? "image/png" : mimeType;
+        var uuid = java.util.UUID.randomUUID().toString();
+        var ext = extensionForMime(mime);
+        var leaf = uuid + "." + ext;
+        var conversationDir = AgentService.acquireWorkspacePath(
+                agent.name, "attachments/" + message.conversation.id);
+        try {
+            Files.createDirectories(conversationDir);
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException("Failed to create attachments directory: " + e.getMessage(), e);
+        }
+        var finalPath = AgentService.acquireContained(conversationDir, leaf);
+        try {
+            Files.write(finalPath, bytes);
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException("Failed to write generated image: " + e.getMessage(), e);
+        }
+
+        var att = new MessageAttachment();
+        att.message = message;
+        att.uuid = uuid;
+        att.originalFilename = "generated-" + GENERATED_TS.format(java.time.LocalDateTime.now()) + "." + ext;
+        att.storagePath = toStoragePath(agent.name, message.conversation.id, leaf);
+        att.mimeType = mime;
+        att.sizeBytes = bytes.length;
+        att.kind = MessageAttachment.kindForMime(mime);
+        att.generated = true;
+        att.generationMetadata = generationMetadata;
+        att.save();
+        return att;
+    }
+
+    private static String extensionForMime(String mime) {
+        return switch (mime) {
+            case "image/jpeg" -> "jpg";
+            case "image/webp" -> "webp";
+            case "image/gif" -> "gif";
+            default -> "png";
+        };
+    }
+
     /**
      * Read a finalized attachment's bytes and encode them as a
      * {@code data:<mime>;base64,<bytes>} URL suitable for the OpenAI

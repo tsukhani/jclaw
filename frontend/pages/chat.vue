@@ -3003,6 +3003,12 @@ function exportConversation() {
                         />
                         <span class="truncate">{{ att.originalFilename }}</span>
                         <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
+                        <!-- JCLAW-227: corner-mark images produced by the generate_image tool. -->
+                        <span
+                          v-if="att.generated"
+                          class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
+                          :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated image'"
+                        >gen</span>
                       </a>
                     </div>
                     <!-- JCLAW-327: USER-role rows with messageKind=subagent_send

@@ -207,6 +207,10 @@ export interface MessageAttachment {
   sizeBytes: number
   /** One of IMAGE, AUDIO, FILE — drives inline-vs-download disposition on the server. */
   kind: 'IMAGE' | 'AUDIO' | 'FILE'
+  /** JCLAW-227: true when produced by the generate_image tool rather than uploaded by the user. */
+  generated?: boolean
+  /** JCLAW-227: JSON metadata (prompt, model, provider) for a generated image; absent for uploads. */
+  generationMetadata?: string
 }
 
 /**
