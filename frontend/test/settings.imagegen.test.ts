@@ -110,4 +110,24 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('bfl')
   })
+
+  it('sets the BFL API key inline (not via LLM Providers)', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', bflKey: '', capturePost: b => captured.push(b) })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+
+    // BFL key not set → reveal the inline field, type a key, and save it.
+    await c.find('button[aria-label="Edit Black Forest Labs API key"]').trigger('click')
+    await flushPromises()
+    const input = c.find<HTMLInputElement>('input[aria-label="Black Forest Labs API key"]')
+    expect(input.exists()).toBe(true)
+    await input.setValue('bfl-secret-123')
+    await c.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'provider.bfl.apiKey')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('bfl-secret-123')
+  })
 })

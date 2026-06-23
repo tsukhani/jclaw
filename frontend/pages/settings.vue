@@ -612,6 +612,13 @@ async function setImagegenProvider(value: string) {
   }
   finally { saving.value = false }
 }
+// BFL is image-gen only, so its API key is set here (not in LLM Providers). Reuses the shared
+// editingKey/editValue/updateEntry flow; editValue starts blank so the operator types a fresh key
+// (the stored value is masked and must not be saved back verbatim).
+function startEditBflKey() {
+  editingKey.value = 'provider.bfl.apiKey'
+  editValue.value = ''
+}
 
 // ──────────────────── Video Interpretation (JCLAW-223) ─────────────────────
 // One knob (frame-sample density) plus a read-only display of which of the three
@@ -1745,6 +1752,11 @@ function closeDiscovery() {
   discoveryProvider.value = null
 }
 
+// JCLAW-229: image-generation-only providers are NOT chat LLM providers (excluded from the backend
+// ProviderRegistry too) — their keys are set in the Image Generation section, not here, so skip them
+// when grouping the LLM Providers list.
+const IMAGE_ONLY_PROVIDERS = ['bfl']
+
 // Group config entries by LLM provider; everything else (non-managed) falls through
 // to the generic Configuration list.
 const providerEntries = computed(() => {
@@ -1756,6 +1768,7 @@ const providerEntries = computed(() => {
     if (e.key.startsWith('provider.')) {
       const parts = e.key.split('.')
       const name = parts[1]!
+      if (IMAGE_ONLY_PROVIDERS.includes(name)) continue // set in the Image Generation section
       if (!providers.has(name)) providers.set(name, [])
       providers.get(name)!.push(e)
     }
@@ -1775,7 +1788,6 @@ const PROVIDER_GROUPS: Record<string, 'remote' | 'local'> = {
   'openrouter': 'remote',
   'openai': 'remote',
   'together': 'remote',
-  'bfl': 'remote', // JCLAW-229: image generation only (no chat models), but its key is set here
   'ollama-local': 'local',
   'lm-studio': 'local',
   'vllm': 'local',
@@ -1786,7 +1798,6 @@ const PROVIDER_LABELS: Record<string, string> = {
   'openrouter': 'OpenRouter',
   'openai': 'OpenAI',
   'together': 'TogetherAI',
-  'bfl': 'Black Forest Labs (image gen)',
   'ollama-local': 'Ollama Local',
   'lm-studio': 'LM Studio',
   'vllm': 'vLLM',
@@ -4167,7 +4178,7 @@ async function deleteLoggerLevel(logger: string) {
               :class="bflApiKeyConfigured
                 ? 'cursor-pointer'
                 : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
-              :title="bflApiKeyConfigured ? '' : 'Add a Black Forest Labs API key in LLM Providers above to enable.'"
+              :title="bflApiKeyConfigured ? '' : 'Set a Black Forest Labs API key below to enable.'"
             >
               <input
                 id="imagegen-provider-bfl"
@@ -4188,7 +4199,7 @@ async function deleteLoggerLevel(logger: string) {
               <span
                 v-if="!bflApiKeyConfigured"
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
-              >no API key — configure in LLM Providers</span>
+              >no API key — set it below</span>
             </label>
             <!-- JCLAW-226 (Phase 2): self-hosted Flux 2 Klein lands with the local Python sidecar. -->
             <label
@@ -4209,6 +4220,56 @@ async function deleteLoggerLevel(logger: string) {
             </label>
           </div>
         </fieldset>
+
+        <!-- BFL API key — set here since BFL is image-gen only and isn't listed under LLM Providers. -->
+        <div class="bg-surface-elevated border border-border">
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Black Forest Labs API key</span>
+            <template v-if="editingKey === 'provider.bfl.apiKey'">
+              <input
+                v-model="editValue"
+                type="password"
+                aria-label="Black Forest Labs API key"
+                placeholder="Your BFL API key from bfl.ai"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="updateEntry('provider.bfl.apiKey')"
+              >
+                <CheckIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingKey = null"
+              >
+                <XMarkIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ bflApiKeyConfigured ? '••••••••' : '(not set)' }}</span>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                :title="bflApiKeyConfigured ? 'Change key' : 'Set key'"
+                aria-label="Edit Black Forest Labs API key"
+                @click="startEditBflKey()"
+              >
+                <PencilIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+          </div>
+        </div>
       </template>
     </div>
 
