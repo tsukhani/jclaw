@@ -105,6 +105,7 @@ const MANAGED_PREFIXES = [
   'transcription.', // Transcription provider + local model — Settings (Transcription)
   'caption.', // Image captioning cloud + local model (caption.cloud.*) — Settings (Image Captioning)
   'video.', // Video interpretation frame-sample density (video.sampleFrames) — Settings (Video Interpretation)
+  'imagegen.', // Image generation provider selection (imagegen.provider) — Settings (Image Generation)
   'ocr.', // OCR backends — Settings (Tesseract today; GLM-OCR planned)
   'search.', // Search providers — Settings
   'scanner.', // Malware scanners — Settings
@@ -574,6 +575,39 @@ async function setCaptionModel(value: string) {
   saving.value = true
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: 'caption.model', value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+
+// ──────────────────── Image generation (JCLAW-229) ─────────────────────────
+// Agents produce images with the generate_image tool (default-off per agent). The operator picks one
+// cloud backend here (OpenAI gpt-image-1 or Black Forest Labs Flux; self-hosted Flux is Phase 2). A
+// non-empty imagegen.provider IS the "enabled" state, mirroring Image Captioning. Reads configData,
+// writes via /api/config.
+const imagegenProvider = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'imagegen.provider')?.value ?? '',
+)
+const imagegenEnabled = computed(() => imagegenProvider.value.trim().length > 0)
+const bflApiKeyConfigured = computed(() => apiKeyConfigured('bfl'))
+
+// Master toggle: off clears the provider; on defaults to the first cloud provider that has a key
+// (no keyless cloud option exists, unlike captioning's local Ollama), falling back to OpenAI.
+async function toggleImagegenEnabled() {
+  saving.value = true
+  try {
+    const next = imagegenEnabled.value
+      ? ''
+      : (openaiApiKeyConfigured.value ? 'openai' : (bflApiKeyConfigured.value ? 'bfl' : 'openai'))
+    await $fetch('/api/config', { method: 'POST', body: { key: 'imagegen.provider', value: next } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function setImagegenProvider(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'imagegen.provider', value } })
     refresh()
   }
   finally { saving.value = false }
@@ -4035,6 +4069,144 @@ async function deleteLoggerLevel(logger: string) {
             <span class="text-fg-muted">LLM Providers</span>.
           </p>
         </div>
+      </template>
+    </div>
+
+    <!-- Image Generation (JCLAW-229) -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-fg-muted">
+        Image Generation
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Let agents produce images with the <span class="font-mono">generate_image</span> tool. Pick a
+        backend below, then enable the tool per agent in the agent editor (it is off by default). Cloud
+        providers reuse the API keys configured in
+        <span class="text-fg-muted">LLM Providers</span> above. Generated images appear inline in chat
+        and are saved like uploaded ones.
+      </p>
+
+      <!-- Active-backend status line. -->
+      <div
+        class="px-3 py-2 text-[11px] border"
+        :class="imagegenEnabled
+          ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
+          : 'bg-muted border-border text-fg-muted'"
+      >
+        <template v-if="imagegenEnabled">
+          Active: image generation via {{ imagegenProvider }}.
+        </template>
+        <template v-else>
+          Image generation is off — enable it and pick a backend below. The generate_image tool stays
+          hidden from agents until a backend is set.
+        </template>
+      </div>
+
+      <!-- Master toggle: ON when imagegen.provider is non-empty (mirrors Image Captioning). -->
+      <div class="bg-surface-elevated border border-border">
+        <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+          <button
+            type="button"
+            :aria-pressed="imagegenEnabled"
+            aria-label="Enable image generation"
+            :class="imagegenEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            @click="toggleImagegenEnabled"
+          >
+            <span
+              :class="imagegenEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
+          </button>
+          <span class="text-sm font-medium text-fg-strong">Enable image generation</span>
+          <span class="ml-auto text-[11px] text-fg-muted">
+            {{ imagegenEnabled ? 'on' : 'off' }}
+          </span>
+        </div>
+      </div>
+
+      <template v-if="imagegenEnabled">
+        <fieldset class="bg-surface-elevated border border-border">
+          <legend class="sr-only">
+            Image generation backend
+          </legend>
+          <div class="divide-y divide-border">
+            <label
+              for="imagegen-provider-openai"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="openaiApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
+            >
+              <input
+                id="imagegen-provider-openai"
+                type="radio"
+                name="imagegen-provider"
+                value="openai"
+                :checked="imagegenProvider === 'openai'"
+                :disabled="!openaiApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setImagegenProvider('openai')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="openaiApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >OpenAI (gpt-image-1)</span>
+              <span
+                v-if="!openaiApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <label
+              for="imagegen-provider-bfl"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="bflApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="bflApiKeyConfigured ? '' : 'Add a Black Forest Labs API key in LLM Providers above to enable.'"
+            >
+              <input
+                id="imagegen-provider-bfl"
+                type="radio"
+                name="imagegen-provider"
+                value="bfl"
+                :checked="imagegenProvider === 'bfl'"
+                :disabled="!bflApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setImagegenProvider('bfl')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="bflApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >Black Forest Labs (Flux)</span>
+              <span
+                v-if="!bflApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <!-- JCLAW-226 (Phase 2): self-hosted Flux 2 Klein lands with the local Python sidecar. -->
+            <label
+              for="imagegen-provider-flux-local"
+              class="px-4 py-2.5 flex items-center gap-3 cursor-not-allowed opacity-60"
+              title="Self-hosted Flux 2 Klein arrives with the local engine (JCLAW-226)."
+            >
+              <input
+                id="imagegen-provider-flux-local"
+                type="radio"
+                name="imagegen-provider"
+                value="flux-local"
+                disabled
+                class="accent-emerald-600"
+              >
+              <span class="flex-1 text-sm text-fg-primary">Self-Hosted Flux 2 Klein</span>
+              <span class="text-[10px] px-1 border text-fg-muted border-input">coming soon</span>
+            </label>
+          </div>
+        </fieldset>
       </template>
     </div>
 
