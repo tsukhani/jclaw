@@ -13,6 +13,7 @@ import java.util.Optional;
  * <ul>
  *   <li>{@code openai} → {@link OpenAiImageGenerationClient} ({@code gpt-image-1})</li>
  *   <li>{@code bfl} → {@link BflImageGenerationClient} (Black Forest Labs Flux)</li>
+ *   <li>{@code replicate} → {@link ReplicateImageGenerationClient} (hosted models, e.g. Flux)</li>
  * </ul>
  *
  * <p>Returns {@link Optional#empty()} when unset/unrecognised — the {@code generate_image} tool then
@@ -31,6 +32,7 @@ public final class ImageGenerationRouter {
         return switch (provider) {
             case "openai" -> Optional.of(new OpenAiImageGenerationClient());
             case "bfl" -> Optional.of(new BflImageGenerationClient());
+            case "replicate" -> Optional.of(new ReplicateImageGenerationClient());
             default -> Optional.empty();
         };
     }

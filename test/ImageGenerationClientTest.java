@@ -12,6 +12,7 @@ import services.imagegen.BflImageGenerationClient;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
 import services.imagegen.OpenAiImageGenerationClient;
+import services.imagegen.ReplicateImageGenerationClient;
 
 import java.util.Base64;
 
@@ -102,6 +103,24 @@ class ImageGenerationClientTest extends UnitTest {
     }
 
     @Test
+    void replicateCreatesAndFetchesOutputUrl() {
+        ConfigService.set("provider.replicate.baseUrl", server.url("/").toString());
+        ConfigService.set("provider.replicate.apiKey", "test-key");
+        var imageBytes = new byte[]{5, 6, 7, 8};
+        // Prefer:wait create-prediction returns succeeded with an output URL → no poll needed.
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"status\":\"succeeded\",\"output\":[\"" + server.url("/img") + "\"],"
+                        + "\"urls\":{\"get\":\"" + server.url("/pred") + "\"}}")).build());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "image/webp").body(bytesBuf(imageBytes)).build());
+
+        var result = new ReplicateImageGenerationClient(testClient).generate("a cat", null, null, null);
+        assertArrayEquals(imageBytes, result.bytes());
+        assertEquals("image/webp", result.mimeType(), "Replicate's content type (webp) should be read from the fetch");
+        assertTrue(result.generatedBy().startsWith("replicate:"), result.generatedBy());
+    }
+
+    @Test
     void routerSelectsClientByProvider() {
         assertTrue(ImageGenerationRouter.configuredService().isEmpty(),
                 "no imagegen.provider → empty (off)");
@@ -111,6 +130,9 @@ class ImageGenerationClientTest extends UnitTest {
 
         ConfigService.set("imagegen.provider", "bfl");
         assertTrue(ImageGenerationRouter.configuredService().orElseThrow() instanceof BflImageGenerationClient);
+
+        ConfigService.set("imagegen.provider", "replicate");
+        assertTrue(ImageGenerationRouter.configuredService().orElseThrow() instanceof ReplicateImageGenerationClient);
 
         ConfigService.set("imagegen.provider", "nonsense");
         assertTrue(ImageGenerationRouter.configuredService().isEmpty(), "unknown provider → empty");

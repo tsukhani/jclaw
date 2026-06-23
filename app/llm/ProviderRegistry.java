@@ -36,7 +36,7 @@ public final class ProviderRegistry {
     /** Providers whose {@code provider.*} credentials are image-generation only (JCLAW-225, BFL Flux)
      *  and must NOT be registered as chat LlmProviders — they don't speak {@code /chat/completions}.
      *  The {@code services.imagegen} clients read their {@code provider.bfl.*} keys directly. */
-    private static final java.util.Set<String> IMAGE_ONLY_PROVIDERS = java.util.Set.of("bfl");
+    private static final java.util.Set<String> IMAGE_ONLY_PROVIDERS = java.util.Set.of("bfl", "replicate");
 
     private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static volatile Map<String, LlmProvider> cache = Map.of();

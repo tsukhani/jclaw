@@ -149,6 +149,10 @@ public class DefaultConfigJob extends Job<Void> {
         // via Settings), mirroring caption.provider.
         seedIfAbsent("provider.bfl.baseUrl", "https://api.bfl.ai/v1");
         seedIfAbsent("provider.bfl.apiKey", "");
+        // Replicate — also IMAGE GENERATION only (hosted models behind an async predictions API,
+        // Bearer auth). Same ProviderRegistry exclusion; ReplicateImageGenerationClient reads these.
+        seedIfAbsent("provider.replicate.baseUrl", "https://api.replicate.com/v1");
+        seedIfAbsent("provider.replicate.apiKey", "");
         seedIfAbsent("imagegen.imageSize", "1024x1024");
         seedIfAbsent("imagegen.timeoutSeconds", "60");
 

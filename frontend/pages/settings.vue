@@ -590,6 +590,7 @@ const imagegenProvider = computed(() =>
 )
 const imagegenEnabled = computed(() => imagegenProvider.value.trim().length > 0)
 const bflApiKeyConfigured = computed(() => apiKeyConfigured('bfl'))
+const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
 
 // Master toggle: off clears the provider; on defaults to the first cloud provider that has a key
 // (no keyless cloud option exists, unlike captioning's local Ollama), falling back to OpenAI.
@@ -617,6 +618,11 @@ async function setImagegenProvider(value: string) {
 // (the stored value is masked and must not be saved back verbatim).
 function startEditBflKey() {
   editingKey.value = 'provider.bfl.apiKey'
+  editValue.value = ''
+}
+// Replicate is also image-gen only → its API key is set in this section too.
+function startEditReplicateKey() {
+  editingKey.value = 'provider.replicate.apiKey'
   editValue.value = ''
 }
 
@@ -1755,7 +1761,7 @@ function closeDiscovery() {
 // JCLAW-229: image-generation-only providers are NOT chat LLM providers (excluded from the backend
 // ProviderRegistry too) — their keys are set in the Image Generation section, not here, so skip them
 // when grouping the LLM Providers list.
-const IMAGE_ONLY_PROVIDERS = ['bfl']
+const IMAGE_ONLY_PROVIDERS = ['bfl', 'replicate']
 
 // Group config entries by LLM provider; everything else (non-managed) falls through
 // to the generic Configuration list.
@@ -4143,35 +4149,7 @@ async function deleteLoggerLevel(logger: string) {
             Image generation backend
           </legend>
           <div class="divide-y divide-border">
-            <label
-              for="imagegen-provider-openai"
-              class="px-4 py-2.5 flex items-center gap-3"
-              :class="openaiApiKeyConfigured
-                ? 'cursor-pointer'
-                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
-              :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
-            >
-              <input
-                id="imagegen-provider-openai"
-                type="radio"
-                name="imagegen-provider"
-                value="openai"
-                :checked="imagegenProvider === 'openai'"
-                :disabled="!openaiApiKeyConfigured"
-                class="accent-emerald-600"
-                @change="setImagegenProvider('openai')"
-              >
-              <span
-                class="flex-1 text-sm"
-                :class="openaiApiKeyConfigured
-                  ? 'text-fg-primary'
-                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
-              >OpenAI (gpt-image-1)</span>
-              <span
-                v-if="!openaiApiKeyConfigured"
-                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
-              >no API key — configure in LLM Providers</span>
-            </label>
+            <!-- 1. Black Forest Labs (Flux) — image-gen only; key set in this section (below). -->
             <label
               for="imagegen-provider-bfl"
               class="px-4 py-2.5 flex items-center gap-3"
@@ -4201,22 +4179,65 @@ async function deleteLoggerLevel(logger: string) {
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — set it below</span>
             </label>
-            <!-- JCLAW-226 (Phase 2): self-hosted Flux 2 Klein lands with the local Python sidecar. -->
+            <!-- 2. OpenAI (gpt-image-1) — reuses the OpenAI key already set in LLM Providers. -->
             <label
-              for="imagegen-provider-flux-local"
-              class="px-4 py-2.5 flex items-center gap-3 cursor-not-allowed opacity-60"
-              title="Self-hosted Flux 2 Klein arrives with the local engine (JCLAW-226)."
+              for="imagegen-provider-openai"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="openaiApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
             >
               <input
-                id="imagegen-provider-flux-local"
+                id="imagegen-provider-openai"
                 type="radio"
                 name="imagegen-provider"
-                value="flux-local"
-                disabled
+                value="openai"
+                :checked="imagegenProvider === 'openai'"
+                :disabled="!openaiApiKeyConfigured"
                 class="accent-emerald-600"
+                @change="setImagegenProvider('openai')"
               >
-              <span class="flex-1 text-sm text-fg-primary">Self-Hosted Flux 2 Klein</span>
-              <span class="text-[10px] px-1 border text-fg-muted border-input">coming soon</span>
+              <span
+                class="flex-1 text-sm"
+                :class="openaiApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >OpenAI (gpt-image-1)</span>
+              <span
+                v-if="!openaiApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <!-- 3. Replicate — image-gen only (hosted Flux etc.); key set in this section (below). -->
+            <label
+              for="imagegen-provider-replicate"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="replicateApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="replicateApiKeyConfigured ? '' : 'Set a Replicate API key below to enable.'"
+            >
+              <input
+                id="imagegen-provider-replicate"
+                type="radio"
+                name="imagegen-provider"
+                value="replicate"
+                :checked="imagegenProvider === 'replicate'"
+                :disabled="!replicateApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setImagegenProvider('replicate')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="replicateApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >Replicate</span>
+              <span
+                v-if="!replicateApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — set it below</span>
             </label>
           </div>
         </fieldset>
@@ -4261,6 +4282,56 @@ async function deleteLoggerLevel(logger: string) {
                 :title="bflApiKeyConfigured ? 'Change key' : 'Set key'"
                 aria-label="Edit Black Forest Labs API key"
                 @click="startEditBflKey()"
+              >
+                <PencilIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Replicate API key — set here too (Replicate is image-gen only, not under LLM Providers). -->
+        <div class="bg-surface-elevated border border-border">
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Replicate API key</span>
+            <template v-if="editingKey === 'provider.replicate.apiKey'">
+              <input
+                v-model="editValue"
+                type="password"
+                aria-label="Replicate API key"
+                placeholder="Your Replicate API token from replicate.com"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="updateEntry('provider.replicate.apiKey')"
+              >
+                <CheckIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingKey = null"
+              >
+                <XMarkIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ replicateApiKeyConfigured ? '••••••••' : '(not set)' }}</span>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                :title="replicateApiKeyConfigured ? 'Change key' : 'Set key'"
+                aria-label="Edit Replicate API key"
+                @click="startEditReplicateKey()"
               >
                 <PencilIcon
                   class="w-3.5 h-3.5"
