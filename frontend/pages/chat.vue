@@ -3161,59 +3161,65 @@ function exportConversation() {
                               class="max-w-[320px] max-h-[320px] rounded-lg border border-border object-contain"
                             >
                           </a>
-                          <!-- Info + actions chip. Labelled with the full generation prompt
-                               (the synthetic filename carries no meaning); wraps so the whole
-                               prompt is visible. -->
+                          <!-- Info + actions chip: a header row (type icon, size, GEN badge, and
+                               the download/delete actions) above the full-width prompt, so the
+                               prompt uses the whole chip width instead of a cramped column. Pinned
+                               to the inline preview's width for a clean stacked look. -->
                           <div
-                            class="flex items-start gap-2 max-w-[320px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs"
+                            class="flex flex-col gap-2 w-[320px] max-w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs"
                             :class="att.deleted ? 'text-fg-muted' : 'text-fg-strong'"
-                            :title="generatedImageLabel(att)"
                           >
-                            <PhotoIcon
-                              class="w-4 h-4 shrink-0 mt-px text-fg-muted"
-                              aria-hidden="true"
-                            />
-                            <span class="min-w-0 break-words">{{ generatedImageLabel(att) }}</span>
-                            <span
-                              v-if="!att.deleted"
-                              class="text-fg-muted shrink-0"
-                            >{{ formatSize(att.sizeBytes) }}</span>
-                            <span
-                              class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
-                              :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated image'"
-                            >gen</span>
-                            <!-- Actions while the file exists: download + delete. -->
-                            <a
-                              v-if="!att.deleted"
-                              :href="`/api/attachments/${att.uuid}`"
-                              :download="att.originalFilename"
-                              class="shrink-0 -my-0.5 p-0.5 text-fg-muted hover:text-fg-strong transition-colors"
-                              title="Download image"
-                              aria-label="Download image"
-                            >
-                              <ArrowDownTrayIcon
-                                class="w-4 h-4"
+                            <!-- Header: icon + size + GEN on the left; actions (or the deleted
+                                 marker) pushed to the right. -->
+                            <div class="flex items-center gap-2">
+                              <PhotoIcon
+                                class="w-4 h-4 shrink-0 text-fg-muted"
                                 aria-hidden="true"
                               />
-                            </a>
-                            <button
-                              v-if="!att.deleted"
-                              type="button"
-                              class="shrink-0 -my-0.5 p-0.5 text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                              title="Delete image from workspace"
-                              @click="deleteAttachment(att)"
-                            >
-                              <TrashIcon
-                                class="w-4 h-4"
-                                aria-hidden="true"
-                              />
-                            </button>
-                            <!-- Once the bytes are gone: an in-chip deletion marker in place
-                                 of the size + action buttons. -->
-                            <span
-                              v-else
-                              class="shrink-0 text-[11px] italic text-red-500/90"
-                            >deleted from workspace</span>
+                              <span
+                                v-if="!att.deleted"
+                                class="text-fg-muted"
+                              >{{ formatSize(att.sizeBytes) }}</span>
+                              <span
+                                class="text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
+                                :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated image'"
+                              >gen</span>
+                              <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
+                              <span
+                                v-if="att.deleted"
+                                class="ml-auto text-[11px] italic text-red-500/90"
+                              >deleted from workspace</span>
+                              <!-- Actions while the file exists: download + delete, right-aligned. -->
+                              <template v-else>
+                                <a
+                                  :href="`/api/attachments/${att.uuid}`"
+                                  :download="att.originalFilename"
+                                  class="ml-auto shrink-0 p-0.5 text-fg-muted hover:text-fg-strong transition-colors"
+                                  title="Download image"
+                                  aria-label="Download image"
+                                >
+                                  <ArrowDownTrayIcon
+                                    class="w-4 h-4"
+                                    aria-hidden="true"
+                                  />
+                                </a>
+                                <button
+                                  type="button"
+                                  class="shrink-0 p-0.5 text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                  title="Delete image from workspace"
+                                  @click="deleteAttachment(att)"
+                                >
+                                  <TrashIcon
+                                    class="w-4 h-4"
+                                    aria-hidden="true"
+                                  />
+                                </button>
+                              </template>
+                            </div>
+                            <!-- Prompt: full chip width, wraps naturally. -->
+                            <p class="break-words leading-relaxed">
+                              {{ generatedImageLabel(att) }}
+                            </p>
                           </div>
                         </div>
                         <!-- Everything else: the compact chip. -->
