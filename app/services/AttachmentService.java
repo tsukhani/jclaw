@@ -218,6 +218,35 @@ public final class AttachmentService {
     }
 
     /**
+     * JCLAW-209: reclaim a conversation's attachment bytes from the workspace. Every attachment in a
+     * conversation is stored under one directory ({@code {agent}/attachments/{conversationId}/}), so a
+     * recursive sweep of that directory frees them all at once. Called by {@code ConversationService}
+     * before the row cascade so deleting a conversation doesn't orphan its files on disk. Best-effort —
+     * a missing directory (no attachments were ever written) is a quiet no-op.
+     */
+    public static void deleteConversationAttachments(String agentName, long conversationId) {
+        if (agentName == null) return;
+        Path dir;
+        try {
+            dir = AgentService.acquireWorkspacePath(agentName, "attachments/" + conversationId);
+        } catch (SecurityException e) {
+            play.Logger.warn("Refused attachment-dir resolution for conversation %d: %s", conversationId, e.getMessage());
+            return;
+        }
+        if (!Files.isDirectory(dir)) return;
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (IOException _) { /* best-effort per-entry */ }
+                    });
+        } catch (IOException e) {
+            play.Logger.warn("Failed to delete attachment dir for conversation %d: %s", conversationId, e.getMessage());
+        }
+    }
+
+    /**
      * Canonical {@code storagePath} layout for a finalized attachment:
      * {@code {agentName}/attachments/{conversationId}/{leaf}}. The
      * {@code agentName} prefix is what {@link #resolveOnDisk} strips back off

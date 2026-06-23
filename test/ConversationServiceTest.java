@@ -7,6 +7,7 @@ import models.MessageAttachment;
 import models.MessageRole;
 import models.SessionCompaction;
 import services.AgentService;
+import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationService;
 
@@ -560,6 +561,46 @@ class ConversationServiceTest extends UnitTest {
                 "message rows must be swept");
         assertEquals(0L, Conversation.count("id = ?1", conv.id),
                 "conversation row must be deleted");
+    }
+
+    @Test
+    void deleteByIdsRemovesAttachmentFilesFromDisk() throws Exception {
+        // JCLAW-209: deleting a conversation must free its on-disk attachment bytes,
+        // not just the DB rows — otherwise generated images and uploads are orphaned
+        // in the workspace forever.
+        var agent = newAgent("conv-delete-files");
+        try {
+            var conv = ConversationService.create(agent, "web", "p");
+            ConversationService.appendUserMessage(conv, "draw me something");
+            var msg = Message.find("conversation.id = ?1", conv.id).<Message>first();
+
+            var bytes = new byte[]{(byte) 0x89, 'P', 'N', 'G', 5, 6, 7};
+            var att = AttachmentService.persistGeneratedImage(
+                    agent, msg, bytes, "image/png", "{\"prompt\":\"x\"}");
+
+            // The conversation's attachment directory exists with the bytes in it.
+            var dir = AgentService.acquireWorkspacePath(agent.name, "attachments/" + conv.id);
+            assertTrue(java.nio.file.Files.isDirectory(dir), "precondition: attachment dir must exist");
+            assertArrayEquals(bytes, AttachmentService.readBytes(att), "precondition: bytes on disk");
+
+            ConversationService.deleteByIds(List.of(conv.id));
+
+            // Both the on-disk directory and the rows are gone.
+            assertFalse(java.nio.file.Files.exists(dir), "attachment directory must be swept from disk");
+            assertEquals(0L, MessageAttachment.count("uuid = ?1", att.uuid), "attachment row must be swept");
+            assertEquals(0L, Conversation.count("id = ?1", conv.id), "conversation row must be deleted");
+        } finally {
+            // Best-effort: remove anything this test planted in the test workspace.
+            try {
+                var root = AgentService.workspacePath(agent.name);
+                if (java.nio.file.Files.exists(root)) {
+                    try (var s = java.nio.file.Files.walk(root)) {
+                        s.sorted(java.util.Comparator.reverseOrder())
+                                .forEach(p -> { try { java.nio.file.Files.deleteIfExists(p); } catch (Exception _) {} });
+                    }
+                }
+            } catch (Exception _) { /* best-effort */ }
+        }
     }
 
     @Test

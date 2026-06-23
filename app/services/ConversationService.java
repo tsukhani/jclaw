@@ -541,7 +541,20 @@ public class ConversationService {
                         + "WHERE sr.parentConversation.id IN :ids "
                         + "   OR sr.childConversation.id IN :ids")
                 .setParameter("ids", ids).executeUpdate();
-        // 3. MessageAttachment first — FK from chat_message_attachment.message_id to
+        // 3a. JCLAW-209: free the on-disk attachment bytes before dropping the rows that
+        // point at them. All of a conversation's attachments live under one directory
+        // (workspace/{agent}/attachments/{conversationId}/), so a per-conversation sweep
+        // reclaims them; without this the files would be orphaned on disk forever once the
+        // rows are cascade-deleted below. Child conversations are handled by the recursive
+        // call above. Done while the conversation→agent join is still intact.
+        @SuppressWarnings("unchecked")
+        List<Object[]> agentDirs = em.createQuery(
+                "SELECT c.id, c.agent.name FROM Conversation c WHERE c.id IN :ids")
+                .setParameter("ids", ids).getResultList();
+        for (var row : agentDirs) {
+            AttachmentService.deleteConversationAttachments((String) row[1], (Long) row[0]);
+        }
+        // 3b. MessageAttachment first — FK from chat_message_attachment.message_id to
         // message.id has no ON DELETE CASCADE, so the bulk Message delete below
         // would otherwise fail with a referential-integrity violation.
         em.createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation.id IN :ids")
