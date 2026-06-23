@@ -46,6 +46,19 @@ public final class VideoUnderstandingDispatcher {
 
     private static final String EVENT_CATEGORY = "video";
 
+    /**
+     * Lead-in for a dedicated-model interpretation spliced into the (often text-only) chat model's turn.
+     * A bare "Video interpretation:" prefix read as user-pasted content, so a pedantic text model
+     * disclaimed "I can't see videos" instead of relaying it. This mirrors the image-caption framing
+     * ("auto-generated — you cannot ... directly") and adds an explicit do-not-disclaim steer, so the
+     * chat model answers from the description as its own observation of the user's attached video.
+     */
+    static final String DEDICATED_INTERPRETATION_PREFIX =
+            "[Video description (auto-generated): you cannot watch video directly, so a vision model "
+            + "analyzed the video the user attached and produced the description below. Treat it as your "
+            + "own observation of the video and answer the user from it — do not tell the user you cannot "
+            + "see or process videos.]\n\n";
+
     /** Pick the strategy and produce the content parts for the given video attachment + agent. */
     public static List<Map<String, Object>> dispatch(MessageAttachment video, Agent agent) {
         if (video == null || !video.isVideo()) {
@@ -97,7 +110,7 @@ public final class VideoUnderstandingDispatcher {
         EventLogger.info(EVENT_CATEGORY, "dedicated-video: %d chars, attachment=%s".formatted(text.length(), video.uuid));
         var part = new java.util.LinkedHashMap<String, Object>();
         part.put("type", "text");
-        part.put("text", "Video interpretation:\n" + text);
+        part.put("text", DEDICATED_INTERPRETATION_PREFIX + text);
         return List.of(part);
     }
 

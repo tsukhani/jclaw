@@ -216,7 +216,10 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
             assertInstanceOf(String.class, userMsg.content(),
                     "a pure-text interpretation must splice as a plain string, not a parts array");
             var content = (String) userMsg.content();
-            assertTrue(content.contains("Video interpretation"), content);
+            // Framing must steer a text model to relay the description as its own observation
+            // rather than disclaim "I can't see videos".
+            assertTrue(content.contains("Video description (auto-generated)"), content);
+            assertTrue(content.contains("do not tell the user you cannot"), content);
             assertTrue(content.contains("waterfall cascades"), content);
         } finally {
             ConfigService.set("video.provider", "");
