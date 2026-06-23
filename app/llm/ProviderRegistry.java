@@ -33,6 +33,11 @@ public final class ProviderRegistry {
 
     private static final String CONFIG_KEY_PREFIX = "provider.";
 
+    /** Providers whose {@code provider.*} credentials are image-generation only (JCLAW-225, BFL Flux)
+     *  and must NOT be registered as chat LlmProviders — they don't speak {@code /chat/completions}.
+     *  The {@code services.imagegen} clients read their {@code provider.bfl.*} keys directly. */
+    private static final java.util.Set<String> IMAGE_ONLY_PROVIDERS = java.util.Set.of("bfl");
+
     private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static volatile Map<String, LlmProvider> cache = Map.of();
     private static volatile long lastRefresh;
@@ -116,6 +121,7 @@ public final class ProviderRegistry {
         // LinkedHashMap preserves insertion order so getPrimary()/getSecondary() are deterministic.
         var newCache = new LinkedHashMap<String, LlmProvider>();
         for (var name : providerNames) {
+            if (IMAGE_ONLY_PROVIDERS.contains(name)) continue; // image-gen only — not a chat provider
             var config = buildProviderConfig(name, configMap);
             if (config != null) newCache.put(name, LlmProvider.forConfig(config));
         }

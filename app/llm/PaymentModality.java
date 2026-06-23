@@ -41,6 +41,7 @@ public enum PaymentModality {
             Map.entry("openai", Set.of(PER_TOKEN, SUBSCRIPTION)),
             Map.entry("openrouter", Set.of(PER_TOKEN)),
             Map.entry("together", Set.of(PER_TOKEN)),
+            Map.entry("bfl", Set.of(PER_TOKEN)),
             Map.entry("ollama-cloud", Set.of(SUBSCRIPTION)),
             Map.entry("ollama-local", Set.of()),
             Map.entry("lm-studio", Set.of()),

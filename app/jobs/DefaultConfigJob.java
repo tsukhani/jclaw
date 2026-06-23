@@ -141,6 +141,17 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.openai.baseUrl", "https://api.openai.com/v1");
         seedIfAbsent("provider.openai.apiKey", "");
 
+        // Black Forest Labs (Flux) — IMAGE GENERATION only (JCLAW-225), NOT a chat provider:
+        // ProviderRegistry.IMAGE_ONLY_PROVIDERS skips it for /chat/completions; the
+        // services.imagegen.BflImageGenerationClient reads these keys directly (async submit+poll
+        // with x-key auth). apiKey blank → the Image Generation Settings BFL radio stays disabled
+        // until an operator pastes a key. imagegen.provider stays unseeded (absent = off, opt-in
+        // via Settings), mirroring caption.provider.
+        seedIfAbsent("provider.bfl.baseUrl", "https://api.bfl.ai/v1");
+        seedIfAbsent("provider.bfl.apiKey", "");
+        seedIfAbsent("imagegen.imageSize", "1024x1024");
+        seedIfAbsent("imagegen.timeoutSeconds", "60");
+
         // Together AI: OpenAI-shape /v1/chat/completions plus Together's
         // own {reasoning: {enabled: bool}} thinking knob. Routes through
         // TogetherAiProvider via the "together" substring match in
