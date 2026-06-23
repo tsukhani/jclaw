@@ -311,10 +311,13 @@ public final class ParallelToolExecutor {
             final String r = text;
             final String s = structured;
             // JCLAW-228: a generate_image tool result carries the produced image; the sink inlines it
-            // on the assistant turn that called the tool (no-op image for every ordinary tool).
+            // on the assistant turn that called the tool (no-op image for every ordinary tool) and
+            // returns the persisted row so we can push it onto the live SSE tool_call frame.
             final var image = result.image();
+            final var attHolder = new java.util.concurrent.atomic.AtomicReference<models.MessageAttachment>();
             Tx.run(() -> {
-                sink.appendAssistantMessage(null, gson.toJson(tc), image);
+                var att = sink.appendAssistantMessage(null, gson.toJson(tc), image);
+                if (att != null) attHolder.set(att);
                 sink.appendToolResult(tc.id(), r, s);
             });
             // JCLAW-170: surface the completed call to the SSE stream so the
@@ -328,9 +331,28 @@ public final class ParallelToolExecutor {
                         ToolRegistry.iconFor(tc.function().name()),
                         tc.function().arguments(),
                         text,
-                        structured));
+                        structured,
+                        generatedAttachmentJson(attHolder.get())));
             }
         }
+    }
+
+    /**
+     * JCLAW-228: serialize a tool-produced attachment for the live SSE {@code tool_call} frame, in the
+     * same shape {@code ApiConversationsController.attachmentsToList} uses, so the chat UI can render
+     * the generated image inline without waiting for a reload. {@code null} when no image was produced.
+     */
+    private static String generatedAttachmentJson(models.MessageAttachment att) {
+        if (att == null) return null;
+        var m = new java.util.LinkedHashMap<String, Object>();
+        m.put("uuid", att.uuid);
+        m.put("originalFilename", att.originalFilename);
+        m.put("mimeType", att.mimeType);
+        m.put("sizeBytes", att.sizeBytes);
+        m.put("kind", att.kind);
+        m.put("generated", att.generated);
+        if (att.generationMetadata != null) m.put("generationMetadata", att.generationMetadata);
+        return gson.toJson(m);
     }
 
 }

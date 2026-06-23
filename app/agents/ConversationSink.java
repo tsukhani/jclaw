@@ -88,18 +88,20 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
-    public void appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
+    public models.MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped("assistant");
-            return;
+            return null;
         }
         var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
         if (image != null) {
-            // JCLAW-228: inline the generate_image output on the assistant turn that called the tool.
-            AttachmentService.persistGeneratedImage(
+            // JCLAW-228: inline the generate_image output on the assistant turn that called the tool,
+            // and return the row so the runner can push it onto the live SSE tool_call frame.
+            return AttachmentService.persistGeneratedImage(
                     managed.agent, msg, image.bytes(), image.mimeType(), image.metadata());
         }
+        return null;
     }
 
     @Override

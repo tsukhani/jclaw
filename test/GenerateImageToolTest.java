@@ -101,8 +101,11 @@ class GenerateImageToolTest extends UnitTest {
         var bytes = new byte[]{1, 2, 3, 4, 5, 6};
         var meta = "{\"prompt\":\"a cat\",\"generatedBy\":\"openai:gpt-image-1\"}";
 
-        new ConversationSink(conv).appendAssistantMessage(
+        var returned = new ConversationSink(conv).appendAssistantMessage(
                 null, "[]", new GeneratedAttachment(bytes, "image/png", meta));
+        // JCLAW-228: the sink returns the persisted row so the runner can ship it on the live SSE frame.
+        assertNotNull(returned, "the sink must return the persisted attachment for the live tool_call frame");
+        assertTrue(returned.generated);
 
         var att = (MessageAttachment) MessageAttachment.find("generated = ?1", true).first();
         assertNotNull(att, "a generated attachment must be persisted onto the assistant turn");

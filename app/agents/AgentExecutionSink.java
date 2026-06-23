@@ -94,9 +94,12 @@ public interface AgentExecutionSink {
      * @param content   assistant text (typically {@code null} for a pure tool-call dispatch)
      * @param toolCalls JSON-encoded tool-call list
      * @param image     the produced image to inline, or {@code null} for an ordinary tool call
+     * @return the persisted {@link models.MessageAttachment} when an image was inlined (so the caller
+     *         can surface it on the live SSE {@code tool_call} frame), or {@code null} otherwise
      */
-    default void appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
+    default models.MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
         appendAssistantMessage(content, toolCalls);
+        return null;
     }
 
     /**

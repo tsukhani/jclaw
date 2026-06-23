@@ -601,6 +601,12 @@ public class ApiChatController extends Controller {
             payload.put("resultStructured",
                     com.google.gson.JsonParser.parseString(ev.resultStructuredJson()));
         }
+        // JCLAW-228: a generate_image tool produced an inline image; ship its attachment metadata so the
+        // chat UI renders it live on the streaming bubble rather than only after a reload.
+        if (ev.generatedAttachmentJson() != null) {
+            payload.put("generatedAttachment",
+                    com.google.gson.JsonParser.parseString(ev.generatedAttachmentJson()));
+        }
         sse.send(payload);
     }
 }

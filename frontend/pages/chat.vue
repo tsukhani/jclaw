@@ -50,7 +50,7 @@ import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 // suppression rule closes.
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
 
-import type { Agent, Conversation, Message, ConfigResponse, ToolCall, ToolCallResultChip } from '~/types/api'
+import type { Agent, Conversation, Message, MessageAttachment, ConfigResponse, ToolCall, ToolCallResultChip } from '~/types/api'
 import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
 import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
 
@@ -1975,6 +1975,9 @@ interface ToolCallEvent {
   arguments?: string
   resultText?: string | null
   resultStructured?: ToolCall['resultStructured']
+  // JCLAW-228: a generate_image tool produced an inline image; the backend ships its attachment so
+  // it renders live on the streaming bubble (not only after a reload).
+  generatedAttachment?: MessageAttachment
 }
 
 function handleStreamToolCallEvent(ctx: StreamContext, event: ToolCallEvent) {
@@ -2001,6 +2004,14 @@ function handleStreamToolCallEvent(ctx: StreamContext, event: ToolCallEvent) {
     resultStructured: event.resultStructured ?? null,
     _expanded: true,
   })
+  // JCLAW-228: a generate_image call produced an inline image — attach it to the streaming bubble so
+  // it renders immediately (the server already persisted it on the assistant turn).
+  if (event.generatedAttachment) {
+    if (!m.attachments) m.attachments = []
+    if (!m.attachments.some(a => a.uuid === event.generatedAttachment!.uuid)) {
+      m.attachments.push(event.generatedAttachment)
+    }
+  }
   triggerRef(messages)
   scrollToBottom()
 }
