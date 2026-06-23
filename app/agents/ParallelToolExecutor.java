@@ -310,8 +310,11 @@ public final class ParallelToolExecutor {
             }
             final String r = text;
             final String s = structured;
+            // JCLAW-228: a generate_image tool result carries the produced image; the sink inlines it
+            // on the assistant turn that called the tool (no-op image for every ordinary tool).
+            final var image = result.image();
             Tx.run(() -> {
-                sink.appendAssistantMessage(null, gson.toJson(tc));
+                sink.appendAssistantMessage(null, gson.toJson(tc), image);
                 sink.appendToolResult(tc.id(), r, s);
             });
             // JCLAW-170: surface the completed call to the SSE stream so the

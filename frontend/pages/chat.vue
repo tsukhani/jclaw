@@ -3081,6 +3081,45 @@ function exportConversation() {
                     v-else
                     class="group"
                   >
+                    <!-- JCLAW-227/228: tool-generated images (generate_image) inline on the assistant
+                         turn, rendered as the same chips as user uploads (left-aligned). -->
+                    <div
+                      v-if="msg.attachments?.length"
+                      class="flex flex-wrap gap-2 mb-2 justify-start"
+                    >
+                      <a
+                        v-for="att in msg.attachments"
+                        :key="att.uuid"
+                        :href="`/api/attachments/${att.uuid}`"
+                        target="_blank"
+                        rel="noopener"
+                        class="inline-flex items-center gap-2 max-w-[260px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-fg-strong hover:bg-muted/60 transition-colors"
+                        :title="`${att.originalFilename} · ${formatSize(att.sizeBytes)} · ${att.mimeType}`"
+                      >
+                        <PhotoIcon
+                          v-if="att.kind === 'IMAGE'"
+                          class="w-4 h-4 shrink-0 text-fg-muted"
+                          aria-hidden="true"
+                        />
+                        <SpeakerWaveIcon
+                          v-else-if="att.kind === 'AUDIO'"
+                          class="w-4 h-4 shrink-0 text-fg-muted"
+                          aria-hidden="true"
+                        />
+                        <DocumentIcon
+                          v-else
+                          class="w-4 h-4 shrink-0 text-fg-muted"
+                          aria-hidden="true"
+                        />
+                        <span class="truncate">{{ att.originalFilename }}</span>
+                        <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
+                        <span
+                          v-if="att.generated"
+                          class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
+                          :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated image'"
+                        >gen</span>
+                      </a>
+                    </div>
                     <!--
                       JCLAW-170: tool-calls accordion. Renders above the
                       thinking card whenever the assistant message carries one

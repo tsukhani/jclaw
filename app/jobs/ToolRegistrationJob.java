@@ -23,6 +23,7 @@ public class ToolRegistrationJob extends Job<Void> {
         var toolList = new java.util.ArrayList<ToolRegistry.Tool>();
         toolList.add(new TaskTool());
         toolList.add(new DateTimeTool());
+        toolList.add(new GenerateImageTool()); // JCLAW-228: default-off per agent (opt-in)
         // JCLAW-462: ccr_retrieve — fetch the full original of a content-
         // compressed tool result by its hash. Registered unconditionally
         // (per-agent disable still applies); only useful once content

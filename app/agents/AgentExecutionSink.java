@@ -86,6 +86,20 @@ public interface AgentExecutionSink {
     }
 
     /**
+     * JCLAW-228: persist a tool-call assistant turn AND inline a tool-produced image onto it (the
+     * {@code generate_image} tool). The default ignores the image — sinks with no chat surface (e.g.
+     * {@code TaskRunSink}) fall back to the plain overload; {@link ConversationSink} overrides to
+     * attach it via {@code AttachmentService.persistGeneratedImage} so the image renders in chat.
+     *
+     * @param content   assistant text (typically {@code null} for a pure tool-call dispatch)
+     * @param toolCalls JSON-encoded tool-call list
+     * @param image     the produced image to inline, or {@code null} for an ordinary tool call
+     */
+    default void appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
+        appendAssistantMessage(content, toolCalls);
+    }
+
+    /**
      * Persist the result of a tool invocation. The rich-widget renderer
      * (web_search favicons, etc.) reads {@code structuredJson} when present.
      *

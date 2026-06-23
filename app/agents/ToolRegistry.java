@@ -37,8 +37,18 @@ public class ToolRegistry {
      *                       so re-opening a conversation keeps the richer
      *                       render. {@code null} means "no structured view".
      */
-    public record ToolResult(String text, String structuredJson) {
-        public static ToolResult text(String text) { return new ToolResult(text, null); }
+    public record ToolResult(String text, String structuredJson, GeneratedAttachment image) {
+        /** Back-compat 2-arg form — most tools produce no inline attachment. */
+        public ToolResult(String text, String structuredJson) {
+            this(text, structuredJson, null);
+        }
+        public static ToolResult text(String text) { return new ToolResult(text, null, null); }
+        /** JCLAW-228: a tool ({@code generate_image}) that produced an image to inline on the
+         *  assistant turn. The commit path ({@link ParallelToolExecutor}) attaches {@code image} to
+         *  the assistant message via {@link AgentExecutionSink}; the model still sees {@code text}. */
+        public static ToolResult withImage(String text, String structuredJson, GeneratedAttachment image) {
+            return new ToolResult(text, structuredJson, image);
+        }
     }
 
     public interface Tool {
@@ -494,6 +504,9 @@ public class ToolRegistry {
         return DISABLED_TOOLS_CACHE.get(agent.id, _ -> computeDisabledTools(agent));
     }
 
+    /** JCLAW-228: {@code generate_image} is default-OFF for every agent (opt-in per agent). */
+    private static final String GENERATE_IMAGE_TOOL = "generate_image";
+
     private static Set<String> computeDisabledTools(Agent agent) {
         var configs = AgentToolConfig.findByAgent(agent);
         var explicitState = new HashMap<String, Boolean>();
@@ -502,6 +515,12 @@ public class ToolRegistry {
         var disabled = new HashSet<String>();
         for (var entry : explicitState.entrySet()) {
             if (Boolean.FALSE.equals(entry.getValue())) disabled.add(entry.getKey());
+        }
+        // JCLAW-228: image generation can cost money / hit rate limits, so generate_image is hidden
+        // from every agent unless an explicit AgentToolConfig row turns it on (single-click in the
+        // agent editor). Distinct from the MCP default-disable below, which only affects non-main agents.
+        if (!Boolean.TRUE.equals(explicitState.get(GENERATE_IMAGE_TOOL))) {
+            disabled.add(GENERATE_IMAGE_TOOL);
         }
         if (!agent.isMain()) {
             addMcpDefaultDisabled(disabled, explicitState);
