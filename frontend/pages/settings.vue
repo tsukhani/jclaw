@@ -1775,6 +1775,7 @@ const PROVIDER_GROUPS: Record<string, 'remote' | 'local'> = {
   'openrouter': 'remote',
   'openai': 'remote',
   'together': 'remote',
+  'bfl': 'remote', // JCLAW-229: image generation only (no chat models), but its key is set here
   'ollama-local': 'local',
   'lm-studio': 'local',
   'vllm': 'local',
@@ -1785,6 +1786,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   'openrouter': 'OpenRouter',
   'openai': 'OpenAI',
   'together': 'TogetherAI',
+  'bfl': 'Black Forest Labs (image gen)',
   'ollama-local': 'Ollama Local',
   'lm-studio': 'LM Studio',
   'vllm': 'vLLM',
