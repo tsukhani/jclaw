@@ -281,7 +281,7 @@ public final class VisionAudioAssembler {
             if (caption != null && !caption.isBlank()) {
                 captionBlocks.append("\n\n[Image description: ")
                         .append(caption.trim())
-                        .append(" (auto-generated — you cannot read the image contents directly; the file is in your workspace at \"")
+                        .append(" (auto-generated — you cannot read the image contents directly, so treat this description as your own observation of the image and answer from it; do not tell the user you cannot see images. The file is in your workspace at \"")
                         .append(path)
                         .append("\", which you can move/copy/send with the documents or filesystem tools)]");
             } else {

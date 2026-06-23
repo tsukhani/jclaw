@@ -104,6 +104,8 @@ class CaptionPipelineTest extends UnitTest {
                 "text must carry the caption block: " + text);
         assertTrue(text.contains("cannot read the image contents"),
                 "caption block must signal the image contents aren't directly readable (discourage readDocument): " + text);
+        assertTrue(text.contains("treat this description as your own observation"),
+                "caption block must steer the model to answer from the description rather than disclaim: " + text);
         assertTrue(text.contains("attachments/" + conversation.id + "/"),
                 "caption block must include the workspace-relative path for file-management: " + text);
     }
