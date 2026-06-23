@@ -2547,6 +2547,24 @@ onBeforeUnmount(() => {
 
 const formatAttachmentSize = formatSize
 
+/**
+ * JCLAW-228: the visible label for a generated-image download link. The
+ * synthetic filename (generated-yyyymmdd-hhmmss.png) carries no information,
+ * so for a generated image we surface the full prompt parsed out of
+ * generationMetadata ({"prompt": "...", "generatedBy": "...", ...}). Falls
+ * back to the filename if the metadata is missing or unparseable.
+ */
+function generatedImageLabel(att: MessageAttachment): string {
+  if (att.generationMetadata) {
+    try {
+      const meta = JSON.parse(att.generationMetadata) as { prompt?: unknown }
+      if (typeof meta.prompt === 'string' && meta.prompt.trim()) return meta.prompt
+    }
+    catch { /* fall through to the filename */ }
+  }
+  return att.originalFilename
+}
+
 async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]> {
   if (!attachedFiles.value.length) return []
   const form = new FormData()
@@ -3113,7 +3131,7 @@ function exportConversation() {
                             :href="`/api/attachments/${att.uuid}`"
                             target="_blank"
                             rel="noopener"
-                            :title="`${att.originalFilename} · ${formatSize(att.sizeBytes)} · ${att.mimeType}`"
+                            :title="generatedImageLabel(att)"
                           >
                             <img
                               :src="`/api/attachments/${att.uuid}`"
@@ -3121,18 +3139,21 @@ function exportConversation() {
                               class="max-w-[320px] max-h-[320px] rounded-lg border border-border object-contain"
                             >
                           </a>
+                          <!-- Download link labelled with the full generation prompt (the
+                               synthetic filename carries no meaning). Wraps so the whole
+                               prompt is visible. -->
                           <a
                             :href="`/api/attachments/${att.uuid}`"
                             target="_blank"
                             rel="noopener"
-                            class="inline-flex items-center gap-2 max-w-[260px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-fg-strong hover:bg-muted/60 transition-colors"
-                            :title="`${att.originalFilename} · ${formatSize(att.sizeBytes)} · ${att.mimeType}`"
+                            class="flex items-start gap-2 max-w-[320px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-fg-strong hover:bg-muted/60 transition-colors"
+                            :title="generatedImageLabel(att)"
                           >
                             <PhotoIcon
-                              class="w-4 h-4 shrink-0 text-fg-muted"
+                              class="w-4 h-4 shrink-0 mt-px text-fg-muted"
                               aria-hidden="true"
                             />
-                            <span class="truncate">{{ att.originalFilename }}</span>
+                            <span class="min-w-0 break-words">{{ generatedImageLabel(att) }}</span>
                             <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
                             <span
                               class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"

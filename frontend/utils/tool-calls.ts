@@ -39,6 +39,11 @@ interface RawRow {
   toolCalls?: PersistedToolCall[] | ToolCall[] | null
   toolResults?: string | null
   toolResultStructured?: ToolCallResultStructured | null
+  /** JCLAW-228: generate_image persists its produced image on the
+   *  intermediate (content-null) assistant row alongside the tool call.
+   *  That row gets filtered, so its attachments are carried onto the
+   *  rendering row the same way its toolCalls are. */
+  attachments?: unknown[] | null
   [k: string]: unknown
 }
 
@@ -100,14 +105,25 @@ function collectNormalizedCalls(
   return out
 }
 
-function attachLeftoverPending(msgs: RawRow[], pending: ToolCall[]): void {
+function attachLeftoverPending(
+  msgs: RawRow[],
+  pending: ToolCall[],
+  pendingAttachments: unknown[],
+): void {
   // Edge case: a mid-turn reload where the final assistant-with-content row
-  // hasn't landed yet. Attach the leftover calls to the last assistant row
-  // we saw so they render instead of getting dropped silently.
+  // hasn't landed yet. Attach the leftover calls (and any carried-over
+  // attachments) to the last assistant row we saw so they render instead of
+  // getting dropped silently.
   for (let i = msgs.length - 1; i >= 0; i--) {
     const row = msgs[i]
     if (row?.role === 'assistant') {
-      row.toolCalls = pending
+      if (pending.length) row.toolCalls = pending
+      if (pendingAttachments.length) {
+        row.attachments = [
+          ...(Array.isArray(row.attachments) ? row.attachments : []),
+          ...pendingAttachments,
+        ]
+      }
       break
     }
   }
@@ -117,6 +133,7 @@ export function hydrateToolCalls(msgs: RawRow[]): void {
   const resultsByCallId = indexToolResults(msgs)
 
   let pending: ToolCall[] = []
+  let pendingAttachments: unknown[] = []
   for (const m of msgs) {
     if (m.role !== 'assistant') continue
     if (Array.isArray(m.toolCalls)) {
@@ -125,11 +142,30 @@ export function hydrateToolCalls(msgs: RawRow[]): void {
       // leaving the persisted shape around would confuse the renderer,
       // which expects the normalized ToolCall[] shape per Message type.
       m.toolCalls = null
+      // JCLAW-228: the intermediate (content-null) tool-call row is where
+      // generate_image persists its produced image, but that row is filtered
+      // out of the transcript. Carry its attachments forward alongside the
+      // toolCalls so the image lands on the assistant row that renders.
+      if (Array.isArray(m.attachments) && m.attachments.length) {
+        pendingAttachments.push(...m.attachments)
+        m.attachments = null
+      }
     }
-    if (m.content && pending.length) {
-      m.toolCalls = pending
-      pending = []
+    if (m.content && (pending.length || pendingAttachments.length)) {
+      if (pending.length) {
+        m.toolCalls = pending
+        pending = []
+      }
+      if (pendingAttachments.length) {
+        m.attachments = [
+          ...(Array.isArray(m.attachments) ? m.attachments : []),
+          ...pendingAttachments,
+        ]
+        pendingAttachments = []
+      }
     }
   }
-  if (pending.length) attachLeftoverPending(msgs, pending)
+  if (pending.length || pendingAttachments.length) {
+    attachLeftoverPending(msgs, pending, pendingAttachments)
+  }
 }

@@ -136,6 +136,63 @@ describe('hydrateToolCalls', () => {
     expect(final.toolCalls[1]!.id).toBe('call_2')
   })
 
+  it('carries a generated-image attachment off the filtered tool-call row onto the rendering row', () => {
+    // JCLAW-228: generate_image persists its produced image on the
+    // intermediate (content-null) assistant row — which shouldDisplayMessage
+    // filters out. Hydration must move the attachment forward onto the final
+    // content row so the image renders on reload, not just live.
+    const msgs = [
+      { role: 'user', content: 'draw a clown', id: 1 },
+      {
+        role: 'assistant', id: 2, content: null,
+        toolCalls: [{ id: 'call_g', type: 'function',
+          function: { name: 'generate_image', arguments: '{"prompt":"a clown"}' },
+          icon: 'photo' }],
+        attachments: [{ uuid: 'u-1', kind: 'IMAGE', generated: true,
+          originalFilename: 'generated-x.png', sizeBytes: 1024,
+          generationMetadata: '{"prompt":"a clown"}' }],
+      },
+      { role: 'tool', id: 3, content: 'Generated an image…', toolResults: 'call_g' },
+      { role: 'assistant', id: 4, content: 'Done — here it is.' },
+    ]
+
+    hydrateToolCalls(msgs as unknown as Array<Record<string, unknown>>)
+
+    // Intermediate row: both raw toolCalls and the attachment are moved off it.
+    expect(msgs[1]!.toolCalls).toBeNull()
+    expect((msgs[1] as unknown as { attachments: unknown }).attachments).toBeNull()
+
+    // Final (rendering) row: gets the carried-over attachment.
+    const final = msgs[3] as unknown as { attachments: Array<{ uuid: string, generated: boolean }> }
+    expect(final.attachments).toHaveLength(1)
+    expect(final.attachments[0]!.uuid).toBe('u-1')
+    expect(final.attachments[0]!.generated).toBe(true)
+  })
+
+  it('dangles a carried attachment on the last assistant row when the final content row is missing', () => {
+    // Mid-turn reload: the content row has not landed, so the attachment must
+    // still surface on the last assistant row rather than vanish.
+    const msgs = [
+      { role: 'user', content: 'draw', id: 1 },
+      {
+        role: 'assistant', id: 2, content: null,
+        toolCalls: [{ id: 'call_h', type: 'function',
+          function: { name: 'generate_image', arguments: '{"prompt":"a cat"}' },
+          icon: 'photo' }],
+        attachments: [{ uuid: 'u-2', kind: 'IMAGE', generated: true,
+          originalFilename: 'generated-y.png', sizeBytes: 2048,
+          generationMetadata: '{"prompt":"a cat"}' }],
+      },
+      { role: 'tool', id: 3, content: 'Generated an image…', toolResults: 'call_h' },
+    ]
+
+    hydrateToolCalls(msgs as unknown as Array<Record<string, unknown>>)
+
+    const row = msgs[1] as unknown as { attachments: Array<{ uuid: string }> }
+    expect(row.attachments).toHaveLength(1)
+    expect(row.attachments[0]!.uuid).toBe('u-2')
+  })
+
   it('falls back to wrench icon when the persisted entry has no icon hint', () => {
     // Older conversation rows predate JCLAW-170's icon enrichment at /messages
     // read-time (or the registry lost the tool). The hydrator must still
