@@ -102,9 +102,9 @@ public final class LocalFluxSidecarManager {
             // The sidecar writes operational lines (listening, request logs,
             // idle-exit) to stderr; stdout carries nothing (image bytes go over
             // the HTTP socket). Drain both on VTs so a full pipe never blocks it.
-            outDrain = Thread.ofVirtual().name("flux-sidecar-out")
+            outDrain = Thread.ofVirtual().name("flux-sidecar-stdout")
                     .start(() -> drain(process.getInputStream(), false));
-            errDrain = Thread.ofVirtual().name("flux-sidecar-err")
+            errDrain = Thread.ofVirtual().name("flux-sidecar-stderr")
                     .start(() -> drain(process.getErrorStream(), true));
             EventLogger.info("imagegen",
                     "Flux sidecar starting (model=%s port=%d)".formatted(model, port()));
@@ -155,10 +155,15 @@ public final class LocalFluxSidecarManager {
         try (var r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
+                // The sidecar (and uv/torch/http.server) write normal operational logs to
+                // stderr by convention — it's not an error stream here — so drain stderr at
+                // INFO and stdout at DEBUG. Log the raw line: the thread name
+                // (flux-sidecar-stderr/-stdout) is the attribution, and the sidecar's own
+                // lines already carry a [flux-sidecar] marker, so don't add a second one.
                 if (stderr) {
-                    Logger.info("[flux-sidecar] %s", line);
+                    Logger.info("%s", line);
                 } else {
-                    Logger.debug("[flux-sidecar:out] %s", line);
+                    Logger.debug("%s", line);
                 }
             }
         } catch (IOException _) {
