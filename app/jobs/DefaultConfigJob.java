@@ -43,6 +43,10 @@ public class DefaultConfigJob extends Job<Void> {
         // "ffmpeg missing" banner without paying the probe cost on first
         // page load. Cheap (~ms when ffmpeg is present, ~tens of ms when not).
         services.transcription.FfmpegProbe.probe();
+        // JCLAW-226: prime the uv-availability cache so the Settings UI can render
+        // a "uv missing" banner for local image generation without paying the probe
+        // cost on first page load (cheap; same rationale as FfmpegProbe above).
+        services.imagegen.FluxSidecarProbe.probe();
         EventLogger.info("system", "Default configuration seeded");
     }
 
@@ -155,6 +159,17 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.replicate.apiKey", "");
         seedIfAbsent("imagegen.imageSize", "1024x1024");
         seedIfAbsent("imagegen.timeoutSeconds", "60");
+
+        // JCLAW-226: local Flux 2 Klein engine via a Python HTTP sidecar (the shape
+        // chosen in the JCLAW-509 spike). Selection stays on imagegen.provider="flux-local"
+        // (unseeded — absent = off, opt-in via Settings, like the cloud image backends);
+        // these keys configure the sidecar that LocalFluxSidecarManager launches on demand.
+        // Default model is klein 4B (Apache-2.0, ~13 GB fp16) — the smallest variant and the
+        // only one whose throughput stays tolerable on Apple Silicon (MPS). idleTimeoutMinutes
+        // lets the daemon self-evict and release the GPU when unused.
+        seedIfAbsent("imagegen.local.model", "black-forest-labs/FLUX.2-klein-4B");
+        seedIfAbsent("imagegen.local.port", "9527");
+        seedIfAbsent("imagegen.local.idleTimeoutMinutes", "15");
 
         // Together AI: OpenAI-shape /v1/chat/completions plus Together's
         // own {reasoning: {enabled: bool}} thinking knob. Routes through

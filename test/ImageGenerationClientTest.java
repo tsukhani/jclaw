@@ -9,6 +9,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.imagegen.BflImageGenerationClient;
+import services.imagegen.FluxLocalImageClient;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
 import services.imagegen.OpenAiImageGenerationClient;
@@ -121,6 +122,53 @@ class ImageGenerationClientTest extends UnitTest {
     }
 
     @Test
+    void fluxLocalReturnsRawImageBytes() {
+        var imageBytes = new byte[]{4, 3, 2, 1};
+        // The sidecar returns the PNG bytes directly with a Content-Type header — no submit/poll.
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "image/png").body(bytesBuf(imageBytes)).build());
+
+        var result = new FluxLocalImageClient(mockBase(), testClient).generate("a red bicycle", null, 1024, 1024);
+        assertArrayEquals(imageBytes, result.bytes());
+        assertEquals("image/png", result.mimeType());
+        assertTrue(result.generatedBy().startsWith("flux-local:"), result.generatedBy());
+    }
+
+    @Test
+    void fluxLocalThrowsNotDownloadedOn409() {
+        // 409 from the sidecar means the weights aren't present yet.
+        server.enqueue(new MockResponse.Builder().code(409)
+                .body(jsonBuf("{\"error\":\"weights not present\"}")).build());
+
+        var client = new FluxLocalImageClient(mockBase(), testClient);
+        var ex = assertThrows(ImageGenerationException.class,
+                () -> client.generate("a cat", null, null, null),
+                "a 409 must surface as a clear not-downloaded error");
+        assertTrue(ex.getMessage().contains("not downloaded"), ex.getMessage());
+    }
+
+    @Test
+    void fluxLocalThrowsOnServerError() {
+        server.enqueue(new MockResponse.Builder().code(500)
+                .body(jsonBuf("{\"error\":\"generation failed\"}")).build());
+
+        var client = new FluxLocalImageClient(mockBase(), testClient);
+        var ex = assertThrows(ImageGenerationException.class,
+                () -> client.generate("a cat", null, null, null),
+                "a 5xx must surface as an ImageGenerationException");
+        assertTrue(ex.getMessage().contains("HTTP 500"), ex.getMessage());
+    }
+
+    @Test
+    void fluxLocalRequiresPrompt() {
+        var client = new FluxLocalImageClient(mockBase(), testClient);
+        var ex = assertThrows(ImageGenerationException.class,
+                () -> client.generate("  ", null, null, null),
+                "a blank prompt must be rejected before any HTTP call");
+        assertTrue(ex.getMessage().contains("prompt is required"), ex.getMessage());
+    }
+
+    @Test
     void routerSelectsClientByProvider() {
         // ConfigService's static cache outlives Fixtures.deleteDatabase(), so a prior test's
         // ConfigService.set("imagegen.provider", ...) can leak into this "key absent → off"
@@ -139,8 +187,17 @@ class ImageGenerationClientTest extends UnitTest {
         ConfigService.set("imagegen.provider", "replicate");
         assertTrue(ImageGenerationRouter.configuredService().orElseThrow() instanceof ReplicateImageGenerationClient);
 
+        ConfigService.set("imagegen.provider", "flux-local");
+        assertTrue(ImageGenerationRouter.configuredService().orElseThrow() instanceof FluxLocalImageClient);
+
         ConfigService.set("imagegen.provider", "nonsense");
         assertTrue(ImageGenerationRouter.configuredService().isEmpty(), "unknown provider → empty");
+    }
+
+    /** MockWebServer base with no trailing slash, mirroring LocalFluxSidecarManager.baseUrl(). */
+    private String mockBase() {
+        var url = server.url("/").toString();
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
     private static Buffer jsonBuf(String s) {

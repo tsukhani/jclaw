@@ -1,0 +1,28 @@
+[project]
+name = "jclaw-flux-sidecar"
+version = "0.1.0"
+description = "Flux 2 Klein local image-generation sidecar for jclaw (JCLAW-226)"
+requires-python = ">=3.10"
+# NOTE (JCLAW-226 open item): the exact minimum diffusers/transformers/torch
+# versions for FLUX.2 klein on MPS must be confirmed against the HF model card
+# (black-forest-labs/FLUX.2-klein-4B). The bounds below are conservative floors;
+# `uv run` resolves and writes uv.lock on first launch.
+dependencies = [
+    "torch>=2.4",
+    "diffusers>=0.36",
+    "transformers>=4.46",
+    "accelerate>=1.0",
+    "huggingface_hub>=0.26",
+    "safetensors>=0.4",
+    "sentencepiece>=0.2",
+    "protobuf>=4.25",
+    "pillow>=10.0",
+]
+
+# torch wheels are platform-specific (JCLAW-509 Linux/CUDA addendum):
+#  - macOS / Apple Silicon: the default PyPI wheel ships CPU + MPS — no extra config.
+#  - Linux + NVIDIA: the default PyPI wheel is CPU-only; install the CUDA build via
+#      UV_TORCH_BACKEND=cu124 uv run serve.py ...      (uv >= 0.5 auto-selects)
+#    or an explicit extra index. See README.md.
+#  - Linux + AMD (ROCm): use the ROCm wheel index. Coverage for klein on ROCm is
+#    unverified (flagged in the spike).

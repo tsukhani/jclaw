@@ -61,6 +61,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("whatsapp-cobalt", WhatsAppCobaltRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("whisper-transcriber", services.transcription.WhisperJniTranscriber::shutdown),
+                new Component("imagegen-flux-sidecar", services.imagegen.LocalFluxSidecarManager::stop),
                 new Component("mcp-connections", mcp.McpConnectionManager::shutdown),
                 new Component("lucene-index", services.search.LuceneIndexer::close),
                 new Component("tailscale-funnel", services.TailscaleFunnel::disableIfEnabled)
