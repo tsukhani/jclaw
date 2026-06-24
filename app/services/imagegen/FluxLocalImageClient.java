@@ -69,7 +69,7 @@ public class FluxLocalImageClient implements ImageGenerationService {
                         "local Flux model not downloaded — download it in Settings → Image Generation");
             }
             if (!resp.isSuccessful()) {
-                var body = resp.body() != null ? resp.body().string() : "";
+                var body = resp.body().string();
                 throw new ImageGenerationException("flux-local generate failed: HTTP %d%s".formatted(
                         resp.code(), body.isEmpty() ? "" : " — " + truncate(body, 500)));
             }

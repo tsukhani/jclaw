@@ -79,7 +79,7 @@ public final class FluxModelManager {
         if (!Files.isDirectory(snapshots)) return false;
         try (var entries = Files.list(snapshots)) {
             return entries.findAny().isPresent();
-        } catch (IOException e) {
+        } catch (IOException _) {
             return false;
         }
     }
@@ -174,25 +174,33 @@ public final class FluxModelManager {
             BufferedSource src = resp.body().source();
             String line;
             while ((line = src.readUtf8Line()) != null) {
-                if (line.isBlank()) continue;
-                var json = JsonParser.parseString(line).getAsJsonObject();
-                var status = optString(json, "status");
-                long done = json.has("bytesDownloaded") ? json.get("bytesDownloaded").getAsLong() : 0;
-                long total = json.has("totalBytes") ? json.get("totalBytes").getAsLong() : 0;
-                if ("error".equals(status)) {
-                    throw new IOException("sidecar pull error: " + optString(json, "error"));
-                }
-                if ("done".equals(status)) {
-                    statuses.put(model, new ModelStatus(State.AVAILABLE, done, total, null));
-                } else {
-                    statuses.put(model, new ModelStatus(State.DOWNLOADING, done, total, null));
-                    if (onProgress != null) {
-                        onProgress.accept(new DownloadProgress(model, done, total));
-                    }
-                }
+                handlePullLine(model, line, onProgress);
             }
         }
         EventLogger.info("imagegen", "Flux model %s downloaded".formatted(model));
+    }
+
+    /** Parse one ndjson progress line from the sidecar /pull stream and update
+     *  {@link #statuses} (and the optional callback). Split out of {@link #doPull}
+     *  to keep that method's cognitive complexity within bounds (S3776). */
+    private static void handlePullLine(String model, String line, Consumer<DownloadProgress> onProgress)
+            throws IOException {
+        if (line.isBlank()) return;
+        var json = JsonParser.parseString(line).getAsJsonObject();
+        var status = optString(json, "status");
+        long done = json.has("bytesDownloaded") ? json.get("bytesDownloaded").getAsLong() : 0;
+        long total = json.has("totalBytes") ? json.get("totalBytes").getAsLong() : 0;
+        if ("error".equals(status)) {
+            throw new IOException("sidecar pull error: " + optString(json, "error"));
+        }
+        if ("done".equals(status)) {
+            statuses.put(model, new ModelStatus(State.AVAILABLE, done, total, null));
+        } else {
+            statuses.put(model, new ModelStatus(State.DOWNLOADING, done, total, null));
+            if (onProgress != null) {
+                onProgress.accept(new DownloadProgress(model, done, total));
+            }
+        }
     }
 
     private static String optString(JsonObject json, String key) {

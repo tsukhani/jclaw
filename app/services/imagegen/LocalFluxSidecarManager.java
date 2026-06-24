@@ -144,9 +144,9 @@ public final class LocalFluxSidecarManager {
             // Drain the body so the sidecar finishes its write — closing the
             // connection early races its socket write and spams its stderr with
             // BrokenPipe tracebacks (the body is tiny, so this is cheap).
-            if (resp.body() != null) resp.body().bytes();
+            resp.body().bytes();
             return resp.isSuccessful();
-        } catch (IOException e) {
+        } catch (IOException _) {
             return false;
         }
     }
