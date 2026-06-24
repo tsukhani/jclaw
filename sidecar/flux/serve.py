@@ -125,28 +125,60 @@ class SidecarState:
 
 
 def _pull_stream(state: SidecarState):
-    """Generator yielding ndjson progress bytes for POST /pull. Downloads every
-    sibling file in the repo (what snapshot_download does) but file-by-file so we
-    can emit byte-granular progress for the Settings UI. hf_hub_download handles
-    caching + integrity (etag/sha) per file."""
-    from huggingface_hub import HfApi, hf_hub_download
+    """Generator yielding ndjson progress bytes for POST /pull.
+
+    The download runs on a background thread (snapshot_download, which uses the
+    fast xet backend); this generator polls the on-disk size of the HF cache's
+    blobs/ dir once a second and reports it against the repo total from
+    model_info. Disk-polling gives smooth BYTE-granular progress — a per-file
+    scheme sits at 0% for the entire first shard (the klein safetensors are
+    ~7.7 GB each), which reads as a stuck download."""
+    from huggingface_hub import HfApi, snapshot_download
 
     def line(obj):
         return (json.dumps(obj) + "\n").encode("utf-8")
 
     try:
         info = HfApi().model_info(state.model, files_metadata=True)
-        files = [(s.rfilename, s.size or 0) for s in info.siblings]
-        total = sum(sz for _, sz in files)
-        done = 0
-        yield line({"status": "downloading", "bytesDownloaded": 0, "totalBytes": total})
-        for name, sz in files:
-            hf_hub_download(state.model, name, cache_dir=state.cache_dir)
-            done += sz
-            yield line({"status": "downloading", "bytesDownloaded": done, "totalBytes": total})
-        yield line({"status": "done", "bytesDownloaded": total, "totalBytes": total})
+        total = sum((s.size or 0) for s in info.siblings)
     except Exception as e:
-        yield line({"status": "error", "error": str(e)})
+        yield line({"status": "error", "error": "metadata fetch failed: %s" % e})
+        return
+
+    blobs = os.path.join(
+        state.cache_dir, "models--" + state.model.replace("/", "--"), "blobs")
+
+    def disk_bytes():
+        if not os.path.isdir(blobs):
+            return 0
+        tot = 0
+        with os.scandir(blobs) as it:
+            for entry in it:
+                try:
+                    tot += entry.stat(follow_symlinks=False).st_size
+                except OSError:
+                    pass
+        return tot
+
+    outcome = {"done": False, "error": None}
+
+    def run_download():
+        try:
+            snapshot_download(state.model, cache_dir=state.cache_dir)
+        except Exception as e:
+            outcome["error"] = str(e)
+        finally:
+            outcome["done"] = True
+
+    threading.Thread(target=run_download, name="flux-snapshot", daemon=True).start()
+    yield line({"status": "downloading", "bytesDownloaded": min(disk_bytes(), total), "totalBytes": total})
+    while not outcome["done"]:
+        time.sleep(1.0)
+        yield line({"status": "downloading", "bytesDownloaded": min(disk_bytes(), total), "totalBytes": total})
+    if outcome["error"]:
+        yield line({"status": "error", "error": outcome["error"]})
+    else:
+        yield line({"status": "done", "bytesDownloaded": total, "totalBytes": total})
 
 
 class Handler(BaseHTTPRequestHandler):
