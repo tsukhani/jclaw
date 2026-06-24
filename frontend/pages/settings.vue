@@ -4530,6 +4530,17 @@ async function deleteLoggerLevel(logger: string) {
           v-if="imagegenProvider === 'flux-local'"
           class="bg-surface-elevated border border-border"
         >
+          <div class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border">
+            Optional — a Read token lifts Hugging Face rate limits, speeds downloads, and unlocks gated
+            models. Not required for klein 4B (it downloads anonymously). Create one (shown once), then
+            paste it below.
+            <a
+              href="https://huggingface.co/settings/tokens"
+              target="_blank"
+              rel="noopener"
+              class="text-fg-primary hover:text-fg-strong underline ml-1"
+            >Get a token → huggingface.co/settings/tokens</a>
+          </div>
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Hugging Face token (optional)</span>
             <template v-if="editingKey === 'imagegen.local.hfToken'">

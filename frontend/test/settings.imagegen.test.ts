@@ -148,6 +148,9 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     const c = await mountSuspended(Settings)
     await flushPromises()
 
+    // Inline guidance: a link to the HF tokens page is present so users aren't left guessing.
+    expect(c.html()).toContain('huggingface.co/settings/tokens')
+
     await c.find('button[aria-label="Edit Hugging Face token"]').trigger('click')
     await flushPromises()
     const input = c.find<HTMLInputElement>('input[aria-label="Hugging Face token"]')
