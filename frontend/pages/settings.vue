@@ -648,6 +648,16 @@ const { data: imagegenLocalState, refresh: refreshImagegenLocalState }
 
 const fluxUvAvailable = computed(() => imagegenLocalState.value?.uvAvailable ?? false)
 const fluxModelStatus = computed(() => imagegenLocalState.value?.modelStatus ?? 'ABSENT')
+// Optional HF token (imagegen.local.hfToken) — passed to the sidecar as HF_TOKEN.
+// Set inline here; the stored value is masked so editValue starts blank.
+const hfTokenConfigured = computed(() => {
+  const v = configData.value?.entries?.find(e => e.key === 'imagegen.local.hfToken')?.value
+  return !!v && v.trim().length > 0
+})
+function startEditHfToken() {
+  editingKey.value = 'imagegen.local.hfToken'
+  editValue.value = ''
+}
 const fluxModelDownloadPct = computed(() => {
   const s = imagegenLocalState.value
   if (!s || s.totalBytes === 0) return 0
@@ -4511,6 +4521,60 @@ async function deleteLoggerLevel(logger: string) {
             class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
           >
             {{ imagegenLocalState.error }}
+          </div>
+        </div>
+
+        <!-- Optional Hugging Face token (JCLAW-226): lifts rate limits, speeds downloads, and
+             unlocks gated models. Passed to the sidecar as HF_TOKEN. Not required for klein 4B. -->
+        <div
+          v-if="imagegenProvider === 'flux-local'"
+          class="bg-surface-elevated border border-border"
+        >
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Hugging Face token (optional)</span>
+            <template v-if="editingKey === 'imagegen.local.hfToken'">
+              <input
+                v-model="editValue"
+                type="password"
+                aria-label="Hugging Face token"
+                placeholder="hf_… — higher rate limits and gated models"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="updateEntry('imagegen.local.hfToken')"
+              >
+                <CheckIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingKey = null"
+              >
+                <XMarkIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ hfTokenConfigured ? '••••••••' : '(not set)' }}</span>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                :title="hfTokenConfigured ? 'Change token' : 'Set token'"
+                aria-label="Edit Hugging Face token"
+                @click="startEditHfToken()"
+              >
+                <PencilIcon
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
           </div>
         </div>
       </template>

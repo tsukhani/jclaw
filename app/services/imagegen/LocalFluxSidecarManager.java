@@ -91,6 +91,13 @@ public final class LocalFluxSidecarManager {
                 "--idle-timeout-min", String.valueOf(idleMin));
         try {
             var pb = new ProcessBuilder(cmd).directory(sidecarDir);
+            // Optional HF token → HF_TOKEN env. huggingface_hub reads it automatically,
+            // so the sidecar needs no change; the secret stays scoped to the child process
+            // and is never written to a token file under data/.
+            var hfToken = ConfigService.get("imagegen.local.hfToken");
+            if (hfToken != null && !hfToken.isBlank()) {
+                pb.environment().put("HF_TOKEN", hfToken);
+            }
             process = pb.start();
             // The sidecar writes operational lines (listening, request logs,
             // idle-exit) to stderr; stdout carries nothing (image bytes go over

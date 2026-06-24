@@ -21,6 +21,7 @@ interface Opts {
   replicateKey?: string
   uvAvailable?: boolean
   fluxModelStatus?: 'ABSENT' | 'DOWNLOADING' | 'AVAILABLE' | 'ERROR'
+  hfToken?: string
   capturePost?: (b: { key?: string, value?: string }) => void
   capturePull?: () => void
 }
@@ -33,6 +34,7 @@ function configEntries(opts: Opts) {
     { key: 'provider.bfl.apiKey', value: opts.bflKey ?? '', updatedAt: '2026-06-23T10:00:00Z' },
     { key: 'provider.replicate.baseUrl', value: 'https://api.replicate.com/v1', updatedAt: '2026-06-23T10:00:00Z' },
     { key: 'provider.replicate.apiKey', value: opts.replicateKey ?? '', updatedAt: '2026-06-23T10:00:00Z' },
+    { key: 'imagegen.local.hfToken', value: opts.hfToken ?? '', updatedAt: '2026-06-23T10:00:00Z' },
   ]
   if (opts.imagegenProvider !== undefined) {
     e.push({ key: 'imagegen.provider', value: opts.imagegenProvider, updatedAt: '2026-06-23T10:00:00Z' })
@@ -138,6 +140,25 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     const c = await mountSuspended(Settings)
     await flushPromises()
     expect(c.text()).toContain('Install uv')
+  })
+
+  it('sets the optional Hugging Face token inline', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ imagegenProvider: 'flux-local', openaiKey: 'sk-****', uvAvailable: true, capturePost: b => captured.push(b) })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+
+    await c.find('button[aria-label="Edit Hugging Face token"]').trigger('click')
+    await flushPromises()
+    const input = c.find<HTMLInputElement>('input[aria-label="Hugging Face token"]')
+    expect(input.exists()).toBe(true)
+    await input.setValue('hf_secret_abc')
+    await c.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'imagegen.local.hfToken')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('hf_secret_abc')
   })
 
   it('triggers the weight pull when the Download button is clicked', async () => {

@@ -170,6 +170,10 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("imagegen.local.model", "black-forest-labs/FLUX.2-klein-4B");
         seedIfAbsent("imagegen.local.port", "9527");
         seedIfAbsent("imagegen.local.idleTimeoutMinutes", "15");
+        // Optional Hugging Face token, passed to the sidecar as HF_TOKEN. Blank by default —
+        // klein 4B is Apache-2.0 and downloads anonymously; a token only lifts rate limits,
+        // speeds downloads, and unlocks gated models. Masked (key name contains "token").
+        seedIfAbsent("imagegen.local.hfToken", "");
 
         // Together AI: OpenAI-shape /v1/chat/completions plus Together's
         // own {reasoning: {enabled: bool}} thinking knob. Routes through
