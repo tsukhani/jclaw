@@ -9,6 +9,10 @@ requires-python = ">=3.10"
 # `uv run` resolves and writes uv.lock on first launch.
 dependencies = [
     "torch>=2.4",
+    # torchvision gives transformers its default image-processor backend; without it
+    # klein's vision processors (CLIP/Siglip, used for image-editing/img2img input) fall
+    # back to a slower PIL path and warn at load. uv resolves the version matching torch.
+    "torchvision>=0.19",
     "diffusers>=0.36",
     "transformers>=4.46",
     "accelerate>=1.0",

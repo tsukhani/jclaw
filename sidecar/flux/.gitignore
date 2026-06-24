@@ -1,0 +1,8 @@
+# Resolved per machine on first `uv run` so the per-platform torch wheel selection
+# keeps working (macOS MPS vs Linux CUDA — see README). Committing a lock would pin
+# one platform's torch build and override UV_TORCH_BACKEND, breaking the CUDA path.
+# Proper universal multi-platform locking is future work (the deferred Linux/CUDA item).
+.venv/
+uv.lock
+__pycache__/
+*.pyc
