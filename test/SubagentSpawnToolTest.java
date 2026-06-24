@@ -1567,8 +1567,11 @@ class SubagentSpawnToolTest extends UnitTest {
             assertTrue(payload.get("reply").getAsString().contains("exceeded"),
                     "TIMEOUT reply must surface the budget-exceeded reason, got: " + payload.get("reply").getAsString());
 
-            java.util.List<EventLog> timeoutEvents = EventLog.find(
-                    "category = ?1", EventLogger.SUBAGENT_TIMEOUT).fetch();
+            // Async timeout emits SUBAGENT_TIMEOUT AFTER stamping the run TIMEOUT
+            // (which awaitTerminalStatus observed), so flushing once can race the
+            // emit and see zero. Await the event, scoped to this run's parent agent.
+            java.util.List<EventLog> timeoutEvents =
+                    awaitEventLogs(EventLogger.SUBAGENT_TIMEOUT, parent.name, 1, 5_000);
             assertEquals(1, timeoutEvents.size(),
                     "TIMEOUT path must emit exactly one SUBAGENT_TIMEOUT event");
         } finally {
@@ -2097,6 +2100,30 @@ class SubagentSpawnToolTest extends UnitTest {
         }
         fail("SubagentRun " + runId + " did not reach " + expected
                 + " within " + timeoutMillis + "ms (last seen: " + seen + ")");
+    }
+
+    /**
+     * Await {@code expected} EventLog rows of {@code category} for {@code agentId},
+     * flushing EventLogger's async pending queue on each poll. The async terminal
+     * paths emit the terminal event AFTER stamping the run status (which
+     * {@link #awaitTerminalStatus} observes), so flushing once can race the emit and
+     * read zero. Scoped by agentId so a concurrently-running test's event can't
+     * inflate the count.
+     */
+    private static java.util.List<EventLog> awaitEventLogs(
+            String category, String agentId, int expected, long timeoutMillis) {
+        var deadline = System.currentTimeMillis() + timeoutMillis;
+        java.util.List<EventLog> rows;
+        while (true) {
+            EventLogger.flush();
+            JPA.em().clear();
+            rows = EventLog.find("category = ?1 and agentId = ?2", category, agentId).fetch();
+            if (rows.size() >= expected || System.currentTimeMillis() >= deadline) {
+                return rows;
+            }
+            try { Thread.sleep(50); }
+            catch (InterruptedException _) { Thread.currentThread().interrupt(); return rows; }
+        }
     }
 
     /** Commit pending parent setup rows so the VT-dispatched child run can
