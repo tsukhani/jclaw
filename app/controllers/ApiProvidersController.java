@@ -37,6 +37,7 @@ public class ApiProvidersController extends Controller {
     private static final Gson gson = INSTANCE;
     private static final String PROVIDER_CONFIG_PREFIX = "provider.";
     private static final String BASE_URL_SUFFIX = ".baseUrl";
+    private static final String SUPPORTS_VISION = "supportsVision";
 
     public record DiscoverModelsResponse(List<Map<String, Object>> models, int count) {}
 
@@ -173,7 +174,7 @@ public class ApiProvidersController extends Controller {
                     var id = String.valueOf(m.getOrDefault("id", ""));
                     if (id.isBlank()) continue;
                     var qualifies = multiImage
-                            ? Boolean.TRUE.equals(m.get("supportsVision")) || Boolean.TRUE.equals(m.get("supportsVideo"))
+                            ? Boolean.TRUE.equals(m.get(SUPPORTS_VISION)) || Boolean.TRUE.equals(m.get("supportsVideo"))
                             : Boolean.TRUE.equals(m.get("supportsVideo"));
                     if (!qualifies) continue;
                     var displayName = String.valueOf(m.getOrDefault("name", ""));
@@ -306,7 +307,7 @@ public class ApiProvidersController extends Controller {
         boolean thinking = optBool(body, "supportsThinking");
         m.addProperty("supportsThinking", thinking);
         if (thinking && optBool(body, "alwaysThinks")) m.addProperty("alwaysThinks", true);
-        m.addProperty("supportsVision", optBool(body, "supportsVision"));
+        m.addProperty(SUPPORTS_VISION, optBool(body, SUPPORTS_VISION));
         m.addProperty("supportsAudio", optBool(body, "supportsAudio"));
         addPriceIfSet(m, body, "promptPrice");
         addPriceIfSet(m, body, "completionPrice");
