@@ -19,7 +19,10 @@ interface Opts {
   openaiKey?: string
   bflKey?: string
   replicateKey?: string
+  uvAvailable?: boolean
+  fluxModelStatus?: 'ABSENT' | 'DOWNLOADING' | 'AVAILABLE' | 'ERROR'
   capturePost?: (b: { key?: string, value?: string }) => void
+  capturePull?: () => void
 }
 
 function configEntries(opts: Opts) {
@@ -45,6 +48,23 @@ function setupApi(opts: Opts = {}) {
   registerEndpoint('/api/providers', () => PROVIDERS)
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
   registerEndpoint('/api/transcription/state', () => ({ provider: 'whisper-local', localModel: 'small.en', ffmpegAvailable: true, ffmpegReason: 'available', models: [] }))
+  registerEndpoint('/api/imagegen/local/state', () => ({
+    provider: opts.imagegenProvider ?? '',
+    model: 'black-forest-labs/FLUX.2-klein-4B',
+    uvAvailable: opts.uvAvailable ?? false,
+    uvReason: opts.uvAvailable ? 'available' : 'uv not found on PATH',
+    modelStatus: opts.fluxModelStatus ?? 'ABSENT',
+    bytesDownloaded: 0,
+    totalBytes: 0,
+    error: null,
+  }))
+  registerEndpoint('/api/imagegen/local/pull', {
+    method: 'POST',
+    handler: () => {
+      opts.capturePull?.()
+      return { status: 'downloading', model: 'black-forest-labs/FLUX.2-klein-4B' }
+    },
+  })
   registerEndpoint('/api/providers/vllm/reachable', () => ({ provider: 'vllm', reachable: false, modelCount: 0, reason: 'vllm not running' }))
   registerEndpoint('/api/providers/openrouter/video-models', () => ({ provider: 'openrouter', models: [], count: 0 }))
   registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: configEntries(opts) }) })
@@ -89,8 +109,50 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     expect(bfl.element.disabled).toBe(true)
     expect(replicate.element.disabled).toBe(true)
     expect(c.text()).toContain('no API key')
-    // The old Phase-2 "Self-Hosted Flux" placeholder radio is gone.
-    expect(c.find('#imagegen-provider-flux-local').exists()).toBe(false)
+    // The self-hosted Flux radio is present but disabled until uv is detected (none in this setup).
+    const flux = c.find<HTMLInputElement>('#imagegen-provider-flux-local')
+    expect(flux.exists()).toBe(true)
+    expect(flux.element.disabled).toBe(true)
+  })
+
+  it('enables the self-hosted Flux radio when uv is available and POSTs flux-local on select', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', uvAvailable: true, capturePost: b => captured.push(b) })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+
+    const flux = c.find<HTMLInputElement>('#imagegen-provider-flux-local')
+    expect(flux.exists()).toBe(true)
+    expect(flux.element.disabled).toBe(false)
+
+    await flux.trigger('change')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'imagegen.provider')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('flux-local')
+  })
+
+  it('shows the uv-missing banner when flux-local is selected but uv is absent', async () => {
+    setupApi({ imagegenProvider: 'flux-local', openaiKey: 'sk-****', uvAvailable: false })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+    expect(c.text()).toContain('Install uv')
+  })
+
+  it('triggers the weight pull when the Download button is clicked', async () => {
+    const pulls: number[] = []
+    setupApi({ imagegenProvider: 'flux-local', openaiKey: 'sk-****', uvAvailable: true, fluxModelStatus: 'ABSENT', capturePull: () => pulls.push(1) })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+
+    const btn = c.findAll('button').find(b => b.text() === 'Download')
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+
+    expect(pulls.length).toBe(1)
+    c.unmount() // clears the poll interval started by downloadFluxModel()
   })
 
   it('POSTs imagegen.provider when the section is enabled', async () => {

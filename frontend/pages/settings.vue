@@ -582,7 +582,7 @@ async function setCaptionModel(value: string) {
 
 // ──────────────────── Image generation (JCLAW-229) ─────────────────────────
 // Agents produce images with the generate_image tool (default-off per agent). The operator picks one
-// cloud backend here (OpenAI gpt-image-1 or Black Forest Labs Flux; self-hosted Flux is Phase 2). A
+// backend here (OpenAI gpt-image-1, Black Forest Labs / Replicate Flux, or a self-hosted Flux 2 Klein sidecar). A
 // non-empty imagegen.provider IS the "enabled" state, mirroring Image Captioning. Reads configData,
 // writes via /api/config.
 const imagegenProvider = computed(() =>
@@ -628,6 +628,66 @@ function startEditReplicateKey() {
   editingKey.value = 'provider.replicate.apiKey'
   editValue.value = ''
 }
+
+// ──────────────────── Local Flux 2 Klein sidecar (JCLAW-226) ──────────────
+// Runtime state — uv availability + Flux weight download status — comes from
+// /api/imagegen/local/state. The provider selection itself rides the same
+// imagegen.provider path as the cloud backends above (value 'flux-local').
+type ImagegenLocalState = {
+  provider: string | null
+  model: string
+  uvAvailable: boolean
+  uvReason: string | null
+  modelStatus: 'ABSENT' | 'DOWNLOADING' | 'AVAILABLE' | 'ERROR'
+  bytesDownloaded: number
+  totalBytes: number
+  error: string | null
+}
+const { data: imagegenLocalState, refresh: refreshImagegenLocalState }
+  = await useFetch<ImagegenLocalState>('/api/imagegen/local/state')
+
+const fluxUvAvailable = computed(() => imagegenLocalState.value?.uvAvailable ?? false)
+const fluxModelStatus = computed(() => imagegenLocalState.value?.modelStatus ?? 'ABSENT')
+const fluxModelDownloadPct = computed(() => {
+  const s = imagegenLocalState.value
+  if (!s || s.totalBytes === 0) return 0
+  return Math.min(100, Math.round((s.bytesDownloaded / s.totalBytes) * 100))
+})
+
+// Kick off the sidecar pull (launches the daemon on demand, then downloads the
+// weights). Returns immediately; the poll loop drives the progress bar.
+async function downloadFluxModel() {
+  saving.value = true
+  try {
+    await $fetch('/api/imagegen/local/pull', { method: 'POST', body: {} })
+    startImagegenLocalPolling()
+  }
+  finally { saving.value = false }
+}
+
+// Poll /api/imagegen/local/state every 1.5s while a pull is in flight, stop once
+// it settles. Mirrors the transcription poll loop; cleans up on unmount.
+let imagegenLocalPollTimer: ReturnType<typeof setInterval> | null = null
+function fluxDownloadInFlight(): boolean {
+  return imagegenLocalState.value?.modelStatus === 'DOWNLOADING'
+}
+function startImagegenLocalPolling() {
+  if (imagegenLocalPollTimer != null) return
+  imagegenLocalPollTimer = setInterval(async () => {
+    await refreshImagegenLocalState()
+    if (!fluxDownloadInFlight()) stopImagegenLocalPolling()
+  }, 1500)
+}
+function stopImagegenLocalPolling() {
+  if (imagegenLocalPollTimer != null) {
+    clearInterval(imagegenLocalPollTimer)
+    imagegenLocalPollTimer = null
+  }
+}
+onMounted(() => {
+  if (fluxDownloadInFlight()) startImagegenLocalPolling()
+})
+onUnmounted(() => stopImagegenLocalPolling())
 
 // ──────────────────── Video Interpretation (JCLAW-223) ─────────────────────
 // One knob (frame-sample density) plus a read-only display of which of the three
@@ -4254,6 +4314,36 @@ async function deleteLoggerLevel(logger: string) {
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — set it below</span>
             </label>
+            <!-- 4. Self-hosted Flux 2 Klein — local Python sidecar; gated by uv presence, not an API key (JCLAW-226). -->
+            <label
+              for="imagegen-provider-flux-local"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="fluxUvAvailable
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="fluxUvAvailable ? '' : 'Install uv (astral.sh/uv) on the server to enable local generation.'"
+            >
+              <input
+                id="imagegen-provider-flux-local"
+                type="radio"
+                name="imagegen-provider"
+                value="flux-local"
+                :checked="imagegenProvider === 'flux-local'"
+                :disabled="!fluxUvAvailable"
+                class="accent-emerald-600"
+                @change="setImagegenProvider('flux-local')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="fluxUvAvailable
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >Self-Hosted (Flux 2 Klein)</span>
+              <span
+                v-if="!fluxUvAvailable"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >uv not found — install uv</span>
+            </label>
           </div>
         </fieldset>
 
@@ -4354,6 +4444,73 @@ async function deleteLoggerLevel(logger: string) {
                 />
               </button>
             </template>
+          </div>
+        </div>
+
+        <!-- Local Flux model: download status + button (JCLAW-226). Shown when flux-local is the backend. -->
+        <div
+          v-if="imagegenProvider === 'flux-local'"
+          class="bg-surface-elevated border border-border"
+        >
+          <div
+            v-if="!fluxUvAvailable"
+            class="px-4 py-2.5 text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/50 dark:bg-amber-900/15 border-b border-amber-200 dark:border-amber-800/50"
+          >
+            {{ imagegenLocalState?.uvReason || 'uv is required to run the local Flux sidecar.' }}
+            Install uv from astral.sh/uv and restart jclaw.
+          </div>
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-mono text-fg-strong truncate">
+                {{ imagegenLocalState?.model }}
+              </div>
+              <div class="text-[11px] text-fg-muted">
+                <template v-if="fluxModelStatus === 'AVAILABLE'">
+                  Ready — weights downloaded.
+                </template>
+                <template v-else-if="fluxModelStatus === 'DOWNLOADING'">
+                  Downloading weights…
+                </template>
+                <template v-else-if="fluxModelStatus === 'ERROR'">
+                  Download failed.
+                </template>
+                <template v-else>
+                  Not downloaded (~13 GB). The first image needs the weights.
+                </template>
+              </div>
+            </div>
+            <template v-if="fluxModelStatus === 'DOWNLOADING'">
+              <div class="flex items-center gap-2">
+                <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
+                  <div
+                    class="h-full bg-emerald-600 transition-[width] duration-300"
+                    :style="{ width: fluxModelDownloadPct + '%' }"
+                  />
+                </div>
+                <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
+                  {{ fluxModelDownloadPct }}%
+                </span>
+              </div>
+            </template>
+            <template v-else-if="fluxModelStatus === 'AVAILABLE'">
+              <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
+            </template>
+            <template v-else>
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                :disabled="saving || !fluxUvAvailable"
+                @click="downloadFluxModel()"
+              >
+                {{ fluxModelStatus === 'ERROR' ? 'Retry' : 'Download' }}
+              </button>
+            </template>
+          </div>
+          <div
+            v-if="fluxModelStatus === 'ERROR' && imagegenLocalState?.error"
+            class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+          >
+            {{ imagegenLocalState.error }}
           </div>
         </div>
       </template>
