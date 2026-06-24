@@ -28,6 +28,7 @@ matching jclaw's data/ runtime-artifact convention (whisper-models, lucene).
 """
 
 import argparse
+import fnmatch
 import io
 import json
 import os
@@ -40,6 +41,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # this, generation hard-crashes on Apple Silicon (JCLAW-509 Apple-Silicon addendum).
 # Must be set before torch is imported, so it lives at module top.
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+# Repo files the diffusers AutoPipeline does NOT use, skipped on download (JCLAW-226).
+# model_index.json declares Flux2KleinPipeline, which loads only the subfolders
+# (transformer/, vae/, text_encoder/, tokenizer/, scheduler/) — the top-level
+# single-file checkpoint (~7.7 GB) is the original/ComfyUI format and the *.jpg are
+# example images, so skipping them cuts ~33% off the ~23.7 GB download.
+IGNORE_PATTERNS = ["flux-2-klein-4b.safetensors", "*.jpg"]
 
 
 class SidecarState:
@@ -138,9 +146,14 @@ def _pull_stream(state: SidecarState):
     def line(obj):
         return (json.dumps(obj) + "\n").encode("utf-8")
 
+    def ignored(name):
+        return any(fnmatch.fnmatch(name, p) for p in IGNORE_PATTERNS)
+
     try:
         info = HfApi().model_info(state.model, files_metadata=True)
-        total = sum((s.size or 0) for s in info.siblings)
+        # Total must reflect the FILTERED file set, or the bar would top out below
+        # 100% (we skip ~7.7 GB) and never reach done.
+        total = sum((s.size or 0) for s in info.siblings if not ignored(s.rfilename))
     except Exception as e:
         yield line({"status": "error", "error": "metadata fetch failed: %s" % e})
         return
@@ -164,7 +177,8 @@ def _pull_stream(state: SidecarState):
 
     def run_download():
         try:
-            snapshot_download(state.model, cache_dir=state.cache_dir)
+            snapshot_download(state.model, cache_dir=state.cache_dir,
+                              ignore_patterns=IGNORE_PATTERNS)
         except Exception as e:
             outcome["error"] = str(e)
         finally:
