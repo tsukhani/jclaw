@@ -69,13 +69,17 @@ class SidecarState:
         return "cpu", torch.float32
 
     def weights_present(self) -> bool:
-        """True when the full model snapshot is already cached locally."""
-        from huggingface_hub import snapshot_download
-        try:
-            snapshot_download(self.model, local_files_only=True, cache_dir=self.cache_dir)
-            return True
-        except Exception:
+        """True when the model snapshot exists locally. Pure filesystem check (no
+        huggingface_hub import) so /health stays fast and never blocks on a slow
+        first import — importing hf/torch here made /health take seconds and time
+        out the JVM's health probe. Mirrors the Java FluxModelManager.availableLocally
+        heuristic: a non-empty snapshots dir under the HF cache layout."""
+        repo_dir = "models--" + self.model.replace("/", "--")
+        snapshots = os.path.join(self.cache_dir, repo_dir, "snapshots")
+        if not os.path.isdir(snapshots):
             return False
+        with os.scandir(snapshots) as it:
+            return any(True for _ in it)
 
     def ensure_pipeline(self):
         """Lazily load + cache the diffusers pipeline. Raises FileNotFoundError
@@ -110,14 +114,14 @@ class SidecarState:
             return self.pipeline
 
     def current_device(self):
-        """Device/dtype for /health without forcing a pipeline load."""
+        """Device/dtype for /health WITHOUT importing torch. Reports the real values
+        only once the pipeline has been loaded (on first /generate, which sets
+        self.device). Importing torch here would make the first /health take several
+        seconds — long enough to time out the JVM's health probe and spam BrokenPipe
+        tracebacks — so device is reported as 'unknown' until the model is loaded."""
         if self.device is not None:
             return self.device, self.dtype
-        try:
-            device, dtype = self.detect_device()
-            return device, str(dtype).replace("torch.", "")
-        except Exception as e:  # torch not importable yet
-            return "unknown", "unknown:" + str(e)
+        return "unknown", "unknown"
 
 
 def _pull_stream(state: SidecarState):
@@ -152,6 +156,21 @@ class Handler(BaseHTTPRequestHandler):
     # default; route it through one prefix so jclaw's stderr drainer can tag it.
     def log_message(self, fmt, *args):
         sys.stderr.write("[flux-sidecar] " + (fmt % args) + "\n")
+
+    # Swallow client-disconnect errors so they don't spam stderr with tracebacks.
+    # The JVM health probe closes the socket as soon as it has the response, which
+    # can race our write; that's benign, not an error worth a traceback.
+    def handle(self):
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def finish(self):
+        try:
+            super().finish()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _send_json(self, code, obj):
         body = json.dumps(obj).encode("utf-8")

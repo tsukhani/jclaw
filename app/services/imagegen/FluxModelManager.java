@@ -126,6 +126,12 @@ public final class FluxModelManager {
         }
         return inFlight.computeIfAbsent(model, m -> {
             var future = new CompletableFuture<Void>();
+            // Mark DOWNLOADING synchronously, before the VT spawns the sidecar, so the
+            // Settings UI flips to a progress bar immediately and its poll loop keeps
+            // running. The sidecar can take ~10s to boot (uv builds the venv) before
+            // /pull streams real progress; without this the first poll would still see
+            // ABSENT and stop the loop, so the bar would never appear.
+            statuses.put(m, new ModelStatus(State.DOWNLOADING, 0, 0, null));
             Thread.ofVirtual().name("flux-pull-" + m).start(() -> {
                 try {
                     doPull(m, onProgress);

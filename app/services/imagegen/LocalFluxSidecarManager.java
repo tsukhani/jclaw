@@ -132,8 +132,12 @@ public final class LocalFluxSidecarManager {
     static boolean isHealthy() {
         var call = HttpFactories.general().newCall(
                 new Request.Builder().url(baseUrl() + "/health").get().build());
-        call.timeout().timeout(2, TimeUnit.SECONDS);
+        call.timeout().timeout(5, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
+            // Drain the body so the sidecar finishes its write — closing the
+            // connection early races its socket write and spams its stderr with
+            // BrokenPipe tracebacks (the body is tiny, so this is cheap).
+            if (resp.body() != null) resp.body().bytes();
             return resp.isSuccessful();
         } catch (IOException e) {
             return false;
