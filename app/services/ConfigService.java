@@ -6,7 +6,6 @@ import models.Config;
 import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
-import services.EventLogger;
 import utils.HttpFactories;
 
 import java.time.Duration;

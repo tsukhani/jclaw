@@ -13,7 +13,6 @@ import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import models.SkillRegistryTool;
-import services.AgentService;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

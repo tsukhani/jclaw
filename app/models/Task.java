@@ -13,7 +13,6 @@ import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
-import models.Agent;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.query.NativeQuery;
 import play.db.jpa.JPA;

@@ -735,7 +735,7 @@ public final class LoadTestRunner {
 
     private static TokenStats aggregateTokenStats(long agentId, long sinceMillis) {
         @SuppressWarnings("unchecked")
-        var rows = (List<Object[]>) JPA.em().createQuery(
+        List<Object[]> rows = JPA.em().createQuery(
                 "SELECT m.content, m.usageJson FROM Message m "
                 + "WHERE m.conversation.agent.id = :aid "
                 + "AND m.role = 'assistant' "
