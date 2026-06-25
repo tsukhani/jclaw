@@ -9,6 +9,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.time.ZoneId;
+import jobs.ToolRegistrationJob;
+import play.cache.Cache;
+import services.EventLogger;
+import utils.HttpFactories;
 
 public class ConfigService {
 
@@ -20,7 +25,7 @@ public class ConfigService {
     // achieved the same by storing String|null in CachedValue, but the typed
     // Caches.get(key, loader) returns null for a null loader result instead
     // of caching the absence — wrapping in Optional preserves negative caching.
-    private static final play.cache.Cache<String, Optional<String>> cache = Caches.named(
+    private static final Cache<String, Optional<String>> cache = Caches.named(
             "config",
             CacheConfig.newBuilder()
                     .expireAfterWrite(Duration.ofSeconds(60))
@@ -78,7 +83,7 @@ public class ConfigService {
         // would silently fall back to the server default, hiding the mistake.
         if (key.equals(TimezoneResolver.APP_CONFIG_KEY)) {
             try {
-                java.time.ZoneId.of(value == null ? "" : value.trim());
+                ZoneId.of(value == null ? "" : value.trim());
             } catch (Exception _) {
                 return "Invalid IANA timezone id '" + value
                         + "'. Use a value from GET /api/timezones (e.g. 'Asia/Kuala_Lumpur').";
@@ -94,7 +99,7 @@ public class ConfigService {
         // register unconditionally now. Only the loadtest mock provider still
         // toggles a tool registration via this side effect.
         if (key.equals("provider.loadtest-mock.enabled")) {
-            jobs.ToolRegistrationJob.registerAll();
+            ToolRegistrationJob.registerAll();
         }
 
         // Live-apply LLM dispatcher cap changes from Settings without
@@ -103,7 +108,7 @@ public class ConfigService {
         // the next outbound LLM call uses the new cap.
         if (key.equals("dispatcher.llm.maxRequestsPerHost")
                 || key.equals("dispatcher.llm.maxRequests")) {
-            utils.HttpFactories.applyDispatcherConfig();
+            HttpFactories.applyDispatcherConfig();
         }
 
         // Per-logger level overrides apply live: the next log statement on the
@@ -130,7 +135,7 @@ public class ConfigService {
             if (existingSearchKey == null || existingSearchKey.isBlank()) {
                 set("search.ollama.apiKey", value);
                 set("search.ollama.enabled", "true");
-                services.EventLogger.info("config",
+                EventLogger.info("config",
                         "Mirrored ollama-cloud LLM apiKey into search.ollama.apiKey "
                                 + "and enabled web search (search key was empty)");
             }
@@ -161,7 +166,7 @@ public class ConfigService {
         // JCLAW-172: see setWithSideEffects for the rationale — only the
         // loadtest mock still triggers a tool re-registration on toggle.
         if (key.equals("provider.loadtest-mock.enabled")) {
-            jobs.ToolRegistrationJob.registerAll();
+            ToolRegistrationJob.registerAll();
         }
         // Deleting a logger override reverts that logger to its inherited level
         // (root → its captured file baseline). See LoggerLevelService.

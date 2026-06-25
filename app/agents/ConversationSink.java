@@ -6,6 +6,7 @@ import services.ConversationService;
 import services.EventLogger;
 
 import java.util.List;
+import models.MessageAttachment;
 
 /**
  * {@link AgentExecutionSink} backed by a {@link Conversation}. All
@@ -88,7 +89,7 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
-    public models.MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
+    public MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped("assistant");

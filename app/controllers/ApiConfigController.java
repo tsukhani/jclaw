@@ -13,6 +13,10 @@ import services.ConfigService;
 import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
+import models.Config;
+import services.InternalApiTokenService;
+import services.LoadTestRunner;
+import services.LoggerLevelService;
 
 @With(AuthCheck.class)
 public class ApiConfigController extends Controller {
@@ -21,7 +25,7 @@ public class ApiConfigController extends Controller {
 
     /** Config key prefix reserved for the load-test harness. Users cannot save or delete these. */
     private static final String RESERVED_KEY_PREFIX =
-            "provider." + services.LoadTestRunner.LOADTEST_PROVIDER + ".";
+            "provider." + LoadTestRunner.LOADTEST_PROVIDER + ".";
 
     /** All {@code auth.*} config is reserved: the admin password hash
      *  ({@code auth.admin.passwordHash}) and the auto-managed internal bearer
@@ -39,7 +43,7 @@ public class ApiConfigController extends Controller {
      *  out of the generic config list (so they aren't double-managed) and, more
      *  importantly, off the {@code maskValue} path — a logger name containing
      *  "token"/"secret"/"key" would otherwise get its level value masked. */
-    private static final String LOGGING_KEY_PREFIX = services.LoggerLevelService.PREFIX;
+    private static final String LOGGING_KEY_PREFIX = LoggerLevelService.PREFIX;
 
     public record ConfigEntry(String key, String value, String updatedAt) {}
 
@@ -63,7 +67,7 @@ public class ApiConfigController extends Controller {
         return key.startsWith(RESERVED_KEY_PREFIX)
                 || key.startsWith(AUTH_KEY_PREFIX)
                 || key.startsWith(LOGGING_KEY_PREFIX)
-                || key.startsWith(services.InternalApiTokenService.INTERNAL_KEY_PREFIX);
+                || key.startsWith(InternalApiTokenService.INTERNAL_KEY_PREFIX);
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigListResponse.class)))
@@ -85,7 +89,7 @@ public class ApiConfigController extends Controller {
     @Operation(summary = "Read a config value by key")
     public static void get(String key) {
         if (isReservedKey(key)) notFound();
-        var config = models.Config.findByKey(key);
+        var config = Config.findByKey(key);
         if (config == null) {
             notFound();
         }

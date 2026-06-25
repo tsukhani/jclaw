@@ -19,6 +19,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.nio.file.Files;
+import java.util.Collections;
+import okhttp3.Request;
 
 /**
  * Uploads outbound files to Slack (JCLAW-345) via the 3-step external flow Slack
@@ -73,7 +76,7 @@ public final class SlackFileUploader {
 
     /** DM-channel cache keyed by (token-hash, userId); bounded LRU. */
     private static final int DM_CACHE_MAX = 1024;
-    private static final Map<String, String> DM_CACHE = java.util.Collections.synchronizedMap(
+    private static final Map<String, String> DM_CACHE = Collections.synchronizedMap(
             new LinkedHashMap<>(64, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, String> e) {
                     return size() > DM_CACHE_MAX;
@@ -136,7 +139,7 @@ public final class SlackFileUploader {
 
     private static String mimeOf(File file) {
         try {
-            var probed = java.nio.file.Files.probeContentType(file.toPath());
+            var probed = Files.probeContentType(file.toPath());
             return probed != null ? probed : "application/octet-stream";
         } catch (IOException _) {
             return "application/octet-stream";
@@ -172,7 +175,7 @@ public final class SlackFileUploader {
                 try {
                     var body = RequestBody.create(file,
                             contentType != null ? MediaType.parse(contentType) : null);
-                    var req = new okhttp3.Request.Builder().url(uploadUrl).post(body).build();
+                    var req = new Request.Builder().url(uploadUrl).post(body).build();
                     try (var resp = UPLOAD_CLIENT.newCall(req).execute()) {
                         return resp.isSuccessful();
                     }

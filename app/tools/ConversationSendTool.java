@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import utils.GsonHolder;
 
 /**
  * JCLAW-326: bidirectional parent↔child message send for the
@@ -271,7 +272,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
         payload.put(PARAM_RUN_ID, String.valueOf(run.id));
         payload.put("childConversationId", String.valueOf(childConv.id));
         payload.put("messageId", String.valueOf(msg.id));
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /** Child→parent: append USER message to the parent conversation. */
@@ -293,7 +294,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
         payload.put(PARAM_RUN_ID, String.valueOf(run.id));
         payload.put("parentConversationId", String.valueOf(parentConv.id));
         payload.put("messageId", String.valueOf(msg.id));
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /** Append a USER-role message via the shared bookkeeping path, then
@@ -305,7 +306,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
         var msg = ConversationService.appendMessage(conv, MessageRole.USER, message,
                 null, null, null);
         msg.messageKind = MESSAGE_KIND;
-        msg.metadata = utils.GsonHolder.INSTANCE.toJson(metadata, Map.class);
+        msg.metadata = GsonHolder.INSTANCE.toJson(metadata, Map.class);
         msg.save();
         return msg;
     }

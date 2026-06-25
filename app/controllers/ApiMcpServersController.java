@@ -14,6 +14,9 @@ import play.mvc.With;
 import services.McpServerService;
 
 import static utils.GsonHolder.INSTANCE;
+import com.google.gson.JsonObject;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Admin CRUD over the {@code mcp_server} table (JCLAW-33).
@@ -44,9 +47,9 @@ public class ApiMcpServersController extends Controller {
     private static final Gson gson = INSTANCE;
 
     public record McpServerRequest(String name, Boolean enabled, Boolean requiresApproval,
-                                   String transport, String command, java.util.List<String> args,
-                                   java.util.Map<String, String> env, String url,
-                                   java.util.Map<String, String> headers) {}
+                                   String transport, String command, List<String> args,
+                                   Map<String, String> env, String url,
+                                   Map<String, String> headers) {}
 
     // JSON body keys reused across create/update parsers.
     private static final String KEY_ENABLED = "enabled";
@@ -150,7 +153,7 @@ public class ApiMcpServersController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static void applyRenameIfPresent(McpServer row, com.google.gson.JsonObject body) {
+    private static void applyRenameIfPresent(McpServer row, JsonObject body) {
         if (!body.has("name") || body.get("name").isJsonNull()) return;
         var newName = body.get("name").getAsString();
         if (newName.equals(row.name)) return;
@@ -192,7 +195,7 @@ public class ApiMcpServersController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static String readRequiredString(com.google.gson.JsonObject body, String key) {
+    private static String readRequiredString(JsonObject body, String key) {
         if (!body.has(key) || body.get(key).isJsonNull()) {
             error(400, "Field '%s' is required".formatted(key));
         }
@@ -202,7 +205,7 @@ public class ApiMcpServersController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static McpServer.Transport readTransport(com.google.gson.JsonObject body) {
+    private static McpServer.Transport readTransport(JsonObject body) {
         var raw = readRequiredString(body, KEY_TRANSPORT);
         try {
             return McpServer.Transport.valueOf(raw.toUpperCase());
@@ -212,7 +215,7 @@ public class ApiMcpServersController extends Controller {
         }
     }
 
-    private static boolean touchesTransportConfig(com.google.gson.JsonObject body) {
+    private static boolean touchesTransportConfig(JsonObject body) {
         return body.has(KEY_TRANSPORT) || body.has("command") || body.has("args")
                 || body.has("env") || body.has("url") || body.has("headers");
     }

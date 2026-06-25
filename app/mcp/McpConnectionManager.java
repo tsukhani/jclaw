@@ -25,6 +25,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.io.IOException;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
+import models.EventLog;
+import play.db.jpa.JPA;
 
 /**
  * Owner of all live MCP server connections (JCLAW-31).
@@ -128,14 +135,14 @@ public final class McpConnectionManager {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                     .get(budget.toMillis(), TimeUnit.MILLISECONDS);
             return true;
-        } catch (java.util.concurrent.TimeoutException _) {
+        } catch (TimeoutException _) {
             EventLogger.warn("system", "MCP startup: %d/%d servers connected within the %ds budget; proceeding (slow servers keep retrying)"
                     .formatted(connectionCount(), futures.size(), budget.toSeconds()));
             return false;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return false;
-        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.CancellationException e) {
+        } catch (ExecutionException | CancellationException e) {
             EventLogger.warn("system", "MCP startup await ended early: " + e.getMessage());
             return false;
         }
@@ -256,7 +263,7 @@ public final class McpConnectionManager {
 
     /** Invoke an MCP tool on a connected server. Used by {@link McpToolAdapter}. */
     public static CallToolResult callTool(String serverName, String toolName, JsonObject arguments)
-            throws java.io.IOException, McpException {
+            throws IOException, McpException {
         var entry = connections.get(serverName);
         if (entry == null || entry.client == null
                 || entry.client.state() != McpClient.State.READY) {
@@ -289,8 +296,8 @@ public final class McpConnectionManager {
     /** Names of every server with an in-memory connection entry, regardless
      *  of state. Used by {@link McpAllowlist#backfillForAgent} to know
      *  which server scopes a new agent should be granted. */
-    public static java.util.Set<String> connectedServerNames() {
-        return java.util.Set.copyOf(connections.keySet());
+    public static Set<String> connectedServerNames() {
+        return Set.copyOf(connections.keySet());
     }
 
     // ==================== internals ====================
@@ -491,7 +498,7 @@ public final class McpConnectionManager {
             Tx.run(() -> {
                 int removed = McpAllowlist.unregister(serverName);
                 if (removed == 0) return;
-                var ev = new models.EventLog();
+                var ev = new EventLog();
                 ev.timestamp = Instant.now();
                 ev.level = "INFO";
                 ev.category = "MCP_TOOL_UNREGISTER";
@@ -562,7 +569,7 @@ public final class McpConnectionManager {
         if (serverId == null) return;
         var truncated = error != null && error.length() > 500 ? error.substring(0, 500) : error;
         try {
-            Tx.run(() -> play.db.jpa.JPA.em().createQuery(
+            Tx.run(() -> JPA.em().createQuery(
                         "UPDATE McpServer s SET s.status = :status, s.lastError = :err, s.updatedAt = :now WHERE s.id = :id")
                         .setParameter("status", status)
                         .setParameter("err", truncated)
@@ -589,7 +596,7 @@ public final class McpConnectionManager {
                         "UPDATE McpServer s SET s.lastDisconnectedAt = :now, s.updatedAt = :now WHERE s.id = :id";
                 default -> throw new IllegalArgumentException("Unsupported timestamp column: " + column);
             };
-            Tx.run(() -> play.db.jpa.JPA.em().createQuery(jpql)
+            Tx.run(() -> JPA.em().createQuery(jpql)
                         .setParameter("now", Instant.now())
                         .setParameter("id", serverId)
                         .executeUpdate());

@@ -15,6 +15,7 @@ import jakarta.persistence.PostRemove;
 import play.db.jpa.Model;
 
 import java.time.Instant;
+import services.search.LuceneIndexer;
 
 /**
  * Audit row for a single subagent invocation (JCLAW-264). When a parent agent
@@ -148,8 +149,8 @@ public class SubagentRun extends Model {
         if (id != null) {
             var l = label != null ? label : "";
             var o = outcome != null ? outcome : "";
-            services.search.LuceneIndexer.upsert(
-                    services.search.LuceneIndexer.Scope.SUBAGENT_RUN,
+            LuceneIndexer.upsert(
+                    LuceneIndexer.Scope.SUBAGENT_RUN,
                     id, l + " " + o);
         }
     }
@@ -157,8 +158,8 @@ public class SubagentRun extends Model {
     @PostRemove
     void onIndexRemove() {
         if (id != null) {
-            services.search.LuceneIndexer.remove(
-                    services.search.LuceneIndexer.Scope.SUBAGENT_RUN, id);
+            LuceneIndexer.remove(
+                    LuceneIndexer.Scope.SUBAGENT_RUN, id);
         }
     }
 }

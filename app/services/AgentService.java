@@ -17,6 +17,14 @@ import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.HashSet;
+import java.util.Optional;
+import java.util.Set;
+import llm.LlmTypes;
+import mcp.McpAllowlist;
+import models.AgentToolConfig;
+import play.cache.Cache;
+import tools.JClawApiTool;
 
 public class AgentService {
 
@@ -39,7 +47,7 @@ public class AgentService {
     public static boolean supportsVision(Agent agent) {
         if (agent == null) return false;
         return findModel(agent.modelProvider, agent.modelId)
-                .map(llm.LlmTypes.ModelInfo::supportsVision)
+                .map(LlmTypes.ModelInfo::supportsVision)
                 .orElse(false);
     }
 
@@ -52,7 +60,7 @@ public class AgentService {
     public static boolean supportsVideo(Agent agent) {
         if (agent == null) return false;
         return findModel(agent.modelProvider, agent.modelId)
-                .map(llm.LlmTypes.ModelInfo::supportsVideo)
+                .map(LlmTypes.ModelInfo::supportsVideo)
                 .orElse(false);
     }
 
@@ -64,10 +72,10 @@ public class AgentService {
      * lookup shared by {@link #supportsVision}, {@link #normalizeThinkingMode},
      * and {@link #isProviderConfigured}.
      */
-    private static java.util.Optional<llm.LlmTypes.ModelInfo> findModel(String providerName, String modelId) {
-        if (providerName == null || modelId == null) return java.util.Optional.empty();
+    private static Optional<LlmTypes.ModelInfo> findModel(String providerName, String modelId) {
+        if (providerName == null || modelId == null) return Optional.empty();
         var provider = ProviderRegistry.get(providerName);
-        if (provider == null) return java.util.Optional.empty();
+        if (provider == null) return Optional.empty();
         return provider.config().models().stream()
                 .filter(m -> m.id().equals(modelId))
                 .findFirst();
@@ -82,7 +90,7 @@ public class AgentService {
      * leak heap; Caffeine's atomic eviction makes both the lock and the
      * race moot.
      */
-    private static final play.cache.Cache<String, String> fileCache = Caches.named(
+    private static final Cache<String, String> fileCache = Caches.named(
             "agent-files",
             CacheConfig.newBuilder()
                     .expireAfterWrite(Duration.ofSeconds(30))
@@ -149,7 +157,7 @@ public class AgentService {
 
         // Disable browser tool for non-main agents (security)
         if (!agent.isMain()) {
-            var browserConfig = new models.AgentToolConfig();
+            var browserConfig = new AgentToolConfig();
             browserConfig.agent = agent;
             browserConfig.toolName = "browser";
             browserConfig.enabled = false;
@@ -158,9 +166,9 @@ public class AgentService {
             // JCLAW-282: jclaw_api can mutate JClaw's own config — only main
             // is trusted with that authority today. Skill-creator can extend
             // this later by promoting jclaw-api into another agent's workspace.
-            var jclawApiConfig = new models.AgentToolConfig();
+            var jclawApiConfig = new AgentToolConfig();
             jclawApiConfig.agent = agent;
-            jclawApiConfig.toolName = tools.JClawApiTool.TOOL_NAME;
+            jclawApiConfig.toolName = JClawApiTool.TOOL_NAME;
             jclawApiConfig.enabled = false;
             jclawApiConfig.save();
         }
@@ -169,7 +177,7 @@ public class AgentService {
         // servers. JCLAW-31's broadcast happens on connect; without this,
         // an agent created post-connect would silently see zero MCP tools.
         try {
-            mcp.McpAllowlist.backfillForAgent(agent);
+            McpAllowlist.backfillForAgent(agent);
         } catch (RuntimeException e) {
             EventLogger.warn("MCP_TOOL_REGISTER",
                     "MCP allowlist backfill failed for new agent '%s': %s"
@@ -264,8 +272,8 @@ public class AgentService {
      * set once and doing O(1) hash lookups per agent collapses the overall
      * cost back to O(N+M).
      */
-    public static java.util.Set<String> configuredModelKeys() {
-        var keys = new java.util.HashSet<String>();
+    public static Set<String> configuredModelKeys() {
+        var keys = new HashSet<String>();
         for (var p : ProviderRegistry.listAll()) {
             for (var m : p.config().models()) {
                 keys.add(p.config().name() + ":" + m.id());

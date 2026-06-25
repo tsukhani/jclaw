@@ -9,6 +9,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Segments an outbound agent response into ordered text + file chunks so the
@@ -171,7 +174,7 @@ public final class TelegramOutboundPlanner {
         // both a markdown image ({@code ![alt](url)}) and a plain text link
         // ({@code [text](url)}) pointing at the same file URL. Our regex
         // matches both. Dedupe by canonical resolved path.
-        var seenFiles = new java.util.HashSet<String>();
+        var seenFiles = new HashSet<String>();
 
         while (matcher.find()) {
             var processed = processMatch(matcher, markdown, agentName, segments, cursor, seenFiles);
@@ -318,7 +321,7 @@ public final class TelegramOutboundPlanner {
      */
     private static Integer processMatch(Matcher matcher, String markdown, String agentName,
                                          List<Segment> segments, int cursor,
-                                         java.util.Set<String> seenFiles) {
+                                         Set<String> seenFiles) {
         // Either the angle-bracket branch or the plain-form branch fired;
         // read from whichever captured.
         String path = matcher.group(2) != null ? matcher.group(2) : matcher.group(4);
@@ -390,7 +393,7 @@ public final class TelegramOutboundPlanner {
     private static String canonicalPath(File resolved) {
         try {
             return resolved.getCanonicalPath();
-        } catch (java.io.IOException _) {
+        } catch (IOException _) {
             return resolved.getAbsolutePath();
         }
     }

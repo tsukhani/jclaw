@@ -24,6 +24,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
+import java.util.concurrent.ConcurrentHashMap;
+import models.TelegramBinding;
+import play.Play;
 
 /**
  * Throttled edit-loop sink for streaming an LLM response into a Telegram
@@ -669,7 +672,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /** True when the operator opted into the ack-reaction lifecycle. */
     static boolean ackReactionEnabled() {
-        var raw = play.Play.configuration.getProperty(CFG_ACK_REACTION, "off");
+        var raw = Play.configuration.getProperty(CFG_ACK_REACTION, "off");
         return raw != null && raw.trim().equalsIgnoreCase(ACK_ON);
     }
 
@@ -903,8 +906,8 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * itself is thread-safe; what's approximate here is the 60-second
      * window, not the structure.
      */
-    private static final java.util.concurrent.ConcurrentHashMap<Long, Long>
-            LAST_NOTIFIER_FIRE_MS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Long, Long>
+            LAST_NOTIFIER_FIRE_MS = new ConcurrentHashMap<>();
     /** Fallback cooldown when {@code telegram.notifier.cooldownMs} is unset/invalid. */
     private static final long DEFAULT_NOTIFIER_RATE_LIMIT_MS = 60_000;
 
@@ -929,7 +932,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /** Resolve the configured cooldown window, falling back on a missing/invalid value. */
     static long notifierCooldownMs() {
-        var raw = play.Play.configuration.getProperty(CFG_NOTIFIER_COOLDOWN_MS);
+        var raw = Play.configuration.getProperty(CFG_NOTIFIER_COOLDOWN_MS);
         if (raw == null || raw.isBlank()) return DEFAULT_NOTIFIER_RATE_LIMIT_MS;
         try {
             long ms = Long.parseLong(raw.trim());
@@ -948,13 +951,13 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * seam, mirroring the {@code *ForTest} convention.
      */
     public static long effectiveNotifierCooldownMs(String botToken) {
-        var override = models.TelegramBinding.overridesForToken(botToken).cooldownMs();
+        var override = TelegramBinding.overridesForToken(botToken).cooldownMs();
         return override != null ? override : notifierCooldownMs();
     }
 
     /** True when the operator opted out of the user-facing delivery-failure reply. */
     static boolean notifierSilent() {
-        var raw = play.Play.configuration.getProperty(CFG_NOTIFIER_POLICY, "reply");
+        var raw = Play.configuration.getProperty(CFG_NOTIFIER_POLICY, "reply");
         return raw != null && raw.trim().equalsIgnoreCase(POLICY_SILENT);
     }
 
@@ -967,7 +970,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * to config. Public for the default-package test seam.
      */
     public static boolean effectiveNotifierSilent(String botToken) {
-        var override = models.TelegramBinding.overridesForToken(botToken).errorReplyPolicy();
+        var override = TelegramBinding.overridesForToken(botToken).errorReplyPolicy();
         if (override == null || override.isBlank()) return notifierSilent();
         return override.trim().equalsIgnoreCase(POLICY_SILENT);
     }

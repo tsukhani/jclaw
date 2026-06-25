@@ -13,6 +13,7 @@ import models.Conversation;
 import models.MessageRole;
 import services.ConfigService;
 import services.EventLogger;
+import llm.LlmTypes;
 
 /**
  * Token-estimation and context-window arithmetic for the agent loop.
@@ -458,10 +459,10 @@ public final class ContextWindowManager {
                 + tail;
     }
 
-    static llm.TokenUsageEstimator.ChatRequestTokens estimateProviderPromptTokens(
+    static TokenUsageEstimator.ChatRequestTokens estimateProviderPromptTokens(
             Agent agent, Conversation conv, LlmProvider provider,
             List<ChatMessage> messages, List<ToolDef> tools) {
-        return llm.TokenUsageEstimator.estimateChatRequest(modelIdFor(agent, conv, provider), messages, tools);
+        return TokenUsageEstimator.estimateChatRequest(modelIdFor(agent, conv, provider), messages, tools);
     }
 
     private static String modelIdFor(Agent agent, Conversation conv, LlmProvider provider) {
@@ -511,7 +512,7 @@ public final class ContextWindowManager {
     }
 
     /** Tool call names + arguments also consume input tokens. */
-    private static int toolCallChars(List<llm.LlmTypes.ToolCall> toolCalls) {
+    private static int toolCallChars(List<LlmTypes.ToolCall> toolCalls) {
         if (toolCalls == null) return 0;
         int chars = 0;
         for (var tc : toolCalls) {

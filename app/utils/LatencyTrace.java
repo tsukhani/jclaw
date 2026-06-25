@@ -3,6 +3,7 @@ package utils;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import play.mvc.Http;
 
 /**
  * Per-request latency trace: records nanoTime marks and tool-round
@@ -63,7 +64,7 @@ public final class LatencyTrace {
      * so they can forward the stamp to {@link #forTurn} across a thread hop.
      */
     public static Long acceptedAtNsFromCurrentRequest() {
-        var req = play.mvc.Http.Request.current();
+        var req = Http.Request.current();
         if (req != null && req.args != null && req.args.get("acceptedAtNanos") instanceof Long ns) {
             return ns;
         }

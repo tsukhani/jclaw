@@ -14,6 +14,7 @@ import services.compression.ContentHash;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import services.CompressionMetrics;
 
 /**
  * CCR retrieve (JCLAW-462). Returns the full, uncompressed original of a
@@ -97,7 +98,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
         // JCLAW-467: record the hit/miss for the CCR cache-hit-rate metric. System
         // errors (no context / conversation not found) aren't a retrieval outcome.
         if (!result.startsWith("Error:")) {
-            services.CompressionMetrics.recordCcrRetrieval(!result.startsWith("No original found"));
+            CompressionMetrics.recordCcrRetrieval(!result.startsWith("No original found"));
         }
         return result;
     }

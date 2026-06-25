@@ -13,6 +13,7 @@ import models.WhatsAppBinding;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import utils.GsonHolder;
 
 /**
  * JCLAW-327 / JCLAW-295: dispatch a text message to an external chat channel.
@@ -347,7 +348,7 @@ public final class DeliveryDispatcher {
         var msg = ConversationService.appendMessage(conv, MessageRole.USER, text,
                 null, null, null);
         msg.messageKind = "subagent_send";
-        msg.metadata = utils.GsonHolder.INSTANCE.toJson(metadata, Map.class);
+        msg.metadata = GsonHolder.INSTANCE.toJson(metadata, Map.class);
         msg.save();
         return DispatchResult.delivered();
     }

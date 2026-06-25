@@ -23,6 +23,28 @@ import utils.JpqlFilter;
 
 import java.time.Instant;
 import java.util.List;
+import com.google.gson.JsonObject;
+import jakarta.persistence.Query;
+import java.io.IOException;
+import java.time.DateTimeException;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+import jobs.TaskCleanupJob;
+import play.Logger;
+import services.DeliveryAdvisor;
+import services.DeliverySpec;
+import services.JClawCronUtils;
+import services.TaskRunRegistry;
+import services.TimezoneResolver;
+import services.Tx;
+import services.search.LuceneIndexer;
+import services.search.MessageSearch;
 
 /**
  * Tasks API.
@@ -70,9 +92,9 @@ public class ApiTasksController extends Controller {
 
     public record TaskRequest(String name, Long agentId, String schedule, String description,
                               String delivery, String payloadType, String modelProvider, String modelId,
-                              java.util.List<String> enabledToolNames, String workdir, String preCheck,
+                              List<String> enabledToolNames, String workdir, String preCheck,
                               String script, Boolean noAgent, Boolean autoDeleteOnComplete,
-                              java.util.List<Long> contextFromTaskIds, Integer repeatLimit,
+                              List<Long> contextFromTaskIds, Integer repeatLimit,
                               Boolean paused, String timezone) {}
 
     private record TaskView(Long id, String name, String description, String type, String status,
@@ -133,7 +155,7 @@ public class ApiTasksController extends Controller {
                     // without re-running the resolver client-side. Returns
                     // a stable IANA id even when t.timezone is null
                     // (falls back through Config / conf / JVM default).
-                    services.TimezoneResolver.resolve(t).getId(),
+                    TimezoneResolver.resolve(t).getId(),
                     runningRunId);
         }
 
@@ -176,8 +198,8 @@ public class ApiTasksController extends Controller {
             if (t.type == Task.Type.CRON && t.cronExpression != null) {
                 // JCLAW-261: render the next fire using the same zone the
                 // scheduler will fire under, so the column matches the real time.
-                var zone = services.TimezoneResolver.resolve(t);
-                var next = services.JClawCronUtils.nextExecution(t.cronExpression, zone);
+                var zone = TimezoneResolver.resolve(t);
+                var next = JClawCronUtils.nextExecution(t.cronExpression, zone);
                 if (next != null) return next.toString();
             }
             if (t.type == Task.Type.INTERVAL && t.intervalSeconds != null && t.intervalSeconds > 0) {
@@ -320,7 +342,7 @@ public class ApiTasksController extends Controller {
             renderJSON("[]");
         }
         try {
-            var hits = services.search.MessageSearch.search(q, effectiveLimit);
+            var hits = MessageSearch.search(q, effectiveLimit);
             renderJSON(gson.toJson(hits.stream().map(TranscriptSearchHit::of).toList()));
         } catch (Throwable e) {
             // Throwable (not just Exception) because Lucene API removals
@@ -328,7 +350,7 @@ public class ApiTasksController extends Controller {
             // — Error subclasses that escape a narrower catch and yield a
             // generic Play 500 page with no useful diagnostic. Log the full
             // stack so version-bump incompats are debuggable.
-            play.Logger.error(e, "search-transcripts failed for q='%s'", q);
+            Logger.error(e, "search-transcripts failed for q='%s'", q);
             error(500, "Search failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
@@ -343,15 +365,15 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     @Operation(summary = "List IANA timezone ids plus the effective task-scheduling and app default zones")
     public static void timezones() {
-        var ids = new java.util.ArrayList<>(java.time.ZoneId.getAvailableZoneIds());
+        var ids = new ArrayList<>(ZoneId.getAvailableZoneIds());
         ids.sort(String::compareTo);
-        var payload = new java.util.LinkedHashMap<String, Object>();
+        var payload = new LinkedHashMap<String, Object>();
         payload.put("timezones", ids);
         // `default` = effective task-scheduling zone (tasks.defaultTimezone chain).
         // `appDefault` = effective operator wall-clock zone (app.timezone chain,
         // falling back to the server's JVM zone) — used by Settings → General.
-        payload.put("default", services.TimezoneResolver.currentDefault().getId());
-        payload.put("appDefault", services.TimezoneResolver.appZone().getId());
+        payload.put("default", TimezoneResolver.currentDefault().getId());
+        payload.put("appDefault", TimezoneResolver.appZone().getId());
         renderJSON(gson.toJson(payload));
     }
 
@@ -392,8 +414,8 @@ public class ApiTasksController extends Controller {
     public static void deliveryAdvisory(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
-        var advisory = services.DeliveryAdvisor.advisoryFor(task.agent, task.delivery);
-        var payload = new java.util.LinkedHashMap<String, Object>();
+        var advisory = DeliveryAdvisor.advisoryFor(task.agent, task.delivery);
+        var payload = new LinkedHashMap<String, Object>();
         payload.put("advisory", advisory);
         renderJSON(gson.toJson(payload));
     }
@@ -436,8 +458,8 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
     @Operation(summary = "Task dashboard KPIs (runs today, success rate, avg duration, pending/running/active/failed counts, retention days)")
     public static void stats(String payloadType, String excludePayloadType) {
-        var zone = services.TimezoneResolver.currentDefault();
-        var since = java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant();
+        var zone = TimezoneResolver.currentDefault();
+        var since = LocalDate.now(zone).atStartOfDay(zone).toInstant();
 
         // payloadType / excludePayloadType scope these aggregates exactly the
         // way they scope GET /api/tasks: the /tasks page passes
@@ -470,7 +492,7 @@ public class ApiTasksController extends Controller {
                 // header renders it without a separate config fetch (which
                 // 404s when the key is unset). Resolved server-side so the
                 // default lives only in TaskCleanupJob, never in the client.
-                jobs.TaskCleanupJob.resolveRetentionDays());
+                TaskCleanupJob.resolveRetentionDays());
         renderJSON(gson.toJson(payload));
     }
 
@@ -539,7 +561,7 @@ public class ApiTasksController extends Controller {
         return sb.toString();
     }
 
-    private static void bindPayloadType(jakarta.persistence.Query q,
+    private static void bindPayloadType(Query q,
                                         String payloadType, String excludePayloadType) {
         if (payloadType != null && !payloadType.isBlank()) q.setParameter("pt", payloadType);
         if (excludePayloadType != null && !excludePayloadType.isBlank()) q.setParameter("ept", excludePayloadType);
@@ -615,7 +637,7 @@ public class ApiTasksController extends Controller {
                 var since = Instant.parse(from);
                 var until = (to != null && !to.isBlank()) ? Instant.parse(to) : Instant.now();
                 return new RunWindow(since, until);
-            } catch (java.time.DateTimeException _) {
+            } catch (DateTimeException _) {
                 error(400, "from/to must be ISO-8601 instants");
                 throw new AssertionError("unreachable: error() throws");
             }
@@ -691,8 +713,8 @@ public class ApiTasksController extends Controller {
         // doesn't need an N+1 round-trip. GROUP BY task id, MAX(completedAt)
         // gives the most-recent successful fire instant per task; tasks with
         // no completed runs are absent from the map (column renders empty).
-        var taskIds = tasks.stream().map(t -> t.id).filter(java.util.Objects::nonNull).toList();
-        java.util.Map<Long, Instant> lastFiredAt = java.util.Map.of();
+        var taskIds = tasks.stream().map(t -> t.id).filter(Objects::nonNull).toList();
+        Map<Long, Instant> lastFiredAt = Map.of();
         if (!taskIds.isEmpty()) {
             @SuppressWarnings("unchecked")
             var rows = (List<Object[]>) JPA.em().createQuery(
@@ -701,7 +723,7 @@ public class ApiTasksController extends Controller {
                             + "GROUP BY r.task.id")
                     .setParameter("ids", taskIds)
                     .getResultList();
-            var map = java.util.HashMap.<Long, Instant>newHashMap(rows.size());
+            var map = HashMap.<Long, Instant>newHashMap(rows.size());
             for (var row : rows) {
                 map.put((Long) row[0], (Instant) row[1]);
             }
@@ -713,7 +735,7 @@ public class ApiTasksController extends Controller {
         // query, no N+1) so the Actions column can show a cancel control while
         // a run is in flight. A task has at most one RUNNING run in practice;
         // MAX(id) is a stable pick if a stale row ever overlaps.
-        java.util.Map<Long, Long> runningByTask = java.util.Map.of();
+        Map<Long, Long> runningByTask = Map.of();
         if (!taskIds.isEmpty()) {
             @SuppressWarnings("unchecked")
             var runningRows = (List<Object[]>) JPA.em().createQuery(
@@ -723,7 +745,7 @@ public class ApiTasksController extends Controller {
                     .setParameter("ids", taskIds)
                     .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING)
                     .getResultList();
-            var rmap = java.util.HashMap.<Long, Long>newHashMap(runningRows.size());
+            var rmap = HashMap.<Long, Long>newHashMap(runningRows.size());
             for (var row : runningRows) {
                 rmap.put((Long) row[0], (Long) row[1]);
             }
@@ -747,11 +769,11 @@ public class ApiTasksController extends Controller {
     private static List<Long> ftsTaskIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
-            var ids = services.search.MessageSearch.searchIds(
-                    services.search.LuceneIndexer.Scope.TASK, q, 500);
+            var ids = MessageSearch.searchIds(
+                    LuceneIndexer.Scope.TASK, q, 500);
             return ids.isEmpty() ? List.of() : ids;
-        } catch (java.io.IOException e) {
-            services.EventLogger.warn("search", null, null,
+        } catch (IOException e) {
+            EventLogger.warn("search", null, null,
                     "FTS lookup failed for tasks q='%s': %s".formatted(q, e.getMessage()));
             return null;
         }
@@ -772,7 +794,7 @@ public class ApiTasksController extends Controller {
 
         rejectDuplicateRecurringTask(name, agent, spec);
 
-        var saved = services.Tx.run(() -> persistNewTask(body, agent, name, spec));
+        var saved = Tx.run(() -> persistNewTask(body, agent, name, spec));
 
         TaskSchedulingService.register(saved);
 
@@ -793,7 +815,7 @@ public class ApiTasksController extends Controller {
      * request body is bad input.
      */
     @SuppressWarnings("java:S2259")
-    private static Agent requireAgentFromBody(com.google.gson.JsonObject body) {
+    private static Agent requireAgentFromBody(JsonObject body) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) {
             error(400, "agentId is required");
             throw new AssertionError("unreachable: error() throws");
@@ -807,7 +829,7 @@ public class ApiTasksController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static String requireTaskName(com.google.gson.JsonObject body) {
+    private static String requireTaskName(JsonObject body) {
         if (!body.has(KEY_NAME) || body.get(KEY_NAME).isJsonNull()) {
             error(400, "name is required");
             throw new AssertionError("unreachable: error() throws");
@@ -826,21 +848,21 @@ public class ApiTasksController extends Controller {
      * resolution and channel configuration are caller/runtime concerns. No-op
      * when {@code delivery} is absent or explicit-null (the latter clears it).
      */
-    private static void rejectInvalidDelivery(com.google.gson.JsonObject body) {
+    private static void rejectInvalidDelivery(JsonObject body) {
         var delivery = readOptionalString(body, KEY_DELIVERY);
         if (delivery == null) return;
-        var err = services.DeliverySpec.validate(delivery);
+        var err = DeliverySpec.validate(delivery);
         if (err != null) error(400, err);
     }
 
     @SuppressWarnings("java:S2259")
-    private static ScheduleShorthandParser.ScheduleSpec requireScheduleSpec(com.google.gson.JsonObject body) {
+    private static ScheduleShorthandParser.ScheduleSpec requireScheduleSpec(JsonObject body) {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) {
             error(400, "schedule is required");
             throw new AssertionError("unreachable: error() throws");
         }
         try {
-            var zone = services.TimezoneResolver.resolve(readOptionalString(body, KEY_TIMEZONE));
+            var zone = TimezoneResolver.resolve(readOptionalString(body, KEY_TIMEZONE));
             return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
             error(400, "Invalid schedule: " + e.getMessage());
@@ -858,7 +880,7 @@ public class ApiTasksController extends Controller {
                                                       ScheduleShorthandParser.ScheduleSpec spec) {
         if (spec.type() != Task.Type.CRON && spec.type() != Task.Type.INTERVAL) return;
         @SuppressWarnings("unchecked")
-        var conflicts = (List<Object>) (List<?>) services.Tx.run(() -> Task.find(
+        var conflicts = (List<Object>) (List<?>) Tx.run(() -> Task.find(
                 "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5",
                 name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED
         ).fetch());
@@ -892,7 +914,7 @@ public class ApiTasksController extends Controller {
         }
     }
 
-    private static Task persistNewTask(com.google.gson.JsonObject body, Agent agent, String name,
+    private static Task persistNewTask(JsonObject body, Agent agent, String name,
                                        ScheduleShorthandParser.ScheduleSpec spec) {
         var t = new Task();
         t.agent = agent;
@@ -947,8 +969,8 @@ public class ApiTasksController extends Controller {
         var tzRaw = readOptionalString(body, KEY_TIMEZONE);
         if (tzRaw != null && !tzRaw.isBlank()) {
             try {
-                java.time.ZoneId.of(tzRaw.trim());
-            } catch (java.time.DateTimeException e) {
+                ZoneId.of(tzRaw.trim());
+            } catch (DateTimeException e) {
                 response.status = 400;
                 renderText("Invalid IANA timezone '" + tzRaw + "': " + e.getMessage()
                         + ". Use a value from GET /api/timezones (e.g. 'America/New_York', 'Asia/Tokyo').");
@@ -962,7 +984,7 @@ public class ApiTasksController extends Controller {
         return t;
     }
 
-    private static String readOptionalString(com.google.gson.JsonObject body, String key) {
+    private static String readOptionalString(JsonObject body, String key) {
         if (!body.has(key)) return null;
         var el = body.get(key);
         if (el.isJsonNull()) return null;
@@ -1016,7 +1038,7 @@ public class ApiTasksController extends Controller {
      * @return true if the schedule field was applied.
      */
     @SuppressWarnings("java:S2259")
-    private static boolean applyScheduleUpdate(Task task, com.google.gson.JsonObject body) {
+    private static boolean applyScheduleUpdate(Task task, JsonObject body) {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) return false;
         final ScheduleShorthandParser.ScheduleSpec spec;
         try {
@@ -1047,7 +1069,7 @@ public class ApiTasksController extends Controller {
      *
      * @return true if the name field was present (and applied).
      */
-    private static boolean applyNameUpdate(Task task, com.google.gson.JsonObject body) {
+    private static boolean applyNameUpdate(Task task, JsonObject body) {
         if (!body.has(KEY_NAME)) return false;
         var el = body.get(KEY_NAME);
         var name = el.isJsonNull() ? null : el.getAsString();
@@ -1065,7 +1087,7 @@ public class ApiTasksController extends Controller {
      *
      * @return true if any field was touched.
      */
-    private static boolean applyOptionalFieldUpdates(Task task, com.google.gson.JsonObject body) {
+    private static boolean applyOptionalFieldUpdates(Task task, JsonObject body) {
         // Split per-field-kind so each helper stays well under the cognitive-
         // complexity bar; the boolean OR reduction below preserves "any field
         // touched" semantics without short-circuiting.
@@ -1080,7 +1102,7 @@ public class ApiTasksController extends Controller {
      * also clears (readOptionalString collapses both to null). Description
      * uniquely coerces null → "" instead of leaving it null.
      */
-    private static boolean applyOptionalStringFields(Task task, com.google.gson.JsonObject body) {
+    private static boolean applyOptionalStringFields(Task task, JsonObject body) {
         boolean changed = false;
         if (body.has(KEY_DESCRIPTION)) {
             var v = readOptionalString(body, KEY_DESCRIPTION);
@@ -1103,7 +1125,7 @@ public class ApiTasksController extends Controller {
      * Boolean fields. Explicit null is rejected (no meaningful semantic) —
      * callers should omit instead.
      */
-    private static boolean applyOptionalBooleanFields(Task task, com.google.gson.JsonObject body) {
+    private static boolean applyOptionalBooleanFields(Task task, JsonObject body) {
         boolean changed = false;
         if (body.has(KEY_PAUSED) && !body.get(KEY_PAUSED).isJsonNull()) {
             task.paused = body.get(KEY_PAUSED).getAsBoolean();
@@ -1121,7 +1143,7 @@ public class ApiTasksController extends Controller {
     }
 
     /** Integer fields. Explicit null clears (sets back to unlimited). */
-    private static boolean applyOptionalIntegerFields(Task task, com.google.gson.JsonObject body) {
+    private static boolean applyOptionalIntegerFields(Task task, JsonObject body) {
         if (!body.has(KEY_REPEAT_LIMIT)) return false;
         var el = body.get(KEY_REPEAT_LIMIT);
         task.repeatLimit = el.isJsonNull() ? null : el.getAsInt();
@@ -1141,7 +1163,7 @@ public class ApiTasksController extends Controller {
         }
         task.status = Task.Status.CANCELLED;
         task.save();
-        services.TaskSchedulingService.cancel(task.id);
+        TaskSchedulingService.cancel(task.id);
         EventLogger.info("TASK_MGMT_DELETE",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) cancelled via API".formatted(task.name, task.id));
@@ -1176,7 +1198,7 @@ public class ApiTasksController extends Controller {
         var taskId = task.id;
         final String taskIdParam = "taskId";
 
-        var em = play.db.jpa.JPA.em();
+        var em = JPA.em();
         em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
                 .setParameter(taskIdParam, taskId).executeUpdate();
         em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
@@ -1193,7 +1215,7 @@ public class ApiTasksController extends Controller {
 
         // Idempotent — harmless if the task is already in a terminal
         // state and its scheduler row was already removed by cancel.
-        services.TaskSchedulingService.cancel(taskId);
+        TaskSchedulingService.cancel(taskId);
 
         task.delete();
         EventLogger.info("TASK_MGMT_HARD_DELETE", agentName, null,
@@ -1213,7 +1235,7 @@ public class ApiTasksController extends Controller {
      */
     @Operation(summary = "Reset dashboard KPIs by deleting terminal (non-RUNNING) task runs and transcripts, scoped by payloadType")
     public static void resetStats(String payloadType, String excludePayloadType) {
-        var em = play.db.jpa.JPA.em();
+        var em = JPA.em();
         var msgQ = em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
                         + payloadTypeWhere("m.taskRun.task", payloadType, excludePayloadType))
                 .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
@@ -1244,7 +1266,7 @@ public class ApiTasksController extends Controller {
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
-        services.TaskSchedulingService.pause(task.id);
+        TaskSchedulingService.pause(task.id);
         EventLogger.info("TASK_MGMT_PAUSE",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) paused via API".formatted(task.name, task.id));
@@ -1262,7 +1284,7 @@ public class ApiTasksController extends Controller {
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
-        services.TaskSchedulingService.resume(task.id);
+        TaskSchedulingService.resume(task.id);
         EventLogger.info("TASK_MGMT_RESUME",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) resumed via API".formatted(task.name, task.id));
@@ -1297,7 +1319,7 @@ public class ApiTasksController extends Controller {
         task.status = Task.initialStatusFor(task.type);
         task.paused = false;
         task.save();
-        services.TaskSchedulingService.register(task);
+        TaskSchedulingService.register(task);
         EventLogger.info("TASK_MGMT_REENABLE",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) re-enabled via API".formatted(task.name, task.id));
@@ -1364,10 +1386,10 @@ public class ApiTasksController extends Controller {
         // it (no-op if the run isn't in-flight on this JVM), then stamp the row
         // CANCELLED so the UI reflects it at once. The tool loop's onCancelled is
         // idempotent and won't double-write once this terminal status lands.
-        services.TaskRunRegistry.requestCancel(runId);
-        run.completedAt = java.time.Instant.now();
+        TaskRunRegistry.requestCancel(runId);
+        run.completedAt = Instant.now();
         run.durationMs = run.startedAt != null
-                ? java.time.Duration.between(run.startedAt, run.completedAt).toMillis() : null;
+                ? Duration.between(run.startedAt, run.completedAt).toMillis() : null;
         run.status = TaskRun.Status.CANCELLED;
         run.outputSummary = "Cancelled by operator";
         run.save();
@@ -1407,9 +1429,9 @@ public class ApiTasksController extends Controller {
             // cancel API refuses to touch them. forceRemoveStaleRow deletes
             // the row directly so the subsequent register inserts a clean
             // new fire row without tripping the PK constraint.
-            services.TaskSchedulingService.forceRemoveStaleRow(task.id);
+            TaskSchedulingService.forceRemoveStaleRow(task.id);
         }
-        services.TaskSchedulingService.register(task);
+        TaskSchedulingService.register(task);
         // /retry is operator-initiated re-firing — same intent as /run from
         // the audit timeline's POV. The mechanical distinction (resets
         // retryCount/lastError, FAILED/LOST-only guard) is internal; the

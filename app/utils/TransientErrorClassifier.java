@@ -2,6 +2,8 @@ package utils;
 
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 
 /**
  * Decide whether a {@link Throwable} represents a transient failure
@@ -132,8 +134,8 @@ public final class TransientErrorClassifier {
      */
     public static boolean isTransient(Throwable t) {
         if (t == null) return false;
-        var visited = java.util.Collections.newSetFromMap(
-                new java.util.IdentityHashMap<Throwable, Boolean>());
+        var visited = Collections.newSetFromMap(
+                new IdentityHashMap<Throwable, Boolean>());
         Throwable cursor = t;
         int depth = 0;
         while (cursor != null && depth < MAX_CAUSE_DEPTH && visited.add(cursor)) {

@@ -4,6 +4,7 @@ import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.LocalProviderProbeSupport;
+import play.Play;
 
 /**
  * Probe the configured self-hosted vLLM instance once at boot. Same shape as
@@ -22,7 +23,7 @@ public class VllmProbeJob extends Job<Void> {
     public void doJob() {
         // Skip in test mode — same rationale as the other local-provider probe jobs: operator
         // guidance only, zero signal under autotest, and a path for external-state flakiness.
-        if (play.Play.runningInTestMode()) return;
+        if (Play.runningInTestMode()) return;
         ProbeJobs.run("vllm", "provider.vllm.baseUrl",
                 "Start a vLLM OpenAI-compatible server (e.g. `vllm serve <model>`, default port 8000) "
                         + "and set provider.vllm.baseUrl to its /v1 URL.",

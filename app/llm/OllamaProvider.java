@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import llm.LlmTypes.ChatRequest;
 import llm.LlmTypes.ChunkDelta;
 import llm.LlmTypes.ProviderConfig;
+import services.ConfigService;
 
 /**
  * Ollama provider (local and Ollama Cloud). Uses the OpenAI-compatible
@@ -64,7 +65,7 @@ public final class OllamaProvider extends LlmProvider {
         // controls how long the model (and its KV cache) stays resident between requests.
         // Pass it as an extra top-level field; Ollama's OpenAI-compat shim forwards unknown
         // fields to the native scheduler.
-        var keepAlive = services.ConfigService.get("ollama.keepAlive");
+        var keepAlive = ConfigService.get("ollama.keepAlive");
         request.addProperty("keep_alive", keepAlive != null && !keepAlive.isBlank() ? keepAlive : "30m");
     }
 }

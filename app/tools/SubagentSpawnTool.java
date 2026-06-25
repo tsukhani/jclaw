@@ -28,6 +28,18 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import agents.RunCancelledException;
+import agents.ToolAction;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Objects;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
+import services.SubagentRegistry;
+import utils.GsonHolder;
 
 /**
  * JCLAW-265: synchronous spawn of a child agent as a subagent.
@@ -196,9 +208,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public List<agents.ToolAction> actions() {
+    public List<ToolAction> actions() {
         return List.of(
-                new agents.ToolAction("spawn",
+                new ToolAction("spawn",
                         "Run a task on a child subagent synchronously and return its final reply"));
     }
 
@@ -445,7 +457,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // off — useful when the parent decides whether to re-summarize or
         // to surface the truncation to the user.
         if (runOutcome.replyTruncated()) payload.put(FIELD_TRUNCATED, Boolean.TRUE);
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /**
@@ -479,7 +491,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (acpError != null) return acpError;
         final var acpCommand = isAcpRuntime(args) ? resolveAcpCommand() : null;
 
-        var specs = new java.util.ArrayList<BatchTaskSpec>();
+        var specs = new ArrayList<BatchTaskSpec>();
         for (var el : tasksEl.getAsJsonArray()) {
             if (el.isJsonPrimitive()) {
                 var t = el.getAsString();
@@ -521,7 +533,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // failure degrades the whole batch to fresh, consistently.
         var summary = buildInheritSummary(parentAgent, parentConvIdFinal, fContext);
 
-        var runIds = new java.util.ArrayList<String>();
+        var runIds = new ArrayList<String>();
         for (var spec : specs) {
             var perArgs = new SpawnArgs(null, spec.task(), spec.label(), spec.agentId(),
                     null, null, fMode, fContext, fTimeout, true);
@@ -545,7 +557,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         payload.put("count", runIds.size());
         payload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
         payload.put("hint", "children run in parallel; collect them all with one subagent_yield using runIds (or all=true)");
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /** JCLAW-498: one entry of a batch fan-out. */
@@ -722,7 +734,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         asyncPayload.put(FIELD_RUN_ID, runIdStr);
         asyncPayload.put(FIELD_CONVERSATION_ID, String.valueOf(childConvId));
         asyncPayload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
-        return utils.GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
+        return GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
     }
 
     /** JCLAW-497/498: detached async subagent OUTCOMES, keyed by runId, handed off
@@ -730,14 +742,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  block-await in subagent_yield. These children have no persistent
      *  conversation to resume into, so the chat announce/resume path doesn't
      *  apply; the parent collects results via a blocking yield. */
-    private static final java.util.concurrent.ConcurrentHashMap<Long, CompletableFuture<SyncRunOutcome>>
-            ASYNC_OUTCOMES = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Long, CompletableFuture<SyncRunOutcome>>
+            ASYNC_OUTCOMES = new ConcurrentHashMap<>();
 
     /** JCLAW-498: outstanding async-child runIds grouped by the spawning parent's
      *  scope ({@code task:<id>} or {@code conv:<id>}), so subagent_yield all=true
      *  can collect every child this parent fanned out without re-listing run ids. */
-    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.Set<Long>>
-            OUTSTANDING_BY_SCOPE = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Set<Long>>
+            OUTSTANDING_BY_SCOPE = new ConcurrentHashMap<>();
 
     /** JCLAW-498: the current tool-dispatch scope key — {@code task:<id>} in a task
      *  fire, {@code conv:<id>} in a chat turn, or null when neither is bound. */
@@ -750,11 +762,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** JCLAW-498: the outstanding async-child runIds for the current scope, for
      *  subagent_yield all=true. */
-    public static java.util.List<Long> outstandingForCurrentScope() {
+    public static List<Long> outstandingForCurrentScope() {
         var key = currentScopeKey();
-        if (key == null) return java.util.List.of();
+        if (key == null) return List.of();
         var set = OUTSTANDING_BY_SCOPE.get(key);
-        return set == null ? java.util.List.of() : new java.util.ArrayList<>(set);
+        return set == null ? List.of() : new ArrayList<>(set);
     }
 
     private static void forgetOutstanding(Long runId) {
@@ -773,7 +785,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var outcomeFuture = new CompletableFuture<SyncRunOutcome>();
         ASYNC_OUTCOMES.put(runId, outcomeFuture);
         if (scopeKey != null) {
-            OUTSTANDING_BY_SCOPE.computeIfAbsent(scopeKey, _ -> java.util.concurrent.ConcurrentHashMap.newKeySet())
+            OUTSTANDING_BY_SCOPE.computeIfAbsent(scopeKey, _ -> ConcurrentHashMap.newKeySet())
                     .add(runId);
         }
         Thread.ofVirtual().name("subagent-async-task-" + runId).start(() ->
@@ -790,7 +802,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         payload.put(FIELD_RUN_ID, runIdStr);
         payload.put(FIELD_CONVERSATION_ID, String.valueOf(childConvId));
         payload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /**
@@ -811,7 +823,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 outcome = awaitAsyncFuture(future, timeoutSeconds,
                         ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS), runId);
             } finally {
-                services.SubagentRegistry.unregister(runId);
+                SubagentRegistry.unregister(runId);
             }
             if (!outcome.killedByOperator()) {
                 persistAsyncTerminalRun(runId, outcome);
@@ -828,7 +840,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     /** Block-await one detached async outcome, bounded a little past the ceiling so
      *  it can't hang even if completion signalling misbehaves. */
     private static SyncRunOutcome awaitOutcomeFuture(CompletableFuture<SyncRunOutcome> f)
-            throws InterruptedException, java.util.concurrent.ExecutionException, TimeoutException {
+            throws InterruptedException, ExecutionException, TimeoutException {
         int ceiling = ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS);
         return ceiling <= 0 ? f.get() : f.get(ceiling + 30L, TimeUnit.SECONDS);
     }
@@ -854,7 +866,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                     + " (already collected, or not an async spawn).";
         }
         try {
-            return utils.GsonHolder.INSTANCE.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
+            return GsonHolder.INSTANCE.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return "Error: interrupted while awaiting async subagent " + runId + ".";
@@ -870,8 +882,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * failing the whole batch. The children ran concurrently, so the wall-clock of
      * this collect ≈ the slowest still-running child.
      */
-    public static String awaitAsyncOutcomes(java.util.List<Long> runIds) {
-        var results = new java.util.ArrayList<Object>();
+    public static String awaitAsyncOutcomes(List<Long> runIds) {
+        var results = new ArrayList<Object>();
         for (var runId : runIds) {
             var f = ASYNC_OUTCOMES.remove(runId);
             forgetOutstanding(runId);
@@ -903,7 +915,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("results", results);
         payload.put("count", results.size());
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /**
@@ -928,8 +940,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     private static SyncRunOutcome runChildSynchronously(Long runId, Long childAgentId,
                                                         Long childConvId, String task,
                                                         int timeoutSeconds, boolean inlineMode) {
-        var future = new java.util.concurrent.CompletableFuture<AgentRunner.RunResult>();
-        services.SubagentRegistry.register(runId, future);
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-" + runId).start(() -> {
             try {
                 var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
@@ -948,7 +960,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             int ceilingSeconds = ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS);
             return awaitFuture(future, timeoutSeconds, ceilingSeconds, runId);
         } finally {
-            services.SubagentRegistry.unregister(runId);
+            SubagentRegistry.unregister(runId);
         }
     }
 
@@ -969,7 +981,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * <p>Public for {@code SubagentSpawnToolTest} (default package).
      */
     public static SyncRunOutcome awaitFuture(
-            java.util.concurrent.CompletableFuture<AgentRunner.RunResult> future,
+            CompletableFuture<AgentRunner.RunResult> future,
             int idleBudgetSeconds, int ceilingSeconds, Long runId) {
         long idleBudgetNanos = TimeUnit.SECONDS.toNanos(Math.max(1, idleBudgetSeconds));
         long ceilingNanos = ceilingSeconds <= 0 ? Long.MAX_VALUE : TimeUnit.SECONDS.toNanos(ceilingSeconds);
@@ -983,7 +995,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         reply, null, false, truncated);
             } catch (TimeoutException _) {
                 // Poll tick — the child is still running. Check the two budgets.
-                long idleNanos = services.SubagentRegistry.nanosSinceActivity(runId);
+                long idleNanos = SubagentRegistry.nanosSinceActivity(runId);
                 if (idleNanos < 0) idleNanos = System.nanoTime() - startNanos; // unregistered fallback
                 if (idleNanos > idleBudgetNanos) {
                     return stopChildOnTimeout(future, runId,
@@ -998,7 +1010,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 Thread.currentThread().interrupt();
                 var reason = "Parent thread interrupted while awaiting subagent";
                 return new SyncRunOutcome("", SubagentRun.Status.FAILED, reason, reason, false, false);
-            } catch (java.util.concurrent.CancellationException _) {
+            } catch (CancellationException _) {
                 // JCLAW-291: kill primitive cancelled our Future. Registry already KILLED.
                 return new SyncRunOutcome("", SubagentRun.Status.KILLED,
                         "Killed by operator", null, true, false);
@@ -1016,8 +1028,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * outcome.
      */
     private static SyncRunOutcome stopChildOnTimeout(
-            java.util.concurrent.CompletableFuture<AgentRunner.RunResult> future, Long runId, String reason) {
-        services.SubagentRegistry.requestStop(runId);
+            CompletableFuture<AgentRunner.RunResult> future, Long runId, String reason) {
+        SubagentRegistry.requestStop(runId);
         long graceDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(STOP_GRACE_MS);
         while (!future.isDone() && System.nanoTime() < graceDeadline) {
             try {
@@ -1054,9 +1066,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             return Tx.run(() -> {
                 var run = (SubagentRun) SubagentRun.findById(runId);
                 if (run == null || run.childConversation == null) return "";
-                models.Message last = models.Message.find(
+                Message last = Message.find(
                         "conversation.id = ?1 and role = ?2 order by createdAt desc, id desc",
-                        run.childConversation.id, models.MessageRole.ASSISTANT.value).first();
+                        run.childConversation.id, MessageRole.ASSISTANT.value).first();
                 return last != null && last.content != null ? last.content : "";
             });
         } catch (Throwable t) {
@@ -1073,7 +1085,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      */
     private static SyncRunOutcome fromExecutionException(ExecutionException ee) {
         var cause = ee.getCause() != null ? ee.getCause() : ee;
-        if (cause instanceof agents.RunCancelledException) {
+        if (cause instanceof RunCancelledException) {
             // JCLAW-291: runner observed the cancel flag at a checkpoint and threw.
             return new SyncRunOutcome("", SubagentRun.Status.KILLED,
                     "Killed by operator", null, true, false);
@@ -1449,8 +1461,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // Only stamp an override when the resolved model DIFFERS from the child
         // agent's base — the plain inherit case keeps a null override (matches
         // prior behavior and the cost dashboard's COALESCE(override, base)).
-        if (!java.util.Objects.equals(resolved.provider(), childAgent.modelProvider)
-                || !java.util.Objects.equals(resolved.modelId(), childAgent.modelId)) {
+        if (!Objects.equals(resolved.provider(), childAgent.modelProvider)
+                || !Objects.equals(resolved.modelId(), childAgent.modelId)) {
             childConv.modelProviderOverride = resolved.provider();
             childConv.modelIdOverride = resolved.modelId();
         }
@@ -1492,8 +1504,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (notBlank(overrideProvider) && notBlank(overrideId)) {
             return new SubagentModel(overrideProvider, overrideId);
         }
-        var cfgProvider = services.ConfigService.get(CFG_SUBAGENT_PROVIDER);
-        var cfgModel = services.ConfigService.get(CFG_SUBAGENT_MODEL);
+        var cfgProvider = ConfigService.get(CFG_SUBAGENT_PROVIDER);
+        var cfgModel = ConfigService.get(CFG_SUBAGENT_MODEL);
         if (notBlank(cfgProvider) && notBlank(cfgModel)) {
             return new SubagentModel(cfgProvider, cfgModel);
         }
@@ -1626,7 +1638,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * rows.
      */
     private static void copyParentToolRestrictions(Agent parentAgent, Agent childAgent) {
-        var childByName = new java.util.HashMap<String, AgentToolConfig>();
+        var childByName = new HashMap<String, AgentToolConfig>();
         for (var r : AgentToolConfig.findByAgent(childAgent)) childByName.put(r.toolName, r);
         boolean any = false;
         for (var pr : AgentToolConfig.findByAgent(parentAgent)) {
@@ -1782,7 +1794,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             outcome = awaitAsyncFuture(future, timeoutSeconds,
                     ConfigService.getInt(MAX_WALLCLOCK_KEY, DEFAULT_MAX_WALLCLOCK_SECONDS), runId);
         } finally {
-            services.SubagentRegistry.unregister(runId);
+            SubagentRegistry.unregister(runId);
         }
 
         // JCLAW-291: kill primitive owns the terminal state on this path —
@@ -1838,7 +1850,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     private static CompletableFuture<AgentRunner.RunResult> startAsyncChild(
             Long runId, Long childAgentId, Long childConvId, String task) {
         var future = new CompletableFuture<AgentRunner.RunResult>();
-        services.SubagentRegistry.register(runId, future);
+        SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-async-runner-" + runId).start(() -> {
             try {
                 var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
@@ -1857,8 +1869,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** JCLAW-499: the per-spawn external-harness command for a run, set when
      *  runtime=acp, consumed once by {@link #executeChildRun}. */
-    private static final java.util.concurrent.ConcurrentHashMap<Long, java.util.List<String>>
-            ACP_RUNS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Long, List<String>>
+            ACP_RUNS = new ConcurrentHashMap<>();
 
     /** JCLAW-499: config key for the operator-configured external agent harness
      *  command (e.g. {@code claude -p} or {@code codex exec}). The command is NOT
@@ -1895,12 +1907,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * ceiling — a runaway harness is force-killed. A non-zero exit raises with the
      * harness's stderr so the spawn records a FAILED outcome.
      */
-    private static AgentRunner.RunResult runAcpHarness(java.util.List<String> command, String task) {
+    private static AgentRunner.RunResult runAcpHarness(List<String> command, String task) {
         Process proc = null;
         try {
             proc = new ProcessBuilder(command).start();
             try (var stdin = proc.getOutputStream()) {
-                stdin.write(task.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                stdin.write(task.getBytes(StandardCharsets.UTF_8));
                 stdin.flush();
             }
             var out = drainAsync(proc.getInputStream());
@@ -1938,20 +1950,20 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             proc.destroyForcibly();
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted awaiting the ACP harness.", e);
-        } catch (java.io.IOException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+        } catch (IOException | ExecutionException | TimeoutException e) {
             if (proc != null) proc.destroyForcibly();
             throw new IllegalStateException("ACP harness failed: " + e.getMessage(), e);
         }
     }
 
     /** Drain a process stream on a VT, bounded to {@link #ACP_MAX_OUTPUT_BYTES}. */
-    private static CompletableFuture<String> drainAsync(java.io.InputStream in) {
+    private static CompletableFuture<String> drainAsync(InputStream in) {
         var f = new CompletableFuture<String>();
         Thread.ofVirtual().start(() -> {
             try (in) {
                 var bytes = in.readNBytes(ACP_MAX_OUTPUT_BYTES);
-                f.complete(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
-            } catch (java.io.IOException _) {
+                f.complete(new String(bytes, StandardCharsets.UTF_8));
+            } catch (IOException _) {
                 f.complete("");
             }
         });
@@ -1998,10 +2010,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     }
 
     /** Operator-configured ACP harness command, whitespace-split. Empty when unset. */
-    private static java.util.List<String> resolveAcpCommand() {
+    private static List<String> resolveAcpCommand() {
         var configured = ConfigService.get(ACP_COMMAND_KEY, null);
-        if (configured == null || configured.isBlank()) return java.util.List.of();
-        return java.util.List.of(configured.strip().split("\\s+"));
+        if (configured == null || configured.isBlank()) return List.of();
+        return List.of(configured.strip().split("\\s+"));
     }
 
     /**
@@ -2201,7 +2213,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         msg.role = yielded ? MessageRole.USER.value : MessageRole.SYSTEM.value;
         msg.content = fallback;
         msg.messageKind = MESSAGE_KIND_ANNOUNCE;
-        msg.metadata = utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        msg.metadata = GsonHolder.INSTANCE.toJson(payload, Map.class);
         // JCLAW-291: also stamp the column on the announce row itself so
         // queries that count truncated messages see it without parsing JSON.
         msg.truncated = modelOutputTruncated;

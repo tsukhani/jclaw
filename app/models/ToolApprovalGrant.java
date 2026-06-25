@@ -7,6 +7,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Column;
 import play.db.jpa.Model;
+import jakarta.persistence.PersistenceException;
 
 /**
  * JCLAW-385: a durable, restart-surviving record that a dangerous tool has
@@ -50,7 +51,7 @@ public class ToolApprovalGrant extends Model {
             grant.agent = agent;
             grant.toolName = toolName;
             grant.save();
-        } catch (jakarta.persistence.PersistenceException _) {
+        } catch (PersistenceException _) {
             // A concurrent upsert inserted the same (agent, tool) first and the unique
             // index rejected this one — idempotent, so treat the collision as success.
         }

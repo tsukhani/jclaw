@@ -7,6 +7,7 @@ import java.io.File;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import models.Agent;
 
 /**
  * Contract for outbound message delivery to an external channel. Each implementation
@@ -111,7 +112,7 @@ public interface Channel {
      * call this so the resolved channel — whatever its type — does the right
      * thing without the caller branching. Must not throw.
      */
-    default SendResult sendText(String peerId, String text, models.Agent agent) {
+    default SendResult sendText(String peerId, String text, Agent agent) {
         return sendText(peerId, text);
     }
 

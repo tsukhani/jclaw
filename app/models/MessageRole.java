@@ -1,5 +1,7 @@
 package models;
 
+import java.util.Map;
+
 /**
  * Enum for the {@code role} column on {@link Message}. Values are stored as
  * lowercase strings in the database (matching the OpenAI-compatible wire format)
@@ -25,7 +27,7 @@ public enum MessageRole implements ValueEnum {
         return value;
     }
 
-    private static final java.util.Map<String, MessageRole> BY_VALUE =
+    private static final Map<String, MessageRole> BY_VALUE =
             ValueEnum.indexOf(values());
 
     /**

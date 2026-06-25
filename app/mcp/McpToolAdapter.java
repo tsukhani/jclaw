@@ -11,6 +11,7 @@ import services.Tx;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.io.IOException;
 
 /**
  * Wraps one MCP tool as a {@link ToolRegistry.Tool} so the agent loop sees
@@ -38,7 +39,7 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
     @FunctionalInterface
     public interface ToolInvoker {
         CallToolResult invoke(String serverName, String toolName, JsonObject arguments)
-                throws java.io.IOException, McpException;
+                throws IOException, McpException;
     }
 
     public McpToolAdapter(String serverName, McpToolDef def, ToolInvoker invoker) {

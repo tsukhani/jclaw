@@ -15,6 +15,7 @@ import play.db.jpa.Model;
 
 import java.time.Instant;
 import java.util.List;
+import services.Tx;
 
 /**
  * One Telegram bot bound to one JClaw agent for messages from exactly one
@@ -172,7 +173,7 @@ public class TelegramBinding extends Model {
      */
     public static SettingOverrides overridesForToken(String botToken) {
         if (botToken == null || botToken.isBlank()) return SettingOverrides.EMPTY;
-        return services.Tx.run(() -> {
+        return Tx.run(() -> {
             var b = findByBotToken(botToken);
             if (b == null) return SettingOverrides.EMPTY;
             Long cd = (b.notifierCooldownMs != null && b.notifierCooldownMs > 0)

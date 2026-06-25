@@ -14,6 +14,7 @@ import services.Tx;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.ArrayList;
 
 /**
  * JCLAW-21: at JVM start, register existing non-terminal
@@ -220,7 +221,7 @@ public class BootConsistencyCheck extends Job<Void> {
         // after a clean-shutdown wipe. Run inside Tx because Play's
         // enhancer needs an open EntityManager for the finder.
         var alive = Tx.run(() -> {
-            var combined = new java.util.ArrayList<Task>();
+            var combined = new ArrayList<Task>();
             combined.addAll(Task.findByStatus(Task.Status.PENDING));
             combined.addAll(Task.findByStatus(Task.Status.ACTIVE));
             return combined;

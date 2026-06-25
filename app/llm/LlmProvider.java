@@ -35,6 +35,12 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Abstract base for LLM provider integrations. Implements shared OpenAI-compatible
@@ -417,7 +423,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         var accumulator = new StreamAccumulator();
         accumulator.promptTokenEstimate = TokenUsageEstimator.estimateChatRequest(model, messages, tools);
         var contentBuilder = new StringBuilder();
-        var toolCallAccumulator = new java.util.HashMap<Integer, ToolCallBuilder>();
+        var toolCallAccumulator = new HashMap<Integer, ToolCallBuilder>();
 
         chatStream(model, messages, tools,
                 chunk -> accumulateChunk(chunk, accumulator, contentBuilder, toolCallAccumulator,
@@ -444,7 +450,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     private void accumulateChunk(ChatCompletionChunk chunk,
                                  StreamAccumulator accumulator,
                                  StringBuilder contentBuilder,
-                                 java.util.Map<Integer, ToolCallBuilder> toolCallAccumulator,
+                                 Map<Integer, ToolCallBuilder> toolCallAccumulator,
                                  Consumer<String> onToken,
                                  Consumer<String> onReasoning) {
         if (chunk.usage() != null) {
@@ -463,7 +469,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     private void applyChoiceDelta(ChunkChoice choice,
                                   StreamAccumulator accumulator,
                                   StringBuilder contentBuilder,
-                                  java.util.Map<Integer, ToolCallBuilder> toolCallAccumulator,
+                                  Map<Integer, ToolCallBuilder> toolCallAccumulator,
                                   Consumer<String> onToken,
                                   Consumer<String> onReasoning) {
         var delta = choice.delta();
@@ -696,7 +702,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * an error outcome on 5xx for the caller to retry.
      */
     private AttemptOutcome attemptRequest(URI uri, String auth, String json, Duration timeout,
-                                          String channel, int attempt) throws InterruptedException, java.io.IOException {
+                                          String channel, int attempt) throws InterruptedException, IOException {
         var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout, channel);
 
         if (reply.statusCode() == 200) return new AttemptOutcome(reply.body(), null);
@@ -791,8 +797,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
          * the carrier to be reused for other work.
          */
         private final StringBuilder reasoningTextBuffer = new StringBuilder();
-        private final java.util.concurrent.locks.ReentrantLock reasoningLock =
-                new java.util.concurrent.locks.ReentrantLock();
+        private final ReentrantLock reasoningLock =
+                new ReentrantLock();
         public volatile Usage usage;
         /** JTokkit-measured prompt tokens for this provider request, available even when provider usage is absent. */
         public volatile TokenUsageEstimator.ChatRequestTokens promptTokenEstimate;
@@ -818,7 +824,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
          * tool-execution gap between rounds).
          */
         public volatile long firstContentNanos = 0L;
-        private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        private final CountDownLatch latch = new CountDownLatch(1);
 
         public void appendReasoningText(String text) {
             if (text == null) return;
@@ -897,7 +903,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         void markComplete() { complete = true; latch.countDown(); }
         public void awaitCompletion() throws InterruptedException { latch.await(); }
         public boolean awaitCompletion(long timeoutMs) throws InterruptedException {
-            return latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            return latch.await(timeoutMs, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -1087,9 +1093,9 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      */
     public static void mergeToolCallChunks(
             List<ToolCallChunk> chunks,
-            java.util.Map<Integer, ToolCallBuilder> accumulator) {
+            Map<Integer, ToolCallBuilder> accumulator) {
         if (chunks == null || chunks.isEmpty()) return;
-        var seenInDelta = new java.util.HashSet<Integer>();
+        var seenInDelta = new HashSet<Integer>();
         for (var tc : chunks) {
             int slot = pickSlotForToolCall(tc, accumulator, seenInDelta);
             seenInDelta.add(slot);
@@ -1111,8 +1117,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      */
     static int pickSlotForToolCall(
             ToolCallChunk chunk,
-            java.util.Map<Integer, ToolCallBuilder> accumulator,
-            java.util.Set<Integer> seenInDelta) {
+            Map<Integer, ToolCallBuilder> accumulator,
+            Set<Integer> seenInDelta) {
         int slot = chunk.index();
         if (seenInDelta.contains(slot)) return nextSlot(accumulator);
         var existing = accumulator.get(slot);
@@ -1130,7 +1136,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         return slot;
     }
 
-    private static int nextSlot(java.util.Map<Integer, ToolCallBuilder> accumulator) {
+    private static int nextSlot(Map<Integer, ToolCallBuilder> accumulator) {
         return accumulator.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
     }
 

@@ -18,6 +18,10 @@ import services.AgentService;
 import services.EventLogger;
 
 import static utils.GsonHolder.INSTANCE;
+import com.google.gson.JsonObject;
+import java.security.SecureRandom;
+import java.util.Base64;
+import java.util.Map;
 
 /**
  * CRUD API for per-user Telegram bindings (JCLAW-89). Each binding maps one bot
@@ -33,7 +37,7 @@ public class ApiTelegramBindingsController extends Controller {
     // Sonar java:S2119 — a single shared SecureRandom for webhook-secret
     // generation. SecureRandom is thread-safe and meant to be reused; a fresh
     // instance per call needlessly re-seeds.
-    private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     // JSON body keys reused across create/update parsers.
     private static final String KEY_BOT_TOKEN = "botToken";
@@ -184,7 +188,7 @@ public class ApiTelegramBindingsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static void applyBotTokenUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
+    private static void applyBotTokenUpdate(TelegramBinding binding, JsonObject body) {
         if (!body.has(KEY_BOT_TOKEN)) return;
         String newToken = body.get(KEY_BOT_TOKEN).getAsString();
         if (newToken == null || newToken.isBlank() || newToken.equals(binding.botToken)) return;
@@ -196,7 +200,7 @@ public class ApiTelegramBindingsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static void applyAgentUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
+    private static void applyAgentUpdate(TelegramBinding binding, JsonObject body) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
         Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
@@ -212,7 +216,7 @@ public class ApiTelegramBindingsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static void applyTelegramUserIdUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
+    private static void applyTelegramUserIdUpdate(TelegramBinding binding, JsonObject body) {
         if (!body.has(KEY_TELEGRAM_USER_ID)) return;
         String uid = body.get(KEY_TELEGRAM_USER_ID).getAsString();
         if (uid == null || !uid.matches("\\d+")) {
@@ -221,7 +225,7 @@ public class ApiTelegramBindingsController extends Controller {
         binding.telegramUserId = uid;
     }
 
-    private static void applyOptionalFieldUpdates(TelegramBinding binding, com.google.gson.JsonObject body) {
+    private static void applyOptionalFieldUpdates(TelegramBinding binding, JsonObject body) {
         if (body.has(KEY_TRANSPORT)) {
             binding.transport = parseTransport(body, binding.transport);
         }
@@ -246,7 +250,7 @@ public class ApiTelegramBindingsController extends Controller {
      * out-of-range value 400s rather than silently persisting a no-op.
      */
     private static void applyBindingSettingOverrides(TelegramBinding binding,
-                                                      com.google.gson.JsonObject body) {
+                                                      JsonObject body) {
         if (body.has(KEY_REPLY_TO_MODE)) {
             String v = readOptionalString(body, KEY_REPLY_TO_MODE);
             if (v != null && !v.matches("off|first|all")) {
@@ -284,7 +288,7 @@ public class ApiTelegramBindingsController extends Controller {
                 && (b.webhookSecret == null || b.webhookSecret.isBlank())) {
             var bytes = new byte[32];
             SECURE_RANDOM.nextBytes(bytes);
-            b.webhookSecret = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+            b.webhookSecret = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         }
     }
 
@@ -361,22 +365,22 @@ public class ApiTelegramBindingsController extends Controller {
         // that 401s (and logs an error) when the bot token was revoked alongside.
         TelegramWebhookRegistrar.onBindingDeleted(botToken, transport);
         TelegramPollingRunner.reconcile();
-        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        renderJSON(gson.toJson(Map.of("status", "ok")));
     }
 
     // ── helpers ──
 
-    private static String readRequiredString(com.google.gson.JsonObject body, String key) {
+    private static String readRequiredString(JsonObject body, String key) {
         if (!body.has(key) || body.get(key).isJsonNull()) return null;
         String s = body.get(key).getAsString();
         return (s == null || s.isBlank()) ? null : s.trim();
     }
 
-    private static String readOptionalString(com.google.gson.JsonObject body, String key) {
+    private static String readOptionalString(JsonObject body, String key) {
         return JsonBodyReader.optString(body, key, true);
     }
 
-    private static ChannelTransport parseTransport(com.google.gson.JsonObject body,
+    private static ChannelTransport parseTransport(JsonObject body,
                                                     ChannelTransport fallback) {
         String raw = body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()
                 ? body.get(KEY_TRANSPORT).getAsString() : null;

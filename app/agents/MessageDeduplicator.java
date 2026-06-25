@@ -113,7 +113,7 @@ public final class MessageDeduplicator {
      * filenames extracted from the first capture group via
      * {@link #extractFilename}. Skips empty filenames.
      */
-    private static HashSet<String> collectMatchedFilenames(String content, List<java.util.regex.Pattern> patterns) {
+    private static HashSet<String> collectMatchedFilenames(String content, List<Pattern> patterns) {
         var filenames = new HashSet<String>();
         for (var pattern : patterns) {
             var m = pattern.matcher(content);

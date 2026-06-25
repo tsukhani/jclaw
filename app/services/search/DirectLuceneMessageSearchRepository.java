@@ -17,6 +17,13 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.function.Function;
+import models.Memory;
+import models.Message;
+import models.SubagentRun;
+import models.Task;
+import play.db.jpa.JPA;
+import services.Tx;
 
 /**
  * Lucene 10 backed implementation of {@link MessageSearchRepository}.
@@ -54,13 +61,13 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * through {@link #backfill(Backfiller)}.
      */
     private record Backfiller(LuceneIndexer.Scope scope, String jpql,
-                              java.util.function.Function<Object, Long> id,
-                              java.util.function.Function<Object, String> content,
-                              java.util.function.Function<Object, String> agent) {
+                              Function<Object, Long> id,
+                              Function<Object, String> content,
+                              Function<Object, String> agent) {
         /** Most scopes carry no per-owner filter field. */
         Backfiller(LuceneIndexer.Scope scope, String jpql,
-                   java.util.function.Function<Object, Long> id,
-                   java.util.function.Function<Object, String> content) {
+                   Function<Object, Long> id,
+                   Function<Object, String> content) {
             this(scope, jpql, id, content, null);
         }
     }
@@ -69,14 +76,14 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
             new Backfiller(LuceneIndexer.Scope.TASK_RUN_MESSAGE, "SELECT m FROM TaskRunMessage m",
                     row -> ((TaskRunMessage) row).id, row -> ((TaskRunMessage) row).content),
             new Backfiller(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "SELECT m FROM Message m",
-                    row -> ((models.Message) row).id, row -> ((models.Message) row).content),
+                    row -> ((Message) row).id, row -> ((Message) row).content),
             new Backfiller(LuceneIndexer.Scope.TASK, "SELECT t FROM Task t",
-                    row -> ((models.Task) row).id, row -> taskContent((models.Task) row)),
+                    row -> ((Task) row).id, row -> taskContent((Task) row)),
             new Backfiller(LuceneIndexer.Scope.SUBAGENT_RUN, "SELECT r FROM SubagentRun r",
-                    row -> ((models.SubagentRun) row).id, row -> subagentRunContent((models.SubagentRun) row)),
+                    row -> ((SubagentRun) row).id, row -> subagentRunContent((SubagentRun) row)),
             new Backfiller(LuceneIndexer.Scope.MEMORY, "SELECT m FROM Memory m",
-                    row -> ((models.Memory) row).id, row -> ((models.Memory) row).text,
-                    row -> ((models.Memory) row).agentId));
+                    row -> ((Memory) row).id, row -> ((Memory) row).text,
+                    row -> ((Memory) row).agentId));
 
     /** {@inheritDoc} */
     @Override
@@ -106,9 +113,9 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * thousands of rows pays one fsync instead of one per row.
      */
     private static void backfill(Backfiller b) {
-        services.Tx.run(() -> {
+        Tx.run(() -> {
             @SuppressWarnings("unchecked")
-            var rows = play.db.jpa.JPA.em().createQuery(b.jpql()).getResultList();
+            var rows = JPA.em().createQuery(b.jpql()).getResultList();
             int n = 0;
             for (var row : rows) {
                 n++;
@@ -134,7 +141,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * space so adjacent words from different fields don't accidentally
      * fuse into one stemmed token.
      */
-    static String taskContent(models.Task t) {
+    static String taskContent(Task t) {
         var name = t.name != null ? t.name : "";
         var desc = t.description != null ? t.description : "";
         return name + " " + desc;
@@ -147,7 +154,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * which is fine — it gets indexed once when the announce-VT writes
      * the terminal outcome and the entity's @PostUpdate hook fires.
      */
-    static String subagentRunContent(models.SubagentRun r) {
+    static String subagentRunContent(SubagentRun r) {
         var label = r.label != null ? r.label : "";
         var outcome = r.outcome != null ? r.outcome : "";
         return label + " " + outcome;
@@ -237,9 +244,9 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     private static List<TaskRunMessage> hydrateTaskRunMessagesInOrder(List<Long> ids) {
         // Bulk-fetch JPA rows, then re-order to match Lucene's relevance
         // ranking. Same pattern as the prior H2-backed impl.
-        var rows = services.Tx.run(() -> {
+        var rows = Tx.run(() -> {
             @SuppressWarnings("unchecked")
-            var raw = play.db.jpa.JPA.em()
+            var raw = JPA.em()
                     .createQuery("SELECT m FROM TaskRunMessage m WHERE m.id IN :ids")
                     .setParameter("ids", ids)
                     .getResultList();

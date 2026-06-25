@@ -16,6 +16,11 @@ import services.MimeExtensions;
 import services.Tx;
 import services.transcription.PendingTranscripts;
 import services.video.VideoUnderstandingDispatcher;
+import models.Agent;
+import models.Message;
+import models.MessageAttachment;
+import services.caption.CaptionRouter;
+import services.caption.ImageCaptionService;
 
 /**
  * Build-time assembly of a historical user turn into the OpenAI-style
@@ -141,7 +146,7 @@ public final class VisionAudioAssembler {
      * assembly directly — Play 1.x pins tests to the default package,
      * so package-private access is unreachable from the test.
      */
-    public static ChatMessage userMessageFor(models.Message msg) {
+    public static ChatMessage userMessageFor(Message msg) {
         // Default behaviour preserves the pre-JCLAW-165 input_audio shape;
         // audio-capable models still go through this overload from
         // buildMessages and from any caller that wants the Telegram
@@ -165,7 +170,7 @@ public final class VisionAudioAssembler {
      * {@link #applyTranscriptsForCapability} handles that outside any
      * blocking JPA transaction.
      */
-    public static ChatMessage userMessageFor(models.Message msg, boolean supportsAudio) {
+    public static ChatMessage userMessageFor(Message msg, boolean supportsAudio) {
         // Vision-capable by default: images ride as image_url parts, preserving
         // the pre-JCLAW-215 shape for every caller that doesn't opt into the
         // caption fallback.
@@ -186,7 +191,7 @@ public final class VisionAudioAssembler {
      * {@code supportsVision=false} — {@link #applyCaptionsForCapability} runs
      * the (slow) caption model outside any blocking JPA transaction first.
      */
-    public static ChatMessage userMessageFor(models.Message msg, boolean supportsAudio, boolean supportsVision) {
+    public static ChatMessage userMessageFor(Message msg, boolean supportsAudio, boolean supportsVision) {
         // Defensive fallback: in most paths Play's enhancer installs a
         // Hibernate lazy proxy on @OneToMany and the field is non-null;
         // VisionAudioAssemblyTest saw null collections after direct entity
@@ -194,7 +199,7 @@ public final class VisionAudioAssembler {
         // the field being null for any reason.
         var atts = msg.attachments;
         if (atts == null) {
-            atts = models.MessageAttachment.findByMessage(msg);
+            atts = MessageAttachment.findByMessage(msg);
         }
         if (atts.isEmpty()) {
             return ChatMessage.user(msg.content);
@@ -226,7 +231,7 @@ public final class VisionAudioAssembler {
      * and video ride as structured content parts elsewhere (video via
      * {@link #applyVideoForCapability}, JCLAW-224), so they skip this branch.
      */
-    private static String collectFileNotes(List<models.MessageAttachment> atts) {
+    private static String collectFileNotes(List<MessageAttachment> atts) {
         var fileNotes = new StringBuilder();
         for (var a : atts) {
             if (a.isImage() || a.isAudio() || a.isVideo()) continue;
@@ -245,7 +250,7 @@ public final class VisionAudioAssembler {
      * "transcription unavailable" note that preserves the user's
      * original filename.
      */
-    private static String collectTranscriptBlocks(List<models.MessageAttachment> atts) {
+    private static String collectTranscriptBlocks(List<MessageAttachment> atts) {
         var transcriptBlocks = new StringBuilder();
         for (var a : atts) {
             if (!a.isAudio()) continue;
@@ -272,11 +277,11 @@ public final class VisionAudioAssembler {
      * guard. Missing/blank captions fall back to a note that preserves the original filename and
      * the same workspace path — symmetric with {@link #collectTranscriptBlocks}.
      */
-    private static String collectCaptionBlocks(List<models.MessageAttachment> atts) {
+    private static String collectCaptionBlocks(List<MessageAttachment> atts) {
         var captionBlocks = new StringBuilder();
         for (var a : atts) {
             if (!a.isImage()) continue;
-            var path = services.AttachmentService.workspaceRelativePath(a);
+            var path = AttachmentService.workspaceRelativePath(a);
             var caption = a.caption;
             if (caption != null && !caption.isBlank()) {
                 captionBlocks.append("\n\n[Image description: ")
@@ -302,7 +307,7 @@ public final class VisionAudioAssembler {
      * audio attachment when the active model supports audio.
      */
     private static void addMediaParts(List<Map<String, Object>> parts,
-                                      List<models.MessageAttachment> atts,
+                                      List<MessageAttachment> atts,
                                       boolean supportsAudio, boolean supportsVision) {
         for (var a : atts) {
             if (a.isImage() && supportsVision) {
@@ -351,7 +356,7 @@ public final class VisionAudioAssembler {
         return Tx.run(() -> {
             var rewritten = new ArrayList<>(messages);
             for (var b : audioBearers) {
-                var msg = (models.Message) models.Message.findById(b.msgId());
+                var msg = (Message) Message.findById(b.msgId());
                 if (msg == null) continue;
                 rewritten.set(b.chatMessageIndex(), userMessageFor(msg, false));
             }
@@ -400,7 +405,7 @@ public final class VisionAudioAssembler {
         return Tx.run(() -> {
             var rewritten = new ArrayList<>(messages);
             for (var b : imageBearers) {
-                var msg = (models.Message) models.Message.findById(b.msgId());
+                var msg = (Message) Message.findById(b.msgId());
                 if (msg == null) continue;
                 rewritten.set(b.chatMessageIndex(), userMessageFor(msg, supportsAudio, false));
             }
@@ -427,7 +432,7 @@ public final class VisionAudioAssembler {
      * functional test can drive it directly from the default test package.
      */
     public static List<ChatMessage> applyVideoForCapability(List<ChatMessage> messages,
-            List<VideoBearer> videoBearers, models.Agent agent, boolean supportsAudio, boolean supportsVision) {
+            List<VideoBearer> videoBearers, Agent agent, boolean supportsAudio, boolean supportsVision) {
         if (videoBearers == null || videoBearers.isEmpty()) return messages;
 
         // Phase 1 (no Tx during sampling/captioning): dispatch each video attachment to its strategy.
@@ -437,7 +442,7 @@ public final class VisionAudioAssembler {
         return Tx.run(() -> {
             var rewritten = new ArrayList<>(messages);
             for (var b : videoBearers) {
-                var msg = (models.Message) models.Message.findById(b.msgId());
+                var msg = (Message) Message.findById(b.msgId());
                 if (msg == null) continue;
                 var base = userMessageFor(msg, supportsAudio, supportsVision);
                 rewritten.set(b.chatMessageIndex(),
@@ -453,12 +458,12 @@ public final class VisionAudioAssembler {
      * dispatch failure degrades to a short text note rather than failing the turn.
      */
     private static Map<Integer, List<Map<String, Object>>> dispatchVideoParts(
-            List<VideoBearer> videoBearers, models.Agent agent) {
+            List<VideoBearer> videoBearers, Agent agent) {
         var partsByIndex = new HashMap<Integer, List<Map<String, Object>>>();
         for (var b : videoBearers) {
             var acc = new ArrayList<Map<String, Object>>();
             for (var attId : b.videoAttachmentIds()) {
-                var att = Tx.run(() -> (models.MessageAttachment) models.MessageAttachment.findById(attId));
+                var att = Tx.run(() -> (MessageAttachment) MessageAttachment.findById(attId));
                 if (att == null) continue;
                 try {
                     acc.addAll(VideoUnderstandingDispatcher.dispatch(att, agent));
@@ -519,7 +524,7 @@ public final class VisionAudioAssembler {
      * "description unavailable" fallback note then carries the filename.
      */
     private static void ensureCaptions(List<ImageBearer> imageBearers) {
-        var svc = services.caption.CaptionRouter.configuredService().orElse(null);
+        var svc = CaptionRouter.configuredService().orElse(null);
         if (svc == null) return;
         for (var b : imageBearers) {
             for (var attId : b.imageAttachmentIds()) {
@@ -533,9 +538,9 @@ public final class VisionAudioAssembler {
      * data URL in a short Tx, run the (slow) model with no connection held, and
      * persist. Any failure is logged and swallowed — the fallback note covers it.
      */
-    private static void captionOne(services.caption.ImageCaptionService svc, Long attId) {
+    private static void captionOne(ImageCaptionService svc, Long attId) {
         var dataUrl = Tx.run(() -> {
-            var att = (models.MessageAttachment) models.MessageAttachment.findById(attId);
+            var att = (MessageAttachment) MessageAttachment.findById(attId);
             if (att == null || (att.caption != null && !att.caption.isBlank())) return null;
             return AttachmentService.readAsDataUrl(att);
         });
@@ -552,7 +557,7 @@ public final class VisionAudioAssembler {
 
         final var resolved = caption.trim();
         Tx.run(() -> {
-            var att = (models.MessageAttachment) models.MessageAttachment.findById(attId);
+            var att = (MessageAttachment) MessageAttachment.findById(attId);
             if (att != null) {
                 att.caption = resolved;
                 att.save();

@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.ArrayList;
 
 /**
  * JCLAW-281: builds the {@code ## MCP Servers} system-prompt manifest — the
@@ -133,7 +134,7 @@ public final class McpServerCatalog {
     }
 
     public static List<String> serversForAgent(Set<String> disabledForAgent) {
-        var out = new java.util.ArrayList<String>();
+        var out = new ArrayList<String>();
         for (var tool : ToolRegistry.listTools()) {
             if (tool.isServerLevel() && tool.group() != null
                     && !disabledForAgent.contains(tool.name())

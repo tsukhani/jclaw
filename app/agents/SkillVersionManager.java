@@ -5,6 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.regex.Pattern;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Comparator;
+import java.util.HexFormat;
 
 /**
  * Skill version lifecycle management: semver comparison, patch bumping,
@@ -81,15 +85,15 @@ public final class SkillVersionManager {
      */
     public static String hashSkillDirectory(Path skillDir) throws IOException {
         if (!Files.isDirectory(skillDir)) return "";
-        java.security.MessageDigest digest;
+        MessageDigest digest;
         try {
-            digest = java.security.MessageDigest.getInstance("SHA-256");
-        } catch (java.security.NoSuchAlgorithmException e) {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
             throw new IOException("SHA-256 not available", e);
         }
         try (var walk = Files.walk(skillDir)) {
             var files = walk.filter(Files::isRegularFile)
-                    .sorted(java.util.Comparator.comparing(p -> skillDir.relativize(p).toString()))
+                    .sorted(Comparator.comparing(p -> skillDir.relativize(p).toString()))
                     .toList();
             for (var file : files) {
                 var rel = skillDir.relativize(file).toString();
@@ -99,7 +103,7 @@ public final class SkillVersionManager {
                 digest.update((byte) 0);
             }
         }
-        return java.util.HexFormat.of().formatHex(digest.digest());
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     // --- SKILL.md finalization ---

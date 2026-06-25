@@ -12,6 +12,17 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import agents.ToolAction;
+import java.time.DateTimeException;
+import java.time.ZoneId;
+import models.Conversation;
+import play.db.jpa.JPA;
+import services.DeliveryAdvisor;
+import services.DeliveryDispatcher;
+import services.DeliverySpec;
+import services.TaskSchedulingService;
+import services.TimezoneResolver;
+import services.Tx;
 
 /**
  * JCLAW-294: agent-facing task management tool. One {@code task_manager}
@@ -96,17 +107,17 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction(ACTION_CREATE_TASK,           "Create a task with a unified schedule string (any of 'now', '30m', 'every 30m', or Spring 6-field cron / @daily etc.)"),
-                new agents.ToolAction(ACTION_UPDATE_TASK,           "Partial update to a task by name — fields that aren't provided stay as-is"),
-                new agents.ToolAction(ACTION_PAUSE,                 "Pause a recurring task by name; cadence is preserved, fires no-op until resume"),
-                new agents.ToolAction(ACTION_RESUME,                "Resume a previously-paused task by name"),
-                new agents.ToolAction(ACTION_RUN_NOW,               "Fire a task immediately by name; accepts any state (revives CANCELLED to PENDING)"),
-                new agents.ToolAction(ACTION_CANCEL_TASK,           "Cancel a task by name (any type) — sets status=CANCELLED, row stays so runNow can revive it later"),
-                new agents.ToolAction(ACTION_DELETE_TASK,           "Hard-delete a task and its run history by name. Irreversible — the row is gone. Use cancelTask if you might want it back"),
-                new agents.ToolAction(ACTION_LIST_RECURRING_TASKS,  "List the agent's currently active recurring tasks"),
-                new agents.ToolAction(ACTION_LIST_REMINDERS,        "List the agent's upcoming reminders (PENDING one-shots + ACTIVE recurring) — name, fire time, status — so you can update or cancel one by name")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction(ACTION_CREATE_TASK,           "Create a task with a unified schedule string (any of 'now', '30m', 'every 30m', or Spring 6-field cron / @daily etc.)"),
+                new ToolAction(ACTION_UPDATE_TASK,           "Partial update to a task by name — fields that aren't provided stay as-is"),
+                new ToolAction(ACTION_PAUSE,                 "Pause a recurring task by name; cadence is preserved, fires no-op until resume"),
+                new ToolAction(ACTION_RESUME,                "Resume a previously-paused task by name"),
+                new ToolAction(ACTION_RUN_NOW,               "Fire a task immediately by name; accepts any state (revives CANCELLED to PENDING)"),
+                new ToolAction(ACTION_CANCEL_TASK,           "Cancel a task by name (any type) — sets status=CANCELLED, row stays so runNow can revive it later"),
+                new ToolAction(ACTION_DELETE_TASK,           "Hard-delete a task and its run history by name. Irreversible — the row is gone. Use cancelTask if you might want it back"),
+                new ToolAction(ACTION_LIST_RECURRING_TASKS,  "List the agent's currently active recurring tasks"),
+                new ToolAction(ACTION_LIST_REMINDERS,        "List the agent's upcoming reminders (PENDING one-shots + ACTIVE recurring) — name, fire time, status — so you can update or cancel one by name")
         );
     }
 
@@ -337,9 +348,9 @@ public class TaskTool implements ToolRegistry.Tool {
      * the any-state variant below because it explicitly revives CANCELLED.
      */
     private static List<Long> findTaskIds(String name, Agent agent) {
-        return services.Tx.run(() -> {
+        return Tx.run(() -> {
             @SuppressWarnings("unchecked")
-            var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
+            var raw = (List<Object>) (List<?>) Task.find(
                     "name = ?1 AND agent = ?2 AND status != ?3",
                     name, agent, Task.Status.CANCELLED).fetch();
             var ids = new ArrayList<Long>(raw.size());
@@ -365,7 +376,7 @@ public class TaskTool implements ToolRegistry.Tool {
             // Resolve the zone up front so an absolute date-time schedule
             // ("2026-06-13T15:00") is interpreted in the same timezone the task
             // will be saved with (validated again in persistNewTask).
-            var zone = services.TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
+            var zone = TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
             spec = ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
             return "Error: Invalid schedule: " + e.getMessage();
@@ -375,7 +386,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // grammar before persisting. null/omitted is fine (it gets inferred);
         // a malformed value (e.g. email:, which is not a channel) is rejected
         // with a hint toward tool:send_gmail_message.
-        var deliveryErr = services.DeliverySpec.validate(optStr(args, KEY_DELIVERY));
+        var deliveryErr = DeliverySpec.validate(optStr(args, KEY_DELIVERY));
         if (deliveryErr != null) return ERR_PREFIX + deliveryErr;
 
         var conflict = checkRecurringDuplicate(name, agent, spec);
@@ -384,13 +395,13 @@ public class TaskTool implements ToolRegistry.Tool {
         final String finalDescription = description;
         final Task saved;
         try {
-            saved = services.Tx.run(() -> persistNewTask(args, agent, name, finalDescription, spec));
+            saved = Tx.run(() -> persistNewTask(args, agent, name, finalDescription, spec));
         } catch (IllegalArgumentException e) {
             // JCLAW-261: surface invalid-timezone (or any other validated
             // arg) as a clean tool error instead of a Tx-wrapped trace.
             return ERR_PREFIX + e.getMessage();
         }
-        services.TaskSchedulingService.register(saved);
+        TaskSchedulingService.register(saved);
 
         EventLogger.info("TASK_MGMT_CREATE", agent.name, null,
                 "Task '%s' (id=%d, type=%s) created via tool"
@@ -410,7 +421,7 @@ public class TaskTool implements ToolRegistry.Tool {
     /** JCLAW-455: append a non-blocking delivery-reachability advisory to a tool result,
      *  or return {@code base} unchanged when none applies. */
     private static String withDeliveryAdvisory(String base, Agent agent, String deliverySpec) {
-        var advisory = services.DeliveryAdvisor.advisoryFor(agent, deliverySpec);
+        var advisory = DeliveryAdvisor.advisoryFor(agent, deliverySpec);
         return advisory == null ? base : base + "\n\n⚠️ " + advisory;
     }
 
@@ -430,7 +441,7 @@ public class TaskTool implements ToolRegistry.Tool {
      *       inference (operator knows what they're doing).</li>
      * </ol>
      */
-    private static String resolveDeliverySpec(String explicit, models.Agent agent) {
+    private static String resolveDeliverySpec(String explicit, Agent agent) {
         if (explicit == null) return inferDeliveryFromContext(agent);
         var trimmed = explicit.trim();
         if (trimmed.isEmpty()) return inferDeliveryFromContext(agent);
@@ -440,7 +451,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // hint. If the conversation lookup doesn't yield a usable target,
         // fall back to the inference shape (which will be null and produce
         // NOT_REQUESTED rather than a fire-time spec rejection).
-        if (!services.DeliveryDispatcher.isSupported(trimmed.toLowerCase())) {
+        if (!DeliveryDispatcher.isSupported(trimmed.toLowerCase())) {
             return explicit;  // Unknown channel — let dispatchSpec surface it.
         }
         var inferred = inferDeliveryFromContext(agent);
@@ -473,12 +484,12 @@ public class TaskTool implements ToolRegistry.Tool {
      * agreeing on "most-recently-updated wins" keeps the two surfaces
      * predictable.
      */
-    private static String inferDeliveryFromContext(models.Agent agent) {
-        return services.Tx.run(() -> {
-            var conv = (models.Conversation) models.Conversation.find(
+    private static String inferDeliveryFromContext(Agent agent) {
+        return Tx.run(() -> {
+            var conv = (Conversation) Conversation.find(
                     "agent = ?1 ORDER BY updatedAt DESC", agent).first();
             if (conv == null || conv.channelType == null) return null;
-            if (!services.DeliveryDispatcher.isSupported(conv.channelType)) return null;
+            if (!DeliveryDispatcher.isSupported(conv.channelType)) return null;
             String target;
             if ("web".equalsIgnoreCase(conv.channelType)) {
                 target = conv.id != null ? conv.id.toString() : null;
@@ -502,7 +513,7 @@ public class TaskTool implements ToolRegistry.Tool {
      * operator's local zone.
      */
     private static String formatScheduledAt(Task task) {
-        var zone = services.TimezoneResolver.resolve(task);
+        var zone = TimezoneResolver.resolve(task);
         return task.scheduledAt.atZone(zone).toString();
     }
 
@@ -515,9 +526,9 @@ public class TaskTool implements ToolRegistry.Tool {
         if (spec.type() != Task.Type.CRON && spec.type() != Task.Type.INTERVAL) {
             return null;
         }
-        var conflictId = services.Tx.run(() -> {
+        var conflictId = Tx.run(() -> {
             @SuppressWarnings("unchecked")
-            var existing = (java.util.List<Object>) (java.util.List<?>) Task.find(
+            var existing = (List<Object>) (List<?>) Task.find(
                     "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5",
                     name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED
             ).fetch();
@@ -599,8 +610,8 @@ public class TaskTool implements ToolRegistry.Tool {
         if (raw == null || raw.isBlank()) return null;
         var trimmed = raw.trim();
         try {
-            java.time.ZoneId.of(trimmed);
-        } catch (java.time.DateTimeException e) {
+            ZoneId.of(trimmed);
+        } catch (DateTimeException e) {
             throw new IllegalArgumentException(
                     "Invalid IANA timezone '" + trimmed + "': " + e.getMessage()
                             + ". Use a value like 'America/New_York' or 'Asia/Tokyo'.");
@@ -613,7 +624,7 @@ public class TaskTool implements ToolRegistry.Tool {
      *  Extracted to keep {@link #updateTask} under the cognitive-complexity bound (Sonar S3776). */
     private ScheduleShorthandParser.ScheduleSpec resolveScheduleSpec(JsonObject args) {
         if (!hasValue(args, KEY_SCHEDULE)) return null;
-        var zone = services.TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
+        var zone = TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
         return ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString(), zone);
     }
 
@@ -639,7 +650,7 @@ public class TaskTool implements ToolRegistry.Tool {
 
         // JCLAW-418: validate an explicit delivery patch before persisting.
         if (args.has(KEY_DELIVERY)) {
-            var deliveryErr = services.DeliverySpec.validate(optStr(args, KEY_DELIVERY));
+            var deliveryErr = DeliverySpec.validate(optStr(args, KEY_DELIVERY));
             if (deliveryErr != null) return ERR_PREFIX + deliveryErr;
         }
 
@@ -653,7 +664,7 @@ public class TaskTool implements ToolRegistry.Tool {
 
         final PatchResult patch;
         try {
-            patch = services.Tx.run(() -> applyPatch(args, taskId, spec));
+            patch = Tx.run(() -> applyPatch(args, taskId, spec));
         } catch (IllegalArgumentException e) {
             // JCLAW-261: surface invalid-timezone (or any other validated
             // field) as a clean tool error.
@@ -668,7 +679,7 @@ public class TaskTool implements ToolRegistry.Tool {
             // EAGER agent relation is initialized so it stays usable after the
             // Tx closes. Reuse it for the reschedule instead of re-reading in a
             // second Tx.
-            services.TaskSchedulingService.update(patch.task());
+            TaskSchedulingService.update(patch.task());
         }
 
         EventLogger.info("TASK_MGMT_UPDATE", agent.name, null,
@@ -796,7 +807,7 @@ public class TaskTool implements ToolRegistry.Tool {
         var name = args.get(KEY_NAME).getAsString();
         var ids = findTaskIds(name, agent);
         if (ids.isEmpty()) return MSG_NO_TASK_FOUND.formatted(name);
-        for (var id : ids) services.TaskSchedulingService.pause(id);
+        for (var id : ids) TaskSchedulingService.pause(id);
         EventLogger.info("TASK_MGMT_PAUSE", agent.name, null,
                 "Task '%s' (%d match%s) paused via tool"
                         .formatted(name, ids.size(), ids.size() == 1 ? "" : "es"));
@@ -812,7 +823,7 @@ public class TaskTool implements ToolRegistry.Tool {
         var name = args.get(KEY_NAME).getAsString();
         var ids = findTaskIds(name, agent);
         if (ids.isEmpty()) return MSG_NO_TASK_FOUND.formatted(name);
-        for (var id : ids) services.TaskSchedulingService.resume(id);
+        for (var id : ids) TaskSchedulingService.resume(id);
         EventLogger.info("TASK_MGMT_RESUME", agent.name, null,
                 "Task '%s' (%d match%s) resumed via tool"
                         .formatted(name, ids.size(), ids.size() == 1 ? "" : "es"));
@@ -830,16 +841,16 @@ public class TaskTool implements ToolRegistry.Tool {
         // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELLED too.
         var revivedRef = new int[] { 0 };
         var lostIds = new ArrayList<Long>();
-        var ranIds = services.Tx.run(() -> collectRunNowTargets(name, agent, revivedRef, lostIds));
+        var ranIds = Tx.run(() -> collectRunNowTargets(name, agent, revivedRef, lostIds));
         if (ranIds.isEmpty()) return MSG_NO_TASK_FOUND.formatted(name);
         for (var id : lostIds) {
-            services.TaskSchedulingService.forceRemoveStaleRow(id);
-            var fresh = services.Tx.run(() -> (Task) Task.findById(id));
-            if (fresh != null) services.TaskSchedulingService.register(fresh);
+            TaskSchedulingService.forceRemoveStaleRow(id);
+            var fresh = Tx.run(() -> (Task) Task.findById(id));
+            if (fresh != null) TaskSchedulingService.register(fresh);
         }
         for (var id : ranIds) {
             if (lostIds.contains(id)) continue;
-            services.TaskSchedulingService.runNow(id);
+            TaskSchedulingService.runNow(id);
         }
 
         var revived = revivedRef[0];
@@ -864,7 +875,7 @@ public class TaskTool implements ToolRegistry.Tool {
     private static List<Long> collectRunNowTargets(String name, Agent agent,
                                                    int[] revivedRef, List<Long> lostIds) {
         @SuppressWarnings("unchecked")
-        var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
+        var raw = (List<Object>) (List<?>) Task.find(
                 "name = ?1 AND agent = ?2", name, agent).fetch();
         var ids = new ArrayList<Long>(raw.size());
         for (var row : raw) {
@@ -902,9 +913,9 @@ public class TaskTool implements ToolRegistry.Tool {
         //
         // Agent-scoped: two agents naming a task "daily summary" must not
         // be able to cancel each other's — agent isolation.
-        var cancelledIds = services.Tx.run(() -> {
+        var cancelledIds = Tx.run(() -> {
             @SuppressWarnings("unchecked")
-            var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
+            var raw = (List<Object>) (List<?>) Task.find(
                     "name = ?1 AND agent = ?2 AND status != ?3",
                     name, agent, Task.Status.CANCELLED).fetch();
             var ids = new ArrayList<Long>(raw.size());
@@ -920,7 +931,7 @@ public class TaskTool implements ToolRegistry.Tool {
             return MSG_NO_TASK_FOUND.formatted(name);
         }
         for (var taskId : cancelledIds) {
-            services.TaskSchedulingService.cancel(taskId);
+            TaskSchedulingService.cancel(taskId);
         }
         EventLogger.info("TASK_MGMT_DELETE", agent.name, null,
                 "Task '%s' (%d match%s) cancelled via tool"
@@ -943,12 +954,12 @@ public class TaskTool implements ToolRegistry.Tool {
             return ERR_NAME_REQUIRED;
         }
         var name = args.get(KEY_NAME).getAsString();
-        var deletedIds = services.Tx.run(() -> {
+        var deletedIds = Tx.run(() -> {
             @SuppressWarnings("unchecked")
-            var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
+            var raw = (List<Object>) (List<?>) Task.find(
                     "name = ?1 AND agent = ?2", name, agent).fetch();
             var ids = new ArrayList<Long>(raw.size());
-            var em = play.db.jpa.JPA.em();
+            var em = JPA.em();
             for (var row : raw) {
                 var task = (Task) row;
                 var taskId = task.id;
@@ -966,7 +977,7 @@ public class TaskTool implements ToolRegistry.Tool {
         }
         // Drop scheduler rows outside the Tx — idempotent and JDBC-only.
         for (var taskId : deletedIds) {
-            services.TaskSchedulingService.cancel(taskId);
+            TaskSchedulingService.cancel(taskId);
         }
         EventLogger.info("TASK_MGMT_HARD_DELETE", agent.name, null,
                 "Task '%s' (%d match%s) hard-deleted via tool"
@@ -981,7 +992,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // Agent-scoped: one agent must not see another agent's recurring
         // schedule (agent isolation). The finder also now
         // includes INTERVAL alongside CRON since both are recurring.
-        var tasks = services.Tx.run(() -> Task.findRecurring(agent));
+        var tasks = Tx.run(() -> Task.findRecurring(agent));
         if (tasks.isEmpty()) return "No recurring tasks configured.";
         var sb = new StringBuilder("Recurring tasks:\n");
         for (var task : tasks) {
@@ -995,7 +1006,7 @@ public class TaskTool implements ToolRegistry.Tool {
             // JCLAW-421: surface the typed delivery (channel / tool / none) so a
             // re-normalization pass can spot tasks whose delivery still lives
             // only in the prose and lift it into the field via updateTask.
-            String delivery = services.DeliverySpec.parse(task.delivery).label();
+            String delivery = DeliverySpec.parse(task.delivery).label();
             sb.append("- %s (%s) [delivery: %s] — %s\n".formatted(
                     task.name, cadence, delivery,
                     task.description != null && task.description.length() > 100
@@ -1011,7 +1022,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // auto-deleted history. This is the one-shot-reminder discovery path
         // listRecurringTasks deliberately omits: a one-time SCHEDULED reminder
         // is neither CRON nor INTERVAL, so findRecurring never returns it.
-        var reminders = services.Tx.run(() -> Task.findReminders(agent));
+        var reminders = Tx.run(() -> Task.findReminders(agent));
         if (reminders.isEmpty()) return "No upcoming reminders.";
         var sb = new StringBuilder("Reminders:\n");
         for (var task : reminders) {

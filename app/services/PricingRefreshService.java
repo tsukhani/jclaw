@@ -12,6 +12,9 @@ import utils.HttpKeys;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import com.google.gson.JsonElement;
+import java.util.Set;
+import okhttp3.Request;
 
 /**
  * Backfills missing pricing data on operator-configured models from
@@ -68,7 +71,7 @@ public final class PricingRefreshService {
      * Enumerated rather than pattern-matched so adding a new provider is
      * an explicit decision.
      */
-    private static final java.util.Set<String> SKIPPED_PROVIDERS = java.util.Set.of(
+    private static final Set<String> SKIPPED_PROVIDERS = Set.of(
             "ollama-cloud", "ollama-local", "lm-studio", "vllm", "loadtest-mock"
     );
 
@@ -120,7 +123,7 @@ public final class PricingRefreshService {
      */
     public static JsonObject fetchLiteLlmCatalog() {
         try {
-            var req = new okhttp3.Request.Builder()
+            var req = new Request.Builder()
                     .url(LITELLM_URL)
                     .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
@@ -213,7 +216,7 @@ public final class PricingRefreshService {
     }
 
     /** Returns true if any field on the model was filled from the catalog. */
-    private static boolean applyToModel(com.google.gson.JsonElement el, JsonObject catalog) {
+    private static boolean applyToModel(JsonElement el, JsonObject catalog) {
         if (!el.isJsonObject()) return false;
         var model = el.getAsJsonObject();
         var id = extractModelId(model);

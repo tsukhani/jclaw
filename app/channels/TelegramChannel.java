@@ -7,6 +7,9 @@ import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
+import java.io.File;
+import java.util.List;
+import services.AttachmentService;
 
 /**
  * Telegram Bot API adapter backed by the {@code org.telegram:telegrambots-client} SDK.
@@ -169,7 +172,7 @@ public class TelegramChannel implements Channel {
      * not abort the caller's binding-activation loop.
      */
     public static void setMyCommands(String botToken,
-            java.util.List<org.telegram.telegrambots.meta.api.objects.commands.BotCommand> commands) {
+            List<org.telegram.telegrambots.meta.api.objects.commands.BotCommand> commands) {
         if (botToken == null || commands == null || commands.isEmpty()) return;
         forToken(botToken).sender.setMyCommands(commands);
     }
@@ -239,7 +242,7 @@ public class TelegramChannel implements Channel {
      * throws.
      */
     public static boolean sendPoll(String botToken, String chatId, String question,
-                                   java.util.List<String> options, Boolean isAnonymous,
+                                   List<String> options, Boolean isAnonymous,
                                    Boolean allowsMultipleAnswers, Integer openPeriod) {
         if (botToken == null) return false;
         return forToken(botToken).sender.sendPoll(chatId, question, options, isAnonymous,
@@ -394,7 +397,7 @@ public class TelegramChannel implements Channel {
      * uniform interface still uploads via the dedicated upload client.
      */
     @Override
-    public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
+    public SendResult sendPhoto(String peerId, File file, String caption) {
         return sender.sendPhoto(peerId, file, caption);
     }
 
@@ -404,7 +407,7 @@ public class TelegramChannel implements Channel {
      * ReplyParameters, Integer, String)} (no reply/topic context).
      */
     @Override
-    public SendResult sendDocument(String peerId, java.io.File file, String caption) {
+    public SendResult sendDocument(String peerId, File file, String caption) {
         return sender.sendDocument(peerId, file, caption);
     }
 
@@ -427,7 +430,7 @@ public class TelegramChannel implements Channel {
      * formatting that spans a chunk boundary may render awkwardly — acceptable for an
      * MVP chunker; a per-channel formatter is the cleaner long-term fix.
      */
-    public static java.util.List<String> chunk(String text, int maxLen) {
+    public static List<String> chunk(String text, int maxLen) {
         return TelegramSender.chunk(text, maxLen);
     }
 
@@ -457,7 +460,7 @@ public class TelegramChannel implements Channel {
     // ── Inbound parsing — delegates to TelegramInboundParser (JCLAW-151) ──
 
     /** @see TelegramInboundParser#prepareInboundAttachments */
-    public static java.util.List<services.AttachmentService.Input> prepareInboundAttachments(
+    public static List<AttachmentService.Input> prepareInboundAttachments(
             String sendToken, String sendChatId, Agent sendAgent, InboundMessage message) {
         return TelegramInboundParser.prepareInboundAttachments(sendToken, sendChatId, sendAgent, message);
     }
@@ -500,7 +503,7 @@ public class TelegramChannel implements Channel {
      * captions aren't used in this MVP — prose accompanying the photo arrives as
      * a separate text message above or below it.
      */
-    public boolean trySendPhoto(String peerId, java.io.File file, String displayName) {
+    public boolean trySendPhoto(String peerId, File file, String displayName) {
         return sender.trySendPhoto(peerId, file, displayName);
     }
 
@@ -512,7 +515,7 @@ public class TelegramChannel implements Channel {
      * overload preserves the legacy call sites. Delegates to the caption-aware
      * overload with a null caption.
      */
-    public boolean trySendPhoto(String peerId, java.io.File file, String displayName,
+    public boolean trySendPhoto(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
         return sender.trySendPhoto(peerId, file, displayName, replyParams, messageThreadId);
     }
@@ -524,7 +527,7 @@ public class TelegramChannel implements Channel {
      * message. Other params as
      * {@link #trySendPhoto(String, java.io.File, String, ReplyParameters, Integer)}.
      */
-    public boolean trySendPhoto(String peerId, java.io.File file, String displayName,
+    public boolean trySendPhoto(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId, String caption) {
         return sender.trySendPhoto(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
@@ -533,7 +536,7 @@ public class TelegramChannel implements Channel {
      * Upload {@code file} as a Telegram document (download attachment). Covers
      * anything that isn't one of the image extensions Telegram renders inline.
      */
-    public boolean trySendDocument(String peerId, java.io.File file, String displayName) {
+    public boolean trySendDocument(String peerId, File file, String displayName) {
         return sender.trySendDocument(peerId, file, displayName);
     }
 
@@ -545,7 +548,7 @@ public class TelegramChannel implements Channel {
      * overload preserves the legacy call sites. Delegates to the caption-aware
      * overload with a null caption.
      */
-    public boolean trySendDocument(String peerId, java.io.File file, String displayName,
+    public boolean trySendDocument(String peerId, File file, String displayName,
                                    ReplyParameters replyParams, Integer messageThreadId) {
         return sender.trySendDocument(peerId, file, displayName, replyParams, messageThreadId);
     }
@@ -555,7 +558,7 @@ public class TelegramChannel implements Channel {
      * omit) rides as the document's {@code caption}. Other params as
      * {@link #trySendDocument(String, java.io.File, String, ReplyParameters, Integer)}.
      */
-    public boolean trySendDocument(String peerId, java.io.File file, String displayName,
+    public boolean trySendDocument(String peerId, File file, String displayName,
                                    ReplyParameters replyParams, Integer messageThreadId, String caption) {
         return sender.trySendDocument(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
@@ -563,52 +566,52 @@ public class TelegramChannel implements Channel {
     // ── JCLAW-364: native media send paths ──
 
     /** Upload {@code file} as a Telegram voice note (.ogg/opus). */
-    public boolean trySendVoice(String peerId, java.io.File file, String displayName) {
+    public boolean trySendVoice(String peerId, File file, String displayName) {
         return sender.trySendVoice(peerId, file, displayName);
     }
 
     /** Reply/topic-aware voice upload; delegates with a null caption. */
-    public boolean trySendVoice(String peerId, java.io.File file, String displayName,
+    public boolean trySendVoice(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
         return sender.trySendVoice(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware voice upload. {@code caption} null/blank to omit. */
-    public boolean trySendVoice(String peerId, java.io.File file, String displayName,
+    public boolean trySendVoice(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId, String caption) {
         return sender.trySendVoice(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
     /** Upload {@code file} as a Telegram audio track (.mp3 and other audio). */
-    public boolean trySendAudio(String peerId, java.io.File file, String displayName) {
+    public boolean trySendAudio(String peerId, File file, String displayName) {
         return sender.trySendAudio(peerId, file, displayName);
     }
 
     /** Reply/topic-aware audio upload; delegates with a null caption. */
-    public boolean trySendAudio(String peerId, java.io.File file, String displayName,
+    public boolean trySendAudio(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
         return sender.trySendAudio(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware audio upload. {@code caption} null/blank to omit. */
-    public boolean trySendAudio(String peerId, java.io.File file, String displayName,
+    public boolean trySendAudio(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId, String caption) {
         return sender.trySendAudio(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
     /** Upload {@code file} as a Telegram video. */
-    public boolean trySendVideo(String peerId, java.io.File file, String displayName) {
+    public boolean trySendVideo(String peerId, File file, String displayName) {
         return sender.trySendVideo(peerId, file, displayName);
     }
 
     /** Reply/topic-aware video upload; delegates with a null caption. */
-    public boolean trySendVideo(String peerId, java.io.File file, String displayName,
+    public boolean trySendVideo(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
         return sender.trySendVideo(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware video upload. {@code caption} null/blank to omit. */
-    public boolean trySendVideo(String peerId, java.io.File file, String displayName,
+    public boolean trySendVideo(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId, String caption) {
         return sender.trySendVideo(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
@@ -624,7 +627,7 @@ public class TelegramChannel implements Channel {
      * — never throws — so the caller can fall back to individual sends.
      */
     public boolean sendMediaGroup(String peerId,
-                                  java.util.List<TelegramOutboundPlanner.FileSegment> items,
+                                  List<TelegramOutboundPlanner.FileSegment> items,
                                   String caption, ReplyParameters replyParams, Integer messageThreadId) {
         return sender.sendMediaGroup(peerId, items, caption, replyParams, messageThreadId);
     }

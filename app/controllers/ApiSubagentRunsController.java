@@ -24,6 +24,12 @@ import java.util.Map;
 import java.util.Set;
 
 import static utils.GsonHolder.INSTANCE;
+import java.io.IOException;
+import java.util.ArrayList;
+import services.AgentService;
+import services.EventLogger;
+import services.search.LuceneIndexer;
+import services.search.MessageSearch;
 
 /**
  * JCLAW-271: REST surface for the SubagentRuns admin page. Lists
@@ -176,10 +182,10 @@ public class ApiSubagentRunsController extends Controller {
     private static List<Long> ftsSubagentRunIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
-            var directIds = services.search.MessageSearch.searchIds(
-                    services.search.LuceneIndexer.Scope.SUBAGENT_RUN, q, 500);
-            var messageIds = services.search.MessageSearch.searchIds(
-                    services.search.LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
+            var directIds = MessageSearch.searchIds(
+                    LuceneIndexer.Scope.SUBAGENT_RUN, q, 500);
+            var messageIds = MessageSearch.searchIds(
+                    LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
 
             Set<Long> union = new HashSet<>(directIds);
             if (!messageIds.isEmpty()) {
@@ -192,8 +198,8 @@ public class ApiSubagentRunsController extends Controller {
                 union.addAll(transcriptRunIds);
             }
             return union.isEmpty() ? List.of() : List.copyOf(union);
-        } catch (java.io.IOException e) {
-            services.EventLogger.warn("search", null, null,
+        } catch (IOException e) {
+            EventLogger.warn("search", null, null,
                     "FTS lookup failed for subagent runs q='%s': %s"
                             .formatted(q, e.getMessage()));
             return null;
@@ -290,7 +296,7 @@ public class ApiSubagentRunsController extends Controller {
             renderJSON("{\"status\":\"deleted\",\"id\":" + id + "}");
             return;
         }
-        services.AgentService.delete(childAgent);
+        AgentService.delete(childAgent);
         renderJSON("{\"status\":\"deleted\",\"id\":" + id + "}");
     }
 
@@ -334,7 +340,7 @@ public class ApiSubagentRunsController extends Controller {
 
     private static Map<Long, String> collectModesForRuns(List<SubagentRun> runs) {
         if (runs.isEmpty()) return Map.of();
-        var ids = new java.util.ArrayList<Long>(runs.size());
+        var ids = new ArrayList<Long>(runs.size());
         for (var r : runs) {
             if (r.id != null) ids.add(r.id);
         }
@@ -351,8 +357,8 @@ public class ApiSubagentRunsController extends Controller {
         // anchoring ones, and the trailing quote in `"run_id":"<id>"` keeps
         // id 5 from matching id 50. The in-Java idSet/most-recent-wins parse
         // below is preserved verbatim so the run→mode mapping is identical.
-        var likeClauses = new java.util.ArrayList<String>(ids.size());
-        var params = new java.util.ArrayList<Object>(ids.size() + 1);
+        var likeClauses = new ArrayList<String>(ids.size());
+        var params = new ArrayList<Object>(ids.size() + 1);
         params.add("SUBAGENT_SPAWN");
         int idx = 2;
         for (var id : ids) {
@@ -363,7 +369,7 @@ public class ApiSubagentRunsController extends Controller {
                 + ") ORDER BY timestamp DESC";
         @SuppressWarnings("unchecked")
         List<EventLog> events = EventLog.find(jpql, params.toArray()).fetch();
-        var idSet = new java.util.HashSet<>(ids);
+        var idSet = new HashSet<>(ids);
         var result = new HashMap<Long, String>();
         for (var ev : events) {
             applySpawnEventMode(ev, idSet, result);
@@ -372,7 +378,7 @@ public class ApiSubagentRunsController extends Controller {
     }
 
     /** Parse one SUBAGENT_SPAWN details payload and populate the run→mode map (most-recent wins). */
-    private static void applySpawnEventMode(EventLog ev, java.util.Set<Long> idSet, Map<Long, String> result) {
+    private static void applySpawnEventMode(EventLog ev, Set<Long> idSet, Map<Long, String> result) {
         if (ev.details == null) return;
         try {
             var obj = JsonParser.parseString(ev.details).getAsJsonObject();

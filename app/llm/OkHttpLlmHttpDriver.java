@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import utils.HttpFactories;
 
 /**
  * OkHttp 5.x-backed LLM transport. The only HTTP path for outbound LLM
@@ -51,7 +52,7 @@ final class OkHttpLlmHttpDriver {
                 .post(RequestBody.create(jsonBody, JSON));
         if (channel != null) builder.tag(String.class, channel);
         var req = builder.build();
-        var call = utils.HttpFactories.llmSingleShot().newCall(req);
+        var call = HttpFactories.llmSingleShot().newCall(req);
         // Per-call timeout via Call.timeout() — no per-call client allocation.
         call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
         try (var resp = call.execute()) {
@@ -117,7 +118,7 @@ final class OkHttpLlmHttpDriver {
             }
         };
 
-        var eventSource = EventSources.createFactory(utils.HttpFactories.llmStreaming())
+        var eventSource = EventSources.createFactory(HttpFactories.llmStreaming())
                 .newEventSource(req, listener);
         try {
             done.await();

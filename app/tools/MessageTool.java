@@ -18,6 +18,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.ArrayList;
+import play.Play;
+import utils.GsonHolder;
 
 /**
  * JCLAW-327: agent-facing {@code message} tool for mid-flight delivery to
@@ -427,7 +430,7 @@ public class MessageTool implements ToolRegistry.Tool {
             payload.put(PARAM_ACTION, "sent");
             payload.put(PARAM_CHANNEL, channel);
             payload.put(PARAM_TARGET, target);
-            return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+            return GsonHolder.INSTANCE.toJson(payload, Map.class);
         }
         return "Error: " + result.reason();
     }
@@ -567,7 +570,7 @@ public class MessageTool implements ToolRegistry.Tool {
      * {@link #executePoll} before this runs. Must run inside an active Tx.
      */
     private static String poll(Long callingAgentId, String explicitTarget, String question,
-                               java.util.List<String> options, Boolean isAnonymous,
+                               List<String> options, Boolean isAnonymous,
                                Boolean allowsMultiple, Integer openPeriod) {
         var agent = (Agent) Agent.findById(callingAgentId);
         if (agent == null) {
@@ -610,7 +613,7 @@ public class MessageTool implements ToolRegistry.Tool {
     static boolean actionEnabled(String action) {
         var key = cfgKeyFor(action);
         boolean defaultOn = !ACTION_PIN.equals(action) && !ACTION_UNPIN.equals(action);
-        var raw = play.Play.configuration.getProperty(key, Boolean.toString(defaultOn));
+        var raw = Play.configuration.getProperty(key, Boolean.toString(defaultOn));
         if (raw == null || raw.isBlank()) return defaultOn;
         return Boolean.parseBoolean(raw.trim());
     }
@@ -635,7 +638,7 @@ public class MessageTool implements ToolRegistry.Tool {
         payload.put(PARAM_ACTION, action);
         payload.put("status", status);
         if (reason != null) payload.put("reason", reason);
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     private static String optString(JsonObject obj, String key) {
@@ -672,10 +675,10 @@ public class MessageTool implements ToolRegistry.Tool {
      * caller's 2-10 count check surfaces the clean validation error rather than
      * a parse exception. Non-string / blank array elements are skipped.
      */
-    private static java.util.List<String> optStringList(JsonObject obj, String key) {
+    private static List<String> optStringList(JsonObject obj, String key) {
         var el = obj.get(key);
-        if (el == null || el.isJsonNull() || !el.isJsonArray()) return java.util.List.of();
-        var out = new java.util.ArrayList<String>();
+        if (el == null || el.isJsonNull() || !el.isJsonArray()) return List.of();
+        var out = new ArrayList<String>();
         for (var item : el.getAsJsonArray()) {
             if (item == null || item.isJsonNull()) continue;
             try {

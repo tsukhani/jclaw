@@ -11,6 +11,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HexFormat;
 
 /**
  * Single choke-point for malware scanning of binary files inside a skill directory.
@@ -140,6 +141,6 @@ public class SkillBinaryScanner {
     private static String sha256Of(Path file) throws IOException, NoSuchAlgorithmException {
         var digest = MessageDigest.getInstance("SHA-256");
         digest.update(Files.readAllBytes(file));
-        return java.util.HexFormat.of().formatHex(digest.digest());
+        return HexFormat.of().formatHex(digest.digest());
     }
 }

@@ -22,6 +22,14 @@ import java.util.HashMap;
 import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
+import agents.ToolRegistry;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import play.Logger;
+import services.SkillBinaryScanner;
+import services.Tx;
 
 @With(AuthCheck.class)
 public class ApiSkillsController extends Controller {
@@ -83,7 +91,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SkillView.class))))
     @Operation(summary = "List all skills in the global registry")
     public static void list() {
-        var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
+        var skills = new ArrayList<SkillLoader.SkillInfo>();
         var globalDir = SkillLoader.globalSkillsPath();
         if (Files.isDirectory(globalDir)) {
             try (var dirs = Files.list(globalDir)) {
@@ -121,11 +129,11 @@ public class ApiSkillsController extends Controller {
 
     // Aliases for body-text heuristic detection only — maps informal names to canonical tool names.
     // The canonical tool list itself is derived live from ToolRegistry via ToolCatalog.
-    private static final java.util.Map<String, String> TOOL_ALIASES = java.util.Map.ofEntries(
-            java.util.Map.entry("shell", "exec"),
-            java.util.Map.entry("readFile", TOOL_FILESYSTEM),
-            java.util.Map.entry("writeFile", TOOL_FILESYSTEM),
-            java.util.Map.entry("listFiles", TOOL_FILESYSTEM)
+    private static final Map<String, String> TOOL_ALIASES = Map.ofEntries(
+            Map.entry("shell", "exec"),
+            Map.entry("readFile", TOOL_FILESYSTEM),
+            Map.entry("writeFile", TOOL_FILESYSTEM),
+            Map.entry("listFiles", TOOL_FILESYSTEM)
     );
 
     /** GET /api/skills/{name}/files — List all files in a skill folder with metadata and detected tool dependencies. */
@@ -152,12 +160,12 @@ public class ApiSkillsController extends Controller {
      * list is empty, which is the correct answer for pure-reasoning skills. Falls back
      * to the body-text heuristic only for legacy skills that predate the declaration.
      */
-    private static java.util.List<SkillToolRef> resolveSkillTools(Path skillDir, String allContent) {
+    private static List<SkillToolRef> resolveSkillTools(Path skillDir, String allContent) {
         var skillFile = skillDir.resolve(SKILL_MD);
         if (Files.exists(skillFile)) {
             var info = SkillLoader.parseSkillFile(skillFile);
             if (info != null && info.toolsDeclared()) {
-                var result = new java.util.ArrayList<SkillToolRef>();
+                var result = new ArrayList<SkillToolRef>();
                 for (var name : info.tools()) {
                     var tool = lookupToolByName(name);
                     result.add(new SkillToolRef(
@@ -172,9 +180,9 @@ public class ApiSkillsController extends Controller {
         return detectTools(allContent);
     }
 
-    private static java.util.List<SkillToolRef> detectTools(String content) {
-        var detectedTools = new java.util.ArrayList<SkillToolRef>();
-        var seen = new java.util.HashSet<String>();
+    private static List<SkillToolRef> detectTools(String content) {
+        var detectedTools = new ArrayList<SkillToolRef>();
+        var seen = new HashSet<String>();
 
         scanRegisteredToolNames(content, detectedTools, seen);
         scanToolAliases(content, detectedTools, seen);
@@ -185,8 +193,8 @@ public class ApiSkillsController extends Controller {
 
     /** Scan every live tool name from the registry against the body text. */
     private static void scanRegisteredToolNames(String content,
-            java.util.List<SkillToolRef> detectedTools, java.util.Set<String> seen) {
-        for (var tool : agents.ToolRegistry.listTools()) {
+            List<SkillToolRef> detectedTools, Set<String> seen) {
+        for (var tool : ToolRegistry.listTools()) {
             if (content.contains(tool.name()) && seen.add(tool.name())) {
                 detectedTools.add(new SkillToolRef(tool.name(),
                         tool.description() != null ? tool.description() : ""));
@@ -196,7 +204,7 @@ public class ApiSkillsController extends Controller {
 
     /** Informal aliases (readFile, shell, writeFile) → map to the canonical tool. */
     private static void scanToolAliases(String content,
-            java.util.List<SkillToolRef> detectedTools, java.util.Set<String> seen) {
+            List<SkillToolRef> detectedTools, Set<String> seen) {
         for (var entry : TOOL_ALIASES.entrySet()) {
             if (content.contains(entry.getKey()) && seen.add(entry.getValue())) {
                 var canonical = entry.getValue();
@@ -209,7 +217,7 @@ public class ApiSkillsController extends Controller {
 
     /** Implicit shell usage — bash/sh code fences. */
     private static void scanImplicitShellUsage(String content,
-            java.util.List<SkillToolRef> detectedTools, java.util.Set<String> seen) {
+            List<SkillToolRef> detectedTools, Set<String> seen) {
         if (!seen.add("exec")) return;
         if (!(content.contains("```bash") || content.contains("```sh")
                 || content.contains("```shell") || content.contains("run the command")
@@ -221,8 +229,8 @@ public class ApiSkillsController extends Controller {
                 tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
     }
 
-    private static agents.ToolRegistry.Tool lookupToolByName(String name) {
-        return agents.ToolRegistry.lookupTool(name);
+    private static ToolRegistry.Tool lookupToolByName(String name) {
+        return ToolRegistry.lookupTool(name);
     }
 
     private static boolean isTextFile(Path p) {
@@ -230,8 +238,8 @@ public class ApiSkillsController extends Controller {
     }
 
     /** Format a list of scanner violations for user-facing error messages. */
-    private static String formatViolations(java.util.List<services.SkillBinaryScanner.Violation> violations) {
-        return services.SkillPromotionService.formatViolations(violations);
+    private static String formatViolations(List<SkillBinaryScanner.Violation> violations) {
+        return SkillPromotionService.formatViolations(violations);
     }
 
     /** DELETE /api/skills/{name} — Delete a global skill. */
@@ -256,7 +264,7 @@ public class ApiSkillsController extends Controller {
         if (agent == null) notFound();
 
         var agentDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
-        var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
+        var skills = new ArrayList<SkillLoader.SkillInfo>();
         if (Files.isDirectory(agentDir)) {
             try (var dirs = Files.list(agentDir)) {
                 dirs.filter(Files::isDirectory).forEach(dir -> {
@@ -332,7 +340,7 @@ public class ApiSkillsController extends Controller {
         config.enabled = enabled;
         config.save();
 
-        renderJSON(gson.toJson(java.util.Map.of("name", name, KEY_ENABLED, enabled, KEY_STATUS, "ok")));
+        renderJSON(gson.toJson(Map.of("name", name, KEY_ENABLED, enabled, KEY_STATUS, "ok")));
     }
 
     /** POST /api/agents/{id}/skills/{name}/copy — Copy a global skill into the agent's workspace. */
@@ -349,14 +357,14 @@ public class ApiSkillsController extends Controller {
         }
 
         // Verify the agent has every tool this skill declares it needs
-        var toolCheck = services.SkillPromotionService.validateToolRequirements(agent, name);
+        var toolCheck = SkillPromotionService.validateToolRequirements(agent, name);
         if (!toolCheck.ok()) {
             response.status = 400;
             renderText(toolCheck.message());
         }
 
         // Malware scan before the copy touches the agent workspace
-        var copyViolations = services.SkillBinaryScanner.scan(globalDir);
+        var copyViolations = SkillBinaryScanner.scan(globalDir);
         if (!copyViolations.isEmpty()) {
             response.status = 400;
             renderText("Cannot add skill '%s' to agent '%s': malware detected — %s"
@@ -368,7 +376,7 @@ public class ApiSkillsController extends Controller {
         var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve(SKILL_MD));
 
         try {
-            services.SkillPromotionService.copyToAgentWorkspace(agent, name);
+            SkillPromotionService.copyToAgentWorkspace(agent, name);
 
             // Ensure skill is enabled for this agent
             var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
@@ -377,7 +385,7 @@ public class ApiSkillsController extends Controller {
                 config.save();
             }
 
-            renderJSON(gson.toJson(java.util.Map.of(
+            renderJSON(gson.toJson(Map.of(
                     "name", name,
                     KEY_STATUS, "ok",
                     "replaced", replacing
@@ -427,7 +435,7 @@ public class ApiSkillsController extends Controller {
         // the workspace copy — if the filesystem delete fails halfway we'd rather
         // have a stale directory without grants than the inverse. The revoke is
         // idempotent, so a retry after a transient failure is safe.
-        services.SkillPromotionService.revokeAgentAllowlist(agent, name);
+        SkillPromotionService.revokeAgentAllowlist(agent, name);
         deleteSkillDir(dir);
     }
 
@@ -462,15 +470,15 @@ public class ApiSkillsController extends Controller {
         var requestingAgentId = agent.id;
         Thread.ofVirtual().name("skill-promote").start(() -> {
             try {
-                services.Tx.run(() -> services.SkillPromotionService.promoteInBackground(
+                Tx.run(() -> SkillPromotionService.promoteInBackground(
                         skillDir, skillName, requestingAgentId));
             } catch (Exception e) {
-                play.Logger.error("Background promotion failed for '%s': %s",
+                Logger.error("Background promotion failed for '%s': %s",
                         skillName, e.getMessage());
             }
         });
 
-        renderJSON(gson.toJson(java.util.Map.of(KEY_STATUS, "promoting", KEY_SKILL_NAME, skillName)));
+        renderJSON(gson.toJson(Map.of(KEY_STATUS, "promoting", KEY_SKILL_NAME, skillName)));
     }
 
     /** PUT /api/skills/{name}/rename — Rename a global skill folder. */
@@ -497,7 +505,7 @@ public class ApiSkillsController extends Controller {
         try {
             Files.move(sourceDir, targetDir);
             SkillLoader.clearCache();
-            renderJSON(gson.toJson(java.util.Map.of("oldName", name, KEY_NEW_NAME, newName, KEY_STATUS, "ok")));
+            renderJSON(gson.toJson(Map.of("oldName", name, KEY_NEW_NAME, newName, KEY_STATUS, "ok")));
         } catch (IOException e) {
             error(500, "Failed to rename skill: " + e.getMessage());
         }
@@ -506,11 +514,11 @@ public class ApiSkillsController extends Controller {
     // --- Shared helpers for global / agent-workspace skill operations ---
 
     /** Aggregated file metadata + concatenated text content from a skill dir walk. */
-    private record SkillDirWalk(java.util.List<java.util.Map<String, Object>> files, String allTextContent) {}
+    private record SkillDirWalk(List<Map<String, Object>> files, String allTextContent) {}
 
     /** Frontmatter fields surfaced alongside the file list. */
-    private record SkillMeta(java.util.List<String> commands, String author) {
-        static SkillMeta empty() { return new SkillMeta(java.util.List.of(), ""); }
+    private record SkillMeta(List<String> commands, String author) {
+        static SkillMeta empty() { return new SkillMeta(List.of(), ""); }
     }
 
     /** Walk a skill directory and render files + detected tools as JSON. */
@@ -521,7 +529,7 @@ public class ApiSkillsController extends Controller {
             var detectedTools = resolveSkillTools(dir, walked.allTextContent());
             var meta = readSkillMeta(dir);
 
-            var result = new java.util.HashMap<String, Object>();
+            var result = new HashMap<String, Object>();
             result.put("files", walked.files());
             result.put("tools", detectedTools);
             result.put("commands", meta.commands());
@@ -533,7 +541,7 @@ public class ApiSkillsController extends Controller {
     }
 
     private static SkillDirWalk walkSkillDir(Path dir) throws IOException {
-        var files = new java.util.ArrayList<java.util.Map<String, Object>>();
+        var files = new ArrayList<Map<String, Object>>();
         var allTextContent = new StringBuilder();
         try (var walk = Files.walk(dir)) {
             walk.filter(Files::isRegularFile)
@@ -543,9 +551,9 @@ public class ApiSkillsController extends Controller {
         return new SkillDirWalk(files, allTextContent.toString());
     }
 
-    private static java.util.Map<String, Object> buildFileEntry(Path dir, Path p, StringBuilder allTextContent) {
+    private static Map<String, Object> buildFileEntry(Path dir, Path p, StringBuilder allTextContent) {
         var rel = dir.relativize(p).toString();
-        var map = new java.util.HashMap<String, Object>();
+        var map = new HashMap<String, Object>();
         map.put("path", rel);
         map.put("name", p.getFileName().toString());
         try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
@@ -567,7 +575,7 @@ public class ApiSkillsController extends Controller {
         if (!Files.exists(skillMd)) return SkillMeta.empty();
         var info = SkillLoader.parseSkillFile(skillMd);
         if (info == null) return SkillMeta.empty();
-        var commands = info.commands() != null ? info.commands() : java.util.List.<String>of();
+        var commands = info.commands() != null ? info.commands() : List.<String>of();
         var author = info.author() != null ? info.author() : "";
         return new SkillMeta(commands, author);
     }
@@ -585,7 +593,7 @@ public class ApiSkillsController extends Controller {
         if (!Files.exists(target)) notFound();
 
         try {
-            renderJSON(gson.toJson(java.util.Map.of(
+            renderJSON(gson.toJson(Map.of(
                     "path", filePath,
                     "content", Files.readString(target)
             )));
@@ -600,7 +608,7 @@ public class ApiSkillsController extends Controller {
         try {
             SkillPromotionService.deleteRecursive(dir);
             SkillLoader.clearCache();
-            renderJSON(gson.toJson(java.util.Map.of(KEY_STATUS, "ok")));
+            renderJSON(gson.toJson(Map.of(KEY_STATUS, "ok")));
         } catch (IOException e) {
             error(500, "Failed to delete skill: " + e.getMessage());
         }

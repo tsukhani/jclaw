@@ -3,6 +3,8 @@ package channels;
 import services.EventLogger;
 
 import java.util.List;
+import java.util.function.Consumer;
+import utils.PlayConfig;
 
 /**
  * M2 inbound long-message reassembly: Telegram clients auto-split a long paste
@@ -103,7 +105,7 @@ public final class TelegramInboundTextBuffer {
      * non-eligible messages belong on the {@link TelegramMediaGroupBuffer} path.
      */
     public static void add(InboundMessage incoming,
-                           java.util.function.Consumer<InboundMessage> dispatcher) {
+                           Consumer<InboundMessage> dispatcher) {
         BUFFER.offer(bufferKey(incoming), incoming, dispatcher);
     }
 
@@ -159,12 +161,12 @@ public final class TelegramInboundTextBuffer {
      *  {@code telegram.inbound.coalesce-threshold} (default 4000). Unparseable
      *  / unset values fall back to the default. */
     static int coalesceThreshold() {
-        return utils.PlayConfig.intOr(CFG_THRESHOLD, DEFAULT_COALESCE_THRESHOLD);
+        return PlayConfig.intOr(CFG_THRESHOLD, DEFAULT_COALESCE_THRESHOLD);
     }
 
     /** Idle window in ms before a buffered group flushes, read from
      *  {@code telegram.inbound.coalesce-window-ms} (default 750). */
     static long coalesceWindowMs() {
-        return utils.PlayConfig.longOr(CFG_WINDOW_MS, DEFAULT_COALESCE_WINDOW_MS);
+        return PlayConfig.longOr(CFG_WINDOW_MS, DEFAULT_COALESCE_WINDOW_MS);
     }
 }

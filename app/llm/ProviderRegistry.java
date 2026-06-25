@@ -12,6 +12,11 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import com.google.gson.Gson;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import services.Tx;
+import utils.GsonHolder;
 
 /**
  * Loads LLM provider configurations from the Config database table and
@@ -37,14 +42,14 @@ public final class ProviderRegistry {
     /** Providers whose {@code provider.*} credentials are image-generation only (JCLAW-225, BFL Flux)
      *  and must NOT be registered as chat LlmProviders — they don't speak {@code /chat/completions}.
      *  The {@code services.imagegen} clients read their {@code provider.bfl.*} keys directly. */
-    private static final java.util.Set<String> IMAGE_ONLY_PROVIDERS = java.util.Set.of("bfl", "replicate");
+    private static final Set<String> IMAGE_ONLY_PROVIDERS = Set.of("bfl", "replicate");
 
-    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
+    private static final Gson gson = GsonHolder.INSTANCE;
     private static volatile Map<String, LlmProvider> cache = Map.of();
     private static volatile long lastRefresh;
     private static final long REFRESH_INTERVAL_MS = 60_000;
     private static final Object refreshLock = new Object();
-    private static final java.util.concurrent.atomic.AtomicBoolean refreshing = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final AtomicBoolean refreshing = new AtomicBoolean(false);
 
     public static LlmProvider get(String name) {
         refreshIfNeeded();
@@ -80,7 +85,7 @@ public final class ProviderRegistry {
         if (lastRefresh == 0L) {
             synchronized (refreshLock) {
                 if (lastRefresh == 0L) {
-                    services.Tx.run(ProviderRegistry::refreshInner);
+                    Tx.run(ProviderRegistry::refreshInner);
                     return;
                 }
             }
@@ -100,7 +105,7 @@ public final class ProviderRegistry {
             // can invoke get()/getPrimary() without holding an ambient transaction
             // just in case the 60s cache is stale. Tx.run short-circuits when
             // already inside a tx, so we don't pay twice.
-            services.Tx.run(ProviderRegistry::refreshInner);
+            Tx.run(ProviderRegistry::refreshInner);
         } finally {
             refreshing.set(false);
         }

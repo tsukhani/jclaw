@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import play.Logger;
 
 /**
  * Content-aware compression pipeline (JCLAW-465 core). Sits between
@@ -157,12 +158,12 @@ public final class CompressionPipeline {
         var after = TokenUsageEstimator.estimateMessage(modelId, candidate).tokens();
         if (after >= before) {
             // Char savings didn't translate to token savings — keep the original.
-            play.Logger.debug("[compress] inflation guard %s/%s %d->%d tokens, kept original",
+            Logger.debug("[compress] inflation guard %s/%s %d->%d tokens, kept original",
                     type, result.algorithm(), before, after);
             CompressionMetrics.recordInflationGuard(settings.agentId(), settings.channel(), modelId, type.name(), before, after);
             return msg;
         }
-        play.Logger.debug("[compress] %s/%s %d->%d tokens (-%d)",
+        Logger.debug("[compress] %s/%s %d->%d tokens (-%d)",
                 type, result.algorithm(), before, after, before - after);
         CompressionMetrics.recordCompression(settings.agentId(), settings.channel(), modelId, type.name(), result.algorithm(), before, after);
         return candidate;

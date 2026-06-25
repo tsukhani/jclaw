@@ -25,6 +25,9 @@ import java.util.Map;
 import java.util.Set;
 
 import static java.util.stream.Collectors.joining;
+import com.google.gson.JsonObject;
+import java.io.UncheckedIOException;
+import services.AgentService;
 
 /**
  * Domain logic for promoting agent workspace skills to the global registry
@@ -136,7 +139,7 @@ public class SkillPromotionService {
                         // found, target read-only filesystem, etc.) rather than
                         // just the source path. The cause itself is preserved
                         // for stack-trace diagnostics.
-                        throw new java.io.UncheckedIOException(
+                        throw new UncheckedIOException(
                                 "Failed to copy " + source.toAbsolutePath() + ": " + ex,
                                 ex);
                     }
@@ -183,7 +186,7 @@ public class SkillPromotionService {
             if (Files.exists(stagingDir)) {
                 try { deleteRecursive(stagingDir); } catch (IOException _) {}
             }
-            if (e instanceof java.io.UncheckedIOException uioe) throw uioe.getCause();
+            if (e instanceof UncheckedIOException uioe) throw uioe.getCause();
             throw e instanceof IOException ioe ? ioe : new IOException(e.getMessage(), e);
         }
     }
@@ -240,7 +243,7 @@ public class SkillPromotionService {
      */
     public static boolean hasSkillCreatorCapability(Agent agent) {
         if (agent == null) return false;
-        var workspaceSkillMd = services.AgentService.workspacePath(agent.name)
+        var workspaceSkillMd = AgentService.workspacePath(agent.name)
                 .resolve(SKILLS_DIR).resolve(SKILL_CREATOR_NAME).resolve(SKILL_FILE_NAME);
         if (!Files.exists(workspaceSkillMd)) return false;
         var cfg = AgentSkillConfig.findByAgentAndSkill(agent, SKILL_CREATOR_NAME);
@@ -659,7 +662,7 @@ public class SkillPromotionService {
     public static String stripCredentialsJson(String content) {
         try {
             var json = JsonParser.parseString(content).getAsJsonObject();
-            var stripped = new com.google.gson.JsonObject();
+            var stripped = new JsonObject();
             for (var entry : json.entrySet()) {
                 stripped.addProperty(entry.getKey(), "[CREDENTIAL]");
             }

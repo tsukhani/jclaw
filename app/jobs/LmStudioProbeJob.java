@@ -4,6 +4,7 @@ import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.LmStudioProbe;
+import play.Play;
 
 /**
  * JCLAW-182: probe the configured LM Studio instance once at boot. Same shape
@@ -22,7 +23,7 @@ public class LmStudioProbeJob extends Job<Void> {
         // probe is operator guidance, contributes zero signal under
         // autotest (which points providers at 127.0.0.1 mock servers),
         // and creates a path for external-state flakiness.
-        if (play.Play.runningInTestMode()) return;
+        if (Play.runningInTestMode()) return;
         ProbeJobs.run("lm-studio", "provider.lm-studio.baseUrl",
                 "Download LM Studio from https://lmstudio.ai, load a model in the My Models "
                         + "tab, then start the local server from the Server tab (default port 1234).",

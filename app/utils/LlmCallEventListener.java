@@ -6,6 +6,7 @@ import okhttp3.EventListener;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import play.Logger;
 
 /**
  * OkHttp EventListener for outbound LLM calls. Two responsibilities, both
@@ -58,7 +59,7 @@ public final class LlmCallEventListener extends EventListener {
         var url = call.request().url();
         var key = url.host() + ":" + url.port();
         if (SEEN_HOSTS.add(key)) {
-            play.Logger.info("OkHttp negotiated %s with %s",
+            Logger.info("OkHttp negotiated %s with %s",
                     connection.protocol(), key);
         }
     }

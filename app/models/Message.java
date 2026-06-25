@@ -17,6 +17,7 @@ import play.db.jpa.Model;
 
 import java.time.Instant;
 import java.util.List;
+import services.search.LuceneIndexer;
 
 @Entity
 @Table(name = "message", indexes = {
@@ -162,8 +163,8 @@ public class Message extends Model {
     @PostUpdate
     void onIndexUpsert() {
         if (id != null) {
-            services.search.LuceneIndexer.upsert(
-                    services.search.LuceneIndexer.Scope.CONVERSATION_MESSAGE,
+            LuceneIndexer.upsert(
+                    LuceneIndexer.Scope.CONVERSATION_MESSAGE,
                     id, content);
         }
     }
@@ -171,8 +172,8 @@ public class Message extends Model {
     @PostRemove
     void onIndexRemove() {
         if (id != null) {
-            services.search.LuceneIndexer.remove(
-                    services.search.LuceneIndexer.Scope.CONVERSATION_MESSAGE, id);
+            LuceneIndexer.remove(
+                    LuceneIndexer.Scope.CONVERSATION_MESSAGE, id);
         }
     }
 

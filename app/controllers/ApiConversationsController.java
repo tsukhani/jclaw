@@ -22,6 +22,20 @@ import java.util.List;
 import java.util.Map;
 
 import static utils.GsonHolder.INSTANCE;
+import agents.ToolRegistry;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.io.IOException;
+import java.util.Objects;
+import llm.ProviderRegistry;
+import models.MessageAttachment;
+import models.SessionCompaction;
+import services.ConversationQueue;
+import services.EventLogger;
+import services.Tx;
+import services.search.LuceneIndexer;
+import services.search.MessageSearch;
 
 /**
  * CRUD and query endpoints for conversations. Extracted from ApiChatController
@@ -203,8 +217,8 @@ public class ApiConversationsController extends Controller {
         // so conversationToMap doesn't fire a per-row COUNT (N+1, up to 100/call).
         // Mirrors the lastFiredAt bulk pattern in ApiTasksController.list;
         // conversations with no compactions are absent from the map (default 0).
-        var convIds = convos.stream().map(c -> c.id).filter(java.util.Objects::nonNull).toList();
-        java.util.Map<Long, Long> compactionCounts = java.util.Map.of();
+        var convIds = convos.stream().map(c -> c.id).filter(Objects::nonNull).toList();
+        Map<Long, Long> compactionCounts = Map.of();
         if (!convIds.isEmpty()) {
             @SuppressWarnings("unchecked")
             var rows = (List<Object[]>) JPA.em().createQuery(
@@ -212,7 +226,7 @@ public class ApiConversationsController extends Controller {
                             + "WHERE sc.conversation.id IN :ids GROUP BY sc.conversation.id")
                     .setParameter("ids", convIds)
                     .getResultList();
-            var m = java.util.HashMap.<Long, Long>newHashMap(rows.size());
+            var m = HashMap.<Long, Long>newHashMap(rows.size());
             for (var row : rows) {
                 m.put((Long) row[0], (Long) row[1]);
             }
@@ -242,8 +256,8 @@ public class ApiConversationsController extends Controller {
     private static List<Long> ftsConversationIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
-            var messageIds = services.search.MessageSearch.searchIds(
-                    services.search.LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
+            var messageIds = MessageSearch.searchIds(
+                    LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
             if (messageIds.isEmpty()) return List.of();
             @SuppressWarnings("unchecked")
             var convIds = (List<Long>) JPA.em()
@@ -251,12 +265,12 @@ public class ApiConversationsController extends Controller {
                     .setParameter("ids", messageIds)
                     .getResultList();
             return convIds.isEmpty() ? List.of() : convIds;
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             // FTS backend unreachable — surface as "no FTS filter" rather
             // than fail the whole list. The operator sees the equality
             // filters' result set and the absence of FTS-narrowed hits;
             // less surprising than a 500 on a search bar.
-            services.EventLogger.warn("search", null, null,
+            EventLogger.warn("search", null, null,
                     "FTS lookup failed for conversations q='%s': %s"
                             .formatted(q, e.getMessage()));
             return null;
@@ -277,7 +291,7 @@ public class ApiConversationsController extends Controller {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
         renderJSON(gson.toJson(conversationToMap(conversation,
-                models.SessionCompaction.count("conversation = ?1", conversation))));
+                SessionCompaction.count("conversation = ?1", conversation))));
     }
 
     /**
@@ -317,7 +331,7 @@ public class ApiConversationsController extends Controller {
         map.put("toolCalls", enrichToolCallsWithIcons(m.toolCalls));
         map.put("toolResults", m.toolResults);
         if (m.toolResultStructured != null) {
-            map.put("toolResultStructured", com.google.gson.JsonParser.parseString(m.toolResultStructured));
+            map.put("toolResultStructured", JsonParser.parseString(m.toolResultStructured));
         }
         // Include reasoning text so the collapsible thinking bubble
         // re-renders identically after a conversation reload. Null for
@@ -325,7 +339,7 @@ public class ApiConversationsController extends Controller {
         if (m.reasoning != null) map.put("reasoning", m.reasoning);
         map.put("createdAt", m.createdAt.toString());
         if (m.usageJson != null) {
-            map.put("usage", com.google.gson.JsonParser.parseString(m.usageJson));
+            map.put("usage", JsonParser.parseString(m.usageJson));
         }
         // JCLAW-267: marker for inline-mode subagent runs. The chat UI
         // folds consecutive messages sharing this id into a single
@@ -345,7 +359,7 @@ public class ApiConversationsController extends Controller {
         if (m.messageKind != null) {
             map.put("messageKind", m.messageKind);
             if (m.metadata != null) {
-                map.put("metadata", com.google.gson.JsonParser.parseString(m.metadata));
+                map.put("metadata", JsonParser.parseString(m.metadata));
             }
         }
         // JCLAW-291: model-output truncation flag. Surfaced only when true
@@ -363,7 +377,7 @@ public class ApiConversationsController extends Controller {
     }
 
     private static List<HashMap<String, Object>> attachmentsToList(
-            java.util.List<models.MessageAttachment> attachments) {
+            List<MessageAttachment> attachments) {
         return attachments.stream().map(a -> {
             var av = new HashMap<String, Object>();
             av.put("uuid", a.uuid);
@@ -384,8 +398,8 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = QueueStatusResponse.class)))
     @Operation(summary = "Get the busy flag and queued-message count for a conversation")
     public static void getQueueStatus(Long id) {
-        var busy = services.ConversationQueue.isBusy(id);
-        var queueSize = services.ConversationQueue.getQueueSize(id);
+        var busy = ConversationQueue.isBusy(id);
+        var queueSize = ConversationQueue.getQueueSize(id);
         renderJSON(gson.toJson(new QueueStatusResponse(busy, queueSize)));
     }
 
@@ -407,7 +421,7 @@ public class ApiConversationsController extends Controller {
         if (message.conversation == null || !message.conversation.id.equals(id)) {
             badRequest();
         }
-        services.Tx.run((Runnable) message::delete);
+        Tx.run((Runnable) message::delete);
         renderJSON(gson.toJson(new StatusResponse("deleted")));
     }
 
@@ -475,13 +489,13 @@ public class ApiConversationsController extends Controller {
         badRequest();
     }
 
-    private static String stringField(com.google.gson.JsonObject obj, String key) {
+    private static String stringField(JsonObject obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         var s = obj.get(key).getAsString();
         return (s == null || s.isBlank()) ? null : s;
     }
 
-    private static Long longField(com.google.gson.JsonObject obj, String key) {
+    private static Long longField(JsonObject obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         return obj.get(key).getAsLong();
     }
@@ -528,7 +542,7 @@ public class ApiConversationsController extends Controller {
                 || newModelId == null || newModelId.isBlank()) badRequest();
 
         // Validate against ProviderRegistry — same checks as /model NAME.
-        var provider = llm.ProviderRegistry.get(newProvider);
+        var provider = ProviderRegistry.get(newProvider);
         if (provider == null) {
             response.status = 400;
             renderJSON(gson.toJson(new ErrorResponse(
@@ -630,16 +644,16 @@ public class ApiConversationsController extends Controller {
      * malformed JSON so the UI's guard on missing tool-call columns still
      * works.
      */
-    private static com.google.gson.JsonArray enrichToolCallsWithIcons(String toolCallsJson) {
+    private static JsonArray enrichToolCallsWithIcons(String toolCallsJson) {
         if (toolCallsJson == null || toolCallsJson.isBlank()) return null;
         try {
-            var parsed = com.google.gson.JsonParser.parseString(toolCallsJson);
-            com.google.gson.JsonArray arr;
+            var parsed = JsonParser.parseString(toolCallsJson);
+            JsonArray arr;
             if (parsed.isJsonArray()) {
                 arr = parsed.getAsJsonArray();
             }
             else if (parsed.isJsonObject()) {
-                arr = new com.google.gson.JsonArray();
+                arr = new JsonArray();
                 arr.add(parsed.getAsJsonObject());
             }
             else {
@@ -653,7 +667,7 @@ public class ApiConversationsController extends Controller {
                     var fn = obj.getAsJsonObject(KEY_FUNCTION);
                     if (fn.has("name")) name = fn.get("name").getAsString();
                 }
-                obj.addProperty("icon", agents.ToolRegistry.iconFor(name));
+                obj.addProperty("icon", ToolRegistry.iconFor(name));
             }
             return arr;
         } catch (Exception _) {

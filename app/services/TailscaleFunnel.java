@@ -9,6 +9,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.io.Closeable;
+import java.io.File;
+import play.Play;
 
 /**
  * Tailscale Funnel integration (JCLAW-84): expose JClaw's local HTTP port to the
@@ -95,7 +98,7 @@ public final class TailscaleFunnel {
     public static int configuredPort() {
         int fallback;
         try {
-            fallback = Integer.parseInt(play.Play.configuration.getProperty("http.port", "9000"));
+            fallback = Integer.parseInt(Play.configuration.getProperty("http.port", "9000"));
         } catch (NumberFormatException _) {
             fallback = 9000;
         }
@@ -209,7 +212,7 @@ public final class TailscaleFunnel {
         var path = which.stdout() != null ? which.stdout().strip() : "";
         if (which.ok() && !path.isBlank()) {
             resolved = path;
-        } else if (new java.io.File(MAC_APP_BINARY).canExecute()) {
+        } else if (new File(MAC_APP_BINARY).canExecute()) {
             resolved = MAC_APP_BINARY;
         }
         if (runner == PROCESS_RUNNER) cachedBinary = resolved;
@@ -351,7 +354,7 @@ public final class TailscaleFunnel {
         }
     }
 
-    private static void closeQuietly(java.io.Closeable c) {
+    private static void closeQuietly(Closeable c) {
         try {
             c.close();
         } catch (IOException _) {

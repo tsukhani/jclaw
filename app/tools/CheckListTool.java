@@ -6,10 +6,15 @@ import models.Agent;
 
 import java.util.List;
 import java.util.Map;
+import agents.ToolAction;
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import utils.GsonHolder;
 
 public class CheckListTool implements ToolRegistry.Tool {
 
-    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
+    private static final Gson gson = GsonHolder.INSTANCE;
 
     private static final String FIELD_CONTENT = "content";
     private static final String FIELD_STATUS = "status";
@@ -32,9 +37,9 @@ public class CheckListTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction("update", "Submit a checklist with items and statuses; at most one item may be in_progress at a time")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction("update", "Submit a checklist with items and statuses; at most one item may be in_progress at a time")
         );
     }
 
@@ -104,7 +109,7 @@ public class CheckListTool implements ToolRegistry.Tool {
         static ItemValidation ok(boolean inProgress) { return new ItemValidation(null, inProgress); }
     }
 
-    private static ItemValidation validateItem(com.google.gson.JsonElement el, int i) {
+    private static ItemValidation validateItem(JsonElement el, int i) {
         if (!el.isJsonObject()) {
             return ItemValidation.fail("Error: Item %d must be an object.".formatted(i));
         }
@@ -121,7 +126,7 @@ public class CheckListTool implements ToolRegistry.Tool {
         return ItemValidation.ok("in_progress".equals(status));
     }
 
-    private static String optString(com.google.gson.JsonObject item, String key) {
+    private static String optString(JsonObject item, String key) {
         var el = item.get(key);
         if (el == null || el.isJsonNull()) return null;
         return el.getAsString();

@@ -14,6 +14,17 @@ import services.Tx;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import channels.TelegramModelSelector;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.function.Supplier;
+import models.EventLog;
+import models.SubagentRun;
+import services.ConfigService;
+import services.ConversationQueue;
+import services.ModelOverrideResolver;
+import services.SessionCompactor;
+import services.SubagentRegistry;
 
 /**
  * Chat slash-command registry and dispatcher (JCLAW-26).
@@ -418,12 +429,12 @@ public final class Commands {
                     "/stop with no current conversation");
             return new Result(null, "No active conversation. Nothing to stop.", Command.STOP);
         }
-        if (!services.ConversationQueue.isBusy(current.id)) {
+        if (!ConversationQueue.isBusy(current.id)) {
             EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                     "/stop for conversation %d — nothing in flight".formatted(current.id));
             return new Result(current, "Nothing to stop.", Command.STOP);
         }
-        services.ConversationQueue.cancellationFlag(current.id).set(true);
+        ConversationQueue.cancellationFlag(current.id).set(true);
         EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                 "/stop signalled cancellation for conversation %d".formatted(current.id));
         return new Result(current, "Stopped.", Command.STOP);
@@ -460,7 +471,7 @@ public final class Commands {
         // Resolve provider: prefer the conversation override, fall back to
         // the agent default, then to the registry's primary. Mirrors
         // AgentRunner.run's provider-selection flow.
-        var resolved = services.ModelOverrideResolver.resolve(current, agent);
+        var resolved = ModelOverrideResolver.resolve(current, agent);
         var providerName = resolved.provider();
         var primary = ProviderRegistry.get(providerName);
         if (primary == null) primary = ProviderRegistry.getPrimary();
@@ -472,19 +483,19 @@ public final class Commands {
 
         var modelId = resolved.modelId();
         var modelLabel = primary.config().name() + "/" + modelId;
-        var maxOutput = services.ConfigService.getInt("chat.compactionMaxTokens", 8192);
+        var maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
 
         final var capturedPrimary = primary;
         final var capturedModelId = modelId;
-        services.SessionCompactor.Summarizer summarizer = sumMsgs -> {
+        SessionCompactor.Summarizer summarizer = sumMsgs -> {
             // Slash-command-triggered compaction has no inbound chat-channel
             // context (it runs on a programmatic invocation), so dispatcher_wait
             // for this call records under "unknown".
-            var resp = capturedPrimary.chat(capturedModelId, sumMsgs, java.util.List.of(), maxOutput, null, null);
-            return services.SessionCompactor.firstChoiceText(resp);
+            var resp = capturedPrimary.chat(capturedModelId, sumMsgs, List.of(), maxOutput, null, null);
+            return SessionCompactor.firstChoiceText(resp);
         };
 
-        var result = services.SessionCompactor.compact(current.id, modelLabel, summarizer,
+        var result = SessionCompactor.compact(current.id, modelLabel, summarizer,
                 /*force*/ true, args);
         var responseText = buildCompactResponseText(result, args);
         persistCompactAckAndLog(agent, channelType, current, responseText,
@@ -499,7 +510,7 @@ public final class Commands {
      * web both render the leading {@code >} as a blockquote for a clear
      * visual boundary.
      */
-    private static String buildCompactResponseText(services.SessionCompactor.CompactionResult result, String args) {
+    private static String buildCompactResponseText(SessionCompactor.CompactionResult result, String args) {
         if (!result.compacted()) {
             var reason = result.skipReason();
             if ("no safe boundary or below min-turns".equals(reason)) {
@@ -610,7 +621,7 @@ public final class Commands {
      */
     private static Result executeModelSummary(Agent agent, String channelType, Conversation current) {
         if ("telegram".equals(channelType) && current != null && agent != null) {
-            var delivered = channels.TelegramModelSelector.sendSummary(agent, current);
+            var delivered = TelegramModelSelector.sendSummary(agent, current);
             EventLogger.info(EVENT_CATEGORY_SLASH, agent.name, channelType,
                     "/model (summary+keyboard) for conversation " + current.id
                             + (delivered ? "" : " — delivery failed"));
@@ -637,7 +648,7 @@ public final class Commands {
 
     /** Tx-wrap response build, persist a canned assistant message, and emit the SLASH_COMMAND event log. */
     private static Result persistAndLogModel(Agent agent, String channelType, Conversation current,
-                                             String logPrefix, java.util.function.Supplier<String> build) {
+                                             String logPrefix, Supplier<String> build) {
         var responseText = Tx.run(() -> {
             var text = build.get();
             persistCannedResponseInTx(current, text);
@@ -706,19 +717,19 @@ public final class Commands {
 
     /** Resolve the effective provider name — override when present, else agent default. */
     private static String effectiveProviderName(Agent agent, Conversation current) {
-        return services.ModelOverrideResolver.provider(current, agent);
+        return ModelOverrideResolver.provider(current, agent);
     }
 
     /** Resolve the effective model id — override when present, else agent default. */
     private static String effectiveModelIdFor(Agent agent, Conversation current) {
-        return services.ModelOverrideResolver.modelId(current, agent);
+        return ModelOverrideResolver.modelId(current, agent);
     }
 
     public static String buildModelResponse(Agent agent, Conversation current) {
         if (agent == null) return "No agent bound to this conversation.";
         var providerName = effectiveProviderName(agent, current);
         var modelId = effectiveModelIdFor(agent, current);
-        var overrideActive = services.ModelOverrideResolver.hasOverride(current);
+        var overrideActive = ModelOverrideResolver.hasOverride(current);
         var model = resolveModel(agent, current);
         if (model.isEmpty()) {
             return "Model not found in provider config (%s/%s). Re-assign the agent's model or restore the provider entry."
@@ -872,7 +883,7 @@ public final class Commands {
                 && m.cachedReadPrice() < 0 && m.cacheWritePrice() < 0) {
             return "unknown";
         }
-        var parts = new java.util.ArrayList<String>(4);
+        var parts = new ArrayList<String>(4);
         parts.add("input " + formatPrice(m.promptPrice()));
         parts.add("output " + formatPrice(m.completionPrice()));
         parts.add("cache read " + formatPrice(m.cachedReadPrice()));
@@ -1084,16 +1095,16 @@ public final class Commands {
         // RUNNING rows to the top (stable, small N — limit 50). Limit a
         // generous 50 so a long-running parent's history still fits;
         // anything more goes to the admin page.
-        List<models.SubagentRun> runs = models.SubagentRun.find(
+        List<SubagentRun> runs = SubagentRun.find(
                 "parentConversation = ?1 ORDER BY startedAt DESC",
                 current).fetch(50);
         if (runs.isEmpty()) {
             return "No subagent runs in this conversation.";
         }
-        runs = new java.util.ArrayList<>(runs);
+        runs = new ArrayList<>(runs);
         runs.sort((a, b) -> {
-            int aRunning = a.status == models.SubagentRun.Status.RUNNING ? 0 : 1;
-            int bRunning = b.status == models.SubagentRun.Status.RUNNING ? 0 : 1;
+            int aRunning = a.status == SubagentRun.Status.RUNNING ? 0 : 1;
+            int bRunning = b.status == SubagentRun.Status.RUNNING ? 0 : 1;
             if (aRunning != bRunning) return Integer.compare(aRunning, bRunning);
             // Tie-break: newer first. startedAt is non-null per @PrePersist.
             return b.startedAt.compareTo(a.startedAt);
@@ -1108,7 +1119,7 @@ public final class Commands {
 
     private static String renderSubagentInfo(Long runId) {
         if (runId == null) return MISSING_RUN_ID_MSG;
-        var run = (models.SubagentRun) models.SubagentRun.findById(runId);
+        var run = (SubagentRun) SubagentRun.findById(runId);
         if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
         // Pull mode/context from the most recent SUBAGENT_SPAWN event for this
         // run id. Those fields aren't on SubagentRun directly — the typed
@@ -1147,14 +1158,14 @@ public final class Commands {
         // The run must exist before we promise log rows for it; surface a
         // clear 404 rather than an empty list (which an operator would
         // misread as "no events" when the id is actually a typo).
-        var run = (models.SubagentRun) models.SubagentRun.findById(runId);
+        var run = (SubagentRun) SubagentRun.findById(runId);
         if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
 
         // EventLog.details is a JSON blob containing run_id. H2's LIKE on a
         // small set of rows is cheap; we filter further in Java to extract
         // the canonical run_id field rather than matching string prefixes
         // that could collide with a substring elsewhere in the payload.
-        List<models.EventLog> rows = models.EventLog.<models.EventLog>find(
+        List<EventLog> rows = EventLog.<EventLog>find(
                 "details LIKE ?1 AND category LIKE 'SUBAGENT_%' ORDER BY timestamp ASC",
                 runIdLikePattern(runId)).fetch(SUBAGENT_LOG_LIMIT);
         if (rows.isEmpty()) {
@@ -1177,7 +1188,7 @@ public final class Commands {
         var reason = agent != null
                 ? "Killed by operator via /subagent kill (agent " + agent.name + ")"
                 : "Killed by operator via /subagent kill";
-        var result = services.SubagentRegistry.kill(runId, reason);
+        var result = SubagentRegistry.kill(runId, reason);
         return result.message();
     }
 
@@ -1196,7 +1207,7 @@ public final class Commands {
      */
     private static String renderSubagentHistory(Agent agent, Long runId) {
         if (runId == null) return MISSING_RUN_ID_MSG;
-        var run = (models.SubagentRun) models.SubagentRun.findById(runId);
+        var run = (SubagentRun) SubagentRun.findById(runId);
         if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
         // Same parent-owned gate as ConversationHistoryTool.
         if (agent == null
@@ -1275,7 +1286,7 @@ public final class Commands {
     }
 
     /** Compact one-line summary of a SubagentRun for the {@code list} view. */
-    private static String formatRunSummary(models.SubagentRun run) {
+    private static String formatRunSummary(SubagentRun run) {
         var label = run.childAgent != null ? run.childAgent.name : "(unnamed)";
         var sb = new StringBuilder();
         sb.append("#").append(run.id)
@@ -1283,7 +1294,7 @@ public final class Commands {
                 .append(' ').append(label)
                 .append(" started=").append(run.startedAt != null ? run.startedAt.toString() : "?");
         if (run.endedAt != null) {
-            var durSec = java.time.Duration.between(run.startedAt, run.endedAt).toSeconds();
+            var durSec = Duration.between(run.startedAt, run.endedAt).toSeconds();
             sb.append(" duration=").append(durSec).append('s');
         }
         return sb.toString();
@@ -1299,7 +1310,7 @@ public final class Commands {
     /** Find the most recent SUBAGENT_SPAWN event for a given run id and
      *  return its {@code details} JSON, or null when no event exists yet. */
     private static String findSpawnEventDetails(Long runId) {
-        List<models.EventLog> rows = models.EventLog.<models.EventLog>find(
+        List<EventLog> rows = EventLog.<EventLog>find(
                 "category = ?1 AND details LIKE ?2 ORDER BY timestamp DESC",
                 "SUBAGENT_SPAWN", runIdLikePattern(runId)).fetch(1);
         return rows.isEmpty() ? null : rows.getFirst().details;

@@ -5,6 +5,7 @@ import models.Conversation;
 import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
+import models.Agent;
 
 /**
  * JCLAW-141: resolves a {@link Channel} instance for a conversation so dispatch
@@ -46,7 +47,7 @@ public final class ChannelRegistry {
      * row. {@code agent}/{@code peerId} are only consulted for Telegram (per-binding
      * token lookup); the other channels ignore them.
      */
-    public static Channel forChannel(String channelType, models.Agent agent, String peerId) {
+    public static Channel forChannel(String channelType, Agent agent, String peerId) {
         var type = ChannelType.fromValue(channelType);
         if (type == null) return null;
         return switch (type) {

@@ -18,6 +18,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import okhttp3.Request;
 
 /**
  * Downloads inbound Telegram attachments (JCLAW-136) via the Bot API.
@@ -164,9 +166,9 @@ public final class TelegramFileDownloader {
         JsonObject getFileResp;
         try {
             var url = apiBaseUrl + "/getFile?file_id=" + pending.telegramFileId();
-            var req = new okhttp3.Request.Builder().url(url).get().build();
+            var req = new Request.Builder().url(url).get().build();
             var call = HttpFactories.general().newCall(req);
-            call.timeout().timeout(GETFILE_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            call.timeout().timeout(GETFILE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             try (var resp = call.execute()) {
                 if (resp.code() != 200) {
                     return new MetaFailed("getFile HTTP " + resp.code());
@@ -212,9 +214,9 @@ public final class TelegramFileDownloader {
             // before opening a socket; SAFE_DNS on DOWNLOAD_CLIENT gates the
             // hostname-resolution path the scheme check can't see.
             SsrfGuard.assertSafeScheme(URI.create(downloadUrl));
-            var req = new okhttp3.Request.Builder().url(downloadUrl).get().build();
+            var req = new Request.Builder().url(downloadUrl).get().build();
             var call = DOWNLOAD_CLIENT.newCall(req);
-            call.timeout().timeout(DOWNLOAD_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            call.timeout().timeout(DOWNLOAD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             try (var resp = call.execute()) {
                 if (resp.code() != 200) {
                     return new DownloadFailed("download HTTP " + resp.code());

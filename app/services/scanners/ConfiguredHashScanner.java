@@ -8,6 +8,8 @@ import okhttp3.Request;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiFunction;
+import java.io.InterruptedIOException;
+import java.util.Objects;
 
 abstract class ConfiguredHashScanner implements Scanner {
 
@@ -31,7 +33,7 @@ abstract class ConfiguredHashScanner implements Scanner {
         this.apiKeyKey = apiKeyKey;
         this.missingKeyWarning = missingKeyWarning;
         this.missingKeyMessage = missingKeyMessage;
-        this.dependencies = java.util.Objects.requireNonNull(dependencies, "dependencies");
+        this.dependencies = Objects.requireNonNull(dependencies, "dependencies");
     }
 
     @Override
@@ -70,7 +72,7 @@ abstract class ConfiguredHashScanner implements Scanner {
             }
             var body = response.body().string();
             return parser.parse(JsonParser.parseString(body).getAsJsonObject());
-        } catch (java.io.InterruptedIOException _) {
+        } catch (InterruptedIOException _) {
             // OkHttp throws InterruptedIOException when a Call is interrupted
             // (Call.timeout firing, Thread.interrupt mid-call, etc.). Re-set
             // the interrupt flag so callers up the stack can observe it.

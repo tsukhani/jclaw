@@ -32,6 +32,18 @@ import org.telegram.telegrambots.meta.generics.TelegramClient;
 import services.EventLogger;
 
 import java.util.concurrent.TimeUnit;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import models.TelegramBinding;
+import play.Play;
+import utils.RetryScheduler;
 
 /**
  * Per-token Telegram outbound engine (JCLAW-151 Phase C2, extracted from
@@ -108,11 +120,11 @@ class TelegramSender {
      * {@code sentByChat} itself — sends and the reaction-gate read happen on
      * different threads.
      */
-    private final java.util.LinkedHashMap<String, java.util.LinkedHashSet<Integer>> sentByChat =
-            new java.util.LinkedHashMap<>(16, 0.75f, true) {
+    private final LinkedHashMap<String, LinkedHashSet<Integer>> sentByChat =
+            new LinkedHashMap<>(16, 0.75f, true) {
                 @Override
                 protected boolean removeEldestEntry(
-                        java.util.Map.Entry<String, java.util.LinkedHashSet<Integer>> eldest) {
+                        Map.Entry<String, LinkedHashSet<Integer>> eldest) {
                     return size() > TelegramChannel.SENT_CHATS_CAP;
                 }
             };
@@ -176,7 +188,7 @@ class TelegramSender {
         if (chatId == null || chatId.isBlank() || messageId == null) return;
         synchronized (sentByChat) {
             var ring = sentByChat.computeIfAbsent(chatId, _ ->
-                    new java.util.LinkedHashSet<>() {
+                    new LinkedHashSet<>() {
                         @Override
                         public boolean add(Integer id) {
                             boolean added = super.add(id);
@@ -247,7 +259,7 @@ class TelegramSender {
      * not abort the caller's binding-activation loop.
      */
     public void setMyCommands(
-            java.util.List<org.telegram.telegrambots.meta.api.objects.commands.BotCommand> commands) {
+            List<org.telegram.telegrambots.meta.api.objects.commands.BotCommand> commands) {
         if (botToken == null || commands == null || commands.isEmpty()) return;
         try {
             client.execute(
@@ -279,11 +291,11 @@ class TelegramSender {
                 .chatId(chatId)
                 .messageId(messageId);
         if (emoji != null && !emoji.isBlank()) {
-            builder.reactionTypes(java.util.List.<ReactionType>of(
+            builder.reactionTypes(List.<ReactionType>of(
                     ReactionTypeEmoji.builder().emoji(emoji).build()));
         } else {
             // Empty list clears the bot's reaction.
-            builder.reactionTypes(java.util.List.of());
+            builder.reactionTypes(List.of());
         }
         try {
             client.execute(builder.build());
@@ -420,7 +432,7 @@ class TelegramSender {
      * throws — so a poll that Telegram rejects can't abort the agent's turn.
      */
     public boolean sendPoll(String chatId, String question,
-                                   java.util.List<String> options, Boolean isAnonymous,
+                                   List<String> options, Boolean isAnonymous,
                                    Boolean allowsMultipleAnswers, Integer openPeriod) {
         if (botToken == null || chatId == null || question == null || question.isBlank()
                 || options == null || options.size() < 2 || options.size() > 12) {
@@ -429,7 +441,7 @@ class TelegramSender {
                             .formatted(options == null ? 0 : options.size()));
             return false;
         }
-        var pollOptions = new java.util.ArrayList<InputPollOption>(options.size());
+        var pollOptions = new ArrayList<InputPollOption>(options.size());
         for (var opt : options) {
             pollOptions.add(InputPollOption.builder().text(opt).build());
         }
@@ -522,7 +534,7 @@ class TelegramSender {
      * can assert the config-read contract, mirroring {@link #replyToMode()}.
      */
     public static boolean suppressLinkPreview() {
-        var raw = play.Play.configuration.getProperty(CFG_LINK_PREVIEW, LINK_PREVIEW_ON);
+        var raw = Play.configuration.getProperty(CFG_LINK_PREVIEW, LINK_PREVIEW_ON);
         return raw != null && raw.trim().equalsIgnoreCase(LINK_PREVIEW_OFF);
     }
 
@@ -559,7 +571,7 @@ class TelegramSender {
      * elsewhere in this class for test-reachable surface).
      */
     public static String replyToMode() {
-        var raw = play.Play.configuration.getProperty(CFG_REPLY_TO_MODE, REPLY_MODE_FIRST);
+        var raw = Play.configuration.getProperty(CFG_REPLY_TO_MODE, REPLY_MODE_FIRST);
         return normalizeReplyMode(raw, REPLY_MODE_FIRST);
     }
 
@@ -583,7 +595,7 @@ class TelegramSender {
      * contract, matching the {@code *ForTest} convention.
      */
     public static String effectiveReplyToMode(String botToken) {
-        var override = models.TelegramBinding.overridesForToken(botToken).replyToMode();
+        var override = TelegramBinding.overridesForToken(botToken).replyToMode();
         if (override == null || override.isBlank()) return replyToMode();
         return normalizeReplyMode(override, replyToMode());
     }
@@ -724,7 +736,7 @@ class TelegramSender {
 
         // JCLAW-369: track "first chunk of the turn" across all segments so the
         // `first` reply-mode applies the reply badge once, not once per segment.
-        var firstChunk = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var firstChunk = new AtomicBoolean(true);
         Integer threadId = sendThreadId(messageThreadId);
         // JCLAW-378: resolve the reply mode once per turn from the binding
         // override (?? config default) so every segment shares one decision.
@@ -744,7 +756,7 @@ class TelegramSender {
      * Integer, String)} (no reply/topic context) so a caller routing through the
      * uniform interface still uploads via the dedicated upload client.
      */
-    public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
+    public SendResult sendPhoto(String peerId, File file, String caption) {
         String fileName = file != null ? file.getName() : null;
         return trySendPhoto(peerId, file, fileName, null, null, caption)
                 ? SendResult.OK : SendResult.FAILED;
@@ -755,7 +767,7 @@ class TelegramSender {
      * Delegates to {@link #trySendDocument(String, java.io.File, String,
      * ReplyParameters, Integer, String)} (no reply/topic context).
      */
-    public SendResult sendDocument(String peerId, java.io.File file, String caption) {
+    public SendResult sendDocument(String peerId, File file, String caption) {
         String fileName = file != null ? file.getName() : null;
         return trySendDocument(peerId, file, fileName, null, null, caption)
                 ? SendResult.OK : SendResult.FAILED;
@@ -765,7 +777,7 @@ class TelegramSender {
     private static boolean dispatchSegment(TelegramSender channel, String chatId,
                                            TelegramOutboundPlanner.Segment segment,
                                            Integer replyToMessageId, Integer threadId,
-                                           java.util.concurrent.atomic.AtomicBoolean firstChunk,
+                                           AtomicBoolean firstChunk,
                                            String mode) {
         if (segment instanceof TelegramOutboundPlanner.TextSegment(String markdown)) {
             return sendTextSegment(channel, chatId, markdown, replyToMessageId, threadId, firstChunk, mode);
@@ -842,7 +854,7 @@ class TelegramSender {
      */
     private static boolean sendTextSegment(TelegramSender channel, String chatId, String markdown,
                                            Integer replyToMessageId, Integer threadId,
-                                           java.util.concurrent.atomic.AtomicBoolean firstChunk,
+                                           AtomicBoolean firstChunk,
                                            String mode) {
         if (markdown == null || markdown.isBlank()) return true;
         var html = TelegramMarkdownFormatter.toHtml(markdown);
@@ -924,7 +936,7 @@ class TelegramSender {
     private static boolean sendMediaGroupSegment(TelegramSender channel, String chatId,
                                                  TelegramOutboundPlanner.MediaGroupSegment mg,
                                                  Integer replyToMessageId, Integer threadId,
-                                                 java.util.concurrent.atomic.AtomicBoolean firstChunk,
+                                                 AtomicBoolean firstChunk,
                                                  String mode) {
         boolean ownsFirst = firstChunk.getAndSet(false);
         var reply = replyParamsFor(replyToMessageId, ownsFirst, mode);
@@ -955,10 +967,10 @@ class TelegramSender {
      * formatting that spans a chunk boundary may render awkwardly — acceptable for an
      * MVP chunker; a per-channel formatter is the cleaner long-term fix.
      */
-    public static java.util.List<String> chunk(String text, int maxLen) {
-        if (text == null || text.isEmpty()) return java.util.List.of(text == null ? "" : text);
-        if (text.length() <= maxLen) return java.util.List.of(text);
-        var out = new java.util.ArrayList<String>();
+    public static List<String> chunk(String text, int maxLen) {
+        if (text == null || text.isEmpty()) return List.of(text == null ? "" : text);
+        if (text.length() <= maxLen) return List.of(text);
+        var out = new ArrayList<String>();
         int start = 0;
         while (text.length() - start > maxLen) {
             int end = start + maxLen;
@@ -1024,7 +1036,7 @@ class TelegramSender {
      * captions aren't used in this MVP — prose accompanying the photo arrives as
      * a separate text message above or below it.
      */
-    public boolean trySendPhoto(String peerId, java.io.File file, String displayName) {
+    public boolean trySendPhoto(String peerId, File file, String displayName) {
         return trySendPhoto(peerId, file, displayName, null, null);
     }
 
@@ -1036,7 +1048,7 @@ class TelegramSender {
      * overload preserves the legacy call sites. Delegates to the caption-aware
      * overload with a null caption.
      */
-    public boolean trySendPhoto(String peerId, java.io.File file, String displayName,
+    public boolean trySendPhoto(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
         return trySendPhoto(peerId, file, displayName, replyParams, messageThreadId, null);
     }
@@ -1048,7 +1060,7 @@ class TelegramSender {
      * message. Other params as
      * {@link #trySendPhoto(String, java.io.File, String, ReplyParameters, Integer)}.
      */
-    public boolean trySendPhoto(String peerId, java.io.File file, String displayName,
+    public boolean trySendPhoto(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId, String caption) {
         var builder = SendPhoto.builder()
                 .chatId(peerId)
@@ -1066,7 +1078,7 @@ class TelegramSender {
      * Upload {@code file} as a Telegram document (download attachment). Covers
      * anything that isn't one of the image extensions Telegram renders inline.
      */
-    public boolean trySendDocument(String peerId, java.io.File file, String displayName) {
+    public boolean trySendDocument(String peerId, File file, String displayName) {
         return trySendDocument(peerId, file, displayName, null, null);
     }
 
@@ -1078,7 +1090,7 @@ class TelegramSender {
      * overload preserves the legacy call sites. Delegates to the caption-aware
      * overload with a null caption.
      */
-    public boolean trySendDocument(String peerId, java.io.File file, String displayName,
+    public boolean trySendDocument(String peerId, File file, String displayName,
                                    ReplyParameters replyParams, Integer messageThreadId) {
         return trySendDocument(peerId, file, displayName, replyParams, messageThreadId, null);
     }
@@ -1088,7 +1100,7 @@ class TelegramSender {
      * omit) rides as the document's {@code caption}. Other params as
      * {@link #trySendDocument(String, java.io.File, String, ReplyParameters, Integer)}.
      */
-    public boolean trySendDocument(String peerId, java.io.File file, String displayName,
+    public boolean trySendDocument(String peerId, File file, String displayName,
                                    ReplyParameters replyParams, Integer messageThreadId, String caption) {
         var builder = SendDocument.builder()
                 .chatId(peerId)
@@ -1113,18 +1125,18 @@ class TelegramSender {
     // overload per send class (no shared PartialBotApiMethod entry point).
 
     /** Upload {@code file} as a Telegram voice note (.ogg/opus). */
-    public boolean trySendVoice(String peerId, java.io.File file, String displayName) {
+    public boolean trySendVoice(String peerId, File file, String displayName) {
         return trySendVoice(peerId, file, displayName, null, null);
     }
 
     /** Reply/topic-aware voice upload; delegates with a null caption. */
-    public boolean trySendVoice(String peerId, java.io.File file, String displayName,
+    public boolean trySendVoice(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
         return trySendVoice(peerId, file, displayName, replyParams, messageThreadId, null);
     }
 
     /** Caption-aware voice upload. {@code caption} null/blank to omit. */
-    public boolean trySendVoice(String peerId, java.io.File file, String displayName,
+    public boolean trySendVoice(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId, String caption) {
         var builder = SendVoice.builder()
                 .chatId(peerId)
@@ -1137,18 +1149,18 @@ class TelegramSender {
     }
 
     /** Upload {@code file} as a Telegram audio track (.mp3 and other audio). */
-    public boolean trySendAudio(String peerId, java.io.File file, String displayName) {
+    public boolean trySendAudio(String peerId, File file, String displayName) {
         return trySendAudio(peerId, file, displayName, null, null);
     }
 
     /** Reply/topic-aware audio upload; delegates with a null caption. */
-    public boolean trySendAudio(String peerId, java.io.File file, String displayName,
+    public boolean trySendAudio(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
         return trySendAudio(peerId, file, displayName, replyParams, messageThreadId, null);
     }
 
     /** Caption-aware audio upload. {@code caption} null/blank to omit. */
-    public boolean trySendAudio(String peerId, java.io.File file, String displayName,
+    public boolean trySendAudio(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId, String caption) {
         var builder = SendAudio.builder()
                 .chatId(peerId)
@@ -1161,18 +1173,18 @@ class TelegramSender {
     }
 
     /** Upload {@code file} as a Telegram video. */
-    public boolean trySendVideo(String peerId, java.io.File file, String displayName) {
+    public boolean trySendVideo(String peerId, File file, String displayName) {
         return trySendVideo(peerId, file, displayName, null, null);
     }
 
     /** Reply/topic-aware video upload; delegates with a null caption. */
-    public boolean trySendVideo(String peerId, java.io.File file, String displayName,
+    public boolean trySendVideo(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId) {
         return trySendVideo(peerId, file, displayName, replyParams, messageThreadId, null);
     }
 
     /** Caption-aware video upload. {@code caption} null/blank to omit. */
-    public boolean trySendVideo(String peerId, java.io.File file, String displayName,
+    public boolean trySendVideo(String peerId, File file, String displayName,
                                 ReplyParameters replyParams, Integer messageThreadId, String caption) {
         var builder = SendVideo.builder()
                 .chatId(peerId)
@@ -1201,7 +1213,7 @@ class TelegramSender {
      * via {@link #uploadClient} (60 s r/w) like the other file paths.
      */
     public boolean sendMediaGroup(String peerId,
-                                  java.util.List<TelegramOutboundPlanner.FileSegment> items,
+                                  List<TelegramOutboundPlanner.FileSegment> items,
                                   String caption, ReplyParameters replyParams, Integer messageThreadId) {
         if (items == null || items.size() < 2 || items.size() > 10) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
@@ -1209,7 +1221,7 @@ class TelegramSender {
                             .formatted(items == null ? 0 : items.size()));
             return false;
         }
-        var medias = new java.util.ArrayList<
+        var medias = new ArrayList<
                 org.telegram.telegrambots.meta.api.objects.media.InputMedia>(items.size());
         for (int i = 0; i < items.size(); i++) {
             var fs = items.get(i);
@@ -1257,7 +1269,7 @@ class TelegramSender {
      * multipart body. {@code caption} null to omit.
      */
     private static org.telegram.telegrambots.meta.api.objects.media.InputMedia buildInputMedia(
-            TelegramOutboundPlanner.MediaKind kind, java.io.File file, String name, String caption) {
+            TelegramOutboundPlanner.MediaKind kind, File file, String name, String caption) {
         if (kind == TelegramOutboundPlanner.MediaKind.PHOTO) {
             var b = org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto.builder()
                     .media(file, name);
@@ -1291,7 +1303,7 @@ class TelegramSender {
      * builds its typed request (chat/file/reply/thread/caption) and passes the
      * execute lambda here.
      */
-    private boolean uploadVia(String kind, String peerId, java.io.File file,
+    private boolean uploadVia(String kind, String peerId, File file,
                               String displayName, UploadCall exec) {
         long startNs = System.nanoTime();
         long fileSize = file.length();
@@ -1432,14 +1444,14 @@ class TelegramSender {
         long delayMs = Math.min(result.retryAfterMs() > 0 ? result.retryAfterMs() : 1000L, 60_000L);
         try {
             // 5 s slack covers the scheduler hop + the second trySend's own latency.
-            boolean ok = utils.RetryScheduler.schedule(
+            boolean ok = RetryScheduler.schedule(
                             () -> trySend(chatId, text, replyParams, messageThreadId).ok(), delayMs)
-                    .get(delayMs + 5_000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
             if (ok) return true;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return false;
-        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException _) {
+        } catch (ExecutionException | TimeoutException _) {
             // Fall through to the error-log branch below.
         }
         EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,

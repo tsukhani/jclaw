@@ -11,6 +11,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Base64;
 import java.util.List;
+import java.io.UncheckedIOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
+import java.util.UUID;
+import play.Logger;
 
 /**
  * Vision/multimodal attachment lifecycle (JCLAW-25). Staged uploads land in
@@ -73,7 +79,7 @@ public final class AttachmentService {
             sniffedMime = TikaHolder.TIKA.detect(stagedFile);
             sizeBytes = Files.size(stagedFile);
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException("Failed to inspect staged attachment: " + e.getMessage(), e);
+            throw new UncheckedIOException("Failed to inspect staged attachment: " + e.getMessage(), e);
         }
         // Mirror the WebM disambiguation in ApiChatController.uploadChatFiles
         // (JCLAW-165 follow-up): Tika sniffs every WebM container as video/webm
@@ -94,13 +100,13 @@ public final class AttachmentService {
         try {
             Files.createDirectories(conversationDir);
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException("Failed to create attachments directory: " + e.getMessage(), e);
+            throw new UncheckedIOException("Failed to create attachments directory: " + e.getMessage(), e);
         }
         var finalPath = AgentService.acquireContained(conversationDir, leaf);
         try {
             Files.move(stagedFile, finalPath, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException("Failed to finalize staged attachment: " + e.getMessage(), e);
+            throw new UncheckedIOException("Failed to finalize staged attachment: " + e.getMessage(), e);
         }
 
         var att = new MessageAttachment();
@@ -118,8 +124,8 @@ public final class AttachmentService {
         return att;
     }
 
-    private static final java.time.format.DateTimeFormatter GENERATED_TS =
-            java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final DateTimeFormatter GENERATED_TS =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     /**
      * Persist a tool-generated image (JCLAW-227). Unlike {@link #finalizeAttachment}, the bytes come
@@ -134,7 +140,7 @@ public final class AttachmentService {
             throw new IllegalArgumentException("generated image bytes are required");
         }
         var mime = (mimeType == null || mimeType.isBlank()) ? "image/png" : mimeType;
-        var uuid = java.util.UUID.randomUUID().toString();
+        var uuid = UUID.randomUUID().toString();
         var ext = extensionForMime(mime);
         var leaf = uuid + "." + ext;
         var conversationDir = AgentService.acquireWorkspacePath(
@@ -142,19 +148,19 @@ public final class AttachmentService {
         try {
             Files.createDirectories(conversationDir);
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException("Failed to create attachments directory: " + e.getMessage(), e);
+            throw new UncheckedIOException("Failed to create attachments directory: " + e.getMessage(), e);
         }
         var finalPath = AgentService.acquireContained(conversationDir, leaf);
         try {
             Files.write(finalPath, bytes);
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException("Failed to write generated image: " + e.getMessage(), e);
+            throw new UncheckedIOException("Failed to write generated image: " + e.getMessage(), e);
         }
 
         var att = new MessageAttachment();
         att.message = message;
         att.uuid = uuid;
-        att.originalFilename = "generated-" + GENERATED_TS.format(java.time.LocalDateTime.now()) + "." + ext;
+        att.originalFilename = "generated-" + GENERATED_TS.format(LocalDateTime.now()) + "." + ext;
         att.storagePath = toStoragePath(agent.name, message.conversation.id, leaf);
         att.mimeType = mime;
         att.sizeBytes = bytes.length;
@@ -202,7 +208,7 @@ public final class AttachmentService {
         try {
             return Files.readAllBytes(path);
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException("Failed to read attachment bytes: " + e.getMessage(), e);
+            throw new UncheckedIOException("Failed to read attachment bytes: " + e.getMessage(), e);
         }
     }
 
@@ -216,7 +222,7 @@ public final class AttachmentService {
         try {
             Files.deleteIfExists(resolveOnDisk(att));
         } catch (IOException | SecurityException e) {
-            play.Logger.warn("Failed to delete attachment file %s: %s", att.uuid, e.getMessage());
+            Logger.warn("Failed to delete attachment file %s: %s", att.uuid, e.getMessage());
         }
     }
 
@@ -233,19 +239,19 @@ public final class AttachmentService {
         try {
             dir = AgentService.acquireWorkspacePath(agentName, ATTACHMENTS_DIR + conversationId);
         } catch (SecurityException e) {
-            play.Logger.warn("Refused attachment-dir resolution for conversation %d: %s", conversationId, e.getMessage());
+            Logger.warn("Refused attachment-dir resolution for conversation %d: %s", conversationId, e.getMessage());
             return;
         }
         if (!Files.isDirectory(dir)) return;
         try (var stream = Files.walk(dir)) {
-            stream.sorted(java.util.Comparator.reverseOrder())
+            stream.sorted(Comparator.reverseOrder())
                     .forEach(p -> {
                         try {
                             Files.deleteIfExists(p);
                         } catch (IOException _) { /* best-effort per-entry */ }
                     });
         } catch (IOException e) {
-            play.Logger.warn("Failed to delete attachment dir for conversation %d: %s", conversationId, e.getMessage());
+            Logger.warn("Failed to delete attachment dir for conversation %d: %s", conversationId, e.getMessage());
         }
     }
 
@@ -302,7 +308,7 @@ public final class AttachmentService {
                     .findFirst()
                     .orElse(null);
         } catch (IOException e) {
-            throw new java.io.UncheckedIOException("Failed to list staging dir: " + e.getMessage(), e);
+            throw new UncheckedIOException("Failed to list staging dir: " + e.getMessage(), e);
         }
     }
 

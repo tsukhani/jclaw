@@ -11,6 +11,10 @@ import services.transcription.TranscriptionRouter;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.time.Instant;
+import java.util.function.Supplier;
+import models.ChannelType;
+import utils.JpqlFilter;
 
 public class ConversationService {
 
@@ -44,7 +48,7 @@ public class ConversationService {
      * @param <T>   {@code body}'s return type
      * @return the value returned by {@code body}
      */
-    public static <T> T withSubagentRunIdMarker(Long runId, java.util.function.Supplier<T> body) {
+    public static <T> T withSubagentRunIdMarker(Long runId, Supplier<T> body) {
         var prev = INLINE_SUBAGENT_RUN_ID.get();
         INLINE_SUBAGENT_RUN_ID.set(runId);
         try {
@@ -471,7 +475,7 @@ public class ConversationService {
      * for the full resolution contract.
      */
     private static String perTypeHistoryKey(Conversation conversation) {
-        if (!models.ChannelType.TELEGRAM.value.equals(conversation.channelType)) {
+        if (!ChannelType.TELEGRAM.value.equals(conversation.channelType)) {
             return null; // non-Telegram: no per-type notion, use global
         }
         // Primary signal: the chat.type stamped at creation. Distinguishes a
@@ -495,7 +499,7 @@ public class ConversationService {
         return null;
     }
 
-    private static java.time.Instant latestOf(java.time.Instant a, java.time.Instant b) {
+    private static Instant latestOf(Instant a, Instant b) {
         if (a == null) return b;
         if (b == null) return a;
         return a.isAfter(b) ? a : b;
@@ -592,7 +596,7 @@ public class ConversationService {
      */
     public static int deleteByFilter(String channel, Long agentId, String name, String peer) {
         boolean hasNameFilter = name != null && !name.isBlank();
-        var filter = new utils.JpqlFilter()
+        var filter = new JpqlFilter()
                 .eq("channelType", channel)
                 .eq("agent.id", agentId)
                 .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)

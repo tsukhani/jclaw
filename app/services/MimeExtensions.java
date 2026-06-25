@@ -1,6 +1,7 @@
 package services;
 
 import java.util.Map;
+import play.libs.MimeTypes;
 
 /**
  * Reverse lookup from a MIME type to a canonical file extension, delegating
@@ -49,7 +50,7 @@ public final class MimeExtensions {
         if (mime == null || mime.isEmpty() || candidates == null) return "";
         var normalized = MIME_ALIASES.getOrDefault(mime.toLowerCase(), mime);
         for (var ext : candidates) {
-            var forward = play.libs.MimeTypes.getMimeType("probe." + ext, "");
+            var forward = MimeTypes.getMimeType("probe." + ext, "");
             if (normalized.equalsIgnoreCase(forward)) return ext;
         }
         return "";

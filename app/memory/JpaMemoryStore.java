@@ -9,6 +9,13 @@ import services.EventLogger;
 
 import java.time.Duration;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.sql.Connection;
+import java.util.HexFormat;
+import llm.ProviderRegistry;
+import play.cache.Cache;
 
 /**
  * JPA-backed memory store. Uses LIKE for H2 (dev/test), PostgreSQL full-text search
@@ -170,7 +177,7 @@ public class JpaMemoryStore implements MemoryStore {
             if (embedding != null) {
                 // Store embedding as raw SQL since JPA doesn't natively handle pgvector
                 var sql = "UPDATE memory SET embedding = ?::text::vector WHERE id = ?";
-                var conn = JPA.em().unwrap(java.sql.Connection.class);
+                var conn = JPA.em().unwrap(Connection.class);
                 try (var stmt = conn.prepareStatement(sql)) {
                     stmt.setString(1, toVectorLiteral(embedding));
                     stmt.setLong(2, (Long) memory.id);
@@ -191,7 +198,7 @@ public class JpaMemoryStore implements MemoryStore {
      * cache age caps the staleness window. {@code maximumSize=10_000} bounds
      * heap (around 60 MB worst case for 1536-dim float vectors).
      */
-    private static final play.cache.Cache<EmbeddingKey, float[]> embeddingCache = Caches.named(
+    private static final Cache<EmbeddingKey, float[]> embeddingCache = Caches.named(
             "llm-embeddings",
             CacheConfig.newBuilder()
                     .expireAfterWrite(Duration.ofHours(24))
@@ -214,10 +221,10 @@ public class JpaMemoryStore implements MemoryStore {
 
     private static String hashText(String text) {
         try {
-            var md = java.security.MessageDigest.getInstance("SHA-256");
-            return java.util.HexFormat.of()
-                    .formatHex(md.digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException e) {
+            var md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of()
+                    .formatHex(md.digest(text.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable — JDK install broken?", e);
         }
     }
@@ -225,7 +232,7 @@ public class JpaMemoryStore implements MemoryStore {
     private float[] generateEmbedding(String text) {
         return embeddingCache.get(new EmbeddingKey(vectorModel, hashText(text)), k -> {
             try {
-                var provider = llm.ProviderRegistry.getPrimary();
+                var provider = ProviderRegistry.getPrimary();
                 if (provider == null) return null;
                 // Embeddings are computed lazily inside a Caffeine cache load —
                 // the chat-channel context that triggered the lookup isn't

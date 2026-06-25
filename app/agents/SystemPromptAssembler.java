@@ -12,6 +12,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import services.EventLogger;
+import services.LoadTestRunner;
+import utils.GsonHolder;
 
 /**
  * Assembles the system prompt for an LLM call by reading workspace files,
@@ -157,7 +160,7 @@ public class SystemPromptAssembler {
         // never pays. Native tools + the discovery tool itself ship every
         // turn and are correctly included.
         var toolEntries = new ArrayList<PromptBreakdown.Entry>();
-        var toolDefs = ToolRegistry.getToolDefsForAgent(agent, java.util.Set.<String>of());
+        var toolDefs = ToolRegistry.getToolDefsForAgent(agent, Set.<String>of());
         for (var tool : toolDefs) {
             var json = TOOL_GSON.toJson(tool);
             toolEntries.add(new PromptBreakdown.Entry(
@@ -186,7 +189,7 @@ public class SystemPromptAssembler {
                 toolEntries);
     }
 
-    private static final Gson TOOL_GSON = utils.GsonHolder.INSTANCE;
+    private static final Gson TOOL_GSON = GsonHolder.INSTANCE;
 
     /**
      * Identical to the existing chars/4 estimate used by the context-window trimmer
@@ -212,7 +215,7 @@ public class SystemPromptAssembler {
         // convention, environment info, and memories. The breakdown path
         // (settings UI introspection) sees the same minimal output, since
         // it shares this method.
-        if (services.LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
+        if (LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
             b.startSection("Safety");
             appendSafetySection(b.sb);
             b.startSection("Execution Bias");
@@ -540,7 +543,7 @@ public class SystemPromptAssembler {
             }
         } catch (Exception e) {
             // Memory recall failure should not block the agent
-            services.EventLogger.warn("agent", "Memory recall failed for agent %s: %s"
+            EventLogger.warn("agent", "Memory recall failed for agent %s: %s"
                     .formatted(agent.name, e.getMessage()));
         }
     }

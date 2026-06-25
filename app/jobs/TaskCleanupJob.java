@@ -11,6 +11,7 @@ import services.Tx;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import services.TaskSchedulingService;
 
 /**
  * JCLAW-259: scheduled auto-cleanup for terminal tasks past their
@@ -162,7 +163,7 @@ public class TaskCleanupJob extends Job<Void> {
         for (var taskId : expiredIds) {
             // Idempotent: terminal tasks usually have no scheduler row,
             // but a CANCELLED-then-revived flow could leave one behind.
-            services.TaskSchedulingService.cancel(taskId);
+            TaskSchedulingService.cancel(taskId);
         }
 
         em.createQuery("DELETE FROM Task t WHERE t.id IN :ids")

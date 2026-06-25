@@ -9,6 +9,9 @@ import models.TaskRun;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import agents.RunCancelledException;
+import play.db.jpa.JPA;
+import tools.MessageTool;
 
 /**
  * Orchestrates one fire of a {@link Task}. Creates the {@link TaskRun},
@@ -244,7 +247,7 @@ public final class TaskExecutor {
     public static void pruneRunHistory(Long taskId) {
         try {
             Tx.run(() -> {
-                var em = play.db.jpa.JPA.em();
+                var em = JPA.em();
                 @SuppressWarnings("unchecked")
                 List<Long> keepIds = em.createQuery(
                         "SELECT r.id FROM TaskRun r WHERE r.task.id = :tid "
@@ -316,7 +319,7 @@ public final class TaskExecutor {
             // operators see at a glance.
             sink.onComplete(outcome.content());
             return true;
-        } catch (agents.RunCancelledException _) {
+        } catch (RunCancelledException _) {
             // JCLAW-414: operator cancelled this fire mid-run. The cancel
             // endpoint already flipped the flag and stamps the run CANCELLED
             // for instant UI; close here too (idempotent — onCancelled only
@@ -489,7 +492,7 @@ public final class TaskExecutor {
      * wrapper — so the LIKE count shares that connection.
      */
     private static boolean deliveredViaMessageTool(Long runId) {
-        var em = play.db.jpa.JPA.em();
+        var em = JPA.em();
         // Match the JSON substring produced by GSON's compact encoding of
         // the FunctionCall record: `"name":"message"`. Single-call rows
         // dominate (MessageHydrator.parseToolCalls deserialises into a
@@ -499,7 +502,7 @@ public final class TaskExecutor {
                         + "WHERE m.taskRun.id = :runId "
                         + "AND m.toolCalls LIKE :pattern")
                 .setParameter("runId", runId)
-                .setParameter("pattern", "%\"name\":\"" + tools.MessageTool.TOOL_NAME + "\"%")
+                .setParameter("pattern", "%\"name\":\"" + MessageTool.TOOL_NAME + "\"%")
                 .getSingleResult();
         return count != null && count > 0;
     }
@@ -532,7 +535,7 @@ public final class TaskExecutor {
         if (task.type != Task.Type.IMMEDIATE && task.type != Task.Type.SCHEDULED) return;
         try {
             Tx.run(() -> {
-                var em = play.db.jpa.JPA.em();
+                var em = JPA.em();
                 em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :tid")
                         .setParameter("tid", task.id).executeUpdate();
                 em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :tid")

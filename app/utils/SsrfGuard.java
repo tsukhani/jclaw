@@ -178,9 +178,9 @@ public final class SsrfGuard {
      *         resolved-address check.
      */
     public static void assertUrlSafe(String url) {
-        java.net.URI uri;
+        URI uri;
         try {
-            uri = java.net.URI.create(url);
+            uri = URI.create(url);
         } catch (IllegalArgumentException e) {
             throw new SecurityException("SSRF guard: unparseable URL: " + url, e);
         }

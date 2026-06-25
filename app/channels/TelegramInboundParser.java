@@ -9,6 +9,14 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import services.EventLogger;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+import models.MessageAttachment;
+import play.Play;
+import services.AttachmentService;
 
 /**
  * Telegram inbound-update parsing, extracted from {@link TelegramChannel} in
@@ -46,9 +54,9 @@ public final class TelegramInboundParser {
     // turn. An empty list, by contrast, means "no attachments to process,
     // continue with text only" — they are semantically distinct outcomes.
     @SuppressWarnings("java:S1168")
-    public static java.util.List<services.AttachmentService.Input> prepareInboundAttachments(
+    public static List<AttachmentService.Input> prepareInboundAttachments(
             String sendToken, String sendChatId, Agent sendAgent, InboundMessage message) {
-        if (message.attachments().isEmpty()) return java.util.List.of();
+        if (message.attachments().isEmpty()) return List.of();
 
         // JCLAW-165 / JCLAW-215: audio and images are universally accepted —
         // text-only models get a transcript / caption text part (via the
@@ -56,7 +64,7 @@ public final class TelegramInboundParser {
         // get native input_audio / image_url. No model-side gate; the rest of
         // the pipeline (AgentRunner.userMessageFor) handles the downgrade.
 
-        var inputs = new java.util.ArrayList<services.AttachmentService.Input>(
+        var inputs = new ArrayList<AttachmentService.Input>(
                 message.attachments().size());
         for (var pending : message.attachments()) {
             var result = TelegramFileDownloader.download(sendToken, pending, sendAgent.name);
@@ -145,7 +153,7 @@ public final class TelegramInboundParser {
             fromDisplayName = displayNameOf(msg.getFrom());
         }
 
-        var attachments = new java.util.ArrayList<PendingAttachment>();
+        var attachments = new ArrayList<PendingAttachment>();
         collectPhotoAttachment(msg, attachments);
         collectAudioAttachments(msg, attachments);
         collectFileAttachments(msg, attachments);
@@ -268,11 +276,11 @@ public final class TelegramInboundParser {
     // holder makes the intent explicit. CompiledPatterns is a record holding an
     // immutable pattern list (compileWakeWords returns List.copyOf), so the
     // cached value is genuinely immutable and safely published.
-    private static final java.util.concurrent.atomic.AtomicReference<CompiledPatterns> wakeWordCache =
-            new java.util.concurrent.atomic.AtomicReference<>();
+    private static final AtomicReference<CompiledPatterns> wakeWordCache =
+            new AtomicReference<>();
 
     /** Immutable (raw-config, compiled-patterns) pair for the wake-word cache. */
-    private record CompiledPatterns(String source, java.util.List<java.util.regex.Pattern> patterns) {}
+    private record CompiledPatterns(String source, List<Pattern> patterns) {}
 
     /**
      * JCLAW-387 (B3): true when {@code body} matches any configured wake-word
@@ -301,8 +309,8 @@ public final class TelegramInboundParser {
      * (so one bad pattern can't disable the rest, and the hot path never sees a
      * {@link java.util.regex.PatternSyntaxException}).
      */
-    private static java.util.List<java.util.regex.Pattern> compiledWakeWords() {
-        var raw = play.Play.configuration.getProperty(CFG_MENTION_PATTERNS, "");
+    private static List<Pattern> compiledWakeWords() {
+        var raw = Play.configuration.getProperty(CFG_MENTION_PATTERNS, "");
         if (raw == null) raw = "";
         var cached = wakeWordCache.get();
         if (cached != null && cached.source().equals(raw)) return cached.patterns();
@@ -312,26 +320,26 @@ public final class TelegramInboundParser {
     }
 
     /** Split, trim, and compile the raw wake-word config into patterns, skipping invalid regexes. */
-    private static java.util.List<java.util.regex.Pattern> compileWakeWords(String raw) {
-        var out = new java.util.ArrayList<java.util.regex.Pattern>();
-        if (raw.isBlank()) return java.util.List.of();
+    private static List<Pattern> compileWakeWords(String raw) {
+        var out = new ArrayList<Pattern>();
+        if (raw.isBlank()) return List.of();
         for (var token : raw.split("[\\n,]")) {
             var trimmed = token.trim();
             if (trimmed.isEmpty()) continue;
             try {
-                out.add(java.util.regex.Pattern.compile(trimmed));
-            } catch (java.util.regex.PatternSyntaxException e) {
+                out.add(Pattern.compile(trimmed));
+            } catch (PatternSyntaxException e) {
                 EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                         "Ignoring invalid telegram.mentionPatterns regex %s: %s"
                                 .formatted(trimmed, e.getMessage()));
             }
         }
         // Immutable so the cached CompiledPatterns can't be mutated post-publish.
-        return java.util.List.copyOf(out);
+        return List.copyOf(out);
     }
 
     /** Scan one text/entity pair for a mention, text_mention, or bot_command suffix addressing the bot. */
-    private static boolean entitiesAddressBot(String body, java.util.List<MessageEntity> entities,
+    private static boolean entitiesAddressBot(String body, List<MessageEntity> entities,
                                               String botUsername, Long botUserId) {
         if (body == null || entities == null) return false;
         for (var entity : entities) {
@@ -404,14 +412,14 @@ public final class TelegramInboundParser {
      * Highest-resolution PhotoSize wins — the array is sorted ascending by
      * Telegram, so the last element is the full-quality original.
      */
-    private static void collectPhotoAttachment(Message msg, java.util.List<PendingAttachment> attachments) {
+    private static void collectPhotoAttachment(Message msg, List<PendingAttachment> attachments) {
         if (!msg.hasPhoto() || msg.getPhoto() == null || msg.getPhoto().isEmpty()) return;
         var sizes = msg.getPhoto();
         var best = sizes.get(sizes.size() - 1);
         long bytes = best.getFileSize() != null ? best.getFileSize() : 0L;
         attachments.add(new PendingAttachment(
                 best.getFileId(), null, "image/jpeg", bytes,
-                models.MessageAttachment.KIND_IMAGE));
+                MessageAttachment.KIND_IMAGE));
     }
 
     /**
@@ -419,25 +427,25 @@ public final class TelegramInboundParser {
      * KIND_AUDIO. getMimeType is nullable — finalizeAttachment re-sniffs
      * with Tika so we're not relying on Telegram's self-report anyway.
      */
-    private static void collectAudioAttachments(Message msg, java.util.List<PendingAttachment> attachments) {
+    private static void collectAudioAttachments(Message msg, List<PendingAttachment> attachments) {
         if (msg.getVoice() != null) {
             var v = msg.getVoice();
             long bytes = v.getFileSize() != null ? v.getFileSize() : 0L;
             attachments.add(new PendingAttachment(
                     v.getFileId(), null, v.getMimeType(), bytes,
-                    models.MessageAttachment.KIND_AUDIO));
+                    MessageAttachment.KIND_AUDIO));
         }
         if (msg.hasAudio() && msg.getAudio() != null) {
             var a = msg.getAudio();
             long bytes = a.getFileSize() != null ? a.getFileSize() : 0L;
             attachments.add(new PendingAttachment(
                     a.getFileId(), a.getFileName(), a.getMimeType(), bytes,
-                    models.MessageAttachment.KIND_AUDIO));
+                    MessageAttachment.KIND_AUDIO));
         }
     }
 
     /** Documents, videos, and video notes — all map to KIND_FILE, except image/* docs which stay KIND_IMAGE. */
-    private static void collectFileAttachments(Message msg, java.util.List<PendingAttachment> attachments) {
+    private static void collectFileAttachments(Message msg, List<PendingAttachment> attachments) {
         if (msg.hasDocument() && msg.getDocument() != null) {
             var d = msg.getDocument();
             long bytes = d.getFileSize() != null ? d.getFileSize() : 0L;
@@ -446,8 +454,8 @@ public final class TelegramInboundParser {
             // Telegram's compression). Classify as IMAGE so the multimodal
             // gate applies correctly and the model receives an image part.
             String kind = d.getMimeType() != null && d.getMimeType().startsWith("image/")
-                    ? models.MessageAttachment.KIND_IMAGE
-                    : models.MessageAttachment.KIND_FILE;
+                    ? MessageAttachment.KIND_IMAGE
+                    : MessageAttachment.KIND_FILE;
             attachments.add(new PendingAttachment(
                     d.getFileId(), d.getFileName(), d.getMimeType(), bytes, kind));
         }
@@ -456,14 +464,14 @@ public final class TelegramInboundParser {
             long bytes = v.getFileSize() != null ? v.getFileSize() : 0L;
             attachments.add(new PendingAttachment(
                     v.getFileId(), v.getFileName(), v.getMimeType(), bytes,
-                    models.MessageAttachment.KIND_FILE));
+                    MessageAttachment.KIND_FILE));
         }
         if (msg.hasVideoNote() && msg.getVideoNote() != null) {
             var vn = msg.getVideoNote();
             long bytes = vn.getFileSize() != null ? vn.getFileSize() : 0L;
             attachments.add(new PendingAttachment(
                     vn.getFileId(), null, null, bytes,
-                    models.MessageAttachment.KIND_FILE));
+                    MessageAttachment.KIND_FILE));
         }
     }
 
@@ -484,7 +492,7 @@ public final class TelegramInboundParser {
      * to {@code image/webp} on disk by {@code finalizeAttachment}; the reported
      * MIME here is a best-effort hint.
      */
-    private static void collectStickerAttachment(Message msg, java.util.List<PendingAttachment> attachments) {
+    private static void collectStickerAttachment(Message msg, List<PendingAttachment> attachments) {
         if (!msg.hasSticker() || msg.getSticker() == null) return;
         var s = msg.getSticker();
         boolean animated = Boolean.TRUE.equals(s.getIsAnimated());
@@ -493,7 +501,7 @@ public final class TelegramInboundParser {
         long bytes = s.getFileSize() != null ? s.getFileSize() : 0L;
         attachments.add(new PendingAttachment(
                 s.getFileId(), null, "image/webp", bytes,
-                models.MessageAttachment.KIND_IMAGE));
+                MessageAttachment.KIND_IMAGE));
     }
 
     /**
@@ -505,7 +513,7 @@ public final class TelegramInboundParser {
      * future combined shape still degrades gracefully.
      */
     private static String inboundContextNote(Message msg) {
-        var parts = new java.util.ArrayList<String>(1);
+        var parts = new ArrayList<String>(1);
         if (msg.hasSticker() && msg.getSticker() != null) {
             parts.add(stickerNote(msg.getSticker()));
         }

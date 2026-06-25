@@ -4,6 +4,7 @@ import services.EventLogger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * JCLAW-136: reassembles {@link InboundMessage} updates that
@@ -58,7 +59,7 @@ public final class TelegramMediaGroupBuffer {
      * callback.
      */
     public static void add(InboundMessage incoming,
-                           java.util.function.Consumer<InboundMessage> dispatcher) {
+                           Consumer<InboundMessage> dispatcher) {
         var groupId = incoming.mediaGroupId();
         if (groupId == null) {
             dispatcher.accept(incoming);

@@ -16,6 +16,10 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.regex.Pattern;
+import java.util.Comparator;
+import java.util.Set;
+import play.cache.Cache;
+import services.Tx;
 
 /**
  * Scans global skills/ and workspace/{agent}/skills/ directories,
@@ -129,7 +133,7 @@ public class SkillLoader {
         return SkillVersionManager.bumpPatch(v);
     }
 
-    private static final play.cache.Cache<String, List<SkillInfo>> skillCache = Caches.named(
+    private static final Cache<String, List<SkillInfo>> skillCache = Caches.named(
             SKILLS,
             CacheConfig.newBuilder()
                     .expireAfterWrite(Duration.ofSeconds(30))
@@ -195,7 +199,7 @@ public class SkillLoader {
 
     /** Delete every {@link AgentSkillConfig} whose skill no longer exists on disk. */
     private static void removeOrphanedSkillConfigs(HashSet<String> existingSkills) {
-        services.Tx.run(() -> {
+        Tx.run(() -> {
             List<AgentSkillConfig> allConfigs = AgentSkillConfig.findAll();
             int removed = 0;
             for (var config : allConfigs) {
@@ -231,7 +235,7 @@ public class SkillLoader {
         // Sort by name for deterministic ordering — the skills block is part of the
         // LLM prompt prefix, and filesystem iteration order is not stable.
         return allSkills.stream()
-                .sorted(java.util.Comparator.comparing(SkillInfo::name))
+                .sorted(Comparator.comparing(SkillInfo::name))
                 .limit(MAX_SKILLS)
                 .toList();
     }
@@ -260,7 +264,7 @@ public class SkillLoader {
      * wrap in a Tx).
      */
     private static void applyAgentPermissionFilters(List<SkillInfo> allSkills, String agentName) {
-        services.Tx.run(() -> {
+        Tx.run(() -> {
             var agent = Agent.findByName(agentName);
             if (agent == null) return;
 
@@ -286,7 +290,7 @@ public class SkillLoader {
      * available to {@code agentName} — used as the {@code removeIf}
      * predicate by {@link #applyAgentPermissionFilters}.
      */
-    private static boolean skillMissingTools(SkillInfo s, java.util.Set<String> disabledTools, String agentName) {
+    private static boolean skillMissingTools(SkillInfo s, Set<String> disabledTools, String agentName) {
         if (s.tools() == null || s.tools().isEmpty()) return false;
         var result = ToolCatalog.validateSkillTools(disabledTools, s.tools());
         if (!result.isOk()) {
@@ -522,14 +526,14 @@ public class SkillLoader {
     // --- Text classification ---
 
     /** Extensions treated as human-readable text for skill content classification. */
-    private static final java.util.Set<String> TEXT_EXTENSIONS = java.util.Set.of(
+    private static final Set<String> TEXT_EXTENSIONS = Set.of(
             ".md", ".json", ".txt", ".yaml", ".yml", ".xml", ".sh", ".py", ".js",
             ".ts", ".java", ".html", ".css", ".toml", ".ini", ".cfg", ".conf", ".env",
             ".properties", ".rb", ".go", ".rs", ".lua", ".sql"
     );
 
     /** Extensionless filenames that are conventionally plain text. */
-    private static final java.util.Set<String> KNOWN_TEXT_FILES = java.util.Set.of(
+    private static final Set<String> KNOWN_TEXT_FILES = Set.of(
             "readme", "makefile", "dockerfile", "license", "changelog",
             "gemfile", "rakefile", "procfile", "vagrantfile"
     );

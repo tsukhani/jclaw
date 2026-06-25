@@ -27,6 +27,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import services.LocalProviderProbeSupport;
 
 /**
  * Provider management endpoints — model discovery from provider APIs.
@@ -129,7 +130,7 @@ public class ApiProvidersController extends Controller {
         if (baseUrl == null || baseUrl.isBlank()) {
             renderJSON(gson.toJson(new ReachableResponse(name, false, 0, "not configured")));
         }
-        var r = services.LocalProviderProbeSupport.probeModels(trimTrailingSlash(baseUrl), name);
+        var r = LocalProviderProbeSupport.probeModels(trimTrailingSlash(baseUrl), name);
         renderJSON(gson.toJson(new ReachableResponse(name, r.available(), r.modelCount(), r.reason())));
     }
 

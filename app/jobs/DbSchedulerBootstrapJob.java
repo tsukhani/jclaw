@@ -15,6 +15,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Executors;
+import javax.sql.DataSource;
+import mcp.McpConnectionManager;
+import play.Play;
 
 /**
  * JCLAW-21: build the db-scheduler {@link Scheduler}, register
@@ -94,7 +97,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         // cascading into MCP_SERVER row-lock timeouts on subsequent
         // Fixtures.deleteDatabase calls. Mirrors FullTextSearchInitJob's
         // test-mode skip.
-        if (play.Play.runningInTestMode()) {
+        if (Play.runningInTestMode()) {
             EventLogger.info("task", null, null,
                     "DbSchedulerBootstrap: skipping scheduler start in test mode");
             return;
@@ -195,7 +198,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         // a task scheduled at boot otherwise raced the async MCP connect (the
         // root trigger behind JCLAW-495). Nothing fires until built.start() runs.
         Thread.ofVirtual().name("scheduler-mcp-gate").start(() -> {
-            mcp.McpConnectionManager.awaitStartupConnected();
+            McpConnectionManager.awaitStartupConnected();
             built.start();
             EventLogger.info("task", null, null,
                     "db-scheduler started (polling 2s, virtual-thread executor, "
@@ -241,7 +244,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         }
     }
 
-    private static boolean isH2(javax.sql.DataSource datasource) {
+    private static boolean isH2(DataSource datasource) {
         try (Connection conn = datasource.getConnection()) {
             return conn.getMetaData().getDatabaseProductName()
                     .toLowerCase().contains("h2");

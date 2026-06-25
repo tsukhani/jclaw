@@ -12,6 +12,8 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
+import agents.ToolAction;
+import com.google.gson.JsonObject;
 
 /**
  * Provides accurate date/time information and calculations.
@@ -58,11 +60,11 @@ public class DateTimeTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction(ACTION_NOW,       "Return the current date and time in the specified timezone"),
-                new agents.ToolAction(ACTION_CONVERT,   "Convert a timestamp from one timezone to another"),
-                new agents.ToolAction(ACTION_CALCULATE, "Add or subtract a duration from a timestamp, or compute the difference between two timestamps")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction(ACTION_NOW,       "Return the current date and time in the specified timezone"),
+                new ToolAction(ACTION_CONVERT,   "Convert a timestamp from one timezone to another"),
+                new ToolAction(ACTION_CALCULATE, "Add or subtract a duration from a timestamp, or compute the difference between two timestamps")
         );
     }
 
@@ -132,13 +134,13 @@ public class DateTimeTool implements ToolRegistry.Tool {
         };
     }
 
-    private String now(com.google.gson.JsonObject args) {
+    private String now(JsonObject args) {
         var zone = resolveZone(args, ARG_TIMEZONE);
         var now = ZonedDateTime.now(zone);
         return formatResult(now);
     }
 
-    private String convert(com.google.gson.JsonObject args) {
+    private String convert(JsonObject args) {
         if (!args.has(ARG_TIMESTAMP)) return "Error: 'timestamp' is required for convert";
 
         var fromZone = resolveZone(args, "fromTimezone");
@@ -156,7 +158,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
         }
     }
 
-    private String calculate(com.google.gson.JsonObject args) {
+    private String calculate(JsonObject args) {
         var zone = resolveZone(args, ARG_TIMEZONE);
 
         // Difference between two timestamps
@@ -197,7 +199,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
         }
     }
 
-    private String computeDifference(com.google.gson.JsonObject args, ZoneId zone) {
+    private String computeDifference(JsonObject args, ZoneId zone) {
         try {
             var startStr = args.has(ARG_TIMESTAMP)
                     ? args.get(ARG_TIMESTAMP).getAsString()
@@ -219,7 +221,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
         }
     }
 
-    private ZoneId resolveZone(com.google.gson.JsonObject args, String field) {
+    private ZoneId resolveZone(JsonObject args, String field) {
         if (args.has(field) && !args.get(field).isJsonNull()) {
             var tz = args.get(field).getAsString();
             if (!tz.isBlank()) {

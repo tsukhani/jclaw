@@ -23,6 +23,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import io.swagger.v3.oas.annotations.Operation;
+import java.io.IOException;
 
 /**
  * Call JClaw's own HTTP API from an agent (JCLAW-282).
@@ -223,7 +225,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
                                 .formatted(MAX_RESPONSE_CHARS);
             }
             return "HTTP %d\n%s".formatted(status, text);
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             return "Error: HTTP request failed: " + e.getMessage();
         }
     }
@@ -362,7 +364,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
      *  summary if the action carries one (curated prose), else a humanized
      *  method name. */
     private static String summaryFor(Method m) {
-        var op = m.getAnnotation(io.swagger.v3.oas.annotations.Operation.class);
+        var op = m.getAnnotation(Operation.class);
         if (op != null && !op.summary().isBlank()) return op.summary();
         return humanize(m.getName());
     }

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import okhttp3.Request;
 
 /**
  * Downloads inbound Slack files (JCLAW-344) authenticating with the agent's
@@ -158,7 +159,7 @@ public final class SlackFileDownloader {
         if (!isSlackHost(uri.getHost())) {
             return new FetchFailed("refusing non-Slack host: " + uri.getHost());
         }
-        var builder = new okhttp3.Request.Builder().url(url).get();
+        var builder = new Request.Builder().url(url).get();
         if (withAuth) {
             builder.header("Authorization", "Bearer " + botToken);
         }

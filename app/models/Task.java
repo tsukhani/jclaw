@@ -18,6 +18,10 @@ import play.db.jpa.Model;
 
 import java.time.Instant;
 import java.util.List;
+import models.Agent;
+import org.hibernate.query.NativeQuery;
+import play.db.jpa.JPA;
+import services.search.LuceneIndexer;
 
 @Entity
 @Table(name = "task", indexes = {
@@ -252,7 +256,7 @@ public class Task extends Model {
      * existing rows before the constraint is enforced.
      */
     @Column(name = "no_agent", nullable = false)
-    @org.hibernate.annotations.ColumnDefault("false")
+    @ColumnDefault("false")
     public boolean noAgent = false;
 
     /**
@@ -322,8 +326,8 @@ public class Task extends Model {
         if (id != null) {
             var n = name != null ? name : "";
             var d = description != null ? description : "";
-            services.search.LuceneIndexer.upsert(
-                    services.search.LuceneIndexer.Scope.TASK,
+            LuceneIndexer.upsert(
+                    LuceneIndexer.Scope.TASK,
                     id, n + " " + d);
         }
     }
@@ -331,8 +335,8 @@ public class Task extends Model {
     @PostRemove
     void onIndexRemove() {
         if (id != null) {
-            services.search.LuceneIndexer.remove(
-                    services.search.LuceneIndexer.Scope.TASK, id);
+            LuceneIndexer.remove(
+                    LuceneIndexer.Scope.TASK, id);
         }
     }
 
@@ -354,9 +358,9 @@ public class Task extends Model {
 
     @SuppressWarnings("unchecked")
     public static List<Task> findByStatus(Status status) {
-        return play.db.jpa.JPA.em()
+        return JPA.em()
                 .createNativeQuery("SELECT * FROM task WHERE status = ?1")
-                .unwrap(org.hibernate.query.NativeQuery.class)
+                .unwrap(NativeQuery.class)
                 .addEntity(TASK_ENTITY_NAME)
                 .setParameter(1, status.name())
                 .getResultList();
@@ -367,7 +371,7 @@ public class Task extends Model {
      * still active. Agent-scoped: one agent must never see another agent's
      * recurring schedule (agent isolation).
      */
-    public static List<Task> findRecurring(models.Agent agent) {
+    public static List<Task> findRecurring(Agent agent) {
         return Task.find(
                 "agent = ?1 AND type IN (?2, ?3) AND status != ?4",
                 agent, Type.CRON, Type.INTERVAL, Status.CANCELLED).fetch();
@@ -385,7 +389,7 @@ public class Task extends Model {
      * agent-isolation reason as {@link #findRecurring} — one agent must
      * never see another's reminders.
      */
-    public static List<Task> findReminders(models.Agent agent) {
+    public static List<Task> findReminders(Agent agent) {
         return Task.find(
                 "agent = ?1 AND payloadType = ?2 AND status IN (?3, ?4)",
                 agent, "reminder", Status.PENDING, Status.ACTIVE).fetch();

@@ -12,15 +12,32 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Map;
+import com.google.gson.Gson;
+import java.io.File;
+import java.nio.file.Files;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import models.WhatsAppBinding;
+import models.WhatsAppConversationWindow;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import services.Tx;
+import utils.GsonHolder;
+import utils.HttpFactories;
 
 /**
  * WhatsApp Cloud API (Meta) client via raw HTTP.
  */
 public class WhatsAppChannel implements Channel {
 
-    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
+    private static final Gson gson = GsonHolder.INSTANCE;
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
-    private static final okhttp3.MediaType JSON_MEDIA_TYPE = okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON);
+    private static final MediaType JSON_MEDIA_TYPE = MediaType.get(HttpKeys.APPLICATION_JSON);
 
     private static final String WHATSAPP = "whatsapp";
     private static final String CHANNEL = "channel";
@@ -78,7 +95,7 @@ public class WhatsAppChannel implements Channel {
 
     /** Per-binding instance carrying this binding's Cloud-API credentials and 24h-window
      *  context (JCLAW-446/447). */
-    public static WhatsAppChannel forBinding(models.WhatsAppBinding binding) {
+    public static WhatsAppChannel forBinding(WhatsAppBinding binding) {
         return new WhatsAppChannel(binding.phoneNumberId, binding.accessToken, binding.appSecret,
                 binding.id, binding.templateName, binding.templateLanguage);
     }
@@ -135,13 +152,13 @@ public class WhatsAppChannel implements Channel {
      * {@code caption}. Overrides the no-op default.
      */
     @Override
-    public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
+    public SendResult sendPhoto(String peerId, File file, String caption) {
         return sendMedia(peerId, file, null, caption);
     }
 
     /** Send a document via the Graph media two-step (JCLAW-447). */
     @Override
-    public SendResult sendDocument(String peerId, java.io.File file, String caption) {
+    public SendResult sendDocument(String peerId, File file, String caption) {
         return sendMedia(peerId, file, null, caption);
     }
 
@@ -154,7 +171,7 @@ public class WhatsAppChannel implements Channel {
      * {@code document}). {@code caption} rides with image/video/document (audio
      * carries none). Returns {@link SendResult#OK} on a 200 from the message send.
      */
-    public SendResult sendMedia(String peerId, java.io.File file, String mimeType, String caption) {
+    public SendResult sendMedia(String peerId, File file, String mimeType, String caption) {
         if (file == null || !file.isFile()) {
             EventLogger.warn(CHANNEL, null, WHATSAPP, "sendMedia: file missing or unreadable");
             return SendResult.FAILED;
@@ -167,7 +184,7 @@ public class WhatsAppChannel implements Channel {
         if (mediaId == null) return SendResult.FAILED;
 
         var type = mediaMessageType(mime);
-        var mediaObj = new java.util.LinkedHashMap<String, Object>();
+        var mediaObj = new LinkedHashMap<String, Object>();
         mediaObj.put("id", mediaId);
         // Audio messages reject a caption; image/video/document accept one.
         if (!"audio".equals(type) && caption != null && !caption.isBlank()) {
@@ -233,12 +250,12 @@ public class WhatsAppChannel implements Channel {
      */
     private SendResult postMessage(WhatsAppConfig config, String jsonBody, String successLog) {
         var url = API_BASE + config.phoneNumberId() + "/messages";
-        var request = new okhttp3.Request.Builder()
+        var request = new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
-                .post(okhttp3.RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
+                .post(RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
                 .build();
-        try (var response = utils.HttpFactories.general().newCall(request).execute()) {
+        try (var response = HttpFactories.general().newCall(request).execute()) {
             if (response.code() == 200) {
                 EventLogger.info(CHANNEL, null, WHATSAPP, successLog);
                 return SendResult.OK;
@@ -263,8 +280,8 @@ public class WhatsAppChannel implements Channel {
      * a single run exceeds the limit with no breakpoint. Public for the
      * default-package test seam.
      */
-    public static java.util.List<String> chunkText(String text, int limit) {
-        var chunks = new java.util.ArrayList<String>();
+    public static List<String> chunkText(String text, int limit) {
+        var chunks = new ArrayList<String>();
         if (text == null || text.isEmpty()) return chunks;
         int i = 0;
         int n = text.length();
@@ -296,8 +313,8 @@ public class WhatsAppChannel implements Channel {
     private boolean isWithinWindow(String peerId) {
         if (bindingId == null) return true;
         try {
-            return services.Tx.run(() -> models.WhatsAppConversationWindow.isWithinWindow(
-                    bindingId, peerId, java.time.Instant.now()));
+            return Tx.run(() -> WhatsAppConversationWindow.isWithinWindow(
+                    bindingId, peerId, Instant.now()));
         } catch (Exception e) {
             EventLogger.warn(CHANNEL, null, WHATSAPP,
                     "24h-window check failed (%s); defaulting to free-form".formatted(e.getMessage()));
@@ -343,21 +360,21 @@ public class WhatsAppChannel implements Channel {
      * {@code /{phoneNumberId}/media} as multipart and return the resulting media
      * id, or null on failure.
      */
-    private String uploadMedia(WhatsAppConfig config, java.io.File file, String mime) {
+    private String uploadMedia(WhatsAppConfig config, File file, String mime) {
         var url = API_BASE + config.phoneNumberId() + "/media";
-        var fileBody = okhttp3.RequestBody.create(file, okhttp3.MediaType.parse(mime));
-        var multipart = new okhttp3.MultipartBody.Builder()
-                .setType(okhttp3.MultipartBody.FORM)
+        var fileBody = RequestBody.create(file, MediaType.parse(mime));
+        var multipart = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
                 .addFormDataPart(MESSAGING_PRODUCT, WHATSAPP)
                 .addFormDataPart("type", mime)
                 .addFormDataPart("file", file.getName(), fileBody)
                 .build();
-        var request = new okhttp3.Request.Builder()
+        var request = new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
                 .post(multipart)
                 .build();
-        try (var response = utils.HttpFactories.general().newCall(request).execute()) {
+        try (var response = HttpFactories.general().newCall(request).execute()) {
             var responseBody = response.body().string();
             if (response.code() != 200) {
                 EventLogger.warn(CHANNEL, null, WHATSAPP,
@@ -374,10 +391,10 @@ public class WhatsAppChannel implements Channel {
 
     /** Resolve the upload MIME: caller-supplied value wins, else probe the file,
      *  else a generic binary type. */
-    private static String resolveMime(java.io.File file, String mimeType) {
+    private static String resolveMime(File file, String mimeType) {
         if (mimeType != null && !mimeType.isBlank()) return mimeType;
         try {
-            var probed = java.nio.file.Files.probeContentType(file.toPath());
+            var probed = Files.probeContentType(file.toPath());
             if (probed != null && !probed.isBlank()) return probed;
         } catch (Exception _) {
             // fall through to the default
@@ -390,7 +407,7 @@ public class WhatsAppChannel implements Channel {
      *  default-package test seam. */
     public static String mediaMessageType(String mime) {
         if (mime == null) return "document";
-        var m = mime.toLowerCase(java.util.Locale.ROOT);
+        var m = mime.toLowerCase(Locale.ROOT);
         if (m.startsWith("image/")) return "image";
         if (m.startsWith("audio/")) return "audio";
         if (m.startsWith("video/")) return "video";
@@ -405,12 +422,12 @@ public class WhatsAppChannel implements Channel {
                 "message_id", messageId
         ));
 
-        var request = new okhttp3.Request.Builder()
+        var request = new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
-                .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE))
+                .post(RequestBody.create(body, JSON_MEDIA_TYPE))
                 .build();
-        try (var resp = utils.HttpFactories.general().newCall(request).execute()) {
+        try (var resp = HttpFactories.general().newCall(request).execute()) {
             // Drain the body so the connection returns to the pool; result discarded.
             resp.body().bytes();
         } catch (Exception _) {

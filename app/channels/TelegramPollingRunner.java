@@ -19,6 +19,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.LinkedHashSet;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import play.Play;
+import services.Tx;
+import utils.Strings;
 
 /**
  * Multi-bot long-polling runner for JCLAW-89 per-user Telegram bindings. Owns a
@@ -47,7 +53,7 @@ public final class TelegramPollingRunner {
      * parity with the historical empty-list behavior — and add
      * {@code message_reaction} so the inbound reaction-notification path fires.
      */
-    static final java.util.List<String> ALLOWED_UPDATES = java.util.List.of(
+    static final List<String> ALLOWED_UPDATES = List.of(
             "message", "edited_message", "callback_query", "message_reaction");
 
     private static final AtomicReference<TelegramBotsLongPollingApplication> APP = new AtomicReference<>();
@@ -77,7 +83,7 @@ public final class TelegramPollingRunner {
      * production uses {@link #tokenRejectedByTelegram}.
      */
     @SuppressWarnings("java:S3077") // volatile predicate: pure publish-then-read, no compound mutation
-    private static volatile java.util.function.Predicate<String> tokenRejectedCheck =
+    private static volatile Predicate<String> tokenRejectedCheck =
             TelegramPollingRunner::tokenRejectedByTelegram;
 
     private TelegramPollingRunner() {}
@@ -89,7 +95,7 @@ public final class TelegramPollingRunner {
      * changed. Synchronized so concurrent admin saves don't race.
      */
     public static synchronized void reconcile() {
-        var desired = services.Tx.run(() ->
+        var desired = Tx.run(() ->
                 TelegramBinding.findAllEnabledByTransport(ChannelTransport.POLLING));
         var desiredById = new HashMap<Long, TelegramBinding>();
         for (var b : desired) desiredById.put(b.id, b);
@@ -242,7 +248,7 @@ public final class TelegramPollingRunner {
      * {@code message_reaction}) opts the poller into reaction deliveries while
      * keeping every update type Telegram sends by default.
      */
-    private static java.util.function.Function<Integer, GetUpdates> seedingGetUpdatesGenerator(int persistedOffset) {
+    private static Function<Integer, GetUpdates> seedingGetUpdatesGenerator(int persistedOffset) {
         return sdkLastReceived -> GetUpdates.builder()
                 .limit(100)
                 .timeout(GET_UPDATES_TIMEOUT_SECONDS)
@@ -305,7 +311,7 @@ public final class TelegramPollingRunner {
         try {
             // Snapshot (id, token) pairs into a plain list inside the tx so no
             // JPA-managed entity escapes to the off-request probe thread.
-            targets = services.Tx.run(() -> {
+            targets = Tx.run(() -> {
                 var out = new ArrayList<TokenTarget>();
                 for (var b : TelegramBinding.findAllEnabledByTransport(ChannelTransport.POLLING)) {
                     out.add(new TokenTarget(b.id, b.botToken));
@@ -366,7 +372,7 @@ public final class TelegramPollingRunner {
      */
     private static void disableBindingForInvalidToken(Long bindingId) {
         try {
-            services.Tx.run(() -> {
+            Tx.run(() -> {
                 TelegramBinding b = TelegramBinding.<TelegramBinding>findById(bindingId);
                 if (b != null) {
                     b.enabled = false;
@@ -388,7 +394,7 @@ public final class TelegramPollingRunner {
      * can drive the auto-disable path without dialing {@code api.telegram.org}.
      * Pass {@code null} to restore the real {@code getMe} probe.
      */
-    static void setTokenRejectedCheckForTest(java.util.function.Predicate<String> p) {
+    static void setTokenRejectedCheckForTest(Predicate<String> p) {
         tokenRejectedCheck = (p != null) ? p : TelegramPollingRunner::tokenRejectedByTelegram;
     }
 
@@ -459,7 +465,7 @@ public final class TelegramPollingRunner {
      * path doesn't touch JPA-managed state on a non-request thread.
      */
     private static Ctx loadCtx(Long bindingId) {
-        return services.Tx.run(() -> {
+        return Tx.run(() -> {
             TelegramBinding b = TelegramBinding.findById(bindingId);
             if (b == null) return null;
             // Force eager read of the agent's name/id to avoid detached-proxy
@@ -498,7 +504,7 @@ public final class TelegramPollingRunner {
         EventLogger.info(LOG_CATEGORY, ctx.agent().name, LOG_SOURCE,
                 "Polling received from %s: %s".formatted(
                         msg.fromUsername() != null ? msg.fromUsername() : msg.fromId(),
-                        utils.Strings.truncate(msg.text(), 50)));
+                        Strings.truncate(msg.text(), 50)));
 
         final String sendToken = ctx.botToken();
         final Agent sendAgent = ctx.agent();
@@ -598,7 +604,7 @@ public final class TelegramPollingRunner {
      * receive and dispatch).
      */
     private static Agent resolveTopicAgent(String botToken, String chatId, Integer threadId, Agent defaultAgent) {
-        return services.Tx.run(() -> {
+        return Tx.run(() -> {
             TelegramBinding binding = TelegramBinding.findByBotToken(botToken);
             if (binding == null) return defaultAgent;
             Agent resolved = binding.resolveAgentForTopic(chatId, threadId);
@@ -637,7 +643,7 @@ public final class TelegramPollingRunner {
      */
     public record ReactionDelta(String chatId, String chatType, Integer messageId,
                                 String reactorId, String reactor,
-                                java.util.List<String> added, java.util.List<String> removed) {}
+                                List<String> added, List<String> removed) {}
 
     /**
      * Resolve the configured reaction-notify policy, normalizing unknown/blank
@@ -645,7 +651,7 @@ public final class TelegramPollingRunner {
      * the config-read contract (matches the {@code *ForTest} convention).
      */
     public static String reactionNotifyMode() {
-        var raw = play.Play.configuration.getProperty(CFG_REACTIONS_NOTIFY, NOTIFY_OWN);
+        var raw = Play.configuration.getProperty(CFG_REACTIONS_NOTIFY, NOTIFY_OWN);
         if (raw == null) return NOTIFY_OWN;
         var v = raw.trim().toLowerCase();
         return switch (v) {
@@ -687,9 +693,9 @@ public final class TelegramPollingRunner {
                 reactorId, reactor, added, removed);
     }
 
-    private static java.util.LinkedHashSet<String> emojiSet(
-            java.util.List<org.telegram.telegrambots.meta.api.objects.reactions.ReactionType> reactions) {
-        var out = new java.util.LinkedHashSet<String>();
+    private static LinkedHashSet<String> emojiSet(
+            List<org.telegram.telegrambots.meta.api.objects.reactions.ReactionType> reactions) {
+        var out = new LinkedHashSet<String>();
         if (reactions == null) return out;
         for (var r : reactions) {
             if (r instanceof org.telegram.telegrambots.meta.api.objects.reactions.ReactionTypeEmoji emoji

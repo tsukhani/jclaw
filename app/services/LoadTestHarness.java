@@ -14,6 +14,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import com.google.gson.JsonParser;
+import java.net.BindException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Embedded OpenAI-compatible SSE server for load testing. Serves
@@ -74,10 +78,10 @@ public final class LoadTestHarness {
     // All writes still happen inside synchronized(lock); the atomic wrapper
     // is the fast-path for unsynchronized readers (isRunning(), port(),
     // and the scheduler.get().schedule() call inside handle()).
-    private static final java.util.concurrent.atomic.AtomicReference<HttpServer> server =
-            new java.util.concurrent.atomic.AtomicReference<>();
-    private static final java.util.concurrent.atomic.AtomicReference<ScheduledExecutorService> scheduler =
-            new java.util.concurrent.atomic.AtomicReference<>();
+    private static final AtomicReference<HttpServer> server =
+            new AtomicReference<>();
+    private static final AtomicReference<ScheduledExecutorService> scheduler =
+            new AtomicReference<>();
     private static volatile int port;
     private static volatile Scenario scenario = Scenario.defaults();
 
@@ -109,7 +113,7 @@ public final class LoadTestHarness {
             if (server.get() != null) return port;
             try {
                 return bindAndStart(requestedPort);
-            } catch (java.net.BindException _) {
+            } catch (BindException _) {
                 stop();
             }
         }
@@ -208,7 +212,7 @@ public final class LoadTestHarness {
      */
     private static boolean isToolResultContinuation(byte[] body) {
         try {
-            var json = com.google.gson.JsonParser.parseString(
+            var json = JsonParser.parseString(
                     new String(body, StandardCharsets.UTF_8)).getAsJsonObject();
             if (!json.has("messages")) return false;
             var msgs = json.getAsJsonArray("messages");
@@ -268,7 +272,7 @@ public final class LoadTestHarness {
         };
         try {
             sch.schedule(task, Math.max(0, scn.ttftMs()), TimeUnit.MILLISECONDS);
-        } catch (java.util.concurrent.RejectedExecutionException rejected) {
+        } catch (RejectedExecutionException rejected) {
             // Concurrent stop() shut the pool down between the snapshot and here.
             done.completeExceptionally(new IOException("loadtest harness stopped", rejected));
         }
@@ -342,7 +346,7 @@ public final class LoadTestHarness {
             };
             try {
                 sch.schedule(chunkTask, cumDelayMs, TimeUnit.MILLISECONDS);
-            } catch (java.util.concurrent.RejectedExecutionException rejected) {
+            } catch (RejectedExecutionException rejected) {
                 // Concurrent stop() shut the pool down mid-schedule. Complete
                 // exceptionally so awaitDone unblocks instead of parking forever
                 // (the already-scheduled earlier chunks may still fire, but the

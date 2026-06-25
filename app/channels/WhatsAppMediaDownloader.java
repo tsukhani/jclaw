@@ -26,6 +26,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import okhttp3.Request;
 
 /**
  * Downloads inbound WhatsApp media into the agent's staging dir, returning
@@ -180,7 +181,7 @@ public final class WhatsAppMediaDownloader {
     private static String resolveCdnUrl(String token, String mediaId, String apiBase, String agentName) {
         try {
             var url = apiBase + mediaId;
-            var req = new okhttp3.Request.Builder()
+            var req = new Request.Builder()
                     .url(url)
                     .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + token)
                     .get()
@@ -224,7 +225,7 @@ public final class WhatsAppMediaDownloader {
                         "Cloud-API media: refusing non-CDN host " + uri.getHost());
                 return false;
             }
-            var req = new okhttp3.Request.Builder()
+            var req = new Request.Builder()
                     .url(cdnUrl)
                     .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + token)
                     .get()
@@ -379,12 +380,12 @@ public final class WhatsAppMediaDownloader {
         var fromName = Filenames.extensionOf(part.filename());
         if (!fromName.isEmpty()) return fromName;
         var mime = part.mimeType();
-        return mime != null ? MIME_EXT.getOrDefault(mime.toLowerCase(java.util.Locale.ROOT), "") : "";
+        return mime != null ? MIME_EXT.getOrDefault(mime.toLowerCase(Locale.ROOT), "") : "";
     }
 
     /** Map MIME to the inbound modality kind, mirroring
      *  {@link models.MessageAttachment#kindForMime}. */
     private static String kindFor(String mime) {
-        return models.MessageAttachment.kindForMime(mime);
+        return MessageAttachment.kindForMime(mime);
     }
 }

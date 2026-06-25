@@ -15,6 +15,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.LinkedHashMap;
+import com.google.gson.JsonElement;
+import java.io.IOException;
+import java.util.concurrent.Future;
+import java.util.regex.Matcher;
+import okhttp3.MediaType;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import play.Logger;
+import utils.HttpFactories;
 
 /**
  * Model catalog discovery from LLM provider APIs. Handles fetching, parsing,
@@ -139,13 +148,13 @@ public class ModelDiscoveryService {
     private static DiscoveryResult discoverOpenAiCompat(String providerName, String baseUrl, String apiKey) {
         try {
             var url = baseUrl.endsWith("/") ? baseUrl + FIELD_MODELS : baseUrl + "/" + FIELD_MODELS;
-            var req = new okhttp3.Request.Builder()
+            var req = new Request.Builder()
                     .url(url)
                     .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
                     .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
                     .build();
-            var call = utils.HttpFactories.llmSingleShot().newCall(req);
+            var call = HttpFactories.llmSingleShot().newCall(req);
             call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;
@@ -156,7 +165,7 @@ public class ModelDiscoveryService {
             }
 
             if (statusCode != 200) {
-                play.Logger.warn("[discover/%s] upstream returned HTTP %d: %s",
+                Logger.warn("[discover/%s] upstream returned HTTP %d: %s",
                         providerName, statusCode, Strings.truncate(responseBody, 500));
                 return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
                         statusCode, Strings.truncate(responseBody, 200)));
@@ -179,10 +188,10 @@ public class ModelDiscoveryService {
             return new DiscoveryResult.Ok(models);
 
         } catch (JsonSyntaxException e) {
-            play.Logger.warn("[discover/%s] invalid JSON: %s", providerName, e.getMessage());
+            Logger.warn("[discover/%s] invalid JSON: %s", providerName, e.getMessage());
             return new DiscoveryResult.Error(502, "Invalid JSON response from provider");
         } catch (Exception e) {
-            play.Logger.warn("[discover/%s] connect/parse failed: %s", providerName, e.getMessage());
+            Logger.warn("[discover/%s] connect/parse failed: %s", providerName, e.getMessage());
             return new DiscoveryResult.Error(502, "Failed to connect to provider: %s".formatted(e.getMessage()));
         }
     }
@@ -219,7 +228,7 @@ public class ModelDiscoveryService {
 
     // --- Model parsing ---
 
-    public static List<Map<String, Object>> parseModels(com.google.gson.JsonElement body) {
+    public static List<Map<String, Object>> parseModels(JsonElement body) {
         var result = new ArrayList<Map<String, Object>>();
         JsonArray dataArray = null;
 
@@ -634,12 +643,12 @@ public class ModelDiscoveryService {
         if (leaderboardUrl == null || leaderboardUrl.isBlank()) return List.of();
 
         try {
-            var req = new okhttp3.Request.Builder()
+            var req = new Request.Builder()
                     .url(leaderboardUrl)
                     .header(HttpKeys.ACCEPT, "text/html,application/json")
                     .get()
                     .build();
-            var call = utils.HttpFactories.general().newCall(req);
+            var call = HttpFactories.general().newCall(req);
             call.timeout().timeout(LEADERBOARD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             String body;
@@ -700,7 +709,7 @@ public class ModelDiscoveryService {
      * only difference is the blocklist set.
      */
     private static void scanLeaderboardMatches(
-            java.util.regex.Matcher matcher,
+            Matcher matcher,
             String[] prefixBlocklist,
             HashSet<String> seen,
             ArrayList<String> out) {
@@ -793,13 +802,13 @@ public class ModelDiscoveryService {
         try {
             var nativeBase = stripV1Suffix(baseUrl);
             var url = nativeBase + "/api/v0/models";
-            var req = new okhttp3.Request.Builder()
+            var req = new Request.Builder()
                     .url(url)
                     .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
                     .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
                     .build();
-            var call = utils.HttpFactories.llmSingleShot().newCall(req);
+            var call = HttpFactories.llmSingleShot().newCall(req);
             call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;
@@ -948,14 +957,14 @@ public class ModelDiscoveryService {
      * GET {@code <nativeBase>/api/tags} and extract the model id list. On
      * non-200, returns a {@link TagsResult} carrying a populated {@link DiscoveryResult.Error}.
      */
-    private static TagsResult fetchOllamaTags(String nativeBase, String apiKey) throws java.io.IOException {
-        var tagsReq = new okhttp3.Request.Builder()
+    private static TagsResult fetchOllamaTags(String nativeBase, String apiKey) throws IOException {
+        var tagsReq = new Request.Builder()
                 .url(nativeBase + "/api/tags")
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
                 .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                 .get()
                 .build();
-        var tagsCall = utils.HttpFactories.llmSingleShot().newCall(tagsReq);
+        var tagsCall = HttpFactories.llmSingleShot().newCall(tagsReq);
         tagsCall.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
         int tagsStatus;
@@ -1001,7 +1010,7 @@ public class ModelDiscoveryService {
      * status on {@link InterruptedException} for cooperative cancellation.
      */
     private static void collectShowResult(
-            java.util.concurrent.Future<Map<String, Object>> future,
+            Future<Map<String, Object>> future,
             String modelId,
             List<Map<String, Object>> out) {
         try {
@@ -1009,9 +1018,9 @@ public class ModelDiscoveryService {
             if (model != null) out.add(model);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            play.Logger.warn("Ollama /api/show interrupted for %s", modelId);
+            Logger.warn("Ollama /api/show interrupted for %s", modelId);
         } catch (Exception e) {
-            play.Logger.warn("Ollama /api/show failed for %s: %s", modelId, e.getMessage());
+            Logger.warn("Ollama /api/show failed for %s: %s", modelId, e.getMessage());
         }
     }
 
@@ -1051,14 +1060,14 @@ public class ModelDiscoveryService {
     private static Map<String, Object> fetchOllamaShow(String url, String apiKey, String id) {
         try {
             var body = "{\"name\":\"" + id.replace("\"", "\\\"") + "\"}";
-            var jsonMediaType = okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON);
-            var req = new okhttp3.Request.Builder()
+            var jsonMediaType = MediaType.get(HttpKeys.APPLICATION_JSON);
+            var req = new Request.Builder()
                     .url(url)
                     .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
                     .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
-                    .post(okhttp3.RequestBody.create(body, jsonMediaType))
+                    .post(RequestBody.create(body, jsonMediaType))
                     .build();
-            var call = utils.HttpFactories.llmSingleShot().newCall(req);
+            var call = HttpFactories.llmSingleShot().newCall(req);
             call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;

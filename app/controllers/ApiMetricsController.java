@@ -16,6 +16,15 @@ import utils.LatencyStats;
 import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import models.CompressionMetric;
+import play.libs.F;
+import play.mvc.results.Result;
+import services.CompressionMetrics;
+import utils.HttpFactories;
 
 /**
  * Runtime observability endpoints. In-memory only — histograms reset
@@ -125,10 +134,10 @@ public class ApiMetricsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionResponse.class)))
     @Operation(summary = "List raw compression-metric rows since a timestamp for client-side aggregation")
     public static void compression() {
-        java.time.Instant since = parseSinceParam(params.get("since"));
-        java.util.List<models.CompressionMetric> events = models.CompressionMetric.<models.CompressionMetric>find(
+        Instant since = parseSinceParam(params.get("since"));
+        List<CompressionMetric> events = CompressionMetric.<CompressionMetric>find(
                 "createdAt >= ?1 order by createdAt desc", since).fetch();
-        var rows = new java.util.ArrayList<CompressionRow>(events.size());
+        var rows = new ArrayList<CompressionRow>(events.size());
         for (var m : events) {
             rows.add(new CompressionRow(
                     m.createdAt.toString(), m.agentId, m.channel, m.contentType, m.algorithm,
@@ -141,7 +150,7 @@ public class ApiMetricsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Reset (delete) all compression metrics")
     public static void resetCompression() {
-        services.CompressionMetrics.reset();
+        CompressionMetrics.reset();
         renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
     }
 
@@ -179,7 +188,7 @@ public class ApiMetricsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CostResponse.class)))
     @Operation(summary = "List per-turn cost rows since a timestamp for client-side aggregation")
     public static void cost() {
-        java.time.Instant since = parseSinceParam(params.get("since"));
+        Instant since = parseSinceParam(params.get("since"));
         Long agentId = parseAgentIdParam(params.get("agentId"));
         var channelTypeParam = params.get("channelType");
         String channelType = (channelTypeParam != null && !channelTypeParam.isBlank())
@@ -222,10 +231,10 @@ public class ApiMetricsController extends Controller {
 
         var results = query.getResultList();
 
-        var rows = new java.util.ArrayList<CostRow>(results.size());
+        var rows = new ArrayList<CostRow>(results.size());
         for (var r : results) {
             rows.add(new CostRow(
-                    ((java.time.Instant) r[0]).toString(),
+                    ((Instant) r[0]).toString(),
                     (Long) r[1],
                     (String) r[2],
                     (String) r[3],
@@ -239,7 +248,7 @@ public class ApiMetricsController extends Controller {
     private record LoadtestInput(int concurrency, int turns, int ttftMs, int tokensPerSecond,
                                  int responseTokens, int simulatedToolCalls, int toolSleepMs,
                                  boolean compress, String provider, String model, boolean real,
-                                 String userMessage, java.util.List<String> prompts) {}
+                                 String userMessage, List<String> prompts) {}
 
     /**
      * POST /api/metrics/loadtest — run a synchronous load test against
@@ -295,13 +304,13 @@ public class ApiMetricsController extends Controller {
         // dispatcher and inflate the ttft segment by the queue time. Snapshot
         // here, restore in finally so the cap returns to its operator-tuned
         // value after the test.
-        int origPerHost = utils.HttpFactories.llmDispatcherMaxRequestsPerHost();
-        int origMax = utils.HttpFactories.llmDispatcherMaxRequests();
+        int origPerHost = HttpFactories.llmDispatcherMaxRequestsPerHost();
+        int origMax = HttpFactories.llmDispatcherMaxRequests();
         boolean dispatcherBumped = input.concurrency() > origPerHost;
         if (dispatcherBumped) {
             int newPerHost = input.concurrency() + 16;
             int newMax = Math.max(origMax, newPerHost * 2);
-            utils.HttpFactories.setLlmDispatcherCapTransient(newPerHost, newMax);
+            HttpFactories.setLlmDispatcherCapTransient(newPerHost, newMax);
         }
 
         try {
@@ -317,7 +326,7 @@ public class ApiMetricsController extends Controller {
             }
 
             renderJSON(INSTANCE.toJson(buildLoadtestResponse(result, input)));
-        } catch (play.mvc.results.Result r) {
+        } catch (Result r) {
             throw r;
         } catch (Exception e) {
             if (!input.real()) {
@@ -327,7 +336,7 @@ public class ApiMetricsController extends Controller {
             error(500, "Load test failed: " + e.getMessage());
         } finally {
             if (dispatcherBumped) {
-                utils.HttpFactories.setLlmDispatcherCapTransient(origPerHost, origMax);
+                HttpFactories.setLlmDispatcherCapTransient(origPerHost, origMax);
             }
         }
     }
@@ -374,19 +383,19 @@ public class ApiMetricsController extends Controller {
      * strategies.
      */
     @SuppressWarnings("java:S2259")
-    private static java.util.List<String> parsePromptsField(JsonObject body, String userMessage) {
+    private static List<String> parsePromptsField(JsonObject body, String userMessage) {
         // LoadTestRunner treats null and empty identically (`!= null && !isEmpty()` guard
         // at the consumer); returning an empty list rather than null keeps the contract
         // predictable for any caller that doesn't replicate that guard.
-        if (body == null || !body.has(KEY_PROMPTS) || body.get(KEY_PROMPTS).isJsonNull()) return java.util.List.of();
-        java.util.List<String> prompts;
+        if (body == null || !body.has(KEY_PROMPTS) || body.get(KEY_PROMPTS).isJsonNull()) return List.of();
+        List<String> prompts;
         try {
             var arr = body.getAsJsonArray(KEY_PROMPTS);
-            prompts = new java.util.ArrayList<>(arr.size());
+            prompts = new ArrayList<>(arr.size());
             for (var el : arr) prompts.add(el.getAsString());
         } catch (Exception _) {
             error(400, "Invalid 'prompts' — must be an array of strings");
-            return java.util.List.of(); // unreachable — error() throws
+            return List.of(); // unreachable — error() throws
         }
         if (userMessage != null && !userMessage.isBlank()) {
             error(400, "userMessage and prompts are mutually exclusive");
@@ -421,7 +430,7 @@ public class ApiMetricsController extends Controller {
         if (real) return;
         try {
             JPA.withTransaction("default", false,
-                    (play.libs.F.Function0<Void>) () -> {
+                    (F.Function0<Void>) () -> {
                         ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
                         return null;
                     });
@@ -490,7 +499,7 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static int readInt(com.google.gson.JsonObject body, String key, int defaultValue) {
+    private static int readInt(JsonObject body, String key, int defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
             return body.get(key).getAsInt();
@@ -501,7 +510,7 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static boolean readBool(com.google.gson.JsonObject body, String key, boolean defaultValue) {
+    private static boolean readBool(JsonObject body, String key, boolean defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
             return body.get(key).getAsBoolean();
@@ -512,7 +521,7 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static String readString(com.google.gson.JsonObject body, String key, String defaultValue) {
+    private static String readString(JsonObject body, String key, String defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
             return body.get(key).getAsString();
@@ -528,13 +537,13 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static java.time.Instant parseSinceParam(String sinceParam) {
+    private static Instant parseSinceParam(String sinceParam) {
         if (sinceParam == null || sinceParam.isBlank()) {
-            return java.time.Instant.now().minus(30, java.time.temporal.ChronoUnit.DAYS);
+            return Instant.now().minus(30, ChronoUnit.DAYS);
         }
         try {
-            return java.time.Instant.parse(sinceParam);
-        } catch (java.time.format.DateTimeParseException _) {
+            return Instant.parse(sinceParam);
+        } catch (DateTimeParseException _) {
             error(400, "Invalid 'since' — must be ISO-8601 instant (e.g. 2026-04-10T00:00:00Z)");
             throw new AssertionError("unreachable: error() throws");
         }

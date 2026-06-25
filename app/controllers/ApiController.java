@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static utils.GsonHolder.INSTANCE;
+import play.Play;
 
 /**
  * API controller for the Nuxt 3 frontend.
@@ -46,10 +47,10 @@ public class ApiController extends Controller {
     public static void status() {
         var resp = new StatusResponse(
                 "ok",
-                play.Play.configuration.getProperty("application.name"),
-                play.Play.mode.toString(),
-                play.Play.configuration.getProperty("application.version", "0.0.0"),
-                play.Play.version,
+                Play.configuration.getProperty("application.name"),
+                Play.mode.toString(),
+                Play.configuration.getProperty("application.version", "0.0.0"),
+                Play.version,
                 readExpectedFrameworkVersion());
         renderJSON(INSTANCE.toJson(resp));
     }
@@ -64,7 +65,7 @@ public class ApiController extends Controller {
      */
     private static String readExpectedFrameworkVersion() {
         try {
-            var path = Path.of(play.Play.applicationPath.getAbsolutePath(), ".play-version");
+            var path = Path.of(Play.applicationPath.getAbsolutePath(), ".play-version");
             if (!Files.isRegularFile(path)) return null;
             var raw = Files.readString(path).trim();
             return raw.isEmpty() ? null : raw;

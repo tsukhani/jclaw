@@ -18,6 +18,7 @@ import play.mvc.With;
 
 import java.util.HashMap;
 import java.util.List;
+import agents.ToolAction;
 
 @With(AuthCheck.class)
 public class ApiToolsController extends Controller {
@@ -32,7 +33,7 @@ public class ApiToolsController extends Controller {
     public record ToolListEntry(String name, String description) {}
 
     public record ToolMetaEntry(String name, String category, String icon, String shortDescription,
-                                String requiresConfig, String group, List<agents.ToolAction> actions) {}
+                                String requiresConfig, String group, List<ToolAction> actions) {}
 
     public record AgentToolEntry(String name, String description, String group, boolean enabled) {}
 

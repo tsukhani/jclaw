@@ -1,5 +1,7 @@
 package utils;
 
+import play.Play;
+
 /**
  * Tiny typed accessors over {@code play.Play.configuration} (the static
  * application.conf properties), with a fallback when the key is absent, blank,
@@ -14,7 +16,7 @@ public final class PlayConfig {
 
     /** Parse {@code key} as an int, or {@code fallback} if absent/blank/invalid. */
     public static int intOr(String key, int fallback) {
-        var raw = play.Play.configuration.getProperty(key);
+        var raw = Play.configuration.getProperty(key);
         if (raw == null || raw.isBlank()) return fallback;
         try {
             return Integer.parseInt(raw.trim());
@@ -25,7 +27,7 @@ public final class PlayConfig {
 
     /** Parse {@code key} as a long, or {@code fallback} if absent/blank/invalid. */
     public static long longOr(String key, long fallback) {
-        var raw = play.Play.configuration.getProperty(key);
+        var raw = Play.configuration.getProperty(key);
         if (raw == null || raw.isBlank()) return fallback;
         try {
             return Long.parseLong(raw.trim());

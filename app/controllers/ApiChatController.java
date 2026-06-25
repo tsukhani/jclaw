@@ -25,6 +25,24 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static utils.GsonHolder.INSTANCE;
 import static utils.TikaHolder.TIKA;
+import com.google.gson.JsonParser;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import llm.LlmTypes;
+import llm.ProviderRegistry;
+import models.MessageAttachment;
+import play.data.Upload;
+import services.AttachmentService;
+import services.ConfigService;
+import services.MimeExtensions;
+import services.Tx;
+import services.UploadLimits;
+import utils.TokenCoalescer;
 
 /**
  * Chat dispatch endpoints: sync send, SSE streaming, and file upload.
@@ -63,14 +81,14 @@ public class ApiChatController extends Controller {
      * in the frame are the spec-mandated {@code \n\n} terminator.
      */
     private static final byte[] SSE_TOKEN_PREFIX =
-            "data: {\"type\":\"token\",\"content\":".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            "data: {\"type\":\"token\",\"content\":".getBytes(StandardCharsets.UTF_8);
     private static final byte[] SSE_REASONING_PREFIX =
-            "data: {\"type\":\"reasoning\",\"content\":".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            "data: {\"type\":\"reasoning\",\"content\":".getBytes(StandardCharsets.UTF_8);
     private static final byte[] SSE_FRAME_SUFFIX =
-            "}\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            "}\n\n".getBytes(StandardCharsets.UTF_8);
 
-    private static void sendChunkFrame(play.mvc.SseStream sse, byte[] prefix, String content) {
-        var contentBytes = gson.toJson(content).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static void sendChunkFrame(SseStream sse, byte[] prefix, String content) {
+        var contentBytes = gson.toJson(content).getBytes(StandardCharsets.UTF_8);
         var frame = new byte[prefix.length + contentBytes.length + SSE_FRAME_SUFFIX.length];
         System.arraycopy(prefix, 0, frame, 0, prefix.length);
         System.arraycopy(contentBytes, 0, frame, prefix.length, contentBytes.length);
@@ -80,7 +98,7 @@ public class ApiChatController extends Controller {
 
     /** Validated prologue shared by send() and streamChat(). */
     private record ChatContext(Agent agent, String message, Long conversationId, String username,
-                                java.util.List<services.AttachmentService.Input> attachments) {}
+                                List<AttachmentService.Input> attachments) {}
 
     /**
      * Parse and validate the common fields from a chat request body.
@@ -110,7 +128,7 @@ public class ApiChatController extends Controller {
         // request in a JPA tx; explicit short Tx.run for the lookup. Agent has
         // no lazy fields used downstream, so reading String columns on the
         // detached entity after the tx closes is safe.
-        Agent agent = services.Tx.run(() -> Agent.findById(agentId));
+        Agent agent = Tx.run(() -> Agent.findById(agentId));
         if (agent == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");
@@ -131,12 +149,12 @@ public class ApiChatController extends Controller {
         return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments);
     }
 
-    private static java.util.List<services.AttachmentService.Input> parseAttachments(JsonObject body) {
+    private static List<AttachmentService.Input> parseAttachments(JsonObject body) {
         if (body == null || !body.has(KEY_ATTACHMENTS) || body.get(KEY_ATTACHMENTS).isJsonNull()) {
-            return java.util.List.of();
+            return List.of();
         }
         var arr = body.getAsJsonArray(KEY_ATTACHMENTS);
-        var out = new java.util.ArrayList<services.AttachmentService.Input>(arr.size());
+        var out = new ArrayList<AttachmentService.Input>(arr.size());
         for (var el : arr) {
             out.add(parseAttachment(el.getAsJsonObject()));
         }
@@ -144,7 +162,7 @@ public class ApiChatController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static services.AttachmentService.Input parseAttachment(JsonObject o) {
+    private static AttachmentService.Input parseAttachment(JsonObject o) {
         var id = o.has(KEY_ATTACHMENT_ID) ? o.get(KEY_ATTACHMENT_ID).getAsString() : null;
         if (id == null || id.isBlank()) {
             error(400, "attachment missing attachmentId");
@@ -152,8 +170,8 @@ public class ApiChatController extends Controller {
         var originalFilename = o.has(KEY_ORIGINAL_FILENAME) ? o.get(KEY_ORIGINAL_FILENAME).getAsString() : null;
         var mimeType = o.has(KEY_MIME_TYPE) ? o.get(KEY_MIME_TYPE).getAsString() : null;
         var sizeBytes = o.has(KEY_SIZE_BYTES) ? o.get(KEY_SIZE_BYTES).getAsLong() : 0L;
-        var kind = o.has("kind") ? o.get("kind").getAsString() : models.MessageAttachment.KIND_FILE;
-        return new services.AttachmentService.Input(id, originalFilename, mimeType, sizeBytes, kind);
+        var kind = o.has("kind") ? o.get("kind").getAsString() : MessageAttachment.KIND_FILE;
+        return new AttachmentService.Input(id, originalFilename, mimeType, sizeBytes, kind);
     }
 
     /**
@@ -222,13 +240,13 @@ public class ApiChatController extends Controller {
      * insertion) happens in {@link AgentRunner} when the send lands.
      */
     @SuppressWarnings("java:S2259")
-    public static void uploadChatFiles(Long agentId, play.data.Upload[] files) {
+    public static void uploadChatFiles(Long agentId, Upload[] files) {
         if (agentId == null) badRequest();
         Agent agent = Agent.findById(agentId);
         if (agent == null) notFound();
 
         validateUploads(files);
-        java.nio.file.Path stagingDir = acquireStagingDir(agent);
+        Path stagingDir = acquireStagingDir(agent);
 
         var results = new ArrayList<Map<String, Object>>();
         try {
@@ -236,7 +254,7 @@ public class ApiChatController extends Controller {
             for (var upload : files) {
                 results.add(stageOneUpload(stagingDir, upload));
             }
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             EventLogger.error("chat", "Chat upload failed for agent %s: %s"
                     .formatted(agent.name, e.getMessage()));
             error(500, "Upload failed: " + e.getMessage());
@@ -248,11 +266,11 @@ public class ApiChatController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static void validateUploads(play.data.Upload[] files) {
+    private static void validateUploads(Upload[] files) {
         if (files == null || files.length == 0) {
             error(400, "No files uploaded");
         }
-        int maxFiles = services.UploadLimits.maxFiles();
+        int maxFiles = UploadLimits.maxFiles();
         if (files.length > maxFiles) {
             error(400, "Too many files (max " + maxFiles + ")");
         }
@@ -262,7 +280,7 @@ public class ApiChatController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static java.nio.file.Path acquireStagingDir(Agent agent) {
+    private static Path acquireStagingDir(Agent agent) {
         try {
             return AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
         } catch (SecurityException _) {
@@ -272,15 +290,15 @@ public class ApiChatController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static Map<String, Object> stageOneUpload(java.nio.file.Path stagingDir, play.data.Upload upload)
-            throws java.io.IOException {
+    private static Map<String, Object> stageOneUpload(Path stagingDir, Upload upload)
+            throws IOException {
         var f = upload.asFile();
         var safeName = sanitizeFilename(upload.getFileName() != null ? upload.getFileName() : f.getName());
         if (safeName.isEmpty()) {
             error(400, "Invalid filename: " + upload.getFileName());
         }
         var sniffedMime = sniffMime(f, upload.getContentType());
-        var kind = models.MessageAttachment.kindForMime(sniffedMime);
+        var kind = MessageAttachment.kindForMime(sniffedMime);
         enforceUploadCap(f, kind, upload.getFileName());
 
         var uuid = UUID.randomUUID().toString();
@@ -311,7 +329,7 @@ public class ApiChatController extends Controller {
      * audio/* AND Tika returned the ambiguous video/webm, trust
      * the browser hint. Other ambiguities still fall to Tika.
      */
-    private static String sniffMime(java.io.File f, String browserMime) throws java.io.IOException {
+    private static String sniffMime(File f, String browserMime) throws IOException {
         var sniffedMime = TIKA.detect(f);
         if ("video/webm".equals(sniffedMime)
                 && browserMime != null && browserMime.startsWith("audio/")) {
@@ -321,13 +339,13 @@ public class ApiChatController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static void enforceUploadCap(java.io.File f, String kind, String originalName) {
-        var cap = services.UploadLimits.forKind(kind);
+    private static void enforceUploadCap(File f, String kind, String originalName) {
+        var cap = UploadLimits.forKind(kind);
         if (f.length() > cap) {
             error(400, "%s too large: %s (max %d MB for %s)"
-                    .formatted(services.UploadLimits.displayName(kind),
+                    .formatted(UploadLimits.displayName(kind),
                             originalName, cap / (1024 * 1024),
-                            services.UploadLimits.displayName(kind)));
+                            UploadLimits.displayName(kind)));
         }
     }
 
@@ -337,8 +355,8 @@ public class ApiChatController extends Controller {
      * caller can stay on the IO happy-path without nesting try blocks.
      * {@code error()} throws — this method does not return on the failure path.
      */
-    private static java.nio.file.Path acquireContainedOr400(
-            java.nio.file.Path stagingDir, String leaf, String originalName) {
+    private static Path acquireContainedOr400(
+            Path stagingDir, String leaf, String originalName) {
         try {
             return AgentService.acquireContained(stagingDir, leaf);
         } catch (SecurityException _) {
@@ -379,7 +397,7 @@ public class ApiChatController extends Controller {
      * a one-line config change.
      */
     private static String canonicalExtensionForMime(String mime) {
-        return services.MimeExtensions.forMime(mime, EXTENSION_CANDIDATES);
+        return MimeExtensions.forMime(mime, EXTENSION_CANDIDATES);
     }
 
     private static String sanitizeFilename(String name) {
@@ -494,11 +512,11 @@ public class ApiChatController extends Controller {
             // the lookup since ConversationService.findById assumes its
             // caller owns the tx.
             final Long capturedConvId = conversationId;
-            var conv = services.Tx.run(() -> ConversationService.findById(capturedConvId));
+            var conv = Tx.run(() -> ConversationService.findById(capturedConvId));
             if (conv == null) notFound();
             return conv;
         }
-        return services.Tx.run(() -> ConversationService.findOrCreate(agent, "web", username));
+        return Tx.run(() -> ConversationService.findOrCreate(agent, "web", username));
     }
 
     private static AgentRunner.StreamingCallbacks buildStreamingCallbacks(SseStream sse, Agent agent) {
@@ -514,10 +532,10 @@ public class ApiChatController extends Controller {
         // and emits one frame per ~N chars of accumulated content. Default
         // 0 = current per-token behavior. First token always emits
         // immediately; only steady-state tokens batch.
-        final int coalesceChars = Math.max(0, services.ConfigService.getInt("chat.stream.token_coalesce_chars", 0));
-        var tokenCoalescer = new utils.TokenCoalescer(coalesceChars,
+        final int coalesceChars = Math.max(0, ConfigService.getInt("chat.stream.token_coalesce_chars", 0));
+        var tokenCoalescer = new TokenCoalescer(coalesceChars,
                 s -> sendChunkFrame(sse, SSE_TOKEN_PREFIX, s));
-        var reasoningCoalescer = new utils.TokenCoalescer(coalesceChars,
+        var reasoningCoalescer = new TokenCoalescer(coalesceChars,
                 s -> sendChunkFrame(sse, SSE_REASONING_PREFIX, s));
         return new AgentRunner.StreamingCallbacks(
                 conversation -> sendInitFrame(sse, agent, conversation),
@@ -528,7 +546,7 @@ public class ApiChatController extends Controller {
                         // HashMap allocation isn't worth the pre-built-frame
                         // dance the steady-state path uses.
                         sse.send(Map.of("type", "token", KEY_CONTENT, token,
-                                "timestamp", java.time.Instant.now().toString()));
+                                "timestamp", Instant.now().toString()));
                     } else {
                         tokenCoalescer.accept(token);
                     }
@@ -563,17 +581,17 @@ public class ApiChatController extends Controller {
     }
 
     private static void sendInitFrame(SseStream sse, Agent agent, Conversation conversation) {
-        var initData = new java.util.HashMap<>(Map.of("type", "init", KEY_CONVERSATION_ID, conversation.id));
+        var initData = new HashMap<>(Map.of("type", "init", KEY_CONVERSATION_ID, conversation.id));
         // Use the agent's persisted thinking mode, gated by the model's
         // current capability — same semantics as AgentRunner so the UI
         // reflects what the LLM will actually receive.
         if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
-            var provider = llm.ProviderRegistry.get(agent.modelProvider);
+            var provider = ProviderRegistry.get(agent.modelProvider);
             if (provider != null) {
                 boolean valid = provider.config().models().stream()
                         .filter(m -> m.id().equals(agent.modelId))
                         .findFirst()
-                        .filter(llm.LlmTypes.ModelInfo::supportsThinking)
+                        .filter(LlmTypes.ModelInfo::supportsThinking)
                         .map(m -> m.effectiveThinkingLevels().contains(agent.thinkingMode))
                         .orElse(false);
                 if (valid) initData.put("thinkingMode", agent.thinkingMode);
@@ -590,7 +608,7 @@ public class ApiChatController extends Controller {
      * clickable result chips.
      */
     private static void sendToolCallFrame(SseStream sse, AgentRunner.ToolCallEvent ev) {
-        var payload = new java.util.LinkedHashMap<String, Object>();
+        var payload = new LinkedHashMap<String, Object>();
         payload.put("type", "tool_call");
         payload.put("id", ev.id());
         payload.put("name", ev.name());
@@ -599,13 +617,13 @@ public class ApiChatController extends Controller {
         payload.put("resultText", ev.resultText() == null ? "" : ev.resultText());
         if (ev.resultStructuredJson() != null) {
             payload.put("resultStructured",
-                    com.google.gson.JsonParser.parseString(ev.resultStructuredJson()));
+                    JsonParser.parseString(ev.resultStructuredJson()));
         }
         // JCLAW-228: a generate_image tool produced an inline image; ship its attachment metadata so the
         // chat UI renders it live on the streaming bubble rather than only after a reload.
         if (ev.generatedAttachmentJson() != null) {
             payload.put("generatedAttachment",
-                    com.google.gson.JsonParser.parseString(ev.generatedAttachmentJson()));
+                    JsonParser.parseString(ev.generatedAttachmentJson()));
         }
         sse.send(payload);
     }

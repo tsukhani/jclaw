@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.ArrayList;
 
 /**
  * One MCP tool advertised by a connected server (JCLAW-31).
@@ -54,7 +55,7 @@ public record McpToolDef(String name, String description, JsonObject inputSchema
         if (el == null || el.isJsonNull()) return null;
         if (el.isJsonObject()) return jsonToMap(el.getAsJsonObject());
         if (el.isJsonArray()) {
-            var list = new java.util.ArrayList<Object>();
+            var list = new ArrayList<Object>();
             for (var e : el.getAsJsonArray()) list.add(jsonToJava(e));
             return list;
         }

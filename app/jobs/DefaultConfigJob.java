@@ -9,6 +9,19 @@ import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
 import services.scanners.ScannerRegistry;
+import agents.AgentRunner;
+import agents.SkillLoader;
+import java.io.IOException;
+import java.nio.file.Files;
+import play.Logger;
+import services.InternalApiTokenService;
+import services.SkillPromotionService;
+import services.imagegen.FluxSidecarProbe;
+import services.transcription.FfmpegProbe;
+import services.transcription.WhisperModel;
+import tools.ShellExecTool;
+import tools.SubagentSpawnTool;
+import utils.HttpFactories;
 
 /**
  * Seeds default runtime configuration and default agent on first startup.
@@ -37,16 +50,16 @@ public class DefaultConfigJob extends Job<Void> {
         seedJClawApiTooling();
         seedDispatcherTuning();
         seedTranscription();
-        agents.SkillLoader.syncSkillConfigs();
-        utils.HttpFactories.applyDispatcherConfig();
+        SkillLoader.syncSkillConfigs();
+        HttpFactories.applyDispatcherConfig();
         // JCLAW-163: prime the ffmpeg cache so the Settings UI can render a
         // "ffmpeg missing" banner without paying the probe cost on first
         // page load. Cheap (~ms when ffmpeg is present, ~tens of ms when not).
-        services.transcription.FfmpegProbe.probe();
+        FfmpegProbe.probe();
         // JCLAW-226: prime the uv-availability cache so the Settings UI can render
         // a "uv missing" banner for local image generation without paying the probe
         // cost on first page load (cheap; same rationale as FfmpegProbe above).
-        services.imagegen.FluxSidecarProbe.probe();
+        FluxSidecarProbe.probe();
         EventLogger.info("system", "Default configuration seeded");
     }
 
@@ -63,7 +76,7 @@ public class DefaultConfigJob extends Job<Void> {
         // is configured.
         seedIfAbsent("transcription.provider", "whisper-local");
         seedIfAbsent("transcription.localModel",
-                services.transcription.WhisperModel.DEFAULT.id());
+                WhisperModel.DEFAULT.id());
     }
 
     /**
@@ -191,7 +204,7 @@ public class DefaultConfigJob extends Job<Void> {
 
     private void seedToolConfig() {
         // Chat settings — values reference the source constants to stay in sync
-        seedIfAbsent("chat.maxToolRounds", String.valueOf(agents.AgentRunner.DEFAULT_MAX_TOOL_ROUNDS));
+        seedIfAbsent("chat.maxToolRounds", String.valueOf(AgentRunner.DEFAULT_MAX_TOOL_ROUNDS));
         seedIfAbsent("chat.maxContextMessages", "50");
 
         // Ollama: how long the model + KV cache stays resident between requests.
@@ -216,7 +229,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("ocr.tesseract.enabled", "true");
 
         // Shell execution tool — operator-tunable knobs only.
-        seedIfAbsent("shell.allowlist", tools.ShellExecTool.DEFAULT_ALLOWLIST);
+        seedIfAbsent("shell.allowlist", ShellExecTool.DEFAULT_ALLOWLIST);
         seedIfAbsent("shell.defaultTimeoutSeconds", "30");
         seedIfAbsent("shell.maxTimeoutSeconds", "300");
         seedIfAbsent("shell.maxOutputBytes", "102400");
@@ -278,16 +291,16 @@ public class DefaultConfigJob extends Job<Void> {
         // keys are editable from the Settings page's Subagents section
         // (DB-backed so changes take effect without a restart). Read path
         // lives in tools.SubagentSpawnTool#enforceRecursionLimits.
-        seedIfAbsent(tools.SubagentSpawnTool.DEPTH_LIMIT_KEY,
-                String.valueOf(tools.SubagentSpawnTool.DEFAULT_DEPTH_LIMIT));
-        seedIfAbsent(tools.SubagentSpawnTool.BREADTH_LIMIT_KEY,
-                String.valueOf(tools.SubagentSpawnTool.DEFAULT_BREADTH_LIMIT));
+        seedIfAbsent(SubagentSpawnTool.DEPTH_LIMIT_KEY,
+                String.valueOf(SubagentSpawnTool.DEFAULT_DEPTH_LIMIT));
+        seedIfAbsent(SubagentSpawnTool.BREADTH_LIMIT_KEY,
+                String.valueOf(SubagentSpawnTool.DEFAULT_BREADTH_LIMIT));
         // JCLAW-424: absolute wall-clock ceiling on a single subagent run — the
         // runaway guard the idle budget (an active child never trips it) cannot
         // provide. Operator-only; 0 disables. Read path lives in
         // tools.SubagentSpawnTool#awaitFuture.
-        seedIfAbsent(tools.SubagentSpawnTool.MAX_WALLCLOCK_KEY,
-                String.valueOf(tools.SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS));
+        seedIfAbsent(SubagentSpawnTool.MAX_WALLCLOCK_KEY,
+                String.valueOf(SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS));
     }
 
     private void seedDefaultAgent() {
@@ -327,7 +340,7 @@ public class DefaultConfigJob extends Job<Void> {
     private void seedJClawApiTooling() {
         // Step 1: ensure the internal bearer token exists. The first
         // call mints it; subsequent boots reuse the stored value.
-        services.InternalApiTokenService.token();
+        InternalApiTokenService.token();
 
         // Step 2: install the skill into main's workspace.
         seedJClawApiSkillForMain();
@@ -340,20 +353,20 @@ public class DefaultConfigJob extends Job<Void> {
      *  it back in. */
     private void seedJClawApiSkillForMain() {
         var skillName = "jclaw-api";
-        var globalSkillMd = agents.SkillLoader.globalSkillsPath()
+        var globalSkillMd = SkillLoader.globalSkillsPath()
                 .resolve(skillName).resolve("SKILL.md");
-        if (!java.nio.file.Files.exists(globalSkillMd)) {
-            play.Logger.info("jclaw-api skill not present in global registry — skipping bootstrap");
+        if (!Files.exists(globalSkillMd)) {
+            Logger.info("jclaw-api skill not present in global registry — skipping bootstrap");
             return;
         }
         var main = Agent.findByName("main");
         if (main == null) return;
         try {
-            services.SkillPromotionService.copyToAgentWorkspace(main, skillName);
+            SkillPromotionService.copyToAgentWorkspace(main, skillName);
             EventLogger.info(EVENT_CATEGORY_AGENT, "main", null,
                     "jclaw-api skill installed for main agent (in-process API access seeded)");
-        } catch (java.io.IOException e) {
-            play.Logger.warn("Failed to bootstrap jclaw-api skill for main: %s", e.getMessage());
+        } catch (IOException e) {
+            Logger.warn("Failed to bootstrap jclaw-api skill for main: %s", e.getMessage());
         }
     }
 
@@ -369,21 +382,21 @@ public class DefaultConfigJob extends Job<Void> {
      * with an actionable error.
      */
     private void seedSkillCreatorForMain() {
-        var skillName = services.SkillPromotionService.SKILL_CREATOR_NAME;
-        var globalSkillMd = agents.SkillLoader.globalSkillsPath()
+        var skillName = SkillPromotionService.SKILL_CREATOR_NAME;
+        var globalSkillMd = SkillLoader.globalSkillsPath()
                 .resolve(skillName).resolve("SKILL.md");
-        if (!java.nio.file.Files.exists(globalSkillMd)) {
-            play.Logger.info("Skill-creator not present in global registry — skipping bootstrap");
+        if (!Files.exists(globalSkillMd)) {
+            Logger.info("Skill-creator not present in global registry — skipping bootstrap");
             return;
         }
         var main = Agent.findByName("main");
         if (main == null) return;
         try {
-            services.SkillPromotionService.copyToAgentWorkspace(main, skillName);
+            SkillPromotionService.copyToAgentWorkspace(main, skillName);
             EventLogger.info(EVENT_CATEGORY_AGENT, "main", null,
                     "Skill-creator installed for main agent (promotion capability seeded)");
-        } catch (java.io.IOException e) {
-            play.Logger.warn("Failed to bootstrap skill-creator for main: %s", e.getMessage());
+        } catch (IOException e) {
+            Logger.warn("Failed to bootstrap skill-creator for main: %s", e.getMessage());
         }
     }
 

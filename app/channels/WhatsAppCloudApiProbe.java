@@ -7,6 +7,8 @@ import utils.HttpKeys;
 import utils.Strings;
 
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
+import okhttp3.Request;
 
 /**
  * Verifies a WhatsApp Cloud-API binding's credentials by probing Meta's Graph
@@ -62,10 +64,10 @@ public final class WhatsAppCloudApiProbe {
      * {@link #installForTest}/cleared via {@link #clearForTest}. The
      * {@code apiBase} overload is unaffected (HTTP-level probe tests use it directly).
      */
-    private static volatile java.util.function.BiFunction<String, String, Result> testOverride;
+    private static volatile BiFunction<String, String, Result> testOverride;
 
     /** Install a canned probe result for tests. */
-    public static void installForTest(java.util.function.BiFunction<String, String, Result> override) {
+    public static void installForTest(BiFunction<String, String, Result> override) {
         testOverride = override;
     }
 
@@ -101,7 +103,7 @@ public final class WhatsAppCloudApiProbe {
         }
 
         var url = apiBase + phoneNumberId + "?fields=" + FIELDS;
-        var request = new okhttp3.Request.Builder()
+        var request = new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + accessToken)
                 .get()

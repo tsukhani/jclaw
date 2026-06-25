@@ -15,6 +15,9 @@ import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Slack Web API + Events API client, on the official Slack SDK (com.slack.api).
@@ -81,13 +84,13 @@ public class SlackChannel implements Channel {
 
     /** JCLAW-141: no native Slack file-upload send today (JCLAW-345). */
     @Override
-    public SendResult sendPhoto(String peerId, java.io.File file, String caption) {
+    public SendResult sendPhoto(String peerId, File file, String caption) {
         return SendResult.FAILED;
     }
 
     /** JCLAW-141: no native Slack file-upload send today (JCLAW-345). */
     @Override
-    public SendResult sendDocument(String peerId, java.io.File file, String caption) {
+    public SendResult sendDocument(String peerId, File file, String caption) {
         return SendResult.FAILED;
     }
 
@@ -356,7 +359,7 @@ public class SlackChannel implements Channel {
     // --- Inbound event parsing (SDK model) ---
 
     public record InboundMessage(String channelId, String userId, String text, String threadTs,
-                                 java.util.List<SlackPendingFile> files, String channelType,
+                                 List<SlackPendingFile> files, String channelType,
                                  boolean botMentioned) {}
 
     /**
@@ -413,12 +416,12 @@ public class SlackChannel implements Channel {
     /** Extract the event's {@code files[]} array into pending downloads (JCLAW-344).
      *  Empty when absent — the text-only path. Prefers {@code url_private_download}
      *  (direct bytes) over {@code url_private} (which serves an HTML page). */
-    private static java.util.List<SlackPendingFile> parseFiles(JsonObject eventObj) {
+    private static List<SlackPendingFile> parseFiles(JsonObject eventObj) {
         if (!eventObj.has(FILES_KEY) || !eventObj.get(FILES_KEY).isJsonArray()) {
-            return java.util.List.of();
+            return List.of();
         }
         var arr = eventObj.getAsJsonArray(FILES_KEY);
-        var out = new java.util.ArrayList<SlackPendingFile>(arr.size());
+        var out = new ArrayList<SlackPendingFile>(arr.size());
         for (var el : arr) {
             if (!el.isJsonObject()) {
                 continue;

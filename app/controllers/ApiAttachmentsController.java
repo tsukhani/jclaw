@@ -9,6 +9,8 @@ import utils.HttpKeys;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import services.AttachmentService;
 
 /**
  * Download endpoint for persisted chat-message attachments (JCLAW-279).
@@ -44,7 +46,7 @@ public class ApiAttachmentsController extends Controller {
         if (!att.storagePath.startsWith(prefix)) notFound();
         var relPath = att.storagePath.substring(prefix.length());
 
-        java.nio.file.Path path;
+        Path path;
         try {
             path = AgentService.acquireWorkspacePath(agentName, relPath);
         } catch (SecurityException _) {
@@ -82,7 +84,7 @@ public class ApiAttachmentsController extends Controller {
         var att = MessageAttachment.findByUuid(uuid);
         if (att == null) notFound();
         if (!att.deleted) {
-            services.AttachmentService.deleteImageFile(att);
+            AttachmentService.deleteImageFile(att);
             att.deleted = true;
             att.save();
         }

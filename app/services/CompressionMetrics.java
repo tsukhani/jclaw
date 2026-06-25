@@ -2,6 +2,7 @@ package services;
 
 import models.CompressionMetric;
 import models.CompressionMetric.Kind;
+import play.Logger;
 
 /**
  * Records compression-pipeline events (JCLAW-467). Recording is best-effort — a
@@ -64,7 +65,7 @@ public final class CompressionMetrics {
             });
         } catch (RuntimeException e) {
             // Metrics are best-effort; a write failure must never disrupt the run.
-            play.Logger.debug("[metrics] dropped a compression metric: %s", e.getMessage());
+            Logger.debug("[metrics] dropped a compression metric: %s", e.getMessage());
         }
     }
 }

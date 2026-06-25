@@ -1,5 +1,7 @@
 package channels;
 
+import java.util.List;
+
 /**
  * Generic inbound shape consumed by {@link controllers.WebhookTelegramController}
  * and {@link TelegramPollingRunner}. Extracted from {@code TelegramChannel} in
@@ -59,14 +61,14 @@ package channels;
 public record InboundMessage(String chatId, String chatType, String text,
                              String fromId, String fromUsername,
                              String fromDisplayName, boolean botMentioned,
-                             java.util.List<PendingAttachment> attachments,
+                             List<PendingAttachment> attachments,
                              String mediaGroupId,
                              Integer messageId, Integer messageThreadId,
                              String replyContext) {
     public InboundMessage(String chatId, String chatType, String text,
                           String fromId, String fromUsername) {
         this(chatId, chatType, text, fromId, fromUsername, null, false,
-                java.util.List.of(), null, null, null, null);
+                List.of(), null, null, null, null);
     }
 
     /**
@@ -82,7 +84,7 @@ public record InboundMessage(String chatId, String chatType, String text,
      */
     public InboundMessage(String chatId, String chatType, String text,
                           String fromId, String fromUsername,
-                          java.util.List<PendingAttachment> attachments,
+                          List<PendingAttachment> attachments,
                           String mediaGroupId) {
         this(chatId, chatType, text, fromId, fromUsername, null, false,
                 attachments, mediaGroupId, null, null, null);
@@ -97,7 +99,7 @@ public record InboundMessage(String chatId, String chatType, String text,
     public InboundMessage(String chatId, String chatType, String text,
                           String fromId, String fromUsername,
                           String fromDisplayName, boolean botMentioned,
-                          java.util.List<PendingAttachment> attachments,
+                          List<PendingAttachment> attachments,
                           String mediaGroupId,
                           Integer messageId, Integer messageThreadId) {
         this(chatId, chatType, text, fromId, fromUsername, fromDisplayName,

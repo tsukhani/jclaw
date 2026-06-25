@@ -18,6 +18,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import agents.ToolAction;
+import com.google.gson.Gson;
+import java.net.URLEncoder;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.concurrent.TimeUnit;
+import utils.GsonHolder;
 
 /**
  * Web search tool supporting multiple providers: Exa, Brave, and Tavily.
@@ -29,7 +36,7 @@ import java.util.Map;
  */
 public class WebSearchTool implements ToolRegistry.Tool {
 
-    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
+    private static final Gson gson = GsonHolder.INSTANCE;
     private static final int TIMEOUT_SECONDS = 30;
     private static final int DEFAULT_NUM_RESULTS = 5;
     private static final int MAX_NUM_RESULTS = 10;
@@ -97,9 +104,9 @@ public class WebSearchTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction(ACTION_SEARCH, "Execute a web search; provider is auto-selected or can be specified explicitly")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction(ACTION_SEARCH, "Execute a web search; provider is auto-selected or can be specified explicitly")
         );
     }
 
@@ -197,12 +204,12 @@ public class WebSearchTool implements ToolRegistry.Tool {
             }
         }
         // Pre-compute priorities to avoid ConfigService lookups inside the sort comparator
-        var priorities = new java.util.HashMap<String, Integer>();
+        var priorities = new HashMap<String, Integer>();
         for (var e : candidates) {
             priorities.put(e.provider().id(),
                     parseInt(ConfigService.get("search." + e.provider().id() + ".priority", "99"), 99));
         }
-        candidates.sort(java.util.Comparator.comparingInt(e -> priorities.get(e.provider().id())));
+        candidates.sort(Comparator.comparingInt(e -> priorities.get(e.provider().id())));
         return candidates;
     }
 
@@ -213,7 +220,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
             var request = provider.buildRequest(apiKey, query, numResults);
             var call = HttpFactories.general().newCall(request);
-            call.timeout().timeout(TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+            call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;
             String responseBody;
@@ -374,7 +381,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
-            var body = new java.util.HashMap<String, Object>();
+            var body = new HashMap<String, Object>();
             body.put(ARG_QUERY, query);
             body.put(ARG_NUM_RESULTS, numResults);
             body.put("contents", Map.of(KEY_HIGHLIGHTS, Map.of("maxCharacters", 4000)));
@@ -436,7 +443,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
-            var encodedQuery = java.net.URLEncoder.encode(query, StandardCharsets.UTF_8);
+            var encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
             var url = "%s?q=%s&count=%d".formatted(baseUrl(), encodedQuery, numResults);
             return new Request.Builder()
                     .url(url)
@@ -467,7 +474,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
-            var body = new java.util.HashMap<String, Object>();
+            var body = new HashMap<String, Object>();
             body.put(ARG_QUERY, query);
             body.put(FIELD_MAX_RESULTS, numResults);
             body.put("search_depth", "basic");
@@ -505,7 +512,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
-            var body = new java.util.HashMap<String, Object>();
+            var body = new HashMap<String, Object>();
             body.put(ARG_QUERY, query);
             body.put(FIELD_MAX_RESULTS, numResults);
             var recency = ConfigService.get("search.perplexity.recencyFilter", DEFAULT_RECENCY_FILTER);
@@ -535,7 +542,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public Request buildRequest(String apiKey, String query, int numResults) {
-            var body = new java.util.HashMap<String, Object>();
+            var body = new HashMap<String, Object>();
             body.put(ARG_QUERY, query);
             body.put(FIELD_MAX_RESULTS, Math.min(numResults, 10));
             return new Request.Builder()

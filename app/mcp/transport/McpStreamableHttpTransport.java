@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import okhttp3.Call;
 
 /**
  * MCP Streamable HTTP transport (JCLAW-31).
@@ -65,7 +66,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
     private Consumer<Throwable> onError;
     private volatile boolean closed;
 
-    private final ConcurrentHashMap<Long, okhttp3.Call> inFlight = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Call> inFlight = new ConcurrentHashMap<>();
     private final AtomicLong callSeq = new AtomicLong();
     /** Session id assigned by the server on the initialize response (if any).
      *  Atomic so the SSE-reader thread that observes it from one response

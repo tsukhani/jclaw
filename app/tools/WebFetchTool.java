@@ -13,6 +13,10 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Map;
+import agents.ToolAction;
+import java.net.SocketTimeoutException;
+import javax.net.ssl.SSLException;
+import services.AgentService;
 
 /**
  * Fetch the content of a URL. Supports two modes:
@@ -58,10 +62,10 @@ public class WebFetchTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction("fetch (text)", "Retrieve a URL and extract clean, readable text content"),
-                new agents.ToolAction("fetch (html)", "Retrieve a URL and return the raw HTML source")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction("fetch (text)", "Retrieve a URL and extract clean, readable text content"),
+                new ToolAction("fetch (html)", "Retrieve a URL and return the raw HTML source")
         );
     }
 
@@ -106,13 +110,13 @@ public class WebFetchTool implements ToolRegistry.Tool {
             return "Error: URL rejected by SSRF guard: %s".formatted(e.getMessage());
         } catch (UnknownHostException e) {
             return "Error: URL rejected: %s".formatted(e.getMessage());
-        } catch (java.net.SocketTimeoutException _) {
+        } catch (SocketTimeoutException _) {
             return "Error: Request timed out after %d seconds fetching %s".formatted(TIMEOUT_SECONDS, url);
-        } catch (javax.net.ssl.SSLException e) {
+        } catch (SSLException e) {
             return "Error: SSL/TLS certificate verification failed for %s: %s. The site may have an expired, self-signed, or invalid certificate."
                     .formatted(url, e.getMessage());
         } catch (Exception e) {
-            if (e.getCause() instanceof javax.net.ssl.SSLException sslEx) {
+            if (e.getCause() instanceof SSLException sslEx) {
                 return "Error: SSL/TLS certificate verification failed for %s: %s. The site may have an expired, self-signed, or invalid certificate."
                         .formatted(url, sslEx.getMessage());
             }
@@ -169,7 +173,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
             // flooding the LLM context with hundreds of KB of HTML
             if (body.length() > MAX_TEXT_LENGTH && agent != null) {
                 var filename = URI.create(url).getHost().replaceAll("[^a-zA-Z0-9.-]", "_") + ".html";
-                services.AgentService.writeWorkspaceFile(agent.name, filename, body);
+                AgentService.writeWorkspaceFile(agent.name, filename, body);
                 return "HTML saved to workspace as '%s' (%d characters from %s)"
                         .formatted(filename, body.length(), url);
             }

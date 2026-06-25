@@ -12,6 +12,11 @@ import tools.PlaywrightBrowserTool;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import mcp.McpConnectionManager;
+import services.TailscaleFunnel;
+import services.imagegen.LocalFluxSidecarManager;
+import services.search.LuceneIndexer;
+import services.transcription.WhisperJniTranscriber;
 
 /**
  * Stop all long-running jclaw subsystems on JVM shutdown. Runs as
@@ -60,11 +65,11 @@ public class ShutdownJob extends Job<Void> {
                 new Component("slack-socket-mode", SlackSocketModeRunner::stop),
                 new Component("whatsapp-cobalt", WhatsAppCobaltRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
-                new Component("whisper-transcriber", services.transcription.WhisperJniTranscriber::shutdown),
-                new Component("imagegen-flux-sidecar", services.imagegen.LocalFluxSidecarManager::stop),
-                new Component("mcp-connections", mcp.McpConnectionManager::shutdown),
-                new Component("lucene-index", services.search.LuceneIndexer::close),
-                new Component("tailscale-funnel", services.TailscaleFunnel::disableIfEnabled)
+                new Component("whisper-transcriber", WhisperJniTranscriber::shutdown),
+                new Component("imagegen-flux-sidecar", LocalFluxSidecarManager::stop),
+                new Component("mcp-connections", McpConnectionManager::shutdown),
+                new Component("lucene-index", LuceneIndexer::close),
+                new Component("tailscale-funnel", TailscaleFunnel::disableIfEnabled)
         );
 
         EventLogger.info(CATEGORY,

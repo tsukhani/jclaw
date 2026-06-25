@@ -17,6 +17,8 @@ import services.EventLogger;
 import services.Tx;
 
 import static utils.GsonHolder.INSTANCE;
+import java.util.concurrent.atomic.AtomicReference;
+import models.MessageAttachment;
 
 /**
  * Three-tier scheduler for a batch of tool calls. Extracted from
@@ -314,7 +316,7 @@ public final class ParallelToolExecutor {
             // on the assistant turn that called the tool (no-op image for every ordinary tool) and
             // returns the persisted row so we can push it onto the live SSE tool_call frame.
             final var image = result.image();
-            final var attHolder = new java.util.concurrent.atomic.AtomicReference<models.MessageAttachment>();
+            final var attHolder = new AtomicReference<MessageAttachment>();
             Tx.run(() -> {
                 var att = sink.appendAssistantMessage(null, gson.toJson(tc), image);
                 if (att != null) attHolder.set(att);
@@ -342,9 +344,9 @@ public final class ParallelToolExecutor {
      * same shape {@code ApiConversationsController.attachmentsToList} uses, so the chat UI can render
      * the generated image inline without waiting for a reload. {@code null} when no image was produced.
      */
-    private static String generatedAttachmentJson(models.MessageAttachment att) {
+    private static String generatedAttachmentJson(MessageAttachment att) {
         if (att == null) return null;
-        var m = new java.util.LinkedHashMap<String, Object>();
+        var m = new LinkedHashMap<String, Object>();
         m.put("uuid", att.uuid);
         m.put("originalFilename", att.originalFilename);
         m.put("mimeType", att.mimeType);

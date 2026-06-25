@@ -17,6 +17,23 @@ import utils.HttpKeys;
 import java.util.regex.Pattern;
 
 import static utils.GsonHolder.INSTANCE;
+import agents.SystemPromptAssembler;
+import com.google.gson.JsonObject;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import models.AgentSkillAllowedTool;
+import models.AgentSkillConfig;
+import play.libs.MimeTypes;
+import services.ConfigService;
+import services.LoadTestRunner;
+import services.compression.TextCompressor;
+import tools.ShellExecTool;
 
 @With(AuthCheck.class)
 public class ApiAgentsController extends Controller {
@@ -71,7 +88,7 @@ public class ApiAgentsController extends Controller {
      */
     private static boolean isReservedName(String name) {
         return name != null
-                && services.LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name);
+                && LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name);
     }
 
     @SuppressWarnings("java:S2259")
@@ -108,7 +125,7 @@ public class ApiAgentsController extends Controller {
          * {@code Stream.anyMatch} over the provider's full model list,
          * which was O(N*M) on the {@code GET /api/agents} hot path.
          */
-        static AgentView of(Agent a, java.util.Set<String> configuredKeys) {
+        static AgentView of(Agent a, Set<String> configuredKeys) {
             return of(a, configuredKeys.contains(a.modelProvider + ":" + a.modelId));
         }
 
@@ -121,7 +138,7 @@ public class ApiAgentsController extends Controller {
                     a.compressionTextEffective(),
                     a.compressionTargetRatio != null
                             ? a.compressionTargetRatio
-                            : services.compression.TextCompressor.DEFAULT_TARGET_RATIO,
+                            : TextCompressor.DEFAULT_TARGET_RATIO,
                     a.acpAllowed);
         }
     }
@@ -171,12 +188,12 @@ public class ApiAgentsController extends Controller {
         if (rawChannel == null || rawChannel.isBlank()) badRequest();
         var channelType = rawChannel.trim().toLowerCase();
         if (!VALID_BREAKDOWN_CHANNELS.contains(channelType)) badRequest();
-        var breakdown = agents.SystemPromptAssembler.breakdown(agent, null, channelType);
+        var breakdown = SystemPromptAssembler.breakdown(agent, null, channelType);
         renderJSON(gson.toJson(breakdown));
     }
 
-    private static final java.util.Set<String> VALID_BREAKDOWN_CHANNELS =
-            java.util.Set.of("web", "telegram", "slack", "whatsapp");
+    private static final Set<String> VALID_BREAKDOWN_CHANNELS =
+            Set.of("web", "telegram", "slack", "whatsapp");
 
     /**
      * GET /api/agents/{id}/shell/effective-allowlist — Derived view of the
@@ -200,9 +217,9 @@ public class ApiAgentsController extends Controller {
         // Global portion: re-parse the raw config string rather than call
         // parsedAllowlist() directly, which lives on a tool instance. The parse
         // is cheap (bounded length, split-and-trim).
-        var rawGlobal = services.ConfigService.get("shell.allowlist",
-                tools.ShellExecTool.DEFAULT_ALLOWLIST);
-        var global = java.util.Arrays.stream(rawGlobal.split(","))
+        var rawGlobal = ConfigService.get("shell.allowlist",
+                ShellExecTool.DEFAULT_ALLOWLIST);
+        var global = Arrays.stream(rawGlobal.split(","))
                 .map(String::strip)
                 .filter(s -> !s.isEmpty())
                 .sorted()
@@ -210,21 +227,21 @@ public class ApiAgentsController extends Controller {
 
         // Per-skill contributions: only surface skills that are currently
         // enabled for this agent (enabled-by-default when no config row).
-        var configs = models.AgentSkillConfig.findByAgent(agent);
-        var disabledSkills = new java.util.HashSet<String>();
+        var configs = AgentSkillConfig.findByAgent(agent);
+        var disabledSkills = new HashSet<String>();
         for (var c : configs) {
             if (!c.enabled) disabledSkills.add(c.skillName);
         }
-        var bySkill = new java.util.TreeMap<String, java.util.List<String>>();
-        for (var row : models.AgentSkillAllowedTool.findByAgent(agent)) {
+        var bySkill = new TreeMap<String, List<String>>();
+        for (var row : AgentSkillAllowedTool.findByAgent(agent)) {
             if (disabledSkills.contains(row.skillName)) continue;
-            bySkill.computeIfAbsent(row.skillName, _ -> new java.util.ArrayList<>()).add(row.toolName);
+            bySkill.computeIfAbsent(row.skillName, _ -> new ArrayList<>()).add(row.toolName);
         }
         for (var entry : bySkill.entrySet()) {
             entry.getValue().sort(String::compareTo);
         }
 
-        renderJSON(gson.toJson(java.util.Map.of(
+        renderJSON(gson.toJson(Map.of(
                 "global", global,
                 "bySkill", bySkill
         )));
@@ -245,7 +262,7 @@ public class ApiAgentsController extends Controller {
         }
         if (isReservedName(name)) {
             error(409, "The agent name '%s' is reserved for internal use"
-                    .formatted(services.LoadTestRunner.LOADTEST_AGENT_NAME));
+                    .formatted(LoadTestRunner.LOADTEST_AGENT_NAME));
         }
         // Agent.name carries a unique constraint at the DB level. Without this
         // pre-check the duplicate surfaces only at JPA flush time as an
@@ -269,7 +286,7 @@ public class ApiAgentsController extends Controller {
      * {@code null} in all of those cases. Used for optional nullable fields
      * like {@code thinkingMode} where the frontend sends {@code null} to clear.
      */
-    private static String readOptionalString(com.google.gson.JsonObject body, String key) {
+    private static String readOptionalString(JsonObject body, String key) {
         if (!body.has(key)) return null;
         var el = body.get(key);
         if (el.isJsonNull()) return null;
@@ -283,7 +300,7 @@ public class ApiAgentsController extends Controller {
      * a missing field should surface as an actionable error, not a stack trace.
      */
     @SuppressWarnings("java:S2259")
-    private static String requireString(com.google.gson.JsonObject body, String key) {
+    private static String requireString(JsonObject body, String key) {
         var v = readOptionalString(body, key);
         if (v == null) {
             error(400, "'" + key + "' is required");
@@ -293,7 +310,7 @@ public class ApiAgentsController extends Controller {
     }
 
     /** Read an optional string, falling back when absent OR JSON null (no NPE on a present-but-null field). */
-    private static String optStringOr(com.google.gson.JsonObject body, String key, String fallback) {
+    private static String optStringOr(JsonObject body, String key, String fallback) {
         if (!body.has(key)) return fallback;
         var el = body.get(key);
         return el.isJsonNull() ? fallback : el.getAsString();
@@ -356,7 +373,7 @@ public class ApiAgentsController extends Controller {
      * the master toggle gates the per-type sub-toggles downstream. Values are set directly
      * on the entity so {@link AgentService#update}'s save() persists them with the rest.
      */
-    private static void applyCompressionSettings(Agent agent, com.google.gson.JsonObject body) {
+    private static void applyCompressionSettings(Agent agent, JsonObject body) {
         if (body.has(KEY_COMPRESSION_ENABLED) && !body.get(KEY_COMPRESSION_ENABLED).isJsonNull()) {
             agent.compressionEnabled = body.get(KEY_COMPRESSION_ENABLED).getAsBoolean();
         }
@@ -397,7 +414,7 @@ public class ApiAgentsController extends Controller {
         }
         if (isReservedName(name)) {
             error(409, "The agent name '%s' is reserved for internal use"
-                    .formatted(services.LoadTestRunner.LOADTEST_AGENT_NAME));
+                    .formatted(LoadTestRunner.LOADTEST_AGENT_NAME));
         }
         // Rename collision: another agent already owns this name. Skip the
         // check when the name is unchanged so a PUT that only updates
@@ -419,7 +436,7 @@ public class ApiAgentsController extends Controller {
             error(409, "The built-in 'main' agent cannot be deleted");
         }
         AgentService.delete(agent);
-        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        renderJSON(gson.toJson(Map.of("status", "ok")));
     }
 
     // --- Workspace file endpoints ---
@@ -442,7 +459,7 @@ public class ApiAgentsController extends Controller {
         // workspace root. acquireWorkspacePath does both, plus realpath
         // resolution so a symlink inside the workspace pointing outside is
         // also rejected.
-        java.nio.file.Path path;
+        Path path;
         try {
             path = AgentService.acquireWorkspacePath(agent.name, filePath);
         } catch (SecurityException _) {
@@ -454,7 +471,7 @@ public class ApiAgentsController extends Controller {
 
         // Content type: Play's MimeTypes resolver covers the bundled database plus
         // any custom mimetype.* entries declared in application.conf.
-        var contentType = play.libs.MimeTypes.getContentType(filePath);
+        var contentType = MimeTypes.getContentType(filePath);
 
         response.setHeader("Cache-Control", "private, max-age=300");
 
@@ -472,7 +489,7 @@ public class ApiAgentsController extends Controller {
         var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
         if (content == null) notFound();
-        renderJSON(gson.toJson(java.util.Map.of("filename", filename, KEY_CONTENT, content)));
+        renderJSON(gson.toJson(Map.of("filename", filename, KEY_CONTENT, content)));
     }
 
     @SuppressWarnings("java:S2259")
@@ -486,7 +503,7 @@ public class ApiAgentsController extends Controller {
             throw new AssertionError("unreachable: badRequest() throws");
         }
         AgentService.writeWorkspaceFile(agent.name, filename, body.get(KEY_CONTENT).getAsString());
-        renderJSON(gson.toJson(java.util.Map.of("status", "ok", "filename", filename)));
+        renderJSON(gson.toJson(Map.of("status", "ok", "filename", filename)));
     }
 
 }

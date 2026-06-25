@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import java.util.Locale;
 
 /**
  * JSON SmartCrusher (JCLAW-461). Compresses a JSON tool output while keeping it
@@ -117,7 +118,7 @@ public final class JsonCompressor implements ContentCompressor {
      * failure buried at index 400 is the whole point of content-awareness.
      */
     private boolean isAnomaly(JsonElement item) {
-        var s = item.toString().toLowerCase(java.util.Locale.ROOT);
+        var s = item.toString().toLowerCase(Locale.ROOT);
         return s.contains("error") || s.contains("fail")
                 || s.contains("exception") || s.contains("\"warn");
     }

@@ -4,6 +4,7 @@ import play.Logger;
 
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Detect whether {@code ffmpeg} is on PATH. JCLAW-163's transcription pipeline
@@ -61,7 +62,7 @@ public final class FfmpegProbe {
             var p = pb.start();
             // -version prints to stdout and exits within milliseconds; bound
             // the wait anyway so a hung binary can't stall startup forever.
-            boolean exited = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            boolean exited = p.waitFor(5, TimeUnit.SECONDS);
             if (!exited) {
                 p.destroyForcibly();
                 return new ProbeResult(false, "ffmpeg -version did not exit within 5s");

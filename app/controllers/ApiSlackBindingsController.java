@@ -18,6 +18,7 @@ import services.AgentService;
 import services.EventLogger;
 
 import static utils.GsonHolder.INSTANCE;
+import java.util.Map;
 
 /**
  * CRUD API for per-agent Slack bindings (JCLAW-441). Mirrors
@@ -252,7 +253,7 @@ public class ApiSlackBindingsController extends Controller {
                 "Binding %d deleted".formatted(id));
         // JCLAW-351: close the Socket Mode connection if the deleted binding had one.
         SlackSocketModeRunner.reconcile();
-        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        renderJSON(gson.toJson(Map.of("status", "ok")));
     }
 
     // ── update helpers ──

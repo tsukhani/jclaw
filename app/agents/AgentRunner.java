@@ -19,6 +19,20 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import channels.ChannelRegistry;
+import channels.ChannelStreamingSink;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import models.SubagentRun;
+import services.AttachmentService;
+import services.ConfigService;
+import services.ConversationQueue;
+import services.SessionCompactor;
+import services.SubagentRegistry;
+import services.TaskRunRegistry;
+import services.Tx;
+import utils.LatencyStats;
 
 /**
  * Core agent pipeline: receive message → load conversation → assemble prompt →
@@ -56,7 +70,7 @@ public class AgentRunner {
     // Package-private so ToolCallLoopRunner (JCLAW-299) can read the
     // operator-configurable per-turn round cap.
     static int maxToolRounds() {
-        return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
+        return ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
     }
 
     /**
@@ -182,7 +196,7 @@ public class AgentRunner {
         SystemPromptAssembler.AssembledPrompt assembled,
         List<ChatMessage> messages,
         List<ToolDef> tools,
-        java.util.Set<String> disabledTools,
+        Set<String> disabledTools,
         List<VisionAudioAssembler.AudioBearer> audioBearers,
         List<VisionAudioAssembler.ImageBearer> imageBearers,
         List<VisionAudioAssembler.VideoBearer> videoBearers
@@ -216,18 +230,18 @@ public class AgentRunner {
         // both columns reference the same row; session mode uses a separate
         // child conv. Either way, the cancel flag is keyed on the SubagentRun
         // id, and a kill against the matching run should bail the runner.
-        var runId = services.Tx.run(() -> {
-            var run = (models.SubagentRun) models.SubagentRun.find(
+        var runId = Tx.run(() -> {
+            var run = (SubagentRun) SubagentRun.find(
                     "childConversation.id = ?1 AND status = ?2",
-                    conversation.id, models.SubagentRun.Status.RUNNING).first();
+                    conversation.id, SubagentRun.Status.RUNNING).first();
             return run != null ? run.id : null;
         });
         if (runId != null) {
             // JCLAW-424: heartbeat the idle-timeout clock at this safe boundary
             // (before each LLM round / between tool calls) so an actively-working
             // child never trips the inactivity budget; only genuine silence does.
-            services.SubagentRegistry.touch(runId);
-            if (services.SubagentRegistry.isCancelled(runId)) {
+            SubagentRegistry.touch(runId);
+            if (SubagentRegistry.isCancelled(runId)) {
                 throw new RunCancelledException(runId);
             }
         }
@@ -245,7 +259,7 @@ public class AgentRunner {
      * H2-corruption post-mortem.
      */
     public static void checkTaskRunCancel(Long taskRunId) {
-        if (taskRunId != null && services.TaskRunRegistry.isCancelled(taskRunId)) {
+        if (taskRunId != null && TaskRunRegistry.isCancelled(taskRunId)) {
             throw new RunCancelledException(taskRunId, "Task");
         }
     }
@@ -282,10 +296,10 @@ public class AgentRunner {
      * @return the run outcome
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage,
-                                 java.util.List<services.AttachmentService.Input> attachments) {
-        var queueMsg = new services.ConversationQueue.QueuedMessage(
+                                 List<AttachmentService.Input> attachments) {
+        var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, conversation.channelType, conversation.peerId, agent);
-        if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+        if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
         return runAfterAcquire(agent, conversation, userMessage, attachments);
@@ -340,16 +354,16 @@ public class AgentRunner {
         // is already in the persisted USER-role announce row. The
         // skipUserAppend flag suppresses appendUserMessage so we don't
         // double-append.
-        var queueMsg = new services.ConversationQueue.QueuedMessage(
+        var queueMsg = new ConversationQueue.QueuedMessage(
                 "", conversation.channelType, conversation.peerId, agent);
-        if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+        if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
         return runAfterAcquire(agent, conversation, "", null, true);
     }
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
-                                              java.util.List<services.AttachmentService.Input> attachments) {
+                                              List<AttachmentService.Input> attachments) {
         return runAfterAcquire(agent, conversation, userMessage, attachments, false);
     }
 
@@ -408,11 +422,11 @@ public class AgentRunner {
      */
     public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
                                                              AgentExecutionSink sink) {
-        java.util.Objects.requireNonNull(agent, EVT_CATEGORY_AGENT);
-        java.util.Objects.requireNonNull(userPrompt, "userPrompt");
-        java.util.Objects.requireNonNull(sink, "sink");
+        Objects.requireNonNull(agent, EVT_CATEGORY_AGENT);
+        Objects.requireNonNull(userPrompt, "userPrompt");
+        Objects.requireNonNull(sink, "sink");
 
-        services.Tx.run(() -> sink.appendUserMessage(userPrompt, null));
+        Tx.run(() -> sink.appendUserMessage(userPrompt, null));
 
         var stubConv = new Conversation();
         stubConv.agent = agent;
@@ -427,7 +441,7 @@ public class AgentRunner {
         // call below, preserving the "no Tx during LLM" design while
         // letting the assembler / tool-registry stay tx-agnostic.
         record Prelude(SystemPromptAssembler.AssembledPrompt assembled, List<ToolDef> tools) {}
-        var prelude = services.Tx.run(() -> new Prelude(
+        var prelude = Tx.run(() -> new Prelude(
                 SystemPromptAssembler.assemble(agent, userPrompt, null, null),
                 ToolRegistry.getToolDefsForAgent(agent)));
         var assembled = prelude.assembled();
@@ -442,7 +456,7 @@ public class AgentRunner {
         if (primary == null) {
             var error = NO_LLM_PROVIDER_ERROR;
             EventLogger.error("llm", agent.name, null, error);
-            services.Tx.run(() -> sink.appendAssistantMessage(error, null));
+            Tx.run(() -> sink.appendAssistantMessage(error, null));
             return new ToolCallLoopRunner.LoopOutcome(error);
         }
         var secondary = ProviderRegistry.getSecondary();
@@ -462,12 +476,12 @@ public class AgentRunner {
 
         final var response = outcome.content();
         final var truncated = outcome.truncated();
-        services.Tx.run(() -> sink.appendAssistantMessage(response, null, null, null, truncated));
+        Tx.run(() -> sink.appendAssistantMessage(response, null, null, null, truncated));
         return outcome;
     }
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
-                                              java.util.List<services.AttachmentService.Input> attachments,
+                                              List<AttachmentService.Input> attachments,
                                               boolean skipUserAppend) {
         final Long conversationId = conversation.id;
         // JCLAW-21: every persistence write inside the runner routes
@@ -496,7 +510,7 @@ public class AgentRunner {
             // Callers on virtual threads (TaskExecutionHandler, webhooks) pass entities that were
             // loaded in a separate, already-committed Tx.run() — those are detached and
             // would throw PersistentObjectException on save().
-            var prepared = services.Tx.run(() -> {
+            var prepared = Tx.run(() -> {
                 var conv = ConversationService.findById(conversationId);
                 // JCLAW-273: skipUserAppend=true comes from runYieldResume — the
                 // yield-resume announce was already persisted as a USER-role
@@ -511,11 +525,11 @@ public class AgentRunner {
                 // JCLAW-38: re-inject the latest compaction summary (if any)
                 // into the system prompt so the LLM keeps continuity with
                 // turns that have since been dropped from the raw history.
-                var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
+                var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
                 // JCLAW-268: re-inject the spawn-time parent-conversation context
                 // for inherit-mode subagents. No-op for fresh-mode and non-subagent
                 // conversations (parentContext is null).
-                sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
+                sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
                 var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
                 var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
                 var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
@@ -549,7 +563,7 @@ public class AgentRunner {
             if (prepared == null) {
                 var error = NO_LLM_PROVIDER_ERROR;
                 return new RunResult(error,
-                        services.Tx.run(() -> ConversationService.findById(conversationId)));
+                        Tx.run(() -> ConversationService.findById(conversationId)));
             }
 
             // JCLAW-38: if the just-built context exceeds the compaction
@@ -605,7 +619,7 @@ public class AgentRunner {
             if (YIELDED_RESPONSE.equals(response)) {
                 EventLogger.info(EVT_CATEGORY_AGENT, agent.name, conversation.channelType,
                         "Parent turn suspended via subagent_yield");
-                var updatedConv = services.Tx.run(() -> ConversationService.findById(conversationId));
+                var updatedConv = Tx.run(() -> ConversationService.findById(conversationId));
                 return new RunResult(response, updatedConv);
             }
 
@@ -614,14 +628,14 @@ public class AgentRunner {
             // (loadtest cleanup, manual UI delete, etc.); ConversationSink
             // logs + skips internally rather than inserting a row with a
             // null FK.
-            services.Tx.run(() ->
+            Tx.run(() ->
                 sink.appendAssistantMessage(response, null, null, null, truncated));
 
             EventLogger.info("llm", agent.name, conversation.channelType,
                     "Response generated (%d chars%s)".formatted(response.length(),
                             truncated ? ", TRUNCATED" : ""));
 
-            var updatedConversation = services.Tx.run(() -> ConversationService.findById(conversationId));
+            var updatedConversation = Tx.run(() -> ConversationService.findById(conversationId));
             return new RunResult(response, updatedConversation, truncated);
         } finally {
             trace.mark(LatencyTrace.TERMINAL_SENT);
@@ -692,7 +706,7 @@ public class AgentRunner {
                                     AtomicBoolean isCancelled,
                                     StreamingCallbacks cb,
                                     Long acceptedAtNs,
-                                    java.util.List<services.AttachmentService.Input> attachments) {
+                                    List<AttachmentService.Input> attachments) {
         Thread.ofVirtual().name("agent-stream").start(() -> {
             final Long[] conversationIdRef = {null};
             // queueReleased is shared between the wrapper's terminal
@@ -808,9 +822,9 @@ public class AgentRunner {
     private static Conversation resolveConversationAndAcquireQueue(
             Agent agent, Long conversationId, String channelType, String peerId,
             String userMessage, StreamingCallbacks cb,
-            java.util.List<services.AttachmentService.Input> attachments) {
+            List<AttachmentService.Input> attachments) {
 
-        Conversation conversation = services.Tx.run(() -> {
+        Conversation conversation = Tx.run(() -> {
             if (conversationId != null) {
                 return ConversationService.findById(conversationId);
             } else if (ChannelType.WEB.value.equals(channelType)) {
@@ -825,9 +839,9 @@ public class AgentRunner {
             return null;
         }
 
-        var queueMsg = new services.ConversationQueue.QueuedMessage(
+        var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, channelType, peerId, agent);
-        if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+        if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
             cb.onInit().accept(conversation);
             cb.onComplete().accept(QUEUED_MESSAGE_RESPONSE);
             return null;
@@ -838,7 +852,7 @@ public class AgentRunner {
         // unchanged; streamLlmLoop builds its own ConversationSink from
         // the returned Conversation for the post-LLM writes.
         AgentExecutionSink sink = new ConversationSink(conversation);
-        services.Tx.run(() -> sink.appendUserMessage(userMessage, attachments));
+        Tx.run(() -> sink.appendUserMessage(userMessage, attachments));
 
         cb.onInit().accept(conversation);
         return conversation;
@@ -980,14 +994,14 @@ public class AgentRunner {
      */
     private static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
                                                             String userMessage) {
-        return services.Tx.run(() -> {
+        return Tx.run(() -> {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
             var convo = ConversationService.findById(conversation.id);
             var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, convo.channelType);
             // JCLAW-38: re-inject latest compaction summary (if any)
-            var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
+            var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
-            sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
+            sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
             var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
             var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
             var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
@@ -1199,9 +1213,9 @@ public class AgentRunner {
         var finalReasoning = turnUsage.reasoningText();
         var finalTruncated = replyTruncated;
         long persistStartNs = System.nanoTime();
-        services.Tx.run(() ->
+        Tx.run(() ->
             sink.appendAssistantMessage(finalContent, null, usageJson, finalReasoning, finalTruncated));
-        utils.LatencyStats.record(channelType, "persist",
+        LatencyStats.record(channelType, "persist",
                 (System.nanoTime() - persistStartNs) / 1_000_000L);
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
     }
@@ -1225,8 +1239,8 @@ public class AgentRunner {
         trace.mark(LatencyTrace.STREAM_BODY_END);
         var finalContent = truncMsg;
         long truncPersistStartNs = System.nanoTime();
-        services.Tx.run(() -> sink.appendAssistantMessage(finalContent, null));
-        utils.LatencyStats.record(channelType, "persist",
+        Tx.run(() -> sink.appendAssistantMessage(finalContent, null));
+        LatencyStats.record(channelType, "persist",
                 (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
         cb.onComplete().accept(finalContent);
     }
@@ -1249,13 +1263,13 @@ public class AgentRunner {
     public static void processWebhookMessage(String channelType, String peerId, String text,
                                               BiConsumer<String, String> sendResponse,
                                               Consumer<String> sendNoRoute) {
-        var route = services.Tx.run(() -> AgentRouter.resolve(channelType, peerId));
+        var route = Tx.run(() -> AgentRouter.resolve(channelType, peerId));
         if (route == null) {
             if (sendNoRoute != null) sendNoRoute.accept(peerId);
             return;
         }
 
-        var conversation = services.Tx.run(() ->
+        var conversation = Tx.run(() ->
                 ConversationService.findOrCreate(route.agent(), channelType, peerId));
         var result = run(route.agent(), conversation, text);
         sendResponse.accept(peerId, result.response());
@@ -1285,13 +1299,13 @@ public class AgentRunner {
             var cmd = slashCmd.get();
             Conversation current = cmd == slash.Commands.Command.NEW
                     ? null
-                    : services.Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
+                    : Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
             var result = slash.Commands.execute(cmd, agent, channelType, peerId, current,
                     slash.Commands.extractArgs(text));
             sendResponse.accept(peerId, result.responseText());
             return;
         }
-        var conversation = services.Tx.run(() ->
+        var conversation = Tx.run(() ->
                 ConversationService.findOrCreate(agent, channelType, peerId));
         var result = run(agent, conversation, text);
         sendResponse.accept(peerId, result.response());
@@ -1322,9 +1336,9 @@ public class AgentRunner {
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
-            java.util.function.Function<Long, channels.ChannelStreamingSink> sinkFactory) {
+            Function<Long, ChannelStreamingSink> sinkFactory) {
         processInboundForAgentStreaming(agent, channelType, peerId, text, sinkFactory,
-                java.util.List.of(), null);
+                List.of(), null);
     }
 
     /**
@@ -1347,8 +1361,8 @@ public class AgentRunner {
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
-            java.util.function.Function<Long, channels.ChannelStreamingSink> sinkFactory,
-            java.util.List<services.AttachmentService.Input> attachments) {
+            Function<Long, ChannelStreamingSink> sinkFactory,
+            List<AttachmentService.Input> attachments) {
         processInboundForAgentStreaming(agent, channelType, peerId, text, sinkFactory,
                 attachments, null);
     }
@@ -1377,8 +1391,8 @@ public class AgentRunner {
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
-            java.util.function.Function<Long, channels.ChannelStreamingSink> sinkFactory,
-            java.util.List<services.AttachmentService.Input> attachments,
+            Function<Long, ChannelStreamingSink> sinkFactory,
+            List<AttachmentService.Input> attachments,
             String chatType) {
         // JCLAW-26: intercept slash commands before the LLM round. Reuse the
         // existing sink machinery to deliver the canned response — an unused
@@ -1389,7 +1403,7 @@ public class AgentRunner {
             var cmd = slashCmd.get();
             Conversation current = cmd == slash.Commands.Command.NEW
                     ? null
-                    : services.Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId, chatType));
+                    : Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId, chatType));
             var result = slash.Commands.execute(cmd, agent, channelType, peerId, current,
                     slash.Commands.extractArgs(text));
             var slashSink = sinkFactory.apply(
@@ -1413,7 +1427,7 @@ public class AgentRunner {
         // first-contact-only deterministic welcome (JCLAW-97).
         final boolean isStart = slash.Commands.isStart(text);
         final String turnText = isStart ? slash.Commands.startIntroPrompt() : text;
-        var conversation = services.Tx.run(() -> isStart
+        var conversation = Tx.run(() -> isStart
                 ? ConversationService.create(agent, channelType, peerId)
                 : ConversationService.findOrCreate(agent, channelType, peerId, chatType));
         // The sink needs the conversation id so it can persist / clear the
@@ -1426,7 +1440,7 @@ public class AgentRunner {
         // NOT started for slash commands above — their responses are
         // instant and don't benefit from the indicator.
         sink.startTypingHeartbeat();
-        var isCancelled = services.ConversationQueue.cancellationFlag(conversation.id);
+        var isCancelled = ConversationQueue.cancellationFlag(conversation.id);
         var cb = new StreamingCallbacks(
                 _ -> {},                 // onInit — nothing to do for Telegram
                 sink::update,            // onToken — live preview edits
@@ -1515,8 +1529,8 @@ public class AgentRunner {
     static void dispatchToChannel(Agent agent, String channelType, String peerId, String text) {
         if (peerId == null || text == null) return;
         try {
-            var channel = services.Tx.run(() ->
-                    channels.ChannelRegistry.forChannel(channelType, agent, peerId));
+            var channel = Tx.run(() ->
+                    ChannelRegistry.forChannel(channelType, agent, peerId));
             if (channel == null) {
                 if (ChannelType.TELEGRAM == ChannelType.fromValue(channelType)) {
                     EventLogger.warn("channel", agent != null ? agent.name : null, "telegram",

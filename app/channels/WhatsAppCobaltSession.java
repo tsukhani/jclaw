@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Wraps ONE Cobalt {@link Whatsapp} (WhatsApp-Web / {@code it.auties.whatsapp})
@@ -331,7 +332,7 @@ public final class WhatsAppCobaltSession {
      *  serialized store. Public for the default-package test seam. */
     public UUID sessionUuid() {
         return UUID.nameUUIDFromBytes(
-                (NAMESPACE + ":" + bindingId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                (NAMESPACE + ":" + bindingId).getBytes(StandardCharsets.UTF_8));
     }
 
     private String sessionName(WhatsAppBinding binding) {

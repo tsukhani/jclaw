@@ -12,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.ArrayList;
 
 /**
  * Simple in-memory pub/sub notification bus for pushing real-time events
@@ -57,7 +58,7 @@ public class NotificationBus {
         var ssePayload = "data: %s\n\n".formatted(event);
         if (listeners.isEmpty()) return;
 
-        var pairs = new java.util.ArrayList<java.util.Map.Entry<Consumer<String>, CompletableFuture<Void>>>();
+        var pairs = new ArrayList<Map.Entry<Consumer<String>, CompletableFuture<Void>>>();
         for (var listener : listeners) {
             var future = CompletableFuture.runAsync(() -> {
                 try {
@@ -70,7 +71,7 @@ public class NotificationBus {
                     Thread.interrupted();
                 }
             }, EXECUTOR);
-            pairs.add(java.util.Map.entry(listener, future));
+            pairs.add(Map.entry(listener, future));
         }
 
         // One shared deadline for the whole fan-out: dispatches run concurrently on
@@ -78,7 +79,7 @@ public class NotificationBus {
         // LISTENER_TIMEOUT_MS regardless of how many listeners are slow — get() each
         // future against the time REMAINING to that deadline, not a fresh budget each.
         var deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(LISTENER_TIMEOUT_MS);
-        var failed = new java.util.ArrayList<Consumer<String>>();
+        var failed = new ArrayList<Consumer<String>>();
         for (var pair : pairs) {
             var future = pair.getValue();
             try {

@@ -18,6 +18,8 @@ import services.ChannelStatusService;
 
 import java.util.List;
 import java.util.Set;
+import channels.TelegramPollingRunner;
+import services.EventLogger;
 
 @With(AuthCheck.class)
 public class ApiChannelsController extends Controller {
@@ -96,7 +98,7 @@ public class ApiChannelsController extends Controller {
 
         reconcileRunner(channelType);
 
-        services.EventLogger.info("channel", null, channelType, "Channel config updated");
+        EventLogger.info("channel", null, channelType, "Channel config updated");
         renderJSON(gson.toJson(ChannelView.of(config)));
     }
 
@@ -107,7 +109,7 @@ public class ApiChannelsController extends Controller {
      */
     private static void reconcileRunner(String channelType) {
         if ("telegram".equals(channelType)) {
-            channels.TelegramPollingRunner.reconcile();
+            TelegramPollingRunner.reconcile();
         }
     }
 

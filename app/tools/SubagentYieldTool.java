@@ -12,6 +12,10 @@ import services.Tx;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import agents.ToolContext;
+import java.util.ArrayList;
+import tools.SubagentSpawnTool;
+import utils.GsonHolder;
 
 /**
  * JCLAW-273 / JCLAW-326: companion tool to {@link SubagentSpawnTool} for the
@@ -212,7 +216,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         // rather than emitting the YIELDED sentinel that suspends a chat turn.
         // (The chat announce/resume side effects below — the yielded flag and the
         // yield-timeout watchdog — are deliberately skipped on this path.)
-        if (agents.ToolContext.taskRunId() != null) {
+        if (ToolContext.taskRunId() != null) {
             if (parsed.runId() == null) {
                 return "Error: subagent_yield inside a task run requires the 'runId' "
                         + "returned by the async subagent_spawn call.";
@@ -248,19 +252,19 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("action", "yielded");
         payload.put(PARAM_RUN_ID, String.valueOf(runId));
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /** JCLAW-498: resolve a batch-collect request — {@code all:true} collects every
      *  outstanding async child this parent fanned out (current scope); {@code
      *  runIds:[...]} collects exactly those. Returns null when neither is present
      *  (the single-yield path takes over). */
-    private static java.util.List<Long> collectBatchRunIds(JsonObject args) {
+    private static List<Long> collectBatchRunIds(JsonObject args) {
         if (args.has("all") && !args.get("all").isJsonNull() && args.get("all").getAsBoolean()) {
-            return tools.SubagentSpawnTool.outstandingForCurrentScope();
+            return SubagentSpawnTool.outstandingForCurrentScope();
         }
         if (args.has(PARAM_RUN_IDS) && args.get(PARAM_RUN_IDS).isJsonArray()) {
-            var list = new java.util.ArrayList<Long>();
+            var list = new ArrayList<Long>();
             for (var el : args.get(PARAM_RUN_IDS).getAsJsonArray()) {
                 try {
                     list.add(el.getAsLong());
@@ -382,7 +386,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         if (run.childConversation != null) {
             alreadyDone.put("conversation_id", String.valueOf(run.childConversation.id));
         }
-        return utils.GsonHolder.INSTANCE.toJson(alreadyDone, Map.class);
+        return GsonHolder.INSTANCE.toJson(alreadyDone, Map.class);
     }
 
     private static String optString(JsonObject obj, String key) {

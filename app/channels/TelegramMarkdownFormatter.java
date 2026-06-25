@@ -41,6 +41,7 @@ import com.vladsch.flexmark.util.data.MutableDataSet;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Markdown → Telegram-safe HTML converter (JCLAW-91). Telegram's Bot API supports
@@ -75,9 +76,9 @@ public final class TelegramMarkdownFormatter {
      *  the agent emits raw HTML, we pass tags matching this allowlist through
      *  verbatim so bold/italic/etc. actually render — anything outside the
      *  allowlist (attributes, unknown tags, script, etc.) still gets escaped. */
-    private static final java.util.regex.Pattern SAFE_TG_TAG = java.util.regex.Pattern.compile(
+    private static final Pattern SAFE_TG_TAG = Pattern.compile(
             "</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote)>",
-            java.util.regex.Pattern.CASE_INSENSITIVE);
+            Pattern.CASE_INSENSITIVE);
 
     private static final Parser PARSER = Parser.builder(new MutableDataSet())
             .extensions(List.of(

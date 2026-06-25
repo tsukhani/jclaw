@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
+import utils.GsonHolder;
 
 /**
  * JCLAW-326: paginated read tool that lists a parent agent's
@@ -157,7 +159,7 @@ public class ConversationListTool implements ToolRegistry.Tool {
                 status = SubagentRun.Status.valueOf(statusStr.toUpperCase());
             } catch (IllegalArgumentException _) {
                 return ParsedArgs.fail("Error: 'status' must be one of "
-                        + java.util.Arrays.toString(SubagentRun.Status.values())
+                        + Arrays.toString(SubagentRun.Status.values())
                         + " (got '" + statusStr + "').");
             }
         }
@@ -244,7 +246,7 @@ public class ConversationListTool implements ToolRegistry.Tool {
         payload.put("count", runsJson.size());
         payload.put("has_more", hasMore);
         payload.put("runs", runsJson);
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     /** Truncate {@link SubagentRun#outcome} to {@link #OUTCOME_PREVIEW_MAX_CHARS}

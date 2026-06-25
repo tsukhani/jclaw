@@ -15,6 +15,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 
 import java.util.Map;
+import java.util.List;
 
 @With(AuthCheck.class)
 public class ApiBindingsController extends Controller {
@@ -37,7 +38,7 @@ public class ApiBindingsController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
     public static void list() {
-        java.util.List<AgentBinding> bindings = JPA.em()
+        List<AgentBinding> bindings = JPA.em()
                 .createQuery("SELECT b FROM AgentBinding b JOIN FETCH b.agent", AgentBinding.class)
                 .getResultList();
         var result = bindings.stream()

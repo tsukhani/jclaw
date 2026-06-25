@@ -8,6 +8,9 @@ import com.github.kagkarlsson.scheduler.task.helper.Tasks;
 import models.Task;
 
 import java.time.Instant;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.Supplier;
 
 /**
  * db-scheduler {@link com.github.kagkarlsson.scheduler.task.Task} definition
@@ -228,10 +231,10 @@ public final class TaskExecutionHandler {
      */
     private static boolean backoffWait() {
         long deadlineNanos = System.nanoTime()
-                + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(FIND_TASK_BACKOFF_MS);
+                + TimeUnit.MILLISECONDS.toNanos(FIND_TASK_BACKOFF_MS);
         long remaining;
         while ((remaining = deadlineNanos - System.nanoTime()) > 0) {
-            java.util.concurrent.locks.LockSupport.parkNanos(remaining);
+            LockSupport.parkNanos(remaining);
             if (Thread.interrupted()) {
                 Thread.currentThread().interrupt();
                 return false;
@@ -293,7 +296,7 @@ public final class TaskExecutionHandler {
      * current row is already dropped, so the Task picks back up on the next
      * {@code BootConsistencyCheck} sweep.
      */
-    private static void rescheduleNext(Task task, java.util.function.Supplier<Instant> nextFire,
+    private static void rescheduleNext(Task task, Supplier<Instant> nextFire,
                                        String kind, String detailSuffix) {
         try {
             Instant next = nextFire.get();

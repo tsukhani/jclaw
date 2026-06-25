@@ -15,6 +15,7 @@ import models.Conversation;
 import models.MessageRole;
 import services.EventLogger;
 import utils.LatencyTrace;
+import tools.SubagentYieldTool;
 
 /**
  * Per-LLM-round tool-call orchestrators. Extracted from
@@ -418,7 +419,7 @@ public final class ToolCallLoopRunner {
             var m = currentMessages.get(i);
             if (m != null && MessageRole.TOOL.value.equals(m.role())
                     && m.content() instanceof String s
-                    && s.startsWith(tools.SubagentYieldTool.YIELD_SENTINEL_PREFIX)) {
+                    && s.startsWith(SubagentYieldTool.YIELD_SENTINEL_PREFIX)) {
                 return true;
             }
         }

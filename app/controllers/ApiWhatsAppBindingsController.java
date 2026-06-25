@@ -17,6 +17,9 @@ import services.AgentService;
 import services.EventLogger;
 
 import static utils.GsonHolder.INSTANCE;
+import channels.WhatsAppCobaltRunner;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * CRUD API for per-agent WhatsApp bindings (JCLAW-444). Mirrors
@@ -162,7 +165,7 @@ public class ApiWhatsAppBindingsController extends Controller {
         // JCLAW-449: open the WhatsApp-Web (Cobalt) connection now if this binding
         // uses that transport, rather than waiting for the next app boot. No-op for
         // Cloud-API bindings (reconcile only touches the WHATSAPP_WEB set).
-        channels.WhatsAppCobaltRunner.reconcile();
+        WhatsAppCobaltRunner.reconcile();
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
@@ -187,8 +190,8 @@ public class ApiWhatsAppBindingsController extends Controller {
         applyOptionalFieldUpdates(binding, body);
 
         boolean credentialsChanged =
-                !java.util.Objects.equals(prevPhoneNumberId, binding.phoneNumberId)
-                        || !java.util.Objects.equals(prevAccessToken, binding.accessToken);
+                !Objects.equals(prevPhoneNumberId, binding.phoneNumberId)
+                        || !Objects.equals(prevAccessToken, binding.accessToken);
         if (credentialsChanged
                 && !verifyCloudApiCredentials(binding, binding.transport,
                         binding.phoneNumberId, binding.accessToken)) {
@@ -201,7 +204,7 @@ public class ApiWhatsAppBindingsController extends Controller {
                 "Binding %d updated".formatted(binding.id));
         // JCLAW-449: reconcile so a transport/enabled change starts or stops the
         // WhatsApp-Web connection immediately.
-        channels.WhatsAppCobaltRunner.reconcile();
+        WhatsAppCobaltRunner.reconcile();
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
@@ -214,8 +217,8 @@ public class ApiWhatsAppBindingsController extends Controller {
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agentName, CHANNEL_WHATSAPP,
                 "Binding %d deleted".formatted(id));
         // JCLAW-449: close the WhatsApp-Web connection if the deleted binding had one.
-        channels.WhatsAppCobaltRunner.reconcile();
-        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        WhatsAppCobaltRunner.reconcile();
+        renderJSON(gson.toJson(Map.of("status", "ok")));
     }
 
     // ── credential verification (JCLAW-445) ──
@@ -263,7 +266,7 @@ public class ApiWhatsAppBindingsController extends Controller {
     private static void applyPhoneNumberIdUpdate(WhatsAppBinding binding, JsonObject body) {
         if (!body.has(KEY_PHONE_NUMBER_ID)) return;
         String next = readOptionalString(body, KEY_PHONE_NUMBER_ID);
-        if (java.util.Objects.equals(next, binding.phoneNumberId)) return;
+        if (Objects.equals(next, binding.phoneNumberId)) return;
         if (next != null) {
             var existing = WhatsAppBinding.findByPhoneNumberId(next);
             if (existing != null && !existing.id.equals(binding.id)) {

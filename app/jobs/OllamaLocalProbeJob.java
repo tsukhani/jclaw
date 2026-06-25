@@ -4,6 +4,7 @@ import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.OllamaLocalProbe;
+import play.Play;
 
 /**
  * JCLAW-178: probe the configured local Ollama instance once at boot. Logs
@@ -29,7 +30,7 @@ public class OllamaLocalProbeJob extends Job<Void> {
         // costs boot latency on every autotest run and creates a path
         // for external-state flakiness (Ollama busy/slow → slow boot).
         // Mirrors the test-mode skip in DbSchedulerBootstrapJob.
-        if (play.Play.runningInTestMode()) return;
+        if (Play.runningInTestMode()) return;
         ProbeJobs.run("ollama-local", "provider.ollama-local.baseUrl",
                 "Install Ollama with: brew install ollama (macOS), "
                         + "curl https://ollama.com/install.sh | sh (Linux), or download "

@@ -1,5 +1,7 @@
 package models;
 
+import java.util.Map;
+
 /**
  * Enum for the {@code channel_type} column on {@link Conversation}. Values are
  * stored as lowercase strings in the database so JPA {@code @Enumerated} is
@@ -31,7 +33,7 @@ public enum ChannelType implements ValueEnum {
         return value;
     }
 
-    private static final java.util.Map<String, ChannelType> BY_VALUE =
+    private static final Map<String, ChannelType> BY_VALUE =
             ValueEnum.indexOf(values());
 
     /**

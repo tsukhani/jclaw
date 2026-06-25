@@ -23,7 +23,7 @@ public class Application extends Controller {
             renderBinary(spaIndex);
         }
         // SPA not built — return a simple HTML page instead of the legacy Groovy template
-        response.setContentTypeIfNotSet(HTML_CONTENT_TYPE_PREFIX + play.Play.defaultWebEncoding);
+        response.setContentTypeIfNotSet(HTML_CONTENT_TYPE_PREFIX + Play.defaultWebEncoding);
         renderHtml("<html><body><h1>JClaw</h1><p>SPA not built. Run: cd frontend &amp;&amp; pnpm generate</p></body></html>");
     }
 
@@ -53,7 +53,7 @@ public class Application extends Controller {
         if (!index.exists()) {
             notFound("SPA not built. Run: cd frontend && pnpm generate, then copy .output/public/* to public/spa/");
         }
-        response.setContentTypeIfNotSet(HTML_CONTENT_TYPE_PREFIX + play.Play.defaultWebEncoding);
+        response.setContentTypeIfNotSet(HTML_CONTENT_TYPE_PREFIX + Play.defaultWebEncoding);
         // Always revalidate the SPA shell so a new build's chunk hashes are picked up
         // immediately (see index() above). Hashed _nuxt/ assets keep their long cache.
         response.setHeader("Cache-Control", "no-cache");

@@ -8,6 +8,7 @@ import services.Tx;
 
 import java.util.ArrayList;
 import java.util.List;
+import services.AttachmentService;
 
 /**
  * Shared Slack inbound dispatch (JCLAW-351), independent of how the event arrived.
@@ -165,13 +166,13 @@ public final class SlackInbound {
      * logged and counted; a single note is sent to the channel if any were rejected, so
      * the user isn't left wondering why an attachment was ignored.
      */
-    private static List<services.AttachmentService.Input> downloadFiles(
+    private static List<AttachmentService.Input> downloadFiles(
             String botToken, SlackChannel.InboundMessage message, String agentName) {
         var files = message.files();
         if (files == null || files.isEmpty()) {
             return List.of();
         }
-        var inputs = new ArrayList<services.AttachmentService.Input>();
+        var inputs = new ArrayList<AttachmentService.Input>();
         int rejected = 0;
         for (int i = 0; i < files.size() && i < MAX_INBOUND_FILES; i++) {
             var file = files.get(i);

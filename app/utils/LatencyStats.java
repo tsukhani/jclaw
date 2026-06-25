@@ -7,6 +7,7 @@ import org.HdrHistogram.AtomicHistogram;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.HashMap;
 
 /**
  * In-memory HdrHistogram-backed latency stats, partitioned by channel.
@@ -88,9 +89,9 @@ public final class LatencyStats {
      * narrow (snapshot → single warmup request → restore).
      */
     public static Runnable captureResetPoint() {
-        Map<String, Map<String, HistogramCopy>> snap = new java.util.HashMap<>();
+        Map<String, Map<String, HistogramCopy>> snap = new HashMap<>();
         for (var channelEntry : BY_CHANNEL.entrySet()) {
-            var inner = new java.util.HashMap<String, HistogramCopy>();
+            var inner = new HashMap<String, HistogramCopy>();
             for (var e : channelEntry.getValue().entrySet()) {
                 inner.put(e.getKey(), e.getValue().copy());
             }

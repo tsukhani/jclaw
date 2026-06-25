@@ -2,6 +2,8 @@ package channels;
 
 import models.TelegramBinding;
 import services.EventLogger;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * JCLAW-339: keeps each Telegram binding's webhook registration on Telegram in
@@ -36,7 +38,7 @@ public final class TelegramWebhookRegistrar {
      * {@link TelegramPollingRunner#ALLOWED_UPDATES} so a binding receives the
      * same update types on either transport.
      */
-    static final java.util.List<String> ALLOWED_UPDATES = TelegramPollingRunner.ALLOWED_UPDATES;
+    static final List<String> ALLOWED_UPDATES = TelegramPollingRunner.ALLOWED_UPDATES;
 
     /** Telegram-facing operations, injectable so tests don't hit the API. */
     public interface WebhookApi {
@@ -49,7 +51,7 @@ public final class TelegramWebhookRegistrar {
             if (token == null || url == null) return false;
             var builder = org.telegram.telegrambots.meta.api.methods.updates.SetWebhook.builder()
                     .url(url)
-                    .allowedUpdates(new java.util.ArrayList<>(ALLOWED_UPDATES));
+                    .allowedUpdates(new ArrayList<>(ALLOWED_UPDATES));
             if (secretToken != null) builder.secretToken(secretToken);
             try {
                 TelegramChannel.forToken(token).client().execute(builder.build());

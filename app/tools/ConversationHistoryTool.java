@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import utils.GsonHolder;
 
 /**
  * JCLAW-274: read a subagent run's child conversation transcript.
@@ -246,7 +247,7 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
         payload.put("count", messages.size());
         payload.put("has_more", hasMore);
         payload.put("messages", messages);
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
     private static String optString(JsonObject obj, String key) {

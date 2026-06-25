@@ -5,6 +5,7 @@ import okhttp3.Request;
 import utils.HttpKeys;
 
 import java.util.List;
+import com.google.gson.JsonElement;
 
 /**
  * VirusTotal SHA-256 hash lookup. Queries
@@ -152,7 +153,7 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
     }
 
     /** Returns "engine: threat" only when the engine reported category=malicious + a non-blank result. */
-    private static String extractMaliciousLabel(String engineName, com.google.gson.JsonElement engineResult) {
+    private static String extractMaliciousLabel(String engineName, JsonElement engineResult) {
         if (!engineResult.isJsonObject()) return null;
         var engineObj = engineResult.getAsJsonObject();
         if (!"malicious".equals(optString(engineObj, FIELD_CATEGORY, ""))) return null;

@@ -16,6 +16,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import models.Conversation;
+import play.cache.Cache;
+import services.LoadTestRunner;
 
 /**
  * Registry of available tools. Tools are registered at startup and made available
@@ -101,7 +105,7 @@ public class ToolRegistry {
          *  "Show actions" disclosure under each tool card; the names typically
          *  match the {@code action} field in {@link #parameters()}. Empty by
          *  default for single-action tools that would repeat their own name. */
-        default java.util.List<ToolAction> actions() { return java.util.List.of(); }
+        default List<ToolAction> actions() { return List.of(); }
 
         /** Runtime config key (in {@code ConfigService}) that must be truthy for
          *  this tool to be usable. The admin UI gates the "Enable" toggle on
@@ -216,8 +220,8 @@ public class ToolRegistry {
      *  name). Each group's tools are published atomically together via
      *  {@link #publishExternal(String, List)} and removed atomically via
      *  {@link #unpublishExternal(String)}. */
-    private static final java.util.concurrent.ConcurrentHashMap<String, Map<String, Tool>> externalGroups =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Map<String, Tool>> externalGroups =
+            new ConcurrentHashMap<>();
 
     /** Merged view of native + external tools. Recomputed under
      *  {@link #rebuildLock} on every change and replaces this volatile field
@@ -393,7 +397,7 @@ public class ToolRegistry {
 
     /** Get tool definitions filtered by agent's tool configuration. */
     public static List<ToolDef> getToolDefsForAgent(Agent agent) {
-        return getToolDefsForAgent(agent, (models.Conversation) null);
+        return getToolDefsForAgent(agent, (Conversation) null);
     }
 
     /**
@@ -414,11 +418,11 @@ public class ToolRegistry {
      * new design folds that bootstrap into every server's own surface.
      */
     @SuppressWarnings("java:S1172") // conv retained for binary compatibility per Javadoc (JCLAW-281)
-    public static List<ToolDef> getToolDefsForAgent(Agent agent, models.Conversation conv) {
+    public static List<ToolDef> getToolDefsForAgent(Agent agent, Conversation conv) {
         // JCLAW-281: discoveredMcpServers no longer drives filtering, but
         // the overload is kept so callers don't need to track which
         // signature to use. Just delegates with an empty set.
-        return getToolDefsForAgent(agent, java.util.Set.<String>of());
+        return getToolDefsForAgent(agent, Set.<String>of());
     }
 
     /**
@@ -434,7 +438,7 @@ public class ToolRegistry {
         // model to invoke a tool instead of answering the benchmark prompt,
         // either of which derails the comparison.
         if (agent != null
-                && services.LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
+                && LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
             return List.of();
         }
         var disabled = loadDisabledTools(agent);
@@ -476,7 +480,7 @@ public class ToolRegistry {
      * tool names) computed across multiple AgentToolConfig rows, not a single
      * entity by ID.
      */
-    private static final play.cache.Cache<Long, Set<String>> DISABLED_TOOLS_CACHE = Caches.named(
+    private static final Cache<Long, Set<String>> DISABLED_TOOLS_CACHE = Caches.named(
             "agent-disabled-tools",
             CacheConfig.newBuilder()
                     .maximumSize(1000)

@@ -16,6 +16,7 @@ import play.db.jpa.Model;
 
 import java.time.Instant;
 import java.util.List;
+import services.search.LuceneIndexer;
 
 /**
  * One turn within a {@link TaskRun}'s transcript. Plays the same role for
@@ -117,7 +118,7 @@ public class TaskRunMessage extends Model {
     @PostPersist
     @PostUpdate
     void onIndexUpsert() {
-        services.search.LuceneIndexer.upsert(this);
+        LuceneIndexer.upsert(this);
     }
 
     /**
@@ -127,7 +128,7 @@ public class TaskRunMessage extends Model {
     @PostRemove
     void onIndexRemove() {
         if (id != null) {
-            services.search.LuceneIndexer.remove(id);
+            LuceneIndexer.remove(id);
         }
     }
 

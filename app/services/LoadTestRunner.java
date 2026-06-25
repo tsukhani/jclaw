@@ -10,6 +10,27 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.io.IOException;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.IntFunction;
+import llm.ProviderRegistry;
+import okhttp3.OkHttpClient;
+import okhttp3.RequestBody;
+import okhttp3.ResponseBody;
+import play.Logger;
+import play.Play;
+import play.libs.Crypto;
+import play.libs.F;
+import play.mvc.CookieDataCodec;
+import utils.HttpFactories;
+import utils.LatencyStats;
 
 /**
  * Drives concurrent HTTP traffic against /api/chat/stream for load testing.
@@ -94,7 +115,7 @@ public final class LoadTestRunner {
                           boolean realProvider,
                           String provider, String model,
                           String userMessage,
-                          java.util.List<String> prompts) {
+                          List<String> prompts) {
 
         /** Backwards-compat constructor — defaults userMessage to {@link #DEFAULT_USER_MESSAGE} and prompts to {@code null}. */
         public Request(int concurrency, int turns, boolean compress,
@@ -173,8 +194,8 @@ public final class LoadTestRunner {
             long avgResponseTokens,
             long avgReasoningTokens,
             double avgTokensPerSec,
-            java.util.List<TurnBucket> turnBuckets,
-            java.util.List<SegmentBreakdown> serverSegments) {}
+            List<TurnBucket> turnBuckets,
+            List<SegmentBreakdown> serverSegments) {}
 
     /**
      * Per-turn-position aggregate across all workers in a run. TTFT is
@@ -238,7 +259,7 @@ public final class LoadTestRunner {
         long agentId = setupLoadtestAgent(req);
 
         var sessionCookie = mintAdminSessionCookie();
-        var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
+        var baseUrl = "http://127.0.0.1:" + Play.configuration.getProperty("http.port", "9000");
 
         // Resolve per-turn message strategy. {@code prompts} (when present)
         // overrides {@code userMessage}: turn t sends prompts.get(t), exposing
@@ -256,7 +277,7 @@ public final class LoadTestRunner {
         // exact connection-pooling and threading model that production chat
         // traffic does. Per-call 120s timeout is set on each individual
         // Call below.
-        var client = utils.HttpFactories.llmSingleShot();
+        var client = HttpFactories.llmSingleShot();
 
         runWarmup(client, baseUrl, sessionCookie, agentId, messageFor, req.compress());
 
@@ -307,26 +328,26 @@ public final class LoadTestRunner {
      * agent + provider config in a committed transaction so HTTP request
      * threads can read them. Returns the agent id used by all workers.
      */
-    private static long setupLoadtestAgent(Request req) throws java.io.IOException {
+    private static long setupLoadtestAgent(Request req) throws IOException {
         var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
         if (!req.realProvider()) LoadTestHarness.setScenario(req.scenario());
         var realProviderName = (req.provider() == null || req.provider().isBlank())
                 ? DEFAULT_REAL_PROVIDER : req.provider();
         try {
             return JPA.withTransaction(DEFAULT_DB, false,
-                    (play.libs.F.Function0<Long>) () -> req.realProvider()
+                    (F.Function0<Long>) () -> req.realProvider()
                             ? ensureLoadtestAgentRealInner(realProviderName, req.model())
                             : ensureLoadtestAgentInner(mockPort));
         } catch (Throwable t) {
             // JPA.withTransaction wraps callee throws as Throwable; surface IOException
             // unwrapped (harness start can throw it) so the caller's narrower throws clause holds.
-            if (t instanceof java.io.IOException io) throw io;
+            if (t instanceof IOException io) throw io;
             if (t instanceof RuntimeException re) throw re;
             throw new IllegalStateException("Loadtest agent setup failed", t);
         }
     }
 
-    private static java.util.function.IntFunction<String> resolveMessageStrategy(Request req) {
+    private static IntFunction<String> resolveMessageStrategy(Request req) {
         var userMessage = (req.userMessage() == null || req.userMessage().isBlank())
                 ? DEFAULT_USER_MESSAGE : req.userMessage();
         boolean variedPrompts = req.prompts() != null && !req.prompts().isEmpty();
@@ -342,17 +363,17 @@ public final class LoadTestRunner {
      * accumulated by prior runs (or by real chat traffic the operator cares
      * about) survives.
      */
-    private static void runWarmup(okhttp3.OkHttpClient client, String baseUrl, String sessionCookie,
-                                   long agentId, java.util.function.IntFunction<String> messageFor,
+    private static void runWarmup(OkHttpClient client, String baseUrl, String sessionCookie,
+                                   long agentId, IntFunction<String> messageFor,
                                    boolean compress) {
         // Warmup body uses the first prompt (or the single message). Any
         // valid request shape works for warmup since its purpose is JIT/cache
         // warming, not measurement; the result is discarded by resetPoint.
-        var warmupBodyObj = new com.google.gson.JsonObject();
+        var warmupBodyObj = new JsonObject();
         warmupBodyObj.addProperty("agentId", agentId);
         warmupBodyObj.addProperty("message", messageFor.apply(0));
         var warmupBody = warmupBodyObj.toString();
-        var resetPoint = utils.LatencyStats.captureResetPoint();
+        var resetPoint = LatencyStats.captureResetPoint();
         warmupRequest(client, baseUrl, sessionCookie, warmupBody, compress);
         resetPoint.run();
     }
@@ -363,8 +384,8 @@ public final class LoadTestRunner {
      * drops the warmup contribution; histograms still carry whatever was
      * there from prior runs / real chat traffic.
      */
-    private static java.util.LinkedHashMap<String, long[]> snapshotTrackedSegments() {
-        var segmentsBefore = new java.util.LinkedHashMap<String, long[]>();
+    private static LinkedHashMap<String, long[]> snapshotTrackedSegments() {
+        var segmentsBefore = new LinkedHashMap<String, long[]>();
         for (var seg : TRACKED_SEGMENTS) {
             segmentsBefore.put(seg, readSegmentSnapshot("web", seg));
         }
@@ -378,9 +399,9 @@ public final class LoadTestRunner {
      * segment diagnosis. Order is preserved (LinkedHashMap) so the
      * breakdown renders in pipeline order rather than alphabetical.
      */
-    private static java.util.ArrayList<SegmentBreakdown> computeSegmentDeltas(
-            java.util.LinkedHashMap<String, long[]> segmentsBefore) {
-        var serverSegments = new java.util.ArrayList<SegmentBreakdown>(TRACKED_SEGMENTS.length);
+    private static ArrayList<SegmentBreakdown> computeSegmentDeltas(
+            LinkedHashMap<String, long[]> segmentsBefore) {
+        var serverSegments = new ArrayList<SegmentBreakdown>(TRACKED_SEGMENTS.length);
         for (var seg : TRACKED_SEGMENTS) {
             var before = segmentsBefore.get(seg);
             var after = readSegmentSnapshot("web", seg);
@@ -392,7 +413,7 @@ public final class LoadTestRunner {
         return serverSegments;
     }
 
-    private static long extractServerTtftMs(java.util.List<SegmentBreakdown> serverSegments) {
+    private static long extractServerTtftMs(List<SegmentBreakdown> serverSegments) {
         var ttftSeg = serverSegments.stream()
                 .filter(s -> "ttft".equals(s.segment())).findFirst().orElse(null);
         return ttftSeg != null ? ttftSeg.meanMs() : 0;
@@ -417,8 +438,8 @@ public final class LoadTestRunner {
             turnTtftMs = new long[concurrency][turns];
             turnDurationMs = new long[concurrency][turns];
             for (int w = 0; w < concurrency; w++) {
-                java.util.Arrays.fill(turnTtftMs[w], -1L);
-                java.util.Arrays.fill(turnDurationMs[w], -1L);
+                Arrays.fill(turnTtftMs[w], -1L);
+                Arrays.fill(turnDurationMs[w], -1L);
             }
         }
     }
@@ -431,12 +452,12 @@ public final class LoadTestRunner {
      * worker; immutable references throughout.
      */
     private record WorkerCtx(Request req, String baseUrl, String sessionCookie,
-                              long agentId, java.util.function.IntFunction<String> messageFor,
-                              okhttp3.OkHttpClient client, RunMetrics metrics) {}
+                              long agentId, IntFunction<String> messageFor,
+                              OkHttpClient client, RunMetrics metrics) {}
 
     private static void runConcurrentWorkers(Request req, String baseUrl, String sessionCookie,
-                                              long agentId, java.util.function.IntFunction<String> messageFor,
-                                              okhttp3.OkHttpClient client, RunMetrics metrics)
+                                              long agentId, IntFunction<String> messageFor,
+                                              OkHttpClient client, RunMetrics metrics)
             throws InterruptedException {
         var ctx = new WorkerCtx(req, baseUrl, sessionCookie, agentId, messageFor, client, metrics);
         var latch = new CountDownLatch(req.concurrency());
@@ -473,7 +494,7 @@ public final class LoadTestRunner {
         // varied-prompts mode, replay userMessage otherwise.
         // conversationId is set from turn 2 onward so the server
         // resumes the same row.
-        var turnBodyObj = new com.google.gson.JsonObject();
+        var turnBodyObj = new JsonObject();
         turnBodyObj.addProperty("agentId", ctx.agentId());
         turnBodyObj.addProperty("message", ctx.messageFor().apply(t));
         if (conversationId != null) {
@@ -513,16 +534,16 @@ public final class LoadTestRunner {
      * the SSE result on 200, null on any non-200 status (caller increments
      * error counter). Throws on socket errors / timeouts (caller catches).
      */
-    private static SseConsumeResult executeChatRequest(okhttp3.OkHttpClient client, String baseUrl,
+    private static SseConsumeResult executeChatRequest(OkHttpClient client, String baseUrl,
                                                         String sessionCookie, String turnBody,
-                                                        boolean compress, long t0) throws java.io.IOException {
+                                                        boolean compress, long t0) throws IOException {
         var builder = new okhttp3.Request.Builder()
                 .url(baseUrl + "/api/chat/stream")
                 .header("Cookie", sessionCookie)
-                .post(okhttp3.RequestBody.create(turnBody, JSON_MEDIA_TYPE));
+                .post(RequestBody.create(turnBody, JSON_MEDIA_TYPE));
         if (compress) builder.header("Accept-Encoding", "br, gzip");
         var call = client.newCall(builder.build());
-        call.timeout().timeout(120, java.util.concurrent.TimeUnit.SECONDS);
+        call.timeout().timeout(120, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             if (resp.code() == 200) {
                 // Stream-parse the SSE body to capture the server-assigned
@@ -561,8 +582,8 @@ public final class LoadTestRunner {
      * stream and parsing every one with Gson is wasted work when we only
      * need the first one.
      */
-    private static SseConsumeResult consumeSseStream(okhttp3.ResponseBody body, long t0Nanos)
-            throws java.io.IOException {
+    private static SseConsumeResult consumeSseStream(ResponseBody body, long t0Nanos)
+            throws IOException {
         Long conversationId = null;
         long ttftMs = -1L;
         try (var source = body.source()) {
@@ -584,7 +605,7 @@ public final class LoadTestRunner {
     /** Parse the conversationId out of an init frame; null on any parse error. */
     private static Long tryParseConversationId(String jsonStr) {
         try {
-            var json = com.google.gson.JsonParser.parseString(jsonStr).getAsJsonObject();
+            var json = JsonParser.parseString(jsonStr).getAsJsonObject();
             if (json.has(FIELD_CONVERSATION_ID)) {
                 return json.get(FIELD_CONVERSATION_ID).getAsLong();
             }
@@ -599,14 +620,14 @@ public final class LoadTestRunner {
      * {@code -1} in the input arrays) are excluded so percentiles aren't
      * polluted by sentinel values.
      */
-    private static java.util.List<TurnBucket> buildTurnBuckets(
+    private static List<TurnBucket> buildTurnBuckets(
             long[][] turnTtftMs, long[][] turnDurationMs) {
         int turns = turnDurationMs[0].length;
         int workers = turnDurationMs.length;
-        var buckets = new java.util.ArrayList<TurnBucket>(turns);
+        var buckets = new ArrayList<TurnBucket>(turns);
         for (int t = 0; t < turns; t++) {
-            var ttfts = new java.util.ArrayList<Long>(workers);
-            var durations = new java.util.ArrayList<Long>(workers);
+            var ttfts = new ArrayList<Long>(workers);
+            var durations = new ArrayList<Long>(workers);
             for (int w = 0; w < workers; w++) {
                 if (turnDurationMs[w][t] >= 0) durations.add(turnDurationMs[w][t]);
                 if (turnTtftMs[w][t] >= 0) ttfts.add(turnTtftMs[w][t]);
@@ -627,7 +648,7 @@ public final class LoadTestRunner {
      * clamped index, so c=5 workers correctly maps p95 to the worst sample
      * (rank 5 → index 4) without an out-of-bounds for small samples.
      */
-    private static long[] computeStats(java.util.List<Long> values) {
+    private static long[] computeStats(List<Long> values) {
         if (values.isEmpty()) return new long[]{0L, 0L, 0L};
         var sorted = values.stream().sorted().toList();
         long mean = (long) sorted.stream().mapToLong(Long::longValue).average().orElse(0);
@@ -647,7 +668,7 @@ public final class LoadTestRunner {
      */
     private static long[] readSegmentSnapshot(String channel, String segment) {
         try {
-            var snap = utils.LatencyStats.snapshot();
+            var snap = LatencyStats.snapshot();
             var ch = snap.getAsJsonObject(channel);
             if (ch == null) return new long[]{0L, 0L};
             var seg = ch.getAsJsonObject(segment);
@@ -714,14 +735,14 @@ public final class LoadTestRunner {
 
     private static TokenStats aggregateTokenStats(long agentId, long sinceMillis) {
         @SuppressWarnings("unchecked")
-        var rows = (java.util.List<Object[]>) JPA.em().createQuery(
+        var rows = (List<Object[]>) JPA.em().createQuery(
                 "SELECT m.content, m.usageJson FROM Message m "
                 + "WHERE m.conversation.agent.id = :aid "
                 + "AND m.role = 'assistant' "
                 + "AND m.usageJson IS NOT NULL "
                 + "AND m.createdAt >= :since")
             .setParameter("aid", agentId)
-            .setParameter("since", java.time.Instant.ofEpochMilli(sinceMillis))
+            .setParameter("since", Instant.ofEpochMilli(sinceMillis))
             .getResultList();
         long visSum = 0;
         long reasonSum = 0;
@@ -752,7 +773,7 @@ public final class LoadTestRunner {
         try {
             var content = (String) row[0];
             var json = (String) row[1];
-            var obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+            var obj = JsonParser.parseString(json).getAsJsonObject();
             long visible = approxTokens(content == null ? 0 : content.length());
             // completion - visible = "everything else the provider
             // billed for but didn't show the user" (true internal
@@ -773,22 +794,22 @@ public final class LoadTestRunner {
         }
     }
 
-    private static long extractDenominatorMs(com.google.gson.JsonObject obj) {
+    private static long extractDenominatorMs(JsonObject obj) {
         if (obj.has("streamBodyMs")) return obj.get("streamBodyMs").getAsLong();
         if (obj.has("durationMs")) return obj.get("durationMs").getAsLong();
         return 0L;
     }
 
-    private static void warmupRequest(okhttp3.OkHttpClient client, String baseUrl,
+    private static void warmupRequest(OkHttpClient client, String baseUrl,
                                        String sessionCookie, String body, boolean compress) {
         try {
             var builder = new okhttp3.Request.Builder()
                     .url(baseUrl + "/api/chat/stream")
                     .header("Cookie", sessionCookie)
-                    .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE));
+                    .post(RequestBody.create(body, JSON_MEDIA_TYPE));
             if (compress) builder.header("Accept-Encoding", "br, gzip");
             var call = client.newCall(builder.build());
-            call.timeout().timeout(60, java.util.concurrent.TimeUnit.SECONDS);
+            call.timeout().timeout(60, TimeUnit.SECONDS);
             try (var resp = call.execute()) {
                 resp.body().bytes();  // drain
             }
@@ -811,7 +832,7 @@ public final class LoadTestRunner {
         do { cur = maxA.get(); if (v <= cur) break; } while (!maxA.compareAndSet(cur, v));
     }
 
-    private static int ensureHarnessStarted() throws java.io.IOException {
+    private static int ensureHarnessStarted() throws IOException {
         if (!LoadTestHarness.isRunning()) {
             int portCfg = ConfigService.getInt("provider.loadtest-mock.port", 19999);
             LoadTestHarness.start(portCfg);
@@ -829,7 +850,7 @@ public final class LoadTestRunner {
                 + "\"promptPrice\":0,\"completionPrice\":0,"
                 + "\"supportsThinking\":false,\"effectiveThinkingLevels\":[]}]");
 
-        llm.ProviderRegistry.refresh();
+        ProviderRegistry.refresh();
 
         var agent = Agent.findByName(LOADTEST_AGENT_NAME);
         if (agent == null) {
@@ -899,11 +920,11 @@ public final class LoadTestRunner {
      */
     @SuppressWarnings("java:S112") // Play's CookieDataCodec.encode declares throws Exception; rewrapping is noise for a test-only helper
     private static String mintAdminSessionCookie() throws Exception {
-        var data = new java.util.LinkedHashMap<String, String>();
+        var data = new LinkedHashMap<String, String>();
         data.put("authenticated", "true");
         data.put("username", "admin");
-        var sessionData = play.mvc.CookieDataCodec.encode(data);
-        var sign = play.libs.Crypto.sign(sessionData, play.Play.secretKey.getBytes());
+        var sessionData = CookieDataCodec.encode(data);
+        var sign = Crypto.sign(sessionData, Play.secretKey.getBytes());
         return "PLAY_SESSION=" + sign + "-" + sessionData;
     }
 
@@ -913,12 +934,12 @@ public final class LoadTestRunner {
      */
     public static void disable() {
         try {
-            JPA.withTransaction(DEFAULT_DB, false, (play.libs.F.Function0<Void>) () -> {
+            JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Void>) () -> {
                 ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "false");
                 return null;
             });
         } catch (Throwable e) {
-            play.Logger.warn("Loadtest disable failed: %s", e.getMessage());
+            Logger.warn("Loadtest disable failed: %s", e.getMessage());
         }
     }
 
@@ -929,7 +950,7 @@ public final class LoadTestRunner {
      */
     public static void cleanupConversations() {
         try {
-            JPA.withTransaction(DEFAULT_DB, false, (play.libs.F.Function0<Void>) () -> {
+            JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Void>) () -> {
                 var agent = Agent.findByName(LOADTEST_AGENT_NAME);
                 if (agent != null) {
                     // MessageAttachment first — FK has no ON DELETE CASCADE (see ConversationService.deleteByIds).
@@ -951,7 +972,7 @@ public final class LoadTestRunner {
                 return null;
             });
         } catch (Throwable e) {
-            play.Logger.warn("Loadtest conversation cleanup failed: %s", e.getMessage());
+            Logger.warn("Loadtest conversation cleanup failed: %s", e.getMessage());
         }
     }
 }

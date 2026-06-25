@@ -8,6 +8,7 @@ import services.video.FrameSampler.FrameSamplingException;
 
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 
 /**
  * Routes a video attachment to an interpretation strategy and returns the OpenAI-style content parts
@@ -108,7 +109,7 @@ public final class VideoUnderstandingDispatcher {
             throw new VideoAdapterException("dedicated video model returned no text");
         }
         EventLogger.info(EVENT_CATEGORY, "dedicated-video: %d chars, attachment=%s".formatted(text.length(), video.uuid));
-        var part = new java.util.LinkedHashMap<String, Object>();
+        var part = new LinkedHashMap<String, Object>();
         part.put("type", "text");
         part.put("text", DEDICATED_INTERPRETATION_PREFIX + text);
         return List.of(part);

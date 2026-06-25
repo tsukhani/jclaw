@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 
 /**
  * Self-calibrating per-(provider, model) safety multiplier maintenance.
@@ -209,7 +210,7 @@ public class TokenizerCalibrationJob extends Job<Void> {
 
     public static double p95(List<Double> values) {
         var sorted = new ArrayList<>(values);
-        java.util.Collections.sort(sorted);
+        Collections.sort(sorted);
         // Cast to long BEFORE the -1 so a hypothetical near-Integer.MAX_VALUE
         // sample count can't wrap on the int subtraction. In practice n is
         // tiny (per-(provider, model) sample groups from one job cycle), but

@@ -17,6 +17,7 @@ import play.db.jpa.Model;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import services.Tx;
 
 @Entity
 @Table(name = "channel_config")
@@ -83,7 +84,7 @@ public class ChannelConfig extends Model {
         // bound. Wrap the cache-miss DB read in Tx.run — it short-circuits
         // when the caller is already inside a transaction (the admin save
         // path), so managed-entity semantics are preserved there.
-        return cache.get(channelType, k -> services.Tx.run(() ->
+        return cache.get(channelType, k -> Tx.run(() ->
                 Optional.ofNullable((ChannelConfig) ChannelConfig.find("channelType", k).first())))
                 .orElse(null);
     }

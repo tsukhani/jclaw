@@ -13,6 +13,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import play.Logger;
+import services.ConfigService;
 
 /**
  * Single source of truth for outbound HTTP-client provisioning. Callers
@@ -101,7 +103,7 @@ public final class HttpFactories {
         // runs (none today, but defence-in-depth) gets a sane cap.
         LLM_DISPATCHER.setMaxRequests(128);
         LLM_DISPATCHER.setMaxRequestsPerHost(64);
-        play.Logger.info("HttpFactories LLM_DISPATCHER bootstrap: maxRequests=%d maxRequestsPerHost=%d",
+        Logger.info("HttpFactories LLM_DISPATCHER bootstrap: maxRequests=%d maxRequestsPerHost=%d",
                 LLM_DISPATCHER.getMaxRequests(), LLM_DISPATCHER.getMaxRequestsPerHost());
     }
 
@@ -115,13 +117,13 @@ public final class HttpFactories {
      * values take effect immediately without restart.
      */
     public static void applyDispatcherConfig() {
-        int perHost = services.ConfigService.getInt(
+        int perHost = ConfigService.getInt(
                 "dispatcher.llm.maxRequestsPerHost", 64);
-        int max = services.ConfigService.getInt(
+        int max = ConfigService.getInt(
                 "dispatcher.llm.maxRequests", 128);
         LLM_DISPATCHER.setMaxRequestsPerHost(perHost);
         LLM_DISPATCHER.setMaxRequests(max);
-        play.Logger.info("HttpFactories LLM_DISPATCHER applied: maxRequests=%d maxRequestsPerHost=%d",
+        Logger.info("HttpFactories LLM_DISPATCHER applied: maxRequests=%d maxRequestsPerHost=%d",
                 max, perHost);
     }
 
@@ -170,7 +172,7 @@ public final class HttpFactories {
             var url = call.request().url();
             String key = url.host() + ":" + url.port();
             if (SEEN_HOSTS.add(key)) {
-                play.Logger.info("OkHttp negotiated %s with %s",
+                Logger.info("OkHttp negotiated %s with %s",
                         connection.protocol(), key);
             }
         }

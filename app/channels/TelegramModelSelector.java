@@ -13,6 +13,7 @@ import services.Tx;
 
 import java.util.List;
 import java.util.Optional;
+import services.ModelOverrideResolver;
 
 /**
  * Telegram-specific entry points for the {@code /model} selector
@@ -88,8 +89,8 @@ public final class TelegramModelSelector {
      * disambiguates command syntax from prose).
      */
     public static String summaryText(Agent agent, Conversation conversation) {
-        var overrideActive = services.ModelOverrideResolver.hasOverride(conversation);
-        var resolved = services.ModelOverrideResolver.resolve(conversation, agent);
+        var overrideActive = ModelOverrideResolver.hasOverride(conversation);
+        var resolved = ModelOverrideResolver.resolve(conversation, agent);
         var provider = resolved.provider();
         var modelId = resolved.modelId();
         var providerLabel = TelegramModelKeyboard.providerLabel(provider);
@@ -113,7 +114,7 @@ public final class TelegramModelSelector {
      * matching row.
      */
     public static String currentProviderName(Agent agent, Conversation conversation) {
-        return services.ModelOverrideResolver.provider(conversation, agent);
+        return ModelOverrideResolver.provider(conversation, agent);
     }
 
     private static String escape(String s) {

@@ -1,6 +1,8 @@
 package channels;
 
 import services.EventLogger;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * JCLAW-341: streams an LLM response into Slack using the native streaming API
@@ -92,7 +94,7 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     private String draftTs;        // chat.update message ts; null until the first post
     private String lastDraftText;  // dedup consecutive identical edits
     private boolean draftStopped;  // stop the live loop (length cap / post-or-edit failure)
-    private final java.util.List<String> toolLines = new java.util.ArrayList<>();
+    private final List<String> toolLines = new ArrayList<>();
 
     /** Production: stream as the binding's bot; {@code agentName} drives the
      *  seal-time upload of any files the agent linked in its reply (JCLAW-345). */

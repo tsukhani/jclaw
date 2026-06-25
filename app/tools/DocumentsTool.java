@@ -23,6 +23,10 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import agents.ToolAction;
+import java.nio.file.StandardOpenOption;
+import play.Play;
+import services.ConfigService;
 
 /**
  * Tool for reading and writing rich document formats. Reading uses Apache
@@ -65,12 +69,12 @@ public class DocumentsTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction(ACTION_READ,   "Extract text from PDF, DOCX, XLSX, PPTX, HTML, RTF, ODT, EPUB via Apache Tika"),
-                new agents.ToolAction(ACTION_WRITE,  "Author a new HTML, PDF, or DOCX file from markdown input"),
-                new agents.ToolAction(ACTION_APPEND, "Append markdown to a draft file for incremental large-document authoring"),
-                new agents.ToolAction(ACTION_RENDER, "Convert an accumulated markdown draft into the target output format")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction(ACTION_READ,   "Extract text from PDF, DOCX, XLSX, PPTX, HTML, RTF, ODT, EPUB via Apache Tika"),
+                new ToolAction(ACTION_WRITE,  "Author a new HTML, PDF, or DOCX file from markdown input"),
+                new ToolAction(ACTION_APPEND, "Append markdown to a draft file for incremental large-document authoring"),
+                new ToolAction(ACTION_RENDER, "Convert an accumulated markdown draft into the target output format")
         );
     }
 
@@ -243,7 +247,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
             Files.createDirectories(target.getParent());
             if (Files.exists(target)) {
                 Files.writeString(target, content,
-                        java.nio.file.StandardOpenOption.APPEND);
+                        StandardOpenOption.APPEND);
                 long size = Files.size(target);
                 return "Appended %d chars to %s (total %d bytes). Call renderDocument when all chunks are added."
                         .formatted(content.length(), relativePath, size);
@@ -398,14 +402,14 @@ public class DocumentsTool implements ToolRegistry.Tool {
     }
 
     private static String stringOrDefault(String key, String fallback) {
-        var raw = play.Play.configuration != null
-                ? play.Play.configuration.getProperty(key) : null;
+        var raw = Play.configuration != null
+                ? Play.configuration.getProperty(key) : null;
         return (raw == null || raw.isBlank()) ? fallback : raw.trim();
     }
 
     private static int positiveIntOrDefault(String key, int fallback) {
-        var raw = play.Play.configuration != null
-                ? play.Play.configuration.getProperty(key) : null;
+        var raw = Play.configuration != null
+                ? Play.configuration.getProperty(key) : null;
         if (raw == null || raw.isBlank()) return fallback;
         try {
             int n = Integer.parseInt(raw.trim());
@@ -432,7 +436,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
      */
     private static boolean ocrEnabled() {
         return "true".equalsIgnoreCase(
-                services.ConfigService.get("ocr.tesseract.enabled", "true"));
+                ConfigService.get("ocr.tesseract.enabled", "true"));
     }
 
     /**

@@ -24,6 +24,9 @@ import tools.ConversationSendTool;
 import tools.ConversationListTool;
 import tools.MessageTool;
 import tools.LoadTestSleepTool;
+import java.util.ArrayList;
+import services.ConfigService;
+import services.EventLogger;
 
 // All DB-touching calls below (ConfigService.get, EventLogger.info) wrap
 // their own work in Tx.run, so no outer JPA tx is needed. @NoTransaction
@@ -39,7 +42,7 @@ public class ToolRegistrationJob extends Job<Void> {
 
     /** Re-run tool registration. Thread-safe: builds a local list and publishes atomically. */
     public static void registerAll() {
-        var toolList = new java.util.ArrayList<ToolRegistry.Tool>();
+        var toolList = new ArrayList<ToolRegistry.Tool>();
         toolList.add(new TaskTool());
         toolList.add(new DateTimeTool());
         toolList.add(new GenerateImageTool()); // JCLAW-228: default-off per agent (opt-in)
@@ -100,10 +103,10 @@ public class ToolRegistrationJob extends Job<Void> {
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by
         // McpConnectionManager.republishTools.
-        if ("true".equals(services.ConfigService.get("provider.loadtest-mock.enabled"))) {
+        if ("true".equals(ConfigService.get("provider.loadtest-mock.enabled"))) {
             toolList.add(new LoadTestSleepTool());
         }
         ToolRegistry.publish(toolList);
-        services.EventLogger.info("system", "Registered %d tools".formatted(ToolRegistry.listTools().size()));
+        EventLogger.info("system", "Registered %d tools".formatted(ToolRegistry.listTools().size()));
     }
 }

@@ -15,6 +15,21 @@ import utils.WebhookUtil;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import channels.TelegramAccessPolicy;
+import channels.TelegramBotIdentity;
+import channels.TelegramCallbackDispatcher;
+import channels.TelegramForwardCoalesceBuffer;
+import channels.TelegramInboundTextBuffer;
+import channels.TelegramMediaGroupBuffer;
+import channels.TelegramPollingRunner;
+import channels.TelegramStreamingSink;
+import channels.TelegramWebhookRateLimiter;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import play.Play;
+import play.mvc.results.Result;
+import services.Tx;
+import utils.PlayConfig;
+import utils.Strings;
 
 /**
  * Webhook receiver for per-user Telegram bindings (JCLAW-89). The route carries
@@ -72,7 +87,7 @@ public class WebhookTelegramController extends Controller {
         // paying the constant-time secret compares on every request. The real
         // client IP is resolved for accurate logging (it does not gate).
         String clientIp = resolveClientIp();
-        if (!channels.TelegramWebhookRateLimiter.allow(bindingId, rateLimitMax(), rateLimitWindowSeconds())) {
+        if (!TelegramWebhookRateLimiter.allow(bindingId, rateLimitMax(), rateLimitWindowSeconds())) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Rate-limited webhook for binding %d from %s".formatted(bindingId, clientIp));
             error(429, "Too Many Requests");
@@ -102,7 +117,7 @@ public class WebhookTelegramController extends Controller {
                 error(413, "Payload Too Large");
             }
             dispatchUpdate(ctx, rawBody, bindingId);
-        } catch (play.mvc.results.Result r) {
+        } catch (Result r) {
             // 413 from the read-length backstop above: rethrow so Play renders
             // it; do not swallow it as a generic parse error.
             throw r;
@@ -119,17 +134,17 @@ public class WebhookTelegramController extends Controller {
      * default 60). Unparseable / unset values fall back to the default.
      */
     private static int rateLimitMax() {
-        return utils.PlayConfig.intOr(CFG_RATE_LIMIT_MAX, DEFAULT_RATE_LIMIT_MAX);
+        return PlayConfig.intOr(CFG_RATE_LIMIT_MAX, DEFAULT_RATE_LIMIT_MAX);
     }
 
     /** M1: rate-limit window in seconds ({@code telegram.webhook.rate-limit.window-seconds}, default 60). */
     private static long rateLimitWindowSeconds() {
-        return utils.PlayConfig.intOr(CFG_RATE_LIMIT_WINDOW_SECONDS, (int) DEFAULT_RATE_LIMIT_WINDOW_SECONDS);
+        return PlayConfig.intOr(CFG_RATE_LIMIT_WINDOW_SECONDS, (int) DEFAULT_RATE_LIMIT_WINDOW_SECONDS);
     }
 
     /** M1: maximum accepted body size in bytes ({@code telegram.webhook.max-body-bytes}, default 1 MiB). */
     private static long maxBodyBytes() {
-        return utils.PlayConfig.longOr(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
+        return PlayConfig.longOr(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
     }
 
     /**
@@ -167,12 +182,12 @@ public class WebhookTelegramController extends Controller {
     }
 
     private static boolean trustedProxy() {
-        var raw = play.Play.configuration.getProperty(CFG_TRUSTED_PROXY, "false");
+        var raw = Play.configuration.getProperty(CFG_TRUSTED_PROXY, "false");
         return raw != null && raw.trim().equalsIgnoreCase("true");
     }
 
     private static BindingCtx loadBindingCtx(Long bindingId) {
-        return services.Tx.run(() -> {
+        return Tx.run(() -> {
             TelegramBinding b = TelegramBinding.findById(bindingId);
             if (b == null) return null;
             if (b.agent != null) {
@@ -219,7 +234,7 @@ public class WebhookTelegramController extends Controller {
      * when the update is a regular text message.
      */
     private static void dispatchUpdate(BindingCtx ctx, String rawBody, Long bindingId)
-            throws com.fasterxml.jackson.core.JsonProcessingException {
+            throws JsonProcessingException {
         Update sdkUpdate = JACKSON.readValue(rawBody, Update.class);
         var callback = TelegramChannel.parseCallback(sdkUpdate);
         if (callback != null) {
@@ -232,9 +247,9 @@ public class WebhookTelegramController extends Controller {
         // NOTE: Telegram only DELIVERS message_reaction to the webhook when the
         // registrar (TelegramWebhookRegistrar — outside this story's file set)
         // names it in allowed_updates; this handler is ready for that follow-up.
-        var reaction = channels.TelegramPollingRunner.parseReaction(sdkUpdate);
+        var reaction = TelegramPollingRunner.parseReaction(sdkUpdate);
         if (reaction != null) {
-            channels.TelegramPollingRunner.handleReaction(
+            TelegramPollingRunner.handleReaction(
                     ctx.agent(), ctx.botToken(), ctx.telegramUserId(), reaction);
             return;
         }
@@ -242,14 +257,14 @@ public class WebhookTelegramController extends Controller {
         // @mention / text_mention / /cmd@botname / reply-to-bot addressing THIS
         // bot — the group access gate in handleInboundMessage reads
         // InboundMessage.botMentioned.
-        var identity = channels.TelegramBotIdentity.resolve(ctx.botToken());
+        var identity = TelegramBotIdentity.resolve(ctx.botToken());
         var message = TelegramChannel.parseUpdate(sdkUpdate, identity.username(), identity.userId());
         if (message == null) return; // non-message update (edited_message, etc.)
         // JCLAW-387 B1: detect a forward off the RAW update (the parsed
         // InboundMessage drops the forward fields) so handleInboundMessage can
         // route a forward burst through the coalesce lane.
         handleInboundMessage(ctx, message, bindingId,
-                channels.TelegramPollingRunner.isForward(sdkUpdate));
+                TelegramPollingRunner.isForward(sdkUpdate));
     }
 
     private static void handleCallback(BindingCtx ctx, InboundCallback callback, Long bindingId) {
@@ -261,7 +276,7 @@ public class WebhookTelegramController extends Controller {
             return;
         }
         dispatchOffThread("webhook-telegram-callback", () ->
-                channels.TelegramCallbackDispatcher.dispatch(
+                TelegramCallbackDispatcher.dispatch(
                         ctx.botToken(), ctx.agent(), callback));
     }
 
@@ -279,7 +294,7 @@ public class WebhookTelegramController extends Controller {
         // group/supergroup is served for any member but only when the bot was
         // directly addressed (@mention / reply-to-bot etc.). See TelegramAccessPolicy.
         boolean ownerMatches = ctx.telegramUserId().equals(message.fromId());
-        if (!channels.TelegramAccessPolicy.isAllowed(ownerMatches, message.chatType(), message.botMentioned())) {
+        if (!TelegramAccessPolicy.isAllowed(ownerMatches, message.chatType(), message.botMentioned())) {
             EventLogger.warn(CATEGORY_CHANNEL,
                     ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                     "Rejected inbound from %s (id=%s) in %s chat: binding %d (owner %s, mentioned=%s)".formatted(
@@ -293,7 +308,7 @@ public class WebhookTelegramController extends Controller {
                 ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                 "Webhook received from %s: %s".formatted(
                         message.fromUsername() != null ? message.fromUsername() : message.fromId(),
-                        utils.Strings.truncate(message.text(), 50)));
+                        Strings.truncate(message.text(), 50)));
 
         // Off-request virtual thread so the HTTP 200 returns immediately.
         // JCLAW-136: multi-photo albums ride through a reassembly buffer
@@ -314,13 +329,13 @@ public class WebhookTelegramController extends Controller {
         // because a forwarded plain text would otherwise fall into the
         // text-reassembly lane and a forwarded photo into the media-group lane.
         if (isForward) {
-            channels.TelegramForwardCoalesceBuffer.add(message, merged ->
+            TelegramForwardCoalesceBuffer.add(message, merged ->
                     dispatchOffThread(THREAD_NAME_PROCESS, () -> processMessage(ctx, merged)));
-        } else if (channels.TelegramInboundTextBuffer.isEligible(message)) {
-            channels.TelegramInboundTextBuffer.add(message, merged ->
+        } else if (TelegramInboundTextBuffer.isEligible(message)) {
+            TelegramInboundTextBuffer.add(message, merged ->
                     dispatchOffThread(THREAD_NAME_PROCESS, () -> processMessage(ctx, merged)));
         } else {
-            channels.TelegramMediaGroupBuffer.add(message, merged ->
+            TelegramMediaGroupBuffer.add(message, merged ->
                     dispatchOffThread(THREAD_NAME_PROCESS, () -> processMessage(ctx, merged)));
         }
     }
@@ -364,7 +379,7 @@ public class WebhookTelegramController extends Controller {
             // conversation is stamped with it (plain DM vs group history caps).
             AgentRunner.processInboundForAgentStreaming(
                     runAgent, CHANNEL_TELEGRAM, peerId, attributedText,
-                    convId -> new channels.TelegramStreamingSink(
+                    convId -> new TelegramStreamingSink(
                             sendToken, sendChatId, sendAgent, convId, sendChatType,
                             message.messageId(), message.messageThreadId()),
                     inputs, sendChatType);
@@ -388,7 +403,7 @@ public class WebhookTelegramController extends Controller {
      * removed between receive and dispatch).
      */
     private static Agent resolveTopicAgent(String botToken, String chatId, Integer threadId, Agent defaultAgent) {
-        return services.Tx.run(() -> {
+        return Tx.run(() -> {
             TelegramBinding binding = TelegramBinding.findByBotToken(botToken);
             if (binding == null) return defaultAgent;
             Agent resolved = binding.resolveAgentForTopic(chatId, threadId);

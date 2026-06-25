@@ -4,6 +4,8 @@ import services.EventLogger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
+import play.Play;
 
 /**
  * JCLAW-387 B1: forwarded-message coalescing lane. When a user forwards a
@@ -90,7 +92,7 @@ public final class TelegramForwardCoalesceBuffer {
      * media-group path.
      */
     public static void add(InboundMessage incoming,
-                           java.util.function.Consumer<InboundMessage> dispatcher) {
+                           Consumer<InboundMessage> dispatcher) {
         BUFFER.offer(bufferKey(incoming), incoming, dispatcher);
     }
 
@@ -140,7 +142,7 @@ public final class TelegramForwardCoalesceBuffer {
      *  {@code telegram.inbound.forward-coalesce-window-ms} (default 1000).
      *  Unparseable / unset values fall back to the default. */
     static long forwardCoalesceWindowMs() {
-        var raw = play.Play.configuration.getProperty(CFG_WINDOW_MS);
+        var raw = Play.configuration.getProperty(CFG_WINDOW_MS);
         if (raw == null || raw.isBlank()) return DEFAULT_FORWARD_COALESCE_WINDOW_MS;
         try {
             return Long.parseLong(raw.trim());

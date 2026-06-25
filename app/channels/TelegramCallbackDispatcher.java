@@ -5,6 +5,9 @@ import models.Agent;
 import models.Conversation;
 import services.Tx;
 import slash.Commands;
+import java.util.Locale;
+import play.Play;
+import services.ModelOverrideResolver;
 
 /**
  * Entry point for Telegram {@code callback_query} updates from the
@@ -109,9 +112,9 @@ public final class TelegramCallbackDispatcher {
      * keyboard up front; the dispatcher uses it as the inbound gate.
      */
     public static boolean keyboardScopeAllows(String chatType) {
-        String scope = play.Play.configuration
+        String scope = Play.configuration
                 .getProperty("telegram.keyboardScope", "all")
-                .trim().toLowerCase(java.util.Locale.ROOT);
+                .trim().toLowerCase(Locale.ROOT);
         return switch (scope) {
             case "off" -> false;
             case "dm" -> "private".equals(chatType);
@@ -190,7 +193,7 @@ public final class TelegramCallbackDispatcher {
         }
         var keyboard = TelegramModelKeyboard.modelsKeyboard(
                 conv.id, payload.providerIdx(), payload.page(),
-                services.ModelOverrideResolver.modelId(conv, agent));
+                ModelOverrideResolver.modelId(conv, agent));
         TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
                 header.toString(), keyboard);
     }

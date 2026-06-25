@@ -2,6 +2,8 @@ package channels;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * JCLAW-345: extracts workspace-file links from an agent's reply and uploads each
@@ -51,7 +53,7 @@ public final class SlackOutboundPlanner {
      *  pointing at the same file — Slack uploads each file once. */
     public static List<TelegramOutboundPlanner.FileSegment> fileSegments(String replyText, String agentName) {
         var out = new ArrayList<TelegramOutboundPlanner.FileSegment>();
-        var seen = new java.util.HashSet<String>();
+        var seen = new HashSet<String>();
         for (var seg : TelegramOutboundPlanner.plan(replyText, agentName)) {
             if (seg instanceof TelegramOutboundPlanner.FileSegment fs) {
                 addUnique(out, seen, fs);
@@ -65,7 +67,7 @@ public final class SlackOutboundPlanner {
     }
 
     private static void addUnique(List<TelegramOutboundPlanner.FileSegment> out,
-                                  java.util.Set<String> seen, TelegramOutboundPlanner.FileSegment fs) {
+                                  Set<String> seen, TelegramOutboundPlanner.FileSegment fs) {
         var path = fs.file() != null ? fs.file().getAbsolutePath() : null;
         if (path == null || seen.add(path)) {
             out.add(fs);

@@ -12,6 +12,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.Set;
 
 /**
  * JCLAW-271: in-memory mapping from {@link SubagentRun} id to the
@@ -151,8 +152,8 @@ public final class SubagentRegistry {
 
     /** Snapshot of the currently-registered run ids. For tests + admin
      *  introspection only. */
-    public static java.util.Set<Long> activeRunIds() {
-        return java.util.Set.copyOf(ACTIVE.keySet());
+    public static Set<Long> activeRunIds() {
+        return Set.copyOf(ACTIVE.keySet());
     }
 
     /**

@@ -24,6 +24,11 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import agents.ToolAction;
+import com.google.gson.JsonElement;
+import java.nio.file.StandardOpenOption;
+import java.util.Comparator;
+import java.util.HashMap;
 
 public class FileSystemTools implements ToolRegistry.Tool {
 
@@ -74,15 +79,15 @@ public class FileSystemTools implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction(ACTION_READ_FILE,   "Read file content up to 1 MB"),
-                new agents.ToolAction(ACTION_WRITE_FILE,  "Create or overwrite a file with full content"),
-                new agents.ToolAction(ACTION_APPEND_FILE, "Append content to the end of a file, creating it if missing"),
-                new agents.ToolAction(ACTION_EDIT_FILE,   "Apply a batch of oldText → newText replacements atomically"),
-                new agents.ToolAction(ACTION_EDIT_LINES,  "Replace, insert, or delete specific 1-indexed line ranges atomically"),
-                new agents.ToolAction(ACTION_APPLY_PATCH, "Apply a multi-file unified diff patch"),
-                new agents.ToolAction(ACTION_LIST_FILES,  "List the contents of a directory")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction(ACTION_READ_FILE,   "Read file content up to 1 MB"),
+                new ToolAction(ACTION_WRITE_FILE,  "Create or overwrite a file with full content"),
+                new ToolAction(ACTION_APPEND_FILE, "Append content to the end of a file, creating it if missing"),
+                new ToolAction(ACTION_EDIT_FILE,   "Apply a batch of oldText → newText replacements atomically"),
+                new ToolAction(ACTION_EDIT_LINES,  "Replace, insert, or delete specific 1-indexed line ranges atomically"),
+                new ToolAction(ACTION_APPLY_PATCH, "Apply a multi-file unified diff patch"),
+                new ToolAction(ACTION_LIST_FILES,  "List the contents of a directory")
         );
     }
 
@@ -318,7 +323,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
             Files.createDirectories(path.getParent());
             if (Files.exists(path)) {
                 Files.writeString(path, content,
-                        java.nio.file.StandardOpenOption.APPEND);
+                        StandardOpenOption.APPEND);
                 long size = Files.size(path);
                 return "Appended %d chars to %s (total %d bytes)"
                         .formatted(content.length(), path.getFileName(), size);
@@ -383,7 +388,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
         // Per-batch regex cache: reuses the compiled Pattern across edits that
         // share the same oldText. Scope is one editFile call; the map is
         // discarded when this loop returns, so no cross-batch global state.
-        var regexCache = new java.util.HashMap<String, Pattern>();
+        var regexCache = new HashMap<String, Pattern>();
 
         for (int i = 0; i < editsJson.size(); i++) {
             var applied = applyEditAtIndex(editsJson.get(i), working, i + 1, regexCache);
@@ -434,8 +439,8 @@ public class FileSystemTools implements ToolRegistry.Tool {
         }
     }
 
-    private EditResult applyEditAtIndex(com.google.gson.JsonElement entry, String working, int editIndex,
-                                         java.util.Map<String, Pattern> regexCache) {
+    private EditResult applyEditAtIndex(JsonElement entry, String working, int editIndex,
+                                         Map<String, Pattern> regexCache) {
         if (!entry.isJsonObject()) {
             return EditResult.err("Error: edit #%d must be an object with oldText and newText fields".formatted(editIndex));
         }
@@ -459,7 +464,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
     }
 
     private EditResult applySingleEdit(String working, String oldText, String newText, boolean isRegex,
-                                        int editIndex, java.util.Map<String, Pattern> regexCache) {
+                                        int editIndex, Map<String, Pattern> regexCache) {
         if (isRegex) {
             return applyRegexEdit(working, oldText, newText, editIndex, regexCache);
         }
@@ -467,7 +472,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
     }
 
     private EditResult applyRegexEdit(String working, String oldText, String newText, int editIndex,
-                                       java.util.Map<String, Pattern> regexCache) {
+                                       Map<String, Pattern> regexCache) {
         Pattern pattern = regexCache.get(oldText);
         if (pattern == null) {
             try {
@@ -706,7 +711,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
     private record OpCounts(int replaced, int inserted, int deleted) {}
 
     /** Parse a single JSON line-op entry, validating shape, startLine type, and bounds. */
-    private static ParsedOp parseLineOpEntry(com.google.gson.JsonElement entry, int lineCount, int index) {
+    private static ParsedOp parseLineOpEntry(JsonElement entry, int lineCount, int index) {
         if (!entry.isJsonObject()) {
             return ParsedOp.err("Error: operation #%d must be an object".formatted(index));
         }
@@ -741,7 +746,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
         var ordered = new ArrayList<>(parsed);
         // Stable sort by startLine; Collections.sort is stable so equal-startLine ops
         // retain their original (request) order — matching the prior tie semantics.
-        ordered.sort(java.util.Comparator.comparingInt(LineOp::startLine));
+        ordered.sort(Comparator.comparingInt(LineOp::startLine));
 
         var merged = new ArrayList<String>(lines.size());
         int cursor = 0; // 0-indexed position in the original lines not yet emitted
@@ -936,7 +941,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
             // Capture the Optional once so the isPresent check and the get share
             // a single reference — addresses SonarQube S3655, which can't prove
             // u.newPath() is referentially transparent across two calls.
-            var newPathOpt = (op instanceof FileOp.Update u) ? u.newPath() : java.util.Optional.<String>empty();
+            var newPathOpt = (op instanceof FileOp.Update u) ? u.newPath() : Optional.<String>empty();
             Path moveTarget = null;
             if (newPathOpt.isPresent()) {
                 try {

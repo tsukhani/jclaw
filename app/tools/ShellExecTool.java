@@ -18,6 +18,21 @@ import java.util.Map;
 import java.util.List;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import agents.ToolAction;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import javax.imageio.ImageIO;
+import services.EventLogger;
+import services.Tx;
 
 /**
  * Shell execution tool for agent-invoked commands.
@@ -70,8 +85,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
     /** Atomically cached parsed allowlist: invalidated when the raw config string changes. */
     private record AllowlistCache(String raw, Set<String> set) {}
-    private static final java.util.concurrent.atomic.AtomicReference<AllowlistCache> cachedAllowlist =
-            new java.util.concurrent.atomic.AtomicReference<>(new AllowlistCache("", Set.of()));
+    private static final AtomicReference<AllowlistCache> cachedAllowlist =
+            new AtomicReference<>(new AllowlistCache("", Set.of()));
 
     private static Set<String> parsedAllowlist() {
         var raw = ConfigService.get("shell.allowlist", DEFAULT_ALLOWLIST);
@@ -80,7 +95,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         var newSet = Arrays.stream(raw.split(","))
                 .map(String::strip)
                 .filter(s -> !s.isEmpty())
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
         cachedAllowlist.set(new AllowlistCache(raw, newSet));
         return newSet;
     }
@@ -115,9 +130,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction("exec", "Run a shell command; validated against the permitted binary allowlist before execution")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction("exec", "Run a shell command; validated against the permitted binary allowlist before execution")
         );
     }
 
@@ -256,29 +271,29 @@ public class ShellExecTool implements ToolRegistry.Tool {
         var global = parsedAllowlist();
         if (agent == null) return global;
 
-        return services.Tx.run(() -> {
+        return Tx.run(() -> {
             // Re-fetch the agent inside the transaction. The caller may have
             // obtained the entity from a different (already-committed) Tx.run
             // block, which detached it — findByAgent on a detached entity is
             // legal but safer to re-attach. Explicit Agent type required:
             // Model.findById() declares JPABase as the return type, and var
             // would infer JPABase here, failing the downstream signature match.
-            models.Agent managed = models.Agent.findById(agent.id);
+            Agent managed = Agent.findById(agent.id);
             if (managed == null) return global;
 
             // Build disabled-skill filter from AgentSkillConfig. Absent config row
             // means enabled-by-default, matching SkillLoader's existing semantics.
             var configs = AgentSkillConfig.findByAgent(managed);
-            var disabledSkills = new java.util.HashSet<String>();
+            var disabledSkills = new HashSet<String>();
             for (var c : configs) {
                 if (!c.enabled) disabledSkills.add(c.skillName);
             }
 
-            var union = new java.util.HashSet<>(global);
+            var union = new HashSet<>(global);
             for (var row : AgentSkillAllowedTool.findByAgent(managed)) {
                 if (!disabledSkills.contains(row.skillName)) union.add(row.toolName);
             }
-            return java.util.Collections.unmodifiableSet(union);
+            return Collections.unmodifiableSet(union);
         });
     }
 
@@ -393,7 +408,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // from a normal exit — process.isAlive() is false in both cases
             // after the loop, but only a watchdog kill should produce the
             // "timed out" markers in the result.
-            var timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
+            var timedOut = new AtomicBoolean(false);
             Thread.ofVirtual().name("shell-exec-watchdog").start(() -> {
                 try {
                     if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
@@ -475,8 +490,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         // Blocking read loop — wrap in InputStreamReader with explicit UTF-8
         // so multi-byte characters split across read() boundaries are decoded
         // correctly (raw new String(byte[]) corrupts partial sequences).
-        var reader = new java.io.InputStreamReader(process.getInputStream(),
-                java.nio.charset.StandardCharsets.UTF_8);
+        var reader = new InputStreamReader(process.getInputStream(),
+                StandardCharsets.UTF_8);
         var cbuf = new char[4096];
         int n;
         // JCLAW-404: scan for terminal-image block art incrementally rather than
@@ -604,7 +619,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     private String replaceTerminalImagesInOutput(String output, Agent agent) {
         var lines = output.split("\n");
         var result = new StringBuilder();
-        var qrLines = new java.util.ArrayList<String>();
+        var qrLines = new ArrayList<String>();
 
         for (var line : lines) {
             if (isBlockArtLine(line)) {
@@ -627,7 +642,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * image. Either way the buffer ends empty so the caller can start a new
      * block on the next non-block line.
      */
-    private void flushQrBlock(java.util.ArrayList<String> qrLines,
+    private void flushQrBlock(ArrayList<String> qrLines,
                               StringBuilder result, Agent agent) {
         if (qrLines.isEmpty()) return;
         if (qrLines.size() >= 5) {
@@ -673,9 +688,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
             if (imgWidth <= 0 || imgHeight <= 0 || imgWidth > 8000 || imgHeight > 8000) return null;
 
-            var img = new java.awt.image.BufferedImage(imgWidth, imgHeight, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            var img = new BufferedImage(imgWidth, imgHeight, BufferedImage.TYPE_INT_RGB);
             var g = img.createGraphics();
-            g.setColor(java.awt.Color.WHITE);
+            g.setColor(Color.WHITE);
             g.fillRect(0, 0, imgWidth, imgHeight);
 
             paintBlockArt(g, lines, cellW, cellH);
@@ -683,15 +698,15 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
             var timestamp = System.currentTimeMillis();
             var filename = "terminal-image-%d.png".formatted(timestamp);
-            var path = services.AgentService.workspacePath(agent.name).resolve(filename);
-            javax.imageio.ImageIO.write(img, "PNG", path.toFile());
+            var path = AgentService.workspacePath(agent.name).resolve(filename);
+            ImageIO.write(img, "PNG", path.toFile());
 
             var url = "/api/agents/%d/files/%s".formatted(agent.id, filename);
             // Use full markdown image syntax — this is a web URL for the chat UI, not a file path
             return "![QR Code](%s)".formatted(url);
 
         } catch (Exception e) {
-            services.EventLogger.warn("tool", "Failed to render terminal image: %s".formatted(e.getMessage()));
+            EventLogger.warn("tool", "Failed to render terminal image: %s".formatted(e.getMessage()));
             return null;
         }
     }
@@ -701,7 +716,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * context using {@code cellW × cellH} cells (each character is two
      * vertically-stacked half-cells per the Unicode half-block encoding).
      */
-    private static void paintBlockArt(java.awt.Graphics2D g, List<String> lines,
+    private static void paintBlockArt(Graphics2D g, List<String> lines,
                                       int cellW, int cellH) {
         for (int row = 0; row < lines.size(); row++) {
             var line = lines.get(row);
@@ -711,11 +726,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 int px = col * cellW;
                 var halves = halfBlocksFor(c);
                 if (halves.topBlack()) {
-                    g.setColor(java.awt.Color.BLACK);
+                    g.setColor(Color.BLACK);
                     g.fillRect(px, py, cellW, cellH);
                 }
                 if (halves.bottomBlack()) {
-                    g.setColor(java.awt.Color.BLACK);
+                    g.setColor(Color.BLACK);
                     g.fillRect(px, py + cellH, cellW, cellH);
                 }
             }

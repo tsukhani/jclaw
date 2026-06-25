@@ -1,6 +1,7 @@
 package channels;
 
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
+import java.util.function.Predicate;
 
 /**
  * Public bridge into {@link TelegramPollingRunner}'s package-private
@@ -38,7 +39,7 @@ public final class TelegramPollingRunnerTestHooks {
      * {@code api.telegram.org}. Pass {@code null} to restore the real
      * {@code getMe} probe.
      */
-    public static void setTokenRejectedCheck(java.util.function.Predicate<String> p) {
+    public static void setTokenRejectedCheck(Predicate<String> p) {
         TelegramPollingRunner.setTokenRejectedCheckForTest(p);
     }
 

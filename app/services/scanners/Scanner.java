@@ -1,5 +1,7 @@
 package services.scanners;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Hash-based malware scanner contract. Every scanner takes a SHA-256 and returns
  * a {@link Verdict}. Scanners are independent — each one may be enabled or
@@ -57,7 +59,7 @@ public interface Scanner {
      * {@link #shouldWarn()}, with a test hook to reset between test runs.
      */
     class OneShotWarning {
-        private final java.util.concurrent.atomic.AtomicBoolean warned = new java.util.concurrent.atomic.AtomicBoolean(false);
+        private final AtomicBoolean warned = new AtomicBoolean(false);
 
         public boolean shouldWarn() {
             return warned.compareAndSet(false, true);

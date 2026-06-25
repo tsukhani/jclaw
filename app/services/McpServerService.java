@@ -20,6 +20,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import play.Logger;
+import play.Play;
 
 /**
  * Service helpers for the MCP server admin surface (JCLAW-33).
@@ -255,13 +263,13 @@ public final class McpServerService {
                 // own first-attempt timeout fires first. Falls through so
                 // the response still reflects whatever transient state the
                 // manager has at this instant (typically CONNECTING).
-                play.Logger.warn(
+                Logger.warn(
                         "MCP server '%s' first connect did not resolve within %s; live status: %s",
                         row.name, syncRuntimeAwait, McpConnectionManager.status(row.name));
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
-            } catch (java.util.concurrent.CancellationException
-                    | java.util.concurrent.ExecutionException _) {
+            } catch (CancellationException
+                    | ExecutionException _) {
                 // Cancellation: a concurrent stop()/connect() replaced our
                 // entry. Execution: the connect attempt failed at the JVM
                 // level — the manager already wrote the failure into the
@@ -273,7 +281,7 @@ public final class McpServerService {
             McpConnectionManager.stop(row.name);
             row.status = McpServer.Status.DISCONNECTED;
             row.lastError = null;
-            row.lastDisconnectedAt = java.time.Instant.now();
+            row.lastDisconnectedAt = Instant.now();
             row.save();
         }
     }
@@ -314,7 +322,7 @@ public final class McpServerService {
         } catch (RuntimeException e) {
             return new TestResult(false, 0, "Bad transport config: " + e.getMessage(), List.of());
         }
-        var clientVersion = play.Play.configuration.getProperty("application.version", "0.0.0-dev");
+        var clientVersion = Play.configuration.getProperty("application.version", "0.0.0-dev");
         try (var client = new McpClient("test:" + row.name, transport, clientVersion, TEST_TIMEOUT)) {
             client.connect();
             var names = client.tools().stream().map(McpToolDef::name).sorted().toList();
@@ -330,8 +338,8 @@ public final class McpServerService {
     /** Lower bound on what a sane {@code mcp_server.name} can hold so the
      *  prefixed allowlist {@code skill_name} ("mcp:&lt;name&gt;") fits into
      *  the existing column and stays readable in event-log messages. */
-    public static final java.util.regex.Pattern NAME_RE =
-            java.util.regex.Pattern.compile("^\\w[\\w-]{0,63}$");
+    public static final Pattern NAME_RE =
+            Pattern.compile("^\\w[\\w-]{0,63}$");
 
     /** Throws {@link IllegalArgumentException} on any structural problem
      *  the form ought to have caught client-side. Server-side defense so
@@ -401,8 +409,8 @@ public final class McpServerService {
         }
         return out.entrySet().stream()
                 .sorted(Comparator.comparing(Map.Entry::getKey))
-                .collect(java.util.stream.Collectors.toMap(
+                .collect(Collectors.toMap(
                         Map.Entry::getKey, Map.Entry::getValue,
-                        (a, b) -> a, java.util.LinkedHashMap::new));
+                        (a, b) -> a, LinkedHashMap::new));
     }
 }

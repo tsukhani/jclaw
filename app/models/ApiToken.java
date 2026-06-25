@@ -10,6 +10,7 @@ import play.db.jpa.Model;
 import utils.TokenHasher;
 
 import java.time.Instant;
+import play.db.jpa.JPA;
 
 /**
  * Bearer-credential row for the in-process {@code jclaw_api} tool
@@ -107,7 +108,7 @@ public class ApiToken extends Model {
     public static ApiToken findActiveByPlaintext(String plaintext) {
         if (plaintext == null || plaintext.isBlank()) return null;
         var hash = TokenHasher.hash(plaintext);
-        var query = play.db.jpa.JPA.em().createQuery(
+        var query = JPA.em().createQuery(
                 "SELECT t FROM ApiToken t WHERE t.secretHash = :hash",
                 ApiToken.class);
         query.setParameter("hash", hash);

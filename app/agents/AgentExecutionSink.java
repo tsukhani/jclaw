@@ -3,6 +3,7 @@ package agents;
 import services.AttachmentService;
 
 import java.util.List;
+import models.MessageAttachment;
 
 /**
  * Write-target abstraction for {@link AgentRunner}. Decouples message
@@ -97,7 +98,7 @@ public interface AgentExecutionSink {
      * @return the persisted {@link models.MessageAttachment} when an image was inlined (so the caller
      *         can surface it on the live SSE {@code tool_call} frame), or {@code null} otherwise
      */
-    default models.MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
+    default MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
         appendAssistantMessage(content, toolCalls);
         return null;
     }

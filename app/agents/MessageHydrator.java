@@ -15,6 +15,8 @@ import models.MessageRole;
 import services.ConversationService;
 
 import static utils.GsonHolder.INSTANCE;
+import models.Message;
+import models.MessageAttachment;
 
 /**
  * History → {@link ChatMessage} list hydration: walks the persisted
@@ -138,12 +140,12 @@ public final class MessageHydrator {
      * into {@code audioBearersOut} so the post-Tx rewrite path can
      * re-target the exact slot in the messages list.
      */
-    private static ChatMessage hydrateUserMessage(models.Message msg, int chatMessageIndex,
+    private static ChatMessage hydrateUserMessage(Message msg, int chatMessageIndex,
                                                   List<VisionAudioAssembler.AudioBearer> audioBearersOut,
                                                   List<VisionAudioAssembler.ImageBearer> imageBearersOut,
                                                   List<VisionAudioAssembler.VideoBearer> videoBearersOut) {
         var atts = msg.attachments;
-        if (atts == null) atts = models.MessageAttachment.findByMessage(msg);
+        if (atts == null) atts = MessageAttachment.findByMessage(msg);
         var audioIds = new ArrayList<Long>();
         var imageIds = new ArrayList<Long>();
         var videoIds = new ArrayList<Long>();
@@ -169,7 +171,7 @@ public final class MessageHydrator {
      * id → function name pair into {@code toolNamesById} so the matching
      * TOOL-row hydration can recover the function name (JCLAW-193).
      */
-    private static ChatMessage hydrateAssistantMessage(models.Message msg, HashMap<String, String> toolNamesById) {
+    private static ChatMessage hydrateAssistantMessage(Message msg, HashMap<String, String> toolNamesById) {
         if (msg.toolCalls == null || msg.toolCalls.isBlank()) {
             return ChatMessage.assistant(msg.content != null ? msg.content : "");
         }

@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import models.TaskRunMessage;
 
 /**
  * JVM-wide owner of the Lucene 10 IndexWriter + SearcherManager instances
@@ -320,7 +321,7 @@ public final class LuceneIndexer {
      * Reads {@link models.TaskRunMessage#content} and delegates to
      * {@link #upsert(Scope, long, String)}.
      */
-    public static void upsert(models.TaskRunMessage m) {
+    public static void upsert(TaskRunMessage m) {
         if (m == null || m.id == null) return;
         upsert(Scope.TASK_RUN_MESSAGE, m.id, m.content);
     }

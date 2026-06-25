@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.Map;
 
 /**
  * Generic Telegram approve/deny button workflow (JCLAW-373).
@@ -112,7 +113,7 @@ public final class TelegramApprovalService {
             // Find and expire the entry this future belongs to.
             PENDING.entrySet().stream()
                     .filter(en -> en.getValue().future() == future)
-                    .map(java.util.Map.Entry::getKey)
+                    .map(Map.Entry::getKey)
                     .findFirst()
                     .ifPresent(id -> expire(id, Outcome.TIMED_OUT));
             future.complete(Outcome.TIMED_OUT);

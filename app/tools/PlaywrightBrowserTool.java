@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import agents.ToolAction;
 
 /**
  * Headless Chromium browser automation for JS-heavy pages.
@@ -75,15 +76,15 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public java.util.List<agents.ToolAction> actions() {
-        return java.util.List.of(
-                new agents.ToolAction(ACTION_NAVIGATE,   "Load a URL, wait for network idle, and return page text"),
-                new agents.ToolAction(ACTION_CLICK,      "Click a DOM element by CSS selector"),
-                new agents.ToolAction(ACTION_FILL,       "Fill a form field with a value by CSS selector"),
-                new agents.ToolAction(ACTION_GET_TEXT,    "Extract the text content of a CSS selector"),
-                new agents.ToolAction(ACTION_SCREENSHOT, "Capture a full-page screenshot and save it to the workspace"),
-                new agents.ToolAction(ACTION_EVALUATE,   "Execute a JavaScript expression and return the result"),
-                new agents.ToolAction(ACTION_CLOSE,      "Close the browser session and free all resources")
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction(ACTION_NAVIGATE,   "Load a URL, wait for network idle, and return page text"),
+                new ToolAction(ACTION_CLICK,      "Click a DOM element by CSS selector"),
+                new ToolAction(ACTION_FILL,       "Fill a form field with a value by CSS selector"),
+                new ToolAction(ACTION_GET_TEXT,    "Extract the text content of a CSS selector"),
+                new ToolAction(ACTION_SCREENSHOT, "Capture a full-page screenshot and save it to the workspace"),
+                new ToolAction(ACTION_EVALUATE,   "Execute a JavaScript expression and return the result"),
+                new ToolAction(ACTION_CLOSE,      "Close the browser session and free all resources")
         );
     }
 

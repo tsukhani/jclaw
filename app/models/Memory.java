@@ -13,6 +13,12 @@ import play.db.jpa.Model;
 
 import java.time.Instant;
 import java.util.List;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import services.EventLogger;
+import services.search.LuceneIndexer;
+import services.search.MessageSearch;
 
 @Entity
 @Table(name = "memory", indexes = {
@@ -55,16 +61,16 @@ public class Memory extends Model {
     @PostUpdate
     void onIndexUpsert() {
         if (id != null) {
-            services.search.LuceneIndexer.upsert(
-                    services.search.LuceneIndexer.Scope.MEMORY, id, text, agentId);
+            LuceneIndexer.upsert(
+                    LuceneIndexer.Scope.MEMORY, id, text, agentId);
         }
     }
 
     @PostRemove
     void onIndexRemove() {
         if (id != null) {
-            services.search.LuceneIndexer.remove(
-                    services.search.LuceneIndexer.Scope.MEMORY, id);
+            LuceneIndexer.remove(
+                    LuceneIndexer.Scope.MEMORY, id);
         }
     }
 
@@ -94,24 +100,24 @@ public class Memory extends Model {
      */
     public static List<Memory> searchByText(String agentId, String query, int limit) {
         if (query == null || query.isBlank()) return List.of();
-        if ("none".equals(services.search.MessageSearch.activeDialect())) {
+        if ("none".equals(MessageSearch.activeDialect())) {
             // Backend not initialized — substring fallback, agent-bounded.
             return Memory.find("agentId = ?1 AND LOWER(text) LIKE ?2",
                     agentId, "%" + query.toLowerCase() + "%").fetch(limit);
         }
         List<Long> ids;
         try {
-            ids = services.search.MessageSearch.searchMemoryIds(agentId, query, limit);
-        } catch (java.io.IOException e) {
-            services.EventLogger.warn("search", null, null,
+            ids = MessageSearch.searchMemoryIds(agentId, query, limit);
+        } catch (IOException e) {
+            EventLogger.warn("search", null, null,
                     "Memory search failed for agent %s: %s".formatted(agentId, e.getMessage()));
             return List.of();
         }
         if (ids.isEmpty()) return List.of();
         List<Memory> rows = Memory.find("agentId = ?1 AND id IN (?2)", agentId, ids).fetch();
-        var byId = new java.util.HashMap<Long, Memory>();
+        var byId = new HashMap<Long, Memory>();
         for (var m : rows) byId.put(m.id, m);
-        var ordered = new java.util.ArrayList<Memory>(ids.size());
+        var ordered = new ArrayList<Memory>(ids.size());
         for (var rid : ids) {
             var m = byId.get(rid);
             if (m != null) ordered.add(m);

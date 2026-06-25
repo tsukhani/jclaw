@@ -6,6 +6,7 @@ import jakarta.persistence.Index;
 import jakarta.persistence.Column;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import java.util.List;
 
 /**
  * Tracks which tools are enabled for each agent.
@@ -24,7 +25,7 @@ public class AgentToolConfig extends AgentFeatureConfig {
     @Column(name = "tool_name", nullable = false)
     public String toolName;
 
-    public static java.util.List<AgentToolConfig> findByAgent(Agent agent) {
+    public static List<AgentToolConfig> findByAgent(Agent agent) {
         return AgentToolConfig.find("agent = ?1", agent).fetch();
     }
 

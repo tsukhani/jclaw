@@ -5,6 +5,7 @@ import okhttp3.Request;
 import utils.HttpKeys;
 
 import java.util.List;
+import com.google.gson.JsonElement;
 
 /**
  * MetaDefender Cloud (OPSWAT) SHA-256 hash lookup. Queries
@@ -131,7 +132,7 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
     }
 
     /** Returns "engine: threat" when the engine reported a non-blank threat, null otherwise. */
-    private static String extractThreatLabel(String engineName, com.google.gson.JsonElement engineResult) {
+    private static String extractThreatLabel(String engineName, JsonElement engineResult) {
         if (!engineResult.isJsonObject()) return null;
         var engineObj = engineResult.getAsJsonObject();
         var threat = optString(engineObj, FIELD_THREAT_FOUND, "");
