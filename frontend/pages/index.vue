@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import {
   ChartBarIcon,
+  QueueListIcon,
   TableCellsIcon,
   TrashIcon,
+  VideoCameraIcon,
 } from '@heroicons/vue/24/outline'
 import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/api'
 
@@ -160,6 +162,29 @@ const hasLatencyData = computed(() => latencyChannels.value.length > 0)
 type LatencyView = 'table' | 'chart'
 const latencyView = ref<LatencyView>('table')
 
+// Recent Activity has two views: the EventLog feed ('all') and a video-job status table ('video').
+// Video jobs aren't EventLog rows, so the 'video' view pulls VideoGenerationJob rows from a dedicated
+// endpoint. It's lazy (immediate: false) — most operators never switch, so we don't pay the query on
+// every dashboard load; it fetches on first switch and then rides the 5 s poll tick while active.
+interface VideoGenJob {
+  id: number
+  state: string
+  prompt: string | null
+  percent: number | null
+  errorMessage: string | null
+  conversationId: number | null
+  createdAt: string | null
+}
+const { data: recentVideoJobs, refresh: refreshVideoJobs } = useFetch<VideoGenJob[]>(
+  '/api/videogen/jobs/recent', { immediate: false, default: () => [] },
+)
+type ActivityView = 'all' | 'video'
+const activityView = ref<ActivityView>('all')
+function setActivityView(v: ActivityView) {
+  activityView.value = v
+  if (v === 'video') refreshVideoJobs()
+}
+
 function formatMs(ms: number): string {
   if (ms < 1) return '<1 ms'
   if (ms < 1000) return `${Math.round(ms)} ms`
@@ -205,6 +230,8 @@ onMounted(() => {
   pollTimer = setInterval(() => {
     refreshLatency()
     refreshLogs()
+    // Only poll video jobs while their view is showing — no cost when the operator is on the events feed.
+    if (activityView.value === 'video') refreshVideoJobs()
     chatCostRef.value?.refresh()
     // Keep the per-status task counts in lockstep with the rest of the
     // dashboard's 5 s tick. Mostly cheap (3 indexed COUNT queries),
@@ -538,56 +565,147 @@ onBeforeUnmount(() => {
 
     <!-- Recent Events -->
     <div class="bg-surface-elevated border border-border">
-      <div class="px-4 py-3 border-b border-border">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
         <h2 class="text-sm font-medium text-fg-primary">
           Recent Activity
         </h2>
-      </div>
-      <div
-        v-if="logs?.events?.length"
-      >
-        <!-- Column headers — same flex template as data rows so the columns
-             stay aligned to the same shrink-0 widths. -->
-        <div class="px-4 py-2 flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
-          <span class="shrink-0 w-10">Level</span>
-          <span class="shrink-0 w-44">Category</span>
-          <span class="shrink-0 w-16">Agent</span>
-          <span class="flex-1 min-w-0">Message</span>
-          <span class="ml-auto shrink-0 w-48 text-right">Timestamp</span>
-        </div>
-        <div class="divide-y divide-border">
-          <div
-            v-for="event in logs.events"
-            :key="event.id"
-            class="px-4 py-2.5 flex items-start gap-3"
+        <div
+          class="inline-flex items-center border border-border overflow-hidden"
+          role="tablist"
+          aria-label="Recent activity view"
+        >
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activityView === 'all'"
+            class="p-1.5 transition-colors"
+            :class="activityView === 'all'
+              ? 'bg-muted text-fg-strong'
+              : 'text-fg-muted hover:text-fg-strong'"
+            title="All activity"
+            @click="setActivityView('all')"
           >
-            <span
-              :class="{
-                'text-red-400': event.level === 'ERROR',
-                'text-yellow-400': event.level === 'WARN',
-                'text-fg-muted': event.level === 'INFO',
-              }"
-              class="text-xs font-mono mt-0.5 shrink-0 w-10"
-            >{{ event.level }}</span>
-            <span
-              :title="event.category"
-              class="text-xs text-fg-muted shrink-0 w-44 font-mono truncate mt-0.5"
-            >{{ event.category }}</span>
-            <span
-              :title="event.agentId || ''"
-              class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5"
-            >{{ event.agentId || '—' }}</span>
-            <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
-            <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5">{{ formatActivityTimestamp(event.timestamp) }}</span>
+            <QueueListIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activityView === 'video'"
+            class="p-1.5 transition-colors"
+            :class="activityView === 'video'
+              ? 'bg-muted text-fg-strong'
+              : 'text-fg-muted hover:text-fg-strong'"
+            title="Video jobs"
+            @click="setActivityView('video')"
+          >
+            <VideoCameraIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+      </div>
+      <template v-if="activityView === 'all'">
+        <div
+          v-if="logs?.events?.length"
+        >
+          <!-- Column headers — same flex template as data rows so the columns
+             stay aligned to the same shrink-0 widths. -->
+          <div class="px-4 py-2 flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
+            <span class="shrink-0 w-10">Level</span>
+            <span class="shrink-0 w-44">Category</span>
+            <span class="shrink-0 w-16">Agent</span>
+            <span class="flex-1 min-w-0">Message</span>
+            <span class="ml-auto shrink-0 w-48 text-right">Timestamp</span>
+          </div>
+          <div class="divide-y divide-border">
+            <div
+              v-for="event in logs.events"
+              :key="event.id"
+              class="px-4 py-2.5 flex items-start gap-3"
+            >
+              <span
+                :class="{
+                  'text-red-400': event.level === 'ERROR',
+                  'text-yellow-400': event.level === 'WARN',
+                  'text-fg-muted': event.level === 'INFO',
+                }"
+                class="text-xs font-mono mt-0.5 shrink-0 w-10"
+              >{{ event.level }}</span>
+              <span
+                :title="event.category"
+                class="text-xs text-fg-muted shrink-0 w-44 font-mono truncate mt-0.5"
+              >{{ event.category }}</span>
+              <span
+                :title="event.agentId || ''"
+                class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5"
+              >{{ event.agentId || '—' }}</span>
+              <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
+              <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5">{{ formatActivityTimestamp(event.timestamp) }}</span>
+            </div>
           </div>
         </div>
-      </div>
-      <div
-        v-else
-        class="px-4 py-8 text-center text-sm text-fg-muted"
-      >
-        No recent events
-      </div>
+        <div
+          v-else
+          class="px-4 py-8 text-center text-sm text-fg-muted"
+        >
+          No recent events
+        </div>
+      </template>
+      <template v-else>
+        <div v-if="recentVideoJobs?.length">
+          <!-- Column headers — same flex widths as the rows below. -->
+          <div class="px-4 py-2 flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
+            <span class="shrink-0 w-20">State</span>
+            <span class="flex-1 min-w-0">Prompt</span>
+            <span class="shrink-0 w-48 text-right">Submitted</span>
+            <span class="shrink-0 w-36 text-right">Conversation</span>
+          </div>
+          <div class="divide-y divide-border">
+            <div
+              v-for="job in recentVideoJobs"
+              :key="job.id"
+              class="px-4 py-2.5 flex items-center gap-3"
+            >
+              <span
+                class="shrink-0 w-20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-center"
+                :class="{
+                  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300': job.state === 'SUCCEEDED',
+                  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300': job.state === 'FAILED',
+                  'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300': job.state === 'RUNNING' || job.state === 'PENDING',
+                }"
+              >{{ job.state }}</span>
+              <span
+                class="flex-1 min-w-0 truncate text-sm text-fg-primary"
+                :title="job.prompt ?? ''"
+              >{{ job.prompt || '(no prompt)' }}</span>
+              <span class="shrink-0 w-48 text-right text-xs text-fg-muted font-mono">{{ job.createdAt ? formatActivityTimestamp(job.createdAt) : '—' }}</span>
+              <span class="shrink-0 w-36 text-right">
+                <NuxtLink
+                  v-if="job.conversationId != null"
+                  :to="`/chat?conversation=${job.conversationId}`"
+                  class="text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
+                >
+                  see in conversation
+                </NuxtLink>
+                <span
+                  v-else
+                  class="text-xs text-fg-muted"
+                >—</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div
+          v-else
+          class="px-4 py-8 text-center text-sm text-fg-muted"
+        >
+          No video generation jobs yet.
+        </div>
+      </template>
     </div>
   </div>
 </template>
