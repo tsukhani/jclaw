@@ -103,7 +103,14 @@ public class GenerateImageTool implements ToolRegistry.Tool {
             var image = serviceOpt.get().generate(
                     prompt, ConfigService.get("imagegen.cloud.model"), dims[0], dims[1]);
             var metadata = buildMetadata(prompt, image.generatedBy(), dims[0], dims[1]);
-            var text = "Generated an image for the prompt and shared it with the user.";
+            // The image is delivered out-of-band (raw bytes -> generated attachment, rendered inline by
+            // the chat UI); the model never receives its URL. Say so explicitly: a model that
+            // "helpfully" re-embeds the image with markdown/HTML has to invent a URL, which resolves to
+            // nothing and renders as a broken-image link in the reply. Telling it the image is already
+            // shown removes the incentive to embed.
+            var text = "Image generated and displayed to the user inline. It is already shown — do not "
+                    + "re-embed or link it in your reply (no markdown image syntax, no HTML <img> tag); "
+                    + "just acknowledge or describe it in words.";
             return ToolRegistry.ToolResult.withImage(text, null,
                     new GeneratedAttachment(image.bytes(), image.mimeType(), metadata));
         } catch (ImageGenerationException e) {

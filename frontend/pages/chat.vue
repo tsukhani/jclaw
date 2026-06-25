@@ -683,6 +683,21 @@ function onFaviconError(ev: Event) {
   if (img) img.style.display = 'none'
 }
 
+/** Broken images inside a rendered markdown body collapse instead of showing
+ *  the browser's broken-image icon + alt text. Markdown is injected via v-html
+ *  (no Vue `@error` binding possible), so we delegate. The usual culprit: a
+ *  model re-embeds a generated image with a markdown `![]()` whose URL it
+ *  invented — the real image already renders as the attachment card above, so
+ *  hiding the dead embed leaves a clean reply. Scoped to `.prose-chat` so the
+ *  generated-image card (a separate template, not v-html) and favicons are
+ *  untouched. Must run in the capture phase — `error` events don't bubble. */
+function onMarkdownImageError(ev: Event) {
+  const target = ev.target as HTMLElement | null
+  if (target instanceof HTMLImageElement && target.closest('.prose-chat')) {
+    target.style.display = 'none'
+  }
+}
+
 // Function form (not a Ref) so Vue's reactivity tracks `selectedAgentId.value`
 // on every URL evaluation — useFetch refetches automatically when the user
 // picks a different agent. selectedAgentId is seeded synchronously above, so
@@ -1407,6 +1422,9 @@ function announcePollTick() {
 
 onMounted(() => {
   announcePollTimer = setInterval(announcePollTick, ANNOUNCE_POLL_INTERVAL_MS)
+  // Capture phase: image load errors don't bubble, so a document-level listener
+  // only sees them in capture. The handler is scoped to `.prose-chat`.
+  document.addEventListener('error', onMarkdownImageError, true)
 })
 
 onUnmounted(() => {
@@ -1416,6 +1434,7 @@ onUnmounted(() => {
   if (streamRenderTimer != null) clearTimeout(streamRenderTimer)
   if (streamReasoningTimer != null) clearTimeout(streamReasoningTimer)
   if (announcePollTimer != null) clearInterval(announcePollTimer)
+  document.removeEventListener('error', onMarkdownImageError, true)
 })
 
 function stopStreaming() {
