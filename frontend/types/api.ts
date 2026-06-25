@@ -205,12 +205,15 @@ export interface MessageAttachment {
   originalFilename: string
   mimeType: string
   sizeBytes: number
-  /** One of IMAGE, AUDIO, FILE — drives inline-vs-download disposition on the server. */
-  kind: 'IMAGE' | 'AUDIO' | 'FILE'
+  /** One of IMAGE, AUDIO, VIDEO, FILE — drives inline-vs-download disposition on the server. */
+  kind: 'IMAGE' | 'AUDIO' | 'VIDEO' | 'FILE'
   /** JCLAW-227: true when produced by the generate_image tool rather than uploaded by the user. */
   generated?: boolean
   /** JCLAW-227: JSON metadata (prompt, model, provider) for a generated image; absent for uploads. */
   generationMetadata?: string
+  /** JCLAW-234: id of the VideoGenerationJob backing a generated-video placeholder; the chat polls
+   *  /api/videogen/jobs?ids= for its status. Absent for every non-video attachment. */
+  generationJobId?: number
   /** JCLAW-209: true once the bytes have been deleted from the workspace. The record is retained so
    *  the chip can show a "deleted from workspace" marker; the file (and inline preview) is gone. */
   deleted?: boolean

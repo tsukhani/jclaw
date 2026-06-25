@@ -44,6 +44,7 @@ import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
+import { isVideoJobPending, videoDisplayState, videoSrc, type VideoJobStatus } from '~/utils/video-job'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
@@ -1420,6 +1421,70 @@ function announcePollTick() {
   void pollForAnnounce()
 }
 
+// JCLAW-234: async video-generation progress. A generated-video attachment starts as a zero-byte
+// placeholder linked to a VideoGenerationJob; we poll the job status (~2s — the SV-4 decision: polling,
+// not SSE, because the job outlives the per-turn chat stream) until it fills or fails, then the card
+// swaps to an inline player or an error. Mirrors settings.vue's imagegen-download poll: start on a
+// trigger, stop when nothing's pending, clean up on unmount.
+const videoJobStatus = ref<Record<number, VideoJobStatus>>({})
+const VIDEO_POLL_INTERVAL_MS = 2000
+let videoPollTimer: ReturnType<typeof setInterval> | null = null
+
+function pendingVideoJobIds(): number[] {
+  const ids: number[] = []
+  for (const m of messages.value) {
+    for (const a of (m.attachments ?? [])) {
+      const jobId = a.generationJobId
+      if (jobId != null && isVideoJobPending(a, videoJobStatus.value[jobId]) && !ids.includes(jobId)) {
+        ids.push(jobId)
+      }
+    }
+  }
+  return ids
+}
+
+async function pollVideoJobs() {
+  const ids = pendingVideoJobIds()
+  if (!ids.length) {
+    stopVideoPolling()
+    return
+  }
+  try {
+    const data = await $fetch<VideoJobStatus[]>(`/api/videogen/jobs?ids=${ids.join(',')}`)
+    for (const s of data ?? []) videoJobStatus.value[s.id] = s
+    triggerRef(messages)
+  }
+  catch {
+    // transient — the next tick retries
+  }
+  if (!pendingVideoJobIds().length) stopVideoPolling()
+}
+
+function startVideoPolling() {
+  if (videoPollTimer != null || !pendingVideoJobIds().length) return
+  void pollVideoJobs()
+  videoPollTimer = setInterval(() => void pollVideoJobs(), VIDEO_POLL_INTERVAL_MS)
+}
+
+function stopVideoPolling() {
+  if (videoPollTimer != null) {
+    clearInterval(videoPollTimer)
+    videoPollTimer = null
+  }
+}
+
+/** Template helpers for the generated-video card (thin wrappers over the pure utils/video-job logic). */
+function videoCardState(att: MessageAttachment) {
+  return videoDisplayState(att, att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined)
+}
+function videoCardSrc(att: MessageAttachment) {
+  return videoSrc(att, att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined)
+}
+function videoCardError(att: MessageAttachment): string {
+  const s = att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined
+  return s?.errorMessage || 'Unknown error'
+}
+
 onMounted(() => {
   announcePollTimer = setInterval(announcePollTick, ANNOUNCE_POLL_INTERVAL_MS)
   // Capture phase: image load errors don't bubble, so a document-level listener
@@ -1435,6 +1500,7 @@ onUnmounted(() => {
   if (streamReasoningTimer != null) clearTimeout(streamReasoningTimer)
   if (announcePollTimer != null) clearInterval(announcePollTimer)
   document.removeEventListener('error', onMarkdownImageError, true)
+  stopVideoPolling()
 })
 
 function stopStreaming() {
@@ -1763,6 +1829,7 @@ else {
 
 async function loadConversation(id: number) {
   selectedConvoId.value = id
+  stopVideoPolling() // a prior conversation's poll loop shouldn't leak into this one
   const loaded = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
   // JCLAW-170: fold persisted tool-role rows into the following assistant
   // message's toolCalls array so the tool-calls block re-renders on reload.
@@ -1786,6 +1853,7 @@ async function loadConversation(id: number) {
   initSubagentCollapsedState(messages.value)
   scrollToBottom()
   focusInput()
+  startVideoPolling() // resume progress polling for any pending video placeholder on (re)load
 }
 
 // Land the cursor in the composer textarea so the user can start typing
@@ -2047,6 +2115,7 @@ function handleStreamToolCallEvent(ctx: StreamContext, event: ToolCallEvent) {
     if (!m.attachments.some(a => a.uuid === event.generatedAttachment!.uuid)) {
       m.attachments.push(event.generatedAttachment)
     }
+    startVideoPolling() // a generate_video placeholder (JCLAW-234) needs the progress poll to begin
   }
   triggerRef(messages)
   scrollToBottom()
@@ -3239,6 +3308,64 @@ function exportConversation() {
                             <p class="break-words leading-relaxed">
                               {{ generatedImageLabel(att) }}
                             </p>
+                          </div>
+                        </div>
+                        <!-- JCLAW-234: tool-generated video. Async — a generating card while the job
+                             runs (poll loop), swapping to an inline player on success or an error card
+                             on failure. -->
+                        <div
+                          v-else-if="att.generated && att.kind === 'VIDEO'"
+                          class="flex flex-col gap-1.5 items-start"
+                        >
+                          <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- an AI-generated clip has no caption track -->
+                          <video
+                            v-if="videoCardState(att) === 'ready'"
+                            :src="videoCardSrc(att)"
+                            controls
+                            preload="metadata"
+                            class="max-w-[360px] max-h-[360px] rounded-lg border border-border bg-black"
+                          />
+                          <div
+                            v-else-if="videoCardState(att) === 'failed'"
+                            class="flex items-start gap-2 w-[320px] max-w-full bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg px-3 py-2 text-xs text-red-600 dark:text-red-400"
+                          >
+                            <ExclamationTriangleIcon
+                              class="w-4 h-4 shrink-0 mt-0.5"
+                              aria-hidden="true"
+                            />
+                            <div class="flex flex-col gap-0.5 min-w-0">
+                              <span class="font-medium">Video generation failed</span>
+                              <span class="break-words text-red-500/90">{{ videoCardError(att) }}</span>
+                            </div>
+                          </div>
+                          <div
+                            v-else
+                            class="flex items-center gap-2.5 w-[320px] max-w-full bg-muted border border-border rounded-lg px-3 py-2.5 text-xs text-fg-strong"
+                          >
+                            <svg
+                              class="w-4 h-4 shrink-0 animate-spin text-purple-500"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <circle
+                                class="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                stroke-width="4"
+                              />
+                              <path
+                                class="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                              />
+                            </svg>
+                            <div class="flex flex-col gap-0.5 min-w-0">
+                              <span class="font-medium">Generating video…</span>
+                              <span class="truncate text-fg-muted">{{ generatedImageLabel(att) }}</span>
+                            </div>
                           </div>
                         </div>
                         <!-- Everything else: the compact chip. -->
