@@ -58,7 +58,8 @@ class VideoGenerationClientTest extends UnitTest {
     void submitThrowsOnHttpError() {
         server.enqueue(new MockResponse.Builder().code(402).body(buf("insufficient credits")).build());
         var client = new ReplicateVideoGenerationClient(testClient);
-        var ex = assertThrows(VideoGenerationException.class, () -> client.submit(req()));
+        var request = req();
+        var ex = assertThrows(VideoGenerationException.class, () -> client.submit(request));
         assertTrue(ex.getMessage().contains("submit failed"), ex.getMessage());
     }
 
@@ -97,8 +98,9 @@ class VideoGenerationClientTest extends UnitTest {
     @Test
     void submitRequiresPrompt() {
         var client = new ReplicateVideoGenerationClient(testClient);
+        var request = new VideoGenRequest("  ", null, null, null);
         var ex = assertThrows(VideoGenerationException.class,
-                () -> client.submit(new VideoGenRequest("  ", null, null, null)),
+                () -> client.submit(request),
                 "a blank prompt must be rejected before any HTTP call");
         assertTrue(ex.getMessage().contains("prompt is required"), ex.getMessage());
     }
