@@ -20,6 +20,7 @@ import {
   PuzzlePieceIcon,
   QueueListIcon,
   UsersIcon,
+  VideoCameraIcon,
 } from '@heroicons/vue/24/outline'
 import type { FunctionalComponent } from 'vue'
 import type { ToolAction, ToolCategory, ToolMeta } from '~/composables/useToolMeta'
@@ -36,6 +37,7 @@ const TOOL_ICONS: Record<string, FunctionalComponent> = {
   'folder': FolderIcon,
   'document': DocumentTextIcon,
   'image': PhotoIcon,
+  'video': VideoCameraIcon,
   'book': BookOpenIcon,
   'globe': GlobeAltIcon,
   'search': MagnifyingGlassIcon,

@@ -24,6 +24,7 @@ import {
   QueueListIcon,
   TrashIcon,
   UsersIcon,
+  VideoCameraIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { Save } from 'lucide-vue-next'
@@ -127,6 +128,7 @@ const TOOL_ICON_COMPONENTS = {
   'folder': FolderIcon,
   'document': DocumentTextIcon,
   'image': PhotoIcon,
+  'video': VideoCameraIcon,
   'book': BookOpenIcon,
   'globe': GlobeAltIcon,
   'search': MagnifyingGlassIcon,
