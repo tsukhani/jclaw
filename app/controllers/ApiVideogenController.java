@@ -10,6 +10,7 @@ import services.videogen.ReplicateVideoModelCatalog;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -62,6 +63,25 @@ public class ApiVideogenController extends Controller {
     @Operation(summary = "Discover Replicate text-to-video models (Settings model dropdown)")
     public static void models() {
         renderJSON(gson.toJson(ReplicateVideoModelCatalog.textToVideoModels()));
+    }
+
+    /** GET /api/videogen/jobs/recent — most-recent jobs for the dashboard Recent Activity (video view). */
+    @Operation(summary = "Most-recent video-generation jobs (dashboard Recent Activity — video view)")
+    public static void recent() {
+        List<VideoGenerationJob> jobs = VideoGenerationJob.find("order by createdAt desc").fetch(20);
+        var out = new ArrayList<LinkedHashMap<String, Object>>();
+        for (var job : jobs) {
+            var m = new LinkedHashMap<String, Object>();
+            m.put("id", job.id);
+            m.put("state", job.state.name());
+            m.put("prompt", job.prompt);
+            m.put("percent", null); // cloud reports none (SV-1); the local engine fills this in JCLAW-232
+            m.put("errorMessage", job.errorMessage);
+            m.put("conversationId", job.conversationId);
+            m.put("createdAt", job.createdAt != null ? job.createdAt.toString() : null);
+            out.add(m);
+        }
+        renderJSON(gson.toJson(out));
     }
 
     private static Long parseId(String s) {
