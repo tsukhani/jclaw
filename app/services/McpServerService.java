@@ -10,7 +10,6 @@ import mcp.transport.McpStdioTransport;
 import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
 import models.McpServer;
-import play.Logger;
 import play.Play;
 
 import java.net.URI;
@@ -22,10 +21,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -53,15 +48,6 @@ import java.util.stream.Collectors;
 public final class McpServerService {
 
     private static final Duration TEST_TIMEOUT = Duration.ofSeconds(10);
-
-    /** JCLAW-288: ceiling on how long {@link #syncRuntime} blocks the caller
-     *  (an admin API request) while the first connect attempt resolves. Set
-     *  slightly above {@code McpConnectionManager.firstAttemptRequestTimeout}
-     *  so we always observe the manager's own timeout fire first; if the
-     *  await still trips this cap the manager's watchdog continues the
-     *  reconnect loop in the background and the row's status keeps
-     *  evolving — the API response just reports CONNECTING in that case. */
-    private static volatile Duration syncRuntimeAwait = Duration.ofSeconds(130);
 
     private McpServerService() {}
 
@@ -235,6 +221,26 @@ public final class McpServerService {
      * any prior entry, and we call {@link McpConnectionManager#stop} for
      * disabled rows so a recently-flipped-off server actually disconnects.
      *
+     * <p><b>The enable path is fire-and-forget.</b> We kick the connect off on
+     * its own virtual thread and return at once — we must <em>not</em> block
+     * the caller on the handshake. The caller is an admin HTTP action whose
+     * request runs inside a single JPA transaction; the {@code row.save()}
+     * that preceded this call flushed an {@code UPDATE} and holds a write lock
+     * on the {@code mcp_server} row until that transaction commits (on action
+     * return). Blocking on the connect (a Docker spawn / HTTP {@code
+     * initialize}, up to tens of seconds) would pin that row lock — and a
+     * pooled DB connection — for the whole handshake, so the connector's own
+     * {@link McpConnectionManager#status status} writes (and any concurrent
+     * toggle) collide with it and time out against H2's 2 s lock timeout
+     * ({@code LockTimeoutException}). Returning now lets the request
+     * transaction commit in milliseconds. The admin UI polls the list while
+     * any row is {@code CONNECTING} ({@code pollUntilStable} in
+     * {@code mcp-servers.vue}), so the badge still ticks over to {@code
+     * CONNECTED}/{@code ERROR} with no synchronous wait. (This reverts
+     * JCLAW-288's synchronous-await contract, which was the cause of the lock
+     * storm; boot-time readiness gating still awaits via
+     * {@link McpConnectionManager#startAll}, where no request tx is in play.)
+     *
      * <p>For the disable path we also reset the row's persisted status to
      * {@code DISCONNECTED}. The {@link McpConnectionManager#status} call
      * site reads {@code McpServer.status} (the DB column), but
@@ -244,39 +250,7 @@ public final class McpServerService {
      */
     public static void syncRuntime(McpServer row) {
         if (row.enabled) {
-            // JCLAW-288: block the caller until the first connect attempt
-            // resolves so admin endpoints (POST/PUT /api/mcp-servers) can
-            // report the actual outcome on the same network roundtrip.
-            // Steady-state reconnect behaviour after this point is
-            // unchanged — watchdog + backoff continue to handle the long
-            // tail of transient failures asynchronously. The row is not
-            // mutated here; {@link View#of} already reads liveStatus from
-            // the manager, and JCLAW-288 extends that to lastError so the
-            // response reflects the just-completed first attempt without
-            // risking Hibernate flushing stale fields (e.g. lastConnectedAt)
-            // back over what persistTimestamp just wrote in its own tx.
-            var future = McpConnectionManager.connectAndAwait(row);
-            try {
-                future.get(syncRuntimeAwait.toMillis(), TimeUnit.MILLISECONDS);
-            } catch (TimeoutException _) {
-                // Should be unreachable under normal config — the manager's
-                // own first-attempt timeout fires first. Falls through so
-                // the response still reflects whatever transient state the
-                // manager has at this instant (typically CONNECTING).
-                Logger.warn(
-                        "MCP server '%s' first connect did not resolve within %s; live status: %s",
-                        row.name, syncRuntimeAwait, McpConnectionManager.status(row.name));
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-            } catch (CancellationException
-                    | ExecutionException _) {
-                // Cancellation: a concurrent stop()/connect() replaced our
-                // entry. Execution: the connect attempt failed at the JVM
-                // level — the manager already wrote the failure into the
-                // entry's status + lastError before completing the future.
-                // Either way the live manager state queried by View.of is
-                // authoritative.
-            }
+            McpConnectionManager.connect(row);
         } else {
             McpConnectionManager.stop(row.name);
             row.status = McpServer.Status.DISCONNECTED;
@@ -284,14 +258,6 @@ public final class McpServerService {
             row.lastDisconnectedAt = Instant.now();
             row.save();
         }
-    }
-
-    /** JCLAW-288: test hook to shrink the await cap. Production code never
-     *  calls this; tests that exercise the cold-start timeout path use
-     *  this together with
-     *  {@link McpConnectionManager#setFirstAttemptRequestTimeout}. */
-    public static void setSyncRuntimeAwait(Duration await) {
-        syncRuntimeAwait = await;
     }
 
     // ==================== test connection ====================

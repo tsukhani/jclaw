@@ -22,13 +22,18 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JCLAW-288 contract test for {@link McpServerService#syncRuntime}: the
- * admin API ({@code POST/PUT /api/mcp-servers}) must block its caller
- * until the first connect attempt has resolved (CONNECTED or ERROR) so
- * the response carries the actual outcome of registration.
+ * Contract test for {@link McpServerService#syncRuntime}: enabling a server
+ * (the {@code POST/PUT /api/mcp-servers} path) kicks the connect off on its
+ * own virtual thread and returns immediately — it must <em>not</em> block the
+ * caller on the handshake, because the caller's request transaction holds a
+ * write lock on the {@code mcp_server} row until it commits, and pinning that
+ * lock across the handshake caused {@code LockTimeoutException} storms when
+ * toggling servers on. The connect outcome (CONNECTED / ERROR) is observed
+ * asynchronously by polling, exactly as the admin UI does via
+ * {@code pollUntilStable}. (Was JCLAW-288's synchronous-await contract;
+ * reverted to fire-and-forget.)
  *
- * <p>Disabled-toggle paths stay asynchronous — teardown does not need to
- * block the caller.
+ * <p>The disable path stays synchronous teardown.
  *
  * <p>Skipped when {@code node} is not on PATH (same gate as the rest of
  * the MCP integration tests).
@@ -68,10 +73,8 @@ class McpServerServiceTest extends UnitTest {
         // Same fast-backoff window the manager test uses, so failure-path
         // tests don't spend real seconds in the watchdog's reconnect loop.
         McpConnectionManager.setBackoff(50, 200);
-        // Tight per-test cap on syncRuntime's await — the production 130 s
-        // would mask test failures behind huge timeouts. Set the manager's
-        // own first-attempt timeout below this so it always fires first.
-        McpServerService.setSyncRuntimeAwait(Duration.ofSeconds(10));
+        // Shrink the manager's first-attempt handshake timeout so the
+        // failure-path test resolves in seconds, not the production 120 s.
         McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(5));
     }
 
@@ -81,29 +84,28 @@ class McpServerServiceTest extends UnitTest {
         EventLogger.clear();
         McpConnectionManager.setBackoff(1_000, 30_000);
         McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(120));
-        McpServerService.setSyncRuntimeAwait(Duration.ofSeconds(130));
         if (fixturePath != null) Files.deleteIfExists(fixturePath);
         ToolRegistrationJob.registerAll();
     }
 
     @Test
-    void syncRuntimeBlocksUntilConnectedOnSuccessfulRegistration() throws Exception {
+    void syncRuntimeConnectsAsynchronouslyOnSuccessfulRegistration() throws Exception {
         var row = seedStdio("svc-ok", OK_FIXTURE);
         var before = System.nanoTime();
         McpServerService.syncRuntime(row);
         var elapsedMs = (System.nanoTime() - before) / 1_000_000;
 
-        // The contract is "block until first attempt resolves" — we don't
-        // care about exact timing, only that by the time syncRuntime
-        // returns the manager has reached CONNECTED. A few seconds is a
-        // generous ceiling for the Node fixture handshake.
-        assertTrue(elapsedMs < 10_000,
-                "syncRuntime should resolve well under the 10 s cap; elapsed=" + elapsedMs);
-        assertEquals(McpServer.Status.CONNECTED,
-                McpConnectionManager.status("svc-ok"),
-                "manager must report CONNECTED before syncRuntime returns");
+        // Fire-and-forget: syncRuntime kicks the connect off on its own VT and
+        // returns at once — it must NOT block on the handshake (that pinned the
+        // mcp_server row lock and caused the LockTimeoutException storm).
+        assertTrue(elapsedMs < 1_000,
+                "syncRuntime must return promptly without awaiting the handshake; elapsed=" + elapsedMs);
+        // The connect resolves on its VT; poll the manager until CONNECTED —
+        // the same way the admin UI observes the outcome (pollUntilStable).
+        awaitUntil(() -> McpConnectionManager.status("svc-ok") == McpServer.Status.CONNECTED,
+                "manager never reached CONNECTED");
         assertNull(McpConnectionManager.lastError("svc-ok"),
-                "successful first attempt leaves no lingering lastError");
+                "successful connect leaves no lingering lastError");
         // View.of(row) is what the controller renders to the API client —
         // confirm it picks up the live state without us mutating the row.
         var view = McpServerService.View.of(row);
@@ -112,19 +114,20 @@ class McpServerServiceTest extends UnitTest {
     }
 
     @Test
-    void syncRuntimeBlocksUntilErrorOnFailedRegistration() throws Exception {
+    void syncRuntimeConnectsAsynchronouslyToErrorOnFailedRegistration() throws Exception {
         var row = seedStdio("svc-eof", EOF_FIXTURE);
         McpServerService.syncRuntime(row);
 
-        assertEquals(McpServer.Status.ERROR,
-                McpConnectionManager.status("svc-eof"),
-                "manager must report ERROR before syncRuntime returns");
-        var liveError = McpConnectionManager.lastError("svc-eof");
-        assertNotNull(liveError, "manager must carry the subprocess-exit reason");
+        // Poll until the failed handshake surfaces as ERROR with a reason.
+        // (status flips to ERROR a hair before lastError is set, and the
+        // fast-backoff loop re-attempts, so gate on both being present.)
+        awaitUntil(() -> McpConnectionManager.status("svc-eof") == McpServer.Status.ERROR
+                        && McpConnectionManager.lastError("svc-eof") != null,
+                "manager never reported ERROR with a reason");
         var view = McpServerService.View.of(row);
         assertEquals(McpServer.Status.ERROR.name(), view.status());
         assertNotNull(view.lastError(),
-                "View must surface the live error so the API response carries it");
+                "View must surface the live error so a polled response carries it");
     }
 
     @Test
@@ -146,6 +149,20 @@ class McpServerServiceTest extends UnitTest {
     }
 
     // ==================== helpers ====================
+
+    /** Poll {@code cond} every 25 ms until it holds, up to ~10 s (generous
+     *  ceiling for the Node fixture handshake plus the fast-backoff reconnect),
+     *  then return; fail with {@code msg} otherwise. Mirrors how the admin UI
+     *  observes the fire-and-forget connect outcome (pollUntilStable). */
+    private static void awaitUntil(java.util.function.BooleanSupplier cond, String msg) {
+        var deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (cond.getAsBoolean()) return;
+            try { Thread.sleep(25); }
+            catch (InterruptedException _) { Thread.currentThread().interrupt(); return; }
+        }
+        org.junit.jupiter.api.Assertions.fail(msg);
+    }
 
     private McpServer seedStdio(String name, String script) throws IOException {
         return seedStdio(name, script, true);
