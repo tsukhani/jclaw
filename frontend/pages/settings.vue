@@ -734,18 +734,27 @@ async function saveVideogenField(configKey: string, value: string) {
   }
   finally { saving.value = false }
 }
-// Jobs panel (operator-facing): the most-recent video-generation jobs with state + a link into chat.
-interface VideoGenJob {
-  id: number
-  state: string
-  prompt: string | null
-  percent: number | null
-  errorMessage: string | null
-  conversationId: number | null
-  createdAt: string | null
+// Model dropdown: Replicate curates a `text-to-video` collection; GET /api/videogen/models returns its
+// owner/model slugs (server-discovered, not hardcoded). The dropdown is the only way to pick a model —
+// no free-text entry — so the saved value is always surfaced (see videogenModelOptions) even if
+// discovery is empty or the saved model has since left the collection.
+interface VideoModel {
+  slug: string
+  name: string
+  description: string | null
 }
-const { data: videogenJobs, refresh: refreshVideogenJobs }
-  = await useFetch<VideoGenJob[]>('/api/videogen/jobs/recent')
+const { data: videogenModels, refresh: refreshVideogenModels, status: videogenModelsStatus }
+  = await useFetch<VideoModel[]>('/api/videogen/models')
+const videogenModelOptions = computed<VideoModel[]>(() => {
+  const discovered = videogenModels.value ?? []
+  const saved = videogenModel.value
+  // Surface a saved model that discovery didn't return (collection drift, missing key, transient
+  // error) so the select shows it as the active choice instead of silently snapping to the default.
+  if (saved && !discovered.some(m => m.slug === saved)) {
+    return [{ slug: saved, name: saved, description: null }, ...discovered]
+  }
+  return discovered
+})
 
 // ──────────────────── Video Interpretation (JCLAW-223) ─────────────────────
 // One knob (frame-sample density) plus a read-only display of which of the three
@@ -5059,18 +5068,43 @@ async function deleteLoggerLevel(logger: string) {
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — set in Image Generation</span>
             </label>
-            <!-- Model override (owner/model slug; provider default when blank). -->
+            <!-- Model — picked from Replicate's curated text-to-video collection (GET /api/videogen/models). -->
             <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
               <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Model</span>
-              <input
+              <select
                 :value="videogenModel"
-                type="text"
                 :disabled="saving"
-                placeholder="wan-video/wan-2.2-t2v-fast"
                 aria-label="Replicate video model"
                 class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-                @change="saveVideogenField('videogen.cloud.model', ($event.target as HTMLInputElement).value)"
+                @change="saveVideogenField('videogen.cloud.model', ($event.target as HTMLSelectElement).value)"
               >
+                <option value="">
+                  Provider default (wan-video/wan-2.2-t2v-fast)
+                </option>
+                <option
+                  v-for="m in videogenModelOptions"
+                  :key="m.slug"
+                  :value="m.slug"
+                  :title="m.description ?? ''"
+                >
+                  {{ m.slug }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="shrink-0 text-[11px] text-fg-muted hover:text-fg-strong disabled:opacity-50"
+                :disabled="videogenModelsStatus === 'pending'"
+                @click="refreshVideogenModels()"
+              >
+                {{ videogenModelsStatus === 'pending' ? 'discovering…' : 'refresh' }}
+              </button>
+            </div>
+            <!-- Empty-state hint when discovery returned nothing (no API key set, or a transient error). -->
+            <div
+              v-if="videogenModelsStatus !== 'pending' && !videogenModels?.length"
+              class="border-t border-border px-4 py-2 text-[11px] text-fg-muted"
+            >
+              No models discovered — set a Replicate API key in Image Generation above, then refresh.
             </div>
           </div>
 
@@ -5110,60 +5144,6 @@ async function deleteLoggerLevel(logger: string) {
           >
         </label>
       </template>
-
-      <!-- Jobs panel: most-recent video jobs (operator-facing progress + a link into chat). -->
-      <div class="border border-border">
-        <div class="px-3 py-2 flex items-center gap-2 border-b border-border bg-muted">
-          <span class="text-xs font-medium text-fg-strong">Recent video jobs</span>
-          <button
-            type="button"
-            class="ml-auto text-[11px] text-fg-muted hover:text-fg-strong"
-            @click="refreshVideogenJobs()"
-          >
-            refresh
-          </button>
-        </div>
-        <div
-          v-if="!videogenJobs?.length"
-          class="px-3 py-3 text-xs text-fg-muted"
-        >
-          No video generation jobs yet.
-        </div>
-        <ul
-          v-else
-          class="divide-y divide-border"
-        >
-          <li
-            v-for="job in videogenJobs"
-            :key="job.id"
-            class="px-3 py-2 flex items-center gap-3 text-xs"
-          >
-            <span
-              class="shrink-0 px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
-              :class="{
-                'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300': job.state === 'SUCCEEDED',
-                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300': job.state === 'FAILED',
-                'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300': job.state === 'RUNNING' || job.state === 'PENDING',
-              }"
-            >{{ job.state }}</span>
-            <span
-              class="flex-1 truncate text-fg-primary"
-              :title="job.prompt ?? ''"
-            >{{ job.prompt || '(no prompt)' }}</span>
-            <span
-              v-if="job.percent != null"
-              class="shrink-0 text-fg-muted"
-            >{{ job.percent }}%</span>
-            <NuxtLink
-              v-if="job.conversationId != null"
-              :to="`/chat?conversation=${job.conversationId}`"
-              class="shrink-0 text-emerald-700 dark:text-emerald-400 hover:underline"
-            >
-              see in conversation
-            </NuxtLink>
-          </li>
-        </ul>
-      </div>
     </div>
 
     <!-- Chat Settings -->

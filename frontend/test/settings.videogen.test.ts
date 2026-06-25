@@ -6,9 +6,11 @@ import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
 /**
- * JCLAW-236 — Video Generation settings section + jobs panel. Toggle gating on the Replicate API key,
- * the Replicate backend radio + model/timeout inputs, the maxJobMinutes persist round-trip, and the
- * recent-jobs panel render. Replicate-only (SV-1); self-hosted is a disabled "coming soon" placeholder.
+ * JCLAW-236 — Video Generation settings section. Toggle gating on the Replicate API key, the Replicate
+ * backend radio, the maxJobMinutes persist round-trip, and the model dropdown — which is populated from
+ * GET /api/videogen/models (Replicate's curated text-to-video collection) with no free-text entry, and
+ * still surfaces a saved model that discovery didn't return. Replicate-only (SV-1); self-hosted is a
+ * disabled "coming soon" placeholder.
  */
 
 const MODELS = '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535}]'
@@ -16,7 +18,7 @@ const MODELS = '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"ma
 function setupApi(opts?: {
   capturePost?: (b: { key?: string, value?: string }) => void
   extraEntries?: Array<{ key: string, value: string }>
-  recentJobs?: unknown[]
+  videoModels?: Array<{ slug: string, name: string, description: string | null }>
 }) {
   registerEndpoint('/api/agents', () => [
     { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true, providerConfigured: true },
@@ -29,7 +31,7 @@ function setupApi(opts?: {
   registerEndpoint('/api/transcription/state', () => ({ provider: 'whisper-local', localModel: 'small.en', ffmpegAvailable: true, ffmpegReason: 'available', models: [] }))
   registerEndpoint('/api/providers/vllm/reachable', () => ({ provider: 'vllm', reachable: false, modelCount: 0, reason: 'vllm not running' }))
   registerEndpoint('/api/providers/openrouter/video-models', () => ({ provider: 'openrouter', models: [], count: 0 }))
-  registerEndpoint('/api/videogen/jobs/recent', () => opts?.recentJobs ?? [])
+  registerEndpoint('/api/videogen/models', () => opts?.videoModels ?? [])
   const base = [
     { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
     { key: 'provider.ollama-cloud.apiKey', value: 'sk-cloud-****' },
@@ -60,7 +62,7 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
     expect(toggle.element.disabled).toBe(true)
   })
 
-  it('with a Replicate key + provider set, shows the checked Replicate radio and the model/timeout inputs', async () => {
+  it('with a Replicate key + provider set, shows the checked radio, the model select, and the timeout', async () => {
     setupApi({ extraEntries: [
       { key: 'provider.replicate.apiKey', value: 'r8_****' },
       { key: 'videogen.provider', value: 'replicate' },
@@ -75,10 +77,36 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
     expect(radio.element.disabled).toBe(false)
     expect(radio.element.checked).toBe(true)
 
-    const model = c.find<HTMLInputElement>('input[aria-label="Replicate video model"]')
+    // The model field is a <select>, not a text input; the saved value is surfaced even though
+    // discovery (mocked empty here) didn't return it.
+    const model = c.find<HTMLSelectElement>('select[aria-label="Replicate video model"]')
+    expect(model.exists()).toBe(true)
     expect(model.element.value).toBe('lightricks/ltx-video')
     const timeout = c.find<HTMLInputElement>('input[aria-label="Video job timeout in minutes"]')
     expect(timeout.element.value).toBe('45')
+  })
+
+  it('populates the model dropdown from discovered Replicate models', async () => {
+    setupApi({
+      videoModels: [
+        { slug: 'wan-video/wan-2.2-t2v-fast', name: 'wan-2.2-t2v-fast', description: 'Fast WAN 2.2' },
+        { slug: 'lightricks/ltx-video', name: 'ltx-video', description: 'LTX' },
+      ],
+      extraEntries: [
+        { key: 'provider.replicate.apiKey', value: 'r8_****' },
+        { key: 'videogen.provider', value: 'replicate' },
+      ],
+    })
+    const c = await mountSuspended(Settings)
+    await flushPromises()
+
+    const select = c.find('select[aria-label="Replicate video model"]')
+    expect(select.exists()).toBe(true)
+    const optionValues = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
+    expect(optionValues).toContain('wan-video/wan-2.2-t2v-fast')
+    expect(optionValues).toContain('lightricks/ltx-video')
+    // The operator-facing jobs panel does not belong in Settings and was removed.
+    expect(c.text()).not.toContain('Recent video jobs')
   })
 
   it('POSTs videogen.maxJobMinutes on change', async () => {
@@ -101,16 +129,25 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
     expect(hit!.value).toBe('15')
   })
 
-  it('renders recent jobs in the jobs panel with a link into the conversation', async () => {
-    setupApi({ recentJobs: [
-      { id: 7, state: 'SUCCEEDED', prompt: 'a comet over a city', percent: null, errorMessage: null, conversationId: 42, createdAt: '2026-06-25T10:00:00Z' },
-    ] })
+  it('POSTs videogen.cloud.model when a model is chosen from the dropdown', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ capturePost: b => captured.push(b),
+      videoModels: [
+        { slug: 'wan-video/wan-2.2-t2v-fast', name: 'wan-2.2-t2v-fast', description: 'Fast WAN 2.2' },
+      ],
+      extraEntries: [
+        { key: 'provider.replicate.apiKey', value: 'r8_****' },
+        { key: 'videogen.provider', value: 'replicate' },
+      ] })
     const c = await mountSuspended(Settings)
     await flushPromises()
 
-    expect(c.text()).toContain('Recent video jobs')
-    expect(c.text()).toContain('a comet over a city')
-    expect(c.text()).toContain('SUCCEEDED')
-    expect(c.find('a[href="/chat?conversation=42"]').exists()).toBe(true)
+    const select = c.find('select[aria-label="Replicate video model"]')
+    await select.setValue('wan-video/wan-2.2-t2v-fast')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'videogen.cloud.model')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('wan-video/wan-2.2-t2v-fast')
   })
 })
