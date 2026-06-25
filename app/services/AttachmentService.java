@@ -171,6 +171,53 @@ public final class AttachmentService {
         return att;
     }
 
+    /**
+     * JCLAW-234: create a zero-length placeholder row for an async video generation. The
+     * {@code generate_video} tool (JCLAW-235) calls this at submit time so the chat can show a
+     * "generating" card immediately; {@link #fillGeneratedVideo} writes the real bytes once the job
+     * succeeds. No file is written yet — the {@code storagePath} is reserved and the byte file appears on
+     * fill. Caller must be inside a JPA transaction.
+     */
+    public static MessageAttachment createGeneratedVideoPlaceholder(Agent agent, Message message,
+            Long generationJobId, String generationMetadata) {
+        var uuid = UUID.randomUUID().toString();
+        var leaf = uuid + ".mp4";
+        var att = new MessageAttachment();
+        att.message = message;
+        att.uuid = uuid;
+        att.originalFilename = "generated-" + GENERATED_TS.format(LocalDateTime.now()) + ".mp4";
+        att.storagePath = toStoragePath(agent.name, message.conversation.id, leaf);
+        att.mimeType = "video/mp4";
+        att.sizeBytes = 0; // filled on job success
+        att.kind = MessageAttachment.KIND_VIDEO;
+        att.generated = true;
+        att.generationMetadata = generationMetadata;
+        att.generationJobId = generationJobId;
+        att.save();
+        return att;
+    }
+
+    /**
+     * JCLAW-234: write the produced video bytes into a placeholder created by
+     * {@link #createGeneratedVideoPlaceholder} and update its size / MIME. Called by the job runner on
+     * success. Caller must be inside a JPA transaction.
+     */
+    public static void fillGeneratedVideo(MessageAttachment att, byte[] bytes, String mimeType) {
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("generated video bytes are required");
+        }
+        var path = resolveOnDisk(att);
+        try {
+            Files.createDirectories(path.getParent());
+            Files.write(path, bytes);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to write generated video: " + e.getMessage(), e);
+        }
+        att.sizeBytes = bytes.length;
+        if (mimeType != null && !mimeType.isBlank()) att.mimeType = mimeType;
+        att.save();
+    }
+
     private static String extensionForMime(String mime) {
         return switch (mime) {
             case "image/jpeg" -> "jpg";

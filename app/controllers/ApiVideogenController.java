@@ -1,0 +1,73 @@
+package controllers;
+
+import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.Operation;
+import models.MessageAttachment;
+import models.VideoGenerationJob;
+import play.mvc.Controller;
+import play.mvc.With;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+
+import static utils.GsonHolder.INSTANCE;
+
+/**
+ * Video-generation job status for the chat UI (JCLAW-234). The chat polls
+ * {@code GET /api/videogen/jobs?ids=1,2,3} (~2s) while any pending video placeholder is non-terminal —
+ * the SV-4 / JCLAW-513 transport decision was polling, not SSE, because a minutes-long job outlives the
+ * per-turn chat stream. The UI swaps the generating-card for an inline player once a job reports
+ * {@code SUCCEEDED} with a {@code resultAttachmentUuid}, and shows an error card on {@code FAILED}.
+ */
+@With(AuthCheck.class)
+public class ApiVideogenController extends Controller {
+
+    private static final Gson gson = INSTANCE;
+
+    /** Per-request id cap — the chat only ever polls a handful of visible placeholders; this just bounds
+     *  the work a single request can ask for (defense-in-depth), not an authorization control. */
+    private static final int MAX_IDS = 50;
+
+    /** GET /api/videogen/jobs?ids=1,2,3 — lightweight status for the chat poll loop.
+     *
+     *  <p>No owner-scoping: JClaw is single-admin Personal Edition — there is no {@code User} entity or
+     *  owner FK (see {@code ApiToken}/{@code AuthCheck}), so the {@code AuthCheck}-gated operator owns
+     *  every job. This mirrors {@code ApiConversationsController} / {@code ApiAttachmentsController},
+     *  which likewise serve rows by id/uuid to the one authenticated operator. */
+    @Operation(summary = "Status of video-generation jobs by id (chat progress polling)")
+    public static void jobs(String ids) {
+        var out = new ArrayList<LinkedHashMap<String, Object>>();
+        if (ids != null && !ids.isBlank()) {
+            var parts = ids.split(",");
+            int limit = Math.min(parts.length, MAX_IDS);
+            for (int i = 0; i < limit; i++) {
+                var id = parseId(parts[i]);
+                if (id == null) continue;
+                VideoGenerationJob job = VideoGenerationJob.findById(id);
+                if (job == null) continue;
+                var m = new LinkedHashMap<String, Object>();
+                m.put("id", job.id);
+                m.put("state", job.state.name());
+                m.put("percent", null); // cloud reports none (SV-1); the local engine fills this in JCLAW-232
+                m.put("errorMessage", job.errorMessage);
+                m.put("resultAttachmentUuid", resultUuid(job.resultAttachmentId));
+                out.add(m);
+            }
+        }
+        renderJSON(gson.toJson(out));
+    }
+
+    private static Long parseId(String s) {
+        try {
+            return Long.valueOf(s.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String resultUuid(Long attachmentId) {
+        if (attachmentId == null) return null;
+        MessageAttachment att = MessageAttachment.findById(attachmentId);
+        return att == null ? null : att.uuid;
+    }
+}

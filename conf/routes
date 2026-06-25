@@ -30,6 +30,9 @@ POST    /api/transcription/models/{id}/download ApiTranscriptionController.downl
 GET     /api/imagegen/local/state               ApiImagegenController.state
 POST    /api/imagegen/local/pull                ApiImagegenController.pull
 
+# Video generation job status — chat progress polling (JCLAW-234)
+GET     /api/videogen/jobs                       ApiVideogenController.jobs
+
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
 GET     /api/tasks/stats                        ApiTasksController.stats

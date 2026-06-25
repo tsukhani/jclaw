@@ -102,6 +102,13 @@ public class MessageAttachment extends Model {
     @Column(name = "generation_metadata", columnDefinition = "TEXT")
     public String generationMetadata;
 
+    /** JCLAW-234: links a generated-video placeholder to its {@code VideoGenerationJob} (JCLAW-230) so the
+     *  runner can fill it on completion and the chat UI can poll the job's progress. Null for every
+     *  uploaded / non-video attachment. Nullable, so the ALTER is safe on the populated table without a
+     *  {@code @ColumnDefault} (only NOT NULL adds need one). */
+    @Column(name = "generation_job_id")
+    public Long generationJobId;
+
     /** JCLAW-209: true once the user deletes this attachment's file from the workspace via the chat UI.
      *  The on-disk bytes are removed but the row is retained so the chip can show a "deleted from
      *  workspace" marker on reload (the prompt/provenance stays a permanent record). {@code @ColumnDefault}
@@ -146,5 +153,11 @@ public class MessageAttachment extends Model {
 
     public static List<MessageAttachment> findByMessage(Message message) {
         return MessageAttachment.find("message = ?1 ORDER BY id ASC", message).fetch();
+    }
+
+    /** JCLAW-234: the placeholder row linked to a video-generation job (null until the tool creates one). */
+    public static MessageAttachment findByGenerationJobId(Long jobId) {
+        if (jobId == null) return null;
+        return MessageAttachment.find("generationJobId", jobId).first();
     }
 }

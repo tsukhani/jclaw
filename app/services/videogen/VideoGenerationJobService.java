@@ -1,12 +1,17 @@
 package services.videogen;
 
+import models.MessageAttachment;
 import models.VideoGenerationJob;
 import models.VideoGenerationJob.State;
+import okhttp3.Request;
 import play.Logger;
+import services.AttachmentService;
 import services.ConfigService;
 import services.videogen.VideoGenerationService.PollResult;
 import services.videogen.VideoGenerationService.VideoGenRequest;
+import utils.HttpFactories;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -84,15 +89,44 @@ public final class VideoGenerationJobService {
         }
         PollResult r = svc.get().poll(job.providerJobId);
         switch (r.state()) {
-            case SUCCEEDED -> {
-                // JCLAW-234 will fetch r.resultUrl() into a MessageAttachment here and set
-                // resultAttachmentId; for now the runner just records completion.
-                job.state = State.SUCCEEDED;
-                job.completedAt = Instant.now();
-                job.save();
-            }
+            case SUCCEEDED -> completeSucceeded(job, r.resultUrl());
             case FAILED -> fail(job, r.error());
             case RUNNING -> job.save(); // bump updated_at to reflect liveness
+        }
+    }
+
+    /**
+     * JCLAW-234: mark the job succeeded, then best-effort fetch the produced video into the placeholder
+     * attachment created for it (by the {@code generate_video} tool). A fetch/store failure leaves the
+     * job SUCCEEDED with no attachment rather than flipping it to FAILED — the state transition is the
+     * contract, and losing the bytes shouldn't lose the job. A succeeded job with no placeholder (e.g.
+     * one submitted outside the tool flow) simply records completion.
+     */
+    private static void completeSucceeded(VideoGenerationJob job, String resultUrl) {
+        job.state = State.SUCCEEDED;
+        job.completedAt = Instant.now();
+        job.save();
+        var placeholder = MessageAttachment.findByGenerationJobId(job.id);
+        if (placeholder == null || resultUrl == null) return;
+        try {
+            var bytes = fetchBytes(resultUrl);
+            AttachmentService.fillGeneratedVideo(placeholder, bytes, "video/mp4");
+            job.resultAttachmentId = placeholder.id;
+            job.save();
+        } catch (RuntimeException e) {
+            Logger.error(e, "videogen: failed to store result for job %s", job.id);
+        }
+    }
+
+    private static byte[] fetchBytes(String url) {
+        var req = new Request.Builder().url(url).get().build();
+        try (var resp = HttpFactories.general().newCall(req).execute()) {
+            if (!resp.isSuccessful()) {
+                throw new VideoGenerationException("video fetch failed: HTTP " + resp.code());
+            }
+            return resp.body().bytes();
+        } catch (IOException e) {
+            throw new VideoGenerationException("video fetch transport failed: " + e.getMessage(), e);
         }
     }
 

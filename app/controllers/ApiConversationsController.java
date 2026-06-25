@@ -388,6 +388,7 @@ public class ApiConversationsController extends Controller {
             av.put("generated", a.generated); // JCLAW-227: chat UI badges tool-generated images
             av.put("deleted", a.deleted); // JCLAW-209: chip shows a "deleted from workspace" marker
             if (a.generationMetadata != null) av.put("generationMetadata", a.generationMetadata);
+            if (a.generationJobId != null) av.put("generationJobId", a.generationJobId); // JCLAW-234: chat polls this job's status
             return av;
         }).toList();
     }
