@@ -51,6 +51,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedJClawApiTooling();
         seedDispatcherTuning();
         seedTranscription();
+        seedVideoGen();
         SkillLoader.syncSkillConfigs();
         HttpFactories.applyDispatcherConfig();
         // JCLAW-163: prime the ffmpeg cache so the Settings UI can render a
@@ -78,6 +79,15 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("transcription.provider", "whisper-local");
         seedIfAbsent("transcription.localModel",
                 WhisperModel.DEFAULT.id());
+    }
+
+    /**
+     * JCLAW-230: seed the video-generation job timeout so the Settings UI (JCLAW-236) has a defined
+     * default and {@code jobs.VideoGenerationJobRunner} times jobs out at a known bound. Provider
+     * selection ({@code videogen.provider}) and model stay unset until the operator opts in.
+     */
+    private void seedVideoGen() {
+        seedIfAbsent("videogen.maxJobMinutes", "30");
     }
 
     /**

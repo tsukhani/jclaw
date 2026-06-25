@@ -28,7 +28,15 @@ public final class VideoGenerationRouter {
     private VideoGenerationRouter() {}
 
     public static Optional<VideoGenerationService> configuredService() {
-        var provider = ConfigService.get("videogen.provider");
+        return serviceFor(ConfigService.get("videogen.provider"));
+    }
+
+    /**
+     * Resolve a client by provider name. Used by {@code jobs.VideoGenerationJobRunner} to poll a job by
+     * the provider it was <em>submitted</em> with (stored on the job row), which may differ from the
+     * current {@code videogen.provider} if the operator changed the Settings mid-job.
+     */
+    public static Optional<VideoGenerationService> serviceFor(String provider) {
         if (provider == null || provider.isBlank()) return Optional.empty();
         return switch (provider) {
             case "replicate" -> Optional.of(new ReplicateVideoGenerationClient());
