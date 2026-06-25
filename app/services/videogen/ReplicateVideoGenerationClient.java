@@ -35,6 +35,7 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
     private static final String DEFAULT_MODEL = "wan-video/wan-2.2-t2v-fast";
     private static final String STATUS = "status";
     private static final String OUTPUT = "output";
+    private static final String ERROR = "error";
 
     private final OkHttpClient client;
 
@@ -122,8 +123,8 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
     }
 
     private static String extractError(JsonObject pred, String status) {
-        if (pred.has("error") && !pred.get("error").isJsonNull()) {
-            return "replicate " + status + ": " + pred.get("error").getAsString();
+        if (pred.has(ERROR) && !pred.get(ERROR).isJsonNull()) {
+            return "replicate " + status + ": " + pred.get(ERROR).getAsString();
         }
         return "replicate prediction " + status;
     }
