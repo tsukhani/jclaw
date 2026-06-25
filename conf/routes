@@ -32,8 +32,8 @@ POST    /api/imagegen/local/pull                ApiImagegenController.pull
 
 # Video generation job status — chat progress polling (JCLAW-234)
 GET     /api/videogen/jobs                       ApiVideogenController.jobs
-# Recent video jobs — operator Settings jobs panel (JCLAW-236)
-GET     /api/videogen/jobs/recent                ApiVideogenController.recent
+# Replicate text-to-video model discovery — Settings model dropdown (JCLAW-236)
+GET     /api/videogen/models                     ApiVideogenController.models
 
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
