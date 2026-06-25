@@ -4229,12 +4229,16 @@ async function deleteLoggerLevel(logger: string) {
       </div>
 
       <template v-if="imagegenEnabled">
-        <fieldset class="bg-surface-elevated border border-border">
+        <!-- Each backend is its own group: the radio sits at the top of a card with
+             that backend's settings (API key / download / token) directly beneath, so
+             it's clear which settings belong to which provider. -->
+        <fieldset class="space-y-3">
           <legend class="sr-only">
             Image generation backend
           </legend>
-          <div class="divide-y divide-border">
-            <!-- 1. Black Forest Labs (Flux) — image-gen only; key set in this section (below). -->
+
+          <!-- Black Forest Labs (Flux) — image-gen only; key set in this group. -->
+          <div class="bg-surface-elevated border border-border">
             <label
               for="imagegen-provider-bfl"
               class="px-4 py-2.5 flex items-center gap-3"
@@ -4264,7 +4268,56 @@ async function deleteLoggerLevel(logger: string) {
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — set it below</span>
             </label>
-            <!-- 2. OpenAI (gpt-image-1) — reuses the OpenAI key already set in LLM Providers. -->
+            <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Black Forest Labs API key</span>
+              <template v-if="editingKey === 'provider.bfl.apiKey'">
+                <input
+                  v-model="editValue"
+                  type="password"
+                  aria-label="Black Forest Labs API key"
+                  placeholder="Your BFL API key from bfl.ai"
+                  class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                >
+                <button
+                  class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                  title="Save"
+                  @click="updateEntry('provider.bfl.apiKey')"
+                >
+                  <CheckIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Cancel"
+                  @click="editingKey = null"
+                >
+                  <XMarkIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+              <template v-else>
+                <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ bflApiKeyConfigured ? '••••••••' : '(not set)' }}</span>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  :title="bflApiKeyConfigured ? 'Change key' : 'Set key'"
+                  aria-label="Edit Black Forest Labs API key"
+                  @click="startEditBflKey()"
+                >
+                  <PencilIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+            </div>
+          </div>
+
+          <!-- OpenAI (gpt-image-1) — reuses the OpenAI key from LLM Providers above; no inline key. -->
+          <div class="bg-surface-elevated border border-border">
             <label
               for="imagegen-provider-openai"
               class="px-4 py-2.5 flex items-center gap-3"
@@ -4294,7 +4347,10 @@ async function deleteLoggerLevel(logger: string) {
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — configure in LLM Providers</span>
             </label>
-            <!-- 3. Replicate — image-gen only (hosted Flux etc.); key set in this section (below). -->
+          </div>
+
+          <!-- Replicate — image-gen only (hosted Flux etc.); key set in this group. -->
+          <div class="bg-surface-elevated border border-border">
             <label
               for="imagegen-provider-replicate"
               class="px-4 py-2.5 flex items-center gap-3"
@@ -4324,7 +4380,57 @@ async function deleteLoggerLevel(logger: string) {
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — set it below</span>
             </label>
-            <!-- 4. Self-hosted Flux 2 Klein — local Python sidecar; gated by uv presence, not an API key (JCLAW-226). -->
+            <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Replicate API key</span>
+              <template v-if="editingKey === 'provider.replicate.apiKey'">
+                <input
+                  v-model="editValue"
+                  type="password"
+                  aria-label="Replicate API key"
+                  placeholder="Your Replicate API token from replicate.com"
+                  class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                >
+                <button
+                  class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                  title="Save"
+                  @click="updateEntry('provider.replicate.apiKey')"
+                >
+                  <CheckIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Cancel"
+                  @click="editingKey = null"
+                >
+                  <XMarkIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+              <template v-else>
+                <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ replicateApiKeyConfigured ? '••••••••' : '(not set)' }}</span>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  :title="replicateApiKeyConfigured ? 'Change key' : 'Set key'"
+                  aria-label="Edit Replicate API key"
+                  @click="startEditReplicateKey()"
+                >
+                  <PencilIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Self-Hosted (Flux 2 Klein) — local Python sidecar; gated by uv presence,
+               not an API key. Download + HF token live in this group (JCLAW-226). -->
+          <div class="bg-surface-elevated border border-border">
             <label
               for="imagegen-provider-flux-local"
               class="px-4 py-2.5 flex items-center gap-3"
@@ -4354,240 +4460,140 @@ async function deleteLoggerLevel(logger: string) {
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >uv not found — install uv</span>
             </label>
-          </div>
-        </fieldset>
 
-        <!-- BFL API key — set here since BFL is image-gen only and isn't listed under LLM Providers. -->
-        <div class="bg-surface-elevated border border-border">
-          <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Black Forest Labs API key</span>
-            <template v-if="editingKey === 'provider.bfl.apiKey'">
-              <input
-                v-model="editValue"
-                type="password"
-                aria-label="Black Forest Labs API key"
-                placeholder="Your BFL API key from bfl.ai"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            <!-- Model download status + button (shown when Self-Hosted is the active backend). -->
+            <div
+              v-if="imagegenProvider === 'flux-local'"
+              class="border-t border-border"
+            >
+              <div
+                v-if="!fluxUvAvailable"
+                class="px-4 py-2.5 text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/50 dark:bg-amber-900/15 border-b border-amber-200 dark:border-amber-800/50"
               >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="updateEntry('provider.bfl.apiKey')"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingKey = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ bflApiKeyConfigured ? '••••••••' : '(not set)' }}</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                :title="bflApiKeyConfigured ? 'Change key' : 'Set key'"
-                aria-label="Edit Black Forest Labs API key"
-                @click="startEditBflKey()"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-          </div>
-        </div>
-
-        <!-- Replicate API key — set here too (Replicate is image-gen only, not under LLM Providers). -->
-        <div class="bg-surface-elevated border border-border">
-          <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Replicate API key</span>
-            <template v-if="editingKey === 'provider.replicate.apiKey'">
-              <input
-                v-model="editValue"
-                type="password"
-                aria-label="Replicate API key"
-                placeholder="Your Replicate API token from replicate.com"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="updateEntry('provider.replicate.apiKey')"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingKey = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ replicateApiKeyConfigured ? '••••••••' : '(not set)' }}</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                :title="replicateApiKeyConfigured ? 'Change key' : 'Set key'"
-                aria-label="Edit Replicate API key"
-                @click="startEditReplicateKey()"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-          </div>
-        </div>
-
-        <!-- Local Flux model: download status + button (JCLAW-226). Shown when flux-local is the backend. -->
-        <div
-          v-if="imagegenProvider === 'flux-local'"
-          class="bg-surface-elevated border border-border"
-        >
-          <div
-            v-if="!fluxUvAvailable"
-            class="px-4 py-2.5 text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/50 dark:bg-amber-900/15 border-b border-amber-200 dark:border-amber-800/50"
-          >
-            {{ imagegenLocalState?.uvReason || 'uv is required to run the local Flux sidecar.' }}
-            Install uv from astral.sh/uv and restart jclaw.
-          </div>
-          <div class="px-4 py-2.5 flex items-center gap-3">
-            <div class="flex-1 min-w-0">
-              <div class="text-sm font-mono text-fg-strong truncate">
-                {{ imagegenLocalState?.model }}
+                {{ imagegenLocalState?.uvReason || 'uv is required to run the local Flux sidecar.' }}
+                Install uv from astral.sh/uv and restart jclaw.
               </div>
-              <div class="text-[11px] text-fg-muted">
-                <template v-if="fluxModelStatus === 'AVAILABLE'">
-                  Ready — weights downloaded.
+              <div class="px-4 py-2.5 flex items-center gap-3">
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-mono text-fg-strong truncate">
+                    {{ imagegenLocalState?.model }}
+                  </div>
+                  <div class="text-[11px] text-fg-muted">
+                    <template v-if="fluxModelStatus === 'AVAILABLE'">
+                      Ready — weights downloaded.
+                    </template>
+                    <template v-else-if="fluxModelStatus === 'DOWNLOADING'">
+                      Downloading weights…
+                    </template>
+                    <template v-else-if="fluxModelStatus === 'ERROR'">
+                      Download failed.
+                    </template>
+                    <template v-else>
+                      Not downloaded (~13 GB). The first image needs the weights.
+                    </template>
+                  </div>
+                </div>
+                <template v-if="fluxModelStatus === 'DOWNLOADING'">
+                  <div class="flex items-center gap-2">
+                    <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
+                      <div
+                        class="h-full bg-emerald-600 transition-[width] duration-300"
+                        :style="{ width: fluxModelDownloadPct + '%' }"
+                      />
+                    </div>
+                    <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
+                      {{ fluxModelDownloadPct }}%
+                    </span>
+                  </div>
                 </template>
-                <template v-else-if="fluxModelStatus === 'DOWNLOADING'">
-                  Downloading weights…
-                </template>
-                <template v-else-if="fluxModelStatus === 'ERROR'">
-                  Download failed.
+                <template v-else-if="fluxModelStatus === 'AVAILABLE'">
+                  <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
                 </template>
                 <template v-else>
-                  Not downloaded (~13 GB). The first image needs the weights.
+                  <button
+                    type="button"
+                    class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                    :disabled="saving || !fluxUvAvailable"
+                    @click="downloadFluxModel()"
+                  >
+                    {{ fluxModelStatus === 'ERROR' ? 'Retry' : 'Download' }}
+                  </button>
+                </template>
+              </div>
+              <div
+                v-if="fluxModelStatus === 'ERROR' && imagegenLocalState?.error"
+                class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+              >
+                {{ imagegenLocalState.error }}
+              </div>
+            </div>
+
+            <!-- Optional Hugging Face token (shown when Self-Hosted is the active backend):
+                 lifts rate limits, speeds downloads, unlocks gated models. Passed as HF_TOKEN. -->
+            <div
+              v-if="imagegenProvider === 'flux-local'"
+              class="border-t border-border"
+            >
+              <div class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border">
+                Optional — a Read token lifts Hugging Face rate limits, speeds downloads, and unlocks gated
+                models. Not required for klein 4B (it downloads anonymously). Create one (shown once), then
+                paste it below.
+                <a
+                  href="https://huggingface.co/settings/tokens"
+                  target="_blank"
+                  rel="noopener"
+                  class="text-fg-primary hover:text-fg-strong underline ml-1"
+                >Get a token → huggingface.co/settings/tokens</a>
+              </div>
+              <div class="px-4 py-2.5 flex items-center gap-3">
+                <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Hugging Face token (optional)</span>
+                <template v-if="editingKey === 'imagegen.local.hfToken'">
+                  <input
+                    v-model="editValue"
+                    type="password"
+                    aria-label="Hugging Face token"
+                    placeholder="hf_… — higher rate limits and gated models"
+                    class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                  >
+                  <button
+                    class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                    title="Save"
+                    @click="updateEntry('imagegen.local.hfToken')"
+                  >
+                    <CheckIcon
+                      class="w-3.5 h-3.5"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <button
+                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                    title="Cancel"
+                    @click="editingKey = null"
+                  >
+                    <XMarkIcon
+                      class="w-3.5 h-3.5"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </template>
+                <template v-else>
+                  <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ hfTokenConfigured ? '••••••••' : '(not set)' }}</span>
+                  <button
+                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                    :title="hfTokenConfigured ? 'Change token' : 'Set token'"
+                    aria-label="Edit Hugging Face token"
+                    @click="startEditHfToken()"
+                  >
+                    <PencilIcon
+                      class="w-3.5 h-3.5"
+                      aria-hidden="true"
+                    />
+                  </button>
                 </template>
               </div>
             </div>
-            <template v-if="fluxModelStatus === 'DOWNLOADING'">
-              <div class="flex items-center gap-2">
-                <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
-                  <div
-                    class="h-full bg-emerald-600 transition-[width] duration-300"
-                    :style="{ width: fluxModelDownloadPct + '%' }"
-                  />
-                </div>
-                <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
-                  {{ fluxModelDownloadPct }}%
-                </span>
-              </div>
-            </template>
-            <template v-else-if="fluxModelStatus === 'AVAILABLE'">
-              <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
-            </template>
-            <template v-else>
-              <button
-                type="button"
-                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-                :disabled="saving || !fluxUvAvailable"
-                @click="downloadFluxModel()"
-              >
-                {{ fluxModelStatus === 'ERROR' ? 'Retry' : 'Download' }}
-              </button>
-            </template>
           </div>
-          <div
-            v-if="fluxModelStatus === 'ERROR' && imagegenLocalState?.error"
-            class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
-          >
-            {{ imagegenLocalState.error }}
-          </div>
-        </div>
-
-        <!-- Optional Hugging Face token (JCLAW-226): lifts rate limits, speeds downloads, and
-             unlocks gated models. Passed to the sidecar as HF_TOKEN. Not required for klein 4B. -->
-        <div
-          v-if="imagegenProvider === 'flux-local'"
-          class="bg-surface-elevated border border-border"
-        >
-          <div class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border">
-            Optional — a Read token lifts Hugging Face rate limits, speeds downloads, and unlocks gated
-            models. Not required for klein 4B (it downloads anonymously). Create one (shown once), then
-            paste it below.
-            <a
-              href="https://huggingface.co/settings/tokens"
-              target="_blank"
-              rel="noopener"
-              class="text-fg-primary hover:text-fg-strong underline ml-1"
-            >Get a token → huggingface.co/settings/tokens</a>
-          </div>
-          <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Hugging Face token (optional)</span>
-            <template v-if="editingKey === 'imagegen.local.hfToken'">
-              <input
-                v-model="editValue"
-                type="password"
-                aria-label="Hugging Face token"
-                placeholder="hf_… — higher rate limits and gated models"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="updateEntry('imagegen.local.hfToken')"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingKey = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ hfTokenConfigured ? '••••••••' : '(not set)' }}</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                :title="hfTokenConfigured ? 'Change token' : 'Set token'"
-                aria-label="Edit Hugging Face token"
-                @click="startEditHfToken()"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-          </div>
-        </div>
+        </fieldset>
       </template>
     </div>
 
