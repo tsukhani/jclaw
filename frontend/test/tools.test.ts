@@ -59,3 +59,33 @@ describe('tools page category counts', () => {
     expect(text).not.toContain('MCP (')
   })
 })
+
+describe('tools page All-view grouping', () => {
+  it('groups by category (System, Utilities, Files, Web) with alphabetical order within each', async () => {
+    const wrapper = await mountSuspended(Tools)
+    await flushPromises()
+
+    // Subheadings render in the fixed category order (MCP excluded).
+    const headings = wrapper.findAll('h2').map(h => norm(h.text()))
+    expect(headings).toEqual(['System (2)', 'Utilities (2)', 'Files (1)', 'Web (1)'])
+
+    // Card names flow alphabetically within each category section, in category
+    // order. Fixture insertion order (shell_exec, message, web_search, filesystem,
+    // datetime, jclaw_docs) differs, so this proves the grouping + alpha sort.
+    const names = wrapper.findAll('span.font-mono.font-semibold').map(s => s.text().trim())
+    expect(names).toEqual([
+      'message', 'shell_exec', // System, alphabetical
+      'datetime', 'jclaw_docs', // Utilities, alphabetical
+      'filesystem', // Files
+      'web_search', // Web
+    ])
+  })
+
+  it('drops the subheadings in a single-category view (the chip labels it)', async () => {
+    const wrapper = await mountSuspended(Tools)
+    await flushPromises()
+    await wrapper.findAll('button').find(b => norm(b.text()).startsWith('System'))!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('h2').length).toBe(0)
+  })
+})

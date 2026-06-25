@@ -83,6 +83,11 @@ onMounted(() => {
 // JCLAW-281: 'MCP' filter dropped — MCP servers live on /mcp-servers, not here.
 const CATEGORIES = ['All', 'System', 'Web', 'Files', 'Utilities'] as const
 
+// Category order for the "All" view's subheadings. Distinct from the filter-chip
+// order above: the All view groups tools System → Utilities → Files → Web, with
+// tools sorted alphabetically within each group.
+const ALL_VIEW_CATEGORY_ORDER: ToolCategory[] = ['System', 'Utilities', 'Files', 'Web']
+
 // ─── Derived lists ─────────────────────────────────────────────────────────────
 
 /**
@@ -154,6 +159,25 @@ const categoryCounts = computed<Record<string, number>>(() => {
   return counts
 })
 
+function sortByName(cards: ToolCard[]): ToolCard[] {
+  return [...cards].sort((a, b) => a.displayName.localeCompare(b.displayName))
+}
+
+// Cards to render, grouped for display. In the All view, one section per category
+// in ALL_VIEW_CATEGORY_ORDER, each sorted alphabetically and shown under a
+// subheading. In a single-category view, one alphabetical section with no
+// subheading (the active filter chip already labels it). Within a grid the cards
+// flow left-to-right, top-to-bottom, so an alphabetical array reads alphabetically.
+const displaySections = computed<{ category: ToolCategory, cards: ToolCard[] }[]>(() => {
+  const cat = activeCategory.value
+  if (cat === 'All') {
+    return ALL_VIEW_CATEGORY_ORDER
+      .map(c => ({ category: c, cards: sortByName(allCards.value.filter(card => card.category === c)) }))
+      .filter(section => section.cards.length > 0)
+  }
+  return [{ category: cat, cards: sortByName(filteredCards.value) }]
+})
+
 // ─── Expand/collapse ──────────────────────────────────────────────────────────
 
 const expandedSet = ref(new Set<string>())
@@ -223,85 +247,99 @@ function toggleAllExpanded() {
       </button>
     </div>
 
-    <!-- Grid -->
-    <div
-      class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"
-    >
-      <div
-        v-for="card in filteredCards"
-        :key="card.key"
-        class="bg-surface-elevated border border-border flex flex-col"
+    <!-- Category-grouped, alphabetised grids -->
+    <div class="space-y-8">
+      <section
+        v-for="section in displaySections"
+        :key="section.category"
       >
-        <!-- Card header -->
-        <div class="p-4 flex items-start gap-3">
-          <!-- Icon -->
-          <div
-            class="w-9 h-9 rounded flex items-center justify-center shrink-0"
-            :class="card.iconBg"
-          >
-            <component
-              :is="iconFor(card.iconKey)"
-              class="w-5 h-5"
-              :class="[card.iconColor, iconExtraClassFor(card.iconKey)]"
-              aria-hidden="true"
-            />
-          </div>
+        <!-- Category subheading — All view only; single-category tabs are self-labelling -->
+        <h2
+          v-if="activeCategory === 'All'"
+          class="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-muted"
+        >
+          {{ section.category }}
+          <span class="tabular-nums opacity-60">({{ section.cards.length }})</span>
+        </h2>
 
-          <!-- Name + category badge -->
-          <div class="flex-1 min-w-0">
-            <span class="text-sm font-mono font-semibold text-fg-strong truncate block">
-              {{ card.displayName }}
-            </span>
-            <span
-              class="mt-1.5 inline-block text-[10px] font-medium px-1.5 py-px rounded-sm leading-tight border"
-              :class="getPillClass(card.key)"
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div
+            v-for="card in section.cards"
+            :key="card.key"
+            class="bg-surface-elevated border border-border flex flex-col"
+          >
+            <!-- Card header -->
+            <div class="p-4 flex items-start gap-3">
+              <!-- Icon -->
+              <div
+                class="w-9 h-9 rounded flex items-center justify-center shrink-0"
+                :class="card.iconBg"
+              >
+                <component
+                  :is="iconFor(card.iconKey)"
+                  class="w-5 h-5"
+                  :class="[card.iconColor, iconExtraClassFor(card.iconKey)]"
+                  aria-hidden="true"
+                />
+              </div>
+
+              <!-- Name + category badge -->
+              <div class="flex-1 min-w-0">
+                <span class="text-sm font-mono font-semibold text-fg-strong truncate block">
+                  {{ card.displayName }}
+                </span>
+                <span
+                  class="mt-1.5 inline-block text-[10px] font-medium px-1.5 py-px rounded-sm leading-tight border"
+                  :class="getPillClass(card.key)"
+                >
+                  {{ card.category }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Description — fixed height so Functions header aligns across all cards in a row -->
+            <p class="px-4 pb-4 text-xs text-fg-muted leading-relaxed min-h-[4rem] line-clamp-3">
+              {{ card.description }}
+            </p>
+
+            <!-- Functions accordion header -->
+            <button
+              class="px-4 py-2.5 border-t border-border flex items-center justify-between w-full group transition-colors"
+              :class="expandedSet.has(card.key) ? 'bg-muted' : 'hover:bg-muted'"
+              @click="toggleExpand(card.key)"
             >
-              {{ card.category }}
-            </span>
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] font-medium text-fg-muted group-hover:text-fg-primary transition-colors">
+                  Functions
+                </span>
+                <span class="text-[10px] text-fg-primary bg-muted px-1.5 py-px rounded tabular-nums">
+                  {{ card.functions.length }}
+                </span>
+              </div>
+              <ChevronDownIcon
+                class="w-3.5 h-3.5 text-fg-muted group-hover:text-fg-muted transition-all duration-200 shrink-0"
+                :class="expandedSet.has(card.key) ? 'rotate-180' : ''"
+                aria-hidden="true"
+              />
+            </button>
+
+            <!-- Functions panel -->
+            <div
+              v-if="expandedSet.has(card.key)"
+              class="border-t border-border"
+            >
+              <div
+                v-for="fn in card.functions"
+                :key="fn.name"
+                class="px-4 py-2 flex items-start gap-3 border-b border-border last:border-b-0"
+              >
+                <code class="text-[10px] font-mono text-emerald-700 dark:text-emerald-400/80 shrink-0 mt-px w-32 truncate">{{ fn.name }}</code>
+                <span class="text-[10px] text-fg-muted leading-relaxed">{{ fn.description }}</span>
+              </div>
+            </div>
           </div>
         </div>
-
-        <!-- Description — fixed height so Functions header aligns across all cards in a row -->
-        <p class="px-4 pb-4 text-xs text-fg-muted leading-relaxed min-h-[4rem] line-clamp-3">
-          {{ card.description }}
-        </p>
-
-        <!-- Functions accordion header -->
-        <button
-          class="px-4 py-2.5 border-t border-border flex items-center justify-between w-full group transition-colors"
-          :class="expandedSet.has(card.key) ? 'bg-muted' : 'hover:bg-muted'"
-          @click="toggleExpand(card.key)"
-        >
-          <div class="flex items-center gap-2">
-            <span class="text-[11px] font-medium text-fg-muted group-hover:text-fg-primary transition-colors">
-              Functions
-            </span>
-            <span class="text-[10px] text-fg-primary bg-muted px-1.5 py-px rounded tabular-nums">
-              {{ card.functions.length }}
-            </span>
-          </div>
-          <ChevronDownIcon
-            class="w-3.5 h-3.5 text-fg-muted group-hover:text-fg-muted transition-all duration-200 shrink-0"
-            :class="expandedSet.has(card.key) ? 'rotate-180' : ''"
-            aria-hidden="true"
-          />
-        </button>
-
-        <!-- Functions panel -->
-        <div
-          v-if="expandedSet.has(card.key)"
-          class="border-t border-border"
-        >
-          <div
-            v-for="fn in card.functions"
-            :key="fn.name"
-            class="px-4 py-2 flex items-start gap-3 border-b border-border last:border-b-0"
-          >
-            <code class="text-[10px] font-mono text-emerald-700 dark:text-emerald-400/80 shrink-0 mt-px w-32 truncate">{{ fn.name }}</code>
-            <span class="text-[10px] text-fg-muted leading-relaxed">{{ fn.description }}</span>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   </div>
 </template>
