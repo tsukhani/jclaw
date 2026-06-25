@@ -106,6 +106,7 @@ const MANAGED_PREFIXES = [
   'caption.', // Image captioning cloud + local model (caption.cloud.*) — Settings (Image Captioning)
   'video.', // Video interpretation frame-sample density (video.sampleFrames) — Settings (Video Interpretation)
   'imagegen.', // Image generation provider selection (imagegen.provider) — Settings (Image Generation)
+  'videogen.', // Video generation provider + job timeout (videogen.provider) — Settings (Video Generation)
   'ocr.', // OCR backends — Settings (Tesseract today; GLM-OCR planned)
   'search.', // Search providers — Settings
   'scanner.', // Malware scanners — Settings
@@ -698,6 +699,53 @@ onMounted(() => {
   if (fluxDownloadInFlight()) startImagegenLocalPolling()
 })
 onUnmounted(() => stopImagegenLocalPolling())
+
+// ──────────────────── Video Generation (JCLAW-236) ─────────────────────
+// Cloud video generation via Replicate (JCLAW-231/235). Mirrors Image Generation: a non-empty
+// videogen.provider IS the "enabled" state. Replicate is the only cloud backend today (the second
+// cloud provider was dropped in SV-1); self-hosted WAN 2 / LTX 2 land in JCLAW-232/233.
+const videogenProvider = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'videogen.provider')?.value ?? '',
+)
+const videogenEnabled = computed(() => videogenProvider.value.trim().length > 0)
+const videogenModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'videogen.cloud.model')?.value ?? '',
+)
+const videogenMaxJobMinutes = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'videogen.maxJobMinutes')?.value ?? '30',
+)
+async function setVideogenProvider(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.provider', value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function toggleVideogenEnabled() {
+  // Only Replicate is wired today; enabling selects it (its API key gates the toggle).
+  await setVideogenProvider(videogenEnabled.value ? '' : 'replicate')
+}
+async function saveVideogenField(configKey: string, value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+// Jobs panel (operator-facing): the most-recent video-generation jobs with state + a link into chat.
+interface VideoGenJob {
+  id: number
+  state: string
+  prompt: string | null
+  percent: number | null
+  errorMessage: string | null
+  conversationId: number | null
+  createdAt: string | null
+}
+const { data: videogenJobs, refresh: refreshVideogenJobs }
+  = await useFetch<VideoGenJob[]>('/api/videogen/jobs/recent')
 
 // ──────────────────── Video Interpretation (JCLAW-223) ─────────────────────
 // One knob (frame-sample density) plus a read-only display of which of the three
@@ -4921,6 +4969,201 @@ async function deleteLoggerLevel(logger: string) {
           @change="saveVideoSampleFrames(($event.target as HTMLInputElement).value)"
         >
       </label>
+    </div>
+
+    <!-- Video Generation (JCLAW-236) -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-fg-muted">
+        Video Generation
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Let agents produce short videos with the <span class="font-mono">generate_video</span> tool, then
+        enable the tool per agent in the agent editor (it is off by default). Generation is asynchronous —
+        a “generating” card appears in chat and swaps to the finished clip when the job completes (minutes).
+        Replicate reuses the API key set in <span class="text-fg-muted">Image Generation</span> above.
+      </p>
+
+      <!-- Active-backend status line. -->
+      <div
+        class="px-3 py-2 text-[11px] border"
+        :class="videogenEnabled
+          ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
+          : 'bg-muted border-border text-fg-muted'"
+      >
+        <template v-if="videogenEnabled">
+          Active: video generation via {{ videogenProvider }}.
+        </template>
+        <template v-else>
+          Video generation is off — enable it below. The generate_video tool stays hidden from agents
+          until a backend is set.
+        </template>
+      </div>
+
+      <!-- Master toggle: ON when videogen.provider is non-empty (mirrors Image Generation). Gated on
+           the Replicate API key since that's the only backend today. -->
+      <div class="bg-surface-elevated border border-border">
+        <div class="px-4 py-2.5 flex items-center gap-3">
+          <button
+            type="button"
+            :aria-pressed="videogenEnabled"
+            aria-label="Enable video generation"
+            :disabled="!videogenEnabled && !replicateApiKeyConfigured"
+            :class="[
+              videogenEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted',
+              (!videogenEnabled && !replicateApiKeyConfigured) ? 'opacity-50 cursor-not-allowed' : '',
+            ]"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            :title="(!videogenEnabled && !replicateApiKeyConfigured) ? 'Set a Replicate API key in Image Generation above first.' : ''"
+            @click="toggleVideogenEnabled"
+          >
+            <span
+              :class="videogenEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
+          </button>
+          <span class="text-sm font-medium text-fg-strong">Enable video generation</span>
+          <span class="ml-auto text-[11px] text-fg-muted">{{ videogenEnabled ? 'on' : 'off' }}</span>
+        </div>
+      </div>
+
+      <template v-if="videogenEnabled">
+        <fieldset class="space-y-3">
+          <legend class="sr-only">
+            Video generation backend
+          </legend>
+
+          <!-- Replicate — the cloud backend; reuses the Replicate API key from Image Generation. -->
+          <div class="bg-surface-elevated border border-border">
+            <label
+              for="videogen-provider-replicate"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="replicateApiKeyConfigured ? 'cursor-pointer' : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="replicateApiKeyConfigured ? '' : 'Set a Replicate API key in Image Generation above to enable.'"
+            >
+              <input
+                id="videogen-provider-replicate"
+                type="radio"
+                name="videogen-provider"
+                value="replicate"
+                :checked="videogenProvider === 'replicate'"
+                :disabled="!replicateApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setVideogenProvider('replicate')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="replicateApiKeyConfigured ? 'text-fg-primary' : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >Replicate (WAN 2, LTX, …)</span>
+              <span
+                v-if="!replicateApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — set in Image Generation</span>
+            </label>
+            <!-- Model override (owner/model slug; provider default when blank). -->
+            <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Model</span>
+              <input
+                :value="videogenModel"
+                type="text"
+                :disabled="saving"
+                placeholder="wan-video/wan-2.2-t2v-fast"
+                aria-label="Replicate video model"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                @change="saveVideogenField('videogen.cloud.model', ($event.target as HTMLInputElement).value)"
+              >
+            </div>
+          </div>
+
+          <!-- Self-hosted engines — not yet available (land in JCLAW-232/233). -->
+          <div class="bg-surface-elevated border border-border opacity-60">
+            <div
+              class="px-4 py-2.5 flex items-center gap-3 cursor-not-allowed"
+              title="Local self-hosted engines arrive in a later release."
+            >
+              <input
+                type="radio"
+                disabled
+                aria-label="Self-hosted video engines (coming soon)"
+                class="accent-emerald-600"
+              >
+              <span class="flex-1 text-sm text-fg-muted">Self-Hosted WAN 2 / LTX 2</span>
+              <span class="text-[10px] text-fg-muted border border-border px-1">coming soon</span>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Job timeout — jobs RUNNING longer than this are failed by the runner. -->
+        <label
+          for="videogen-max-job-minutes"
+          class="flex items-center gap-3 px-1"
+        >
+          <span class="text-sm text-fg-strong">Job timeout (minutes)</span>
+          <input
+            id="videogen-max-job-minutes"
+            :value="videogenMaxJobMinutes"
+            type="number"
+            min="1"
+            :disabled="saving"
+            class="w-20 px-2 py-1 text-sm text-right bg-surface border border-border text-fg-primary"
+            aria-label="Video job timeout in minutes"
+            @change="saveVideogenField('videogen.maxJobMinutes', ($event.target as HTMLInputElement).value)"
+          >
+        </label>
+      </template>
+
+      <!-- Jobs panel: most-recent video jobs (operator-facing progress + a link into chat). -->
+      <div class="border border-border">
+        <div class="px-3 py-2 flex items-center gap-2 border-b border-border bg-muted">
+          <span class="text-xs font-medium text-fg-strong">Recent video jobs</span>
+          <button
+            type="button"
+            class="ml-auto text-[11px] text-fg-muted hover:text-fg-strong"
+            @click="refreshVideogenJobs()"
+          >
+            refresh
+          </button>
+        </div>
+        <div
+          v-if="!videogenJobs?.length"
+          class="px-3 py-3 text-xs text-fg-muted"
+        >
+          No video generation jobs yet.
+        </div>
+        <ul
+          v-else
+          class="divide-y divide-border"
+        >
+          <li
+            v-for="job in videogenJobs"
+            :key="job.id"
+            class="px-3 py-2 flex items-center gap-3 text-xs"
+          >
+            <span
+              class="shrink-0 px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+              :class="{
+                'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300': job.state === 'SUCCEEDED',
+                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300': job.state === 'FAILED',
+                'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300': job.state === 'RUNNING' || job.state === 'PENDING',
+              }"
+            >{{ job.state }}</span>
+            <span
+              class="flex-1 truncate text-fg-primary"
+              :title="job.prompt ?? ''"
+            >{{ job.prompt || '(no prompt)' }}</span>
+            <span
+              v-if="job.percent != null"
+              class="shrink-0 text-fg-muted"
+            >{{ job.percent }}%</span>
+            <NuxtLink
+              v-if="job.conversationId != null"
+              :to="`/chat?conversation=${job.conversationId}`"
+              class="shrink-0 text-emerald-700 dark:text-emerald-400 hover:underline"
+            >
+              see in conversation
+            </NuxtLink>
+          </li>
+        </ul>
+      </div>
     </div>
 
     <!-- Chat Settings -->

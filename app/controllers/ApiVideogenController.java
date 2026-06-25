@@ -9,6 +9,7 @@ import play.mvc.With;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -53,6 +54,25 @@ public class ApiVideogenController extends Controller {
                 m.put("resultAttachmentUuid", resultUuid(job.resultAttachmentId));
                 out.add(m);
             }
+        }
+        renderJSON(gson.toJson(out));
+    }
+
+    /** GET /api/videogen/jobs/recent — the most-recent jobs for the Settings jobs panel (JCLAW-236). */
+    @Operation(summary = "Most-recent video-generation jobs (operator Settings jobs panel)")
+    public static void recent() {
+        List<VideoGenerationJob> jobs = VideoGenerationJob.find("order by createdAt desc").fetch(20);
+        var out = new ArrayList<LinkedHashMap<String, Object>>();
+        for (var job : jobs) {
+            var m = new LinkedHashMap<String, Object>();
+            m.put("id", job.id);
+            m.put("state", job.state.name());
+            m.put("prompt", job.prompt);
+            m.put("percent", null); // cloud reports none (SV-1); the local engine fills this in JCLAW-232
+            m.put("errorMessage", job.errorMessage);
+            m.put("conversationId", job.conversationId);
+            m.put("createdAt", job.createdAt != null ? job.createdAt.toString() : null);
+            out.add(m);
         }
         renderJSON(gson.toJson(out));
     }

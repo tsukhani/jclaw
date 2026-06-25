@@ -2,6 +2,7 @@ package agents;
 
 import models.Conversation;
 import models.MessageAttachment;
+import models.VideoGenerationJob;
 import services.AttachmentService;
 import services.ConversationService;
 import services.EventLogger;
@@ -115,6 +116,13 @@ public class ConversationSink implements AgentExecutionSink {
         var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
         if (videoJob == null || videoJob.jobId() == null) {
             return null;
+        }
+        // JCLAW-236: backfill the job's conversation (the tool submits without one) so the Settings jobs
+        // panel can link each job back into its chat.
+        VideoGenerationJob job = VideoGenerationJob.findById(videoJob.jobId());
+        if (job != null && job.conversationId == null) {
+            job.conversationId = managed.id;
+            job.save();
         }
         // JCLAW-234/235: a zero-byte placeholder linked to the job; the runner fills it on completion
         // and the chat swaps the generating card for the inline player. Returned so the runner ships it
