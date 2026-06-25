@@ -4,16 +4,20 @@ plugins {
     id("com.diffplug.spotless") version "6.25.0"
 }
 
-// Import-order enforcement for production Java (JCLAW code-audit follow-up). Only
-// the importOrder step is used — it is a pure text transform on the import block,
-// so it is Java-25-safe (no source parsing, unlike removeUnusedImports/google-java-
-// format). Unused imports + wildcard bans are handled elsewhere (Sonar S1128, and
-// the pre-push wildcard gate). `spotlessApply` canonicalises; `spotlessCheck`
-// (wired into .githooks/pre-push) fails the push on drift. Scoped to app/ to match
-// the production-only import-hygiene cleanup; test/ is intentionally out of scope.
+// Import hygiene enforcement for production Java (JCLAW code-audit follow-up). Two
+// steps: removeUnusedImports() strips imports whose name is never referenced (it
+// parses source via google-java-format — verified Java-25-safe: handles unnamed
+// vars `_`, records, and pattern matching, see the injection test in the sonar-fixes
+// branch history), and importOrder() canonicalises ordering (a pure text transform).
+// Note removeUnusedImports does NOT catch same-package-but-used imports (the S1128
+// subset where the simple name IS referenced) — Sonar S1128 still owns those.
+// Wildcard bans are the pre-push grep gate. `spotlessApply` canonicalises;
+// `spotlessCheck` (wired into .githooks/pre-push) fails the push on drift. Scoped to
+// app/ to match the production-only cleanup; test/ is intentionally out of scope.
 spotless {
     java {
         target("app/**/*.java")
+        removeUnusedImports()
         importOrder("", "javax", "java", "\\#")
     }
 }
