@@ -1,11 +1,11 @@
 package agents;
 
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import llm.LlmProvider;
 import models.Agent;
 import services.EventLogger;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Client-disconnect cancellation primitives for the streaming agent loop.

@@ -4,19 +4,19 @@ import channels.SlackSocketModeRunner;
 import channels.TelegramPollingRunner;
 import channels.TelegramStreamingSink;
 import channels.WhatsAppCobaltRunner;
+import mcp.McpConnectionManager;
 import play.jobs.Job;
 import play.jobs.OnApplicationStop;
 import services.EventLogger;
+import services.TailscaleFunnel;
+import services.imagegen.LocalFluxSidecarManager;
+import services.search.LuceneIndexer;
+import services.transcription.WhisperJniTranscriber;
 import tools.PlaywrightBrowserTool;
 
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import mcp.McpConnectionManager;
-import services.TailscaleFunnel;
-import services.imagegen.LocalFluxSidecarManager;
-import services.search.LuceneIndexer;
-import services.transcription.WhisperJniTranscriber;
 
 /**
  * Stop all long-running jclaw subsystems on JVM shutdown. Runs as

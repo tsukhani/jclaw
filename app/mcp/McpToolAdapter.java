@@ -8,10 +8,10 @@ import models.Agent;
 import models.EventLog;
 import services.Tx;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.io.IOException;
 
 /**
  * Wraps one MCP tool as a {@link ToolRegistry.Tool} so the agent loop sees

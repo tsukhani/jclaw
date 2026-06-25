@@ -7,8 +7,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.Play;
-
-import static utils.GsonHolder.INSTANCE;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.ConfigService;
@@ -18,6 +16,8 @@ import utils.PasswordHasher;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * Admin authentication.

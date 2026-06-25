@@ -3,6 +3,7 @@ package services.caption;
 import play.Logger;
 
 import javax.imageio.ImageIO;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.Base64;

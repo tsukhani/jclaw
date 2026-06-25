@@ -1,8 +1,10 @@
 package tools;
 
 import agents.SkillLoader;
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -12,8 +14,11 @@ import services.EventLogger;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -24,11 +29,6 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-import agents.ToolAction;
-import com.google.gson.JsonElement;
-import java.nio.file.StandardOpenOption;
-import java.util.Comparator;
-import java.util.HashMap;
 
 public class FileSystemTools implements ToolRegistry.Tool {
 

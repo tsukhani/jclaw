@@ -1,36 +1,36 @@
 package services;
 
-import models.Agent;
-import okhttp3.MediaType;
-import play.db.jpa.JPA;
-import utils.HttpKeys;
-
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.ProviderRegistry;
+import models.Agent;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.RequestBody;
+import okhttp3.ResponseBody;
+import play.Logger;
+import play.Play;
+import play.db.jpa.JPA;
+import play.libs.Crypto;
+import play.libs.F;
+import play.mvc.CookieDataCodec;
+import utils.HttpFactories;
+import utils.HttpKeys;
+import utils.LatencyStats;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntFunction;
-import llm.ProviderRegistry;
-import okhttp3.OkHttpClient;
-import okhttp3.RequestBody;
-import okhttp3.ResponseBody;
-import play.Logger;
-import play.Play;
-import play.libs.Crypto;
-import play.libs.F;
-import play.mvc.CookieDataCodec;
-import utils.HttpFactories;
-import utils.LatencyStats;
 
 /**
  * Drives concurrent HTTP traffic against /api/chat/stream for load testing.

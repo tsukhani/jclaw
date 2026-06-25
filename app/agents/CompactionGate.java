@@ -1,8 +1,5 @@
 package agents;
 
-import java.util.List;
-import java.util.Set;
-
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
@@ -14,6 +11,9 @@ import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
 import services.Tx;
+
+import java.util.List;
+import java.util.Set;
 
 /**
  * JCLAW-38 / JCLAW-268 compaction trigger. Extracted from

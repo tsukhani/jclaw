@@ -1,23 +1,23 @@
 package models;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
 import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.PostPersist;
+import jakarta.persistence.PostRemove;
+import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
-import jakarta.persistence.PostPersist;
-import jakarta.persistence.PostUpdate;
-import jakarta.persistence.PostRemove;
+import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.Model;
+import services.Tx;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import services.Tx;
 
 @Entity
 @Table(name = "channel_config")

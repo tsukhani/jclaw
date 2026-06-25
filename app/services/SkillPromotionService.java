@@ -4,6 +4,7 @@ import agents.SkillLoader;
 import agents.ToolCatalog;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
@@ -12,8 +13,10 @@ import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import models.SkillRegistryTool;
+import services.AgentService;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -25,9 +28,6 @@ import java.util.Map;
 import java.util.Set;
 
 import static java.util.stream.Collectors.joining;
-import com.google.gson.JsonObject;
-import java.io.UncheckedIOException;
-import services.AgentService;
 
 /**
  * Domain logic for promoting agent workspace skills to the global registry

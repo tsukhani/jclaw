@@ -1,10 +1,10 @@
 package models;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
-import jakarta.persistence.Index;
 import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
 import play.db.jpa.Model;
 
 import java.time.Instant;

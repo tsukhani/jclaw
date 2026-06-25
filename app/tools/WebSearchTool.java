@@ -1,6 +1,8 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -10,21 +12,19 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
 import services.EventLogger;
+import utils.GsonHolder;
 import utils.HttpFactories;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import agents.ToolAction;
-import com.google.gson.Gson;
-import java.net.URLEncoder;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.concurrent.TimeUnit;
-import utils.GsonHolder;
 
 /**
  * Web search tool supporting multiple providers: Exa, Brave, and Tavily.

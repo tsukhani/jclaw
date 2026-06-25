@@ -1,41 +1,41 @@
 package controllers;
 
+import agents.ToolRegistry;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import llm.ProviderRegistry;
 import models.Conversation;
 import models.Message;
+import models.MessageAttachment;
+import models.SessionCompaction;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
-import services.ConversationService;
-import utils.JpqlFilter;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static utils.GsonHolder.INSTANCE;
-import agents.ToolRegistry;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import java.io.IOException;
-import java.util.Objects;
-import llm.ProviderRegistry;
-import models.MessageAttachment;
-import models.SessionCompaction;
 import services.ConversationQueue;
+import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
+import utils.JpqlFilter;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * CRUD and query endpoints for conversations. Extracted from ApiChatController

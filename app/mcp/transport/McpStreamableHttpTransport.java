@@ -1,6 +1,7 @@
 package mcp.transport;
 
 import mcp.jsonrpc.JsonRpc;
+import okhttp3.Call;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -17,7 +18,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import okhttp3.Call;
 
 /**
  * MCP Streamable HTTP transport (JCLAW-31).

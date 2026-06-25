@@ -5,8 +5,11 @@ import com.google.gson.JsonSyntaxException;
 import llm.LlmTypes.ToolDef;
 import models.Agent;
 import models.AgentToolConfig;
+import models.Conversation;
+import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
+import services.LoadTestRunner;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -17,9 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import models.Conversation;
-import play.cache.Cache;
-import services.LoadTestRunner;
 
 /**
  * Registry of available tools. Tools are registered at startup and made available

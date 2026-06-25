@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -8,31 +9,31 @@ import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import services.AgentService;
 import services.ConfigService;
+import services.EventLogger;
+import services.Tx;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import java.util.Map;
-import java.util.List;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import agents.ToolAction;
+import javax.imageio.ImageIO;
+
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-import javax.imageio.ImageIO;
-import services.EventLogger;
-import services.Tx;
 
 /**
  * Shell execution tool for agent-invoked commands.

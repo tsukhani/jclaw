@@ -1,6 +1,7 @@
 package controllers;
 
 import agents.SkillLoader;
+import agents.ToolRegistry;
 import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -10,26 +11,25 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.AgentSkillConfig;
+import play.Logger;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.SkillBinaryScanner;
 import services.SkillPromotionService;
+import services.Tx;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.List;
-
-import static utils.GsonHolder.INSTANCE;
-import agents.ToolRegistry;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import play.Logger;
-import services.SkillBinaryScanner;
-import services.Tx;
+
+import static utils.GsonHolder.INSTANCE;
 
 @With(AuthCheck.class)
 public class ApiSkillsController extends Controller {

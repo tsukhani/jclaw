@@ -3,10 +3,10 @@ package utils;
 import okhttp3.Call;
 import okhttp3.Connection;
 import okhttp3.EventListener;
+import play.Logger;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import play.Logger;
 
 /**
  * OkHttp EventListener for outbound LLM calls. Two responsibilities, both

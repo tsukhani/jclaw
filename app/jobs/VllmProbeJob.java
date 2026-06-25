@@ -1,10 +1,10 @@
 package jobs;
 
+import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.LocalProviderProbeSupport;
-import play.Play;
 
 /**
  * Probe the configured self-hosted vLLM instance once at boot. Same shape as

@@ -1,6 +1,8 @@
 package tools;
 
 import agents.AgentRunner;
+import agents.RunCancelledException;
+import agents.ToolAction;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
@@ -9,37 +11,35 @@ import llm.ProviderRegistry;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
-import models.SubagentRun;
 import models.Message;
 import models.MessageRole;
+import models.SubagentRun;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
+import services.SubagentRegistry;
 import services.Tx;
+import utils.GsonHolder;
 
-import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import agents.RunCancelledException;
-import agents.ToolAction;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import services.SubagentRegistry;
-import utils.GsonHolder;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * JCLAW-265: synchronous spawn of a child agent as a subagent.

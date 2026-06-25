@@ -1,9 +1,10 @@
 package utils;
 
+import play.mvc.Http;
+
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import play.mvc.Http;
 
 /**
  * Per-request latency trace: records nanoTime marks and tool-round

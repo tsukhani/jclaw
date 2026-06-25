@@ -1,22 +1,21 @@
 package agents;
 
+import com.google.gson.Gson;
+import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.ToolCall;
+import models.Conversation;
+import models.Message;
+import models.MessageAttachment;
+import models.MessageRole;
+import services.ConversationService;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import com.google.gson.Gson;
-
-import llm.LlmTypes.ChatMessage;
-import llm.LlmTypes.ToolCall;
-import models.Conversation;
-import models.MessageRole;
-import services.ConversationService;
-
 import static utils.GsonHolder.INSTANCE;
-import models.Message;
-import models.MessageAttachment;
 
 /**
  * History → {@link ChatMessage} list hydration: walks the persisted

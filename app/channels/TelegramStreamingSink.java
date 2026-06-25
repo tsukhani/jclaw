@@ -2,18 +2,21 @@ package channels;
 
 import models.Agent;
 import models.Conversation;
+import models.TelegramBinding;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
+import play.Play;
 import services.EventLogger;
 import services.Tx;
 import utils.VirtualThreads;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -24,9 +27,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
-import java.util.concurrent.ConcurrentHashMap;
-import models.TelegramBinding;
-import play.Play;
 
 /**
  * Throttled edit-loop sink for streaming an LLM response into a Telegram

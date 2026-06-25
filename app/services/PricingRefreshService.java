@@ -1,9 +1,11 @@
 package services;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Config;
+import okhttp3.Request;
 import play.Logger;
 import utils.GsonHolder;
 import utils.HttpFactories;
@@ -11,10 +13,8 @@ import utils.HttpKeys;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
-import com.google.gson.JsonElement;
 import java.util.Set;
-import okhttp3.Request;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Backfills missing pricing data on operator-configured models from

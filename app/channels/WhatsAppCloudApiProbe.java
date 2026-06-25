@@ -2,13 +2,13 @@ package channels;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import okhttp3.Request;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.Strings;
 
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
-import okhttp3.Request;
 
 /**
  * Verifies a WhatsApp Cloud-API binding's credentials by probing Meta's Graph

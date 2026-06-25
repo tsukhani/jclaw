@@ -3,11 +3,12 @@ package channels;
 import channels.TelegramModelCallback.Payload;
 import models.Agent;
 import models.Conversation;
-import services.Tx;
-import slash.Commands;
-import java.util.Locale;
 import play.Play;
 import services.ModelOverrideResolver;
+import services.Tx;
+import slash.Commands;
+
+import java.util.Locale;
 
 /**
  * Entry point for Telegram {@code callback_query} updates from the

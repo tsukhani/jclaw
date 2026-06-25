@@ -17,8 +17,9 @@ import play.mvc.With;
 import services.AgentService;
 import services.EventLogger;
 
-import static utils.GsonHolder.INSTANCE;
 import java.util.Map;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * CRUD API for per-agent Slack bindings (JCLAW-441). Mirrors

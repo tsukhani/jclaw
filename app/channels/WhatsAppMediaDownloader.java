@@ -5,6 +5,7 @@ import it.auties.whatsapp.model.info.ChatMessageInfo;
 import models.MessageAttachment;
 import models.WhatsAppBinding;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import services.AgentService;
 import services.AttachmentService;
 import services.EventLogger;
@@ -26,7 +27,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import okhttp3.Request;
 
 /**
  * Downloads inbound WhatsApp media into the agent's staging dir, returning

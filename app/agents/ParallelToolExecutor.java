@@ -1,24 +1,23 @@
 package agents;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonParser;
+import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.ToolCall;
+import models.Agent;
+import models.MessageAttachment;
+import services.EventLogger;
+import services.Tx;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonParser;
-
-import llm.LlmTypes.ChatMessage;
-import llm.LlmTypes.ToolCall;
-import models.Agent;
-import services.EventLogger;
-import services.Tx;
-
 import static utils.GsonHolder.INSTANCE;
-import java.util.concurrent.atomic.AtomicReference;
-import models.MessageAttachment;
 
 /**
  * Three-tier scheduler for a batch of tool calls. Extracted from

@@ -1,5 +1,9 @@
 package services.search;
 
+import models.Memory;
+import models.Message;
+import models.SubagentRun;
+import models.Task;
 import models.TaskRunMessage;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.index.Term;
@@ -11,19 +15,15 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.search.TermQuery;
+import play.db.jpa.JPA;
 import services.EventLogger;
+import services.Tx;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.function.Function;
-import models.Memory;
-import models.Message;
-import models.SubagentRun;
-import models.Task;
-import play.db.jpa.JPA;
-import services.Tx;
 
 /**
  * Lucene 10 backed implementation of {@link MessageSearchRepository}.

@@ -1,9 +1,9 @@
 package agents;
 
+import models.MessageAttachment;
 import services.AttachmentService;
 
 import java.util.List;
-import models.MessageAttachment;
 
 /**
  * Write-target abstraction for {@link AgentRunner}. Decouples message

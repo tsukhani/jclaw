@@ -1,13 +1,13 @@
 package models;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
-import jakarta.persistence.Index;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Column;
-import play.db.jpa.Model;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PersistenceException;
+import jakarta.persistence.Table;
+import play.db.jpa.Model;
 
 /**
  * JCLAW-385: a durable, restart-surviving record that a dangerous tool has

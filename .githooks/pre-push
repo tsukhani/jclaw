@@ -68,6 +68,22 @@ if should_skip_for_docs; then
     exit 0
 fi
 
+# Import-hygiene gate (code-audit follow-up): production code must have no wildcard
+# imports, and import order must be canonical (Spotless). Both are fast — run them
+# before the slower test suite so a hygiene slip fails the push immediately.
+wildcards=$(cd "$repo_root" && grep -rlE '^import [a-z][[:alnum:]_.]*\.\*;' app/ 2>/dev/null || true)
+if [[ -n "$wildcards" ]]; then
+    echo "[jclaw pre-push] Wildcard imports are banned in app/ — found in:" >&2
+    echo "$wildcards" >&2
+    echo "[jclaw pre-push] Replace them with explicit imports, then re-commit." >&2
+    exit 1
+fi
+echo "[jclaw pre-push] Checking import order (spotlessCheck)..."
+if ! (cd "$repo_root" && ./gradlew --quiet spotlessCheck); then
+    echo "[jclaw pre-push] Import order drift in app/ — run ./gradlew spotlessApply, then re-commit." >&2
+    exit 1
+fi
+
 echo "[jclaw pre-push] Testing HEAD $current_sha before push..."
 if (cd "$repo_root" && ./jclaw.sh test); then
     echo "$current_sha" > "$cache_file"

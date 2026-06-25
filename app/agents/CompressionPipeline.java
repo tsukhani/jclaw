@@ -5,6 +5,7 @@ import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
+import play.Logger;
 import services.CompressionMetrics;
 import services.ConfigService;
 import services.compression.CodeCompressor;
@@ -19,7 +20,6 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
-import play.Logger;
 
 /**
  * Content-aware compression pipeline (JCLAW-465 core). Sits between

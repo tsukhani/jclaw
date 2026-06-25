@@ -9,12 +9,12 @@ import models.Conversation;
 import models.Message;
 import models.SubagentRun;
 import services.Tx;
+import utils.GsonHolder;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import utils.GsonHolder;
 
 /**
  * JCLAW-274: read a subagent run's child conversation transcript.

@@ -4,10 +4,10 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.HdrHistogram.AtomicHistogram;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.HashMap;
 
 /**
  * In-memory HdrHistogram-backed latency stats, partitioned by channel.

@@ -5,12 +5,12 @@ import mcp.McpServerTool;
 import models.Agent;
 import models.McpServer;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.ArrayList;
 
 /**
  * JCLAW-281: builds the {@code ## MCP Servers} system-prompt manifest — the

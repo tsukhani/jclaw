@@ -1,5 +1,6 @@
 package channels;
 
+import models.Agent;
 import services.EventLogger;
 import utils.RetryScheduler;
 
@@ -7,7 +8,6 @@ import java.io.File;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import models.Agent;
 
 /**
  * Contract for outbound message delivery to an external channel. Each implementation

@@ -2,6 +2,7 @@ package channels;
 
 import models.MessageAttachment;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
@@ -19,7 +20,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import okhttp3.Request;
 
 /**
  * Downloads inbound Slack files (JCLAW-344) authenticating with the agent's

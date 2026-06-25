@@ -1,10 +1,10 @@
 package jobs;
 
+import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.LmStudioProbe;
-import play.Play;
 
 /**
  * JCLAW-182: probe the configured LM Studio instance once at boot. Same shape

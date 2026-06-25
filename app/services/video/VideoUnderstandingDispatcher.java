@@ -6,9 +6,9 @@ import services.AgentService;
 import services.EventLogger;
 import services.video.FrameSampler.FrameSamplingException;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.LinkedHashMap;
 
 /**
  * Routes a video attachment to an interpretation strategy and returns the OpenAI-style content parts

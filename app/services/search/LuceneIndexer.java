@@ -1,5 +1,6 @@
 package services.search;
 
+import models.TaskRunMessage;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -23,7 +24,6 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import models.TaskRunMessage;
 
 /**
  * JVM-wide owner of the Lucene 10 IndexWriter + SearcherManager instances

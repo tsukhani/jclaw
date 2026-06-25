@@ -3,11 +3,15 @@ package jobs;
 import com.github.kagkarlsson.scheduler.Scheduler;
 import com.github.kagkarlsson.scheduler.SchedulerBuilder;
 import com.github.kagkarlsson.scheduler.jdbc.DefaultJdbcCustomization;
+import mcp.McpConnectionManager;
+import play.Play;
 import play.db.DB;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.TaskExecutionHandler;
+
+import javax.sql.DataSource;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -15,9 +19,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Executors;
-import javax.sql.DataSource;
-import mcp.McpConnectionManager;
-import play.Play;
 
 /**
  * JCLAW-21: build the db-scheduler {@link Scheduler}, register

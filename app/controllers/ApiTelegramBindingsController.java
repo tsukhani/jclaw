@@ -4,6 +4,7 @@ import channels.ChannelTransport;
 import channels.TelegramPollingRunner;
 import channels.TelegramWebhookRegistrar;
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -17,11 +18,11 @@ import play.mvc.With;
 import services.AgentService;
 import services.EventLogger;
 
-import static utils.GsonHolder.INSTANCE;
-import com.google.gson.JsonObject;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Map;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * CRUD API for per-user Telegram bindings (JCLAW-89). Each binding maps one bot

@@ -3,8 +3,8 @@ package services.transcription;
 import play.Logger;
 
 import java.io.IOException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Detect whether {@code ffmpeg} is on PATH. JCLAW-163's transcription pipeline

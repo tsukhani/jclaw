@@ -1,13 +1,14 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
-import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.PlaywrightException;
-import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.options.LoadState;
 import models.Agent;
 import services.AgentService;
 import services.EventLogger;
@@ -19,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
-import agents.ToolAction;
 
 /**
  * Headless Chromium browser automation for JS-heavy pages.

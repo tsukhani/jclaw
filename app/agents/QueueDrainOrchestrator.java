@@ -1,11 +1,11 @@
 package agents;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Post-turn conversation-queue draining + ownership-release machinery.

@@ -1,8 +1,8 @@
 package services;
 
 import com.google.gson.Gson;
-import static utils.GsonHolder.INSTANCE;
 
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -12,7 +12,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
-import java.util.ArrayList;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * Simple in-memory pub/sub notification bus for pushing real-time events

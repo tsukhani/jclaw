@@ -1,6 +1,7 @@
 package services;
 
 import models.Agent;
+import models.ChannelType;
 import models.Conversation;
 import models.Message;
 import models.MessageAttachment;
@@ -8,13 +9,12 @@ import models.MessageRole;
 import play.db.jpa.JPA;
 import services.transcription.PendingTranscripts;
 import services.transcription.TranscriptionRouter;
+import utils.JpqlFilter;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.time.Instant;
 import java.util.function.Supplier;
-import models.ChannelType;
-import utils.JpqlFilter;
 
 public class ConversationService {
 

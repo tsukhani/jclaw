@@ -5,12 +5,12 @@ import models.MessageAttachment;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.AttachmentService;
 import utils.HttpKeys;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import services.AttachmentService;
 
 /**
  * Download endpoint for persisted chat-message attachments (JCLAW-279).

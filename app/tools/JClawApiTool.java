@@ -4,18 +4,20 @@ import agents.ToolRegistry;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import controllers.ChatHidden;
+import io.swagger.v3.oas.annotations.Operation;
 import models.Agent;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
-import controllers.ChatHidden;
 import play.Play;
 import play.mvc.ActionInvoker;
 import play.mvc.Router;
 import services.InternalApiTokenService;
 import utils.HttpFactories;
 
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
@@ -23,8 +25,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import io.swagger.v3.oas.annotations.Operation;
-import java.io.IOException;
 
 /**
  * Call JClaw's own HTTP API from an agent (JCLAW-282).

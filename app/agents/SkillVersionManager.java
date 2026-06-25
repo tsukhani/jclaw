@@ -4,11 +4,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.regex.Pattern;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.regex.Pattern;
 
 /**
  * Skill version lifecycle management: semver comparison, patch bumping,

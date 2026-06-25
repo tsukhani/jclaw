@@ -1,12 +1,12 @@
 package agents;
 
-import java.util.Optional;
-
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import models.Agent;
 import models.Conversation;
 import services.ModelOverrideResolver;
+
+import java.util.Optional;
 
 /**
  * Conversation-override-aware lookups for the model identity and

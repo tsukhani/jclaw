@@ -1,13 +1,13 @@
 package agents;
 
-import java.util.List;
-
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import models.Agent;
 import models.Conversation;
 import services.EventLogger;
+
+import java.util.List;
 
 /**
  * Provider {@code finish_reason} interpretation and the JCLAW-291

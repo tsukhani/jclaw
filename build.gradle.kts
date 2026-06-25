@@ -1,6 +1,21 @@
 plugins {
     id("org.playframework.play1")
     id("org.sonarqube") version "7.3.1.8318"
+    id("com.diffplug.spotless") version "6.25.0"
+}
+
+// Import-order enforcement for production Java (JCLAW code-audit follow-up). Only
+// the importOrder step is used — it is a pure text transform on the import block,
+// so it is Java-25-safe (no source parsing, unlike removeUnusedImports/google-java-
+// format). Unused imports + wildcard bans are handled elsewhere (Sonar S1128, and
+// the pre-push wildcard gate). `spotlessApply` canonicalises; `spotlessCheck`
+// (wired into .githooks/pre-push) fails the push on drift. Scoped to app/ to match
+// the production-only import-hygiene cleanup; test/ is intentionally out of scope.
+spotless {
+    java {
+        target("app/**/*.java")
+        importOrder("", "javax", "java", "\\#")
+    }
 }
 
 play1 {

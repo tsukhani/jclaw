@@ -1,21 +1,21 @@
 package memory;
 
+import llm.ProviderRegistry;
 import models.Memory;
 import play.Play;
+import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.EventLogger;
 
-import java.time.Duration;
-import java.util.List;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
+import java.time.Duration;
 import java.util.HexFormat;
-import llm.ProviderRegistry;
-import play.cache.Cache;
+import java.util.List;
 
 /**
  * JPA-backed memory store. Uses LIKE for H2 (dev/test), PostgreSQL full-text search

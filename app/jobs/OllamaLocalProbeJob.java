@@ -1,10 +1,10 @@
 package jobs;
 
+import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.OllamaLocalProbe;
-import play.Play;
 
 /**
  * JCLAW-178: probe the configured local Ollama instance once at boot. Logs

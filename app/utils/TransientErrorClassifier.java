@@ -1,9 +1,9 @@
 package utils;
 
-import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Decide whether a {@link Throwable} represents a transient failure

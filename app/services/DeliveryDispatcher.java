@@ -10,10 +10,10 @@ import models.MessageRole;
 import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
+import utils.GsonHolder;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-import utils.GsonHolder;
 
 /**
  * JCLAW-327 / JCLAW-295: dispatch a text message to an external chat channel.

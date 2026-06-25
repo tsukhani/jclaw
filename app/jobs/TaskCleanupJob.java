@@ -6,12 +6,12 @@ import play.jobs.Every;
 import play.jobs.Job;
 import services.ConfigService;
 import services.EventLogger;
+import services.TaskSchedulingService;
 import services.Tx;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import services.TaskSchedulingService;
 
 /**
  * JCLAW-259: scheduled auto-cleanup for terminal tasks past their

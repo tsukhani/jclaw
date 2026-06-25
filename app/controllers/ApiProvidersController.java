@@ -14,9 +14,8 @@ import llm.PaymentModality;
 import llm.ProviderRegistry;
 import play.mvc.Controller;
 import play.mvc.With;
-
-import static utils.GsonHolder.INSTANCE;
 import services.ConfigService;
+import services.LocalProviderProbeSupport;
 import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
 import services.PricingRefreshService;
@@ -27,7 +26,8 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import services.LocalProviderProbeSupport;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * Provider management endpoints — model discovery from provider APIs.

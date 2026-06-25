@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -13,10 +14,10 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.McpServerService;
 
-import static utils.GsonHolder.INSTANCE;
-import com.google.gson.JsonObject;
 import java.util.List;
 import java.util.Map;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * Admin CRUD over the {@code mcp_server} table (JCLAW-33).

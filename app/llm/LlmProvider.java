@@ -1,46 +1,46 @@
 package llm;
 
+import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParser;
-import com.google.gson.FieldNamingPolicy;
 import llm.LlmTypes.ChatCompletionChunk;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatRequest;
 import llm.LlmTypes.ChatResponse;
+import llm.LlmTypes.Choice;
 import llm.LlmTypes.ChunkChoice;
 import llm.LlmTypes.ChunkDelta;
+import llm.LlmTypes.EmbeddingRequest;
+import llm.LlmTypes.EmbeddingResponse;
+import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ProviderConfig;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolCallChunk;
 import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
-import llm.LlmTypes.EmbeddingRequest;
-import llm.LlmTypes.EmbeddingResponse;
-import llm.LlmTypes.Choice;
-import llm.LlmTypes.FunctionCall;
 import services.EventLogger;
 import utils.HttpKeys;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Abstract base for LLM provider integrations. Implements shared OpenAI-compatible

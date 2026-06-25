@@ -2,6 +2,7 @@ package channels;
 
 import channels.Channel.SendResult;
 import models.Agent;
+import models.TelegramBinding;
 import okhttp3.OkHttpClient;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
@@ -9,8 +10,6 @@ import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.UnpinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.polls.SendPoll;
 import org.telegram.telegrambots.meta.api.methods.reactions.SetMessageReaction;
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
-import org.telegram.telegrambots.meta.api.objects.polls.input.InputPollOption;
 import org.telegram.telegrambots.meta.api.methods.send.SendAudio;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -19,19 +18,22 @@ import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.methods.send.SendVoice;
 import org.telegram.telegrambots.meta.api.methods.updates.DeleteWebhook;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
+import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.polls.input.InputPollOption;
 import org.telegram.telegrambots.meta.api.objects.reactions.ReactionType;
 import org.telegram.telegrambots.meta.api.objects.reactions.ReactionTypeEmoji;
-import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
+import play.Play;
 import services.EventLogger;
+import utils.RetryScheduler;
 
-import java.util.concurrent.TimeUnit;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -39,11 +41,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import models.TelegramBinding;
-import play.Play;
-import utils.RetryScheduler;
 
 /**
  * Per-token Telegram outbound engine (JCLAW-151 Phase C2, extracted from

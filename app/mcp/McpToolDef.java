@@ -3,9 +3,9 @@ package mcp;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.ArrayList;
 
 /**
  * One MCP tool advertised by a connected server (JCLAW-31).

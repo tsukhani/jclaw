@@ -6,6 +6,8 @@ import okhttp3.ConnectionPool;
 import okhttp3.Dispatcher;
 import okhttp3.EventListener;
 import okhttp3.OkHttpClient;
+import play.Logger;
+import services.ConfigService;
 
 import java.time.Duration;
 import java.util.Set;
@@ -13,8 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import play.Logger;
-import services.ConfigService;
 
 /**
  * Single source of truth for outbound HTTP-client provisioning. Callers

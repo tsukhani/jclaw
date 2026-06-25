@@ -1,11 +1,11 @@
 package channels;
 
+import models.Agent;
 import models.ChannelType;
 import models.Conversation;
 import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
-import models.Agent;
 
 /**
  * JCLAW-141: resolves a {@link Channel} instance for a conversation so dispatch

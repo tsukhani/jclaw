@@ -3,21 +3,10 @@ package controllers;
 import agents.AgentRunner;
 import channels.InboundCallback;
 import channels.InboundMessage;
-import channels.TelegramChannel;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import models.Agent;
-import models.TelegramBinding;
-import org.telegram.telegrambots.meta.api.objects.Update;
-import play.mvc.Controller;
-import play.mvc.Http;
-import services.EventLogger;
-import utils.WebhookUtil;
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import channels.TelegramAccessPolicy;
 import channels.TelegramBotIdentity;
 import channels.TelegramCallbackDispatcher;
+import channels.TelegramChannel;
 import channels.TelegramForwardCoalesceBuffer;
 import channels.TelegramInboundTextBuffer;
 import channels.TelegramMediaGroupBuffer;
@@ -25,11 +14,22 @@ import channels.TelegramPollingRunner;
 import channels.TelegramStreamingSink;
 import channels.TelegramWebhookRateLimiter;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import models.Agent;
+import models.TelegramBinding;
+import org.telegram.telegrambots.meta.api.objects.Update;
 import play.Play;
+import play.mvc.Controller;
+import play.mvc.Http;
 import play.mvc.results.Result;
+import services.EventLogger;
 import services.Tx;
 import utils.PlayConfig;
 import utils.Strings;
+import utils.WebhookUtil;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * Webhook receiver for per-user Telegram bindings (JCLAW-89). The route carries

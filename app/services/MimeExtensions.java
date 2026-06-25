@@ -1,7 +1,8 @@
 package services;
 
-import java.util.Map;
 import play.libs.MimeTypes;
+
+import java.util.Map;
 
 /**
  * Reverse lookup from a MIME type to a canonical file extension, delegating

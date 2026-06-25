@@ -1,9 +1,9 @@
 package models;
 
-import jakarta.persistence.MappedSuperclass;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Column;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.MappedSuperclass;
 import play.db.jpa.Model;
 
 /**

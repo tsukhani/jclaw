@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -11,7 +12,9 @@ import org.apache.tika.parser.ocr.TesseractOCRConfig;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
 import org.xml.sax.SAXException;
+import play.Play;
 import services.AgentService;
+import services.ConfigService;
 import services.DocumentWriter;
 import services.OcrHealthProbe;
 import utils.TikaHolder;
@@ -20,13 +23,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import agents.ToolAction;
-import java.nio.file.StandardOpenOption;
-import play.Play;
-import services.ConfigService;
 
 /**
  * Tool for reading and writing rich document formats. Reading uses Apache

@@ -13,10 +13,16 @@ import models.SubagentRun;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AgentService;
+import services.EventLogger;
 import services.SubagentRegistry;
+import services.search.LuceneIndexer;
+import services.search.MessageSearch;
 import utils.JpqlFilter;
 
+import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -24,12 +30,6 @@ import java.util.Map;
 import java.util.Set;
 
 import static utils.GsonHolder.INSTANCE;
-import java.io.IOException;
-import java.util.ArrayList;
-import services.AgentService;
-import services.EventLogger;
-import services.search.LuceneIndexer;
-import services.search.MessageSearch;
 
 /**
  * JCLAW-271: REST surface for the SubagentRuns admin page. Lists

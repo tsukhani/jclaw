@@ -4,6 +4,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.rendering.PDFRenderer;
 
 import javax.imageio.ImageIO;
+
 import java.awt.image.BufferedImage;
 import java.io.InputStream;
 import java.io.OutputStream;

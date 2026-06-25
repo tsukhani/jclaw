@@ -1,22 +1,23 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import org.jsoup.Jsoup;
+import services.AgentService;
 import utils.SsrfGuard;
 
+import javax.net.ssl.SSLException;
+
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Map;
-import agents.ToolAction;
-import java.net.SocketTimeoutException;
-import javax.net.ssl.SSLException;
-import services.AgentService;
 
 /**
  * Fetch the content of a URL. Supports two modes:

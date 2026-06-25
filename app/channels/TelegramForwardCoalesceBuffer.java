@@ -1,11 +1,11 @@
 package channels;
 
+import play.Play;
 import services.EventLogger;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import play.Play;
 
 /**
  * JCLAW-387 B1: forwarded-message coalescing lane. When a user forwards a

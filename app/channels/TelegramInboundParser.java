@@ -3,20 +3,21 @@ package channels;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
 import models.Agent;
+import models.MessageAttachment;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.MessageEntity;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
+import play.Play;
+import services.AttachmentService;
 import services.EventLogger;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-import models.MessageAttachment;
-import play.Play;
-import services.AttachmentService;
 
 /**
  * Telegram inbound-update parsing, extracted from {@link TelegramChannel} in

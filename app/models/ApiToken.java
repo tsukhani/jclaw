@@ -1,16 +1,16 @@
 package models;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
 import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import play.db.jpa.JPA;
 import play.db.jpa.Model;
 import utils.TokenHasher;
 
 import java.time.Instant;
-import play.db.jpa.JPA;
 
 /**
  * Bearer-credential row for the in-process {@code jclaw_api} tool

@@ -10,8 +10,8 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.HexFormat;
+import java.util.List;
 
 /**
  * Single choke-point for malware scanning of binary files inside a skill directory.

@@ -3,12 +3,12 @@ package channels;
 import agents.AgentRunner;
 import com.google.gson.JsonObject;
 import models.SlackBinding;
+import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
 
 import java.util.ArrayList;
 import java.util.List;
-import services.AttachmentService;
 
 /**
  * Shared Slack inbound dispatch (JCLAW-351), independent of how the event arrived.

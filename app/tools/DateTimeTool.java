@@ -1,6 +1,8 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 
@@ -12,8 +14,6 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
-import agents.ToolAction;
-import com.google.gson.JsonObject;
 
 /**
  * Provides accurate date/time information and calculations.

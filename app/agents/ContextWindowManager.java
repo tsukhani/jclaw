@@ -1,10 +1,7 @@
 package agents;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
 import llm.LlmProvider;
+import llm.LlmTypes;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.TokenUsageEstimator;
@@ -13,7 +10,10 @@ import models.Conversation;
 import models.MessageRole;
 import services.ConfigService;
 import services.EventLogger;
-import llm.LlmTypes;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Token-estimation and context-window arithmetic for the agent loop.

@@ -1,7 +1,9 @@
 package controllers;
 
+import agents.SystemPromptAssembler;
 import agents.SystemPromptAssembler.PromptBreakdown;
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -9,16 +11,18 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
+import models.AgentSkillAllowedTool;
+import models.AgentSkillConfig;
+import play.libs.MimeTypes;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.ConfigService;
+import services.LoadTestRunner;
+import services.compression.TextCompressor;
+import tools.ShellExecTool;
 import utils.HttpKeys;
 
-import java.util.regex.Pattern;
-
-import static utils.GsonHolder.INSTANCE;
-import agents.SystemPromptAssembler;
-import com.google.gson.JsonObject;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -27,13 +31,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import models.AgentSkillAllowedTool;
-import models.AgentSkillConfig;
-import play.libs.MimeTypes;
-import services.ConfigService;
-import services.LoadTestRunner;
-import services.compression.TextCompressor;
-import tools.ShellExecTool;
+import java.util.regex.Pattern;
+
+import static utils.GsonHolder.INSTANCE;
 
 @With(AuthCheck.class)
 public class ApiAgentsController extends Controller {

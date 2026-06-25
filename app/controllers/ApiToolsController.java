@@ -1,6 +1,7 @@
 package controllers;
 
 import agents.SkillLoader;
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.Operation;
@@ -9,8 +10,6 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-
-import static utils.GsonHolder.INSTANCE;
 import models.Agent;
 import models.AgentToolConfig;
 import play.mvc.Controller;
@@ -18,7 +17,8 @@ import play.mvc.With;
 
 import java.util.HashMap;
 import java.util.List;
-import agents.ToolAction;
+
+import static utils.GsonHolder.INSTANCE;
 
 @With(AuthCheck.class)
 public class ApiToolsController extends Controller {

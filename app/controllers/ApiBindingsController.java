@@ -8,14 +8,14 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.AgentBinding;
-
-import static utils.GsonHolder.INSTANCE;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
+
+import static utils.GsonHolder.INSTANCE;
 
 @With(AuthCheck.class)
 public class ApiBindingsController extends Controller {

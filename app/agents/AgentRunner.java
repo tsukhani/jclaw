@@ -1,7 +1,8 @@
 package agents;
 
+import channels.ChannelRegistry;
+import channels.ChannelStreamingSink;
 import com.google.gson.Gson;
-import static utils.GsonHolder.INSTANCE;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
@@ -10,29 +11,29 @@ import llm.ProviderRegistry;
 import models.Agent;
 import models.ChannelType;
 import models.Conversation;
-import services.ConversationService;
-import services.EventLogger;
-import utils.LatencyTrace;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import channels.ChannelRegistry;
-import channels.ChannelStreamingSink;
-import java.util.Objects;
-import java.util.Set;
-import java.util.function.Function;
 import models.SubagentRun;
 import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationQueue;
+import services.ConversationService;
+import services.EventLogger;
 import services.SessionCompactor;
 import services.SubagentRegistry;
 import services.TaskRunRegistry;
 import services.Tx;
 import utils.LatencyStats;
+import utils.LatencyTrace;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Function;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * Core agent pipeline: receive message → load conversation → assemble prompt →

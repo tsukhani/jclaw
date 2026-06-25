@@ -13,8 +13,8 @@ import services.Tx;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.ArrayList;
+import java.util.HashSet;
 
 /**
  * JCLAW-21: at JVM start, register existing non-terminal

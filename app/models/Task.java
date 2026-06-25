@@ -1,27 +1,27 @@
 package models;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
-import jakarta.persistence.Index;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Column;
-import jakarta.persistence.Enumerated;
+import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PostPersist;
+import jakarta.persistence.PostRemove;
+import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
-import jakarta.persistence.PostPersist;
-import jakarta.persistence.PostUpdate;
-import jakarta.persistence.PostRemove;
+import jakarta.persistence.Table;
+import models.Agent;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.query.NativeQuery;
+import play.db.jpa.JPA;
 import play.db.jpa.Model;
+import services.search.LuceneIndexer;
 
 import java.time.Instant;
 import java.util.List;
-import models.Agent;
-import org.hibernate.query.NativeQuery;
-import play.db.jpa.JPA;
-import services.search.LuceneIndexer;
 
 @Entity
 @Table(name = "task", indexes = {

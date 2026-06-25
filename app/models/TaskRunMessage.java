@@ -13,10 +13,10 @@ import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import play.db.jpa.Model;
+import services.search.LuceneIndexer;
 
 import java.time.Instant;
 import java.util.List;
-import services.search.LuceneIndexer;
 
 /**
  * One turn within a {@link TaskRun}'s transcript. Plays the same role for

@@ -7,6 +7,7 @@ import services.EventLogger;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -14,7 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.Map;
 
 /**
  * Generic Telegram approve/deny button workflow (JCLAW-373).

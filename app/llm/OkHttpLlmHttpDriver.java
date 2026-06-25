@@ -7,6 +7,7 @@ import okhttp3.Response;
 import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
+import utils.HttpFactories;
 import utils.HttpKeys;
 
 import java.io.IOException;
@@ -16,7 +17,6 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import utils.HttpFactories;
 
 /**
  * OkHttp 5.x-backed LLM transport. The only HTTP path for outbound LLM

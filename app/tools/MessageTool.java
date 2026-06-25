@@ -11,16 +11,16 @@ import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
 import models.WhatsAppTransport;
+import play.Play;
 import services.DeliveryDispatcher;
 import services.Tx;
+import utils.GsonHolder;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.ArrayList;
-import play.Play;
-import utils.GsonHolder;
 
 /**
  * JCLAW-327: agent-facing {@code message} tool for mid-flight delivery to

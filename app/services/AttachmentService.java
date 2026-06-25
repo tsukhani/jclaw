@@ -3,20 +3,20 @@ package services;
 import models.Agent;
 import models.Message;
 import models.MessageAttachment;
+import play.Logger;
 import utils.TikaHolder;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.Base64;
-import java.util.List;
-import java.io.UncheckedIOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Base64;
 import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
-import play.Logger;
 
 /**
  * Vision/multimodal attachment lifecycle (JCLAW-25). Staged uploads land in

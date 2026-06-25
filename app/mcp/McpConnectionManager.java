@@ -7,11 +7,14 @@ import com.google.gson.JsonParser;
 import mcp.transport.McpStdioTransport;
 import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
+import models.EventLog;
 import models.McpServer;
 import play.Play;
+import play.db.jpa.JPA;
 import services.EventLogger;
 import services.Tx;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,19 +22,16 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.io.IOException;
-import java.util.Set;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
-import models.EventLog;
-import play.db.jpa.JPA;
 
 /**
  * Owner of all live MCP server connections (JCLAW-31).

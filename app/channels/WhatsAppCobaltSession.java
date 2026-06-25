@@ -11,13 +11,13 @@ import play.Play;
 import services.EventLogger;
 import services.Tx;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
-import java.nio.charset.StandardCharsets;
 
 /**
  * Wraps ONE Cobalt {@link Whatsapp} (WhatsApp-Web / {@code it.auties.whatsapp})

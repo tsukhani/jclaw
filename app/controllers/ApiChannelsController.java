@@ -1,5 +1,6 @@
 package controllers;
 
+import channels.TelegramPollingRunner;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -9,17 +10,16 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-
-import static utils.GsonHolder.INSTANCE;
 import models.ChannelConfig;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ChannelStatusService;
+import services.EventLogger;
 
 import java.util.List;
 import java.util.Set;
-import channels.TelegramPollingRunner;
-import services.EventLogger;
+
+import static utils.GsonHolder.INSTANCE;
 
 @With(AuthCheck.class)
 public class ApiChannelsController extends Controller {

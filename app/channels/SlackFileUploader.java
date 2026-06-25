@@ -5,6 +5,7 @@ import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.request.files.FilesCompleteUploadExternalRequest;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.EventLogger;
 import utils.HttpFactories;
@@ -13,15 +14,14 @@ import utils.SsrfGuard;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
-import java.nio.file.Files;
-import java.util.Collections;
-import okhttp3.Request;
 
 /**
  * Uploads outbound files to Slack (JCLAW-345) via the 3-step external flow Slack

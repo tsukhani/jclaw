@@ -1,5 +1,19 @@
 package agents;
 
+import llm.LlmTypes.ChatMessage;
+import models.Agent;
+import models.Message;
+import models.MessageAttachment;
+import models.MessageRole;
+import services.AttachmentService;
+import services.EventLogger;
+import services.MimeExtensions;
+import services.Tx;
+import services.caption.CaptionRouter;
+import services.caption.ImageCaptionService;
+import services.transcription.PendingTranscripts;
+import services.video.VideoUnderstandingDispatcher;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -7,20 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-
-import llm.LlmTypes.ChatMessage;
-import models.MessageRole;
-import services.AttachmentService;
-import services.EventLogger;
-import services.MimeExtensions;
-import services.Tx;
-import services.transcription.PendingTranscripts;
-import services.video.VideoUnderstandingDispatcher;
-import models.Agent;
-import models.Message;
-import models.MessageAttachment;
-import services.caption.CaptionRouter;
-import services.caption.ImageCaptionService;
 
 /**
  * Build-time assembly of a historical user turn into the OpenAI-style

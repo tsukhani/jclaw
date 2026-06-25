@@ -9,11 +9,11 @@ import models.TelegramBinding;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
+import services.ModelOverrideResolver;
 import services.Tx;
 
 import java.util.List;
 import java.util.Optional;
-import services.ModelOverrideResolver;
 
 /**
  * Telegram-specific entry points for the {@code /model} selector

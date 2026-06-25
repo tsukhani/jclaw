@@ -3,6 +3,7 @@ package channels;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
@@ -19,7 +20,6 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import okhttp3.Request;
 
 /**
  * Downloads inbound Telegram attachments (JCLAW-136) via the Bot API.

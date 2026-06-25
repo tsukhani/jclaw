@@ -6,17 +6,17 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import models.Config;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
+import services.InternalApiTokenService;
+import services.LoadTestRunner;
+import services.LoggerLevelService;
 
 import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
-import models.Config;
-import services.InternalApiTokenService;
-import services.LoadTestRunner;
-import services.LoggerLevelService;
 
 @With(AuthCheck.class)
 public class ApiConfigController extends Controller {

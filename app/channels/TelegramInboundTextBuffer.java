@@ -1,10 +1,10 @@
 package channels;
 
 import services.EventLogger;
+import utils.PlayConfig;
 
 import java.util.List;
 import java.util.function.Consumer;
-import utils.PlayConfig;
 
 /**
  * M2 inbound long-message reassembly: Telegram clients auto-split a long paste

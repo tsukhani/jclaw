@@ -1,12 +1,12 @@
 package agents;
 
 import models.Conversation;
+import models.MessageAttachment;
 import services.AttachmentService;
 import services.ConversationService;
 import services.EventLogger;
 
 import java.util.List;
-import models.MessageAttachment;
 
 /**
  * {@link AgentExecutionSink} backed by a {@link Conversation}. All

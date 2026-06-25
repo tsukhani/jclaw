@@ -1,10 +1,5 @@
 package agents;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
@@ -14,8 +9,13 @@ import models.Agent;
 import models.Conversation;
 import models.MessageRole;
 import services.EventLogger;
-import utils.LatencyTrace;
 import tools.SubagentYieldTool;
+import utils.LatencyTrace;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Per-LLM-round tool-call orchestrators. Extracted from

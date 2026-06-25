@@ -1,6 +1,7 @@
 package controllers;
 
 import channels.WhatsAppCloudApiProbe;
+import channels.WhatsAppCobaltRunner;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -16,10 +17,10 @@ import play.mvc.With;
 import services.AgentService;
 import services.EventLogger;
 
-import static utils.GsonHolder.INSTANCE;
-import channels.WhatsAppCobaltRunner;
 import java.util.Map;
 import java.util.Objects;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * CRUD API for per-agent WhatsApp bindings (JCLAW-444). Mirrors

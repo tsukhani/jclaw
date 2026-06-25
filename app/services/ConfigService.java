@@ -1,19 +1,19 @@
 package services;
 
+import jobs.ToolRegistrationJob;
 import models.Agent;
 import models.Config;
+import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
+import services.EventLogger;
+import utils.HttpFactories;
 
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.time.ZoneId;
-import jobs.ToolRegistrationJob;
-import play.cache.Cache;
-import services.EventLogger;
-import utils.HttpFactories;
 
 public class ConfigService {
 

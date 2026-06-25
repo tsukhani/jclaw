@@ -1,24 +1,24 @@
 package models;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
-import jakarta.persistence.Index;
 import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
+import jakarta.persistence.PostPersist;
+import jakarta.persistence.PostRemove;
+import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
-import jakarta.persistence.PostPersist;
-import jakarta.persistence.PostUpdate;
-import jakarta.persistence.PostRemove;
+import jakarta.persistence.Table;
 import play.db.jpa.Model;
-
-import java.time.Instant;
-import java.util.List;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
 import services.EventLogger;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
+
+import java.io.IOException;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 
 @Entity
 @Table(name = "memory", indexes = {

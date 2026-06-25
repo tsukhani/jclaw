@@ -11,13 +11,13 @@ import com.slack.api.util.json.GsonFactory;
 import services.EventLogger;
 import utils.RetryScheduler;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Slack Web API + Events API client, on the official Slack SDK (com.slack.api).

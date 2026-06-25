@@ -7,13 +7,13 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.SubagentRun;
 import services.Tx;
+import utils.GsonHolder;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Arrays;
-import utils.GsonHolder;
 
 /**
  * JCLAW-326: paginated read tool that lists a parent agent's

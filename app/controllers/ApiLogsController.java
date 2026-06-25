@@ -6,13 +6,13 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.EventLog;
 import play.mvc.Controller;
-
-import static utils.GsonHolder.INSTANCE;
 import play.mvc.With;
 import utils.JpqlFilter;
 
 import java.time.Instant;
 import java.util.List;
+
+import static utils.GsonHolder.INSTANCE;
 
 @With(AuthCheck.class)
 public class ApiLogsController extends Controller {

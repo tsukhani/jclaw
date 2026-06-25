@@ -7,6 +7,7 @@ import models.Agent;
 import models.Message;
 import models.MessageRole;
 import models.TaskRunMessage;
+import services.CompressionMetrics;
 import services.ConversationService;
 import services.Tx;
 import services.compression.ContentHash;
@@ -14,7 +15,6 @@ import services.compression.ContentHash;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import services.CompressionMetrics;
 
 /**
  * CCR retrieve (JCLAW-462). Returns the full, uncompressed original of a

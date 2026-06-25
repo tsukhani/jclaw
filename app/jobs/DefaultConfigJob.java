@@ -1,27 +1,28 @@
 package jobs;
 
+import agents.AgentRunner;
+import agents.SkillLoader;
 import models.Agent;
 import models.Config;
+import play.Logger;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
-import services.Tx;
-import services.scanners.ScannerRegistry;
-import agents.AgentRunner;
-import agents.SkillLoader;
-import java.io.IOException;
-import java.nio.file.Files;
-import play.Logger;
 import services.InternalApiTokenService;
 import services.SkillPromotionService;
+import services.Tx;
 import services.imagegen.FluxSidecarProbe;
+import services.scanners.ScannerRegistry;
 import services.transcription.FfmpegProbe;
 import services.transcription.WhisperModel;
 import tools.ShellExecTool;
 import tools.SubagentSpawnTool;
 import utils.HttpFactories;
+
+import java.io.IOException;
+import java.nio.file.Files;
 
 /**
  * Seeds default runtime configuration and default agent on first startup.

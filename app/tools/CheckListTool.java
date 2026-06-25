@@ -1,16 +1,16 @@
 package tools;
 
-import agents.ToolRegistry;
-import com.google.gson.JsonParser;
-import models.Agent;
-
-import java.util.List;
-import java.util.Map;
 import agents.ToolAction;
+import agents.ToolRegistry;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import models.Agent;
 import utils.GsonHolder;
+
+import java.util.List;
+import java.util.Map;
 
 public class CheckListTool implements ToolRegistry.Tool {
 

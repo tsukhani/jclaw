@@ -1,21 +1,21 @@
 package models;
 
 import channels.ChannelTransport;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
-import jakarta.persistence.Index;
 import jakarta.persistence.Column;
-import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
+import services.Tx;
 
 import java.time.Instant;
 import java.util.List;
-import services.Tx;
 
 /**
  * One Telegram bot bound to one JClaw agent for messages from exactly one

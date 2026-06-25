@@ -5,11 +5,11 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
 
+import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BiFunction;
-import java.io.InterruptedIOException;
 import java.util.Objects;
+import java.util.function.BiFunction;
 
 abstract class ConfiguredHashScanner implements Scanner {
 

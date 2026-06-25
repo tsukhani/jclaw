@@ -2,14 +2,15 @@ package channels;
 
 import com.google.gson.JsonObject;
 import models.Agent;
-import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
+import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
+import services.AttachmentService;
+
 import java.io.File;
 import java.util.List;
-import services.AttachmentService;
 
 /**
  * Telegram Bot API adapter backed by the {@code org.telegram:telegrambots-client} SDK.

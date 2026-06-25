@@ -1,6 +1,7 @@
 package tools;
 
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -8,14 +9,13 @@ import models.Agent;
 import models.SubagentRun;
 import services.SubagentRegistry;
 import services.Tx;
+import tools.SubagentSpawnTool;
+import utils.GsonHolder;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import agents.ToolContext;
-import java.util.ArrayList;
-import tools.SubagentSpawnTool;
-import utils.GsonHolder;
 
 /**
  * JCLAW-273 / JCLAW-326: companion tool to {@link SubagentSpawnTool} for the

@@ -1,30 +1,30 @@
 package slash;
 
+import channels.TelegramModelSelector;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
-import models.Message;
-import services.ConversationService;
-import services.EventLogger;
-import services.Tx;
-
-import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
-import channels.TelegramModelSelector;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.function.Supplier;
 import models.EventLog;
+import models.Message;
 import models.SubagentRun;
 import services.ConfigService;
 import services.ConversationQueue;
+import services.ConversationService;
+import services.EventLogger;
 import services.ModelOverrideResolver;
 import services.SessionCompactor;
 import services.SubagentRegistry;
+import services.Tx;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Chat slash-command registry and dispatcher (JCLAW-26).

@@ -1,11 +1,11 @@
 package services.scanners;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import okhttp3.Request;
 import utils.HttpKeys;
 
 import java.util.List;
-import com.google.gson.JsonElement;
 
 /**
  * VirusTotal SHA-256 hash lookup. Queries
