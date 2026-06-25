@@ -1,7 +1,8 @@
 package llm;
 
 import com.google.gson.reflect.TypeToken;
-import llm.LlmTypes.*;
+import llm.LlmTypes.ModelInfo;
+import llm.LlmTypes.ProviderConfig;
 import services.ConfigService;
 
 import java.math.BigDecimal;

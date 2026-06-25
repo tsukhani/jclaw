@@ -1,7 +1,7 @@
 package llm;
 
 import com.google.gson.JsonObject;
-import llm.LlmTypes.*;
+import llm.LlmTypes.ProviderConfig;
 
 /**
  * Standard OpenAI-compatible provider. Handles direct OpenAI API and any

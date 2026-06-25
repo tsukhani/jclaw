@@ -2,7 +2,7 @@ package agents;
 
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
-import llm.LlmTypes.*;
+import llm.LlmTypes.ToolDef;
 import models.Agent;
 import models.AgentToolConfig;
 import play.cache.CacheConfig;

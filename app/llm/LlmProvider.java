@@ -1,7 +1,26 @@
 package llm;
 
-import com.google.gson.*;
-import llm.LlmTypes.*;
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParser;
+import com.google.gson.FieldNamingPolicy;
+import llm.LlmTypes.ChatCompletionChunk;
+import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.ChatRequest;
+import llm.LlmTypes.ChatResponse;
+import llm.LlmTypes.ChunkChoice;
+import llm.LlmTypes.ChunkDelta;
+import llm.LlmTypes.ProviderConfig;
+import llm.LlmTypes.ToolCall;
+import llm.LlmTypes.ToolCallChunk;
+import llm.LlmTypes.ToolDef;
+import llm.LlmTypes.Usage;
+import llm.LlmTypes.EmbeddingRequest;
+import llm.LlmTypes.EmbeddingResponse;
+import llm.LlmTypes.Choice;
+import llm.LlmTypes.FunctionCall;
 import services.EventLogger;
 import utils.HttpKeys;
 

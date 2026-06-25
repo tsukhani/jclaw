@@ -4,7 +4,26 @@ import agents.ToolRegistry;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
-import tools.*;
+import tools.TaskTool;
+import tools.DateTimeTool;
+import tools.GenerateImageTool;
+import tools.CcrRetrieveTool;
+import tools.UserGuideTool;
+import tools.CheckListTool;
+import tools.FileSystemTools;
+import tools.DocumentsTool;
+import tools.WebFetchTool;
+import tools.WebSearchTool;
+import tools.PlaywrightBrowserTool;
+import tools.ShellExecTool;
+import tools.JClawApiTool;
+import tools.SubagentSpawnTool;
+import tools.SubagentYieldTool;
+import tools.ConversationHistoryTool;
+import tools.ConversationSendTool;
+import tools.ConversationListTool;
+import tools.MessageTool;
+import tools.LoadTestSleepTool;
 
 // All DB-touching calls below (ConfigService.get, EventLogger.info) wrap
 // their own work in Tx.run, so no outer JPA tx is needed. @NoTransaction

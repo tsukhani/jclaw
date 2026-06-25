@@ -1,7 +1,9 @@
 package llm;
 
 import com.google.gson.JsonObject;
-import llm.LlmTypes.*;
+import llm.LlmTypes.ChatRequest;
+import llm.LlmTypes.ChunkDelta;
+import llm.LlmTypes.ProviderConfig;
 
 /**
  * Ollama provider (local and Ollama Cloud). Uses the OpenAI-compatible

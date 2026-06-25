@@ -1,7 +1,8 @@
 package llm;
 
 import com.google.gson.JsonObject;
-import llm.LlmTypes.*;
+import llm.LlmTypes.ChunkDelta;
+import llm.LlmTypes.ProviderConfig;
 
 /**
  * Together AI provider. OpenAI-compatible chat completions at

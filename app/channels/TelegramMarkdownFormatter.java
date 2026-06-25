@@ -1,6 +1,25 @@
 package channels;
 
-import com.vladsch.flexmark.ast.*;
+import com.vladsch.flexmark.ast.BulletList;
+import com.vladsch.flexmark.ast.FencedCodeBlock;
+import com.vladsch.flexmark.ast.OrderedList;
+import com.vladsch.flexmark.ast.Heading;
+import com.vladsch.flexmark.ast.Paragraph;
+import com.vladsch.flexmark.ast.StrongEmphasis;
+import com.vladsch.flexmark.ast.Emphasis;
+import com.vladsch.flexmark.ast.Code;
+import com.vladsch.flexmark.ast.IndentedCodeBlock;
+import com.vladsch.flexmark.ast.BlockQuote;
+import com.vladsch.flexmark.ast.Link;
+import com.vladsch.flexmark.ast.AutoLink;
+import com.vladsch.flexmark.ast.Text;
+import com.vladsch.flexmark.ast.SoftLineBreak;
+import com.vladsch.flexmark.ast.HardLineBreak;
+import com.vladsch.flexmark.ast.ThematicBreak;
+import com.vladsch.flexmark.ast.HtmlInline;
+import com.vladsch.flexmark.ast.HtmlBlock;
+import com.vladsch.flexmark.ast.HtmlCommentBlock;
+import com.vladsch.flexmark.ast.HtmlInlineComment;
 import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
 import com.vladsch.flexmark.ext.gfm.strikethrough.Strikethrough;
 import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension;
