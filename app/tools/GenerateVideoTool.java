@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.VideoGenerationJob;
 import services.ConfigService;
+import services.Tx;
 import services.videogen.VideoGenerationJobService;
 import services.videogen.VideoGenerationRouter;
 import services.videogen.VideoGenerationService.VideoGenRequest;
@@ -94,7 +95,10 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
         }
 
         var req = new VideoGenRequest(prompt, null, optInt(args, ARG_DURATION), optString(args, ARG_ASPECT));
-        var job = VideoGenerationJobService.submit(agent.id, null, req);
+        // Tool execution runs on the [agent-stream] thread, which Play's JPAPlugin never wraps in a JPA
+        // transaction, so submit()'s job.save() has no EntityManager of its own. Open one here — the same
+        // Tx.run convention every other DB-touching tool (ShellExecTool, TaskTool, …) follows.
+        var job = Tx.run(() -> VideoGenerationJobService.submit(agent.id, null, req));
         var text = "Started generating a video for the prompt; it runs in the background (typically a "
                 + "few minutes) and appears in the chat automatically when ready. Do not re-embed or "
                 + "link it — it shows on its own.";

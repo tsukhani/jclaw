@@ -15,10 +15,12 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.Tx;
 import tools.GenerateVideoTool;
 
 import java.nio.file.Files;
 import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-235 coverage for the {@code generate_video} tool and its placeholder linkage:
@@ -98,6 +100,48 @@ class GenerateVideoToolTest extends UnitTest {
         assertNotNull(job, "the tool must have created the job row");
         assertEquals(State.RUNNING, job.state);
         assertEquals("pred_v", job.providerJobId);
+    }
+
+    @Test
+    void toolSubmitsFromNonRequestThreadWithoutAmbientTransaction() throws Exception {
+        // Regression: the real generate_video path runs on the [agent-stream] tool-execution thread,
+        // which Play's JPAPlugin never wraps in a JPA transaction. Before the Tx.run wrap, submit()'s
+        // job.save() threw "No active EntityManager for name [default], transaction not started?" there.
+        // The in-thread test above can't catch it (the test method body has tx management the raw stream
+        // thread lacks), so reproduce on a separate platform thread with no ambient EntityManager.
+        ConfigService.set("videogen.provider", "replicate");
+        ConfigService.set("provider.replicate.baseUrl", server.url("/").toString());
+        ConfigService.set("provider.replicate.apiKey", "test-key");
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "application/json")
+                .body(jsonBuf("{\"id\":\"pred_off\",\"status\":\"starting\"}")).build());
+
+        var agent = savedAgent();
+
+        var resultRef = new AtomicReference<ToolRegistry.ToolResult>();
+        var errorRef = new AtomicReference<Throwable>();
+        var worker = new Thread(() -> {
+            try {
+                resultRef.set(new GenerateVideoTool().executeRich(
+                        "{\"prompt\":\"a comet over a city\"}", agent));
+            } catch (Throwable t) {
+                errorRef.set(t);
+            }
+        }, "agent-stream-test");
+        worker.start();
+        worker.join(10_000);
+
+        assertNull(errorRef.get(),
+                "tool must open its own transaction off the request thread, not throw: " + errorRef.get());
+        var result = resultRef.get();
+        assertNotNull(result, "the worker thread must have produced a result");
+        assertNotNull(result.videoJob(), "a submitted job must be carried on the result");
+
+        // The worker committed in its own Tx.run; read back in a fresh transaction.
+        VideoGenerationJob job = Tx.run(() -> VideoGenerationJob.findById(result.videoJob().jobId()));
+        assertNotNull(job, "the tool must have persisted the job row from the non-request thread");
+        assertEquals(State.RUNNING, job.state);
+        assertEquals("pred_off", job.providerJobId);
     }
 
     @Test
