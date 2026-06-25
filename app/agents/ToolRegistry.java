@@ -41,19 +41,29 @@ public class ToolRegistry {
      *                       so re-opening a conversation keeps the richer
      *                       render. {@code null} means "no structured view".
      */
-    public record ToolResult(String text, String structuredJson, GeneratedAttachment image) {
+    public record ToolResult(String text, String structuredJson, GeneratedAttachment image, VideoJobRef videoJob) {
         /** Back-compat 2-arg form — most tools produce no inline attachment. */
         public ToolResult(String text, String structuredJson) {
-            this(text, structuredJson, null);
+            this(text, structuredJson, null, null);
         }
-        public static ToolResult text(String text) { return new ToolResult(text, null, null); }
+        public static ToolResult text(String text) { return new ToolResult(text, null, null, null); }
         /** JCLAW-228: a tool ({@code generate_image}) that produced an image to inline on the
          *  assistant turn. The commit path ({@link ParallelToolExecutor}) attaches {@code image} to
          *  the assistant message via {@link AgentExecutionSink}; the model still sees {@code text}. */
         public static ToolResult withImage(String text, String structuredJson, GeneratedAttachment image) {
-            return new ToolResult(text, structuredJson, image);
+            return new ToolResult(text, structuredJson, image, null);
+        }
+        /** JCLAW-235: a tool ({@code generate_video}) that submitted an async job. The commit path
+         *  creates a placeholder MessageAttachment linked to the job on the assistant turn (JCLAW-234);
+         *  the model sees {@code text} (a "generating, appears when ready" confirmation). */
+        public static ToolResult withVideoJob(String text, Long jobId, String generationMetadata) {
+            return new ToolResult(text, null, null, new VideoJobRef(jobId, generationMetadata));
         }
     }
+
+    /** JCLAW-235: reference to a submitted video-generation job, carried on a {@link ToolResult} so the
+     *  tool-call commit path can create a placeholder attachment linked to it on the assistant turn. */
+    public record VideoJobRef(Long jobId, String generationMetadata) {}
 
     public interface Tool {
         String name();
@@ -510,6 +520,8 @@ public class ToolRegistry {
 
     /** JCLAW-228: {@code generate_image} is default-OFF for every agent (opt-in per agent). */
     private static final String GENERATE_IMAGE_TOOL = "generate_image";
+    /** JCLAW-235: {@code generate_video} is default-OFF for every agent (opt-in, like generate_image). */
+    private static final String GENERATE_VIDEO_TOOL = "generate_video";
 
     private static Set<String> computeDisabledTools(Agent agent) {
         var configs = AgentToolConfig.findByAgent(agent);
@@ -525,6 +537,10 @@ public class ToolRegistry {
         // agent editor). Distinct from the MCP default-disable below, which only affects non-main agents.
         if (!Boolean.TRUE.equals(explicitState.get(GENERATE_IMAGE_TOOL))) {
             disabled.add(GENERATE_IMAGE_TOOL);
+        }
+        // JCLAW-235: video generation is likewise default-off (costly / slow); opt-in per agent.
+        if (!Boolean.TRUE.equals(explicitState.get(GENERATE_VIDEO_TOOL))) {
+            disabled.add(GENERATE_VIDEO_TOOL);
         }
         if (!agent.isMain()) {
             addMcpDefaultDisabled(disabled, explicitState);

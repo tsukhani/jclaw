@@ -315,9 +315,15 @@ public final class ParallelToolExecutor {
             // on the assistant turn that called the tool (no-op image for every ordinary tool) and
             // returns the persisted row so we can push it onto the live SSE tool_call frame.
             final var image = result.image();
+            final var videoJob = result.videoJob();
             final var attHolder = new AtomicReference<MessageAttachment>();
             Tx.run(() -> {
-                var att = sink.appendAssistantMessage(null, gson.toJson(tc), image);
+                // JCLAW-235: a generate_video result carries a submitted-job ref instead of bytes — the
+                // sink creates a zero-byte placeholder linked to it; every other tool takes the image path
+                // (no-op image for ordinary calls).
+                var att = videoJob != null
+                        ? sink.appendVideoPlaceholder(null, gson.toJson(tc), videoJob)
+                        : sink.appendAssistantMessage(null, gson.toJson(tc), image);
                 if (att != null) attHolder.set(att);
                 sink.appendToolResult(tc.id(), r, s);
             });
@@ -353,6 +359,7 @@ public final class ParallelToolExecutor {
         m.put("kind", att.kind);
         m.put("generated", att.generated);
         if (att.generationMetadata != null) m.put("generationMetadata", att.generationMetadata);
+        if (att.generationJobId != null) m.put("generationJobId", att.generationJobId); // JCLAW-234: chat polls this job
         return gson.toJson(m);
     }
 

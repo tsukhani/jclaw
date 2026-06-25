@@ -104,6 +104,21 @@ public interface AgentExecutionSink {
     }
 
     /**
+     * JCLAW-235: persist a tool-call assistant turn AND create a zero-byte placeholder attachment linked
+     * to a submitted video-generation job (the {@code generate_video} tool). The default ignores the ref
+     * — sinks with no chat surface fall back to the plain overload; {@link ConversationSink} overrides to
+     * create the placeholder via {@code AttachmentService.createGeneratedVideoPlaceholder} so the chat
+     * shows a generating card the runner later fills.
+     *
+     * @return the persisted placeholder {@link MessageAttachment} (so the caller can surface it on the
+     *         live SSE {@code tool_call} frame), or {@code null} otherwise
+     */
+    default MessageAttachment appendVideoPlaceholder(String content, String toolCalls, ToolRegistry.VideoJobRef videoJob) {
+        appendAssistantMessage(content, toolCalls);
+        return null;
+    }
+
+    /**
      * Persist the result of a tool invocation. The rich-widget renderer
      * (web_search favicons, etc.) reads {@code structuredJson} when present.
      *

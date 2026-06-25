@@ -106,6 +106,24 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
+    public MessageAttachment appendVideoPlaceholder(String content, String toolCalls, ToolRegistry.VideoJobRef videoJob) {
+        var managed = ConversationService.findById(conversation.id);
+        if (managed == null) {
+            warnSkipped("assistant");
+            return null;
+        }
+        var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
+        if (videoJob == null || videoJob.jobId() == null) {
+            return null;
+        }
+        // JCLAW-234/235: a zero-byte placeholder linked to the job; the runner fills it on completion
+        // and the chat swaps the generating card for the inline player. Returned so the runner ships it
+        // on the live SSE tool_call frame (which starts the frontend's progress poll).
+        return AttachmentService.createGeneratedVideoPlaceholder(
+                managed.agent, msg, videoJob.jobId(), videoJob.generationMetadata());
+    }
+
+    @Override
     public void appendToolResult(String toolCallId, String result, String structuredJson) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {

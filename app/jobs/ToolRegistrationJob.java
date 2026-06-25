@@ -15,6 +15,7 @@ import tools.DateTimeTool;
 import tools.DocumentsTool;
 import tools.FileSystemTools;
 import tools.GenerateImageTool;
+import tools.GenerateVideoTool;
 import tools.JClawApiTool;
 import tools.LoadTestSleepTool;
 import tools.MessageTool;
@@ -47,6 +48,7 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new TaskTool());
         toolList.add(new DateTimeTool());
         toolList.add(new GenerateImageTool()); // JCLAW-228: default-off per agent (opt-in)
+        toolList.add(new GenerateVideoTool()); // JCLAW-235: async video gen; default-off per agent (opt-in)
         // JCLAW-462: ccr_retrieve — fetch the full original of a content-
         // compressed tool result by its hash. Registered unconditionally
         // (per-agent disable still applies); only useful once content
