@@ -56,6 +56,11 @@ A live tail of the last 10 events. It shows the same message columns as the [Log
 | **Message** | flex      | One-line description.                       |
 | **Timestamp**| 48ch     | Local date · time (matches Logs format).     |
 
+A segmented toggle in the panel header switches the table between two views:
+
+- **All** (default) — the event tail described above.
+- **Video** — recent video-generation jobs with their state (`PENDING` / `RUNNING` / `SUCCEEDED` / `FAILED`), prompt, submitted time, and a *see in conversation* link to where each was requested. Use it to track `generate_video` jobs as they run, without leaving the dashboard.
+
 For full filtering and expansion, click through to the [Logs](/logs) page.
 
 ## Logs

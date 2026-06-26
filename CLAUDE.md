@@ -113,7 +113,7 @@ All HTTP-client provisioning lives in `app/utils/HttpFactories.java` — a singl
 ### Frontend
 - Nuxt 4 SPA in `frontend/` with Tailwind CSS v4
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
-- `useApi<T>(path)` composable in `frontend/composables/useApi.ts` wraps `useFetch` for backend calls
+- Backend calls use Nuxt's auto-imported `useFetch` / `$fetch` directly; `frontend/composables/` adds `useApiParsed` (schema-validated reads, JCLAW-287) and `useApiMutation` (POST/PUT/DELETE) as consistent wrappers
 - Package manager: **pnpm**, version pinned in `frontend/package.json`'s `packageManager` field with a `+sha512-...` integrity hash. Three layers keep the hash present and verified:
   1. `./jclaw.sh setup` runs `corepack use pnpm@<version>` to add the hash if missing (idempotent — no-op once the hash is in place).
   2. The `.githooks/pre-commit` guard refuses to commit a `frontend/package.json` whose `packageManager` value lacks a hash, so a hand-edit that drops it can't slip through.

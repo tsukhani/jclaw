@@ -4,21 +4,20 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java) with a **Nuxt 3** (Vue 3 + TypeScript) SPA frontend. It combines OpenClaw agent orchestration and JavaClaw job scheduling into a single Java-first platform.
+JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java) with a **Nuxt 4** (Vue 3 + TypeScript) SPA frontend. It combines OpenClaw agent orchestration and JavaClaw job scheduling into a single Java-first platform.
 
-**Status**: v0.1.0-alpha, work in progress.
+**Status**: pre-v1 (alpha), work in progress.
 
 ## Development Commands
 
 ### Backend (Play 1.x)
 ```bash
 play run                  # Start dev server on :9000
-play test                 # Run all tests (unit + functional)
-play auto-test            # Run tests with auto-reload
+play autotest             # Run all tests (unit + functional)
 play dist                 # Build production distribution
 ```
 
-### Frontend (Nuxt 3)
+### Frontend (Nuxt 4)
 ```bash
 cd frontend
 pnpm install              # Install dependencies
@@ -37,14 +36,14 @@ Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm 
 - Routes defined in `conf/routes` — uses Play's `{controller}.{action}` catch-all pattern
 - Configuration in `conf/application.conf` — supports environment prefixes (`%prod.`, `%test.`)
 - Dependencies managed via `build.gradle.kts` using the `org.playframework.play1` plugin from the `/opt/play1` fork (composite build wired in `settings.gradle.kts`)
-- Tests in `test/` — JUnit 5, extending Play's `UnitTest` or `FunctionalTest`
+- Tests in `test/` — JUnit 6, extending Play's `UnitTest` or `FunctionalTest`
 - Test mode uses H2 in-memory database (`%test.db.url` in application.conf)
 
 ### Frontend
-- Nuxt 3 SPA in `frontend/` with Tailwind CSS
+- Nuxt 4 SPA in `frontend/` with Tailwind CSS v4
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
-- `useApi<T>(path)` composable in `frontend/composables/useApi.ts` wraps `useFetch` for backend calls
-- Package manager: **pnpm** (pinned at 10.8.0)
+- Backend calls use Nuxt's auto-imported `useFetch` / `$fetch` directly; `frontend/composables/` adds `useApiParsed` (schema-validated reads, JCLAW-287) and `useApiMutation` (POST/PUT/DELETE) as consistent wrappers
+- Package manager: **pnpm** (pinned at 11.7.0)
 
 ### API Contract
 Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `GET /api/status`). The frontend consumes these through the proxy — no CORS configuration needed.
