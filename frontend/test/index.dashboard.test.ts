@@ -10,12 +10,12 @@ import Index from '~/pages/index.vue'
  * /api/videogen/jobs/recent and renders a job-status table with a "see in conversation" deep-link.
  */
 
-function setupApi(opts?: { events?: unknown[], videoJobs?: unknown[] }) {
+function setupApi(opts?: { events?: unknown[], videoJobs?: unknown[], latency?: unknown }) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels/active', () => ({ count: 0, channelTypes: [] }))
   registerEndpoint('/api/tasks', () => [])
   registerEndpoint('/api/conversations', () => [])
-  registerEndpoint('/api/metrics/latency', () => ({}))
+  registerEndpoint('/api/metrics/latency/rows', () => opts?.latency ?? ({ since: '', channels: [], segments: {} }))
   registerEndpoint('/api/logs', () => ({ events: opts?.events ?? [] }))
   registerEndpoint('/api/videogen/jobs/recent', () => opts?.videoJobs ?? [])
 }
@@ -62,5 +62,42 @@ describe('Dashboard — Recent Activity video toggle (JCLAW-236)', () => {
     await flushPromises()
 
     expect(c.text()).toContain('No video generation jobs yet.')
+  })
+})
+
+describe('Dashboard — Chat Performance latency filters (JCLAW-515)', () => {
+  beforeEach(() => clearNuxtData())
+
+  it('renders the windowed latency panel with 7d/30d/All + agent + channel filters', async () => {
+    const hist = (p50: number) => ({
+      count: 10, sum_ms: 1000, min_ms: 50, max_ms: 200,
+      p50_ms: p50, p90_ms: 180, p99_ms: 200, p999_ms: 200, buckets: [],
+    })
+    setupApi({
+      latency: {
+        since: '2026-06-01T00:00:00Z',
+        channels: ['web', 'telegram'],
+        segments: { total: hist(100), ttft: hist(30) },
+      },
+    })
+    // Chat Cost / Compression also carry a 7d/30d/All control, so stub them — the only
+    // window buttons left are the Chat Performance panel's.
+    const c = await mountSuspended(Index, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    expect(c.text()).toContain('Chat Performance')
+    expect(c.text()).not.toContain('No latency samples in this window')
+
+    const buttonLabels = c.findAll('button').map(b => b.text())
+    expect(buttonLabels).toContain('7d')
+    expect(buttonLabels).toContain('30d')
+    expect(buttonLabels).toContain('All')
+
+    expect(c.find('select[aria-label="Filter by agent"]').exists()).toBe(true)
+    const channelSelect = c.find('select[aria-label="Filter by channel"]')
+    expect(channelSelect.exists()).toBe(true)
+    const channelOpts = channelSelect.findAll('option').map(o => (o.element as HTMLOptionElement).value)
+    expect(channelOpts).toContain('web')
+    expect(channelOpts).toContain('telegram')
   })
 })

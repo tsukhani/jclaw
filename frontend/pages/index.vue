@@ -6,13 +6,13 @@ import {
   TrashIcon,
   VideoCameraIcon,
 } from '@heroicons/vue/24/outline'
-import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/api'
+import type { Agent, LatencyHistogram, LogEvent } from '~/types/api'
 
 // --- Latency metrics (chat performance panel) ---
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
 // split) lives in ~/utils/latency-rows for unit-testability without
 // mounting the dashboard.
-import { buildLatencyRows, buildChartSeries, listAvailableChannels } from '~/utils/latency-rows'
+import { buildLatencyRows, buildChartSeries } from '~/utils/latency-rows'
 
 interface ActiveChannelsResponse {
   count: number
@@ -98,66 +98,59 @@ const activeReminders = computed(() => activeReminderCount.value ?? 0)
 const pendingReminders = computed(() => pendingReminderCount.value ?? 0)
 const totalConversations = computed(() => conversationCount.value ?? 0)
 
-const { data: latency, refresh: refreshLatency } = useFetch<LatencyMetrics>(
-  '/api/metrics/latency',
-  { default: () => ({}) },
-)
-
-// The payload is now {channel: {segment: hist}}. One channel renders at
-// a time, selected via the dropdown; switching channels rotates both the
-// table and the chart. Empty channels are suppressed from the dropdown
-// so the user never sees an option that would render nothing.
-const latencyChannels = computed(() =>
-  listAvailableChannels<LatencyHistogram>((latency.value ?? {}) as LatencyMetrics),
-)
-
-const LATENCY_CHANNEL_STORAGE_KEY = 'jclaw:chat-perf:selected-channel'
-const selectedChannel = ref<string>('')
-
-// Keep selection valid as channels come and go. If the stored/prior
-// choice isn't in the current list, fall back to the first available
-// (listAvailableChannels puts web first when present).
-watchEffect(() => {
-  const available = latencyChannels.value
-  if (available.length === 0) {
-    selectedChannel.value = ''
-    return
-  }
-  if (available.some(c => c.key === selectedChannel.value)) return
-  selectedChannel.value = available[0]!.key
-})
-
-onMounted(() => {
-  try {
-    const stored = localStorage.getItem(LATENCY_CHANNEL_STORAGE_KEY)
-    if (stored && latencyChannels.value.some(c => c.key === stored)) {
-      selectedChannel.value = stored
-    }
-  }
-  catch { /* SSR / privacy mode — stick with default */ }
-})
-
-function onSelectChannel(key: string) {
-  selectedChannel.value = key
-  try {
-    localStorage.setItem(LATENCY_CHANNEL_STORAGE_KEY, key)
-  }
-  catch { /* ignore */ }
+// Chat Performance latency is time-windowed + filterable (JCLAW-515): the panel reads
+// server-aggregated percentiles from GET /api/metrics/latency/rows, driven by a 7d/30d/All
+// window plus agent and channel filters. The endpoint returns the same {segment: histogram}
+// shape the live snapshot did, so the table/chart renderers below are unchanged — only the
+// data source and the header controls changed.
+interface LatencyRowsResponse {
+  since: string
+  channels: string[]
+  segments: Record<string, LatencyHistogram>
 }
+type LatencyWindow = '7d' | '30d' | 'all'
+const LAT_WINDOWS: { key: LatencyWindow, label: string }[] = [
+  { key: '7d', label: '7d' },
+  { key: '30d', label: '30d' },
+  { key: 'all', label: 'All' },
+]
+const latencyWindow = ref<LatencyWindow>('30d')
+const latencyAgentId = ref<number | null>(null)
+const latencyChannel = ref<string | null>(null)
 
-const selectedChannelMetrics = computed<Record<string, LatencyHistogram>>(() => {
-  const payload = (latency.value ?? {}) as LatencyMetrics
-  return payload[selectedChannel.value] ?? {}
+const latencySince = computed(() => {
+  if (latencyWindow.value === 'all') return new Date(0).toISOString()
+  const days = latencyWindow.value === '7d' ? 7 : 30
+  return new Date(Date.now() - days * 86_400_000).toISOString()
+})
+const latencyQuery = computed<Record<string, string>>(() => {
+  const q: Record<string, string> = { since: latencySince.value }
+  if (latencyAgentId.value != null) q.agentId = String(latencyAgentId.value)
+  if (latencyChannel.value != null) q.channel = latencyChannel.value
+  return q
+})
+
+const { data: latency, refresh: refreshLatency } = useFetch<LatencyRowsResponse>(
+  '/api/metrics/latency/rows',
+  { query: latencyQuery, default: () => ({ since: '', channels: [], segments: {} }), watch: [latencyQuery] },
+)
+
+const latencyChannels = computed(() => latency.value?.channels ?? [])
+const latencySegments = computed<Record<string, LatencyHistogram>>(() => latency.value?.segments ?? {})
+
+// Drop a channel filter that's no longer present after a window/agent reload.
+watch(latencyChannels, (list) => {
+  if (latencyChannel.value && !list.includes(latencyChannel.value)) latencyChannel.value = null
 })
 
 const latencyRows = computed(() =>
-  buildLatencyRows<LatencyHistogram>(selectedChannelMetrics.value),
+  buildLatencyRows<LatencyHistogram>(latencySegments.value),
 )
 const latencyChartSeries = computed(() =>
-  buildChartSeries<LatencyHistogram>(selectedChannelMetrics.value),
+  buildChartSeries<LatencyHistogram>(latencySegments.value),
 )
 
-const hasLatencyData = computed(() => latencyChannels.value.length > 0)
+const hasLatencyData = computed(() => Object.keys(latencySegments.value).length > 0)
 
 type LatencyView = 'table' | 'chart'
 const latencyView = ref<LatencyView>('table')
@@ -192,7 +185,7 @@ function formatMs(ms: number): string {
 }
 
 async function resetLatency() {
-  await $fetch('/api/metrics/latency', { method: 'DELETE' })
+  await $fetch('/api/metrics/latency/rows', { method: 'DELETE' })
   await refreshLatency()
 }
 
@@ -417,37 +410,58 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <div class="flex items-center justify-center">
-          <!--
-            Channel selector. Hidden entirely when no channels have samples
-            (matches the "no samples yet" empty state below). Visible even
-            when only one channel has samples so the operator can see which
-            channel they're looking at; a static display in that case but
-            still communicates context. Bare dropdown with aria-label to
-            mirror Chat Compression / Chat Cost.
-          -->
+        <!-- Window + agent + channel filters, centered — mirrors Chat Compression / Chat Cost. -->
+        <div class="flex items-center justify-center gap-3 flex-wrap">
+          <div class="inline-flex items-center border border-border overflow-hidden">
+            <button
+              v-for="w in LAT_WINDOWS"
+              :key="w.key"
+              type="button"
+              class="px-2.5 py-1 text-xs"
+              :class="latencyWindow === w.key ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
+              @click="latencyWindow = w.key"
+            >
+              {{ w.label }}
+            </button>
+          </div>
           <select
-            v-if="latencyChannels.length > 0"
-            :value="selectedChannel"
+            v-model="latencyAgentId"
+            aria-label="Filter by agent"
+            class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
+          >
+            <option :value="null">
+              All agents
+            </option>
+            <option
+              v-for="a in (agents ?? [])"
+              :key="a.id"
+              :value="a.id"
+            >
+              {{ a.name }}
+            </option>
+          </select>
+          <select
+            v-model="latencyChannel"
             aria-label="Filter by channel"
             class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
-            @change="onSelectChannel(($event.target as HTMLSelectElement).value)"
           >
+            <option :value="null">
+              All channels
+            </option>
             <option
-              v-for="channel in latencyChannels"
-              :key="channel.key"
-              :value="channel.key"
+              v-for="c in latencyChannels"
+              :key="c"
+              :value="c"
             >
-              {{ channel.label }}
+              {{ c }}
             </option>
           </select>
         </div>
         <div class="flex items-center gap-3 text-xs shrink-0">
-          <span class="text-fg-muted hidden sm:inline">In-memory • resets on JVM restart</span>
           <button
             type="button"
-            class="text-fg-muted hover:text-fg-strong transition-colors p-1"
-            title="Reset latency histograms"
+            class="text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors p-1"
+            title="Clear latency metrics"
             @click="resetLatency"
           >
             <TrashIcon
@@ -462,7 +476,7 @@ onBeforeUnmount(() => {
         v-if="!hasLatencyData"
         class="px-4 py-8 text-center text-sm text-fg-muted"
       >
-        No samples yet. Send a chat message to populate latency histograms.
+        No latency samples in this window.
       </div>
 
       <div
