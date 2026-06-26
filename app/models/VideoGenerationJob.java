@@ -26,9 +26,10 @@ import java.util.List;
  * is filled later by the storage story (JCLAW-234) when a succeeded job's video is fetched into a
  * {@code MessageAttachment}.
  *
- * <p>Schema is managed by Hibernate auto-DDL ({@code jpa.ddl=update}) — a brand-new table, so there is
- * no populated-table {@code ALTER} (hence no {@code @ColumnDefault} needed for the NOT NULL columns)
- * and no migration file.
+ * <p>Schema is managed by Hibernate auto-DDL ({@code jpa.ddl=update}). The original columns shipped with
+ * the brand-new table, so none needed a {@code @ColumnDefault} (no populated-table {@code ALTER}). The
+ * later {@link #percent} column (JCLAW-232) IS an {@code ALTER} on a populated table, but it is nullable,
+ * so it still needs no default. No migration file either way.
  */
 @Entity
 @Table(name = "video_generation_job", indexes = {
@@ -63,6 +64,13 @@ public class VideoGenerationJob extends Model {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     public State state = State.PENDING;
+
+    /** Best-effort progress 0..100 while RUNNING — a real per-step number for the local sidecar
+     *  (JCLAW-232, via the diffusion step callback), {@code null} for cloud providers which report none
+     *  (SV-1). Nullable, so adding it as an {@code ALTER} on the now-populated table needs no
+     *  {@code @ColumnDefault}. */
+    @Column(name = "percent")
+    public Integer percent;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;

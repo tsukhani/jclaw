@@ -44,7 +44,7 @@ import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
-import { isVideoJobPending, videoDisplayState, videoSrc, type VideoJobStatus } from '~/utils/video-job'
+import { isVideoJobPending, videoDisplayState, videoProgressPercent, videoSrc, type VideoJobStatus } from '~/utils/video-job'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
@@ -1483,6 +1483,9 @@ function videoCardSrc(att: MessageAttachment) {
 function videoCardError(att: MessageAttachment): string {
   const s = att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined
   return s?.errorMessage || 'Unknown error'
+}
+function videoCardPercent(att: MessageAttachment): number | null {
+  return videoProgressPercent(att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined)
 }
 
 onMounted(() => {
@@ -3362,9 +3365,26 @@ function exportConversation() {
                                 d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
                               />
                             </svg>
-                            <div class="flex flex-col gap-0.5 min-w-0">
-                              <span class="font-medium">Generating video…</span>
+                            <div class="flex flex-col gap-0.5 min-w-0 flex-1">
+                              <span class="font-medium">
+                                Generating video…<template v-if="videoCardPercent(att) != null"> {{ videoCardPercent(att) }}%</template>
+                              </span>
                               <span class="truncate text-fg-muted">{{ generatedImageLabel(att) }}</span>
+                              <!-- Determinate bar only when the local engine reports real per-step progress
+                                   (JCLAW-232); cloud jobs (percent null) keep the bare spinner. -->
+                              <div
+                                v-if="videoCardPercent(att) != null"
+                                class="mt-1 h-1 w-full rounded-full bg-border overflow-hidden"
+                                role="progressbar"
+                                :aria-valuenow="videoCardPercent(att) ?? 0"
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                              >
+                                <div
+                                  class="h-full bg-purple-500 transition-[width] duration-500"
+                                  :style="{ width: videoCardPercent(att) + '%' }"
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>

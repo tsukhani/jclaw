@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { videoDisplayState, videoSrc, isVideoJobPending, type VideoJobStatus } from '~/utils/video-job'
+import { videoDisplayState, videoSrc, isVideoJobPending, videoProgressPercent, type VideoJobStatus } from '~/utils/video-job'
 
 /** JCLAW-234: the generated-video card's display-state logic, isolated from chat.vue and the poll timer. */
 function ph(over: Record<string, unknown> = {}) {
@@ -41,6 +41,31 @@ describe('videoSrc', () => {
 
   it('falls back to the placeholder uuid', () => {
     expect(videoSrc(ph(), undefined)).toBe('/api/attachments/u1')
+  })
+})
+
+describe('videoProgressPercent', () => {
+  it('is null when no status', () => {
+    expect(videoProgressPercent(undefined)).toBeNull()
+  })
+
+  it('is null for cloud (percent null/undefined — SV-1)', () => {
+    expect(videoProgressPercent({ id: 7, state: 'RUNNING', percent: null })).toBeNull()
+    expect(videoProgressPercent({ id: 7, state: 'RUNNING' })).toBeNull()
+  })
+
+  it('passes a real local percent through (JCLAW-232)', () => {
+    expect(videoProgressPercent({ id: 7, state: 'RUNNING', percent: 42 })).toBe(42)
+  })
+
+  it('clamps to 0..100 and rounds', () => {
+    expect(videoProgressPercent({ id: 7, state: 'RUNNING', percent: -5 })).toBe(0)
+    expect(videoProgressPercent({ id: 7, state: 'RUNNING', percent: 150 })).toBe(100)
+    expect(videoProgressPercent({ id: 7, state: 'RUNNING', percent: 42.7 })).toBe(43)
+  })
+
+  it('is null for NaN', () => {
+    expect(videoProgressPercent({ id: 7, state: 'RUNNING', percent: Number.NaN })).toBeNull()
   })
 })
 

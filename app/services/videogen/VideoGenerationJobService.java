@@ -91,7 +91,11 @@ public final class VideoGenerationJobService {
         switch (r.state()) {
             case SUCCEEDED -> completeSucceeded(job, r.resultUrl());
             case FAILED -> fail(job, r.error());
-            case RUNNING -> job.save(); // bump updated_at to reflect liveness
+            // Persist the latest progress (real for local, null for cloud) and bump updated_at for liveness.
+            case RUNNING -> {
+                job.percent = r.percent();
+                job.save();
+            }
         }
     }
 

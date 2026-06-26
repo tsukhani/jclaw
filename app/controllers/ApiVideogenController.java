@@ -51,7 +51,7 @@ public class ApiVideogenController extends Controller {
                 var m = new LinkedHashMap<String, Object>();
                 m.put("id", job.id);
                 m.put("state", job.state.name());
-                m.put("percent", null); // cloud reports none (SV-1); the local engine fills this in JCLAW-232
+                m.put("percent", job.percent); // real 0..100 for the local engine (JCLAW-232); null for cloud (SV-1)
                 m.put("errorMessage", job.errorMessage);
                 m.put("resultAttachmentUuid", resultUuid(job.resultAttachmentId));
                 out.add(m);
@@ -95,7 +95,7 @@ public class ApiVideogenController extends Controller {
             m.put("id", job.id);
             m.put("state", job.state.name());
             m.put("prompt", job.prompt);
-            m.put("percent", null); // cloud reports none (SV-1); the local engine fills this in JCLAW-232
+            m.put("percent", job.percent); // real 0..100 for the local engine (JCLAW-232); null for cloud (SV-1)
             m.put("errorMessage", job.errorMessage);
             m.put("conversationId", job.conversationId);
             m.put("createdAt", job.createdAt != null ? job.createdAt.toString() : null);

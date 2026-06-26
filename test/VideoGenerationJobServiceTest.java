@@ -39,6 +39,7 @@ class VideoGenerationJobServiceTest extends UnitTest {
     void tearDown() {
         server.close();
         ConfigService.delete("videogen.provider");
+        ConfigService.delete("videogen.local.port");
     }
 
     private VideoGenRequest req() {
@@ -102,6 +103,28 @@ class VideoGenerationJobServiceTest extends UnitTest {
 
         VideoGenerationJob reloaded = VideoGenerationJob.findById(job.id);
         assertEquals(State.RUNNING, reloaded.state);
+        assertNull(reloaded.percent, "cloud reports no percent (SV-1) — stays null");
+    }
+
+    @Test
+    void tickPersistsLocalEngineProgressPercent() {
+        // The local sidecar reports a real per-step percent (JCLAW-232). Drive a RUNNING job through the
+        // real LocalVideoGenerationClient by pointing videogen.local.port at the mock server (poll hits
+        // http://127.0.0.1:<port>/jobs/<id>); the runner must persist that percent onto the job row.
+        ConfigService.set("videogen.local.port", String.valueOf(server.url("/").port()));
+        var job = new VideoGenerationJob();
+        job.prompt = "a comet streaking past";
+        job.provider = "ltx-local";
+        job.providerJobId = "j1";
+        job.state = State.RUNNING;
+        job.save();
+
+        server.enqueue(json("{\"job_id\":\"j1\",\"state\":\"running\",\"percent\":42}"));
+        VideoGenerationJobService.tickOnce();
+
+        VideoGenerationJob reloaded = VideoGenerationJob.findById(job.id);
+        assertEquals(State.RUNNING, reloaded.state);
+        assertEquals(Integer.valueOf(42), reloaded.percent);
     }
 
     @Test

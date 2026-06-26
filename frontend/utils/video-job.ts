@@ -45,6 +45,17 @@ export function videoSrc(att: VideoAttachmentLike, status: VideoJobStatus | unde
 }
 
 /**
+ * Progress percent for the generating card, clamped to 0..100, or null when the provider reports none
+ * (cloud — SV-1, no reliable percentage). Local engines report a real per-step number (JCLAW-232, from
+ * the sidecar's diffusion step callback), which drives a determinate bar instead of a bare spinner.
+ */
+export function videoProgressPercent(status: VideoJobStatus | undefined): number | null {
+  const p = status?.percent
+  if (p == null || Number.isNaN(p)) return null
+  return Math.max(0, Math.min(100, Math.round(p)))
+}
+
+/**
  * True when this attachment is a video placeholder whose job still needs polling (not yet terminal, not
  * yet filled). Drives the poll loop's keep-going / stop decision.
  */
