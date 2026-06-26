@@ -1,31 +1,36 @@
 [project]
 name = "jclaw-video-sidecar"
-version = "0.1.0"
-description = "Local video-generation sidecar for jclaw (WAN 2 / LTX) — JCLAW-232/233"
-requires-python = ">=3.10"
-# One model per process (the active local engine, passed via --model). Async protocol
-# (submit/poll/result) designed in SV-3 / JCLAW-512: video takes minutes, so unlike the
-# synchronous Flux image sidecar this returns a job handle and the jclaw runner polls.
+version = "0.2.0"
+description = "Local video-generation sidecar for jclaw — LTX-2.3/MLX on Apple Silicon, WAN/LTX-Video diffusers on CUDA (JCLAW-232/233)"
+requires-python = ">=3.11"
+# Dual runtime, split by platform so the MLX and diffusers stacks NEVER share a venv (they pin
+# incompatible transformers versions). serve.py branches on the same platform check.
 dependencies = [
-    "torch>=2.4",
-    "diffusers>=0.32",
-    "transformers>=4.46",
-    "accelerate>=1.0",
+    # Common to both runtimes.
     "huggingface_hub>=0.26",
-    "safetensors>=0.4",
-    "sentencepiece>=0.2",
-    # protobuf + tiktoken: the LTX T5 tokenizer needs one of these and diffusers/transformers
-    # don't pull them transitively — SV-2 found the first run fails without them.
-    "protobuf>=4.25",
-    "tiktoken>=0.7",
     "imageio[ffmpeg]>=2.34",
     "pillow>=10.0",
+
+    # Apple Silicon — MLX LTX-2.3 int4 (JCLAW-233): faster, higher quality, generates audio. Pulls mlx +
+    # ltx-core-mlx + transformers (5.x) transitively. No torch/diffusers on this platform.
+    "ltx-pipelines-mlx ; sys_platform == 'darwin'",
+
+    # Linux/CUDA — diffusers WAN + LTX-Video. No mlx on this platform.
+    # torch wheels are platform-specific: CPU-only by default; install the CUDA build via
+    #   UV_TORCH_BACKEND=cu124 uv run serve.py ...
+    "torch>=2.4 ; sys_platform == 'linux'",
+    "diffusers>=0.32 ; sys_platform == 'linux'",
+    "transformers>=4.46 ; sys_platform == 'linux'",
+    "accelerate>=1.0 ; sys_platform == 'linux'",
+    "safetensors>=0.4 ; sys_platform == 'linux'",
+    # protobuf + tiktoken: the LTX-Video T5 tokenizer needs one of these (SV-2 — first run fails without).
+    "sentencepiece>=0.2 ; sys_platform == 'linux'",
+    "protobuf>=4.25 ; sys_platform == 'linux'",
+    "tiktoken>=0.7 ; sys_platform == 'linux'",
 ]
 
-# torch wheels are platform-specific (same as the Flux sidecar):
-#  - macOS / Apple Silicon: the default PyPI wheel ships CPU + MPS — no extra config.
-#    LTX runs here (best-effort, slow); the faster MLX backend is a JCLAW-233 follow-up.
-#  - Linux + NVIDIA: the default PyPI wheel is CPU-only; install the CUDA build via
-#      UV_TORCH_BACKEND=cu124 uv run serve.py ...      (uv >= 0.5 auto-selects)
-#    WAN local (JCLAW-232) is NVIDIA-only per SV-2.
-#  - CPU-only hosts: non-viable for video; the sidecar refuses on the free-VRAM gate.
+# The MLX engine lives in a uv workspace (dgrauet/ltx-2-mlx); pull the two packages it needs straight
+# from their subdirectories. Only fetched on macOS (the dep above is markered to darwin).
+[tool.uv.sources]
+ltx-pipelines-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx.git", subdirectory = "packages/ltx-pipelines-mlx" }
+ltx-core-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx.git", subdirectory = "packages/ltx-core-mlx" }
