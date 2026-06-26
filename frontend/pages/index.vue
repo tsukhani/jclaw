@@ -565,8 +565,8 @@ onBeforeUnmount(() => {
 
     <!-- Recent Events -->
     <div class="bg-surface-elevated border border-border">
-      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-        <h2 class="text-sm font-medium text-fg-primary">
+      <div class="px-4 py-3 border-b border-border flex items-center gap-3">
+        <h2 class="text-sm font-medium text-fg-primary shrink-0">
           Recent Activity
         </h2>
         <div

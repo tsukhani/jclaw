@@ -52,6 +52,13 @@ const WINDOW_LABELS: Record<WindowKey, string> = {
   'all': 'All time',
 }
 
+// Short labels for the segmented window selector (mirrors Chat Compression's 7d/30d/All control).
+const WINDOWS: { key: WindowKey, label: string }[] = [
+  { key: '7d', label: '7d' },
+  { key: '30d', label: '30d' },
+  { key: 'all', label: 'All' },
+]
+
 const STORAGE_KEY = 'jclaw:chat-cost:settings'
 
 const selectedWindow = ref<WindowKey>('30d')
@@ -1022,8 +1029,20 @@ defineExpose({ refresh })
         </div>
       </div>
 
-      <!-- Filters: bare dropdowns, centered — mirrors Chat Compression. -->
+      <!-- Filters: window segmented control + agent/channel dropdowns, centered — mirrors Chat Compression. -->
       <div class="flex items-center justify-center gap-3 flex-wrap">
+        <div class="inline-flex items-center border border-border overflow-hidden">
+          <button
+            v-for="w in WINDOWS"
+            :key="w.key"
+            type="button"
+            class="px-2.5 py-1 text-xs"
+            :class="selectedWindow === w.key ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
+            @click="selectedWindow = w.key"
+          >
+            {{ w.label }}
+          </button>
+        </div>
         <select
           v-model="selectedAgentId"
           aria-label="Filter by agent"
@@ -1054,19 +1073,6 @@ defineExpose({ refresh })
             :value="ch"
           >
             {{ ch }}
-          </option>
-        </select>
-        <select
-          v-model="selectedWindow"
-          aria-label="Filter by time window"
-          class="px-2 py-1 text-xs bg-muted border border-input text-fg-strong"
-        >
-          <option
-            v-for="(label, key) in WINDOW_LABELS"
-            :key="key"
-            :value="key"
-          >
-            {{ label }}
           </option>
         </select>
       </div>
