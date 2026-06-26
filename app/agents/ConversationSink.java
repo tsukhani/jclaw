@@ -49,6 +49,8 @@ import java.util.List;
  */
 public class ConversationSink implements AgentExecutionSink {
 
+    private static final String ASSISTANT = "assistant";
+
     private final Conversation conversation;
 
     public ConversationSink(Conversation conversation) {
@@ -82,7 +84,7 @@ public class ConversationSink implements AgentExecutionSink {
                                        String reasoning, boolean truncated) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
-            warnSkipped("assistant");
+            warnSkipped(ASSISTANT);
             return;
         }
         ConversationService.appendAssistantMessage(managed, content, toolCalls,
@@ -93,7 +95,7 @@ public class ConversationSink implements AgentExecutionSink {
     public MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
-            warnSkipped("assistant");
+            warnSkipped(ASSISTANT);
             return null;
         }
         var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
@@ -110,7 +112,7 @@ public class ConversationSink implements AgentExecutionSink {
     public MessageAttachment appendVideoPlaceholder(String content, String toolCalls, ToolRegistry.VideoJobRef videoJob) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
-            warnSkipped("assistant");
+            warnSkipped(ASSISTANT);
             return null;
         }
         var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);

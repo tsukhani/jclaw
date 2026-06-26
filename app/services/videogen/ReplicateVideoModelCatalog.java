@@ -35,6 +35,7 @@ public final class ReplicateVideoModelCatalog {
 
     private static final String DEFAULT_BASE = "https://api.replicate.com/v1";
     private static final String COLLECTION = "text-to-video";
+    private static final String MODELS = "models";
 
     // Replicate's curated collection changes on the order of days, so a short TTL keeps the Settings
     // dropdown responsive without an outbound call on every page load. Only successful, non-empty
@@ -94,8 +95,8 @@ public final class ReplicateVideoModelCatalog {
     private static List<VideoModel> parse(String body) {
         var out = new ArrayList<VideoModel>();
         var root = JsonParser.parseString(body).getAsJsonObject();
-        if (!root.has("models") || !root.get("models").isJsonArray()) return out;
-        for (var el : root.getAsJsonArray("models")) {
+        if (!root.has(MODELS) || !root.get(MODELS).isJsonArray()) return out;
+        for (var el : root.getAsJsonArray(MODELS)) {
             if (!el.isJsonObject()) continue;
             var m = el.getAsJsonObject();
             var owner = asString(m, "owner");

@@ -87,7 +87,7 @@ public class ApiVideogenController extends Controller {
     private static Long parseId(String s) {
         try {
             return Long.valueOf(s.trim());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return null;
         }
     }
