@@ -1,3 +1,6 @@
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import models.LatencyMetric;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -7,6 +10,8 @@ import play.test.*;
 import utils.LatencyStats;
 import utils.LatencyTrace;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 
 /**
@@ -251,6 +256,108 @@ class ApiMetricsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"ttft\""), body);
         assertTrue(body.contains("\"stream_body\""), body);
         assertFalse(body.contains("\"queue_wait\""), "no queue_wait without an accept stamp: " + body);
+    }
+
+    // ---- JCLAW-515: end-to-end verification of GET /api/metrics/latency/rows ----
+    // Unique "verify*" channel/segment markers isolate these rows from any latency
+    // samples a concurrent agent-turn test might persist into the shared table.
+
+    private static void commitInFreshTx(Runnable block) {
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try { services.Tx.run(block); } catch (Throwable ex) { err.set(ex); }
+        });
+        try { t.join(); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new RuntimeException(e); }
+        if (err.get() != null) throw new RuntimeException(err.get());
+    }
+
+    private static void seedLatency(String agentId, String channel, String segment,
+                                    Instant createdAt, long... valuesMs) {
+        commitInFreshTx(() -> {
+            for (long v : valuesMs) {
+                var m = new LatencyMetric();
+                m.agentId = agentId;
+                m.channel = channel;
+                m.segment = segment;
+                m.latencyMs = v;
+                m.createdAt = createdAt;
+                m.save();
+            }
+        });
+    }
+
+    private static long[] range(int from, int to) {
+        var a = new long[to - from + 1];
+        for (int i = 0; i < a.length; i++) a[i] = from + i;
+        return a;
+    }
+
+    private static JsonObject segments(String body) {
+        return JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("segments");
+    }
+
+    private static void assertPercentile(JsonObject seg, String key, long expected, long tol) {
+        long actual = seg.get(key).getAsLong();
+        assertTrue(Math.abs(actual - expected) <= tol,
+                key + " expected ~" + expected + " (±" + tol + "), was " + actual);
+    }
+
+    @Test
+    void latencyRowsReturnsAccuratePercentiles() {
+        login();
+        var now = Instant.now();
+        // Known distribution: 1..1000 ms.
+        seedLatency("7", "verifyweb", "verifytotal", now, range(1, 1000));
+
+        var since = now.minus(1, ChronoUnit.DAYS).toString();
+        var response = GET("/api/metrics/latency/rows?agentId=7&channel=verifyweb&since=" + since);
+        assertIsOk(response);
+        var total = segments(getContent(response)).getAsJsonObject("verifytotal");
+
+        assertEquals(1000L, total.get("count").getAsLong());
+        assertEquals(1L, total.get("min_ms").getAsLong());
+        assertEquals(1000L, total.get("max_ms").getAsLong());
+        // HdrHistogram recomputes percentiles from the raw samples, accurate to ~0.1%:
+        // the 500th / 900th / 990th / 999th values of 1..1000.
+        assertPercentile(total, "p50_ms", 500, 3);
+        assertPercentile(total, "p90_ms", 900, 3);
+        assertPercentile(total, "p99_ms", 990, 3);
+        assertPercentile(total, "p999_ms", 999, 3);
+    }
+
+    @Test
+    void latencyRowsAppliesWindowAgentAndChannelFilters() {
+        login();
+        var now = Instant.now();
+        seedLatency("7", "verifyweb", "verifytotal", now, 100, 200, 300);   // agent 7 / verifyweb (3)
+        seedLatency("9", "verifytel", "verifytotal", now, 500, 600);        // agent 9 / verifytel (2)
+        seedLatency("7", "verifyweb", "verifytotal",
+                now.minus(60, ChronoUnit.DAYS), 9999);                      // 60d-old → excluded by window
+
+        var since = now.minus(7, ChronoUnit.DAYS).toString();
+
+        // (a) All channels, windowed: both agents' recent rows; the 60d-old row excluded.
+        var all = getContent(GET("/api/metrics/latency/rows?since=" + since));
+        assertEquals(5L, segments(all).getAsJsonObject("verifytotal").get("count").getAsLong());
+        var channels = JsonParser.parseString(all).getAsJsonObject().getAsJsonArray("channels").toString();
+        assertTrue(channels.contains("verifyweb") && channels.contains("verifytel"), channels);
+
+        // (b) Agent filter: only agent 7's rows aggregate.
+        var byAgent = segments(getContent(GET("/api/metrics/latency/rows?since=" + since + "&agentId=7")))
+                .getAsJsonObject("verifytotal");
+        assertEquals(3L, byAgent.get("count").getAsLong());
+        assertEquals(100L, byAgent.get("min_ms").getAsLong());
+        assertEquals(300L, byAgent.get("max_ms").getAsLong());
+
+        // (c) Channel filter: only verifytel rows aggregate; the channels list still lists both.
+        var byChannel = getContent(GET("/api/metrics/latency/rows?since=" + since + "&channel=verifytel"));
+        var chTotal = segments(byChannel).getAsJsonObject("verifytotal");
+        assertEquals(2L, chTotal.get("count").getAsLong());
+        assertEquals(500L, chTotal.get("min_ms").getAsLong());
+        assertEquals(600L, chTotal.get("max_ms").getAsLong());
+        assertTrue(JsonParser.parseString(byChannel).getAsJsonObject()
+                .getAsJsonArray("channels").toString().contains("verifyweb"), byChannel);
     }
 
     @Test
