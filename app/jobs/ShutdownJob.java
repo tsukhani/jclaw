@@ -10,6 +10,7 @@ import play.jobs.OnApplicationStop;
 import services.EventLogger;
 import services.TailscaleFunnel;
 import services.imagegen.LocalFluxSidecarManager;
+import services.videogen.LocalVideoSidecarManager;
 import services.search.LuceneIndexer;
 import services.transcription.WhisperJniTranscriber;
 import tools.PlaywrightBrowserTool;
@@ -67,6 +68,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("whisper-transcriber", WhisperJniTranscriber::shutdown),
                 new Component("imagegen-flux-sidecar", LocalFluxSidecarManager::stop),
+                new Component("videogen-sidecar", LocalVideoSidecarManager::stop),
                 new Component("mcp-connections", McpConnectionManager::shutdown),
                 new Component("lucene-index", LuceneIndexer::close),
                 new Component("tailscale-funnel", TailscaleFunnel::disableIfEnabled)

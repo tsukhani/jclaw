@@ -36,6 +36,9 @@ GET     /api/videogen/jobs                       ApiVideogenController.jobs
 GET     /api/videogen/jobs/recent                ApiVideogenController.recent
 # Replicate text-to-video model discovery — Settings model dropdown (JCLAW-236)
 GET     /api/videogen/models                     ApiVideogenController.models
+# Local engine capability probe — adaptive Settings dropdown (JCLAW-232/233)
+GET     /api/videogen/capability                 ApiVideogenController.capability
+POST    /api/videogen/capability/probe           ApiVideogenController.probeCapability
 
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list

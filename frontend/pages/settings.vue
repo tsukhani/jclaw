@@ -756,6 +756,87 @@ const videogenModelOptions = computed<VideoModel[]>(() => {
   return discovered
 })
 
+// ──── Self-hosted adaptive capability picker (SV-2 / JCLAW-232/233) ────
+// The sidecar's one-shot `--probe` reports the host GPU + free VRAM and tiers every local engine, so the
+// dropdown only offers what THIS machine can run (and greys out WAN off NVIDIA). State machine mirrors the
+// local-Flux download: POST starts a background probe, GET polls the snapshot until it settles.
+interface VideoEngine {
+  id: string
+  label: string
+  provider: string
+  minVramGb: number
+  tier: 'ready' | 'fits' | 'no'
+  runnable: boolean
+  reason: string | null
+}
+interface VideoCapability {
+  kind: string
+  gpu: string
+  freeVramGb: number
+  totalVramGb: number
+  models: VideoEngine[]
+}
+interface VideoCapabilitySnapshot {
+  uvAvailable: boolean
+  uvReason: string | null
+  state: 'NEEDS_PROBE' | 'PROBING' | 'READY' | 'UNAVAILABLE' | 'ERROR'
+  capability: VideoCapability | null
+  error: string | null
+}
+const { data: videoCapability, refresh: refreshVideoCapability }
+  = await useFetch<VideoCapabilitySnapshot>('/api/videogen/capability')
+const videoCapState = computed(() => videoCapability.value?.state ?? 'NEEDS_PROBE')
+const videoEngines = computed<VideoEngine[]>(() => videoCapability.value?.capability?.models ?? [])
+const videogenLocalModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'videogen.local.model')?.value ?? '',
+)
+const videoCapDetectLabel = computed(() => {
+  switch (videoCapState.value) {
+    case 'PROBING': return 'detecting…'
+    case 'READY': return 're-detect'
+    default: return 'detect GPU'
+  }
+})
+function isLocalEngineActive(e: VideoEngine): boolean {
+  if (videogenProvider.value !== e.provider) return false
+  // ltx-local is single-model; wan-local distinguishes wan-5b / wan-14b via videogen.local.model.
+  if (e.provider === 'ltx-local') return true
+  return videogenLocalModel.value ? videogenLocalModel.value === e.id : e.id === 'wan-5b'
+}
+async function selectLocalEngine(e: VideoEngine) {
+  if (!e.runnable) return
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.local.model', value: e.id } })
+    await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.provider', value: e.provider } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function probeVideoCapability() {
+  await $fetch('/api/videogen/capability/probe', { method: 'POST' })
+  await refreshVideoCapability()
+  startVideoCapPolling()
+}
+let videoCapPollTimer: ReturnType<typeof setInterval> | null = null
+function startVideoCapPolling() {
+  if (videoCapPollTimer != null) return
+  videoCapPollTimer = setInterval(async () => {
+    await refreshVideoCapability()
+    if (videoCapState.value !== 'PROBING') stopVideoCapPolling()
+  }, 2000)
+}
+function stopVideoCapPolling() {
+  if (videoCapPollTimer != null) {
+    clearInterval(videoCapPollTimer)
+    videoCapPollTimer = null
+  }
+}
+onMounted(() => {
+  if (videoCapState.value === 'PROBING') startVideoCapPolling()
+})
+onUnmounted(() => stopVideoCapPolling())
+
 // ──────────────────── Video Interpretation (JCLAW-223) ─────────────────────
 // One knob (frame-sample density) plus a read-only display of which of the three
 // interpretation strategies the default ("main") agent's model would use — native
@@ -5108,20 +5189,91 @@ async function deleteLoggerLevel(logger: string) {
             </div>
           </div>
 
-          <!-- Self-hosted engines — not yet available (land in JCLAW-232/233). -->
-          <div class="bg-surface-elevated border border-border opacity-60">
-            <div
-              class="px-4 py-2.5 flex items-center gap-3 cursor-not-allowed"
-              title="Local self-hosted engines arrive in a later release."
-            >
-              <input
-                type="radio"
-                disabled
-                aria-label="Self-hosted video engines (coming soon)"
-                class="accent-emerald-600"
+          <!-- Self-hosted engines — adaptive picker (SV-2 / JCLAW-232/233): the host's GPU + free VRAM
+               decide what's offered. WAN is greyed off NVIDIA; a fits-but-slow engine is still selectable. -->
+          <div class="bg-surface-elevated border border-border">
+            <div class="px-4 py-2.5 flex items-center gap-3 border-b border-border">
+              <span class="flex-1 text-sm text-fg-primary">Self-Hosted (on this machine)</span>
+              <span
+                v-if="!videoCapability?.uvAvailable"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 px-1"
+                :title="videoCapability?.uvReason ?? ''"
+              >requires uv on PATH</span>
+              <button
+                v-else
+                type="button"
+                class="shrink-0 text-[11px] text-fg-muted hover:text-fg-strong disabled:opacity-50"
+                :disabled="videoCapState === 'PROBING'"
+                @click="probeVideoCapability()"
               >
-              <span class="flex-1 text-sm text-fg-muted">Self-Hosted WAN 2 / LTX 2</span>
-              <span class="text-[10px] text-fg-muted border border-border px-1">coming soon</span>
+                {{ videoCapDetectLabel }}
+              </button>
+            </div>
+
+            <!-- PROBING — the first run installs the Python video deps. -->
+            <div
+              v-if="videoCapState === 'PROBING'"
+              class="px-4 py-2.5 text-[11px] text-fg-muted"
+            >
+              Detecting GPU capability… the first run installs the Python video deps and can take a few minutes.
+            </div>
+
+            <!-- ERROR — probe failed. -->
+            <div
+              v-else-if="videoCapState === 'ERROR'"
+              class="px-4 py-2.5 text-[11px] text-rose-600 dark:text-rose-400"
+            >
+              {{ videoCapability?.error ?? 'Capability probe failed.' }}
+            </div>
+
+            <!-- READY — host summary + one radio per engine, tiered for this machine. -->
+            <template v-else-if="videoCapState === 'READY' && videoCapability?.capability">
+              <div class="px-4 py-1.5 text-[11px] text-fg-muted border-b border-border">
+                {{ videoCapability.capability.gpu }} ·
+                {{ videoCapability.capability.freeVramGb }} GB free / {{ videoCapability.capability.totalVramGb }} GB total
+              </div>
+              <label
+                v-for="e in videoEngines"
+                :key="e.id"
+                :for="`videogen-engine-${e.id}`"
+                class="px-4 py-2.5 flex items-center gap-3 border-b border-border last:border-b-0"
+                :class="e.runnable ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'"
+                :title="e.reason ?? ''"
+              >
+                <input
+                  :id="`videogen-engine-${e.id}`"
+                  type="radio"
+                  name="videogen-provider"
+                  :checked="isLocalEngineActive(e)"
+                  :disabled="!e.runnable || saving"
+                  class="accent-emerald-600"
+                  @change="selectLocalEngine(e)"
+                >
+                <span
+                  class="flex-1 text-sm"
+                  :class="e.runnable ? 'text-fg-primary' : 'text-fg-muted'"
+                >{{ e.label }}</span>
+                <span
+                  v-if="e.tier === 'ready'"
+                  class="text-[10px] text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-600/60 px-1"
+                >ready</span>
+                <span
+                  v-else-if="e.tier === 'fits'"
+                  class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 px-1"
+                >runs slow</span>
+                <span
+                  v-else
+                  class="text-[10px] text-fg-muted border border-border px-1"
+                >{{ e.reason ?? 'unavailable' }}</span>
+              </label>
+            </template>
+
+            <!-- NEEDS_PROBE — idle hint. -->
+            <div
+              v-else-if="videoCapState === 'NEEDS_PROBE' && videoCapability?.uvAvailable"
+              class="px-4 py-2.5 text-[11px] text-fg-muted"
+            >
+              Run local WAN 2 / LTX on your own GPU — detect to see what this machine can run.
             </div>
           </div>
         </fieldset>

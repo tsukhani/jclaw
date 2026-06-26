@@ -12,13 +12,14 @@ import java.util.Optional;
  * <ul>
  *   <li>{@code replicate} → {@link ReplicateVideoGenerationClient} — fronts WAN 2 and LTX in cloud form
  *       for users without a local GPU, so one aggregator covers the whole cloud path.</li>
+ *   <li>{@code ltx-local} / {@code wan-local} → {@link LocalVideoGenerationClient} — the on-host Python
+ *       sidecar (JCLAW-232/233), gated on free VRAM, returning real per-step progress.</li>
  * </ul>
  *
  * <p>A second cloud client was deliberately dropped (SV-1 / JCLAW-510): Replicate already fronts both
  * WAN 2 and LTX, so another aggregator would add no capability, only a price/speed hedge — fal.ai is the
  * documented future option if that hedge is ever wanted (the true Replicate peer: same poll-without-webhook
- * queue API), rather than a first-party API like Runway/Luma/Kling. The local engines ({@code wan-local},
- * {@code ltx-local}) land in JCLAW-232/233 and slot into the same switch. Returns {@link Optional#empty()}
+ * queue API), rather than a first-party API like Runway/Luma/Kling. Returns {@link Optional#empty()}
  * when unset/unrecognised — the {@code generate_video} tool (JCLAW-235) then reports "video generation is
  * not configured" rather than attempting a call. Resolved per call so a Settings change takes effect on
  * the next generation without a restart.
@@ -40,7 +41,17 @@ public final class VideoGenerationRouter {
         if (provider == null || provider.isBlank()) return Optional.empty();
         return switch (provider) {
             case "replicate" -> Optional.of(new ReplicateVideoGenerationClient());
+            // Local engines (JCLAW-232/233): one Python sidecar per JVM, selected engine passed through.
+            // LTX is fixed; WAN's specific variant (wan-5b / wan-14b) is operator-selectable per the
+            // free-VRAM tier the capability probe reports (SV-2).
+            case "ltx-local" -> Optional.of(new LocalVideoGenerationClient("ltx"));
+            case "wan-local" -> Optional.of(new LocalVideoGenerationClient(
+                    firstNonBlank(ConfigService.get("videogen.local.model"), "wan-5b")));
             default -> Optional.empty();
         };
+    }
+
+    private static String firstNonBlank(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
     }
 }

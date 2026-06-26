@@ -7,6 +7,7 @@ import models.VideoGenerationJob;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.videogen.ReplicateVideoModelCatalog;
+import services.videogen.VideoCapabilityProbe;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -63,6 +64,25 @@ public class ApiVideogenController extends Controller {
     @Operation(summary = "Discover Replicate text-to-video models (Settings model dropdown)")
     public static void models() {
         renderJSON(gson.toJson(ReplicateVideoModelCatalog.textToVideoModels()));
+    }
+
+    /** GET /api/videogen/capability — adaptive local-engine capability snapshot for the Settings dropdown
+     *  (SV-2 / JCLAW-232/233). The page polls this while the probe is PROBING, then renders the per-host
+     *  tiered engine list (and greys out what won't run). */
+    @Operation(summary = "Local video-gen host capability (GPU, free VRAM, per-engine runnable tiers)")
+    public static void capability() {
+        renderJSON(gson.toJson(VideoCapabilityProbe.snapshot()));
+    }
+
+    /** POST /api/videogen/capability/probe — kick off a background GPU/VRAM probe (one-shot
+     *  {@code uv run serve.py --probe}). Returns immediately; progress is observed via {@link #capability}. */
+    @Operation(summary = "Start a background local video-gen capability probe")
+    @ChatHidden("runs a GPU capability subprocess -- resource action")
+    public static void probeCapability() {
+        VideoCapabilityProbe.probe();
+        var m = new LinkedHashMap<String, Object>();
+        m.put("status", "probing");
+        renderJSON(gson.toJson(m));
     }
 
     /** GET /api/videogen/jobs/recent — most-recent jobs for the dashboard Recent Activity (video view). */
