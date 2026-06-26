@@ -108,6 +108,10 @@ public final class VideoGenerationJobService {
      */
     private static void completeSucceeded(VideoGenerationJob job, String resultUrl) {
         job.state = State.SUCCEEDED;
+        // A finished job is 100% — normalize across providers: cloud reports null progress (SV-1) and the
+        // local MLX hook caps RUNNING at 95 (reserving headroom for the decode/mux phase), so the terminal
+        // transition is where 100 belongs.
+        job.percent = 100;
         job.completedAt = Instant.now();
         job.save();
         var placeholder = MessageAttachment.findByGenerationJobId(job.id);

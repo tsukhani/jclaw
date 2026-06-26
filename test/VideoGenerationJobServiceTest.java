@@ -78,6 +78,7 @@ class VideoGenerationJobServiceTest extends UnitTest {
         VideoGenerationJob reloaded = VideoGenerationJob.findById(job.id);
         assertEquals(State.SUCCEEDED, reloaded.state);
         assertNotNull(reloaded.completedAt);
+        assertEquals(Integer.valueOf(100), reloaded.percent, "a finished job reads 100%");
     }
 
     @Test
