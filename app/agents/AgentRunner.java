@@ -521,6 +521,7 @@ public class AgentRunner {
                     sink.appendUserMessage(userMessage, attachments);
                 }
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
+                trace.agentId(agentIdOf(agent));
 
                 var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType);
                 // JCLAW-38: re-inject the latest compaction summary (if any)
@@ -729,6 +730,7 @@ public class AgentRunner {
                 conversationIdRef[0] = conversation.id;
 
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
+                trace.agentId(agentIdOf(agent));
 
                 if (CancellationManager.checkCancelled(isCancelled, agent, channelType, tracedCb)) return;
 
@@ -1217,8 +1219,13 @@ public class AgentRunner {
         Tx.run(() ->
             sink.appendAssistantMessage(finalContent, null, usageJson, finalReasoning, finalTruncated));
         LatencyStats.record(channelType, "persist",
-                (System.nanoTime() - persistStartNs) / 1_000_000L);
+                (System.nanoTime() - persistStartNs) / 1_000_000L, agentIdOf(agent));
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
+    }
+
+    /** Agent id as a string for latency-metric tagging (JCLAW-515); null for a null/transient agent. */
+    private static String agentIdOf(Agent agent) {
+        return agent == null || agent.id == null ? null : agent.id.toString();
     }
 
     /**
@@ -1242,7 +1249,7 @@ public class AgentRunner {
         long truncPersistStartNs = System.nanoTime();
         Tx.run(() -> sink.appendAssistantMessage(finalContent, null));
         LatencyStats.record(channelType, "persist",
-                (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
+                (System.nanoTime() - truncPersistStartNs) / 1_000_000L, agentIdOf(agent));
         cb.onComplete().accept(finalContent);
     }
 

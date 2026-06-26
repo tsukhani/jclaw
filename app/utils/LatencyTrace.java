@@ -27,6 +27,9 @@ public final class LatencyTrace {
     public static final String TERMINAL_SENT = "terminal_sent";
 
     private final String channel;
+    // Set once the conversation/agent is resolved (AgentRunner, at PROLOGUE_CONV_RESOLVED).
+    // Tags every persisted segment sample so the dashboard's agent filter works (JCLAW-515).
+    private volatile String agentId;
     private final long startNs;
     private final long acceptedAtNs;
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
@@ -56,6 +59,13 @@ public final class LatencyTrace {
      */
     public static LatencyTrace forTurn(String channel, Long acceptedAtNs) {
         return new LatencyTrace(channel, acceptedAtNs == null ? 0L : acceptedAtNs);
+    }
+
+    /** Tag this turn's persisted segment samples with the owning agent id (JCLAW-515).
+     *  Called by AgentRunner once the conversation/agent is resolved. A null id leaves
+     *  the samples agent-less — they still record, just without agent attribution. */
+    public void agentId(String id) {
+        this.agentId = id;
     }
 
     /**
@@ -120,11 +130,11 @@ public final class LatencyTrace {
             // virtual/worker thread — any skew we see would be a bug worth
             // surfacing as 0 rather than a negative outlier.
             long queueNs = Math.max(0L, startNs - acceptedAtNs);
-            LatencyStats.record(channel, "queue_wait", nsToMs(queueNs));
+            emit("queue_wait", nsToMs(queueNs));
         }
 
-        LatencyStats.record(channel, "total", nsToMs(endNs - startNs));
-        LatencyStats.record(channel, "prologue", nsToMs(prologueDone - startNs));
+        emit("total", nsToMs(endNs - startNs));
+        emit("prologue", nsToMs(prologueDone - startNs));
 
         recordPrologueSubSegments(prologueDone);
         recordStreamSegments(prologueDone);
@@ -143,16 +153,16 @@ public final class LatencyTrace {
         Long promptAssembled = marks.get(PROLOGUE_PROMPT_ASSEMBLED);
 
         if (requestParsed != null) {
-            LatencyStats.record(channel, "prologue_parse", nsToMs(requestParsed - startNs));
+            emit("prologue_parse", nsToMs(requestParsed - startNs));
         }
         if (requestParsed != null && convResolved != null) {
-            LatencyStats.record(channel, "prologue_conv", nsToMs(convResolved - requestParsed));
+            emit("prologue_conv", nsToMs(convResolved - requestParsed));
         }
         if (convResolved != null && promptAssembled != null) {
-            LatencyStats.record(channel, "prologue_prompt", nsToMs(promptAssembled - convResolved));
+            emit("prologue_prompt", nsToMs(promptAssembled - convResolved));
         }
         if (promptAssembled != null) {
-            LatencyStats.record(channel, "prologue_tools", nsToMs(prologueDone - promptAssembled));
+            emit("prologue_tools", nsToMs(prologueDone - promptAssembled));
         }
     }
 
@@ -175,30 +185,35 @@ public final class LatencyTrace {
     private void recordStreamSegments(long prologueDone) {
         Long firstToken = marks.get(FIRST_TOKEN);
         if (firstToken != null) {
-            LatencyStats.record(channel, "ttft", nsToMs(firstToken - prologueDone));
+            emit("ttft", nsToMs(firstToken - prologueDone));
         }
 
         Long streamBodyEnd = marks.get(STREAM_BODY_END);
         if (firstToken != null && streamBodyEnd != null) {
-            LatencyStats.record(channel, "stream_body", nsToMs(streamBodyEnd - firstToken));
+            emit("stream_body", nsToMs(streamBodyEnd - firstToken));
         }
 
         Long persistDone = marks.get(PERSIST_DONE);
         if (streamBodyEnd != null && persistDone != null) {
-            LatencyStats.record(channel, "persist", nsToMs(persistDone - streamBodyEnd));
+            emit("persist", nsToMs(persistDone - streamBodyEnd));
         }
 
         Long terminalSent = marks.get(TERMINAL_SENT);
         if (streamBodyEnd != null && terminalSent != null) {
-            LatencyStats.record(channel, "terminal_tail", nsToMs(terminalSent - streamBodyEnd));
+            emit("terminal_tail", nsToMs(terminalSent - streamBodyEnd));
         }
     }
 
     private void recordToolSegments() {
         if (toolRoundCount.get() > 0) {
-            LatencyStats.record(channel, "tool_exec", toolExecMs.get());
-            LatencyStats.record(channel, "tool_round_count", toolRoundCount.get());
+            emit("tool_exec", toolExecMs.get());
+            emit("tool_round_count", toolRoundCount.get());
         }
+    }
+
+    /** Record one segment to both the live histogram and the persisted time-series. */
+    private void emit(String segment, long ms) {
+        LatencyStats.record(channel, segment, ms, agentId);
     }
 
     private static long nsToMs(long ns) {

@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.CompressionMetric;
+import models.LatencyMetric;
 import play.db.jpa.JPA;
 import play.libs.F;
 import play.mvc.Before;
@@ -22,7 +23,9 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.TreeSet;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -122,6 +125,59 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Reset latency segment histograms")
     public static void resetLatency() {
         LatencyStats.reset();
+        renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
+    }
+
+    /**
+     * GET /api/metrics/latency/rows — windowed, persisted latency samples (JCLAW-515),
+     * aggregated server-side into the same {@code {segment: histogram}} shape the live
+     * snapshot ({@link #latency()}) emits per channel, so the Chat Performance dashboard
+     * can window (7d/30d/All via {@code since}) and filter by agent and channel — the
+     * dimensions the in-memory histogram can't provide.
+     *
+     * <p>Query params: {@code since} (ISO-8601 lower bound; default 30d), {@code agentId}
+     * and {@code channel} (optional filters). Response: {@code {"since": ISO, "channels":
+     * [...], "segments": {segment: histogramJson}}}. {@code channels} lists every channel
+     * present in the window (ignoring the channel filter) so the dropdown can populate;
+     * {@code segments} aggregates only the rows matching the channel filter — all channels
+     * when omitted, with percentiles recomputed from raw samples (not merged).
+     */
+    @Operation(summary = "Windowed latency percentiles by segment, filterable by agent and channel")
+    public static void latencyRows() {
+        Instant since = parseSinceParam(params.get("since"));
+        var agentIdParam = params.get("agentId");
+        var agentId = (agentIdParam != null && !agentIdParam.isBlank()) ? agentIdParam : null;
+        var channelParam = params.get("channel");
+        var channel = (channelParam != null && !channelParam.isBlank()) ? channelParam : null;
+
+        // One query: window + agent filter (NOT channel). Derive the channel list from
+        // all fetched rows so the dropdown populates; aggregate only the channel-matching
+        // subset so percentiles are recomputed from raw samples rather than merged.
+        List<LatencyMetric> rows = agentId == null
+                ? LatencyMetric.<LatencyMetric>find("createdAt >= ?1", since).fetch()
+                : LatencyMetric.<LatencyMetric>find("createdAt >= ?1 and agentId = ?2", since, agentId).fetch();
+
+        var channels = new TreeSet<String>();
+        var bySegment = new LinkedHashMap<String, List<Long>>();
+        for (var r : rows) {
+            if (r.channel != null) channels.add(r.channel);
+            if (channel == null || channel.equals(r.channel)) {
+                bySegment.computeIfAbsent(r.segment, _ -> new ArrayList<>()).add(r.latencyMs);
+            }
+        }
+
+        var resp = new JsonObject();
+        resp.addProperty("since", since.toString());
+        resp.add("channels", INSTANCE.toJsonTree(channels));
+        resp.add("segments", LatencyStats.aggregate(bySegment));
+        renderJSON(resp.toString());
+    }
+
+    /** DELETE /api/metrics/latency/rows — clear the persisted latency time-series (JCLAW-515). */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Clear persisted latency metric rows")
+    public static void clearLatencyRows() {
+        LatencyMetric.deleteAll();
         renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
     }
 

@@ -3,6 +3,7 @@ package utils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.HdrHistogram.AtomicHistogram;
+import services.LatencyMetricRecorder;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -46,11 +47,25 @@ public final class LatencyStats {
     // idiomatic name purely to avoid Java's contextual keyword.
     @SuppressWarnings("java:S6213")
     public static void record(String channel, String segment, long valueMs) {
+        record(channel, segment, valueMs, null);
+    }
+
+    /**
+     * Record a sample to the live in-memory histogram AND persist it for the
+     * time-windowed Chat Performance dashboard (JCLAW-515). {@code agentId} tags
+     * the persisted row (null for agent-less recordings) so the dashboard's agent
+     * filter works. The in-memory histogram remains the source of truth for the
+     * live snapshot and the load-test harness; the persisted enqueue is best-effort
+     * and batched off the turn path by {@link LatencyMetricRecorder}.
+     */
+    @SuppressWarnings("java:S6213")
+    public static void record(String channel, String segment, long valueMs, String agentId) {
         var resolved = (channel == null || channel.isBlank()) ? UNKNOWN_CHANNEL : channel;
         BY_CHANNEL
                 .computeIfAbsent(resolved, _ -> new ConcurrentHashMap<>())
                 .computeIfAbsent(segment, _ -> new Histogram())
                 .record(valueMs);
+        LatencyMetricRecorder.enqueue(agentId, resolved, segment, valueMs);
     }
 
     /**
@@ -73,6 +88,23 @@ public final class LatencyStats {
 
     public static void reset() {
         BY_CHANNEL.clear();
+    }
+
+    /**
+     * Aggregate raw persisted samples (segment → values) into the same
+     * {@code {segment: histogramJson}} shape {@link #snapshot} emits per channel,
+     * for the windowed Chat Performance dashboard (JCLAW-515). Reuses the
+     * HdrHistogram percentile machinery so server-side (windowed/filtered) and
+     * live aggregation produce an identical shape from one code path.
+     */
+    public static JsonObject aggregate(Map<String, ? extends Iterable<Long>> samplesBySegment) {
+        var root = new JsonObject();
+        for (var e : samplesBySegment.entrySet()) {
+            var hist = new Histogram();
+            for (long v : e.getValue()) hist.record(v);
+            root.add(e.getKey(), hist.toJson());
+        }
+        return root;
     }
 
     /**

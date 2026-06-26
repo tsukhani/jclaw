@@ -208,6 +208,9 @@ DELETE  /api/subagent-runs/{id}                 ApiSubagentRunsController.delete
 # Metrics API (in-memory latency histograms — reset on JVM restart)
 GET     /api/metrics/latency                    ApiMetricsController.latency
 DELETE  /api/metrics/latency                    ApiMetricsController.resetLatency
+# Time-windowed latency percentiles for the Chat Performance dashboard (JCLAW-515)
+GET     /api/metrics/latency/rows               ApiMetricsController.latencyRows
+DELETE  /api/metrics/latency/rows               ApiMetricsController.clearLatencyRows
 # Cost is durable — aggregates persisted Message.usageJson across conversations
 GET     /api/metrics/cost                       ApiMetricsController.cost
 GET     /api/metrics/compression                ApiMetricsController.compression
