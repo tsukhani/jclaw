@@ -30,6 +30,11 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final int DEFAULT_FPS = 24; // sidecar default when the request doesn't specify fps
 
+    // Sidecar poll-response JSON keys.
+    private static final String KEY_STATE = "state";
+    private static final String KEY_PERCENT = "percent";
+    private static final String KEY_ERROR = "error";
+
     private final String model;
     private final OkHttpClient client;
     private final String baseUrlOverride; // tests inject a mock server; null in prod -> resolve dynamically
@@ -84,7 +89,7 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
                 .post(RequestBody.create(payload.toString(), JSON))
                 .build();
         try (var resp = client.newCall(httpReq).execute()) {
-            var body = resp.body() != null ? resp.body().string() : "";
+            var body = resp.body().string();
             if (resp.code() == 409) {
                 throw new VideoGenerationException("local video sidecar is busy (one job at a time) — retry shortly");
             }
@@ -115,17 +120,17 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
         var base = pollBase();
         var httpReq = new Request.Builder().url(base + "/jobs/" + providerJobId).get().build();
         try (var resp = client.newCall(httpReq).execute()) {
-            var body = resp.body() != null ? resp.body().string() : "";
+            var body = resp.body().string();
             if (!resp.isSuccessful()) {
                 throw new VideoGenerationException("local video poll failed: HTTP " + resp.code() + " " + truncate(body, 200));
             }
             var j = JsonParser.parseString(body).getAsJsonObject();
-            var state = j.has("state") && !j.get("state").isJsonNull() ? j.get("state").getAsString() : "";
-            Integer percent = j.has("percent") && !j.get("percent").isJsonNull() ? j.get("percent").getAsInt() : null;
+            var state = j.has(KEY_STATE) && !j.get(KEY_STATE).isJsonNull() ? j.get(KEY_STATE).getAsString() : "";
+            Integer percent = j.has(KEY_PERCENT) && !j.get(KEY_PERCENT).isJsonNull() ? j.get(KEY_PERCENT).getAsInt() : null;
             return switch (state) {
                 case "succeeded" -> PollResult.succeeded(base + "/jobs/" + providerJobId + "/result");
                 case "failed" -> PollResult.failed(
-                        j.has("error") && !j.get("error").isJsonNull() ? j.get("error").getAsString()
+                        j.has(KEY_ERROR) && !j.get(KEY_ERROR).isJsonNull() ? j.get(KEY_ERROR).getAsString()
                                 : "local video generation failed");
                 default -> PollResult.running(percent); // running / queued
             };

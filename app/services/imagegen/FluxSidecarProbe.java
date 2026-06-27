@@ -1,10 +1,7 @@
 package services.imagegen;
 
-import play.Logger;
-
-import java.io.IOException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
+import services.ExecutableProbeSupport;
+import services.ProbeCache;
 
 /**
  * Detect whether {@code uv} (the Astral Python package/venv manager) is on PATH.
@@ -23,61 +20,34 @@ public final class FluxSidecarProbe {
 
     public record ProbeResult(boolean available, String reason) {}
 
-    private static final ProbeResult UNRUN = new ProbeResult(false, "uv probe has not run yet");
-    private static final AtomicReference<ProbeResult> result = new AtomicReference<>(UNRUN);
+    private static final ProbeCache<ProbeResult> CACHE =
+            new ProbeCache<>(new ProbeResult(false, "uv probe has not run yet"));
 
     private FluxSidecarProbe() {}
 
     /** Run the probe (idempotent), update cache, return result. */
     public static ProbeResult probe() {
-        var r = doProbe();
-        result.set(r);
-        return r;
+        var r = ExecutableProbeSupport.probeOnPath("uv", "--version", "FluxSidecarProbe",
+                " — install uv to enable local image generation");
+        return CACHE.set(new ProbeResult(r.available(), r.reason()));
     }
 
-    /** Most recent probe result; returns {@link #UNRUN} until {@link #probe} has been called. */
+    /** Most recent probe result; returns the unrun sentinel until {@link #probe} has been called. */
     public static ProbeResult lastResult() {
-        return result.get();
+        return CACHE.get();
     }
 
     /**
-     * Cached probe — runs once on first call. Threadsafe via the AtomicReference;
+     * Cached probe — runs once on first call. Threadsafe via the cache;
      * concurrent callers may both run the probe but they return the same answer.
      */
     public static boolean isAvailable() {
-        var cached = result.get();
-        if (cached == UNRUN) cached = probe();
+        var cached = CACHE.get();
+        if (CACHE.isUnrun(cached)) cached = probe();
         return cached.available();
     }
 
     public static void setForTest(ProbeResult forced) {
-        result.set(forced == null ? UNRUN : forced);
-    }
-
-    private static ProbeResult doProbe() {
-        try {
-            var pb = new ProcessBuilder("uv", "--version");
-            pb.redirectErrorStream(true);
-            var p = pb.start();
-            // --version prints and exits within milliseconds; bound the wait
-            // anyway so a hung binary can't stall startup forever.
-            boolean exited = p.waitFor(5, TimeUnit.SECONDS);
-            if (!exited) {
-                p.destroyForcibly();
-                return new ProbeResult(false, "uv --version did not exit within 5s");
-            }
-            int code = p.exitValue();
-            if (code != 0) {
-                return new ProbeResult(false, "uv --version exited %d".formatted(code));
-            }
-            Logger.info("FluxSidecarProbe: uv available on PATH");
-            return new ProbeResult(true, "available");
-        } catch (IOException e) {
-            return new ProbeResult(false,
-                    "uv not found on PATH (" + e.getMessage() + ") — install uv to enable local image generation");
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-            return new ProbeResult(false, "interrupted while probing uv");
-        }
+        CACHE.setForTest(forced);
     }
 }

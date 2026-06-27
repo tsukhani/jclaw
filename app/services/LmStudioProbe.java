@@ -1,7 +1,5 @@
 package services;
 
-import java.util.concurrent.atomic.AtomicReference;
-
 /**
  * One-shot health check for an LM Studio instance reachable at
  * {@code provider.lm-studio.baseUrl}. Mirrors {@link OllamaLocalProbe} —
@@ -15,34 +13,23 @@ public class LmStudioProbe {
 
     public record ProbeResult(boolean available, int modelCount, String reason, boolean connectionRefused) { }
 
-    private static final ProbeResult UNRUN = new ProbeResult(false, 0,
-            "lm-studio probe has not run yet", false);
-
-    private static final AtomicReference<ProbeResult> result = new AtomicReference<>(UNRUN);
+    private static final ProbeCache<ProbeResult> CACHE = new ProbeCache<>(
+            new ProbeResult(false, 0, "lm-studio probe has not run yet", false));
 
     public static ProbeResult probe(String baseUrl) {
         // JCLAW-186: probeModels now uses OkHttp under the hood. OkHttp does
         // not attempt h2c upgrade on plain HTTP, so the LM Studio
         // Express/Node upgrade-event hang the JDK driver had to dodge is
         // structurally absent — no version pin needed.
-        return setResult(fromShared(LocalProviderProbeSupport.probeModels(
-                baseUrl, "LM Studio")));
+        var r = LocalProviderProbeSupport.probeModels(baseUrl, "LM Studio");
+        return CACHE.set(new ProbeResult(r.available(), r.modelCount(), r.reason(), r.connectionRefused()));
     }
 
     public static ProbeResult lastResult() {
-        return result.get();
+        return CACHE.get();
     }
 
     public static void setForTest(ProbeResult forced) {
-        result.set(forced == null ? UNRUN : forced);
-    }
-
-    private static ProbeResult setResult(ProbeResult r) {
-        result.set(r);
-        return r;
-    }
-
-    private static ProbeResult fromShared(LocalProviderProbeSupport.Result r) {
-        return new ProbeResult(r.available(), r.modelCount(), r.reason(), r.connectionRefused());
+        CACHE.setForTest(forced);
     }
 }

@@ -87,7 +87,7 @@ public final class VideoCapabilityProbe {
             }
             capability = JsonParser.parseString(out).getAsJsonObject();
             state = State.READY;
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             fail("capability probe interrupted");
         } catch (Exception e) {

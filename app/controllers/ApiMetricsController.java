@@ -54,6 +54,8 @@ import static utils.GsonHolder.INSTANCE;
 public class ApiMetricsController extends Controller {
 
     private static final String KEY_PROMPTS = "prompts";
+    private static final String KEY_SINCE = "since";
+    private static final String STATUS_RESET = "reset";
 
     @Before(only = {"latency", "resetLatency", "cost", "compression", "resetCompression"})
     static void requireAdminSession() {
@@ -125,7 +127,7 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Reset latency segment histograms")
     public static void resetLatency() {
         LatencyStats.reset();
-        renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
+        renderJSON(INSTANCE.toJson(new StatusResponse(STATUS_RESET)));
     }
 
     /**
@@ -144,7 +146,7 @@ public class ApiMetricsController extends Controller {
      */
     @Operation(summary = "Windowed latency percentiles by segment, filterable by agent and channel")
     public static void latencyRows() {
-        Instant since = parseSinceParam(params.get("since"));
+        Instant since = parseSinceParam(params.get(KEY_SINCE));
         var agentIdParam = params.get("agentId");
         var agentId = (agentIdParam != null && !agentIdParam.isBlank()) ? agentIdParam : null;
         var channelParam = params.get("channel");
@@ -167,7 +169,7 @@ public class ApiMetricsController extends Controller {
         }
 
         var resp = new JsonObject();
-        resp.addProperty("since", since.toString());
+        resp.addProperty(KEY_SINCE, since.toString());
         resp.add("channels", INSTANCE.toJsonTree(channels));
         resp.add("segments", LatencyStats.aggregate(bySegment));
         renderJSON(resp.toString());
@@ -178,7 +180,7 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Clear persisted latency metric rows")
     public static void clearLatencyRows() {
         LatencyMetric.deleteAll();
-        renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
+        renderJSON(INSTANCE.toJson(new StatusResponse(STATUS_RESET)));
     }
 
     /**
@@ -190,7 +192,7 @@ public class ApiMetricsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionResponse.class)))
     @Operation(summary = "List raw compression-metric rows since a timestamp for client-side aggregation")
     public static void compression() {
-        Instant since = parseSinceParam(params.get("since"));
+        Instant since = parseSinceParam(params.get(KEY_SINCE));
         List<CompressionMetric> events = CompressionMetric.<CompressionMetric>find(
                 "createdAt >= ?1 order by createdAt desc", since).fetch();
         var rows = new ArrayList<CompressionRow>(events.size());
@@ -207,7 +209,7 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Reset (delete) all compression metrics")
     public static void resetCompression() {
         CompressionMetrics.reset();
-        renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
+        renderJSON(INSTANCE.toJson(new StatusResponse(STATUS_RESET)));
     }
 
     /**
@@ -244,7 +246,7 @@ public class ApiMetricsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CostResponse.class)))
     @Operation(summary = "List per-turn cost rows since a timestamp for client-side aggregation")
     public static void cost() {
-        Instant since = parseSinceParam(params.get("since"));
+        Instant since = parseSinceParam(params.get(KEY_SINCE));
         Long agentId = parseAgentIdParam(params.get("agentId"));
         var channelTypeParam = params.get("channelType");
         String channelType = (channelTypeParam != null && !channelTypeParam.isBlank())

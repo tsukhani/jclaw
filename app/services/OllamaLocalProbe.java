@@ -1,7 +1,5 @@
 package services;
 
-import java.util.concurrent.atomic.AtomicReference;
-
 /**
  * One-shot health check for a local Ollama instance reachable at
  * {@code provider.ollama-local.baseUrl}. Mirrors the shape of {@link OcrHealthProbe}:
@@ -20,10 +18,8 @@ public class OllamaLocalProbe {
 
     public record ProbeResult(boolean available, int modelCount, String reason, boolean connectionRefused) { }
 
-    private static final ProbeResult UNRUN = new ProbeResult(false, 0,
-            "ollama-local probe has not run yet", false);
-
-    private static final AtomicReference<ProbeResult> result = new AtomicReference<>(UNRUN);
+    private static final ProbeCache<ProbeResult> CACHE = new ProbeCache<>(
+            new ProbeResult(false, 0, "ollama-local probe has not run yet", false));
 
     /**
      * Issue a {@code GET <baseUrl>/models} with a short timeout and cache the
@@ -35,12 +31,12 @@ public class OllamaLocalProbe {
         // is gone — OkHttp speaks HTTP/1.1 to plain-HTTP cleartext
         // endpoints by default (no h2c upgrade), which is what Ollama
         // serves on the loopback /v1 port.
-        return setResult(fromShared(LocalProviderProbeSupport.probeModels(
-                baseUrl, "Ollama")));
+        var r = LocalProviderProbeSupport.probeModels(baseUrl, "Ollama");
+        return CACHE.set(new ProbeResult(r.available(), r.modelCount(), r.reason(), r.connectionRefused()));
     }
 
     public static ProbeResult lastResult() {
-        return result.get();
+        return CACHE.get();
     }
 
     /**
@@ -49,15 +45,6 @@ public class OllamaLocalProbe {
      * actually running (and vice versa).
      */
     public static void setForTest(ProbeResult forced) {
-        result.set(forced == null ? UNRUN : forced);
-    }
-
-    private static ProbeResult setResult(ProbeResult r) {
-        result.set(r);
-        return r;
-    }
-
-    private static ProbeResult fromShared(LocalProviderProbeSupport.Result r) {
-        return new ProbeResult(r.available(), r.modelCount(), r.reason(), r.connectionRefused());
+        CACHE.setForTest(forced);
     }
 }
