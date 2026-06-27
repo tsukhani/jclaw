@@ -44,7 +44,7 @@ import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
-import { isVideoJobPending, videoDisplayState, videoProgressPercent, videoSrc, type VideoJobStatus } from '~/utils/video-job'
+import { formatVideoDuration, isVideoJobPending, videoDisplayState, videoGenMeta, videoProgressPercent, videoResultSizeBytes, videoSrc, type VideoJobStatus } from '~/utils/video-job'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
@@ -1486,6 +1486,30 @@ function videoCardError(att: MessageAttachment): string {
 }
 function videoCardPercent(att: MessageAttachment): number | null {
   return videoProgressPercent(att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined)
+}
+
+// Generated-video chip metadata (JCLAW-234). Thin reactive wrappers over the pure video-job helpers:
+// aspect/fps from the persisted metadata, size from the poll status or attachment, and duration captured
+// from each <video> element (the rendered clip's real length), with the requested value as a fallback.
+/** Rendered-clip duration (seconds) captured from each <video>'s loadedmetadata, keyed by attachment uuid. */
+const videoDurations = ref<Record<string, number>>({})
+function onVideoLoadedMeta(att: MessageAttachment, ev: Event) {
+  const el = ev.target as HTMLVideoElement
+  if (Number.isFinite(el.duration) && el.duration > 0) videoDurations.value[att.uuid] = el.duration
+}
+function videoAspect(att: MessageAttachment): string | null {
+  return videoGenMeta(att.generationMetadata).aspectRatio
+}
+function videoFps(att: MessageAttachment): number | null {
+  return videoGenMeta(att.generationMetadata).fps
+}
+function videoSizeLabel(att: MessageAttachment): string {
+  const s = att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined
+  const bytes = videoResultSizeBytes(att, s)
+  return bytes > 0 ? formatSize(bytes) : ''
+}
+function videoDurationLabel(att: MessageAttachment): string {
+  return formatVideoDuration(videoDurations.value[att.uuid], videoGenMeta(att.generationMetadata).durationSeconds)
 }
 
 onMounted(() => {
@@ -3260,7 +3284,7 @@ function exportConversation() {
                             class="flex flex-col gap-2 w-[320px] max-w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs"
                             :class="att.deleted ? 'text-fg-muted' : 'text-fg-strong'"
                           >
-                            <!-- Header: icon + size + GEN on the left; actions (or the deleted
+                            <!-- Header: icon + size on the left; actions (or the deleted
                                  marker) pushed to the right. -->
                             <div class="flex items-center gap-2">
                               <PhotoIcon
@@ -3271,10 +3295,6 @@ function exportConversation() {
                                 v-if="!att.deleted"
                                 class="text-fg-muted"
                               >{{ formatSize(att.sizeBytes) }}</span>
-                              <span
-                                class="text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
-                                :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated image'"
-                              >gen</span>
                               <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
                               <span
                                 v-if="att.deleted"
@@ -3320,14 +3340,82 @@ function exportConversation() {
                           v-else-if="att.generated && att.kind === 'VIDEO'"
                           class="flex flex-col gap-1.5 items-start"
                         >
-                          <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- an AI-generated clip has no caption track -->
-                          <video
-                            v-if="videoCardState(att) === 'ready'"
-                            :src="videoCardSrc(att)"
-                            controls
-                            preload="metadata"
-                            class="max-w-[360px] max-h-[360px] rounded-lg border border-border bg-black"
-                          />
+                          <template v-if="videoCardState(att) === 'ready'">
+                            <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- an AI-generated clip has no caption track -->
+                            <video
+                              v-if="!att.deleted"
+                              :src="videoCardSrc(att)"
+                              controls
+                              preload="metadata"
+                              class="max-w-[360px] max-h-[360px] rounded-lg border border-border bg-black"
+                              @loadedmetadata="onVideoLoadedMeta(att, $event)"
+                            />
+                            <!-- Info + actions chip, mirroring the generated-image chip: a header row
+                                 (film icon · size · aspect · fps · duration, download/delete pushed right)
+                                 above the full-width prompt. Pinned to the player width for a stacked look. -->
+                            <div
+                              class="flex flex-col gap-2 w-[360px] max-w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs"
+                              :class="att.deleted ? 'text-fg-muted' : 'text-fg-strong'"
+                            >
+                              <div class="flex items-center gap-2">
+                                <FilmIcon
+                                  class="w-4 h-4 shrink-0 text-fg-muted"
+                                  aria-hidden="true"
+                                />
+                                <template v-if="!att.deleted">
+                                  <span
+                                    v-if="videoSizeLabel(att)"
+                                    class="text-fg-muted"
+                                  >{{ videoSizeLabel(att) }}</span>
+                                  <span
+                                    v-if="videoAspect(att)"
+                                    class="text-fg-muted"
+                                  >{{ videoAspect(att) }}</span>
+                                  <span
+                                    v-if="videoFps(att) != null"
+                                    class="text-fg-muted"
+                                  >{{ videoFps(att) }} fps</span>
+                                  <span
+                                    v-if="videoDurationLabel(att)"
+                                    class="text-fg-muted"
+                                  >{{ videoDurationLabel(att) }}</span>
+                                  <!-- Actions while the file exists: download + delete, right-aligned. -->
+                                  <a
+                                    :href="`/api/attachments/${att.uuid}`"
+                                    :download="att.originalFilename"
+                                    class="ml-auto shrink-0 p-0.5 text-fg-muted hover:text-fg-strong transition-colors"
+                                    title="Download video"
+                                    aria-label="Download video"
+                                  >
+                                    <ArrowDownTrayIcon
+                                      class="w-4 h-4"
+                                      aria-hidden="true"
+                                    />
+                                  </a>
+                                  <button
+                                    type="button"
+                                    class="shrink-0 p-0.5 text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                    title="Delete video from workspace"
+                                    @click="deleteAttachment(att)"
+                                  >
+                                    <TrashIcon
+                                      class="w-4 h-4"
+                                      aria-hidden="true"
+                                    />
+                                  </button>
+                                </template>
+                                <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
+                                <span
+                                  v-else
+                                  class="ml-auto text-[11px] italic text-red-500/90"
+                                >deleted from workspace</span>
+                              </div>
+                              <!-- Prompt: full chip width, wraps naturally. -->
+                              <p class="break-words leading-relaxed">
+                                {{ generatedImageLabel(att) }}
+                              </p>
+                            </div>
+                          </template>
                           <div
                             v-else-if="videoCardState(att) === 'failed'"
                             class="flex items-start gap-2 w-[320px] max-w-full bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg px-3 py-2 text-xs text-red-600 dark:text-red-400"

@@ -11,6 +11,9 @@ export interface VideoJobStatus {
   percent?: number | null
   errorMessage?: string | null
   resultAttachmentUuid?: string | null
+  /** Byte size of the filled result. The placeholder is filled in-place, so until a reload the chat's own
+   *  attachment still reads sizeBytes=0; the video chip uses this for the live "size" label (JCLAW-234). */
+  resultSizeBytes?: number | null
 }
 
 export type VideoDisplayState = 'generating' | 'ready' | 'failed'
@@ -63,4 +66,55 @@ export function isVideoJobPending(att: VideoAttachmentLike, status: VideoJobStat
   if (att.kind !== 'VIDEO' || !att.generated || att.generationJobId == null) return false
   if (att.sizeBytes > 0) return false
   return status?.state !== 'SUCCEEDED' && status?.state !== 'FAILED'
+}
+
+// --- Generated-video chip metadata (JCLAW-234) ---------------------------------------------------------
+// The chip shows four facts pulled from three sources: fps + aspectRatio from the persisted
+// generationMetadata (fps isn't recoverable from a <video> element), size from the poll status or the
+// attachment, and duration from the rendered clip itself (truest value, with the requested value as a
+// fallback). These pure helpers keep that resolution testable without mounting chat.vue.
+
+/**
+ * Parse the chip-relevant fields out of an attachment's {@code generationMetadata} JSON. fps/aspectRatio
+ * are the effective request values the tool persisted; durationSeconds is present only when the caller
+ * asked for a specific length. Returns all-null on absent or malformed metadata.
+ */
+export function videoGenMeta(generationMetadata: string | undefined): {
+  aspectRatio: string | null
+  fps: number | null
+  durationSeconds: number | null
+} {
+  if (generationMetadata) {
+    try {
+      const m = JSON.parse(generationMetadata) as { aspectRatio?: unknown, fps?: unknown, durationSeconds?: unknown }
+      return {
+        aspectRatio: typeof m.aspectRatio === 'string' ? m.aspectRatio : null,
+        fps: typeof m.fps === 'number' ? m.fps : null,
+        durationSeconds: typeof m.durationSeconds === 'number' ? m.durationSeconds : null,
+      }
+    }
+    catch { /* malformed metadata — show what we can */ }
+  }
+  return { aspectRatio: null, fps: null, durationSeconds: null }
+}
+
+/**
+ * Result byte size for the chip: the poll status's size (live — the placeholder is filled in-place so the
+ * chat's own attachment still reads 0 until a reload) else the attachment's own size. 0 when neither is known.
+ */
+export function videoResultSizeBytes(att: VideoAttachmentLike, status: VideoJobStatus | undefined): number {
+  if (status?.resultSizeBytes != null && status.resultSizeBytes > 0) return status.resultSizeBytes
+  return att.sizeBytes > 0 ? att.sizeBytes : 0
+}
+
+/**
+ * Human "Ns" duration label, preferring the rendered clip's real duration (off the {@code <video>}
+ * element) and falling back to the requested value from metadata. Empty string when neither is known.
+ */
+export function formatVideoDuration(elementDuration: number | null | undefined, requestedSeconds: number | null): string {
+  const d = (elementDuration != null && Number.isFinite(elementDuration) && elementDuration > 0)
+    ? elementDuration
+    : requestedSeconds
+  if (d == null || d <= 0) return ''
+  return d < 1 ? `${d.toFixed(1)}s` : `${Math.round(d)}s`
 }

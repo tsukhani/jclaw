@@ -53,7 +53,12 @@ public class ApiVideogenController extends Controller {
                 m.put("state", job.state.name());
                 m.put("percent", job.percent); // real 0..100 for the local engine (JCLAW-232); null for cloud (SV-1)
                 m.put("errorMessage", job.errorMessage);
-                m.put("resultAttachmentUuid", resultUuid(job.resultAttachmentId));
+                // The placeholder is filled in-place, so until a reload the chat still holds sizeBytes=0;
+                // hand it the result's uuid + size so the video chip can show the size live (JCLAW-234).
+                MessageAttachment result = job.resultAttachmentId != null
+                        ? MessageAttachment.findById(job.resultAttachmentId) : null;
+                m.put("resultAttachmentUuid", result == null ? null : result.uuid);
+                m.put("resultSizeBytes", result == null ? null : result.sizeBytes);
                 out.add(m);
             }
         }
@@ -112,9 +117,4 @@ public class ApiVideogenController extends Controller {
         }
     }
 
-    private static String resultUuid(Long attachmentId) {
-        if (attachmentId == null) return null;
-        MessageAttachment att = MessageAttachment.findById(attachmentId);
-        return att == null ? null : att.uuid;
-    }
 }

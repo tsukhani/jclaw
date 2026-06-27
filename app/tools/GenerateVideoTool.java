@@ -32,6 +32,12 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
     private static final String ARG_FPS = "fps";
     private static final String ARG_ASPECT = "aspect_ratio";
 
+    /** Effective defaults recorded in the metadata when the caller omits them, so the chat's video chip
+     *  always has an fps/aspect to show. Mirror {@code LocalVideoGenerationClient}'s client-side defaults
+     *  (fps 24, landscape). */
+    private static final int DEFAULT_FPS = 24;
+    private static final String DEFAULT_ASPECT = "16:9";
+
     @Override public String name() { return "generate_video"; }
     @Override public String category() { return "Utilities"; }
     @Override public String icon() { return "video"; }
@@ -107,15 +113,26 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
         var text = "Started generating a video for the prompt; it runs in the background (typically a "
                 + "few minutes) and appears in the chat automatically when ready. Do not re-embed or "
                 + "link it — it shows on its own.";
-        return ToolRegistry.ToolResult.withVideoJob(text, job.id, buildMetadata(prompt, job));
+        return ToolRegistry.ToolResult.withVideoJob(text, job.id, buildMetadata(req, job));
     }
 
-    private static String buildMetadata(String prompt, VideoGenerationJob job) {
+    /** Metadata persisted on the placeholder attachment and surfaced by the chat's video chip
+     *  (size · aspect · fps · duration · prompt). {@code fps}/{@code aspectRatio} record the effective
+     *  request values (defaults filled in when the caller omits them); {@code durationSeconds} only when
+     *  the caller asked for one — the chip prefers the rendered clip's real duration off the {@code
+     *  <video>} element and falls back to this. */
+    private static String buildMetadata(VideoGenRequest req, VideoGenerationJob job) {
         var meta = new JsonObject();
-        meta.addProperty(ARG_PROMPT, prompt);
+        meta.addProperty(ARG_PROMPT, req.prompt());
         if (job.provider != null) meta.addProperty("provider", job.provider);
         var model = ConfigService.get("videogen.cloud.model");
         if (model != null && !model.isBlank()) meta.addProperty("model", model);
+        meta.addProperty("fps", req.fps() != null && req.fps() > 0 ? req.fps() : DEFAULT_FPS);
+        meta.addProperty("aspectRatio",
+                req.aspectRatio() != null && !req.aspectRatio().isBlank() ? req.aspectRatio() : DEFAULT_ASPECT);
+        if (req.durationSeconds() != null && req.durationSeconds() > 0) {
+            meta.addProperty("durationSeconds", req.durationSeconds());
+        }
         return meta.toString();
     }
 

@@ -1,5 +1,6 @@
 import agents.ConversationSink;
 import agents.ToolRegistry;
+import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
 import models.MessageAttachment;
@@ -142,6 +143,46 @@ class GenerateVideoToolTest extends UnitTest {
         assertNotNull(job, "the tool must have persisted the job row from the non-request thread");
         assertEquals(State.RUNNING, job.state);
         assertEquals("pred_off", job.providerJobId);
+    }
+
+    @Test
+    void metadataCarriesRequestedAspectFpsAndDuration() {
+        // The chat's video chip reads size/aspect/fps/duration off the placeholder's generationMetadata
+        // (JCLAW-234); the tool must persist the requested aspect/fps/duration there.
+        ConfigService.set("videogen.provider", "replicate");
+        ConfigService.set("provider.replicate.baseUrl", server.url("/").toString());
+        ConfigService.set("provider.replicate.apiKey", "test-key");
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "application/json")
+                .body(jsonBuf("{\"id\":\"pred_meta\",\"status\":\"starting\"}")).build());
+
+        var agent = savedAgent();
+        var result = new GenerateVideoTool().executeRich(
+                "{\"prompt\":\"a comet\",\"aspect_ratio\":\"9:16\",\"fps\":30,\"duration_seconds\":4}", agent);
+
+        var meta = JsonParser.parseString(result.videoJob().generationMetadata()).getAsJsonObject();
+        assertEquals("a comet", meta.get("prompt").getAsString());
+        assertEquals("9:16", meta.get("aspectRatio").getAsString());
+        assertEquals(30, meta.get("fps").getAsInt());
+        assertEquals(4, meta.get("durationSeconds").getAsInt());
+    }
+
+    @Test
+    void metadataAppliesFpsAndAspectDefaultsWhenOmitted() {
+        ConfigService.set("videogen.provider", "replicate");
+        ConfigService.set("provider.replicate.baseUrl", server.url("/").toString());
+        ConfigService.set("provider.replicate.apiKey", "test-key");
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "application/json")
+                .body(jsonBuf("{\"id\":\"pred_def\",\"status\":\"starting\"}")).build());
+
+        var agent = savedAgent();
+        var result = new GenerateVideoTool().executeRich("{\"prompt\":\"a comet\"}", agent);
+
+        var meta = JsonParser.parseString(result.videoJob().generationMetadata()).getAsJsonObject();
+        assertEquals("16:9", meta.get("aspectRatio").getAsString(), "landscape default when aspect omitted");
+        assertEquals(24, meta.get("fps").getAsInt(), "24fps default when fps omitted");
+        assertFalse(meta.has("durationSeconds"), "no duration recorded when the caller omits it");
     }
 
     @Test

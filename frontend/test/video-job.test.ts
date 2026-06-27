@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { videoDisplayState, videoSrc, isVideoJobPending, videoProgressPercent, type VideoJobStatus } from '~/utils/video-job'
+import { videoDisplayState, videoSrc, isVideoJobPending, videoProgressPercent, videoGenMeta, videoResultSizeBytes, formatVideoDuration, type VideoJobStatus } from '~/utils/video-job'
 
 /** JCLAW-234: the generated-video card's display-state logic, isolated from chat.vue and the poll timer. */
 function ph(over: Record<string, unknown> = {}) {
@@ -87,5 +87,60 @@ describe('isVideoJobPending', () => {
     expect(isVideoJobPending(ph({ kind: 'IMAGE' }), undefined)).toBe(false)
     expect(isVideoJobPending(ph({ generated: false }), undefined)).toBe(false)
     expect(isVideoJobPending(ph({ generationJobId: undefined }), undefined)).toBe(false)
+  })
+})
+
+describe('videoGenMeta', () => {
+  it('parses aspect, fps, and duration from the metadata JSON', () => {
+    const m = videoGenMeta('{"prompt":"x","aspectRatio":"9:16","fps":30,"durationSeconds":4}')
+    expect(m).toEqual({ aspectRatio: '9:16', fps: 30, durationSeconds: 4 })
+  })
+
+  it('is all-null for absent metadata', () => {
+    expect(videoGenMeta(undefined)).toEqual({ aspectRatio: null, fps: null, durationSeconds: null })
+  })
+
+  it('is all-null for malformed JSON (never throws)', () => {
+    expect(videoGenMeta('{not json')).toEqual({ aspectRatio: null, fps: null, durationSeconds: null })
+  })
+
+  it('null-guards wrong-typed fields', () => {
+    // fps as a string, aspect as a number — ignore rather than render garbage.
+    expect(videoGenMeta('{"aspectRatio":16,"fps":"24"}')).toEqual({ aspectRatio: null, fps: null, durationSeconds: null })
+  })
+})
+
+describe('videoResultSizeBytes', () => {
+  it('prefers the poll status size (live — placeholder still reads 0 before reload)', () => {
+    expect(videoResultSizeBytes(ph({ sizeBytes: 0 }), { id: 7, state: 'SUCCEEDED', resultSizeBytes: 2048 })).toBe(2048)
+  })
+
+  it('falls back to the attachment size (after reload, filled in-place)', () => {
+    expect(videoResultSizeBytes(ph({ sizeBytes: 4096 }), undefined)).toBe(4096)
+  })
+
+  it('is 0 when neither is known', () => {
+    expect(videoResultSizeBytes(ph({ sizeBytes: 0 }), { id: 7, state: 'RUNNING' })).toBe(0)
+  })
+})
+
+describe('formatVideoDuration', () => {
+  it('prefers the rendered clip duration over the requested value', () => {
+    expect(formatVideoDuration(2.04, 2)).toBe('2s')
+  })
+
+  it('falls back to the requested seconds when the element duration is unknown', () => {
+    expect(formatVideoDuration(undefined, 4)).toBe('4s')
+    expect(formatVideoDuration(null, 4)).toBe('4s')
+  })
+
+  it('shows one decimal under a second', () => {
+    expect(formatVideoDuration(0.5, null)).toBe('0.5s')
+  })
+
+  it('is empty when neither source is known or sane', () => {
+    expect(formatVideoDuration(undefined, null)).toBe('')
+    expect(formatVideoDuration(Number.NaN, null)).toBe('')
+    expect(formatVideoDuration(0, 0)).toBe('')
   })
 })
