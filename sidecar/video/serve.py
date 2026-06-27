@@ -294,8 +294,9 @@ def _run_job_mlx(state, jid, prompt, frames, width, height, fps):
     from tqdm import tqdm as _tqdm
     try:
         pipe = state.load()
-        # LTX-2 needs num_frames of the form 8k+1; snap down to the nearest valid count (>= 9).
-        frames = max(9, ((frames - 1) // 8) * 8 + 1)
+        # LTX-2 needs num_frames of the form 8k+1; snap to the NEAREST valid count (>= 9) so the duration
+        # stays close to what was requested (flooring undershot, e.g. 2s@12fps -> 17 frames -> 1.4s).
+        frames = max(9, round((frames - 1) / 8) * 8 + 1)
         total_steps = 8 + 3  # distilled two-stage budget (stage1 + stage2) — drives the bar
         progress = {"done": 0}
 
@@ -335,7 +336,7 @@ def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height, fps):
     from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
     try:
         pipe = state.load()
-        frames = max(9, ((frames - 1) // 8) * 8 + 1)  # LTX-2 requires num_frames of the form 8k+1
+        frames = max(9, round((frames - 1) / 8) * 8 + 1)  # LTX-2 requires num_frames of the form 8k+1
         height = max(64, (height // 64) * 64)  # LTX-2 two-stage asserts height/width are multiples of 64
         width = max(64, (width // 64) * 64)
         total_steps = 8 + 4  # distilled stage-1 (DISTILLED_SIGMAS) + stage-2 (STAGE_2_DISTILLED_SIGMAS)
