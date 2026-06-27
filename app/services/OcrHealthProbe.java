@@ -1,7 +1,6 @@
 package services;
 
 import java.io.IOException;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * One-shot health check for the {@code tesseract} binary that Apache Tika
@@ -19,10 +18,8 @@ public class OcrHealthProbe {
 
     public record ProbeResult(boolean available, String version, String reason) { }
 
-    private static final ProbeResult UNRUN = new ProbeResult(false, null,
-            "tesseract probe has not run yet");
-
-    private static final AtomicReference<ProbeResult> result = new AtomicReference<>(UNRUN);
+    private static final ProbeCache<ProbeResult> CACHE = new ProbeCache<>(
+            new ProbeResult(false, null, "tesseract probe has not run yet"));
 
     /**
      * Execute {@code tesseract --version} and cache the outcome. Safe to call
@@ -43,22 +40,22 @@ public class OcrHealthProbe {
             int exit = proc.waitFor();
             if (exit == 0) {
                 var firstLine = output.lines().findFirst().orElse("(no version output)").trim();
-                return setResult(new ProbeResult(true, firstLine, null));
+                return CACHE.set(new ProbeResult(true, firstLine, null));
             }
-            return setResult(new ProbeResult(false, null,
+            return CACHE.set(new ProbeResult(false, null,
                     "tesseract --version exited %d: %s".formatted(exit, output.strip())));
         } catch (IOException e) {
-            return setResult(new ProbeResult(false, null,
+            return CACHE.set(new ProbeResult(false, null,
                     "tesseract binary not found on PATH (%s)".formatted(e.getMessage())));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return setResult(new ProbeResult(false, null,
+            return CACHE.set(new ProbeResult(false, null,
                     "tesseract --version interrupted: " + e.getMessage()));
         }
     }
 
     public static ProbeResult lastResult() {
-        return result.get();
+        return CACHE.get();
     }
 
     /**
@@ -67,11 +64,6 @@ public class OcrHealthProbe {
      * binary is actually installed (and vice versa).
      */
     public static void setForTest(ProbeResult forced) {
-        result.set(forced == null ? UNRUN : forced);
-    }
-
-    private static ProbeResult setResult(ProbeResult r) {
-        result.set(r);
-        return r;
+        CACHE.setForTest(forced);
     }
 }
