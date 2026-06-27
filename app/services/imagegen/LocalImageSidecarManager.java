@@ -1,8 +1,14 @@
 package services.imagegen;
 
+import com.google.gson.JsonParser;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import services.ConfigService;
 import services.LocalSidecarDaemon;
 import services.UvProbe;
+import utils.HttpFactories;
+
+import java.time.Duration;
 
 /**
  * Lifecycle owner for the local image-generation Python sidecar (JCLAW-226).
@@ -31,6 +37,12 @@ public final class LocalImageSidecarManager {
             "the first launch installs ~GB of Python deps (torch/diffusers); pre-warm it from Settings",
             ImageGenerationException::new));
 
+    // Short-timeout client for the progress poll — must never block the chat on a wedged sidecar.
+    // Derived from the shared general client (reuses its pool/dispatcher) with a tight 2s call timeout.
+    private static final OkHttpClient PROGRESS_CLIENT = HttpFactories.general().newBuilder()
+            .callTimeout(Duration.ofSeconds(2))
+            .build();
+
     private LocalImageSidecarManager() {}
 
     static String baseUrl() {
@@ -55,6 +67,23 @@ public final class LocalImageSidecarManager {
             DAEMON.spawn(ConfigService.get("imagegen.local.model", DEFAULT_MODEL));
             DAEMON.awaitHealthy();
             return DAEMON.baseUrl();
+        }
+    }
+
+    /**
+     * Live step-progress (0..100) of an in-flight local generation, or {@code null} when the sidecar is
+     * down or idle. Never spawns the daemon — a progress poll must not launch a sidecar — and never
+     * throws: any failure (sidecar down, unreachable, malformed body) reads as "no progress" so the chat
+     * bar simply doesn't show. Polled by the chat via {@code GET /api/imagegen/progress}.
+     */
+    public static Integer currentProgressPercent() {
+        var req = new Request.Builder().url(DAEMON.baseUrl() + "/progress").get().build();
+        try (var resp = PROGRESS_CLIENT.newCall(req).execute()) {
+            if (!resp.isSuccessful() || resp.body() == null) return null;
+            var pct = JsonParser.parseString(resp.body().string()).getAsJsonObject().get("percent");
+            return pct == null || pct.isJsonNull() ? null : pct.getAsInt();
+        } catch (Exception e) {
+            return null; // sidecar down / idle-evicted / unreachable — no bar
         }
     }
 

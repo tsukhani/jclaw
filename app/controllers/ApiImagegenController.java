@@ -10,8 +10,11 @@ import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 import services.imagegen.ImageModelManager;
+import services.imagegen.LocalImageSidecarManager;
 import services.imagegen.ReplicateImageModelCatalog;
 import services.UvProbe;
+
+import java.util.LinkedHashMap;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -92,5 +95,15 @@ public class ApiImagegenController extends Controller {
     @Operation(summary = "Discover Replicate text-to-image models (Settings model dropdown)")
     public static void models() {
         renderJSON(gson.toJson(ReplicateImageModelCatalog.textToImageModels()));
+    }
+
+    /** GET /api/imagegen/progress — live step-progress of an in-flight LOCAL image generation, polled by
+     *  the chat to drive a determinate bar. {@code percent} is null when the local sidecar is down or
+     *  idle, or when the active provider is cloud (no per-step progress — like the video cloud path). */
+    @Operation(summary = "Live step-progress of an in-flight local image generation (chat bar)")
+    public static void progress() {
+        var m = new LinkedHashMap<String, Object>();
+        m.put("percent", LocalImageSidecarManager.currentProgressPercent());
+        renderJSON(gson.toJson(m));
     }
 }

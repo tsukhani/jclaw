@@ -10,9 +10,11 @@ server like torchserve (too heavy for a single-user Personal Edition).
 
 Protocol (bound to 127.0.0.1 only):
   GET  /health  -> 200 {status, device, dtype, model, weights_present, loaded}
+  GET  /progress-> 200 {percent}   (0..100 while generating, null when idle)
   POST /generate {prompt, width?, height?, steps?, seed?}
         -> 200 image/png  (raw bytes)
-        -> 409 {error}     when weights are not present (call /pull first)
+        -> 409 {error}     when weights are not present (call /pull first),
+                           OR when a generation is already in progress (one at a time)
         -> 500 {error}     on generation failure
   POST /pull
         -> 200 application/x-ndjson, one JSON object per line:
@@ -62,6 +64,11 @@ class SidecarState:
         self.dtype = None             # torch dtype name, e.g. "float16"
         self.load_lock = threading.Lock()
         self.last_activity = time.monotonic()
+        # One generation at a time (ThreadingHTTPServer would otherwise drive the single resident
+        # pipeline from two threads and corrupt its sampler state). gen_lock gates /generate; gen_percent
+        # is the live 0..100 step progress (None when idle), surfaced by GET /progress for the chat bar.
+        self.gen_lock = threading.Lock()
+        self.gen_percent = None
 
     def touch(self):
         self.last_activity = time.monotonic()
@@ -234,7 +241,13 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8")) if raw else {}
 
     def do_GET(self):
-        if self.path.split("?")[0] != "/health":
+        path = self.path.split("?")[0]
+        if path == "/progress":
+            # Live step progress for the chat's image-gen bar. Deliberately does NOT touch() — it's a
+            # read-only status poll; the in-flight generation keeps the idle watcher at bay on its own.
+            self._send_json(200, {"percent": self.state.gen_percent})
+            return
+        if path != "/health":
             self._send_json(404, {"error": "not found"})
             return
         self.state.touch()
@@ -273,33 +286,49 @@ class Handler(BaseHTTPRequestHandler):
         # klein is step-distilled to ~4 steps — the default that keeps MPS tolerable.
         steps = int(body.get("steps") or 4)
         seed = body.get("seed")
-        try:
-            pipe = self.state.ensure_pipeline()
-        except FileNotFoundError as e:
-            self._send_json(409, {"error": str(e)})
-            return
-        except Exception as e:
-            self._send_json(500, {"error": "pipeline load failed: %s" % e})
+        # One generation at a time. The resident pipeline isn't safe to drive concurrently, and the
+        # shared %-progress assumes a single in-flight gen. A second caller gets 409 (the Java client
+        # surfaces it the same way the video sidecar's busy gate does).
+        if not self.state.gen_lock.acquire(blocking=False):
+            self._send_json(409, {"error": "a generation is already in progress"})
             return
         try:
-            kwargs = {"prompt": prompt, "width": width, "height": height,
-                      "num_inference_steps": steps}
-            if seed is not None:
-                import torch
-                kwargs["generator"] = torch.Generator(
-                    device=self.state.device).manual_seed(int(seed))
-            image = pipe(**kwargs).images[0]
-            buf = io.BytesIO()
-            image.save(buf, format="PNG")
-            data = buf.getvalue()
-        except Exception as e:
-            self._send_json(500, {"error": "generation failed: %s" % e})
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "image/png")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+            self.state.gen_percent = 0  # bar shows "starting" through the (one-time) pipeline load
+            try:
+                pipe = self.state.ensure_pipeline()
+            except FileNotFoundError as e:
+                self._send_json(409, {"error": str(e)})
+                return
+            except Exception as e:
+                self._send_json(500, {"error": "pipeline load failed: %s" % e})
+                return
+            try:
+                def on_step(_p, step, _t, kw):  # diffusers step callback -> live percent for /progress
+                    self.state.gen_percent = int(round((step + 1) / steps * 100))
+                    self.state.touch()
+                    return kw
+
+                kwargs = {"prompt": prompt, "width": width, "height": height,
+                          "num_inference_steps": steps, "callback_on_step_end": on_step}
+                if seed is not None:
+                    import torch
+                    kwargs["generator"] = torch.Generator(
+                        device=self.state.device).manual_seed(int(seed))
+                image = pipe(**kwargs).images[0]
+                buf = io.BytesIO()
+                image.save(buf, format="PNG")
+                data = buf.getvalue()
+            except Exception as e:
+                self._send_json(500, {"error": "generation failed: %s" % e})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        finally:
+            self.state.gen_percent = None
+            self.state.gen_lock.release()
 
     def _handle_pull(self):
         self.send_response(200)

@@ -1473,6 +1473,42 @@ function stopVideoPolling() {
   }
 }
 
+// Local image-gen progress bar (JCLAW-228). Image gen is synchronous (no job to poll like video), so the
+// chat polls the sidecar's live step-percent during any streaming turn; the endpoint returns null for
+// cloud providers and when idle, so the bar only appears for an in-flight LOCAL generation.
+const imageGenPercent = ref<number | null>(null)
+const IMAGE_PROGRESS_INTERVAL_MS = 1000
+let imageProgressTimer: ReturnType<typeof setInterval> | null = null
+
+async function pollImageProgress() {
+  try {
+    const r = await $fetch<{ percent: number | null }>('/api/imagegen/progress')
+    // Guard against a late-resolving poll after polling stopped — it must not resurrect a stale bar.
+    if (imageProgressTimer != null) imageGenPercent.value = r?.percent ?? null
+  }
+  catch {
+    if (imageProgressTimer != null) imageGenPercent.value = null // transient — next tick retries
+  }
+}
+function startImageProgressPolling() {
+  if (imageProgressTimer != null) return
+  // Set the timer before the first poll so pollImageProgress's "still polling?" guard sees it as active.
+  imageProgressTimer = setInterval(() => void pollImageProgress(), IMAGE_PROGRESS_INTERVAL_MS)
+  void pollImageProgress()
+}
+function stopImageProgressPolling() {
+  if (imageProgressTimer != null) {
+    clearInterval(imageProgressTimer)
+    imageProgressTimer = null
+  }
+  imageGenPercent.value = null
+}
+// Poll only while a turn is streaming — that's the only window a generate_image runs.
+watch(streaming, (on) => {
+  if (on) startImageProgressPolling()
+  else stopImageProgressPolling()
+})
+
 /** Template helpers for the generated-video card (thin wrappers over the pure utils/video-job logic). */
 function videoCardState(att: MessageAttachment) {
   return videoDisplayState(att, att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined)
@@ -1543,6 +1579,7 @@ onUnmounted(() => {
   if (announcePollTimer != null) clearInterval(announcePollTimer)
   document.removeEventListener('error', onMarkdownImageError, true)
   stopVideoPolling()
+  stopImageProgressPolling()
 })
 
 function stopStreaming() {
@@ -4007,6 +4044,33 @@ function exportConversation() {
             ~25% alpha, black shadows vanish against #222427 — this
             is the "elevated card" token across the auth pages.
         -->
+          <!-- Local image-gen progress: a determinate bar while the local sidecar reports per-step
+               progress (polled via /api/imagegen/progress during a streaming turn). Hidden for cloud
+               providers (no per-step info — like the video cloud path) and when idle. -->
+          <div
+            v-if="imageGenPercent != null"
+            class="mb-2 flex items-center gap-2.5 bg-surface-elevated border border-border rounded-xl px-3 py-2 text-xs text-fg-strong"
+          >
+            <PhotoIcon
+              class="w-4 h-4 shrink-0 text-purple-500"
+              aria-hidden="true"
+            />
+            <div class="flex flex-col gap-1 min-w-0 flex-1">
+              <span class="font-medium">Generating image… {{ imageGenPercent }}%</span>
+              <div
+                class="h-1 w-full rounded-full bg-border overflow-hidden"
+                role="progressbar"
+                :aria-valuenow="imageGenPercent"
+                aria-valuemin="0"
+                aria-valuemax="100"
+              >
+                <div
+                  class="h-full bg-purple-500 transition-[width] duration-500"
+                  :style="{ width: imageGenPercent + '%' }"
+                />
+              </div>
+            </div>
+          </div>
           <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
           <form
             data-tour="chat-composer"
