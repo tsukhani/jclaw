@@ -1,9 +1,11 @@
-# jclaw Flux 2 Klein image sidecar (JCLAW-226)
+# jclaw image sidecar (JCLAW-226)
 
-A long-running localhost HTTP daemon that runs [FLUX.2 klein](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B)
-locally for jclaw's `generate_image` tool. The jclaw JVM launches it on demand
-(`LocalFluxSidecarManager`) and talks to it over `127.0.0.1`; you normally never
-run this by hand. Shape and protocol were chosen in the **JCLAW-509** spike.
+A long-running localhost HTTP daemon that runs a local diffusion image model —
+by default [FLUX.2 klein](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B),
+configurable via `imagegen.local.model` — for jclaw's `generate_image` tool. The
+jclaw JVM launches it on demand (`LocalImageSidecarManager`) and talks to it over
+`127.0.0.1`; you normally never run this by hand. Shape and protocol were chosen
+in the **JCLAW-509** spike.
 
 ## Why a sidecar
 
@@ -16,7 +18,7 @@ load — a per-request subprocess would re-pay it every time, and a model server
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/)** on `PATH`.
-  jclaw probes for these (`FluxSidecarProbe`); if absent, the Settings UI shows a
+  jclaw probes for these (`UvProbe`); if absent, the Settings UI shows a
   banner and cloud image providers remain the working path.
 - A GPU helps a lot: Apple Silicon (MPS) or NVIDIA (CUDA). CPU works but is slow.
 - Enough memory to hold klein 4B (~13 GB at fp16). On a Mac that is **unified**
@@ -36,7 +38,7 @@ Device/dtype is picked here (the JVM can't see CUDA/MPS): `mps`→fp16
 ## Running by hand (debugging)
 
 ```bash
-cd sidecar/flux
+cd sidecar/image
 uv run serve.py --port 9527 --model black-forest-labs/FLUX.2-klein-4B
 # then, from another shell:
 curl localhost:9527/health
@@ -44,7 +46,7 @@ curl -X POST localhost:9527/pull           # downloads weights (ndjson progress)
 curl -X POST localhost:9527/generate -d '{"prompt":"a red bicycle"}' -o out.png
 ```
 
-Weights download to `--cache-dir` (jclaw passes `data/flux-models/`) via `HF_HOME`.
+Weights download to `--cache-dir` (jclaw passes `data/image-models/`) via `HF_HOME`.
 
 ## Platform notes (torch wheels)
 

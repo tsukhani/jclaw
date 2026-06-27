@@ -1,7 +1,7 @@
 [project]
-name = "jclaw-flux-sidecar"
+name = "jclaw-image-sidecar"
 version = "0.1.0"
-description = "Flux 2 Klein local image-generation sidecar for jclaw (JCLAW-226)"
+description = "Local image-generation sidecar for jclaw — default engine Flux 2 Klein (JCLAW-226)"
 requires-python = ">=3.10"
 # NOTE (JCLAW-226 open item): the exact minimum diffusers/transformers/torch
 # versions for FLUX.2 klein on MPS must be confirmed against the HF model card

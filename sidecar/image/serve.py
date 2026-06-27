@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Flux 2 Klein local image-generation sidecar for jclaw (JCLAW-226).
+"""Local image-generation sidecar for jclaw, default engine Flux 2 Klein (JCLAW-226).
 
 A long-running localhost HTTP daemon, launched on demand by the jclaw JVM
-(LocalFluxSidecarManager) and holding the diffusers pipeline resident in
+(LocalImageSidecarManager) and holding the diffusers pipeline resident in
 GPU/unified memory between calls. The shape and protocol were chosen in the
 JCLAW-509 spike: a localhost HTTP daemon beats a per-request subprocess
 (which would re-pay the multi-second model load on every image) and a model
@@ -23,7 +23,7 @@ Device/dtype (JCLAW-509 addenda): mps->float16 (+ PYTORCH_ENABLE_MPS_FALLBACK),
 cuda->bfloat16, cpu->float32 (slow; logged as a warning). The JVM cannot see
 CUDA/MPS, so the chosen device is reported here via /health.
 
-Weights live under the --cache-dir (jclaw passes data/flux-models) via HF_HOME,
+Weights live under the --cache-dir (jclaw passes data/image-models) via HF_HOME,
 matching jclaw's data/ runtime-artifact convention (whisper-models, lucene).
 """
 
@@ -80,7 +80,7 @@ class SidecarState:
         """True when the model snapshot exists locally. Pure filesystem check (no
         huggingface_hub import) so /health stays fast and never blocks on a slow
         first import — importing hf/torch here made /health take seconds and time
-        out the JVM's health probe. Mirrors the Java FluxModelManager.availableLocally
+        out the JVM's health probe. Mirrors the Java ImageModelManager.availableLocally
         heuristic: a non-empty snapshots dir under the HF cache layout."""
         repo_dir = "models--" + self.model.replace("/", "--")
         snapshots = os.path.join(self.cache_dir, repo_dir, "snapshots")
@@ -99,7 +99,7 @@ class SidecarState:
                 return self.pipeline
             if not self.weights_present():
                 raise FileNotFoundError(
-                    "Flux weights for '%s' are not present — POST /pull first" % self.model)
+                    "model weights for '%s' are not present — POST /pull first" % self.model)
             import torch  # noqa: F401  (ensures torch is importable before diffusers)
             # AutoPipeline reads the repo's model_index.json and instantiates the
             # right pipeline class, so the sidecar doesn't hard-code a class name
@@ -110,7 +110,7 @@ class SidecarState:
             device, dtype = self.detect_device()
             if device == "cpu":
                 sys.stderr.write(
-                    "[flux-sidecar] WARNING: no GPU backend (MPS/CUDA) — running on CPU; "
+                    "[image-sidecar] WARNING: no GPU backend (MPS/CUDA) — running on CPU; "
                     "generation will be slow\n")
             pipe = AutoPipelineForText2Image.from_pretrained(
                 self.model, torch_dtype=dtype, cache_dir=self.cache_dir)
@@ -118,7 +118,7 @@ class SidecarState:
             self.pipeline = pipe
             self.device = device
             self.dtype = str(dtype).replace("torch.", "")
-            sys.stderr.write("[flux-sidecar] pipeline loaded on %s (%s)\n" % (device, self.dtype))
+            sys.stderr.write("[image-sidecar] pipeline loaded on %s (%s)\n" % (device, self.dtype))
             return self.pipeline
 
     def current_device(self):
@@ -184,7 +184,7 @@ def _pull_stream(state: SidecarState):
         finally:
             outcome["done"] = True
 
-    threading.Thread(target=run_download, name="flux-snapshot", daemon=True).start()
+    threading.Thread(target=run_download, name="image-snapshot", daemon=True).start()
     yield line({"status": "downloading", "bytesDownloaded": min(disk_bytes(), total), "totalBytes": total})
     while not outcome["done"]:
         time.sleep(1.0)
@@ -201,7 +201,7 @@ class Handler(BaseHTTPRequestHandler):
     # Quieter logging: BaseHTTPRequestHandler logs every request to stderr by
     # default; route it through one prefix so jclaw's stderr drainer can tag it.
     def log_message(self, fmt, *args):
-        sys.stderr.write("[flux-sidecar] " + (fmt % args) + "\n")
+        sys.stderr.write("[image-sidecar] " + (fmt % args) + "\n")
 
     # Swallow client-disconnect errors so they don't spam stderr with tracebacks.
     # The JVM health probe closes the socket as soon as it has the response, which
@@ -319,31 +319,31 @@ def _idle_watcher(state: SidecarState, server: ThreadingHTTPServer):
     while True:
         time.sleep(min(60.0, state.idle_timeout_s))
         if time.monotonic() - state.last_activity >= state.idle_timeout_s:
-            sys.stderr.write("[flux-sidecar] idle for %.0fs — exiting to free the GPU\n"
+            sys.stderr.write("[image-sidecar] idle for %.0fs — exiting to free the GPU\n"
                              % state.idle_timeout_s)
             # os._exit avoids hanging on torch/CUDA background threads at shutdown.
             os._exit(0)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="jclaw Flux 2 Klein image sidecar")
+    ap = argparse.ArgumentParser(description="jclaw image sidecar")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, required=True)
     ap.add_argument("--model", required=True, help="Hugging Face repo id")
-    ap.add_argument("--cache-dir", default=os.path.join("data", "flux-models"))
+    ap.add_argument("--cache-dir", default=os.path.join("data", "image-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
     args = ap.parse_args()
 
     cache_dir = os.path.abspath(args.cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
-    # Point Hugging Face at jclaw's data dir so weights land under data/flux-models.
+    # Point Hugging Face at jclaw's data dir so weights land under data/image-models.
     os.environ.setdefault("HF_HOME", cache_dir)
 
     Handler.state = SidecarState(args.model, cache_dir, args.idle_timeout_min * 60.0)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(
         target=_idle_watcher, args=(Handler.state, server), daemon=True).start()
-    sys.stderr.write("[flux-sidecar] listening on http://%s:%d (model=%s)\n"
+    sys.stderr.write("[image-sidecar] listening on http://%s:%d (model=%s)\n"
                      % (args.host, args.port, args.model))
     try:
         server.serve_forever()

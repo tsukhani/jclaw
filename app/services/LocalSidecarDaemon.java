@@ -17,8 +17,8 @@ import java.util.function.BiFunction;
 
 /**
  * Shared lifecycle mechanism for jclaw's local Python sidecars — the imagegen
- * Flux daemon ({@link services.imagegen.LocalFluxSidecarManager}) and the
- * videogen daemon ({@link services.videogen.LocalVideoSidecarManager}). Both
+ * daemon ({@link services.imagegen.LocalImageSidecarManager}) and the videogen
+ * daemon ({@link services.videogen.LocalVideoSidecarManager}). Both
  * spawn {@code uv run serve.py}, drain its streams on virtual threads, poll
  * {@code /health}, and stop with a {@code destroy()} → {@code destroyForcibly()}
  * discipline; only the directories, config keys, labels, and exception type

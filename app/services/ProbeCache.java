@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>Extracted from the per-engine probe classes ({@link OllamaLocalProbe},
  * {@link LmStudioProbe}, {@link services.transcription.FfmpegProbe},
- * {@link services.imagegen.FluxSidecarProbe}), which all wrapped their own typed
+ * {@link services.UvProbe}), which all wrapped their own typed
  * result record in this identical holder scaffolding. Each probe keeps its own
  * public {@code ProbeResult} record and static facade; only the caching
  * mechanism is shared here.

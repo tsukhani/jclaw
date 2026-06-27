@@ -1,34 +1,33 @@
-package services.imagegen;
-
-import services.ExecutableProbeSupport;
-import services.ProbeCache;
+package services;
 
 /**
  * Detect whether {@code uv} (the Astral Python package/venv manager) is on PATH.
- * The local Flux sidecar (JCLAW-226) is launched with {@code uv run serve.py},
- * and {@code uv} bootstraps both the Python interpreter and the isolated venv
- * with torch/diffusers — so {@code uv} is the single prerequisite jclaw needs to
- * verify, mirroring {@link services.transcription.FfmpegProbe}'s role for ffmpeg.
+ * jclaw's local image and video sidecars are both launched with {@code uv run
+ * serve.py}, and {@code uv} bootstraps the Python interpreter and the isolated
+ * venv (torch/diffusers) — so {@code uv} is the single shared prerequisite jclaw
+ * needs to verify, mirroring {@link services.transcription.FfmpegProbe}'s role for
+ * ffmpeg.
  *
  * <p>Probe lazily on first call and cache the result; the binary doesn't appear
  * or disappear at runtime in any realistic single-process scenario. The Settings
- * UI (next story) reads {@link #lastResult} to surface a "uv missing" banner, and
- * {@link LocalFluxSidecarManager} reads it to fail fast with a clear error before
- * attempting to spawn the daemon.
+ * UI reads {@link #lastResult} to surface a "uv missing" banner, and the sidecar
+ * managers ({@link services.imagegen.LocalImageSidecarManager},
+ * {@link services.videogen.LocalVideoSidecarManager}) read it to fail fast with a
+ * clear error before attempting to spawn a daemon.
  */
-public final class FluxSidecarProbe {
+public final class UvProbe {
 
     public record ProbeResult(boolean available, String reason) {}
 
     private static final ProbeCache<ProbeResult> CACHE =
             new ProbeCache<>(new ProbeResult(false, "uv probe has not run yet"));
 
-    private FluxSidecarProbe() {}
+    private UvProbe() {}
 
     /** Run the probe (idempotent), update cache, return result. */
     public static ProbeResult probe() {
-        var r = ExecutableProbeSupport.probeOnPath("uv", "--version", "FluxSidecarProbe",
-                " — install uv to enable local image generation");
+        var r = ExecutableProbeSupport.probeOnPath("uv", "--version", "UvProbe",
+                " — install uv to enable local image and video generation");
         return CACHE.set(new ProbeResult(r.available(), r.reason()));
     }
 

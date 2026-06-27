@@ -371,7 +371,7 @@ def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height, fps):
 
 
 def _pull_stream(state, wfile):
-    """Download the weights, emitting ndjson {bytesDownloaded,totalBytes} progress (mirrors Flux /pull)."""
+    """Download the weights, emitting ndjson {bytesDownloaded,totalBytes} progress (mirrors the image sidecar /pull)."""
     from huggingface_hub import snapshot_download
 
     repo_dir = "models--" + state.spec["repo"].replace("/", "--")
@@ -490,7 +490,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _idle_watcher(state):
-    """Self-evict after the idle timeout so the daemon releases the GPU/VRAM (mirrors Flux)."""
+    """Self-evict after the idle timeout so the daemon releases the GPU/VRAM (mirrors the image sidecar)."""
     if state.idle_s <= 0:
         return
     while True:

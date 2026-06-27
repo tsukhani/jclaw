@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
  * {@code <binary> <versionArg>} with a bounded timeout and inspecting the exit
  * code. Mirrors {@link LocalProviderProbeSupport} (which does the equivalent for
  * the local-LLM {@code /models} probes): the per-prerequisite probe classes
- * ({@link services.transcription.FfmpegProbe}, {@link services.imagegen.FluxSidecarProbe})
+ * ({@link services.transcription.FfmpegProbe}, {@link services.UvProbe})
  * keep their own typed result record and cached facade, delegating only this
  * identical detection logic here.
  */

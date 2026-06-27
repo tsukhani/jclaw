@@ -2,7 +2,7 @@ package services.imagegen;
 
 /**
  * Single contract for any image-generation backend in jclaw (JCLAW-225) — the cloud OpenAI / BFL
- * clients (and the local Flux 2 Klein sidecar in the JCLAW-226 phase) all implement this so the
+ * clients (and the local image sidecar in the JCLAW-226 phase) all implement this so the
  * {@code generate_image} tool can pick one via the {@code imagegen.provider} config key without
  * caring about the transport. This is the producing counterpart to
  * {@code services.caption.ImageCaptionService} (which consumes images).

@@ -1,7 +1,7 @@
 package services.videogen;
 
 import services.LocalSidecarDaemon;
-import services.imagegen.FluxSidecarProbe;
+import services.UvProbe;
 
 /**
  * Lifecycle owner for the local video-generation Python sidecar (JCLAW-232/233).
@@ -42,9 +42,9 @@ public final class LocalVideoSidecarManager {
         if (model.equals(runningModel) && DAEMON.isHealthy()) return DAEMON.baseUrl();
         synchronized (DAEMON.lock()) {
             if (model.equals(runningModel) && DAEMON.isHealthy()) return DAEMON.baseUrl();
-            if (!FluxSidecarProbe.isAvailable()) { // shared uv-on-PATH probe
+            if (!UvProbe.isAvailable()) { // shared uv-on-PATH probe
                 throw new VideoGenerationException(
-                        "local video generation requires 'uv' on PATH: " + FluxSidecarProbe.lastResult().reason());
+                        "local video generation requires 'uv' on PATH: " + UvProbe.lastResult().reason());
             }
             if (DAEMON.hasProcess()) { // switching engine, or stale -> restart
                 DAEMON.stop();

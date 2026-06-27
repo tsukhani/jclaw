@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
- * Orchestrates download of the local Flux model weights (JCLAW-226). The
+ * Orchestrates download of the local image model weights (JCLAW-226). The
  * JCLAW-509 spike chose to have the Python sidecar own the actual fetch (via
  * {@code huggingface_hub}, which knows the exact multi-file diffusers set), with
  * this manager <em>triggering</em> it and <em>relaying</em> progress to the
@@ -31,17 +31,17 @@ import java.util.function.Consumer;
  * machine, single-flight coalescing, and pollable {@link ModelStatus} snapshot —
  * but the bytes move inside the sidecar's {@code POST /pull}, not here.
  *
- * <p>Weights land under {@code data/flux-models/} (jclaw's data/ convention) in
+ * <p>Weights land under {@code data/image-models/} (jclaw's data/ convention) in
  * the Hugging Face cache layout. {@link #availableLocally} checks that layout so
  * a model pulled in a previous session is recognised without a running sidecar.
  */
-public final class FluxModelManager {
+public final class ImageModelManager {
 
     private static final String DEFAULT_MODEL = "black-forest-labs/FLUX.2-klein-4B";
     private static final ConcurrentHashMap<String, CompletableFuture<Void>> inFlight = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, ModelStatus> statuses = new ConcurrentHashMap<>();
 
-    private FluxModelManager() {}
+    private ImageModelManager() {}
 
     /** State machine for the local model's availability. */
     public enum State { ABSENT, DOWNLOADING, AVAILABLE, ERROR }
@@ -85,7 +85,7 @@ public final class FluxModelManager {
     }
 
     static Path cacheRoot() {
-        return new File(Play.applicationPath, "data/flux-models").toPath();
+        return new File(Play.applicationPath, "data/image-models").toPath();
     }
 
     /**
@@ -132,12 +132,12 @@ public final class FluxModelManager {
             // /pull streams real progress; without this the first poll would still see
             // ABSENT and stop the loop, so the bar would never appear.
             statuses.put(m, new ModelStatus(State.DOWNLOADING, 0, 0, null));
-            Thread.ofVirtual().name("flux-pull-" + m).start(() -> {
+            Thread.ofVirtual().name("image-pull-" + m).start(() -> {
                 try {
                     doPull(m, onProgress);
                     future.complete(null);
                 } catch (@SuppressWarnings("java:S1181") Throwable t) {
-                    Logger.warn(t, "FluxModelManager: pull failed for %s", m);
+                    Logger.warn(t, "ImageModelManager: pull failed for %s", m);
                     statuses.put(m, new ModelStatus(
                             State.ERROR, 0, 0, t.getMessage() == null ? t.toString() : t.getMessage()));
                     future.completeExceptionally(t);
@@ -157,7 +157,7 @@ public final class FluxModelManager {
      * direct GET does would otherwise let general()'s 30s readTimeout trip).
      */
     private static void doPull(String model, Consumer<DownloadProgress> onProgress) throws IOException {
-        var baseUrl = LocalFluxSidecarManager.ensureRunning();
+        var baseUrl = LocalImageSidecarManager.ensureRunning();
         statuses.put(model, new ModelStatus(State.DOWNLOADING, 0, 0, null));
         var client = HttpFactories.general().newBuilder()
                 .readTimeout(Duration.ofMinutes(15))   // tolerate a slow multi-GB shard between lines
@@ -177,7 +177,7 @@ public final class FluxModelManager {
                 handlePullLine(model, line, onProgress);
             }
         }
-        EventLogger.info("imagegen", "Flux model %s downloaded".formatted(model));
+        EventLogger.info("imagegen", "image model %s downloaded".formatted(model));
     }
 
     /** Parse one ndjson progress line from the sidecar /pull stream and update

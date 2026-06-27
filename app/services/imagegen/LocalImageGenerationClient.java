@@ -12,12 +12,12 @@ import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Local Flux 2 Klein image-generation client (JCLAW-226), talking to the Python
+ * Local image-generation client (JCLAW-226), talking to the Python
  * sidecar over {@code 127.0.0.1} (the shape chosen in the JCLAW-509 spike). Unlike
  * the cloud clients this is synchronous — {@code POST /generate} returns the raw
  * image bytes directly (no submit/poll), so the body + Content-Type map straight
  * onto {@link GeneratedImage}. The sidecar is launched on demand by
- * {@link LocalFluxSidecarManager}; a {@code 409} means the weights aren't
+ * {@link LocalImageSidecarManager}; a {@code 409} means the weights aren't
  * downloaded yet.
  *
  * <p>Configuration: {@code imagegen.local.model} (the HF repo, set per launch),
@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
  * generous because the first call also pays the lazy model load, and CPU mode is
  * slow).
  */
-public class FluxLocalImageClient implements ImageGenerationService {
+public class LocalImageGenerationClient implements ImageGenerationService {
 
     private static final MediaType JSON = MediaType.parse("application/json");
 
@@ -33,12 +33,12 @@ public class FluxLocalImageClient implements ImageGenerationService {
     /** Non-null only in tests — bypasses the sidecar manager and points at MockWebServer. */
     private final String baseUrlOverride;
 
-    public FluxLocalImageClient() {
+    public LocalImageGenerationClient() {
         this(null, HttpFactories.llmSingleShot());
     }
 
     /** Test seam — inject a base URL (e.g. MockWebServer) and client, skipping the real sidecar. */
-    public FluxLocalImageClient(String baseUrl, OkHttpClient client) {
+    public LocalImageGenerationClient(String baseUrl, OkHttpClient client) {
         this.baseUrlOverride = baseUrl;
         this.client = client;
     }
@@ -49,13 +49,13 @@ public class FluxLocalImageClient implements ImageGenerationService {
             throw new ImageGenerationException("image generation: prompt is required");
         }
         // In prod, ensure the daemon is up and get its base URL; in tests, use the override.
-        var baseUrl = baseUrlOverride != null ? baseUrlOverride : LocalFluxSidecarManager.ensureRunning();
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : LocalImageSidecarManager.ensureRunning();
 
         var root = new JsonObject();
         root.addProperty("prompt", prompt);
         if (width != null) root.addProperty("width", width);
         if (height != null) root.addProperty("height", height);
-        var generatedBy = "flux-local:" + shortName(FluxModelManager.configuredModel());
+        var generatedBy = "flux-local:" + shortName(ImageModelManager.configuredModel());
 
         int timeoutS = ConfigService.getInt("imagegen.local.generateTimeoutSeconds", 300);
         var call = client.newCall(new Request.Builder()
@@ -66,7 +66,7 @@ public class FluxLocalImageClient implements ImageGenerationService {
         try (var resp = call.execute()) {
             if (resp.code() == 409) {
                 throw new ImageGenerationException(
-                        "local Flux model not downloaded — download it in Settings → Image Generation");
+                        "local image model not downloaded — download it in Settings → Image Generation");
             }
             if (!resp.isSuccessful()) {
                 var body = resp.body().string();

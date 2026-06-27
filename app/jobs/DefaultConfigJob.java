@@ -13,7 +13,7 @@ import services.EventLogger;
 import services.InternalApiTokenService;
 import services.SkillPromotionService;
 import services.Tx;
-import services.imagegen.FluxSidecarProbe;
+import services.UvProbe;
 import services.scanners.ScannerRegistry;
 import services.transcription.FfmpegProbe;
 import services.transcription.WhisperModel;
@@ -61,7 +61,7 @@ public class DefaultConfigJob extends Job<Void> {
         // JCLAW-226: prime the uv-availability cache so the Settings UI can render
         // a "uv missing" banner for local image generation without paying the probe
         // cost on first page load (cheap; same rationale as FfmpegProbe above).
-        FluxSidecarProbe.probe();
+        UvProbe.probe();
         EventLogger.info("system", "Default configuration seeded");
     }
 
@@ -187,7 +187,7 @@ public class DefaultConfigJob extends Job<Void> {
         // JCLAW-226: local Flux 2 Klein engine via a Python HTTP sidecar (the shape
         // chosen in the JCLAW-509 spike). Selection stays on imagegen.provider="flux-local"
         // (unseeded — absent = off, opt-in via Settings, like the cloud image backends);
-        // these keys configure the sidecar that LocalFluxSidecarManager launches on demand.
+        // these keys configure the sidecar that LocalImageSidecarManager launches on demand.
         // Default model is klein 4B (Apache-2.0, ~13 GB fp16) — the smallest variant and the
         // only one whose throughput stays tolerable on Apple Silicon (MPS). idleTimeoutMinutes
         // lets the daemon self-evict and release the GPU when unused.

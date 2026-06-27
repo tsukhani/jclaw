@@ -9,8 +9,8 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
-import services.imagegen.FluxModelManager;
-import services.imagegen.FluxSidecarProbe;
+import services.imagegen.ImageModelManager;
+import services.UvProbe;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -24,7 +24,7 @@ import static utils.GsonHolder.INSTANCE;
  *       download status. The Settings page polls this while a pull is in flight,
  *       then stops once the model settles to AVAILABLE / ABSENT / ERROR.</li>
  *   <li>{@code POST /api/imagegen/local/pull} — kicks off a background weight
- *       download via {@link FluxModelManager#ensureAvailable} (which launches the
+ *       download via {@link ImageModelManager#ensureAvailable} (which launches the
  *       sidecar on demand and drives its {@code /pull}). Returns immediately;
  *       progress is observed through the polling endpoint above.</li>
  * </ul>
@@ -48,17 +48,17 @@ public class ApiImagegenController extends Controller {
     /** GET /api/imagegen/local/state — snapshot for the Settings UI. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ImagegenLocalStateResponse.class)))
-    @Operation(summary = "Snapshot local image-gen config, uv availability, and the Flux model download status")
+    @Operation(summary = "Snapshot local image-gen config, uv availability, and the local image model download status")
     public static void state() {
-        var uv = FluxSidecarProbe.lastResult();
+        var uv = UvProbe.lastResult();
         // Force one probe if the cache is still on the UNRUN sentinel — DefaultConfigJob
         // primes it on startup, but a hot-reloaded dev server may not have run that yet.
         if (!uv.available() && uv.reason() != null && uv.reason().startsWith("uv probe has not run")) {
-            uv = FluxSidecarProbe.probe();
+            uv = UvProbe.probe();
         }
 
-        var model = FluxModelManager.configuredModel();
-        var status = FluxModelManager.status(model);
+        var model = ImageModelManager.configuredModel();
+        var status = ImageModelManager.status(model);
 
         var payload = new ImagegenLocalStateResponse(
                 ConfigService.get("imagegen.provider"),
@@ -76,13 +76,13 @@ public class ApiImagegenController extends Controller {
      *  configured local model. Returns 202-style {@code {"status":"downloading"}}
      *  immediately; progress is observed via {@link #state}. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
-    @ChatHidden("triggers a Flux model download -- disk/network/GPU resource action")
+    @ChatHidden("triggers a local image model download -- disk/network/GPU resource action")
     public static void pull() {
-        var model = FluxModelManager.configuredModel();
+        var model = ImageModelManager.configuredModel();
         // ensureAvailable is single-flight; concurrent calls from the polling UI
         // all attach to the same in-flight pull, no harm done.
-        FluxModelManager.ensureAvailable(model, null);
-        EventLogger.info("imagegen", "Flux model download requested: %s".formatted(model));
+        ImageModelManager.ensureAvailable(model, null);
+        EventLogger.info("imagegen", "image model download requested: %s".formatted(model));
         renderJSON(gson.toJson(new DownloadStartedResponse("downloading", model)));
     }
 }

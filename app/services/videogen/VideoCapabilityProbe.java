@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import play.Logger;
 import play.Play;
-import services.imagegen.FluxSidecarProbe;
+import services.UvProbe;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -18,7 +18,7 @@ import java.util.List;
  * one-shot {@code uv run serve.py --probe} to detect the GPU + free VRAM and tier every engine, which
  * drives the Settings dropdown so the operator only sees what THIS host can actually run (and WAN is
  * greyed out off NVIDIA). Mirrors the imagegen model-download state machine
- * ({@code services.imagegen.FluxModelManager}): a POST kicks off a background probe, a GET polls the
+ * ({@code services.imagegen.ImageModelManager}): a POST kicks off a background probe, a GET polls the
  * snapshot, and the UI stops polling once the state settles.
  *
  * <p>The first probe pays the one-time {@code uv} dependency install (minutes); later probes reuse the
@@ -41,10 +41,10 @@ public final class VideoCapabilityProbe {
 
     /** Snapshot for the Settings UI. Reports UNAVAILABLE when {@code uv} (the sidecar prerequisite) is absent. */
     public static Snapshot snapshot() {
-        var uv = FluxSidecarProbe.lastResult();
+        var uv = UvProbe.lastResult();
         // Force one probe if the cache is still on the UNRUN sentinel (mirrors ApiImagegenController.state).
         if (!uv.available() && uv.reason() != null && uv.reason().startsWith("uv probe has not run")) {
-            uv = FluxSidecarProbe.probe();
+            uv = UvProbe.probe();
         }
         var st = uv.available() ? state : State.UNAVAILABLE;
         return new Snapshot(uv.available(), uv.reason(), st, capability, error);
@@ -53,7 +53,7 @@ public final class VideoCapabilityProbe {
     /** Kick off a background probe if one isn't already running. Idempotent — concurrent calls from the
      *  polling UI collapse onto the single in-flight probe. */
     public static void probe() {
-        if (!FluxSidecarProbe.isAvailable()) return; // snapshot() then reports UNAVAILABLE
+        if (!UvProbe.isAvailable()) return; // snapshot() then reports UNAVAILABLE
         synchronized (LOCK) {
             if (state == State.PROBING) return;
             state = State.PROBING;
