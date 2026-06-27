@@ -33,10 +33,11 @@ public interface VideoGenerationService {
 
     /**
      * A generation request. {@code model} may be null/blank to use the configured/default model
-     * ({@code videogen.cloud.model}); {@code durationSeconds} and {@code aspectRatio} may be null to
-     * use provider defaults.
+     * ({@code videogen.cloud.model}); {@code durationSeconds}, {@code aspectRatio}, and {@code fps} may be
+     * null to use provider defaults. For the local sidecar, {@code num_frames = durationSeconds * fps} and
+     * the clip is exported at {@code fps} (default 24).
      */
-    record VideoGenRequest(String prompt, String model, Integer durationSeconds, String aspectRatio) {}
+    record VideoGenRequest(String prompt, String model, Integer durationSeconds, String aspectRatio, Integer fps) {}
 
     /** Running-or-terminal lifecycle state, mapped from each provider's status strings. */
     enum State { RUNNING, SUCCEEDED, FAILED }

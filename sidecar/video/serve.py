@@ -14,7 +14,7 @@ ltx_pipelines_mlx — faster, higher quality, generates audio); everywhere else 
   GET  /health            -> {status, device, model, weights_present, loaded}     (fast; no torch import)
   GET  /capability        -> {kind, gpu, freeVramGb, totalVramGb, models:[{id,label,tier,runnable}...]}
   (CLI) --probe           -> same capability JSON to stdout, one-shot (no server, no model load)
-  POST /jobs {prompt, num_frames?, steps?, width?, height?}
+  POST /jobs {prompt, num_frames?, fps?, steps?, width?, height?}   (fps default 24; duration = num_frames/fps)
                           -> 202 {job_id, state} | 409 {busy} | 400 {insufficient_vram|unknown}
   GET  /jobs/<id>         -> {job_id, state, percent, error, output}
   GET  /jobs/<id>/result  -> mp4 bytes | 409 {not_ready}
@@ -256,12 +256,12 @@ class State:
         return pipe
 
 
-def run_job(state, jid, prompt, frames, steps, width, height):
+def run_job(state, jid, prompt, frames, steps, width, height, fps):
     if _is_mlx_ltx(state.spec):
-        _run_job_mlx(state, jid, prompt, frames, width, height)
+        _run_job_mlx(state, jid, prompt, frames, width, height, fps)
         return
     if _is_cuda_ltx2(state.spec):
-        _run_job_cuda_ltx2(state, jid, prompt, frames, width, height)
+        _run_job_cuda_ltx2(state, jid, prompt, frames, width, height, fps)
         return
     try:
         pipe = state.load()
@@ -277,7 +277,7 @@ def run_job(state, jid, prompt, frames, steps, width, height):
         frames_out = pipe(**kwargs).frames[0]
         from diffusers.utils import export_to_video
         path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
-        export_to_video(frames_out, path, fps=24)
+        export_to_video(frames_out, path, fps=fps)
         state.jobs[jid].update(state="succeeded", percent=100, path=path, mime="video/mp4")
     except Exception as e:  # generation failure is a FAILED job, never a sidecar crash
         state.jobs[jid].update(state="failed", error=str(e)[:400])
@@ -286,7 +286,7 @@ def run_job(state, jid, prompt, frames, steps, width, height):
         state.touch()
 
 
-def _run_job_mlx(state, jid, prompt, frames, width, height):
+def _run_job_mlx(state, jid, prompt, frames, width, height, fps):
     """Apple Silicon MLX generation (LTX-2.3 int4). Output is an h264+AAC mp4 — video WITH synchronized
     audio. The pipeline exposes no progress callback, so live percent comes from wrapping the sampler's
     tqdm: we count denoise steps across its two distilled stages against the step budget."""
@@ -313,7 +313,7 @@ def _run_job_mlx(state, jid, prompt, frames, width, height):
         try:
             path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
             pipe.generate_and_save(prompt=prompt, output_path=path, height=height, width=width,
-                                   num_frames=frames, frame_rate=24, seed=42)
+                                   num_frames=frames, frame_rate=fps, seed=42)
         finally:
             samplers.tqdm = orig_tqdm
         state.jobs[jid].update(state="succeeded", percent=100, path=path, mime="video/mp4")
@@ -324,7 +324,7 @@ def _run_job_mlx(state, jid, prompt, frames, width, height):
         state.touch()
 
 
-def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height):
+def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height, fps):
     """CUDA LTX-2.3 generation (official ltx_pipelines). Output is an h264+AAC mp4 (video WITH audio). The
     pipeline __call__ returns (video_iterator, audio); we encode the mp4 ourselves with encode_video. Live
     percent via the sampler tqdm (8 + 4 distilled steps). Validated on an RTX 4090 (fp8 + CPU offload)."""
@@ -356,8 +356,8 @@ def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height):
             path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
             with torch.inference_mode():
                 video, audio = pipe(prompt=prompt, seed=42, height=height, width=width,
-                                    num_frames=frames, frame_rate=24, images=[], tiling_config=tiling)
-                encode_video(video=video, fps=24, audio=audio, output_path=path,
+                                    num_frames=frames, frame_rate=fps, images=[], tiling_config=tiling)
+                encode_video(video=video, fps=fps, audio=audio, output_path=path,
                              video_chunks_number=get_video_chunks_number(frames, tiling))
         finally:
             samplers.tqdm = orig_tqdm
@@ -480,10 +480,11 @@ class Handler(BaseHTTPRequestHandler):
             s.jobs[jid] = {"state": "running", "percent": 0, "error": None, "path": None, "mime": None}
             s.busy = jid
         s.touch()
+        fps = max(1, min(60, int(body.get("fps", 24))))  # clip exported at this rate; clamp to sane bounds
         threading.Thread(target=run_job, args=(
             s, jid, body.get("prompt", ""), int(body.get("num_frames", 49)),
             int(body.get("steps", 30)), int(body.get("width", s.spec["width"])),
-            int(body.get("height", s.spec["height"])), ), daemon=True).start()
+            int(body.get("height", s.spec["height"])), fps), daemon=True).start()
         self._json(202, {"job_id": jid, "state": "running"})
 
 

@@ -43,7 +43,7 @@ class VideoGenerationClientTest extends UnitTest {
     }
 
     private VideoGenRequest req() {
-        return new VideoGenRequest("a cat surfing a wave", null, 5, "16:9");
+        return new VideoGenRequest("a cat surfing a wave", null, 5, "16:9", null);
     }
 
     @Test
@@ -98,7 +98,7 @@ class VideoGenerationClientTest extends UnitTest {
     @Test
     void submitRequiresPrompt() {
         var client = new ReplicateVideoGenerationClient(testClient);
-        var request = new VideoGenRequest("  ", null, null, null);
+        var request = new VideoGenRequest("  ", null, null, null, null);
         var ex = assertThrows(VideoGenerationException.class,
                 () -> client.submit(request),
                 "a blank prompt must be rejected before any HTTP call");

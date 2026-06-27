@@ -49,13 +49,31 @@ class LocalVideoGenerationClientTest extends UnitTest {
     }
 
     private VideoGenRequest req() {
-        return new VideoGenRequest("a cat surfing a wave", null, 5, "16:9");
+        return new VideoGenRequest("a cat surfing a wave", null, 5, "16:9", null);
     }
 
     @Test
     void submitReturnsSidecarJobId() {
         server.enqueue(json(202, "{\"job_id\":\"3c757c6946b9\",\"state\":\"running\"}"));
         assertEquals("3c757c6946b9", client().submit(req()));
+    }
+
+    @Test
+    void submitMapsDurationAndFpsToFrames() throws Exception {
+        server.enqueue(json(202, "{\"job_id\":\"j\",\"state\":\"running\"}"));
+        // 2s @ 30fps -> 60 frames; fps carried through so the sidecar exports at the chosen rate.
+        client().submit(new VideoGenRequest("waves at sunset", null, 2, "16:9", 30));
+        var body = server.takeRequest().getBody().utf8();
+        assertTrue(body.contains("\"num_frames\":60"), body);
+        assertTrue(body.contains("\"fps\":30"), body);
+    }
+
+    @Test
+    void submitMapsAspectRatioToPortraitDims() throws Exception {
+        server.enqueue(json(202, "{\"job_id\":\"j\",\"state\":\"running\"}"));
+        client().submit(new VideoGenRequest("a tall waterfall", null, null, "9:16", null));
+        var body = server.takeRequest().getBody().utf8();
+        assertTrue(body.contains("\"width\":480") && body.contains("\"height\":832"), body); // portrait
     }
 
     @Test
@@ -81,7 +99,7 @@ class LocalVideoGenerationClientTest extends UnitTest {
     @Test
     void submitRequiresPrompt() {
         var client = client();
-        var request = new VideoGenRequest("  ", null, null, null);
+        var request = new VideoGenRequest("  ", null, null, null, null);
         var ex = assertThrows(VideoGenerationException.class, () -> client.submit(request),
                 "a blank prompt must be rejected before any HTTP call");
         assertTrue(ex.getMessage().contains("prompt is required"), ex.getMessage());

@@ -43,7 +43,7 @@ class VideoGenerationJobServiceTest extends UnitTest {
     }
 
     private VideoGenRequest req() {
-        return new VideoGenRequest("a dog skateboarding", null, 5, "16:9");
+        return new VideoGenRequest("a dog skateboarding", null, 5, "16:9", null);
     }
 
     @Test

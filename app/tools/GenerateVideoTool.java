@@ -29,6 +29,7 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
 
     private static final String ARG_PROMPT = "prompt";
     private static final String ARG_DURATION = "duration_seconds";
+    private static final String ARG_FPS = "fps";
     private static final String ARG_ASPECT = "aspect_ratio";
 
     @Override public String name() { return "generate_video"; }
@@ -39,9 +40,10 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
     public String description() {
         return """
                 Generate a short video from a text prompt and show it to the user inline. Provide a \
-                detailed 'prompt'. Optionally set 'duration_seconds' or an 'aspect_ratio' (1:1, 16:9, \
-                9:16). Generation is asynchronous and takes minutes — the tool returns immediately and \
-                the finished video appears in the chat on its own when ready.""";
+                detailed 'prompt'. Optionally set 'duration_seconds', 'fps' (frames per second, default \
+                24), or an 'aspect_ratio' (1:1, 16:9, 9:16). Generation is asynchronous and takes \
+                minutes — the tool returns immediately and the finished video appears in the chat on its \
+                own when ready.""";
     }
 
     @Override
@@ -58,6 +60,8 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION, "A detailed description of the video to generate."),
                         ARG_DURATION, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                                 SchemaKeys.DESCRIPTION, "Optional clip length in seconds (provider-dependent bounds)."),
+                        ARG_FPS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION, "Optional frames per second (local engine; default 24)."),
                         ARG_ASPECT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.ENUM, List.of("1:1", "16:9", "9:16"),
                                 SchemaKeys.DESCRIPTION, "Optional aspect ratio.")
@@ -94,7 +98,8 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
                             + "Settings → Video Generation.");
         }
 
-        var req = new VideoGenRequest(prompt, null, optInt(args, ARG_DURATION), optString(args, ARG_ASPECT));
+        var req = new VideoGenRequest(prompt, null, optInt(args, ARG_DURATION), optString(args, ARG_ASPECT),
+                optInt(args, ARG_FPS));
         // Tool execution runs on the [agent-stream] thread, which Play's JPAPlugin never wraps in a JPA
         // transaction, so submit()'s job.save() has no EntityManager of its own. Open one here — the same
         // Tx.run convention every other DB-touching tool (ShellExecTool, TaskTool, …) follows.

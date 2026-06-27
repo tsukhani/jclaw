@@ -130,7 +130,7 @@ class GeneratedVideoStorageTest extends UnitTest {
 
         server.enqueue(json("{\"id\":\"pred_z\",\"status\":\"starting\"}")); // submit
         var job = VideoGenerationJobService.submit(
-                msg.conversation.agent.id, msg.conversation.id, new VideoGenRequest("a comet", null, 5, "16:9"));
+                msg.conversation.agent.id, msg.conversation.id, new VideoGenRequest("a comet", null, 5, "16:9", null));
         assertEquals(State.RUNNING, job.state);
 
         var att = AttachmentService.createGeneratedVideoPlaceholder(msg.conversation.agent, msg, job.id, null);

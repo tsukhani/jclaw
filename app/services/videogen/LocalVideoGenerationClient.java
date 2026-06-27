@@ -28,7 +28,7 @@ import java.io.IOException;
 public class LocalVideoGenerationClient implements VideoGenerationService {
 
     private static final MediaType JSON = MediaType.parse("application/json");
-    private static final int FRAMES_PER_SECOND = 24; // sidecar exports at 24fps; map duration -> frames
+    private static final int DEFAULT_FPS = 24; // sidecar default when the request doesn't specify fps
 
     private final String model;
     private final OkHttpClient client;
@@ -65,8 +65,19 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
         var base = submitBase();
         var payload = new JsonObject();
         payload.addProperty("prompt", request.prompt());
+        // Duration + fps are independent knobs: the clip is exported at fps, and num_frames = duration*fps.
+        int fps = (request.fps() != null && request.fps() > 0) ? request.fps() : DEFAULT_FPS;
+        payload.addProperty("fps", fps);
         if (request.durationSeconds() != null && request.durationSeconds() > 0) {
-            payload.addProperty("num_frames", request.durationSeconds() * FRAMES_PER_SECOND);
+            payload.addProperty("num_frames", request.durationSeconds() * fps);
+        }
+        // Aspect ratio -> base width x height (landscape / portrait / square). The sidecar snaps to each
+        // model's constraints (e.g. multiples of 64 for LTX-2), so the final ratio is approximate. When
+        // unset, the sidecar uses its own default (landscape).
+        var dims = dimsForAspect(request.aspectRatio());
+        if (dims != null) {
+            payload.addProperty("width", dims[0]);
+            payload.addProperty("height", dims[1]);
         }
         var httpReq = new Request.Builder()
                 .url(base + "/jobs")
@@ -121,6 +132,18 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
         } catch (IOException e) {
             throw new VideoGenerationException("local video poll transport failed: " + e.getMessage(), e);
         }
+    }
+
+    /** Map the tool's aspect_ratio enum to a base width x height (~480p short side); null = let the
+     *  sidecar use its default landscape resolution. */
+    private static int[] dimsForAspect(String aspect) {
+        if (aspect == null) return null;
+        return switch (aspect) {
+            case "16:9" -> new int[]{832, 480}; // landscape
+            case "9:16" -> new int[]{480, 832}; // portrait
+            case "1:1" -> new int[]{512, 512};  // square
+            default -> null;
+        };
     }
 
     private static String truncate(String s, int max) {
