@@ -28,10 +28,15 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Where generated clips land before the jclaw runner fetches them over HTTP. Cross-platform (/tmp on
+# Unix, the user temp dir on Windows) — the path is internal to the sidecar, never seen by the Java side.
+_OUTDIR = tempfile.gettempdir()
 
 # Apple Silicon takes the MLX path (JCLAW-233 follow-up): LTX-2.3 via ltx_pipelines_mlx — faster, higher
 # quality, and it generates synchronized audio. Everywhere else keeps the diffusers path (WAN on CUDA,
@@ -40,30 +45,59 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 IS_APPLE_SILICON = platform.system() == "Darwin" and platform.machine() == "arm64"
 
 # Registry: the --model id -> backend config, free-VRAM floor, default dims, and the jclaw provider that
-# selects it. The "ltx" engine is dual-runtime: MLX (LTX-2.3 int4) on Apple Silicon, diffusers (LTX-Video)
-# elsewhere — the mlx.* fields drive the former. Mono-model per process; one sidecar per active engine.
-MODELS = {
-    "ltx": {
-        "repo": "Lightricks/LTX-Video", "family": "ltx", "provider": "ltx-local",
-        "label": "LTX-2.3 (MLX)" if IS_APPLE_SILICON else "LTX-Video",
-        "min_gb": 12 if IS_APPLE_SILICON else 8, "comfortable_gb": 16 if IS_APPLE_SILICON else 12,
-        "width": 704, "height": 480,
-        # MLX (Apple Silicon) — quantized LTX-2.3 + a separate Gemma text encoder. The q4 repo over-bundles
-        # (dev/old-distilled transformers + LoRAs ~36GB) so we pre-fetch ONLY the int4-essential files.
-        "mlx_repo": "dgrauet/ltx-2.3-mlx-q4",
-        "mlx_local": "ltx-2.3-mlx-q4",  # subdir under the cache dir for the pruned local copy
-        "mlx_key_file": "transformer-distilled-1.1.safetensors",
-        "mlx_gemma": "mlx-community/gemma-3-12b-it-4bit",
-        "mlx_ignore": ["transformer-dev.safetensors", "transformer-distilled.safetensors", "*lora-384*.safetensors"],
-    },
-    "wan-5b":  {"repo": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",  "family": "wan", "provider": "wan-local", "label": "WAN 2.2 TI2V-5B",  "min_gb": 8,  "comfortable_gb": 12, "width": 832, "height": 480},
-    "wan-14b": {"repo": "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "family": "wan", "provider": "wan-local", "label": "WAN 2.2 T2V-A14B", "min_gb": 12, "comfortable_gb": 40, "width": 832, "height": 480},
-}
+# selects it. Built PER PLATFORM so the adaptive picker offers a memory-scaled spectrum everywhere (SV-2):
+# host_capability() tiers each entry by FREE VRAM, so a bigger GPU simply lights up more of the list — up
+# to the largest its memory allows. Mono-model per process; one sidecar per active engine.
+def _build_models():
+    if IS_APPLE_SILICON:
+        # MLX LTX-2.3 quantization tiers (int4 -> int8 -> bf16). All three share ONE load path: same
+        # DistilledPipeline + file layout (key file transformer-distilled-1.1.safetensors), differing only
+        # in the quantized transformer's size — hence the rising free-VRAM floor. "ltx" stays int4 for
+        # back-compat. Each repo over-bundles (dev/old transformers + LoRAs) so we pre-fetch only the
+        # essential files (mlx_ignore). The Gemma text encoder is a separate repo.
+        mlx = {"family": "ltx", "provider": "ltx-local", "width": 704, "height": 480,
+               "mlx_key_file": "transformer-distilled-1.1.safetensors",
+               "mlx_gemma": "mlx-community/gemma-3-12b-it-4bit",
+               "mlx_ignore": ["transformer-dev.safetensors", "transformer-distilled.safetensors", "*lora-384*.safetensors"]}
+        return {
+            "ltx":      {**mlx, "label": "LTX-2.3 int4 (MLX)", "mlx_repo": "dgrauet/ltx-2.3-mlx-q4", "mlx_local": "ltx-2.3-mlx-q4",  "min_gb": 11, "comfortable_gb": 16},
+            "ltx-q8":   {**mlx, "label": "LTX-2.3 int8 (MLX)", "mlx_repo": "dgrauet/ltx-2.3-mlx-q8", "mlx_local": "ltx-2.3-mlx-q8",  "min_gb": 21, "comfortable_gb": 30},
+            "ltx-bf16": {**mlx, "label": "LTX-2.3 bf16 (MLX)", "mlx_repo": "dgrauet/ltx-2.3-mlx",    "mlx_local": "ltx-2.3-mlx-bf16", "min_gb": 40, "comfortable_gb": 56},
+        }
+    # Linux / Windows (CUDA): LTX-2.3 via the official Lightricks ltx_pipelines (the CUDA sibling of the
+    # MLX port) — ONE 22B model at three memory strategies (quantization + offload) so it scales from an
+    # 80 GB datacenter card down to a ~10 GB free slice. Plus WAN via diffusers. Tiered by free CUDA VRAM.
+    # The fp8 + CPU-offload tier is VALIDATED on an RTX 4090: ~8.3 GB peak, 62 s for a 25-frame clip with
+    # audio (the weight-load build needs ~8 GB regardless of offload, so there's no sub-8 GB tier — it'd
+    # OOM at load). CPU offload streams weights from system RAM (needs ~36 GB free RAM).
+    cuda_ltx = {"family": "ltx", "provider": "ltx-local", "width": 704, "height": 480,
+                "ckpt_repo": "Lightricks/LTX-2.3",
+                "ckpt_file": "ltx-2.3-22b-distilled-1.1.safetensors",
+                "upscaler_file": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+                "gemma_repo": "google/gemma-3-12b-it-qat-q4_0-unquantized"}
+    return {
+        "ltx":             {**cuda_ltx, "label": "LTX-2.3 (CUDA)",            "cuda_fp8": False, "cuda_offload": "none", "min_gb": 32, "comfortable_gb": 40},
+        "ltx-fp8":         {**cuda_ltx, "label": "LTX-2.3 fp8 (CUDA)",        "cuda_fp8": True,  "cuda_offload": "none", "min_gb": 16, "comfortable_gb": 20},
+        "ltx-fp8-offload": {**cuda_ltx, "label": "LTX-2.3 fp8 + CPU offload", "cuda_fp8": True,  "cuda_offload": "cpu",  "min_gb": 10, "comfortable_gb": 12},
+        "wan-5b":  {"repo": "Wan-AI/Wan2.2-TI2V-5B-Diffusers",  "family": "wan", "provider": "wan-local", "label": "WAN 2.2 TI2V-5B",  "min_gb": 8,  "comfortable_gb": 12, "width": 832, "height": 480},
+        "wan-14b": {"repo": "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "family": "wan", "provider": "wan-local", "label": "WAN 2.2 T2V-A14B", "min_gb": 12, "comfortable_gb": 40, "width": 832, "height": 480},
+    }
+
+
+MODELS = _build_models()
 
 
 def _is_mlx_ltx(spec):
     """True when this engine should use the Apple Silicon MLX runtime (LTX-2.3) rather than diffusers."""
     return IS_APPLE_SILICON and spec["family"] == "ltx"
+
+
+def _is_cuda_ltx2(spec):
+    """True when this engine should use the official CUDA ltx_pipelines runtime (LTX-2.3) — i.e. the "ltx"
+    family on a non-Apple-Silicon (CUDA) host. Validated end-to-end on an RTX 4090 (the fp8 + CPU-offload
+    tier): a valid h264+AAC clip in ~62 s, ~8.3 GB peak. The fp8/none and bf16/none tiers extrapolate the
+    free-VRAM floors from that run."""
+    return (not IS_APPLE_SILICON) and spec["family"] == "ltx"
 
 
 def detect_vram():
@@ -133,6 +167,8 @@ class State:
         if _is_mlx_ltx(self.spec):
             key = os.path.join(self.cache_dir, self.spec["mlx_local"], self.spec["mlx_key_file"])
             return os.path.exists(key)
+        if _is_cuda_ltx2(self.spec):
+            return os.path.exists(os.path.join(self.cache_dir, "ltx-2.3-cuda", self.spec["ckpt_file"]))
         repo_dir = "models--" + self.spec["repo"].replace("/", "--")
         snaps = os.path.join(self.cache_dir, repo_dir, "snapshots")
         try:
@@ -151,6 +187,8 @@ class State:
                 return self.pipeline
             if _is_mlx_ltx(self.spec):
                 return self._load_mlx()
+            if _is_cuda_ltx2(self.spec):
+                return self._load_cuda_ltx2()
             import torch
             dev = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
             dtype = torch.bfloat16 if dev == "cuda" else torch.float16
@@ -188,10 +226,42 @@ class State:
         self.pipeline = pipe
         return pipe
 
+    def _load_cuda_ltx2(self):
+        """CUDA: load LTX-2.3 via the official ltx_pipelines (kept warm). The tier's quantization
+        (fp8-cast) + offload mode (none/cpu) set the VRAM footprint — fp8 + CPU offload peaks ~8.3 GB
+        (validated on an RTX 4090). Downloads only the distilled checkpoint + spatial upscaler from
+        Lightricks/LTX-2.3 plus the Gemma text-encoder dir."""
+        from huggingface_hub import hf_hub_download, snapshot_download
+        from ltx_pipelines import DistilledPipeline
+        from ltx_pipelines.utils.types import OffloadMode
+
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+        wdir = os.path.join(self.cache_dir, "ltx-2.3-cuda")
+        sys.stderr.write(f"[video-sidecar] {self.model_id} (CUDA): fetching LTX-2.3 weights -> {wdir}\n")
+        ckpt = hf_hub_download(self.spec["ckpt_repo"], self.spec["ckpt_file"], local_dir=wdir)
+        upscaler = hf_hub_download(self.spec["ckpt_repo"], self.spec["upscaler_file"], local_dir=wdir)
+        gemma_root = snapshot_download(self.spec["gemma_repo"],
+                                       local_dir=os.path.join(self.cache_dir, "gemma-3-12b-it"))
+        quantization = None
+        if self.spec.get("cuda_fp8"):
+            from ltx_core.quantization.fp8_cast import build_policy as build_fp8_cast_policy
+            quantization = build_fp8_cast_policy(ckpt)  # downcasts the bf16 checkpoint to fp8 on the fly
+        offload = {"none": OffloadMode.NONE, "cpu": OffloadMode.CPU,
+                   "disk": OffloadMode.DISK}[self.spec.get("cuda_offload", "none")]
+        pipe = DistilledPipeline(distilled_checkpoint_path=ckpt, gemma_root=gemma_root,
+                                 spatial_upsampler_path=upscaler, loras=[],
+                                 quantization=quantization, offload_mode=offload)
+        self.device = "cuda"
+        self.pipeline = pipe
+        return pipe
+
 
 def run_job(state, jid, prompt, frames, steps, width, height):
     if _is_mlx_ltx(state.spec):
         _run_job_mlx(state, jid, prompt, frames, width, height)
+        return
+    if _is_cuda_ltx2(state.spec):
+        _run_job_cuda_ltx2(state, jid, prompt, frames, width, height)
         return
     try:
         pipe = state.load()
@@ -206,7 +276,7 @@ def run_job(state, jid, prompt, frames, steps, width, height):
             kwargs.update(width=width, height=height)
         frames_out = pipe(**kwargs).frames[0]
         from diffusers.utils import export_to_video
-        path = os.path.join("/tmp", f"jclaw_video_{jid}.mp4")
+        path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
         export_to_video(frames_out, path, fps=24)
         state.jobs[jid].update(state="succeeded", percent=100, path=path, mime="video/mp4")
     except Exception as e:  # generation failure is a FAILED job, never a sidecar crash
@@ -241,9 +311,54 @@ def _run_job_mlx(state, jid, prompt, frames, width, height):
         orig_tqdm = samplers.tqdm
         samplers.tqdm = _HookedTqdm
         try:
-            path = os.path.join("/tmp", f"jclaw_video_{jid}.mp4")
+            path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
             pipe.generate_and_save(prompt=prompt, output_path=path, height=height, width=width,
                                    num_frames=frames, frame_rate=24, seed=42)
+        finally:
+            samplers.tqdm = orig_tqdm
+        state.jobs[jid].update(state="succeeded", percent=100, path=path, mime="video/mp4")
+    except Exception as e:
+        state.jobs[jid].update(state="failed", error=str(e)[:400])
+    finally:
+        state.busy = None
+        state.touch()
+
+
+def _run_job_cuda_ltx2(state, jid, prompt, frames, width, height):
+    """CUDA LTX-2.3 generation (official ltx_pipelines). Output is an h264+AAC mp4 (video WITH audio). The
+    pipeline __call__ returns (video_iterator, audio); we encode the mp4 ourselves with encode_video. Live
+    percent via the sampler tqdm (8 + 4 distilled steps). Validated on an RTX 4090 (fp8 + CPU offload)."""
+    import torch
+    import ltx_pipelines.utils.samplers as samplers
+    from tqdm import tqdm as _tqdm
+    from ltx_pipelines.utils.media_io import encode_video
+    from ltx_core.model.video_vae import TilingConfig, get_video_chunks_number
+    try:
+        pipe = state.load()
+        frames = max(9, ((frames - 1) // 8) * 8 + 1)  # LTX-2 requires num_frames of the form 8k+1
+        height = max(64, (height // 64) * 64)  # LTX-2 two-stage asserts height/width are multiples of 64
+        width = max(64, (width // 64) * 64)
+        total_steps = 8 + 4  # distilled stage-1 (DISTILLED_SIGMAS) + stage-2 (STAGE_2_DISTILLED_SIGMAS)
+        progress = {"done": 0}
+
+        class _HookedTqdm(_tqdm):
+            def __iter__(self):
+                for obj in super().__iter__():
+                    yield obj
+                    progress["done"] += 1
+                    state.jobs[jid]["percent"] = min(95, int(round(progress["done"] / total_steps * 100)))
+                    state.touch()
+
+        orig_tqdm = samplers.tqdm
+        samplers.tqdm = _HookedTqdm
+        try:
+            tiling = TilingConfig.default()
+            path = os.path.join(_OUTDIR, f"jclaw_video_{jid}.mp4")
+            with torch.inference_mode():
+                video, audio = pipe(prompt=prompt, seed=42, height=height, width=width,
+                                    num_frames=frames, frame_rate=24, images=[], tiling_config=tiling)
+                encode_video(video=video, fps=24, audio=audio, output_path=path,
+                             video_chunks_number=get_video_chunks_number(frames, tiling))
         finally:
             samplers.tqdm = orig_tqdm
         state.jobs[jid].update(state="succeeded", percent=100, path=path, mime="video/mp4")

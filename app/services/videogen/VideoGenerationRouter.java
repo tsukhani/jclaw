@@ -41,10 +41,13 @@ public final class VideoGenerationRouter {
         if (provider == null || provider.isBlank()) return Optional.empty();
         return switch (provider) {
             case "replicate" -> Optional.of(new ReplicateVideoGenerationClient());
-            // Local engines (JCLAW-232/233): one Python sidecar per JVM, selected engine passed through.
-            // LTX is fixed; WAN's specific variant (wan-5b / wan-14b) is operator-selectable per the
-            // free-VRAM tier the capability probe reports (SV-2).
-            case "ltx-local" -> Optional.of(new LocalVideoGenerationClient("ltx"));
+            // Local engines (JCLAW-232/233): one Python sidecar per JVM, the selected variant passed
+            // through as videogen.local.model. The adaptive picker offers a free-VRAM-tiered spectrum per
+            // platform (SV-2) — LTX quantization tiers (ltx / ltx-q8 / ltx-bf16) on Apple Silicon, WAN
+            // sizes (wan-5b / wan-14b) on CUDA — so both arms read the operator's choice, defaulting to
+            // the smallest in each family.
+            case "ltx-local" -> Optional.of(new LocalVideoGenerationClient(
+                    firstNonBlank(ConfigService.get("videogen.local.model"), "ltx")));
             case "wan-local" -> Optional.of(new LocalVideoGenerationClient(
                     firstNonBlank(ConfigService.get("videogen.local.model"), "wan-5b")));
             default -> Optional.empty();

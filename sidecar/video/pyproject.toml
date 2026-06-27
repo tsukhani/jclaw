@@ -15,22 +15,27 @@ dependencies = [
     # ltx-core-mlx + transformers (5.x) transitively. No torch/diffusers on this platform.
     "ltx-pipelines-mlx ; sys_platform == 'darwin'",
 
-    # Linux/CUDA — diffusers WAN + LTX-Video. No mlx on this platform.
+    # Linux + Windows / NVIDIA CUDA (marker: any non-darwin) — LTX-2.3 via the official Lightricks
+    # ltx_pipelines (CUDA sibling of the MLX port) + WAN via diffusers. Both torch-based, share this venv;
+    # ltx-core pins torch~=2.7 / transformers>=4.52, which dominate the resolution. Validated on Linux (RTX
+    # 4090); Windows is wired the same way but unverified (the ltx-pipelines triton dep is the likely snag).
     # torch wheels are platform-specific: CPU-only by default; install the CUDA build via
-    #   UV_TORCH_BACKEND=cu124 uv run serve.py ...
-    "torch>=2.4 ; sys_platform == 'linux'",
-    "diffusers>=0.32 ; sys_platform == 'linux'",
-    "transformers>=4.46 ; sys_platform == 'linux'",
-    "accelerate>=1.0 ; sys_platform == 'linux'",
-    "safetensors>=0.4 ; sys_platform == 'linux'",
-    # protobuf + tiktoken: the LTX-Video T5 tokenizer needs one of these (SV-2 — first run fails without).
-    "sentencepiece>=0.2 ; sys_platform == 'linux'",
-    "protobuf>=4.25 ; sys_platform == 'linux'",
-    "tiktoken>=0.7 ; sys_platform == 'linux'",
+    #   UV_TORCH_BACKEND=cu124 uv run serve.py ...   (works on Linux + Windows)
+    "ltx-pipelines ; sys_platform != 'darwin'",
+    "torch>=2.7 ; sys_platform != 'darwin'",
+    "diffusers>=0.32 ; sys_platform != 'darwin'",
+    "transformers>=4.52 ; sys_platform != 'darwin'",
+    "accelerate>=1.0 ; sys_platform != 'darwin'",
+    "safetensors>=0.4 ; sys_platform != 'darwin'",
+    "sentencepiece>=0.2 ; sys_platform != 'darwin'",
+    "protobuf>=4.25 ; sys_platform != 'darwin'",
 ]
 
-# The MLX engine lives in a uv workspace (dgrauet/ltx-2-mlx); pull the two packages it needs straight
-# from their subdirectories. Only fetched on macOS (the dep above is markered to darwin).
+# Both LTX engines live in uv workspaces; pull the packages each needs straight from their git
+# subdirectories. The darwin pair (dgrauet MLX fork) is only fetched on macOS; the Lightricks LTX-2 pair
+# on any non-darwin (Linux + Windows) CUDA host — the deps above are markered per platform.
 [tool.uv.sources]
 ltx-pipelines-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx.git", subdirectory = "packages/ltx-pipelines-mlx" }
 ltx-core-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx.git", subdirectory = "packages/ltx-core-mlx" }
+ltx-pipelines = { git = "https://github.com/Lightricks/LTX-2.git", subdirectory = "packages/ltx-pipelines" }
+ltx-core = { git = "https://github.com/Lightricks/LTX-2.git", subdirectory = "packages/ltx-core" }

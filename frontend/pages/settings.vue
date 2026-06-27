@@ -799,9 +799,11 @@ const videoCapDetectLabel = computed(() => {
 })
 function isLocalEngineActive(e: VideoEngine): boolean {
   if (videogenProvider.value !== e.provider) return false
-  // ltx-local is single-model; wan-local distinguishes wan-5b / wan-14b via videogen.local.model.
-  if (e.provider === 'ltx-local') return true
-  return videogenLocalModel.value ? videogenLocalModel.value === e.id : e.id === 'wan-5b'
+  // Match the exact variant the operator picked (videogen.local.model) — both families now have a
+  // VRAM-tiered spectrum (ltx int4/int8/bf16, wan 5b/14b). Fall back to the smallest in the family for a
+  // freshly-selected provider that hasn't recorded a model yet.
+  if (videogenLocalModel.value) return videogenLocalModel.value === e.id
+  return e.id === (e.provider === 'wan-local' ? 'wan-5b' : 'ltx')
 }
 async function selectLocalEngine(e: VideoEngine) {
   if (!e.runnable) return
