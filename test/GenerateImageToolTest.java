@@ -77,6 +77,27 @@ class GenerateImageToolTest extends UnitTest {
     }
 
     @Test
+    void aspectRatioResolvesToTrueDimensions() {
+        // The aspect_ratio enum must map to true-ratio pixels (16:9 = 1536x864, not the old 3:2 1536x1024),
+        // recorded in the image metadata the chip and persistence read.
+        var imageBytes = new byte[]{(byte) 0x89, 'P', 'N', 'G'};
+        ConfigService.set("provider.openai.baseUrl", server.url("/").toString());
+        ConfigService.set("provider.openai.apiKey", "test-key");
+        ConfigService.set("imagegen.provider", "openai");
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "application/json")
+                .body(jsonBuf("{\"data\":[{\"b64_json\":\""
+                        + Base64.getEncoder().encodeToString(imageBytes) + "\"}]}")).build());
+
+        var result = new GenerateImageTool().executeRich(
+                "{\"prompt\":\"a kite\",\"aspect_ratio\":\"16:9\"}", new Agent());
+
+        var meta = result.image().metadata();
+        assertTrue(meta.contains("\"width\":1536"), meta);
+        assertTrue(meta.contains("\"height\":864"), meta);
+    }
+
+    @Test
     void toolReportsWhenNotConfigured() {
         // No imagegen.provider → the router is empty; the tool reports, doesn't throw, no image.
         var result = new GenerateImageTool().executeRich("{\"prompt\":\"anything\"}", new Agent());

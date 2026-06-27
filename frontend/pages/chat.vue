@@ -1512,6 +1512,21 @@ function videoDurationLabel(att: MessageAttachment): string {
   return formatVideoDuration(videoDurations.value[att.uuid], videoGenMeta(att.generationMetadata).durationSeconds)
 }
 
+// Generated-image chip dimensions (JCLAW-228). Read off the rendered <img>'s natural size on load — the
+// truest source, since a provider may return different pixels than requested (e.g. Replicate renders its
+// own aspect_ratio dims, not the width/height we sent). Keyed by attachment uuid.
+const imageDimensions = ref<Record<string, { w: number, h: number }>>({})
+function onImageLoad(att: MessageAttachment, ev: Event) {
+  const el = ev.target as HTMLImageElement
+  if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+    imageDimensions.value[att.uuid] = { w: el.naturalWidth, h: el.naturalHeight }
+  }
+}
+function imageDimsLabel(att: MessageAttachment): string {
+  const d = imageDimensions.value[att.uuid]
+  return d ? `${d.w}×${d.h}` : ''
+}
+
 onMounted(() => {
   announcePollTimer = setInterval(announcePollTick, ANNOUNCE_POLL_INTERVAL_MS)
   // Capture phase: image load errors don't bubble, so a document-level listener
@@ -3274,9 +3289,10 @@ function exportConversation() {
                               :src="`/api/attachments/${att.uuid}`"
                               alt="AI-generated graphic"
                               class="max-w-[320px] max-h-[320px] rounded-lg border border-border object-contain"
+                              @load="onImageLoad(att, $event)"
                             >
                           </a>
-                          <!-- Info + actions chip: a header row (type icon, size, GEN badge, and
+                          <!-- Info + actions chip: a header row (type icon, size, pixel dimensions, and
                                the download/delete actions) above the full-width prompt, so the
                                prompt uses the whole chip width instead of a cramped column. Pinned
                                to the inline preview's width for a clean stacked look. -->
@@ -3284,7 +3300,7 @@ function exportConversation() {
                             class="flex flex-col gap-2 w-[320px] max-w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs"
                             :class="att.deleted ? 'text-fg-muted' : 'text-fg-strong'"
                           >
-                            <!-- Header: icon + size on the left; actions (or the deleted
+                            <!-- Header: icon + size + dimensions on the left; actions (or the deleted
                                  marker) pushed to the right. -->
                             <div class="flex items-center gap-2">
                               <PhotoIcon
@@ -3295,6 +3311,10 @@ function exportConversation() {
                                 v-if="!att.deleted"
                                 class="text-fg-muted"
                               >{{ formatSize(att.sizeBytes) }}</span>
+                              <span
+                                v-if="!att.deleted && imageDimsLabel(att)"
+                                class="text-fg-muted"
+                              >{{ imageDimsLabel(att) }}</span>
                               <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
                               <span
                                 v-if="att.deleted"

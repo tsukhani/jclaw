@@ -125,9 +125,13 @@ public class GenerateImageTool implements ToolRegistry.Tool {
         if (width != null && height != null) return new Integer[]{width, height};
         var aspect = optString(args, ARG_ASPECT);
         if (aspect != null) {
+            // True ratios at a Flux-safe scale (each side a multiple of 16; long side 1536). Providers
+            // that take raw pixels (local Flux, BFL) render these exactly; Replicate maps them back to its
+            // own aspect_ratio label; OpenAI's gpt-image-1 snaps landscape/portrait to its fixed
+            // 1536x1024 / 1024x1536 (a 3:2 it can't avoid). The chip shows whatever actually came back.
             return switch (aspect) {
-                case "16:9" -> new Integer[]{1536, 1024};
-                case "9:16" -> new Integer[]{1024, 1536};
+                case "16:9" -> new Integer[]{1536, 864}; // 1536/864 = 16/9 exactly
+                case "9:16" -> new Integer[]{864, 1536};
                 case "1:1" -> new Integer[]{1024, 1024};
                 default -> new Integer[]{width, height};
             };
