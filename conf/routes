@@ -29,6 +29,8 @@ POST    /api/transcription/models/{id}/download ApiTranscriptionController.downl
 # Local image generation API (JCLAW-226)
 GET     /api/imagegen/local/state               ApiImagegenController.state
 POST    /api/imagegen/local/pull                ApiImagegenController.pull
+# Replicate text-to-image model discovery — Settings model dropdown
+GET     /api/imagegen/models                     ApiImagegenController.models
 
 # Video generation job status — chat progress polling (JCLAW-234)
 GET     /api/videogen/jobs                       ApiVideogenController.jobs

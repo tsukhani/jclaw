@@ -630,6 +630,37 @@ function startEditReplicateKey() {
   editValue.value = ''
 }
 
+// Replicate image-model dropdown — mirrors the videogen catalog. Replicate curates a `text-to-image`
+// collection; GET /api/imagegen/models returns its owner/model slugs (server-discovered, not hardcoded).
+// The saved value is always surfaced (see imagegenModelOptions) even if discovery is empty or the saved
+// model has since left the collection, so it's shown as the active choice rather than silently dropped.
+interface ImageModel {
+  slug: string
+  name: string
+  description: string | null
+}
+const imagegenModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'imagegen.cloud.model')?.value ?? '',
+)
+const { data: imagegenModels, refresh: refreshImagegenModels, status: imagegenModelsStatus }
+  = await useFetch<ImageModel[]>('/api/imagegen/models')
+const imagegenModelOptions = computed<ImageModel[]>(() => {
+  const discovered = imagegenModels.value ?? []
+  const saved = imagegenModel.value
+  if (saved && !discovered.some(m => m.slug === saved)) {
+    return [{ slug: saved, name: saved, description: null }, ...discovered]
+  }
+  return discovered
+})
+async function saveImagegenField(configKey: string, value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+
 // ──────────────────── Local Flux 2 Klein sidecar (JCLAW-226) ──────────────
 // Runtime state — uv availability + Flux weight download status — comes from
 // /api/imagegen/local/state. The provider selection itself rides the same
@@ -4565,6 +4596,48 @@ async function deleteLoggerLevel(logger: string) {
                   />
                 </button>
               </template>
+            </div>
+            <!-- Model — picked from Replicate's curated text-to-image collection (GET /api/imagegen/models).
+                 Shown when Replicate is the active backend, mirroring the Self-Hosted download UI below. -->
+            <div
+              v-if="imagegenProvider === 'replicate'"
+              class="border-t border-border px-4 py-2.5 flex items-center gap-3"
+            >
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Model</span>
+              <select
+                :value="imagegenModel"
+                :disabled="saving"
+                aria-label="Replicate image model"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                @change="saveImagegenField('imagegen.cloud.model', ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">
+                  Provider default (black-forest-labs/flux-schnell)
+                </option>
+                <option
+                  v-for="m in imagegenModelOptions"
+                  :key="m.slug"
+                  :value="m.slug"
+                  :title="m.description ?? ''"
+                >
+                  {{ m.slug }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="shrink-0 text-[11px] text-fg-muted hover:text-fg-strong disabled:opacity-50"
+                :disabled="imagegenModelsStatus === 'pending'"
+                @click="refreshImagegenModels()"
+              >
+                {{ imagegenModelsStatus === 'pending' ? 'discovering…' : 'refresh' }}
+              </button>
+            </div>
+            <!-- Empty-state hint when discovery returned nothing (no API key set, or a transient error). -->
+            <div
+              v-if="imagegenProvider === 'replicate' && imagegenModelsStatus !== 'pending' && !imagegenModels?.length"
+              class="border-t border-border px-4 py-2 text-[11px] text-fg-muted"
+            >
+              No models discovered — set a Replicate API key above, then refresh.
             </div>
           </div>
 

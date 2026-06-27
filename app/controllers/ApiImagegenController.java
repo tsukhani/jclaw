@@ -10,6 +10,7 @@ import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 import services.imagegen.ImageModelManager;
+import services.imagegen.ReplicateImageModelCatalog;
 import services.UvProbe;
 
 import static utils.GsonHolder.INSTANCE;
@@ -84,5 +85,12 @@ public class ApiImagegenController extends Controller {
         ImageModelManager.ensureAvailable(model, null);
         EventLogger.info("imagegen", "image model download requested: %s".formatted(model));
         renderJSON(gson.toJson(new DownloadStartedResponse("downloading", model)));
+    }
+
+    /** GET /api/imagegen/models — Replicate text-to-image models for the Settings model dropdown.
+     *  Empty when no Replicate API key is set or discovery fails; the UI degrades to "no models". */
+    @Operation(summary = "Discover Replicate text-to-image models (Settings model dropdown)")
+    public static void models() {
+        renderJSON(gson.toJson(ReplicateImageModelCatalog.textToImageModels()));
     }
 }
