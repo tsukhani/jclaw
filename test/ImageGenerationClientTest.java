@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
 import okhttp3.OkHttpClient;
@@ -119,6 +120,34 @@ class ImageGenerationClientTest extends UnitTest {
         assertArrayEquals(imageBytes, result.bytes());
         assertEquals("image/webp", result.mimeType(), "Replicate's content type (webp) should be read from the fetch");
         assertTrue(result.generatedBy().startsWith("replicate:"), result.generatedBy());
+    }
+
+    @Test
+    void replicateMapsDimsToAspectRatio() throws Exception {
+        // The tool resolves aspect_ratio -> width/height; Flux on Replicate wants the label back, so the
+        // client must derive aspect_ratio (landscape/portrait/square) and send no label when dims are unset.
+        ConfigService.set("provider.replicate.baseUrl", server.url("/").toString());
+        ConfigService.set("provider.replicate.apiKey", "test-key");
+        var client = new ReplicateImageGenerationClient(testClient);
+
+        assertEquals("16:9", aspectSentOnCreate(client, 1536, 1024), "landscape dims -> 16:9");
+        assertEquals("9:16", aspectSentOnCreate(client, 1024, 1536), "portrait dims -> 9:16");
+        assertEquals("1:1", aspectSentOnCreate(client, 1024, 1024), "square dims -> 1:1");
+        assertNull(aspectSentOnCreate(client, null, null), "no dims -> no aspect_ratio (model default)");
+    }
+
+    /** Run one Replicate generate() and return the {@code aspect_ratio} it put on the create-prediction
+     *  (null if absent). The create-prediction is the first recorded request; the image fetch is the second. */
+    private String aspectSentOnCreate(ReplicateImageGenerationClient client, Integer w, Integer h) throws Exception {
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"status\":\"succeeded\",\"output\":[\"" + server.url("/img") + "\"]}")).build());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "image/webp").body(bytesBuf(new byte[]{1})).build());
+        client.generate("a cat", null, w, h);
+        var createBody = server.takeRequest().getBody().utf8();
+        server.takeRequest(); // drain the image fetch so the next call's create is first again
+        var input = JsonParser.parseString(createBody).getAsJsonObject().getAsJsonObject("input");
+        return input.has("aspect_ratio") ? input.get("aspect_ratio").getAsString() : null;
     }
 
     @Test

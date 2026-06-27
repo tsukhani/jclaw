@@ -59,14 +59,20 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         }
         var effModel = firstNonBlank(model, ConfigService.get("imagegen.cloud.model"), DEFAULT_MODEL);
 
-        var prediction = createPrediction(trimTrailingSlash(baseUrl), effModel, apiKey, prompt);
+        var prediction = createPrediction(trimTrailingSlash(baseUrl), effModel, apiKey, prompt, width, height);
         var imageUrl = resolveOutputUrl(prediction, apiKey);
         return fetchImage(imageUrl, "replicate:" + effModel);
     }
 
-    private JsonObject createPrediction(String baseUrl, String model, String apiKey, String prompt) {
+    private JsonObject createPrediction(String baseUrl, String model, String apiKey, String prompt,
+            Integer width, Integer height) {
         var input = new JsonObject();
         input.addProperty("prompt", prompt);
+        // Flux models on Replicate take an aspect_ratio string, not raw pixels (those need
+        // aspect_ratio="custom"), so map the tool's width/height back to the landscape/portrait/square
+        // label — the same width/height→label move OpenAiCompatibleImageGenerationClient.sizeFor makes.
+        var aspect = aspectRatioFor(width, height);
+        if (aspect != null) input.addProperty("aspect_ratio", aspect);
         var root = new JsonObject();
         root.add("input", input);
         var request = new Request.Builder()
@@ -183,6 +189,15 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
 
     private static String trimTrailingSlash(String s) {
         return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
+    }
+
+    /** Map the tool's width/height back to a Flux {@code aspect_ratio} label (landscape/portrait/square);
+     *  null when dims are unset, so the model keeps its own default. */
+    private static String aspectRatioFor(Integer width, Integer height) {
+        if (width == null || height == null) return null;
+        if (width > height) return "16:9";
+        if (height > width) return "9:16";
+        return "1:1";
     }
 
     private static String truncate(String s, int max) {
