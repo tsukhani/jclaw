@@ -37,29 +37,13 @@ const [{ data: bindings, refresh }, { data: agents }] = await Promise.all([
 // pre-fills the webhook URL — shared across the channel pages via the composable.
 const { data: tailscale } = useTailscaleStatus()
 
-const enabledAgents = computed(() => (agents.value ?? []).filter(a => a.enabled))
+const creating = ref(false)
+const editing = ref<TelegramBindingSummary | null>(null)
 
-/**
- * Agents that are still selectable for a new or edited binding. Agent memory is
- * scoped per agent, so any agent already bound to another binding is hidden to
- * prevent accidentally sharing memories across two Telegram users. When editing
- * an existing binding, that binding's current agent stays selectable.
- */
-const availableAgents = computed(() => {
-  const takenAgentIds = new Set<number>()
-  for (const b of bindings.value ?? []) {
-    if (b.agentId == null) continue
-    if (editing.value && b.id === editing.value.id) continue
-    takenAgentIds.add(b.agentId)
-  }
-  return enabledAgents.value.filter(a => !takenAgentIds.has(a.id))
-})
+const { availableAgents } = useBindingAgents(agents, bindings, editing)
 
 const { mutate, loading: saving } = useApiMutation()
 const { confirm } = useConfirm()
-
-const creating = ref(false)
-const editing = ref<TelegramBindingSummary | null>(null)
 
 interface BindingForm {
   botToken: string
