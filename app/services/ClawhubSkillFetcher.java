@@ -39,6 +39,10 @@ public final class ClawhubSkillFetcher {
     private static final String BASE_URL_PROPERTY = "jclaw.skills.clawhub.url";
     private static final String DEFAULT_BASE_URL = "https://clawhub.ai";
     private static final int TIMEOUT_SECONDS = 60;
+    private static final String SKILLS_PATH = "api/v1/skills/";
+    private static final String KEY_VERSION = "version";
+    private static final String KEY_LATEST_VERSION = "latestVersion";
+    private static final String KEY_FILES = "files";
 
     private ClawhubSkillFetcher() {}
 
@@ -56,9 +60,9 @@ public final class ClawhubSkillFetcher {
         String version;
         List<String> paths;
         try {
-            version = latestVersion(getJson(skillApi(owner, "api/v1/skills/" + slug)));
+            version = latestVersion(getJson(skillApi(owner, SKILLS_PATH + slug)));
             if (version == null) return new FetchResult(false, 0, "no published version for clawhub skill '" + slug + "'");
-            paths = parseFilePaths(getJson(skillApi(owner, "api/v1/skills/" + slug + "/versions/" + version)));
+            paths = parseFilePaths(getJson(skillApi(owner, SKILLS_PATH + slug + "/versions/" + version)));
         } catch (IOException e) {
             return new FetchResult(false, 0, "could not read clawhub skill '" + slug + "': " + e.getMessage());
         }
@@ -73,7 +77,7 @@ public final class ClawhubSkillFetcher {
                     continue;
                 }
                 Files.createDirectories(dest.getParent());
-                var fileUrl = skillApi(owner, "api/v1/skills/" + slug + "/file", "path", path, "version", version);
+                var fileUrl = skillApi(owner, SKILLS_PATH + slug + "/file", "path", path, KEY_VERSION, version);
                 Files.write(dest, getBytes(fileUrl));
                 n++;
             } catch (IOException e) {
@@ -88,18 +92,18 @@ public final class ClawhubSkillFetcher {
 
     /** Latest published version string from a {@code /skills/{slug}} detail response. */
     public static String latestVersion(JsonObject detail) {
-        if (detail == null || !detail.has("latestVersion") || !detail.get("latestVersion").isJsonObject()) return null;
-        var lv = detail.getAsJsonObject("latestVersion");
-        return lv.has("version") && !lv.get("version").isJsonNull() ? lv.get("version").getAsString() : null;
+        if (detail == null || !detail.has(KEY_LATEST_VERSION) || !detail.get(KEY_LATEST_VERSION).isJsonObject()) return null;
+        var lv = detail.getAsJsonObject(KEY_LATEST_VERSION);
+        return lv.has(KEY_VERSION) && !lv.get(KEY_VERSION).isJsonNull() ? lv.get(KEY_VERSION).getAsString() : null;
     }
 
     /** File paths from a {@code /skills/{slug}/versions/{version}} response ({@code version.files[].path}). */
     public static List<String> parseFilePaths(JsonObject versionDetail) {
         var out = new ArrayList<String>();
-        if (versionDetail == null || !versionDetail.has("version") || !versionDetail.get("version").isJsonObject()) return out;
-        var version = versionDetail.getAsJsonObject("version");
-        if (!version.has("files") || !version.get("files").isJsonArray()) return out;
-        for (var el : version.getAsJsonArray("files")) {
+        if (versionDetail == null || !versionDetail.has(KEY_VERSION) || !versionDetail.get(KEY_VERSION).isJsonObject()) return out;
+        var version = versionDetail.getAsJsonObject(KEY_VERSION);
+        if (!version.has(KEY_FILES) || !version.get(KEY_FILES).isJsonArray()) return out;
+        for (var el : version.getAsJsonArray(KEY_FILES)) {
             if (!el.isJsonObject()) continue;
             var o = el.getAsJsonObject();
             if (o.has("path") && !o.get("path").isJsonNull()) out.add(o.get("path").getAsString());
@@ -113,7 +117,7 @@ public final class ClawhubSkillFetcher {
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var b = resp.body();
-            if (!resp.isSuccessful() || b == null) throw new IOException("clawhub HTTP " + resp.code() + " for " + u.encodedPath());
+            if (!resp.isSuccessful()) throw new IOException("clawhub HTTP " + resp.code() + " for " + u.encodedPath());
             return JsonParser.parseString(b.string()).getAsJsonObject();
         }
     }
@@ -123,7 +127,7 @@ public final class ClawhubSkillFetcher {
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var b = resp.body();
-            if (!resp.isSuccessful() || b == null) throw new IOException("clawhub file HTTP " + resp.code());
+            if (!resp.isSuccessful()) throw new IOException("clawhub file HTTP " + resp.code());
             return b.bytes();
         }
     }

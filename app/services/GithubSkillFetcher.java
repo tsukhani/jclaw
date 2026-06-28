@@ -32,6 +32,7 @@ public final class GithubSkillFetcher {
     private static final String RAW = "https://raw.githubusercontent.com";
     private static final String TOKEN_PROPERTY = "jclaw.skills.catalog.github.token";
     private static final String SKILL_MD = "SKILL.md";
+    private static final String KEY_DEFAULT_BRANCH = "default_branch";
     private static final int TIMEOUT_SECONDS = 60;
 
     private GithubSkillFetcher() {}
@@ -90,8 +91,8 @@ public final class GithubSkillFetcher {
     private static String defaultBranch(String owner, String repo) throws IOException {
         var body = getString(API + "/repos/" + owner + "/" + repo);
         var json = JsonParser.parseString(body).getAsJsonObject();
-        if (json.has("default_branch") && !json.get("default_branch").isJsonNull()) {
-            return json.get("default_branch").getAsString();
+        if (json.has(KEY_DEFAULT_BRANCH) && !json.get(KEY_DEFAULT_BRANCH).isJsonNull()) {
+            return json.get(KEY_DEFAULT_BRANCH).getAsString();
         }
         return "main";
     }
@@ -159,7 +160,7 @@ public final class GithubSkillFetcher {
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var rb = resp.body();
-            if (!resp.isSuccessful() || rb == null) {
+            if (!resp.isSuccessful()) {
                 throw new IOException("HTTP " + resp.code() + " for " + path);
             }
             return rb.bytes();
@@ -171,7 +172,7 @@ public final class GithubSkillFetcher {
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var rb = resp.body();
-            if (!resp.isSuccessful() || rb == null) {
+            if (!resp.isSuccessful()) {
                 throw new IOException("HTTP " + resp.code() + " for " + url);
             }
             return rb.string();

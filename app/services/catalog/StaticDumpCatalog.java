@@ -164,8 +164,8 @@ public final class StaticDumpCatalog implements Catalog {
         try {
             var ids = MessageSearch.searchIds(scope, query, LUCENE_WINDOW);
             var out = new ArrayList<CatalogSkill>(ids.size());
-            for (var id : ids) {
-                int i = id.intValue();
+            for (var docId : ids) {
+                int i = docId.intValue();
                 if (i >= 0 && i < snapshot.size()) out.add(snapshot.get(i));
             }
             return out;
@@ -230,7 +230,7 @@ public final class StaticDumpCatalog implements Catalog {
         call.timeout().timeout(DOWNLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var body = resp.body();
-            if (!resp.isSuccessful() || body == null) {
+            if (!resp.isSuccessful()) {
                 throw new IOException("dump download HTTP " + resp.code() + " from " + url);
             }
             return body.string();

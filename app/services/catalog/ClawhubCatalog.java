@@ -64,6 +64,10 @@ public final class ClawhubCatalog implements Catalog {
     private static final String BASE_URL_PROPERTY = "jclaw.skills.clawhub.url";
     private static final String DEFAULT_BASE_URL = "https://clawhub.ai";
     private static final int MAX_PAGE_SIZE = 50;
+    private static final String CLAWHUB_HOST = "clawhub.ai/";
+    private static final String KEY_DOWNLOADS = "downloads";
+    private static final String KEY_STATS = "stats";
+    private static final String KEY_TOPICS = "topics";
     private static final int TIMEOUT_SECONDS = 25;
     private static final String CATEGORY = "skills";
     private static final String PROVIDER = "clawhub";
@@ -111,7 +115,7 @@ public final class ClawhubCatalog implements Catalog {
     private CatalogPage browse(String cursor, int limit) throws IOException {
         var url = base().newBuilder()
                 .addPathSegments("api/v1/skills")
-                .addQueryParameter("sort", "downloads")
+                .addQueryParameter("sort", KEY_DOWNLOADS)
                 .addQueryParameter("nonSuspiciousOnly", "true")
                 .addQueryParameter("limit", String.valueOf(limit));
         if (cursor != null && !cursor.isBlank()) url.addQueryParameter("cursor", cursor);
@@ -150,14 +154,14 @@ public final class ClawhubCatalog implements Catalog {
     public static CatalogSkill mapBrowseItem(JsonObject o, String base) {
         var slug = str(o, "slug");
         var displayName = firstNonBlank(str(o, "displayName"), slug);
-        var stats = o.has("stats") && o.get("stats").isJsonObject() ? o.getAsJsonObject("stats") : null;
-        long installs = stats != null ? asLong(stats, "installsAllTime", asLong(stats, "downloads", 0)) : 0;
+        var stats = o.has(KEY_STATS) && o.get(KEY_STATS).isJsonObject() ? o.getAsJsonObject(KEY_STATS) : null;
+        long installs = stats != null ? asLong(stats, "installsAllTime", asLong(stats, KEY_DOWNLOADS, 0)) : 0;
         var category = SkillCategoryClassifier.classifyText(
                 join(slug, displayName, str(o, "summary"), str(o, "description"), topics(o)));
         // Browse listings omit the owner, and clawhub slugs are owner-scoped (not
         // globally unique), so we can't resolve the exact /{owner}/skills/{slug}
         // page. Link to the slug-filtered search, which lands on the right skill.
-        return new CatalogSkill(slug, displayName, "clawhub.ai/" + nz(slug),
+        return new CatalogSkill(slug, displayName, CLAWHUB_HOST + nz(slug),
                 "", "", searchLink(base, slug), installs, category, PROVIDER);
     }
 
@@ -166,7 +170,7 @@ public final class ClawhubCatalog implements Catalog {
         var slug = str(o, "slug");
         var displayName = firstNonBlank(str(o, "displayName"), slug);
         var owner = nz(str(o, "ownerHandle"));
-        long installs = asLong(o, "downloads", 0);
+        long installs = asLong(o, KEY_DOWNLOADS, 0);
         var category = SkillCategoryClassifier.classifyText(join(slug, displayName, str(o, "summary")));
         return new CatalogSkill(slug, displayName, sourceLabel(owner, slug),
                 owner, "", skillPageUrl(base, owner, slug), installs, category, PROVIDER);
@@ -189,13 +193,13 @@ public final class ClawhubCatalog implements Catalog {
 
     /** Display subtitle: the owner-qualified path when known, else just the slug. */
     private static String sourceLabel(String owner, String slug) {
-        return owner.isBlank() ? "clawhub.ai/" + nz(slug) : "clawhub.ai/" + owner + "/" + nz(slug);
+        return owner.isBlank() ? CLAWHUB_HOST + nz(slug) : CLAWHUB_HOST + owner + "/" + nz(slug);
     }
 
     private static String topics(JsonObject o) {
-        if (!o.has("topics") || !o.get("topics").isJsonArray()) return "";
+        if (!o.has(KEY_TOPICS) || !o.get(KEY_TOPICS).isJsonArray()) return "";
         var sb = new StringBuilder();
-        JsonArray arr = o.getAsJsonArray("topics");
+        JsonArray arr = o.getAsJsonArray(KEY_TOPICS);
         for (var el : arr) {
             if (!el.isJsonNull()) sb.append(el.getAsString()).append(' ');
         }
@@ -208,7 +212,7 @@ public final class ClawhubCatalog implements Catalog {
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var body = resp.body();
-            if (!resp.isSuccessful() || body == null) {
+            if (!resp.isSuccessful()) {
                 throw new IOException("clawhub HTTP " + resp.code() + " for " + url.encodedPath());
             }
             return JsonParser.parseString(body.string()).getAsJsonObject();

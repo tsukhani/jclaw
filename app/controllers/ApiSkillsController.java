@@ -53,6 +53,9 @@ public class ApiSkillsController extends Controller {
     private static final String KEY_NEW_NAME = "newName";
     private static final String KEY_DESCRIPTION = "description";
     private static final String KEY_SKILL_NAME = "skillName";
+    private static final String KEY_CATALOG = "catalog";
+    private static final String KEY_PROVIDER = "provider";
+    private static final String KEY_OWNER = "owner";
 
     public record SkillView(String name, String description, boolean isGlobal, String location,
                             List<String> tools, List<String> commands, String author, String icon,
@@ -116,13 +119,6 @@ public class ApiSkillsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
-    /**
-     * GET /api/skills/catalog/search — Search the external importable-skills
-     * catalog (the skills.sh / mastra-ai GitHub-scraped snapshot). The snapshot
-     * is downloaded and indexed lazily on the first call (then disk-cached), so
-     * the first search is slower than later ones. A blank {@code q} browses the
-     * most-installed skills.
-     */
     /** GET /api/skills/catalogs — List the configured catalogs for the selector. */
     @Operation(summary = "List the configured skill catalogs (static dumps + dynamic registries)")
     public static void catalogs() {
@@ -158,10 +154,10 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Refresh a static dump catalog from its update URL")
     public static void catalogRefresh() {
         var body = JsonBodyReader.readJsonBody();
-        var catalogId = body != null && body.has("catalog") ? body.get("catalog").getAsString() : null;
+        var catalogId = body != null && body.has(KEY_CATALOG) ? body.get(KEY_CATALOG).getAsString() : null;
         var c = CatalogRegistry.byId(catalogId);
         var refreshed = c.refresh();
-        renderJSON(gson.toJson(Map.of("catalog", c.id(),
+        renderJSON(gson.toJson(Map.of(KEY_CATALOG, c.id(),
                 "type", c.type().name().toLowerCase(), "refreshed", refreshed)));
     }
 
@@ -180,10 +176,10 @@ public class ApiSkillsController extends Controller {
 
         var source = body.get("source").getAsString();
         var skillId = body.get("skillId").getAsString();
-        var provider = body.has("provider") && !body.get("provider").isJsonNull()
-                ? body.get("provider").getAsString() : null;
-        var owner = body.has("owner") && !body.get("owner").isJsonNull()
-                ? body.get("owner").getAsString() : null;
+        var provider = body.has(KEY_PROVIDER) && !body.get(KEY_PROVIDER).isJsonNull()
+                ? body.get(KEY_PROVIDER).getAsString() : null;
+        var owner = body.has(KEY_OWNER) && !body.get(KEY_OWNER).isJsonNull()
+                ? body.get(KEY_OWNER).getAsString() : null;
 
         var result = RegistrySkillImporter.importToGlobal(provider, source, skillId, owner);
         if (!result.ok()) {

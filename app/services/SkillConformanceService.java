@@ -50,7 +50,10 @@ public final class SkillConformanceService {
 
     private static final String CATEGORY = "skills";
     private static final String SKILL_MD = "SKILL.md";
-    private static final Pattern KEBAB = Pattern.compile("^[a-z0-9]+(?:-[a-z0-9]+)*$");
+    // Possessive quantifiers (++ / *+) keep the match identical for this anchored
+    // validator while disabling the backtracking that could overflow the stack on
+    // pathological input (java:S5998).
+    private static final Pattern KEBAB = Pattern.compile("^[a-z0-9]++(?:-[a-z0-9]++)*+$");
     private static final String DEFAULT_ICON = "🛠️";
     private static final int LLM_TIMEOUT_SECONDS = 120;
 
@@ -119,9 +122,12 @@ public final class SkillConformanceService {
         var stagedBinaries = listStagedBinaries(stagedDir);
         // Preserve the original body verbatim; the LLM only normalizes frontmatter.
         var split = SkillLoader.splitFrontmatter(raw);
-        var originalBody = (split != null && split.frontmatter() != null && !split.frontmatter().isBlank())
-                ? (split.body() != null ? split.body() : "")
-                : raw;
+        String originalBody;
+        if (split != null && split.frontmatter() != null && !split.frontmatter().isBlank()) {
+            originalBody = split.body() != null ? split.body() : "";
+        } else {
+            originalBody = raw;  // no frontmatter to strip — the whole file is the body
+        }
 
         var proposed = proposeWithLlm(raw, fallbackName);
         if (proposed == null) {
@@ -194,7 +200,7 @@ public final class SkillConformanceService {
             EventLogger.warn(CATEGORY, "Conformance skipped: no LLM provider resolved");
             return null;
         }
-        var modelId = resolveModel(provider);
+        var modelId = resolveModel();
         if (modelId == null || modelId.isBlank()) {
             EventLogger.warn(CATEGORY, "Conformance skipped: no model resolved");
             return null;
@@ -269,7 +275,7 @@ public final class SkillConformanceService {
         return main != null ? ProviderRegistry.get(main.modelProvider) : null;
     }
 
-    private static String resolveModel(LlmProvider provider) {
+    private static String resolveModel() {
         var configModel = ConfigService.get("skillsPromotion.model");
         if (configModel != null && !configModel.isBlank()) return configModel;
         var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
@@ -296,7 +302,7 @@ public final class SkillConformanceService {
         if (s == null) return null;
         var kebab = s.strip().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("(^-+|-+$)", "");
+                .replaceAll("(?:^-++)|(?:-++$)", "");  // strip leading/trailing hyphens (possessive: no backtracking — java:S5850/S5852)
         return kebab.isBlank() ? null : kebab;
     }
 
