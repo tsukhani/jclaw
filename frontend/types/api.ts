@@ -402,51 +402,65 @@ export interface SkillFileContent {
 }
 
 /**
- * One importable skill from the external catalog (the skills.sh / mastra-ai
- * GitHub-scraped snapshot), as returned by GET /api/skills/catalog/search.
+ * One importable skill, normalized across catalog sources, as returned by
+ * GET /api/skills/catalog/search.
  */
 export interface CatalogSkill {
   skillId: string
   displayName: string
-  /** GitHub `owner/repo` the skill lives in. */
+  /** Provenance: `owner/repo` (GitHub) or `clawhub.ai/slug` (clawhub). */
   source: string
+  /** GitHub owner, or clawhub owner handle; may be empty for some sources. */
   owner: string
   repo: string
-  githubUrl: string
-  /** Popularity signal from the upstream catalog; used for browse ranking. */
+  /** Canonical web page for the skill (GitHub URL or clawhub page). */
+  url: string
+  /** Popularity signal used for browse ranking. */
   installs: number
-  /** Derived topical category (the dump has no category field). */
+  /** Derived topical category (catalogs have no category field). */
   category: string
+  /** Originating catalog id (e.g. `mastra` | `clawhub`) — source badge + import routing. */
+  provider: string
 }
 
 /** One facet row: a topical category, its icon, and its count in the current
  *  (query-applied, category-unfiltered) result set. The `category` value `All`
- *  is the no-filter pseudo-facet. */
+ *  is the no-filter pseudo-facet. Static catalogs only. */
 export interface CategoryFacet {
   category: string
   icon: string
   count: number
 }
 
+/** A configured catalog in the selector. `type` decides the nav model:
+ *  `static` = facets + jump-to-page; `dynamic` = live search + cursor Next/Prev. */
+export interface CatalogInfo {
+  id: string
+  displayName: string
+  type: 'static' | 'dynamic'
+}
+
 /**
- * Shape returned by GET /api/skills/catalog/search. `ready=false` means the
- * upstream snapshot couldn't be loaded (download/parse failure) rather than
- * "no matches".
+ * A page of catalog results (GET /api/skills/catalog/search). `ready=false`
+ * means a load/fetch failure. Static catalogs populate `total`/`facets`/
+ * `catalogSize`/`scrapedAt` (jump-to-page); dynamic catalogs populate
+ * `nextCursor` with `total=-1` and empty `facets` (cursor Next/Prev).
  */
-export interface CatalogSearchResult {
+export interface CatalogPage {
   ready: boolean
-  /** Total skills in the loaded snapshot (not the result count). */
-  catalogSize: number
-  /** ISO-8601 timestamp of when the upstream snapshot was scraped. */
-  scrapedAt: string | null
   results: CatalogSkill[]
-  /** Count of the current (category-filtered) result set — drives pagination. */
+  /** Filtered result count (static); `-1` for dynamic (unknown — live). */
   total: number
-  /** 0-indexed page returned. */
   page: number
   pageSize: number
-  /** Facet counts over the query result before the category filter; `All` first. */
+  /** Continuation token for the next page (dynamic), else null. */
+  nextCursor: string | null
+  /** Facet counts; empty for dynamic catalogs. */
   facets: CategoryFacet[]
+  /** Loaded snapshot size (static); `-1` for dynamic. */
+  catalogSize: number
+  /** Snapshot timestamp (static); null for dynamic. */
+  scrapedAt: string | null
 }
 
 /** A channel configuration status. */

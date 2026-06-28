@@ -17,8 +17,10 @@ import play.mvc.With;
 import services.AgentService;
 import services.RegistrySkillImporter;
 import services.SkillBinaryScanner;
-import services.SkillCatalogService;
 import services.SkillPromotionService;
+import services.catalog.CatalogPage;
+import services.catalog.CatalogQuery;
+import services.catalog.CatalogRegistry;
 import services.Tx;
 
 import java.io.IOException;
@@ -121,12 +123,30 @@ public class ApiSkillsController extends Controller {
      * the first search is slower than later ones. A blank {@code q} browses the
      * most-installed skills.
      */
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCatalogService.CatalogSearchResult.class)))
-    @Operation(summary = "Search the external importable-skills catalog")
-    public static void catalogSearch(String q, String category, Integer page, Integer pageSize) {
-        var result = SkillCatalogService.search(q, category,
-                page != null ? page : 0, pageSize != null ? pageSize : 20);
-        renderJSON(gson.toJson(result));
+    /** GET /api/skills/catalogs — List the configured catalogs for the selector. */
+    @Operation(summary = "List the configured skill catalogs (static dumps + dynamic registries)")
+    public static void catalogs() {
+        var list = CatalogRegistry.all().stream()
+                .map(c -> Map.of("id", c.id(), "displayName", c.displayName(),
+                        "type", c.type().name().toLowerCase()))
+                .toList();
+        renderJSON(gson.toJson(list));
+    }
+
+    /**
+     * GET /api/skills/catalog/search — Browse/search a specific catalog. {@code catalog}
+     * selects the source (default = first/static). Static catalogs honor
+     * {@code category}/{@code page}/{@code pageSize} (topical facets + paging);
+     * dynamic catalogs honor {@code cursor} (live Next/Prev nav).
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CatalogPage.class)))
+    @Operation(summary = "Browse or search a skill catalog")
+    public static void catalogSearch(String catalog, String q, String category,
+                                     Integer page, Integer pageSize, String cursor) {
+        var c = CatalogRegistry.byId(catalog);
+        var query = new CatalogQuery(q, category, page != null ? page : 0,
+                pageSize != null ? pageSize : 20, cursor);
+        renderJSON(gson.toJson(c.query(query)));
     }
 
     /**

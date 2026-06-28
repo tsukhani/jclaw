@@ -16,7 +16,8 @@ import DOMPurify from 'dompurify'
 import type {
   Agent,
   AgentSkill,
-  CatalogSearchResult,
+  CatalogInfo,
+  CatalogPage,
   CatalogSkill,
   CategoryFacet,
   Skill,
@@ -58,44 +59,60 @@ async function loadAllAgentSkills() {
 
 watch(agents, () => loadAllAgentSkills(), { immediate: true })
 
-// --- Importable-skills catalog search (skills.sh / mastra-ai snapshot) ---
-// The backend lazily downloads + indexes the ~10 MB catalog snapshot on the
-// first search, so the first query is slower than later ones — hence the
-// loading copy. $fetch (not useFetch) keeps each search imperative + uncached.
+// --- Importable-skills catalogs (static dump + dynamic registry) ---
+// Two catalog TYPES, browsed one at a time via a selector:
+//  - static (Mastra/GitHub): local index → topical facets + jump-to-page.
+//  - dynamic (ClawHub): live API proxy → cursor Next/Prev, no global facets.
+// $fetch (not useFetch) keeps each request imperative + uncached.
 const CATALOG_PAGE_SIZE = 20
 const catalogOpen = ref(false)
+const catalogs = ref<CatalogInfo[]>([])
+const selectedCatalog = ref('')
+const catalogType = computed(() =>
+  catalogs.value.find(c => c.id === selectedCatalog.value)?.type ?? 'static')
+
 const catalogQuery = ref('')
 const catalogLoading = ref(false)
 const catalogError = ref<string | null>(null)
 const catalogResults = ref<CatalogSkill[]>([])
 const catalogSize = ref<number | null>(null)
-// Facets + pagination state.
+// Static nav: facets + page-jump.
 const catalogCategory = ref('All')
 const catalogPage = ref(0)
 const catalogTotal = ref(0)
 const catalogFacets = ref<CategoryFacet[]>([])
-// Monotonic guard so a slow in-flight search can't overwrite a newer one.
+// Dynamic nav: cursor stack (each entry produced that page; [null] = page 0).
+const cursorStack = ref<(string | null)[]>([null])
+const nextCursor = ref<string | null>(null)
+// Monotonic guard so a slow in-flight request can't overwrite a newer one.
 let catalogSeq = 0
 
 const catalogTotalPages = computed(() =>
   Math.max(1, Math.ceil(catalogTotal.value / CATALOG_PAGE_SIZE)))
+const hasNextPage = computed(() =>
+  catalogType.value === 'dynamic' ? !!nextCursor.value : catalogPage.value < catalogTotalPages.value - 1)
+const hasPrevPage = computed(() =>
+  catalogType.value === 'dynamic' ? cursorStack.value.length > 1 : catalogPage.value > 0)
 
 async function runCatalogSearch() {
   const seq = ++catalogSeq
   catalogLoading.value = true
   catalogError.value = null
+  const dynamic = catalogType.value === 'dynamic'
   try {
-    const res = await $fetch<CatalogSearchResult>('/api/skills/catalog/search', {
+    const res = await $fetch<CatalogPage>('/api/skills/catalog/search', {
       params: {
+        catalog: selectedCatalog.value,
         q: catalogQuery.value,
         category: catalogCategory.value,
         page: catalogPage.value,
         pageSize: CATALOG_PAGE_SIZE,
+        cursor: dynamic ? (cursorStack.value[cursorStack.value.length - 1] ?? '') : '',
       },
     })
     if (seq !== catalogSeq) return
     if (!res.ready) {
-      catalogError.value = 'Could not load the skills catalog. Check connectivity and try again.'
+      catalogError.value = 'Could not load this catalog. Check connectivity and try again.'
       catalogResults.value = []
       return
     }
@@ -103,10 +120,11 @@ async function runCatalogSearch() {
     catalogSize.value = res.catalogSize
     catalogTotal.value = res.total
     catalogFacets.value = res.facets
+    nextCursor.value = res.nextCursor
   }
   catch {
     if (seq !== catalogSeq) return
-    catalogError.value = 'Catalog search failed.'
+    catalogError.value = 'Catalog request failed.'
     catalogResults.value = []
   }
   finally {
@@ -114,14 +132,29 @@ async function runCatalogSearch() {
   }
 }
 
-// A new query resets the facet + page (fresh search starts from All / page 0).
-function searchCatalog() {
+// Reset nav (used on a new query, facet change, or catalog switch).
+function resetCatalogNav() {
   catalogCategory.value = 'All'
   catalogPage.value = 0
+  cursorStack.value = [null]
+  nextCursor.value = null
+}
+
+function searchCatalog() {
+  resetCatalogNav()
   runCatalogSearch()
 }
 
-// Selecting a facet re-paginates within it from page 0.
+function selectCatalog(id: string) {
+  if (selectedCatalog.value === id) return
+  selectedCatalog.value = id
+  catalogQuery.value = ''
+  catalogResults.value = []
+  resetCatalogNav()
+  runCatalogSearch()
+}
+
+// Static only: selecting a facet re-paginates within it from page 0.
 function selectFacet(category: string) {
   if (catalogCategory.value === category) return
   catalogCategory.value = category
@@ -129,22 +162,36 @@ function selectFacet(category: string) {
   runCatalogSearch()
 }
 
-function goToPage(page: number) {
-  const clamped = Math.min(Math.max(0, page), catalogTotalPages.value - 1)
-  if (clamped === catalogPage.value) return
-  catalogPage.value = clamped
+// Static: jump page. Dynamic: cursor Next/Prev via the stack.
+function nextPage() {
+  if (!hasNextPage.value) return
+  if (catalogType.value === 'dynamic') cursorStack.value.push(nextCursor.value)
+  else catalogPage.value += 1
   runCatalogSearch()
 }
 
-function openCatalog() {
+function prevPage() {
+  if (!hasPrevPage.value) return
+  if (catalogType.value === 'dynamic') cursorStack.value.pop()
+  else catalogPage.value -= 1
+  runCatalogSearch()
+}
+
+async function openCatalog() {
   catalogOpen.value = true
-  // Browse the most-installed skills on open (blank query) if nothing loaded yet.
+  if (!catalogs.value.length) {
+    try {
+      catalogs.value = await $fetch<CatalogInfo[]>('/api/skills/catalogs')
+      if (catalogs.value.length && !selectedCatalog.value) selectedCatalog.value = catalogs.value[0]!.id
+    }
+    catch { /* selector stays empty; search still hits the default catalog */ }
+  }
   if (!catalogResults.value.length && !catalogLoading.value) runCatalogSearch()
 }
 
-// Import is synchronous on the backend (GitHub fetch + conformance + sanitize
-// LLM passes), so it's a multi-second call — show a per-row "Importing…" state.
-const catalogKey = (s: CatalogSkill) => `${s.source}/${s.skillId}`
+// Import is only wired for the static GitHub catalog (clawhub import is a follow-up).
+const canImport = (s: CatalogSkill) => s.provider === 'mastra'
+const catalogKey = (s: CatalogSkill) => `${s.provider}/${s.skillId}`
 const importingKey = ref<string | null>(null)
 const importedKeys = ref<Set<string>>(new Set())
 const importMessage = ref<string | null>(null)
@@ -1470,7 +1517,7 @@ function totalSkillCount(agentId: number) {
             <div class="flex flex-col">
               <span class="text-sm font-semibold text-fg-strong">Browse importable skills</span>
               <span
-                v-if="catalogSize"
+                v-if="catalogSize && catalogSize > 0"
                 class="text-xs text-fg-muted"
               >
                 {{ catalogSize.toLocaleString() }} skills in catalog
@@ -1482,6 +1529,29 @@ function totalSkillCount(agentId: number) {
               @click="catalogOpen = false"
             >
               ×
+            </button>
+          </div>
+
+          <!-- Catalog selector: each is a self-contained source (static dump or live registry) -->
+          <div
+            v-if="catalogs.length > 1"
+            class="px-4 pt-2 flex gap-1 shrink-0 border-b border-border"
+          >
+            <button
+              v-for="c in catalogs"
+              :key="c.id"
+              :class="[
+                'px-3 py-1.5 text-xs border-b-2 -mb-px transition-colors',
+                selectedCatalog === c.id
+                  ? 'border-accent text-fg-strong font-medium'
+                  : 'border-transparent text-fg-muted hover:text-fg-strong',
+              ]"
+              @click="selectCatalog(c.id)"
+            >
+              {{ c.displayName }}<span
+                v-if="c.type === 'dynamic'"
+                class="ml-1 text-fg-muted"
+              >· live</span>
             </button>
           </div>
 
@@ -1500,7 +1570,7 @@ function totalSkillCount(agentId: number) {
           </div>
 
           <div
-            v-if="catalogFacets.length"
+            v-if="catalogType === 'static' && catalogFacets.length"
             class="px-3 py-2 border-b border-border flex flex-wrap gap-1.5 shrink-0"
           >
             <button
@@ -1525,7 +1595,7 @@ function totalSkillCount(agentId: number) {
               v-if="catalogLoading"
               class="px-4 py-8 text-center text-sm text-fg-muted"
             >
-              Loading catalog… the first search downloads the snapshot.
+              {{ catalogType === 'static' ? 'Loading catalog… the first search downloads the snapshot.' : 'Loading…' }}
             </div>
             <div
               v-else-if="catalogError"
@@ -1545,7 +1615,7 @@ function totalSkillCount(agentId: number) {
             >
               <li
                 v-for="s in catalogResults"
-                :key="`${s.source}/${s.skillId}`"
+                :key="`${s.provider}/${s.skillId}`"
                 class="px-4 py-2.5 flex items-center justify-between gap-3"
               >
                 <div class="min-w-0">
@@ -1559,46 +1629,50 @@ function totalSkillCount(agentId: number) {
                 <div class="flex items-center gap-3 shrink-0">
                   <span class="text-xs text-fg-muted">{{ s.installs.toLocaleString() }} installs</span>
                   <a
-                    :href="s.githubUrl"
+                    :href="s.url"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="text-xs text-accent hover:underline"
-                  >GitHub ↗</a>
-                  <span
-                    v-if="importedKeys.has(catalogKey(s))"
-                    class="text-xs text-emerald-600 dark:text-emerald-400"
-                  >Imported ✓</span>
-                  <button
-                    v-else
-                    :disabled="importingKey === catalogKey(s)"
-                    class="text-xs px-2 py-1 border border-border text-fg-strong hover:bg-muted disabled:opacity-50"
-                    @click="importSkill(s)"
-                  >
-                    {{ importingKey === catalogKey(s) ? 'Importing…' : 'Import' }}
-                  </button>
+                  >Open ↗</a>
+                  <template v-if="canImport(s)">
+                    <span
+                      v-if="importedKeys.has(catalogKey(s))"
+                      class="text-xs text-emerald-600 dark:text-emerald-400"
+                    >Imported ✓</span>
+                    <button
+                      v-else
+                      :disabled="importingKey === catalogKey(s)"
+                      class="text-xs px-2 py-1 border border-border text-fg-strong hover:bg-muted disabled:opacity-50"
+                      @click="importSkill(s)"
+                    >
+                      {{ importingKey === catalogKey(s) ? 'Importing…' : 'Import' }}
+                    </button>
+                  </template>
                 </div>
               </li>
             </ul>
           </div>
 
           <div
-            v-if="!catalogLoading && !catalogError && catalogTotal > 0"
+            v-if="!catalogLoading && !catalogError && catalogResults.length"
             class="px-4 py-2 border-t border-border flex items-center justify-between gap-3 text-xs text-fg-muted shrink-0"
           >
-            <span>{{ catalogTotal.toLocaleString() }} result{{ catalogTotal === 1 ? '' : 's' }}</span>
+            <span v-if="catalogType === 'static'">{{ catalogTotal.toLocaleString() }} result{{ catalogTotal === 1 ? '' : 's' }}</span>
+            <span v-else>live results</span>
             <div class="flex items-center gap-2">
               <button
-                :disabled="catalogPage <= 0"
+                :disabled="!hasPrevPage"
                 class="px-2 py-1 border border-border hover:bg-muted disabled:opacity-40"
-                @click="goToPage(catalogPage - 1)"
+                @click="prevPage"
               >
                 Prev
               </button>
-              <span>Page {{ catalogPage + 1 }} of {{ catalogTotalPages }}</span>
+              <span v-if="catalogType === 'static'">Page {{ catalogPage + 1 }} of {{ catalogTotalPages }}</span>
+              <span v-else>Page {{ cursorStack.length }}</span>
               <button
-                :disabled="catalogPage >= catalogTotalPages - 1"
+                :disabled="!hasNextPage"
                 class="px-2 py-1 border border-border hover:bg-muted disabled:opacity-40"
-                @click="goToPage(catalogPage + 1)"
+                @click="nextPage"
               >
                 Next
               </button>

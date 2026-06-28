@@ -117,11 +117,20 @@ public final class SkillCategoryClassifier {
     }
 
     /**
-     * Classify a skill by its text signals. Returns the first matching category
-     * (taxonomy order) or {@link #OTHER} when nothing matches.
+     * Classify a skill by its name/repo signals. Returns the first matching
+     * category (taxonomy order) or {@link #OTHER} when nothing matches.
      */
     public static String classify(String skillId, String displayName, String repo) {
-        var t = (nz(skillId) + " " + nz(displayName) + " " + nz(repo)).toLowerCase();
+        return classifyText(nz(skillId) + " " + nz(displayName) + " " + nz(repo));
+    }
+
+    /**
+     * Classify by an arbitrary text signal — first matching category (taxonomy
+     * order) or {@link #OTHER}. Dynamic sources pass richer text (description +
+     * topics) than the static dump's name-only signal, which classifies better.
+     */
+    public static String classifyText(String text) {
+        var t = nz(text).toLowerCase();
         for (var c : TAXONOMY) {
             for (var k : c.keywords()) {
                 if (t.contains(k)) return c.name();
