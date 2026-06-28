@@ -642,8 +642,10 @@ interface ImageModel {
 const imagegenModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'imagegen.cloud.model')?.value ?? '',
 )
+// Lazy: Replicate's text-to-image collection is a slow outbound call (~seconds). Awaiting it blocked the
+// whole Settings page render; lazy lets the page paint immediately and the dropdown fills in when ready.
 const { data: imagegenModels, refresh: refreshImagegenModels, status: imagegenModelsStatus }
-  = await useFetch<ImageModel[]>('/api/imagegen/models')
+  = useLazyFetch<ImageModel[]>('/api/imagegen/models')
 const imagegenModelOptions = computed<ImageModel[]>(() => {
   const discovered = imagegenModels.value ?? []
   const saved = imagegenModel.value
@@ -830,8 +832,10 @@ interface VideoModel {
   name: string
   description: string | null
 }
+// Lazy: same as imagegen models — Replicate's text-to-video collection is a slow outbound call, so don't
+// block the page render on it (this is the bulk of the old Settings-load lag).
 const { data: videogenModels, refresh: refreshVideogenModels, status: videogenModelsStatus }
-  = await useFetch<VideoModel[]>('/api/videogen/models')
+  = useLazyFetch<VideoModel[]>('/api/videogen/models')
 const videogenModelOptions = computed<VideoModel[]>(() => {
   const discovered = videogenModels.value ?? []
   const saved = videogenModel.value
