@@ -31,7 +31,9 @@ class ClawhubCatalogTest extends UnitTest {
         assertEquals("Docker Helper", s.displayName());
         assertEquals("clawhub", s.provider());
         assertEquals(1200L, s.installs(), "prefers installsAllTime over downloads");
-        assertEquals("https://clawhub.ai/skills/docker-helper", s.url());
+        // Browse omits the owner, and clawhub slugs are owner-scoped, so the row
+        // links to the slug-filtered search rather than a (non-resolvable) page.
+        assertEquals("https://clawhub.ai/skills?q=docker-helper", s.url());
         assertEquals("clawhub.ai/docker-helper", s.source());
         assertEquals("DevOps & Cloud", s.category());
     }
@@ -63,5 +65,23 @@ class ClawhubCatalogTest extends UnitTest {
         assertEquals(15817L, s.installs());
         assertEquals("Git & VCS", s.category());
         assertEquals("clawhub", s.provider());
+        // Owner-scoped canonical page (the form clawhub declares canonical).
+        assertEquals("https://clawhub.ai/ivangdavila/skills/git", s.url());
+        assertEquals("clawhub.ai/ivangdavila/git", s.source());
+    }
+
+    @Test
+    void searchResultWithoutOwnerFallsBackToSearchLink() {
+        // ownerHandle can be absent; without it we can't resolve the exact page,
+        // so fall back to the slug-filtered search (same as browse rows).
+        var res = obj("""
+                {"slug":"mystery-skill","displayName":"Mystery","summary":"does things","downloads":3}
+                """);
+
+        var s = ClawhubCatalog.mapSearchResult(res, "https://clawhub.ai");
+
+        assertEquals("", s.owner());
+        assertEquals("https://clawhub.ai/skills?q=mystery-skill", s.url());
+        assertEquals("clawhub.ai/mystery-skill", s.source());
     }
 }

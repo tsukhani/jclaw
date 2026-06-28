@@ -25,6 +25,13 @@ import java.util.concurrent.TimeUnit;
  * returns {@code version.files[].path}. So: resolve the latest version, read its
  * file list, download each file. Host-pinned to clawhub; every write is
  * path-contained via {@link AgentService#resolveContained}.
+ *
+ * <h2>Owner-scoped slugs</h2>
+ * ClawHub slugs are <em>not</em> globally unique — several authors can publish
+ * the same slug, and a bare {@code /skills/{slug}} request then 404s with
+ * {@code AMBIGUOUS_SKILL_SLUG}. A {@code ?owner=} query param disambiguates (and
+ * is harmless on unique slugs), so every endpoint is owner-qualified whenever the
+ * caller knows the owner (search rows do; browse rows don't).
  */
 public final class ClawhubSkillFetcher {
 
@@ -39,17 +46,19 @@ public final class ClawhubSkillFetcher {
 
     /**
      * Fetch the ClawHub skill {@code slug} (its latest version) into
-     * {@code stagedDir}. Never throws — failures return {@code ok=false}.
+     * {@code stagedDir}, owner-qualified by {@code owner} when non-blank to
+     * disambiguate same-slug skills. Never throws — failures return
+     * {@code ok=false}.
      */
-    public static FetchResult fetch(String slug, Path stagedDir) {
+    public static FetchResult fetch(String slug, String owner, Path stagedDir) {
         if (slug == null || slug.isBlank()) return new FetchResult(false, 0, "missing clawhub slug");
 
         String version;
         List<String> paths;
         try {
-            version = latestVersion(getJson(url("api/v1/skills/" + slug)));
+            version = latestVersion(getJson(skillApi(owner, "api/v1/skills/" + slug)));
             if (version == null) return new FetchResult(false, 0, "no published version for clawhub skill '" + slug + "'");
-            paths = parseFilePaths(getJson(url("api/v1/skills/" + slug + "/versions/" + version)));
+            paths = parseFilePaths(getJson(skillApi(owner, "api/v1/skills/" + slug + "/versions/" + version)));
         } catch (IOException e) {
             return new FetchResult(false, 0, "could not read clawhub skill '" + slug + "': " + e.getMessage());
         }
@@ -64,10 +73,7 @@ public final class ClawhubSkillFetcher {
                     continue;
                 }
                 Files.createDirectories(dest.getParent());
-                var fileUrl = base().addPathSegments("api/v1/skills/" + slug + "/file")
-                        .addQueryParameter("path", path)
-                        .addQueryParameter("version", version)
-                        .build();
+                var fileUrl = skillApi(owner, "api/v1/skills/" + slug + "/file", "path", path, "version", version);
                 Files.write(dest, getBytes(fileUrl));
                 n++;
             } catch (IOException e) {
@@ -122,8 +128,16 @@ public final class ClawhubSkillFetcher {
         }
     }
 
-    private static HttpUrl url(String segments) {
-        return base().addPathSegments(segments).build();
+    /**
+     * Build a clawhub skill-API URL with optional {@code key,value,...} query
+     * pairs, owner-qualifying it via {@code ?owner=} when {@code owner} is set
+     * (clawhub slugs are owner-scoped; the param disambiguates same-slug skills).
+     */
+    private static HttpUrl skillApi(String owner, String segments, String... queryKv) {
+        var b = base().addPathSegments(segments);
+        for (int i = 0; i + 1 < queryKv.length; i += 2) b.addQueryParameter(queryKv[i], queryKv[i + 1]);
+        if (owner != null && !owner.isBlank()) b.addQueryParameter("owner", owner);
+        return b.build();
     }
 
     private static HttpUrl.Builder base() {

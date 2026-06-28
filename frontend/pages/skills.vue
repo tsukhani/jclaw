@@ -239,7 +239,7 @@ async function importSkill(s: CatalogSkill) {
   try {
     const res = await $fetch<{ status: string, message?: string, skillName?: string }>(
       '/api/skills/catalog/import',
-      { method: 'POST', body: { source: s.source, skillId: s.skillId, provider: s.provider } },
+      { method: 'POST', body: { source: s.source, skillId: s.skillId, provider: s.provider, owner: s.owner } },
     )
     if (res.status === 'imported') {
       importedKeys.value.add(key)

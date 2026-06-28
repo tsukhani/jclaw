@@ -11,6 +11,8 @@ import services.SkillCategoryClassifier;
 import utils.HttpFactories;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -152,18 +154,42 @@ public final class ClawhubCatalog implements Catalog {
         long installs = stats != null ? asLong(stats, "installsAllTime", asLong(stats, "downloads", 0)) : 0;
         var category = SkillCategoryClassifier.classifyText(
                 join(slug, displayName, str(o, "summary"), str(o, "description"), topics(o)));
+        // Browse listings omit the owner, and clawhub slugs are owner-scoped (not
+        // globally unique), so we can't resolve the exact /{owner}/skills/{slug}
+        // page. Link to the slug-filtered search, which lands on the right skill.
         return new CatalogSkill(slug, displayName, "clawhub.ai/" + nz(slug),
-                "", "", base + "/skills/" + nz(slug), installs, category, PROVIDER);
+                "", "", searchLink(base, slug), installs, category, PROVIDER);
     }
 
     /** Map a {@code /api/v1/search} result to a normalized row. */
     public static CatalogSkill mapSearchResult(JsonObject o, String base) {
         var slug = str(o, "slug");
         var displayName = firstNonBlank(str(o, "displayName"), slug);
+        var owner = nz(str(o, "ownerHandle"));
         long installs = asLong(o, "downloads", 0);
         var category = SkillCategoryClassifier.classifyText(join(slug, displayName, str(o, "summary")));
-        return new CatalogSkill(slug, displayName, "clawhub.ai/" + nz(slug),
-                nz(str(o, "ownerHandle")), "", base + "/skills/" + nz(slug), installs, category, PROVIDER);
+        return new CatalogSkill(slug, displayName, sourceLabel(owner, slug),
+                owner, "", skillPageUrl(base, owner, slug), installs, category, PROVIDER);
+    }
+
+    /**
+     * The canonical clawhub web page for a skill. Slugs are owner-scoped, so the
+     * page lives at {@code /{owner}/skills/{slug}} — the form clawhub declares as
+     * its {@code <link rel=canonical>} and returns in disambiguation
+     * {@code matches[].url}. When the owner is unknown (browse listings omit it),
+     * fall back to the slug-filtered search, which still lands on the right skill.
+     */
+    private static String skillPageUrl(String base, String owner, String slug) {
+        return owner.isBlank() ? searchLink(base, slug) : base + "/" + owner + "/skills/" + nz(slug);
+    }
+
+    private static String searchLink(String base, String slug) {
+        return base + "/skills?q=" + URLEncoder.encode(nz(slug), StandardCharsets.UTF_8);
+    }
+
+    /** Display subtitle: the owner-qualified path when known, else just the slug. */
+    private static String sourceLabel(String owner, String slug) {
+        return owner.isBlank() ? "clawhub.ai/" + nz(slug) : "clawhub.ai/" + owner + "/" + nz(slug);
     }
 
     private static String topics(JsonObject o) {

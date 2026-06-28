@@ -38,11 +38,12 @@ public final class RegistrySkillImporter {
     /**
      * Import the catalog skill {@code skillId} into the global registry, fetching
      * its files from the source named by {@code provider}: {@code "clawhub"} uses
-     * the ClawHub API (slug = skillId); anything else (the GitHub dump) parses
-     * {@code source} as {@code owner/repo}. Never throws — failures return
+     * the ClawHub API (slug = skillId, owner-qualified by {@code owner} since
+     * clawhub slugs aren't globally unique); anything else (the GitHub dump)
+     * parses {@code source} as {@code owner/repo}. Never throws — failures return
      * {@code ok=false} with a human-readable message.
      */
-    public static ImportResult importToGlobal(String provider, String source, String skillId) {
+    public static ImportResult importToGlobal(String provider, String source, String skillId, String owner) {
         if (skillId == null || skillId.isBlank()) {
             return ImportResult.fail("missing skill id");
         }
@@ -59,7 +60,7 @@ public final class RegistrySkillImporter {
             boolean fetchOk;
             String fetchMsg;
             if ("clawhub".equalsIgnoreCase(provider)) {
-                var f = ClawhubSkillFetcher.fetch(skillId, staged);   // skillId == clawhub slug
+                var f = ClawhubSkillFetcher.fetch(skillId, owner, staged);   // skillId == clawhub slug
                 fetchOk = f.ok();
                 fetchMsg = f.message();
             } else {
