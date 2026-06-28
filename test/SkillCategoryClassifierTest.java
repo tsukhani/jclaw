@@ -23,6 +23,29 @@ class SkillCategoryClassifierTest extends UnitTest {
     }
 
     @Test
+    void domainBeatsAgentMetaLabel() {
+        // "agent" is demoted to last, so the domain signal wins: a research agent
+        // is Research, not AI & Agents.
+        assertEquals("Research & Analysis",
+                SkillCategoryClassifier.classify("research-agent", "Research Agent", "x"));
+    }
+
+    @Test
+    void claudeRuntimeNameIsNotACategory() {
+        // "claude" matched ~8k rows (the runtime, not a topic) and is intentionally
+        // NOT a keyword — a claude-named skill with no other signal is Other, not AI.
+        assertEquals(SkillCategoryClassifier.OTHER,
+                SkillCategoryClassifier.classify("claude-code-helper", "Claude Code Helper", "claude-skills"));
+    }
+
+    @Test
+    void pureAgentSkillStillLandsInAi() {
+        // Domain-free AI skill (no earlier-category keyword like "server").
+        assertEquals("AI & Agents",
+                SkillCategoryClassifier.classify("llm-chatbot", "LLM Chatbot", "x"));
+    }
+
+    @Test
     void unmatchedFallsToOther() {
         assertEquals(SkillCategoryClassifier.OTHER,
                 SkillCategoryClassifier.classify("zxqwop", "Zxqwop Thing", "foo"));
@@ -42,6 +65,6 @@ class SkillCategoryClassifierTest extends UnitTest {
 
     @Test
     void taxonomyIsFixedAndManageable() {
-        assertEquals(14, SkillCategoryClassifier.taxonomy().size());
+        assertEquals(17, SkillCategoryClassifier.taxonomy().size());
     }
 }

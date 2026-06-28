@@ -10,11 +10,20 @@ import java.util.List;
  *
  * <h2>How the taxonomy was chosen</h2>
  * The buckets and keyword sets were calibrated against the full ~34k-skill
- * snapshot (token-frequency analysis + iterating on the "Other" residual). The
- * list is intentionally fixed and manageable (14 buckets + {@link #OTHER}); the
- * residual lands in Other (~24% of the catalog — expected for a heuristic over
- * free-form names). Order matters: it is first-match-wins, ordered specific →
- * general, so e.g. a "react testing" skill lands in Testing (listed before Web).
+ * snapshot (token-frequency analysis + iterating on the distribution). Two design
+ * choices keep the facets useful:
+ * <ul>
+ *   <li><b>Domain over meta-label.</b> Almost everything in an agent-skills
+ *       catalog "is an agent skill" (the bare word {@code claude} alone matched
+ *       ~8k rows — the runtime, not a topic), so that axis doesn't discriminate.
+ *       {@code AI & Agents} is therefore placed near the END and {@code claude}
+ *       is intentionally NOT a keyword: a "data-analysis agent" lands in Research,
+ *       a "react agent" in Web; only domain-less skills fall to AI & Agents.</li>
+ *   <li><b>First-match-wins, ordered specific → general.</b> Order is significant
+ *       (e.g. a "react testing" skill lands in Testing, listed before Web).</li>
+ * </ul>
+ * The residual lands in {@link #OTHER} (~23% — expected for a heuristic over
+ * free-form names with no description text). 17 buckets + Other; fixed, bounded.
  *
  * <p>Pure + deterministic — classification runs once per skill at catalog load.
  */
@@ -27,7 +36,8 @@ public final class SkillCategoryClassifier {
 
     public record Category(String name, String icon, List<String> keywords) {}
 
-    // First-match-wins, ordered specific → general. Keywords are lowercase
+    // First-match-wins, ordered specific → general (domains first; the AI/agent
+    // meta-label and generic tooling mop-up last). Keywords are lowercase
     // substrings matched against "skillId displayName repo".
     private static final List<Category> TAXONOMY = List.of(
             new Category("Git & VCS", "🔀", List.of(
@@ -53,10 +63,6 @@ public final class SkillCategoryClassifier {
             new Category("Documents", "📄", List.of(
                     "pdf", "docx", "xlsx", "pptx", "spreadsheet", "powerpoint", "excel", "invoice",
                     "resume", "slide", "epub", "markdown")),
-            new Category("AI & Agents", "🤖", List.of(
-                    "mcp", "agent", "llm", "prompt", "rag", "gemini", "openai", "gpt", "anthropic",
-                    "claude", "chatbot", "embedding", "fine-tune", "langchain", "ollama", "workflow",
-                    "brainstorm", "browser use")),
             new Category("Web & Frontend", "🌐", List.of(
                     "react", "vue", "angular", "svelte", "next", "nuxt", "frontend", "front-end",
                     "web", "css", "tailwind", "html", "component", "astro", "remix", "spa", "expo",
@@ -70,16 +76,30 @@ public final class SkillCategoryClassifier {
                     "django", "flask", "express", "sdk", "python", "rust", "typescript", "javascript",
                     "golang", "java", "dotnet", ".net", "php", "ruby", "kotlin", "swift", "node",
                     "spring")),
+            new Category("Research & Analysis", "🔬", List.of(
+                    "research", "analysis", "analyst", "analyze", "analyzer", "insight", "summari",
+                    "report", "investigat", "scrape", "scraper", "extract")),
             new Category("Engineering & Architecture", "🏗️", List.of(
                     "pattern", "architecture", "refactor", "code review", "best practice", "clean code",
-                    "debug", "lint", "solid", "development", "engineering", "spec", "planning",
-                    "review", "optimization", "performance")),
+                    "debug", "lint", "solid", "development", "engineer", "spec", "review",
+                    "optimization", "performance", "developer", "architect")),
             new Category("Content & Marketing", "✍️", List.of(
                     "writing", "writer", "content", "blog", "copywrit", "seo", "marketing", "social",
                     "campaign", "newsletter", "article", "documentation", "docs", "translat", "comms")),
+            new Category("Business & Product", "💼", List.of(
+                    "product", "management", "manager", "strategy", "business", "roadmap", "okr",
+                    "sales", "crm", "finance", "invoic", "startup", "pitch", "plan")),
             new Category("Productivity", "✅", List.of(
-                    "productiv", "project management", "task", "notes", "automation", "calendar",
-                    "planner", "todo", "obsidian", "notion", "life")));
+                    "workflow", "productiv", "task", "notes", "automation", "calendar", "planner",
+                    "todo", "obsidian", "notion", "life", "email", "slack")),
+            new Category("AI & Agents", "🤖", List.of(
+                    "mcp", "agent", "llm", "prompt", "rag", "gemini", "openai", "gpt", "anthropic",
+                    "chatbot", "embedding", "fine-tune", "langchain", "ollama", "brainstorm",
+                    "browser use")),
+            new Category("Developer Tools", "🧰", List.of(
+                    "cli", "command line", "terminal", "tool", "toolkit", "generator", "builder",
+                    "scaffold", "boilerplate", "starter", "template", "snippet", "vscode", "editor",
+                    "plugin", "extension", "shell", "script", "setup", "config")));
 
     private SkillCategoryClassifier() {}
 
