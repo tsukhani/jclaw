@@ -415,6 +415,17 @@ export interface CatalogSkill {
   githubUrl: string
   /** Popularity signal from the upstream catalog; used for browse ranking. */
   installs: number
+  /** Derived topical category (the dump has no category field). */
+  category: string
+}
+
+/** One facet row: a topical category, its icon, and its count in the current
+ *  (query-applied, category-unfiltered) result set. The `category` value `All`
+ *  is the no-filter pseudo-facet. */
+export interface CategoryFacet {
+  category: string
+  icon: string
+  count: number
 }
 
 /**
@@ -429,6 +440,13 @@ export interface CatalogSearchResult {
   /** ISO-8601 timestamp of when the upstream snapshot was scraped. */
   scrapedAt: string | null
   results: CatalogSkill[]
+  /** Count of the current (category-filtered) result set — drives pagination. */
+  total: number
+  /** 0-indexed page returned. */
+  page: number
+  pageSize: number
+  /** Facet counts over the query result before the category filter; `All` first. */
+  facets: CategoryFacet[]
 }
 
 /** A channel configuration status. */

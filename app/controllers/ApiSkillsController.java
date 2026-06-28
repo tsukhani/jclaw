@@ -123,8 +123,9 @@ public class ApiSkillsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCatalogService.CatalogSearchResult.class)))
     @Operation(summary = "Search the external importable-skills catalog")
-    public static void catalogSearch(String q, Integer limit) {
-        var result = SkillCatalogService.search(q, limit != null ? limit : 30);
+    public static void catalogSearch(String q, String category, Integer page, Integer pageSize) {
+        var result = SkillCatalogService.search(q, category,
+                page != null ? page : 0, pageSize != null ? pageSize : 20);
         renderJSON(gson.toJson(result));
     }
 

@@ -13,7 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -59,23 +61,38 @@ public final class SkillCatalogService {
     private static final String CACHE_DIR = "data/skills-catalog";
     private static final String CACHE_FILE = "scraped-skills.json";
 
-    /** Hard cap on results per query, independent of the requested limit. */
-    private static final int MAX_RESULTS = 100;
+    /** Hard cap on page size, independent of the requested pageSize. */
+    private static final int MAX_PAGE_SIZE = 50;
+    /** Relevance window for a text query: facet counts + pagination are computed
+     *  over (at most) this many top-ranked Lucene hits. A blank "browse" query
+     *  paginates the full catalog instead, so this only bounds text searches. */
+    private static final int LUCENE_WINDOW = 2000;
+    /** Facet name + selection token for "no category filter". */
+    public static final String ALL = "All";
     /** Generous deadline for the one-off ~10 MB snapshot download. */
     private static final int DOWNLOAD_TIMEOUT_SECONDS = 120;
 
     private static final String CATEGORY = "skills";
 
-    /** One importable catalog entry. Mirrors the upstream row shape, trimmed
-     *  to the fields the Skills UI and the import path need. */
+    /** One importable catalog entry. Mirrors the upstream row shape, trimmed to
+     *  the fields the Skills UI + import path need, plus a derived topical
+     *  {@link #category} (see {@link SkillCategoryClassifier}). */
     public record CatalogSkill(String skillId, String displayName, String source,
-                               String owner, String repo, String githubUrl, long installs) {}
+                               String owner, String repo, String githubUrl, long installs,
+                               String category) {}
+
+    /** One facet row: a category, its icon, and how many skills in the current
+     *  (query-applied, category-unfiltered) result set fall in it. */
+    public record CategoryFacet(String category, String icon, int count) {}
 
     /** Search/browse response. {@code ready=false} means the snapshot couldn't
      *  be loaded (download/parse failure) — the UI shows an error rather than
-     *  an empty result that looks like "no matches". */
+     *  an empty result that looks like "no matches". {@code facets} are computed
+     *  over the query result BEFORE the category filter, so every category's
+     *  count is visible; {@code total} is the filtered count that drives paging. */
     public record CatalogSearchResult(boolean ready, int catalogSize, String scrapedAt,
-                                      List<CatalogSkill> results) {}
+                                      List<CatalogSkill> results, int total, int page, int pageSize,
+                                      List<CategoryFacet> facets) {}
 
     // Published once, atomically, at the end of a successful load. null until
     // the first load completes; read on the search fast-path without locking.
@@ -87,35 +104,54 @@ public final class SkillCatalogService {
     private SkillCatalogService() {}
 
     /**
-     * Search the catalog, loading it lazily on first call. A blank query
-     * "browses" the most-installed skills. Never throws — a load or search
-     * failure degrades to {@code ready=false} / empty results.
+     * Search/browse the catalog with topical facets and pagination, loading it
+     * lazily on first call. A blank query browses by install count; a non-blank
+     * query rides Lucene relevance. {@code category} (null/blank/{@link #ALL}
+     * means no filter) narrows the result list, while facet counts are always
+     * computed over the unfiltered query result so the user can see and switch
+     * between categories. Never throws — a load/search failure degrades to
+     * {@code ready=false} / empty results.
      */
-    public static CatalogSearchResult search(String query, int limit) {
+    public static CatalogSearchResult search(String query, String category, int page, int pageSize) {
         ensureLoaded();
         var snapshot = catalog;
+        int ps = Math.clamp(pageSize, 1, MAX_PAGE_SIZE);
+        int pg = Math.max(0, page);
         if (snapshot == null) {
-            return new CatalogSearchResult(false, 0, null, List.of());
+            return new CatalogSearchResult(false, 0, null, List.of(), 0, pg, ps, List.of());
         }
-        int cap = Math.clamp(limit, 1, MAX_RESULTS);
-        List<CatalogSkill> hits = (query == null || query.isBlank())
-                ? topByInstalls(snapshot, cap)
-                : searchLucene(query, cap, snapshot);
-        return new CatalogSearchResult(true, snapshot.size(), scrapedAt, hits);
+
+        // Base set = query applied, category NOT applied (so facet counts span
+        // every category). Blank query browses the whole catalog by installs.
+        List<CatalogSkill> base = (query == null || query.isBlank())
+                ? browseByInstalls(snapshot)
+                : searchLucene(query, snapshot);
+
+        var facets = computeFacets(base);
+
+        var filtered = (category == null || category.isBlank() || ALL.equalsIgnoreCase(category))
+                ? base
+                : base.stream().filter(s -> category.equals(s.category())).toList();
+
+        int total = filtered.size();
+        int from = Math.min(pg * ps, total);
+        int to = Math.min(from + ps, total);
+        var pageRows = List.copyOf(filtered.subList(from, to));
+
+        return new CatalogSearchResult(true, snapshot.size(), scrapedAt, pageRows, total, pg, ps, facets);
     }
 
-    /** Browse default for an empty query: the most-installed skills first. */
-    private static List<CatalogSkill> topByInstalls(List<CatalogSkill> snapshot, int cap) {
+    /** Browse order for a blank query: most-installed first, whole catalog. */
+    private static List<CatalogSkill> browseByInstalls(List<CatalogSkill> snapshot) {
         return snapshot.stream()
                 .sorted(Comparator.comparingLong(CatalogSkill::installs).reversed())
-                .limit(cap)
                 .toList();
     }
 
-    /** Lucene relevance search, hydrating hit ids back to catalog rows. */
-    private static List<CatalogSkill> searchLucene(String query, int cap, List<CatalogSkill> snapshot) {
+    /** Lucene relevance hits (capped at {@link #LUCENE_WINDOW}), hydrated to rows. */
+    private static List<CatalogSkill> searchLucene(String query, List<CatalogSkill> snapshot) {
         try {
-            var ids = MessageSearch.searchIds(LuceneIndexer.Scope.SKILLS_CATALOG, query, cap);
+            var ids = MessageSearch.searchIds(LuceneIndexer.Scope.SKILLS_CATALOG, query, LUCENE_WINDOW);
             var out = new ArrayList<CatalogSkill>(ids.size());
             for (var id : ids) {
                 int i = id.intValue();
@@ -126,6 +162,30 @@ public final class SkillCatalogService {
             EventLogger.warn(CATEGORY, "Skill catalog search failed: " + e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * Facet counts over the base set: "All" first, then categories with count &gt;
+     * 0 sorted by count descending, with {@link SkillCategoryClassifier#OTHER}
+     * forced last (it's a residual, not a topic).
+     */
+    private static List<CategoryFacet> computeFacets(List<CatalogSkill> base) {
+        var counts = new HashMap<String, Integer>();
+        for (var s : base) counts.merge(s.category(), 1, Integer::sum);
+
+        var facets = new ArrayList<CategoryFacet>();
+        facets.add(new CategoryFacet(ALL, "", base.size()));
+        counts.entrySet().stream()
+                .filter(e -> e.getValue() > 0 && !SkillCategoryClassifier.OTHER.equals(e.getKey()))
+                .sorted(Comparator.<Map.Entry<String, Integer>>comparingInt(Map.Entry::getValue).reversed())
+                .forEach(e -> facets.add(new CategoryFacet(
+                        e.getKey(), SkillCategoryClassifier.iconFor(e.getKey()), e.getValue())));
+        var other = counts.getOrDefault(SkillCategoryClassifier.OTHER, 0);
+        if (other > 0) {
+            facets.add(new CategoryFacet(SkillCategoryClassifier.OTHER,
+                    SkillCategoryClassifier.iconFor(SkillCategoryClassifier.OTHER), other));
+        }
+        return facets;
     }
 
     private static void ensureLoaded() {
@@ -186,10 +246,14 @@ public final class SkillCatalogService {
         if (arr != null) {
             for (var el : arr) {
                 var o = el.getAsJsonObject();
+                var skillId = str(o, "skillId");
+                var displayName = str(o, "displayName");
+                var repo = str(o, "repo");
                 list.add(new CatalogSkill(
-                        str(o, "skillId"), str(o, "displayName"), str(o, "source"),
-                        str(o, "owner"), str(o, "repo"), str(o, "githubUrl"),
-                        asLong(o, "installs")));
+                        skillId, displayName, str(o, "source"),
+                        str(o, "owner"), repo, str(o, "githubUrl"),
+                        asLong(o, "installs"),
+                        SkillCategoryClassifier.classify(skillId, displayName, repo)));
             }
         }
         return new Parsed(List.copyOf(list), when);

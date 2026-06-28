@@ -8,10 +8,9 @@ import services.search.MessageSearch;
 import java.util.List;
 
 /**
- * Spike coverage for the importable-skills catalog search: proves the upstream
- * snapshot schema maps onto {@link SkillCatalogService.CatalogSkill}, that a
- * blank query browses by install count, and that a term query rides the new
- * {@link services.search.LuceneIndexer.Scope#SKILLS_CATALOG} Lucene scope.
+ * Spike coverage for the importable-skills catalog: upstream schema → DTO
+ * mapping (incl. derived category), install-ranked browse, Lucene term search,
+ * topical facets, the category filter, and pagination.
  *
  * <p>Loads from an inline fixture via {@link SkillCatalogService#loadForTest}
  * (no network / disk cache). Lucene access is serialized through
@@ -20,15 +19,17 @@ import java.util.List;
  */
 class SkillCatalogServiceTest extends UnitTest {
 
-    // Verbatim upstream shape (scraped-skills.json): only these 8 fields exist.
+    // 5 skills with predictable categories: Git&VCS(1), Web&Frontend(2),
+    // DevOps&Cloud(1), Documents(1); installs descending 100..60.
     private static final String FIXTURE = """
             {
               "scrapedAt": "2026-01-30T04:51:07.907Z",
-              "totalSkills": 3,
               "skills": [
-                {"source":"vercel-labs/agent-skills","skillId":"vercel-react-best-practices","name":"vercel-react-best-practices","installs":69954,"owner":"vercel-labs","repo":"agent-skills","githubUrl":"https://github.com/vercel-labs/agent-skills","displayName":"Vercel React Best Practices"},
-                {"source":"remotion-dev/skills","skillId":"remotion-best-practices","name":"remotion-best-practices","installs":50464,"owner":"remotion-dev","repo":"skills","githubUrl":"https://github.com/remotion-dev/skills","displayName":"Remotion Best Practices"},
-                {"source":"anthropics/skills","skillId":"frontend-design","name":"frontend-design","installs":1234,"owner":"anthropics","repo":"skills","githubUrl":"https://github.com/anthropics/skills","displayName":"Frontend Design"}
+                {"skillId":"git-commit-helper","displayName":"Git Commit Helper","source":"a/tools","installs":100,"owner":"a","repo":"tools","githubUrl":"https://github.com/a/tools"},
+                {"skillId":"react-dashboard","displayName":"React Dashboard","source":"b/web","installs":90,"owner":"b","repo":"web","githubUrl":"https://github.com/b/web"},
+                {"skillId":"docker-deploy","displayName":"Docker Deploy","source":"c/ops","installs":80,"owner":"c","repo":"ops","githubUrl":"https://github.com/c/ops"},
+                {"skillId":"react-router-guide","displayName":"React Router Guide","source":"b/web","installs":70,"owner":"b","repo":"web","githubUrl":"https://github.com/b/web"},
+                {"skillId":"pdf-extractor","displayName":"PDF Extractor","source":"d/docs","installs":60,"owner":"d","repo":"docs","githubUrl":"https://github.com/d/docs"}
               ]
             }
             """;
@@ -47,45 +48,75 @@ class SkillCatalogServiceTest extends UnitTest {
     }
 
     @Test
-    void parsesEveryUpstreamSchemaField() {
-        var r = SkillCatalogService.search("", 10);
+    void parsesSchemaFieldsAndDerivesCategory() {
+        var r = SkillCatalogService.search("", null, 0, 1);
 
-        assertTrue(r.ready(), "catalog should be loaded");
-        assertEquals(3, r.catalogSize());
+        assertTrue(r.ready());
+        assertEquals(5, r.catalogSize());
         assertEquals("2026-01-30T04:51:07.907Z", r.scrapedAt());
 
-        var top = r.results().get(0);
-        assertEquals("vercel-react-best-practices", top.skillId());
-        assertEquals("Vercel React Best Practices", top.displayName());
-        assertEquals("vercel-labs/agent-skills", top.source());
-        assertEquals("vercel-labs", top.owner());
-        assertEquals("agent-skills", top.repo());
-        assertEquals("https://github.com/vercel-labs/agent-skills", top.githubUrl());
-        assertEquals(69954L, top.installs());
+        var top = r.results().get(0);   // most-installed
+        assertEquals("git-commit-helper", top.skillId());
+        assertEquals("https://github.com/a/tools", top.githubUrl());
+        assertEquals(100L, top.installs());
+        assertEquals("Git & VCS", top.category());
     }
 
     @Test
     void blankQueryBrowsesMostInstalledFirst() {
-        var ids = SkillCatalogService.search("", 10).results().stream()
+        var ids = SkillCatalogService.search("", null, 0, 50).results().stream()
                 .map(SkillCatalogService.CatalogSkill::skillId).toList();
 
-        assertEquals(List.of(
-                "vercel-react-best-practices",   // 69954
-                "remotion-best-practices",       // 50464
-                "frontend-design"), ids);        // 1234
+        assertEquals(List.of("git-commit-helper", "react-dashboard", "docker-deploy",
+                "react-router-guide", "pdf-extractor"), ids);
+    }
+
+    @Test
+    void paginationSlicesByInstalls() {
+        var page0 = SkillCatalogService.search("", null, 0, 2);
+        assertEquals(5, page0.total());
+        assertEquals(2, page0.results().size());
+        assertEquals("git-commit-helper", page0.results().get(0).skillId());
+
+        var page1 = SkillCatalogService.search("", null, 1, 2);
+        assertEquals(List.of("docker-deploy", "react-router-guide"),
+                page1.results().stream().map(SkillCatalogService.CatalogSkill::skillId).toList());
+    }
+
+    @Test
+    void facetsCountOverBaseWithAllFirst() {
+        var facets = SkillCatalogService.search("", null, 0, 50).facets();
+
+        assertEquals("All", facets.get(0).category());
+        assertEquals(5, facets.get(0).count());
+        // Web & Frontend (count 2) is the only multi-count topic → deterministically 2nd.
+        assertEquals("Web & Frontend", facets.get(1).category());
+        assertEquals(2, facets.get(1).count());
+        // The remaining single-count topics, order-independent; no "Other".
+        var rest = facets.subList(2, facets.size()).stream()
+                .map(SkillCatalogService.CategoryFacet::category).toList();
+        assertTrue(rest.containsAll(List.of("Git & VCS", "DevOps & Cloud", "Documents")));
+        assertFalse(rest.contains("Other"));
+    }
+
+    @Test
+    void categoryFilterNarrowsResultsButNotFacets() {
+        var r = SkillCatalogService.search("", "Web & Frontend", 0, 50);
+
+        assertEquals(2, r.total());
+        assertEquals(List.of("react-dashboard", "react-router-guide"),
+                r.results().stream().map(SkillCatalogService.CatalogSkill::skillId).toList());
+        // Facets still span every category (computed before the filter).
+        assertEquals(5, r.facets().get(0).count());
     }
 
     @Test
     void termQueryMatchesViaLuceneScope() {
-        var r = SkillCatalogService.search("remotion", 10);
+        var r = SkillCatalogService.search("react", null, 0, 50);
 
         assertTrue(r.ready());
-        assertEquals(1, r.results().size(), "only the Remotion skill matches 'remotion'");
-        assertEquals("remotion-best-practices", r.results().get(0).skillId());
-    }
-
-    @Test
-    void limitIsRespected() {
-        assertEquals(1, SkillCatalogService.search("", 1).results().size());
+        assertEquals(2, r.results().size());
+        assertEquals(List.of("react-dashboard", "react-router-guide"),
+                r.results().stream().map(SkillCatalogService.CatalogSkill::skillId).sorted().toList());
     }
 }

@@ -18,6 +18,7 @@ import type {
   AgentSkill,
   CatalogSearchResult,
   CatalogSkill,
+  CategoryFacet,
   Skill,
   SkillFile,
   SkillFileContent,
@@ -61,22 +62,36 @@ watch(agents, () => loadAllAgentSkills(), { immediate: true })
 // The backend lazily downloads + indexes the ~10 MB catalog snapshot on the
 // first search, so the first query is slower than later ones — hence the
 // loading copy. $fetch (not useFetch) keeps each search imperative + uncached.
+const CATALOG_PAGE_SIZE = 20
 const catalogOpen = ref(false)
 const catalogQuery = ref('')
 const catalogLoading = ref(false)
 const catalogError = ref<string | null>(null)
 const catalogResults = ref<CatalogSkill[]>([])
 const catalogSize = ref<number | null>(null)
+// Facets + pagination state.
+const catalogCategory = ref('All')
+const catalogPage = ref(0)
+const catalogTotal = ref(0)
+const catalogFacets = ref<CategoryFacet[]>([])
 // Monotonic guard so a slow in-flight search can't overwrite a newer one.
 let catalogSeq = 0
 
-async function searchCatalog() {
+const catalogTotalPages = computed(() =>
+  Math.max(1, Math.ceil(catalogTotal.value / CATALOG_PAGE_SIZE)))
+
+async function runCatalogSearch() {
   const seq = ++catalogSeq
   catalogLoading.value = true
   catalogError.value = null
   try {
     const res = await $fetch<CatalogSearchResult>('/api/skills/catalog/search', {
-      params: { q: catalogQuery.value, limit: 30 },
+      params: {
+        q: catalogQuery.value,
+        category: catalogCategory.value,
+        page: catalogPage.value,
+        pageSize: CATALOG_PAGE_SIZE,
+      },
     })
     if (seq !== catalogSeq) return
     if (!res.ready) {
@@ -86,6 +101,8 @@ async function searchCatalog() {
     }
     catalogResults.value = res.results
     catalogSize.value = res.catalogSize
+    catalogTotal.value = res.total
+    catalogFacets.value = res.facets
   }
   catch {
     if (seq !== catalogSeq) return
@@ -97,10 +114,32 @@ async function searchCatalog() {
   }
 }
 
+// A new query resets the facet + page (fresh search starts from All / page 0).
+function searchCatalog() {
+  catalogCategory.value = 'All'
+  catalogPage.value = 0
+  runCatalogSearch()
+}
+
+// Selecting a facet re-paginates within it from page 0.
+function selectFacet(category: string) {
+  if (catalogCategory.value === category) return
+  catalogCategory.value = category
+  catalogPage.value = 0
+  runCatalogSearch()
+}
+
+function goToPage(page: number) {
+  const clamped = Math.min(Math.max(0, page), catalogTotalPages.value - 1)
+  if (clamped === catalogPage.value) return
+  catalogPage.value = clamped
+  runCatalogSearch()
+}
+
 function openCatalog() {
   catalogOpen.value = true
   // Browse the most-installed skills on open (blank query) if nothing loaded yet.
-  if (!catalogResults.value.length && !catalogLoading.value) searchCatalog()
+  if (!catalogResults.value.length && !catalogLoading.value) runCatalogSearch()
 }
 
 // Import is synchronous on the backend (GitHub fetch + conformance + sanitize
@@ -1460,6 +1499,27 @@ function totalSkillCount(agentId: number) {
             </div>
           </div>
 
+          <div
+            v-if="catalogFacets.length"
+            class="px-3 py-2 border-b border-border flex flex-wrap gap-1.5 shrink-0"
+          >
+            <button
+              v-for="f in catalogFacets"
+              :key="f.category"
+              :class="[
+                'inline-flex items-center gap-1 px-2 py-0.5 text-xs border transition-colors',
+                catalogCategory === f.category
+                  ? 'border-ring bg-muted text-accent font-medium'
+                  : 'border-border text-fg-muted hover:bg-muted',
+              ]"
+              @click="selectFacet(f.category)"
+            >
+              <span v-if="f.icon">{{ f.icon }}</span>
+              <span>{{ f.category }}</span>
+              <span class="text-fg-muted">{{ f.count.toLocaleString() }}</span>
+            </button>
+          </div>
+
           <div class="flex-1 min-h-0 overflow-y-auto">
             <div
               v-if="catalogLoading"
@@ -1493,7 +1553,7 @@ function totalSkillCount(agentId: number) {
                     {{ s.displayName || s.skillId }}
                   </div>
                   <div class="text-xs text-fg-muted truncate">
-                    {{ s.source }}
+                    {{ s.source }} · {{ s.category }}
                   </div>
                 </div>
                 <div class="flex items-center gap-3 shrink-0">
@@ -1519,6 +1579,30 @@ function totalSkillCount(agentId: number) {
                 </div>
               </li>
             </ul>
+          </div>
+
+          <div
+            v-if="!catalogLoading && !catalogError && catalogTotal > 0"
+            class="px-4 py-2 border-t border-border flex items-center justify-between gap-3 text-xs text-fg-muted shrink-0"
+          >
+            <span>{{ catalogTotal.toLocaleString() }} result{{ catalogTotal === 1 ? '' : 's' }}</span>
+            <div class="flex items-center gap-2">
+              <button
+                :disabled="catalogPage <= 0"
+                class="px-2 py-1 border border-border hover:bg-muted disabled:opacity-40"
+                @click="goToPage(catalogPage - 1)"
+              >
+                Prev
+              </button>
+              <span>Page {{ catalogPage + 1 }} of {{ catalogTotalPages }}</span>
+              <button
+                :disabled="catalogPage >= catalogTotalPages - 1"
+                class="px-2 py-1 border border-border hover:bg-muted disabled:opacity-40"
+                @click="goToPage(catalogPage + 1)"
+              >
+                Next
+              </button>
+            </div>
           </div>
 
           <div
