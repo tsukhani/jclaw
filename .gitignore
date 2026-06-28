@@ -55,6 +55,9 @@ javadoc/
 # Autoresearch state
 .autoresearch/
 
+# omo tool local state (per-machine, not tracked)
+.omo/
+
 # IntelliJ IDEA
 .idea/
 *.iml
