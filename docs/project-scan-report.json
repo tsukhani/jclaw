@@ -1,0 +1,23 @@
+{
+  "workflow_version": "1.2.0",
+  "timestamps": {"started": "2026-06-29", "last_updated": "2026-06-29", "completed": "2026-06-29"},
+  "mode": "full_rescan",
+  "scan_level": "deep",
+  "project_root": "/Users/tarun/Programming/jclaw",
+  "project_knowledge": "docs",
+  "output_target": "docs/architecture",
+  "current_step": "completed",
+  "project_classification": {"repository_type": "monorepo", "parts": ["backend (Play 1.13.x/Java 25)", "frontend (Nuxt 4.4.8)"], "version": "0.14.47"},
+  "completed_steps": [
+    {"step": "scan", "status": "completed", "summary": "Deep scan of app/** + frontend/** via 4 parallel subagent inventories"},
+    {"step": "regenerate", "status": "completed", "summary": "Regenerated 12 docs in docs/architecture/ in place"}
+  ],
+  "outputs_generated": [
+    "index.md", "project-overview.md", "source-tree-analysis.md", "architecture-backend.md",
+    "architecture-frontend.md", "api-contracts-backend.md", "data-models-backend.md",
+    "component-inventory-frontend.md", "integration-architecture.md", "development-guide.md",
+    "deployment-guide.md", "project-parts.json"
+  ],
+  "left_untouched": ["jclaw-agentic-refactor.md (hand-authored)", "adr/ADR-001-defer-redis.md (hand-authored)"],
+  "resume_instructions": "Complete. Re-run /bmad-document-project to refresh."
+}

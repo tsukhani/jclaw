@@ -1,72 +1,94 @@
 # Frontend Component Inventory
 
-The frontend does not ship a component library — JClaw deliberately keeps page-specific UI inlined in the page file. Only components with cross-page reach live in `frontend/components/`.
+The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. ~91 components total: 74 UI primitives + 17 feature components.
 
-## Standalone components (`frontend/components/`)
+## UI primitives (`frontend/components/ui/`)
 
-| Component | File | Purpose | Consumers |
+74 shadcn-nuxt / Reka UI primitives, auto-imported, grouped by widget family:
+
+| Family | Count | Family | Count |
 |---|---|---|---|
-| `<ConfirmDialog />` | `ConfirmDialog.vue` | Imperative confirm modal, mounted once in `app.vue`. Driven by the `useConfirm()` composable — any page can `await confirm({title, message})` and receive `true`/`false`. | Mounted globally in `app.vue`; triggered from `agents.vue`, `conversations.vue`, `skills.vue`, `channels.vue`, `settings.vue`, etc. |
-| `<SkillFileTree />` | `SkillFileTree.vue` | Tree view for skill-authoring files (reads `/api/skills/{name}/files`). Handles expand/collapse and selection. | `skills.vue` |
+| accordion | 4 | popover | 4 |
+| alert | 3 | select | 11 |
+| button | 1 | sheet | 9 |
+| command | 9 | table | 9 |
+| dialog | 10 | dropdown-menu | 13 |
+
+Variants are composed with `class-variance-authority` + `tailwind-merge` (`utils/ui-utils.ts` exposes the `cn()` helper).
+
+## Feature components (`frontend/components/` + `guide/`)
+
+17 cross-page components:
+
+| Component | Purpose |
+|---|---|
+| `DataTable.vue` | `@tanstack/vue-table` wrapper for admin lists (tasks, subagent runs). |
+| `ConfirmDialog.vue` | Imperative confirm/destructive-action modal (driven by `useConfirm`, mounted in `app.vue`). |
+| `CommandPalette.vue` | Global `/`-triggered command palette. |
+| `ChatContextMeter.vue`, `ChatCompressionSection.vue`, `ChatCostSection.vue` | Chat context/token/cost meters. |
+| `ChatModelCombobox.vue`, `ModelCapabilityPills.vue` | Model selection + capability badges (vision/audio/reasoning). |
+| `LatencyOverlayChart.vue` | Latency histogram overlay. |
+| `FilterBar.vue` | Conversation/log filtering UI. |
+| `NotificationBar.vue`, `StatusBanner.vue` | In-app notifications + system/auth/network banners. |
+| `PeekPanel.vue` | Drawer-style side panel for in-page editors. |
+| `ScheduleCalendar.vue` | Calendar widget for reminders/task scheduling. |
+| `SkillFileTree.vue` | File browser for skill editing. |
+| `TourIntroDialog.vue` | Onboarding-tour intro modal (driven by `useGuidedTour`). |
+| `guide/GuideRenderer.vue` | Renders `docs/user-guide/*.md` (marked + DOMPurify) for the in-app `/guide`. |
 
 ## Layout (`frontend/layouts/`)
 
 | Layout | File | Notes |
 |---|---|---|
-| `default` | `default.vue` | Only layout. Renders the sidebar (nav groups: Dashboard / Chat-group / Ops-group / Settings-group), topbar (breadcrumb + search placeholder + theme toggle), and a `<slot/>` content area. Polls `/api/status` every 30s for the status dot. |
+| `default` | `default.vue` | The only layout. Sidebar (Dashboard / Chat / Ops / Admin / Help groups), topbar (breadcrumb + theme toggle + logout), and a `<slot/>` content area. Heroicons for nav, Lucide for accent icons. Mounts `TourIntroDialog`; wires `useAuth`/`useTheme`/`useGuidedTour`. |
 
 ## Composables (`frontend/composables/`)
 
-| Composable | File | Role |
-|---|---|---|
-| `useAuth` | `useAuth.ts` | Session state (`authenticated`, `username`), `login`, `logout`, `checkAuth` (coalesced module-level lock). |
-| `useApiMutation` | `useApiMutation.ts` | `$fetch` wrapper returning `{mutate, loading, error}` — consistent error handling for POST/PUT/DELETE. |
-| `useEventBus` | `useEventBus.ts` | Singleton `EventSource('/api/events')` with typed `on(event, handler)` fan-out, reconnect backoff, auth-gate to prevent 401 reconnect loops. |
-| `useConfirm` | `useConfirm.ts` | Imperative `confirm({title, message})` — resolves Boolean, rendered by `<ConfirmDialog />`. |
-| `useTheme` | `useTheme.ts` | `themeMode` (`system`/`light`/`dark`), `setTheme`. Applies `.light-mode` class on `<html>`. |
-| `useProviders` | `useProviders.ts` | Cached `/api/providers` lookups. |
-| `useToolMeta` | `useToolMeta.ts` | Cached tool catalog (name → schema) for UI rendering. |
+~17 — the `useState`-backed state + data layer (no Pinia):
+
+| Composable | Role |
+|---|---|
+| `useAuth` | Session state + login/logout/checkAuth/checkPasswordSet/setupPassword/resetPassword (module-level lock). |
+| `useEventBus` | Singleton `EventSource('/api/events')` with typed `on(event, handler)` fan-out + reconnect backoff. |
+| `useApiParsed` | `$fetch` + Zod validation (`types/schemas.ts`); throws `SchemaParseError` on boundary mismatch. |
+| `useApiMutation` | POST/PUT/DELETE wrapper returning `{mutate, loading, error}`. |
+| `useConfirm` | Imperative `confirm({title, message, requireText?})` → Boolean, rendered by `<ConfirmDialog />`. |
+| `useTheme` | `themeMode` (system/light/dark), `setTheme`; toggles the `dark` class on `<html>` with a View Transitions reveal. |
+| `useBulkSelect` | Multi-select state for admin list pages. |
+| `useBindingAgents` | Agent-availability filtering for channel bindings. |
+| `useProviders`, `useToolMeta`, `useModelAutocomplete` | Provider/model/tool catalogs + `/model` completion. |
+| `useGuidedTour`, `useBreadcrumbExtra`, `useTailscaleStatus` | Onboarding tour, in-page breadcrumb crumbs, Tailscale Funnel status. |
+
+## Plugins (`frontend/plugins/`)
+
+| Plugin | Role |
+|---|---|
+| `theme.client.ts` | Applies the persisted theme (`localStorage.jclaw-theme`) before first paint to avoid a flash-of-wrong-theme. |
+| `axe.client.ts` | Dev-only vue-axe/axe-core a11y scanner (tree-shaken from production). |
 
 ## Middleware (`frontend/middleware/`)
 
-| Middleware | Scope | Behavior |
-|---|---|---|
-| `auth.global.ts` | Global, every route | Skips `/login`. If `useAuth().authenticated` is false, calls `checkAuth()`; on fail, `navigateTo('/login')`. |
+| Middleware | Behavior |
+|---|---|
+| `auth.global.ts` | Runs on every nav except `/login` and `/setup-password`; routes to `/setup-password` (no admin password set) or `/login` (unauthenticated) via `useAuth`. |
 
 ## Utilities (`frontend/utils/`)
 
-| Module | Purpose |
-|---|---|
-| `format.ts` | Date/number/byte formatters. |
-| `usage-cost.ts` | Converts `MessageUsage` (prompt/completion tokens) into estimated cost per configured provider pricing. |
+~13 pure helpers: `format.ts` (date/number/byte), `usage-cost.ts` (token→cost), `tool-calls.ts` + `display-message-filter.ts` (message rendering), `thinking.ts` + `thinking-lock.ts` (reasoning UI), `schedule.ts` + `calendar.ts` + `task-steps.ts` (scheduling), `linkify.ts` + `markdown-links.ts` (link handling), `video-job.ts`, `latency-rows.ts`, and `ui-utils.ts` (`cn()`).
 
-## Types (`frontend/types/api.ts`)
+## Types (`frontend/types/`)
 
-Wire types mirroring the backend JSON shapes:
-- `Agent`, `Conversation`, `Message`, `ConfigEntry`, `ConfigResponse`
-- `LatencyHistogram`, `LatencyMetrics`
-- `Skill`, `SkillFile`
-- `MessageUsage` (imported into `Message` for token accounting)
+- `api.ts` — compile-time wire shapes mirroring backend JSON.
+- `schemas.ts` — Zod runtime schemas for boundary-validated reads (used by `useApiParsed`).
+- ambient `.d.ts` — `markdown-raw.d.ts` (`?raw` markdown imports), `vue-axe.d.ts`.
 
 ## Test coverage
 
-Vitest specs under `frontend/test/` directly exercise the composables and page-level logic (not a full integration harness — E2E lives in Playwright):
+~69 Vitest specs under `frontend/test/` exercise composables and page-level logic under the **`jsdom`** environment (`test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Playwright E2E under `frontend/tests/e2e/` drives the booted stack through the browser.
 
-| Spec | Target |
-|---|---|
-| `auth.test.ts` | `useAuth` + middleware behavior. |
-| `chat.test.ts` | `pages/chat.vue` streaming logic (mocked SSE). |
-| `composables.test.ts` | `useApiMutation`, `useEventBus`, `useTheme`, `useConfirm`, `useProviders`, `useToolMeta`. |
-| `markdown.test.ts` | `marked + DOMPurify` sanitization on message rendering. |
-| `pages.test.ts` | Page-level smoke (agents, tools, settings). |
-| `skills.test.ts` | `pages/skills.vue` + `SkillFileTree.vue`. |
-| `usage-cost.test.ts` | `utils/usage-cost.ts`. |
+## Intentional choices
 
-Playwright E2E (under `frontend/tests/`) drives the fully booted stack through the browser — see `playwright.config.ts` for base URL and trace settings.
-
-## Intentional absences
-
-- **No Pinia** — shared state is handled by `useState` + composables. Pinia is the natural upgrade path if state outgrows this.
-- **No component library** — page-specific UI is inlined with Tailwind. Cross-page extraction should only happen when the third consumer appears.
-- **No custom theming tokens** — light mode is an inversion filter on `html`, not a real palette.
+- **No Pinia** — shared state is `useState` + composables.
+- **shadcn-nuxt + Reka UI** is the component base; new cross-page UI should extend it rather than re-inline.
+- **Real light/dark theming** via the `dark` class + design tokens (not a CSS inversion filter).
 - **No SSR/Nitro API** — `ssr: false`; `routeRules.proxy` is a leftover and not active.

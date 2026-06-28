@@ -1,0 +1,84 @@
+{
+  "repository_type": "monorepo",
+  "name": "jclaw",
+  "version": "0.14.47",
+  "generated": "2026-06-29",
+  "generator": "bmad-document-project (deep rescan)",
+  "parts": [
+    {
+      "part_id": "backend",
+      "display_name": "JClaw Backend",
+      "project_type_id": "backend",
+      "root_path": "/",
+      "language": "Java 25",
+      "framework": "Play Framework 1.13.x (fork tsukhani/play1, pinned .play-version=1.13.44)",
+      "tech": [
+        "JPA/Hibernate on H2 (dev, MODE=MYSQL) / PostgreSQL (prod template)",
+        "OkHttp 5 (okhttp-jvm 5.4.0 + okhttp-sse) — single outbound HTTP stack",
+        "Apache Lucene 10.4.0 — full-text search",
+        "db-scheduler 16.x — persistent task scheduling",
+        "JTokkit 1.1.0 — tokenization",
+        "Apache Tika 3.3.1 + Tesseract OCR",
+        "Microsoft Playwright for Java 1.60",
+        "Caffeine L2 cache (JCache)"
+      ],
+      "build": "Gradle (org.playframework.play1 plugin); play dist / gradle playBundle",
+      "test": "JUnit 6, Play UnitTest/FunctionalTest, `play autotest`",
+      "entry_points": ["conf/routes", "app/controllers/Application.java"],
+      "critical_directories": [
+        "app/controllers", "app/models", "app/agents", "app/llm", "app/channels",
+        "app/tools", "app/mcp", "app/memory", "app/jobs", "app/services", "app/utils", "conf"
+      ]
+    },
+    {
+      "part_id": "frontend",
+      "display_name": "JClaw Frontend",
+      "project_type_id": "web",
+      "root_path": "/frontend",
+      "language": "TypeScript",
+      "framework": "Nuxt 4.4.8 (SPA, ssr: false)",
+      "tech": [
+        "Vue 3 Composition API",
+        "Tailwind CSS v4 via @tailwindcss/vite",
+        "shadcn-nuxt on Reka UI primitives",
+        "Zod 4 (useApiParsed) + @tanstack/vue-table",
+        "marked + dompurify",
+        "useState-based state (no Pinia); singleton EventSource SSE"
+      ],
+      "build": "nuxi generate -> public/spa/",
+      "test": "Vitest 4 (jsdom), @nuxt/test-utils, Playwright 1.60 (e2e)",
+      "package_manager": "pnpm 11.7.0 (+sha512 pin)",
+      "entry_points": ["frontend/app.vue", "frontend/pages"],
+      "critical_directories": [
+        "frontend/pages", "frontend/components", "frontend/composables",
+        "frontend/middleware", "frontend/plugins", "frontend/utils", "frontend/types"
+      ]
+    }
+  ],
+  "integration_points": [
+    {
+      "from": "frontend",
+      "to": "backend",
+      "type": "REST",
+      "details": "$fetch / useApiParsed / useApiMutation to /api/*; Nitro devProxy in dev, same-origin (public/spa/) in prod; cookie session (PLAY_SESSION)"
+    },
+    {
+      "from": "frontend",
+      "to": "backend",
+      "type": "SSE",
+      "details": "Singleton EventSource to /api/events (NotificationBus) + per-request /api/chat/stream"
+    },
+    {
+      "from": "external-channels",
+      "to": "backend",
+      "type": "Webhook/Poll/Socket",
+      "details": "Slack (webhook + Socket Mode), Telegram (long-poll + webhook), WhatsApp (Cloud API + Web/Cobalt) -> AgentRouter.resolve -> AgentRunner"
+    },
+    {
+      "from": "backend",
+      "to": "llm-providers",
+      "type": "HTTP/SSE",
+      "details": "OkHttp 5 to OpenAI/Ollama/OpenRouter/TogetherAI (OpenAI-compatible); sealed LlmProvider hierarchy"
+    }
+  ]
+}

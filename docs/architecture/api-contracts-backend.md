@@ -1,170 +1,128 @@
 # API Contracts — Backend
 
-All endpoints defined in `conf/routes`. Unless noted, they are JSON-over-HTTP, hosted by the Play backend on `:9000`, and gated by `AuthCheck` (Play `@Before` interceptor that checks `session("authenticated") == "true"`). The frontend accesses them at same-origin `/api/*` in production and via Nitro dev-proxy in development.
+All endpoints are defined in `conf/routes`. Unless noted, they are JSON-over-HTTP, hosted by the Play backend on `:9000` (and `:9443` when HTTPS is enabled), and gated by `AuthCheck` (Play `@Before` interceptor: valid session cookie, or a Bearer `ApiToken` for the in-process `jclaw_api` tool). The frontend accesses them at same-origin `/api/*` in production and via the Nitro dev-proxy in development.
 
-**Auth exemptions:** `/api/auth/login`, `/api/auth/logout`, and `/api/webhooks/*` (webhooks verify their own signatures).
+**Auth exemptions:** the auth endpoints, `/api/status`, and `/api/webhooks/*` (webhooks verify their own signatures). Unknown `/api/*` paths return a clean 404 JSON via `ApiNotFoundController` (so scanners don't trigger an `ActionNotFound` stack trace).
 
 ## Auth & status
 
-| Method | Path | Controller | Notes |
-|---|---|---|---|
-| GET | `/api/status` | `ApiController.status` | Liveness probe. Returns `{status, application, mode, version}`. Public. |
-| POST | `/api/auth/login` | `ApiAuthController.login` | Sets `session("authenticated")` cookie on success. |
-| POST | `/api/auth/logout` | `ApiAuthController.logout` | Clears session. |
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/status` | Liveness probe (`{status, application, mode, version}`). Public. |
+| GET | `/api/auth/status` | Session/auth state probe (used by the client auth guard). |
+| POST | `/api/auth/setup` | First-boot admin password setup. |
+| POST | `/api/auth/login` | Sets the `PLAY_SESSION` cookie on success. |
+| POST | `/api/auth/logout` | Clears session. |
+| POST | `/api/auth/reset-password` | Reset the admin password. |
+| GET | `/api/onboarding/tour-status` · POST `/api/onboarding/tour-progress` | Guided-tour state. |
 
 ## Agents
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/agents` | List all agents. |
-| POST | `/api/agents` | Create. |
-| GET | `/api/agents/{id}` | Fetch one. |
-| PUT | `/api/agents/{id}` | Update (name, model, thinkingMode, enabled). |
-| DELETE | `/api/agents/{id}` | Delete. |
-| GET | `/api/agents/{id}/prompt-breakdown` | Returns assembled system-prompt sections (for debugging). |
-| GET | `/api/agents/{id}/shell/effective-allowlist` | Computes: `global shell.allowlist ∪ agent_skill_allowed_tool rows`. |
-| GET | `/api/agents/{id}/workspace/{filename}` | Read workspace file. |
-| GET | `/api/agents/{id}/files/{+filePath}` | Serve workspace file binary. |
-| PUT | `/api/agents/{id}/workspace/{filename}` | Write workspace file. |
-| GET | `/api/agents/{id}/tools` | Per-agent tool enable state. |
-| PUT | `/api/agents/{id}/tools/{name}` | Toggle tool for agent. |
+| GET / POST | `/api/agents` | List / create. |
+| GET / PUT / DELETE | `/api/agents/{id}` | Fetch / update / delete. |
+| GET | `/api/agents/{id}/prompt-breakdown` | Assembled system-prompt sections (debugging). |
+| GET | `/api/agents/{id}/shell/effective-allowlist` | `global shell.allowlist ∪ agent_skill_allowed_tool`. |
+| GET / PUT | `/api/agents/{id}/workspace/{filename}` | Read / write a workspace file. |
+| GET | `/api/agents/{id}/files/{+filePath}` | Serve a workspace file binary. |
+| GET / PUT | `/api/agents/{id}/tools`, `/tools/{name}`, `/tool-groups/{group}` | Per-agent tool enablement. |
+| GET / PUT / DELETE / POST | `/api/agents/{id}/skills…` | Per-agent skill enablement, file reads, copy, delete. |
 
-## Chat (dispatch)
+## Chat
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/chat/send` | Synchronous send → returns final assistant content. |
-| POST | `/api/chat/stream` | SSE stream: tokens, reasoning, status, complete, error. |
-| POST | `/api/chat/upload` | Upload attachments; returns URLs referenceable in subsequent `send`. |
+| POST | `/api/chat/send` | Synchronous send → final assistant content. |
+| POST | `/api/chat/stream` | SSE stream: `init`, `token`, `reasoning`, `status`, `complete`, `error`. |
+| POST | `/api/chat/upload` | Upload attachments, referenceable in a subsequent `send`. |
 
 ### Request body (chat)
 
 ```json
-{
-  "agentId": 12,
-  "message": "Draft a release note.",
-  "conversationId": 345  // optional; null starts a new web conversation
-}
+{ "agentId": 12, "message": "Draft a release note.", "conversationId": 345 }
 ```
 
-### SSE events (`/api/chat/stream`)
-
-- `init` — `{conversationId}`
-- `token` — partial content string
-- `reasoning` — reasoning-trace token (when `thinkingMode` set)
-- `status` — e.g. tool invocation notice
-- `complete` — final assistant message (full)
-- `error` — exception message
-
-Client disconnects are detected in `AgentRunner.checkCancelled` via an `AtomicBoolean` and log `"Stream cancelled by client disconnect"`.
+`conversationId` is optional; null starts a new web conversation. Client disconnects are detected by `CancellationManager` (polled between tool rounds and inside `LlmProvider` streaming).
 
 ## Conversations
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/conversations` | List (supports channel filter). |
-| GET | `/api/conversations/channels` | Distinct channel types with counts. |
-| GET | `/api/conversations/{id}/messages` | Message history (ASC by `createdAt`). |
-| GET | `/api/conversations/{id}/queue` | `ConversationQueue` state (processing/pending/mode). |
-| POST | `/api/conversations/{id}/generate-title` | LLM-generated title. |
-| DELETE | `/api/conversations/{id}` | Single delete. |
-| DELETE | `/api/conversations` | Batch delete (body: `{ids:[…]}`). |
+| GET | `/api/conversations` · `/channels` | List (channel filter) · distinct channels. |
+| GET | `/api/conversations/{id}` · `/messages` · `/queue` | Conversation · message history (ASC) · `ConversationQueue` state. |
+| DELETE | `/api/conversations/{id}` · `/api/conversations` · `/messages/{mid}` | Single / batch / single-message delete. |
+| PUT / DELETE | `/api/conversations/{id}/model-override` | Set / clear per-conversation model override. |
 
-## Tasks
+## Tasks, notifications & reminders
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/tasks` | List tasks (optionally filter by status). |
-| POST | `/api/tasks/{id}/cancel` | Set status=CANCELLED. |
-| POST | `/api/tasks/{id}/retry` | Reset retryCount & nextRunAt. |
+| GET | `/api/tasks` · `/stats` · `/{id}/runs` · `/{id}/delivery-advisory` | List / stats / run history / delivery advisory. |
+| POST | `/api/tasks` · `/{id}/run` · `/cancel` · `/retry` · `/pause` · `/resume` · `/reenable` | Create + lifecycle actions. |
+| PATCH / DELETE | `/api/tasks/{id}` | Update / delete. |
+| GET / POST | `/api/task-runs/search` · `/recent` · `/{id}/messages` · `/{runId}/cancel` · `/reset` | Transcript search (Lucene), recent runs, run transcript, cancel, stats reset. |
+| GET | `/api/timezones` | IANA zone list for scheduling. |
+| GET / POST / DELETE | `/api/notifications` · `/{id}/ack` · `/{id}` | Reminder/notification surface. |
 
-`TaskPollerJob @Every("30s")` drains `PENDING` tasks due by `next_run_at`, executes on a `newVirtualThreadPerTaskExecutor`, re-schedules CRON tasks on completion, and applies exponential backoff `30s * 2^(retryCount-1)` capped at ~12 days (`MAX_BACKOFF_SHIFT=20`). Task creation for tasks with `agent != null` runs the task as a prompt through `AgentRunner.run` against a synthetic `"task"` channel.
+Task **execution is owned by db-scheduler** (atomic row-claim, retries, heartbeat recovery) — not a custom `@Every` poller. A task with `agent != null` runs its description as a prompt through `AgentRunner` against a synthetic `"task"` channel; reminders are tasks with `auto_delete_on_complete`.
 
-## Bindings (channel → agent routing)
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/bindings` | List. |
-| POST | `/api/bindings` | Create (channelType + optional peerId + agentId + priority). |
-| PUT | `/api/bindings/{id}` | Update. |
-| DELETE | `/api/bindings/{id}` | Delete. |
-
-Routing order in `AgentRouter.resolve`: (1) exact peer match, (2) channel-wide (peerId=NULL), (3) main agent (`name="main"`).
-
-## Skills
-
-Read-only from the HTTP API — skills are authored only via the skill-creator skill (using the filesystem tool) or promoted from an agent workspace. No `POST /api/skills`, no PUT for file content.
+## Bindings, channels & webhooks
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/skills` | List global skills. |
-| POST | `/api/skills/promote` | Promote an agent-workspace skill into the global registry. |
-| GET | `/api/skills/{name}` | Skill metadata + file listing. |
-| PUT | `/api/skills/{name}/rename` | Rename. |
-| GET | `/api/skills/{name}/files/{+filePath}` | Read file content. |
-| GET | `/api/skills/{name}/files` | List files. |
-| DELETE | `/api/skills/{name}` | Un-promote. |
-| GET | `/api/agents/{id}/skills` | Agent's enabled skills. |
-| PUT | `/api/agents/{id}/skills/{name}` | Toggle. |
-| GET | `/api/agents/{id}/skills/{name}/files/{+filePath}` | Read skill file (agent-scoped). |
-| DELETE | `/api/agents/{id}/skills/{name}/delete` | Remove skill from agent workspace. |
-| POST | `/api/agents/{id}/skills/{name}/copy` | Copy global skill into agent workspace. |
+| GET / POST / PUT / DELETE | `/api/bindings…` | Generic channel→agent routing bindings. |
+| GET | `/api/channels` · `/active` · `/{channelType}` | Channel list · dashboard aggregate · one config. |
+| PUT | `/api/channels/{channelType}` | Upsert channel config JSON + enabled. |
+| GET / POST / PUT / DELETE | `/api/channels/{telegram,slack,whatsapp}/bindings…` | Per-transport binding CRUD + `/test`. |
+| GET | `/api/channels/whatsapp/bindings/{id}/qr` | WhatsApp-Web (Cobalt) QR pairing status. |
+| POST | `/api/webhooks/telegram/{bindingId}/{secret}` | Telegram webhook (path-secret verified). |
+| POST | `/api/webhooks/slack/{bindingId}` · `/interactive` | Slack event + interactive (signature verified). |
+| GET / POST | `/api/webhooks/whatsapp` | Cloud-API verify handshake (GET) + webhook (POST). |
 
-## Tools
+Routing order in `AgentRouter.resolve`: (1) exact peer match → (2) channel-wide (peerId=NULL) → (3) main agent. Webhook inbounds flow `WebhookXController` → signature verify → `AgentRouter.resolve` → `AgentRunner` (queued via `ConversationQueue`) → matching `channels.Channel` adapter.
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/tools` | Tool catalog (name, description, schema). |
+## Skills, tools & MCP
 
-## Events (SSE)
+Skill authoring is **read-only** over HTTP — skills are created/updated via the skill-creator skill (filesystem tool) or promoted from an agent workspace.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/events` | `text/event-stream` — broadcast channel. Frontend singleton `EventSource`. |
+| GET | `/api/skills` · `/{name}` · `/{name}/files` · `/catalogs` · `/catalog/search` | List / metadata / files / importable catalogs. |
+| POST | `/api/skills/promote` · `/catalog/refresh` · `/catalog/import` | Promote / refresh / import. |
+| PUT / DELETE | `/api/skills/{name}/rename` · `/api/skills/{name}` | Rename / un-promote. |
+| GET | `/api/tools` · `/api/tools/meta` | Tool catalog + UI metadata. |
+| GET / POST / PUT / DELETE | `/api/mcp-servers…` · `/{id}/test` | MCP server CRUD + connection test. |
+| GET / POST / DELETE | `/api/subagent-runs` · `/{id}/kill` · `/{id}` | Subagent run monitor. |
 
-## Providers
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/providers/{name}/discover-models` | Call provider's model-list endpoint, cache into `ProviderRegistry`. |
-
-## Config
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/config` | All key/value overrides. Also used by `useAuth.checkAuth` as a session probe. |
-| POST | `/api/config` | Upsert batch. |
-| GET | `/api/config/{key}` | Single value. |
-| DELETE | `/api/config/{key}` | Revert to default. |
-
-## Channels
+## Providers, models & media
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/channels` | List all `ChannelConfig` rows. |
-| GET | `/api/channels/{channelType}` | Fetch one. |
-| PUT | `/api/channels/{channelType}` | Upsert config JSON + enabled flag. |
+| GET / POST | `/api/providers` · `/{name}/discover-models` · `/reachable` · `/models` · `/video-models` · `/refresh-prices` | Provider catalog, model discovery, reachability, pricing. |
+| GET | `/api/ocr/status` | OCR backend availability. |
+| GET / POST | `/api/transcription/state` · `/models/{id}/download` | Whisper model state + download. |
+| GET / POST | `/api/imagegen/{local/state,local/pull,models,progress,capability,capability/probe}` | Local + cloud image generation. |
+| GET / POST | `/api/videogen/{jobs,jobs/recent,models,capability,capability/probe}` | Video generation jobs + capability. |
+| GET / DELETE | `/api/attachments/{uuid}` | Download / delete a persisted attachment. |
 
-## Webhooks (auth-exempt)
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/webhooks/telegram/{secret}` | Path-secret verified. |
-| POST | `/api/webhooks/slack` | Slack signature verified in-controller. |
-| GET | `/api/webhooks/whatsapp` | WA verify handshake. |
-| POST | `/api/webhooks/whatsapp` | WA webhook. |
-
-All webhook inbounds resolve an agent through `AgentRouter.resolve(channelType, peerId)` and feed the message into `AgentRunner`.
-
-## Logs & metrics
+## Config, logging, tailscale
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/logs` | Paged `EventLog` query (filters on `category`, `level`, agent). |
-| GET | `/api/metrics/latency` | In-memory `HdrHistogram` latency per segment (JVM-local, reset on restart). |
-| DELETE | `/api/metrics/latency` | Reset histograms. |
-| POST | `/api/metrics/loadtest` | Drive `LoadTestHarness`. |
-| DELETE | `/api/metrics/loadtest` | Stop harness. |
+| GET / POST | `/api/config` · `/{key}` · DELETE `/{key}` | Runtime Config key/value (Settings UI). |
+| GET / POST / DELETE | `/api/logging/levels…` | Per-logger runtime level overrides. |
+| GET / POST | `/api/tailscale` | Tailscale Funnel public-URL toggle (for webhook channels). |
+
+## Events, logs & metrics
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/events` | `text/event-stream` — broadcast bus (frontend singleton `EventSource`). |
+| GET | `/api/logs` | Paged `EventLog` query (category/level/agent filters). |
+| GET / DELETE | `/api/metrics/latency` · `/latency/rows` | In-memory HdrHistogram latency (JVM-local, reset on restart) + windowed rows. |
+| GET | `/api/metrics/cost` · `/compression` | Durable cost (from `Message.usageJson`) + compression telemetry. |
+| POST / DELETE | `/api/metrics/loadtest` · `/loadtest/data` | Drive / stop / clean the in-process load-test harness. |
 
 ## SPA serving
 
@@ -175,6 +133,6 @@ All webhook inbounds resolve an agent through `AgentRouter.resolve(channelType, 
 
 ## Authentication contract
 
-- Session-cookie based, set by `/api/auth/login` (body: `{username, password}`).
-- `AuthCheck.@Before` guards every protected controller; webhooks whitelist themselves by path prefix.
-- Unauthenticated responses are `401` with `{"error":"Authentication required"}`. Failed login returns `401` with `{"error":"Invalid credentials"}`. Genuine authorization failures (e.g. trying to disable a system tool, deleting the built-in skill-creator skill, rejected config writes) still return `403`.
+- Session-cookie based (`PLAY_SESSION`), set by `POST /api/auth/login`; the in-process `jclaw_api` tool uses a Bearer `ApiToken` instead.
+- `AuthCheck @Before` guards protected controllers; webhooks and the auth/status endpoints exempt themselves.
+- Unauthenticated → **401** (`{"error":"Authentication required"}`); failed login → **401**; genuine authorization failures (e.g. disabling a system tool, deleting the built-in skill-creator skill) → **403**.

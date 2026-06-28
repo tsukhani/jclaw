@@ -1,136 +1,134 @@
 # Source Tree Analysis
 
-Annotated directory tree of the jclaw repository. Paths that generate output (logs, dist, tmp, node_modules) are omitted.
+Annotated directory tree of the jclaw repository. Paths that generate output (logs, dist, tmp, node_modules, .nuxt) are omitted.
 
 ```
 jclaw/
 ├── app/                          # Play 1.x backend (entry point: conf/routes)
-│   ├── controllers/              # HTTP endpoints. Static-method Play controllers.
+│   ├── controllers/              # HTTP endpoints. Static-method Play controllers (~34).
 │   │   ├── Api*Controller.java   # JSON API (all under /api/*). Guarded by @With(AuthCheck.class).
 │   │   ├── Webhook*Controller.java  # Inbound webhooks — exempted from auth, verified per-channel.
-│   │   ├── AuthCheck.java        # Play @Before interceptor — checks session('authenticated').
-│   │   ├── JsonBodyReader.java   # Gson-backed JSON body parser.
+│   │   ├── AuthCheck.java        # Play @Before interceptor — session cookie + Bearer ApiToken.
 │   │   └── Application.java      # SPA fallback (serves public/spa/index.html for unknown routes).
-│   ├── models/                   # JPA entities extending play.db.jpa.Model.
+│   ├── models/                   # JPA entities extending play.db.jpa.Model (~29 entities).
 │   │   ├── Agent, AgentBinding   # Agent config + channel→agent routing bindings.
-│   │   ├── Conversation, Message # Chat history (indexed by agent+channel+peer).
-│   │   ├── Task                  # Scheduled/cron/immediate tasks + retry bookkeeping.
-│   │   ├── Memory                # Free-form per-agent memory rows (LIKE-searched).
-│   │   ├── Config                # Key/value application config (overrides application.conf).
-│   │   ├── EventLog              # Structured event audit log (category + level + details).
-│   │   ├── ChannelConfig, ChannelType  # Per-channel JSON config + enum with outbound resolver.
-│   │   ├── AgentToolConfig       # Per-agent tool enablement.
-│   │   ├── AgentSkillConfig      # Per-agent skill enablement.
-│   │   ├── AgentSkillAllowedTool # Per-(agent, skill, tool) shell-exec allowlist (DB-authoritative).
-│   │   ├── SkillRegistryTool     # Per-(skill, tool) registry snapshot from promotion.
-│   │   └── MessageRole           # user/assistant/tool/system (string-backed enum).
-│   ├── agents/                   # Agent orchestration layer.
+│   │   ├── Conversation, Message, MessageAttachment, SessionCompaction  # Chat history + media + summaries.
+│   │   ├── Task, TaskRun, TaskRunMessage  # Scheduling + run history + transcripts.
+│   │   ├── SlackBinding, TelegramBinding, TelegramTopicBinding, WhatsAppBinding, ChannelConfig  # Channel bindings.
+│   │   ├── McpServer, AgentToolConfig, AgentSkillConfig, AgentSkillAllowedTool, SkillRegistryTool  # Tools/skills/MCP.
+│   │   ├── Memory                # Per-agent memory rows (Lucene-indexed).
+│   │   ├── Config, ApiToken      # Key/value config + Bearer-token credential.
+│   │   ├── Notification, SubagentRun, VideoGenerationJob, ToolApprovalGrant  # Reminders, subagents, async jobs, grants.
+│   │   ├── EventLog, LatencyMetric, CompressionMetric  # Audit log + metrics.
+│   │   └── MessageRole, ChannelType, …  # String-backed enums.
+│   ├── agents/                   # Agent orchestration layer (~29 classes).
 │   │   ├── AgentRouter.java      # 3-tier routing: peer → channel → main.
-│   │   ├── AgentRunner.java      # Prompt assembly + LLM call + tool loop (DEFAULT_MAX_TOOL_ROUNDS=10).
+│   │   ├── AgentRunner.java      # Prompt assembly + LLM call + tool loop (cap via chat.maxToolRounds).
 │   │   ├── SystemPromptAssembler.java  # Builds the final system prompt.
-│   │   ├── SkillLoader.java, SkillVersionManager.java  # File-system skill loading.
-│   │   ├── ToolCatalog.java, ToolRegistry.java         # Discovers/registers Tool impls.
-│   ├── llm/                      # LLM provider integrations (sealed hierarchy).
-│   │   ├── LlmProvider.java      # Abstract base: retries, streaming, OpenAI-compatible HTTP.
-│   │   ├── OpenAiProvider, OllamaProvider, OpenRouterProvider  # Concrete providers.
-│   │   ├── ProviderRegistry.java # Atomic swap of active provider set.
-│   │   └── LlmTypes.java         # ChatMessage, ToolDef, ModelInfo records.
+│   │   ├── ToolRegistry/ToolCatalog/ToolCallLoopRunner/ParallelToolExecutor  # Tool discovery + execution.
+│   │   ├── ContextWindowManager, CompactionGate, CompressionPipeline  # Context budget management.
+│   │   └── SkillLoader, SkillVersionManager, CancellationManager, SubagentRegistry
+│   ├── llm/                      # LLM provider integrations (sealed hierarchy, OkHttp 5).
+│   │   ├── LlmProvider.java      # Sealed base: retries, OpenAI-compatible HTTP, SSE parsing.
+│   │   ├── OpenAiProvider, OllamaProvider, OpenRouterProvider, TogetherAiProvider  # Concrete providers.
+│   │   ├── OkHttpLlmHttpDriver.java  # The single HTTP driver (OkHttp 5 + okhttp-sse).
+│   │   ├── ProviderRegistry.java # Config-backed provider set (60s refresh).
+│   │   ├── TokenUsageEstimator.java  # JTokkit counting, Caffeine-memoized.
+│   │   └── LlmTypes.java         # ChatMessage, ToolDef, ChatRequest/Response, Usage.
+│   ├── mcp/                      # Model Context Protocol client (~12 classes).
+│   │   ├── McpClient.java        # JSON-RPC state machine.
+│   │   ├── McpStdioTransport, McpStreamableHttpTransport, McpConnectionManager
+│   │   └── McpToolAdapter.java   # Bridges discovered MCP tools into agents.ToolRegistry.
 │   ├── memory/                   # Pluggable memory store.
-│   │   ├── MemoryStore.java (iface), JpaMemoryStore.java, MemoryStoreFactory.java
-│   │   └── Neo4jMemoryStore.java.disabled  # Future; not compiled.
-│   ├── tools/                    # Tool implementations exposed to agents.
-│   │   ├── ShellExecTool.java    # Shell command exec (consults AgentSkillAllowedTool at call time).
-│   │   ├── FileSystemTools.java, WebFetchTool.java, WebSearchTool.java
-│   │   ├── PlaywrightBrowserTool.java  # Headless Chromium via Playwright.
-│   │   ├── DocumentsTool.java    # Tika-backed document ingest.
-│   │   ├── TaskTool.java, CheckListTool.java, DateTimeTool.java
-│   │   └── LoadTestSleepTool.java  # Deterministic sleep for load-testing.
-│   ├── jobs/                     # Play background jobs.
-│   │   ├── TaskPollerJob @Every("30s")  # Drains pending tasks on virtual threads.
-│   │   ├── BrowserCleanupJob     # Reaps Playwright browser contexts.
-│   │   ├── EventLogCleanupJob    # Trims EventLog by TTL.
-│   │   ├── ShutdownJob           # Graceful shutdown: drains TaskPoller, closes browsers.
-│   │   ├── DefaultConfigJob      # Seeds required Config rows on boot.
-│   │   ├── ToolRegistrationJob   # Registers tools post-boot.
-│   │   └── CronParser.java       # CRON expression → next Instant.
-│   ├── channels/                 # Outbound messaging adapters.
-│   │   ├── Channel.java (iface), SlackChannel, TelegramChannel, WhatsAppChannel
+│   │   ├── MemoryStore.java (iface), JpaMemoryStore.java (default), MemoryStoreFactory.java
+│   │   └── Neo4jMemoryStore.java # Optional; reflection-loaded if the Neo4j driver is present.
+│   ├── tools/                    # Tool implementations exposed to agents (~22).
+│   │   ├── ShellExecTool.java    # Shell exec (consults AgentSkillAllowedTool at call time).
+│   │   ├── FileSystemTools, WebFetchTool (SSRF-guarded), WebSearchTool
+│   │   ├── PlaywrightBrowserTool, DocumentsTool (Tika), GenerateImageTool, GenerateVideoTool
+│   │   ├── TaskTool, SubagentSpawnTool, SubagentYieldTool, MessageTool, ConversationHistoryTool
+│   │   └── JClawApiTool, CheckListTool, DateTimeTool, LoadTestSleepTool
+│   ├── jobs/                     # Play @Every / @OnApplicationStart jobs (~32).
+│   │   ├── DbSchedulerBootstrapJob, DbSchedulerSchemaInitJob  # db-scheduler wiring (task execution).
+│   │   ├── FullTextSearchInitJob # Opens Lucene indices at boot.
+│   │   ├── DefaultConfigJob, ToolRegistrationJob, McpStartupJob, TokenizerCalibrationJob
+│   │   ├── *CleanupJob, *FlushJob # event-log / latency / browser / queue cleanup.
+│   │   ├── OllamaLocalProbeJob, LmStudioProbeJob, TesseractProbeJob  # Reachability probes.
+│   │   └── ShutdownJob           # Commits + closes Lucene, drains executors on stop.
+│   ├── channels/                 # Messaging adapters (~57 classes).
+│   │   ├── Channel.java (iface), ChannelRegistry
+│   │   ├── Slack* (HTTP webhook + Socket Mode), Telegram* (polling + webhook)
+│   │   ├── WhatsApp* (Cloud API) + WhatsAppCobalt* (WhatsApp-Web via it.auties.whatsapp)
+│   │   └── WebChannel             # WEB replies persist to message + stream over SSE.
 │   ├── services/                 # Business-logic services (Play convention: static methods).
-│   │   ├── AgentService, ConfigService, ConversationService, ConversationQueue (per-convo FIFO),
-│   │   ├── ModelDiscoveryService, NotificationBus (SSE fan-out), EventLogger,
-│   │   ├── DocumentWriter, SkillPromotionService, SkillBinaryScanner,
-│   │   ├── LoadTestHarness, LoadTestRunner,
-│   │   ├── Tx.java               # Tiny transactional wrapper.
-│   │   └── scanners/             # Pluggable file-scan integrations (VirusTotal, MetaDefender, MalwareBazaar).
-│   ├── utils/                    # Cross-cutting utilities.
-│   │   ├── HttpClients, GsonHolder, JpqlFilter, LatencyStats, LatencyTrace,
-│   │   ├── VirtualThreads, WebhookUtil
-│   └── views/                    # Groovy templates (only Application, errors — SPA handles UI).
+│   │   ├── Tx.java               # Transactional wrapper (no-ops if already inside a tx).
+│   │   ├── ConfigService, ConversationService, ConversationQueue, SessionCompactor
+│   │   ├── search/               # LuceneIndexer + DirectLuceneMessageSearchRepository (Lucene 10).
+│   │   ├── transcription/, caption/, imagegen/, videogen/, video/  # Media subsystems + sidecar managers.
+│   │   ├── compression/, catalog/, scanners/  # Compression, tool/task catalogs, malware scanners.
+│   │   ├── TaskSchedulingService, TaskExecutionHandler, ReminderDispatcher  # db-scheduler integration.
+│   │   ├── NotificationBus (SSE fan-out), EventLogger, LatencyMetricRecorder
+│   │   └── LoadTestRunner, LoadTestHarness
+│   ├── utils/                    # Cross-cutting utilities (~20).
+│   │   ├── HttpFactories         # Single OkHttp 5 provisioning (llmStreaming/llmSingleShot/general).
+│   │   ├── SsrfGuard, GsonHolder, JpqlFilter, LatencyStats, LatencyTrace
+│   │   └── VirtualThreads, WebhookUtil, TokenCoalescer
+│   ├── com/aspose/words/         # Tiny PDFBox-backed shim satisfying Cobalt's Aspose static link (JCLAW-451).
+│   ├── slash/                    # Slash-command dispatcher (Commands.java: /new, /reset, /compact, /model, …).
+│   ├── plugins/                  # (empty)
+│   └── views/                    # Groovy templates (only Application + error pages — SPA handles UI).
 │
 ├── conf/                         # Play configuration.
-│   ├── application.conf          # The only config file. All environment-specific
-│   │                             # values live here under %prod. / %test. prefixes;
-│   │                             # secrets resolve from .env via ${VARNAME} placeholder.
-│   ├── routes                    # URL table — ~70 /api/* endpoints + SPA catch-all.
-│   ├── log4j2.xml / log4j2-prod.xml  # Logging.
-│   ├── messages                  # i18n (default locale).
-│   └── nginx.example.conf        # Reverse-proxy template.
+│   ├── application.conf          # The only config file. %prod. / %test. prefixes; secrets via ${VARNAME}.
+│   ├── routes                    # URL table — ~80 /api/* endpoints + SPA catch-all.
+│   ├── log4j2.xml / log4j2-prod.xml / log4j2-test.xml  # Logging per mode.
+│   └── messages                  # i18n (default locale).
 │
-├── frontend/                     # Nuxt 3 SPA.
-│   ├── app.vue                   # Root: <NuxtLayout>/<NuxtPage/> + global ConfirmDialog.
+├── frontend/                     # Nuxt 4 SPA.
+│   ├── app.vue                   # Root: <NuxtLayout>/<NuxtPage/> + global dialogs.
 │   ├── layouts/default.vue       # The only layout: sidebar + topbar + content slot.
-│   ├── pages/                    # File-routed pages (11).
-│   │   ├── index.vue             # Dashboard.
-│   │   ├── chat.vue, conversations.vue  # Chat + history (chat is largest page, ~1k LOC).
-│   │   ├── agents.vue, channels.vue, skills.vue, tools.vue, tasks.vue, logs.vue
-│   │   ├── settings.vue          # Largest page (~1.5k LOC).
-│   │   └── login.vue             # Only page that bypasses auth.global.ts.
+│   ├── pages/                    # File-routed pages (20, incl. conversations/ + channels/).
 │   ├── components/
-│   │   ├── ConfirmDialog.vue     # Globally mounted, driven by useConfirm.
-│   │   └── SkillFileTree.vue     # Used on skills.vue.
-│   ├── composables/
-│   │   ├── useAuth.ts            # Session state + login/logout/checkAuth (module-level lock).
-│   │   ├── useApiMutation.ts     # $fetch wrapper with loading/error state.
-│   │   ├── useEventBus.ts        # Singleton EventSource → /api/events fan-out.
-│   │   ├── useProviders.ts, useToolMeta.ts, useTheme.ts, useConfirm.ts
-│   ├── middleware/auth.global.ts # Redirects to /login when checkAuth() fails.
-│   ├── types/api.ts              # API wire types (Agent, Conversation, Message, …).
-│   ├── utils/
-│   │   ├── format.ts             # Date/number formatters.
-│   │   └── usage-cost.ts         # LLM cost calculator from token usage.
-│   ├── test/                     # Vitest unit tests (7 files — auth, chat, composables, markdown, pages, skills, usage-cost).
-│   ├── tests/, playwright.config.ts, playwright-report/  # Playwright E2E harness.
-│   ├── vitest.config.ts          # happy-dom env.
-│   ├── tailwind.config.js, nuxt.config.ts
-│   └── package.json              # pnpm; pinned 10.33.0.
+│   │   ├── ui/                   # 74 shadcn-nuxt / Reka UI primitives.
+│   │   └── *.vue, guide/         # 17 feature components (DataTable, ChatContextMeter, GuideRenderer, …).
+│   ├── composables/              # ~17 (useAuth, useEventBus, useApiParsed, useApiMutation, useTheme, …).
+│   ├── plugins/                  # theme.client.ts (pre-paint theme), axe.client.ts (dev a11y).
+│   ├── middleware/auth.global.ts # Routes to /login or /setup-password based on auth state.
+│   ├── types/                    # api.ts (wire types) + schemas.ts (Zod) + ambient .d.ts.
+│   ├── utils/                    # Pure helpers (format, usage-cost, tool-calls, schedule, …).
+│   ├── test/                     # Vitest unit tests (~69 files).
+│   ├── tests/e2e/, playwright.config.ts  # Playwright E2E harness.
+│   ├── vitest.config.ts          # jsdom env.
+│   ├── nuxt.config.ts, components.json, eslint.config.mjs, stylelint.config.mjs
+│   └── package.json              # pnpm; pinned 11.7.0 (+sha512).
 │
-├── test/                         # Play backend tests (44 JUnit classes + Application.test.html).
-│                                 # Run with `play auto-test` (non-interactive) — not `play test`.
-├── public/                       # Play static assets; spa/ is staged here at start/deploy time (gitignored), not baked into the dist zip.
+├── sidecar/                      # Python local-generation daemons (uv-run).
+│   ├── image/                    # Local diffusion image model (FLUX.2 klein).
+│   └── video/                    # Local video model (LTX / WAN).
+├── test/                         # Play backend tests (JUnit 6). Run with `play autotest` — not `play test`.
+├── public/                       # Play static assets; spa/ staged here at start/deploy (gitignored).
 ├── skills/                       # File-system skill definitions (global, promoted-skill source of truth).
-├── workspace/                    # Per-agent workspace (filesystem-tool scoped).
-├── data/                         # H2 DB file + attachments/ blob storage (dev default).
-├── logs/                         # Runtime logs.
-├── lib/, modules/, tmp/, precompiled/, dist/  # Play runtime/build directories.
-├── openspec/                     # OpenSpec change proposals.
-│   ├── changes/v020-backlog/     # Active proposal.
+├── workspace/                    # Per-agent workspace (filesystem-tool scoped; main/ holds Standing Orders).
+├── data/                         # H2 DB file + attachments/ + jclaw-lucene/ index (dev default).
+├── .githooks/                    # pre-commit (lint-staged) + pre-push (full suite) hooks.
+├── .devcontainer/                # Dev Container (Ubuntu 26.04, Zulu 25, Node 24, Play fork).
+├── openspec/                     # OpenSpec proposals.
 │   ├── specs/shell-exec/         # Ratified spec.
-│   └── archive/
-├── docs/                         # <-- this documentation suite.
-│   └── perf/                     # Performance baseline JSON (load-test output).
-├── documentation/                # Play default welcome page (ignorable).
+│   └── archive/                  # Completed proposals (v020-backlog, performance-critical-fixes).
+├── docs/                         # <-- this documentation suite (architecture/ + user-guide/).
 ├── _bmad/, _bmad-output/         # BMAD/BMM workflow artifacts.
 ├── jclaw.sh                      # One-stop dev/deploy launcher (backend + frontend).
-├── Dockerfile                    # 3-stage build → GHCR image.
+├── install.sh / install.ps1      # One-line bundle installers (macOS/Linux/Windows).
+├── Dockerfile                    # Multi-stage build → GHCR image.
 ├── docker-compose.yml            # Consumer-facing single-container deploy.
-├── Jenkinsfile                   # CI (build, test, dist, release to GitHub + GHCR).
-├── README.md, CLAUDE.md, LICENSE # Root docs.
-└── *.iml / *.ipr / *.iws         # IntelliJ project files (checked in).
+├── Jenkinsfile                   # CI (build, test, dist/bundle, release to GitHub + GHCR).
+├── .play-version                 # Pinned play1 fork version (1.13.44).
+└── README.md, CLAUDE.md, AGENTS.md, LICENSE  # Root docs.
 ```
 
 ## Integration points (multi-part)
 
 - **Frontend → Backend (dev):** `frontend/nuxt.config.ts` → `nitro.devProxy['/api']` → `http://localhost:9000/api` — no CORS config needed.
-- **Frontend → Backend (prod):** the SPA is `nuxi generate`-d and copied into `public/spa/`. Play serves `/_nuxt/*` as static dir and catches unknown paths via `Application.spa` (renders `public/spa/index.html`), so the frontend and API share origin.
-- **Session coupling:** auth is cookie-backed (Play `session.get("authenticated")`); `useAuth.checkAuth` pings `/api/config` to detect session validity — no token exchange.
+- **Frontend → Backend (prod):** the SPA is `nuxi generate`-d and copied into `public/spa/`. Play serves `/_nuxt/*` as a static dir and catches unknown paths via `Application.spa` (renders `public/spa/index.html`), so the frontend and API share origin.
+- **Session coupling:** auth is cookie-backed; `useAuth.checkAuth` pings the auth-status endpoint to detect session validity — no token exchange (the in-process `jclaw_api` tool uses a Bearer `ApiToken` separately).
 - **SSE channel:** `/api/events` (`ApiEventsController`) + `NotificationBus` backend → `useEventBus` singleton `EventSource` frontend.

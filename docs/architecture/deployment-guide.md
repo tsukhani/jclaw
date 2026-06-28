@@ -6,48 +6,50 @@ How JClaw is built, packaged, and shipped.
 
 | Artifact | Source | Consumers |
 |---|---|---|
-| `dist/jclaw-bundle.zip` | `play dist` → `playBundle` Gradle task (self-contained: precompiled bytecode, framework jar + lib, Gradle-resolved deps under `lib/`, `conf/`, `modules/`, `public/` with the staged SPA) | Manual `./jclaw.sh --deploy` flow, GitHub Releases. |
+| `dist/jclaw.zip` | `./jclaw.sh dist` (== gradle `playDist`) | Source distribution; target host needs Java 25 + Gradle + the Play fork. |
+| `dist/jclaw-bundle.zip` | `./jclaw.sh bundle` (== gradle `playBundle`) — self-contained: precompiled bytecode, framework jar + lib, Gradle-resolved deps, `conf/`, `public/` with the staged SPA, and a `./play` launcher | One-line installers + GitHub Releases; runs with only a Java 25 JRE. |
 | `ghcr.io/tsukhani/jclaw:<tag>` | Multi-stage `Dockerfile` | `docker-compose.yml`, anywhere a container runtime is available. |
-| GitHub Release | Jenkins `Release` stage | End-users downloading the dist zip. |
+| GitHub Release | Jenkins `Release` stage | End-users downloading the bundle zip (or the installer). |
 
 ## Build pipeline (Jenkins)
 
-`Jenkinsfile` declares a pipeline on a node labeled `JDK25` + `node-22`.
+`Jenkinsfile` runs on `agent any` with `tools { jdk 'JDK25'; nodejs 'node-24' }`.
 
 ```
-Setup ──► Build (parallel BE + FE) ──► Test (parallel BE + FE)
-      ──► Package ──► [Release, Cleanup Old Releases] (if RELEASE=true)
+Setup ──► Build (parallel BE + FE) ──► Test (parallel BE + FE) ──► Sonar
+      ──► Package ──► [Release, Publish Dev Container, Cleanup] (gated by params)
 ```
 
 Key steps:
 
-- **Setup** — `play version`, `corepack prepare pnpm@10.33.0 --activate`, `pnpm install --frozen-lockfile`.
-- **Build.Backend** — `play precompile` (Gradle resolves deps as a transitive step; PF-90 dropped the legacy `play deps --sync`).
+- **Setup** — check Java/Play versions, `corepack enable`, `pnpm install --frozen-lockfile`.
+- **Build.Backend** — `play precompile` (Gradle resolves deps transitively; PF-90 dropped the legacy `play deps --sync`).
 - **Build.Frontend** — `(cd frontend && npx nuxi generate)`.
-- **Test.Backend** — `play autotest` + JUnit XML publish from `test-result/*.xml`.
-- **Test.Frontend** — `(cd frontend && pnpm test)`.
-- **Package** — `play dist` (the `playBundle` Gradle task) writes a self-contained `dist/jclaw-bundle.zip` that's archived as a Jenkins artifact. The SPA **is** injected into the zip — `jclaw.sh dist` runs `nuxi generate` and copies `frontend/.output/public` into `public/spa/` before `play dist` packs the bundle, and `playBundle`'s include list covers `public/`. So the artifact is a JDK-only-runs-anywhere zip; no separate SPA build at deploy time.
-- **Release** (when param `RELEASE=true`): creates git tag `v<application.version>`, deletes any pre-existing GitHub Release at that tag, uploads `dist/jclaw-bundle.zip`, then builds and pushes `ghcr.io/tsukhani/jclaw:<tag>` and `:latest`.
-- **Cleanup** — Keeps the 5 most recent GitHub Releases; prunes old GHCR versions while preserving whatever `:latest` currently points to.
+- **Test.Backend** — `play autotest` + JaCoCo XML; JUnit XML published from `test-result/*.xml`.
+- **Test.Frontend** — `(cd frontend && pnpm test --coverage)` (Vitest + lcov).
+- **Sonar** — `./gradlew sonar -Dsonar.projectVersion=v${appVersion}` (project key `abundent:jclaw`), with the quality-gate binding.
+- **Package** — `./jclaw.sh dist` + `./gradlew playBundle` write `dist/jclaw.zip` and `dist/jclaw-bundle.zip`, archived as Jenkins artifacts. The SPA **is** baked into the bundle — `nuxi generate` output is copied into `public/spa/` before packaging.
+- **Release** (param `RELEASE=true`): create git tag `v<application.version>`, refresh the GitHub Release with both zips, then multi-arch `buildx` push of `ghcr.io/tsukhani/jclaw:<tag>` + `:latest` for `linux/amd64` + `linux/arm64` (QEMU binfmt for cross-arch).
+- **Publish Dev Container** (param `PUBLISH_DEVCONTAINER=true`): buildx push `ghcr.io/tsukhani/jclaw-devcontainer:latest`.
+- **Cleanup** (on release): keep the 5 most recent GitHub Releases + 5 most recent GHCR versions (never deleting whatever `:latest` points to); prune BuildKit cache older than 30 days.
 
-## Shell deploy (no Docker)
+## Bare-metal deploy (no Docker)
 
-```bash
-# Packages, unzips to <dir>/jclaw/, installs deps, builds frontend, starts both.
-./jclaw.sh --deploy /tmp start
-./jclaw.sh --deploy /tmp stop
-./jclaw.sh --deploy /tmp logs
-```
-
-Custom ports: `./jclaw.sh --deploy /opt --backend-port 8080 --frontend-port 4000 start`. The script updates the frontend API proxy to the specified backend port.
-
-Once deployed, subsequent starts skip packaging:
+Build a self-contained bundle, unzip it wherever you want to install, and start it in place:
 
 ```bash
-./jclaw.sh start
-./jclaw.sh stop
-./jclaw.sh logs
+./jclaw.sh bundle                         # writes dist/jclaw-bundle.zip (self-contained, JRE-only)
+unzip -o dist/jclaw-bundle.zip -d /opt
+cd /opt/jclaw && ./jclaw.sh start         # start; stop; status; logs
 ```
+
+Or use the one-line installer (downloads the latest bundle, installs to `~/.jclaw`, wires the `jclaw` PATH shim + shell completion):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
+```
+
+Custom port: `./jclaw.sh --backend-port 8080 start`.
 
 ## Docker (preferred in prod)
 
@@ -59,15 +61,18 @@ services:
     image: ghcr.io/tsukhani/jclaw:latest
     pull_policy: always
     ports:
-      - "9000:9000"
+      - "${JCLAW_PORT:-9000}:9000"
+      - "${JCLAW_HTTPS_PORT:-9443}:9443/tcp"   # HTTP/2 over TLS
+      - "${JCLAW_HTTPS_PORT:-9443}:9443/udp"   # HTTP/3 over QUIC
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./workspace:/app/workspace
       - ./skills:/app/skills
+      - ./certs:/app/certs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/127.0.0.1/9000' || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/api/status || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -82,53 +87,43 @@ docker compose logs -f
 docker compose down
 ```
 
-The image runs `play run --%prod`. The SPA is already baked in — no Node/pnpm/Play toolchain required on the host.
+On first boot the entrypoint generates a 64-char `PLAY_SECRET` (persisted to `./data/.play-secret`) and a self-signed TLS cert at `certs/host.cert` if none exists, then runs the backend in prod mode with the 9443 HTTPS listener. The SPA is baked into the image — no Node/pnpm/Play toolchain on the host. For browser-trusted HTTPS + working HTTP/3, sign the cert with mkcert's local CA (`./jclaw.sh https`) and restart.
 
 ### Persisted volumes
 
 | Volume | Purpose |
 |---|---|
-| `./data` | H2 DB file + `attachments/` blob storage. |
+| `./data` | H2 DB file, `attachments/` blobs, `jclaw-lucene/` index, `.play-secret`. |
 | `./logs` | Runtime logs. |
-| `./workspace` | Per-agent workspace files. |
+| `./workspace` | Per-agent workspace files (Standing Orders under `main/`). |
 | `./skills` | Global skills registry (authoring output). |
-
-### Healthcheck note
-
-The healthcheck uses bash's `/dev/tcp` to probe `:9000` — avoids pulling `curl`/`wget` back into the runtime image. `start_period: 60s` gives Play time to precompile, seed the DB, and bind on a cold boot.
+| `./certs` | TLS cert + key (`host.cert` / `host.key`). |
 
 ## Dockerfile stages
 
-1. **`frontend-build`** (`node:22-slim`) — corepack + pnpm + `nuxi generate`.
-2. **`backend-build`** (`azul/zulu-openjdk:25`) — downloads the latest `tsukhani/play1` release, installs Playwright Chromium into `/opt/pw-browsers`, copies the SPA into `public/spa/`, bakes in `workspace/main/` (SOUL.md, IDENTITY.md, USER.md, BOOTSTRAP.md, AGENT.md) as the main-agent seed, `play precompile` (which transitively resolves Gradle deps via the `org.playframework.play1` plugin — PF-90 dropped the legacy `play deps --sync`), and creates `data/` + `logs/`. The `./workspace` bind-mount in `docker-compose.yml` shadows the baked seed at runtime.
-3. **`runtime`** (`azul/zulu-openjdk:25-jre-headless-latest`) — installs the Playwright-Chromium shared libs plus `python3` (for Play's Python CLI wrapper). Copies `/opt` and `/app` wholesale from the backend-build stage so the `/opt/play → /opt/play-<version>` symlink is preserved. `EXPOSE 9000`. `CMD ["play", "run", "--%prod"]`.
+1. **bundle stage** (`azul/zulu-openjdk:25.0.3`) — Node 24 (NodeSource) + corepack + Gradle 9.5.0; downloads the `tsukhani/play1` release pinned in `.play-version`, runs `pnpm install` + `nuxi generate` (SPA → `public/spa/`), `play precompile`, and `gradle playBundle` to produce the self-contained bundle.
+2. **chromium stage** (`azul/zulu-openjdk:25.0.3`) — installs Playwright Chromium into `/opt/pw-browsers`.
+3. **runtime** (`ubuntu:26.04` + Zulu 25 JRE) — copies the unpacked bundle + Chromium libs; bakes `workspace/main/` (SOUL.md, IDENTITY.md, USER.md, BOOTSTRAP.md, AGENT.md) as the main-agent seed (the `./workspace` bind-mount shadows it at runtime); `EXPOSE 9000 9443/tcp 9443/udp`; entrypoint auto-provisions `PLAY_SECRET` + certs, then `./play run --%prod --https.port=9443`.
 
 ## Production configuration
 
-All environment-specific config lives in the single `conf/application.conf` via Play's `%prod.` and `%test.` line prefixes — there is no separate `application.prod.conf` or template. The only operator-managed value outside the file is `application.secret`, which resolves from an env var (whose name is whatever conf's `application.secret=${VARNAME}` declares; `play secret` writes it to `.env`).
+All environment-specific config lives in the single `conf/application.conf` via Play's `%prod.` / `%test.` line prefixes — there is no separate `application.prod.conf`. The only operator-managed value outside the file is `application.secret`, which resolves from the `PLAY_SECRET` env var (`./jclaw.sh secret` / the container entrypoint writes it).
 
-- The shipped `application.conf` keeps DB on H2 file DB even in prod — PostgreSQL config is commented-in template (`%prod.db.url=jdbc:postgresql://…`). Switch and provide `DB_PASSWORD` env var before promoting.
-- `jpa.ddl=update` in prod (`%prod.jpa.ddl=update`). Explicit tradeoff for pre-1.0 — additive schema only; renames/type changes need manual intervention.
-- Pool: `%prod.db.pool.maxSize=30`, `%prod.db.pool.timeout=5000`.
-- Play pool: `%prod.play.pool=20` (1 thread in dev).
+- The shipped `application.conf` keeps DB on H2 file even in prod — PostgreSQL is a commented-in template (`%prod.db.url=jdbc:postgresql://…`). Switch and provide `DB_PASSWORD` before promoting.
+- `jpa.ddl=update` in prod (`%prod.jpa.ddl=update`). Explicit pre-1.0 tradeoff — additive schema only; renames/type changes need manual intervention.
+- Pool: `%prod.db.pool.maxSize=64`, `%prod.db.pool.timeout=5000` (raised for SSE chat streams that hold a JPA connection).
 - Logging: `%prod.application.log.path=/log4j2-prod.xml`.
+- HTTPS: off by default; `./jclaw.sh https` + a valid cert enables the 9443 listener (HTTP/2 + HTTP/3) at runtime via `-Dhttps.port=9443`. `conf/application.conf` is never modified by the toggle.
 
 ## Reverse proxy
 
-Template at `conf/nginx.example.conf`. Requirements if fronting with nginx:
-
+If fronting with nginx:
 - `proxy_buffering off` for SSE endpoints (`/api/events`, `/api/chat/stream`).
-- `proxy_set_header Host $host` so Play can compute self-URLs correctly.
+- `proxy_set_header Host $host` so Play computes self-URLs correctly.
 - Pass cookies through (don't strip the `PLAY_SESSION` cookie).
 
 ## Release cadence
 
-- Each commit bumps `application.version` in `conf/application.conf` (per post-coding workflow).
-- Jenkins is triggered on push; release builds are gated by the `RELEASE` parameter.
-- Tags: `v0.X.Y`. Latest observed on `main`: `v0.7.18`.
-
-## Prune policy (automated)
-
-From the Jenkins `Cleanup Old Releases` stage:
-- Keep 5 most recent GitHub Releases (`gh release list … | jq .[5:]`).
-- Keep 5 most recent GHCR versions, NEVER deleting whichever version `:latest` currently points to.
+- `/deploy` bumps `application.version` in `conf/application.conf`, creates the signed release commit + tag (`v0.X.Y`), and pushes to both remotes.
+- Jenkins triggers on push; release builds (tag + GitHub Release + GHCR) are gated by the `RELEASE` parameter.
+- Latest observed on `main`: `v0.14.47`.
