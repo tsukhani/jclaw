@@ -508,6 +508,13 @@ public class SkillPromotionService {
         var backupDir = globalDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
         var replacingExisting = Files.isDirectory(targetDir);
 
+        // Stamp the system-managed version onto SKILL.md before staging: 1.0.0
+        // for a brand-new skill, an auto patch-bump for a materially-changed
+        // re-publish. Conformance + promotion deliberately leave version: out of
+        // frontmatter, so this write path is where it's assigned — without it an
+        // imported skill reads back as 0.0.0.
+        stampSkillVersion(sanitized, targetDir);
+
         try {
             stageAndSwap(targetDir, stagingDir, backupDir, replacingExisting, staging -> {
                 Files.createDirectories(staging.resolve("credentials"));
@@ -539,6 +546,21 @@ public class SkillPromotionService {
                     KEY_ERROR, e.getMessage()
             ));
         }
+    }
+
+    /**
+     * Assign the system-managed {@code version:} to the staged SKILL.md via the
+     * shared finalize path ({@link SkillLoader#finalizeSkillMdWrite}): INITIAL
+     * 1.0.0 when {@code targetDir} has no prior SKILL.md, an auto patch-bump when
+     * a material change replaces an existing one, preserved otherwise. No-op when
+     * SKILL.md isn't in the payload.
+     */
+    // Public for SkillPromotionServiceCoverageTest (default-package test cannot access package-private)
+    public static void stampSkillVersion(LinkedHashMap<String, String> sanitized, Path targetDir) {
+        var skillMd = sanitized.get(SKILL_FILE_NAME);
+        if (skillMd == null) return;
+        sanitized.put(SKILL_FILE_NAME,
+                SkillLoader.finalizeSkillMdWrite(targetDir.resolve(SKILL_FILE_NAME), skillMd));
     }
 
     private static void writeSanitizedTextFiles(Path stagingDir,

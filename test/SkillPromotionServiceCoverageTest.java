@@ -11,6 +11,7 @@ import services.SkillPromotionService;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -633,6 +634,46 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
                 "disabled-tool dependency must fail validation");
         assertTrue(result.message().contains("disabled"),
                 "error message must call out the disabled list: " + result.message());
+    }
+
+    // ==================== version stamping (write path) ====================
+
+    @Test
+    void stampSkillVersionInjects1_0_0ForNewSkill() {
+        // The reported bug: a conformed/imported SKILL.md omits version:, so the
+        // write path must stamp INITIAL 1.0.0 — otherwise it reads back as 0.0.0.
+        var payload = new LinkedHashMap<String, String>();
+        payload.put("SKILL.md", "---\nname: humanizer\ndescription: d\n---\n# Body");
+        var target = globalSkillsDir.resolve("humanizer"); // no prior SKILL.md
+
+        SkillPromotionService.stampSkillVersion(payload, target);
+
+        assertTrue(payload.get("SKILL.md").contains("version: 1.0.0"),
+                "new skill without version: must be stamped 1.0.0, got:\n" + payload.get("SKILL.md"));
+    }
+
+    @Test
+    void stampSkillVersionPatchBumpsOnMaterialRepublish() throws Exception {
+        var target = globalSkillsDir.resolve("humanizer");
+        writeSkillMd(target, "humanizer", "1.4.2"); // existing global skill at 1.4.2
+
+        var payload = new LinkedHashMap<String, String>();
+        payload.put("SKILL.md", "---\nname: humanizer\ndescription: changed\n---\n# New body");
+        SkillPromotionService.stampSkillVersion(payload, target);
+
+        assertTrue(payload.get("SKILL.md").contains("version: 1.4.3"),
+                "material re-publish must auto patch-bump 1.4.2 -> 1.4.3, got:\n" + payload.get("SKILL.md"));
+    }
+
+    @Test
+    void stampSkillVersionNoopWhenNoSkillMd() {
+        var payload = new LinkedHashMap<String, String>();
+        payload.put("notes.md", "no frontmatter here");
+
+        SkillPromotionService.stampSkillVersion(payload, globalSkillsDir.resolve("x"));
+
+        assertFalse(payload.containsKey("SKILL.md"), "must not fabricate a SKILL.md");
+        assertEquals("no frontmatter here", payload.get("notes.md"), "other files untouched");
     }
 
 }
