@@ -115,6 +115,7 @@ GET     /api/skills                             ApiSkillsController.list
 # Importable-skills catalog search (skills.sh / mastra-ai snapshot, lazy-loaded).
 # Multi-segment path so it resolves before the GET /api/skills/{name} pattern below.
 GET     /api/skills/catalog/search              ApiSkillsController.catalogSearch
+POST    /api/skills/catalog/import              ApiSkillsController.catalogImport
 POST    /api/skills/promote                     ApiSkillsController.promote
 GET     /api/skills/{name}                      ApiSkillsController.get
 PUT     /api/skills/{name}/rename               ApiSkillsController.rename

@@ -103,6 +103,38 @@ function openCatalog() {
   if (!catalogResults.value.length && !catalogLoading.value) searchCatalog()
 }
 
+// Import is synchronous on the backend (GitHub fetch + conformance + sanitize
+// LLM passes), so it's a multi-second call — show a per-row "Importing…" state.
+const catalogKey = (s: CatalogSkill) => `${s.source}/${s.skillId}`
+const importingKey = ref<string | null>(null)
+const importedKeys = ref<Set<string>>(new Set())
+const importMessage = ref<string | null>(null)
+
+async function importSkill(s: CatalogSkill) {
+  const key = catalogKey(s)
+  importingKey.value = key
+  importMessage.value = null
+  try {
+    const res = await $fetch<{ status: string, message?: string, skillName?: string }>(
+      '/api/skills/catalog/import',
+      { method: 'POST', body: { source: s.source, skillId: s.skillId } },
+    )
+    if (res.status === 'imported') {
+      importedKeys.value.add(key)
+      await refreshSkills() // the new skill appears in the Global Skills panel
+    }
+    else {
+      importMessage.value = `${s.displayName || s.skillId}: ${res.message || 'import failed'}`
+    }
+  }
+  catch {
+    importMessage.value = `${s.displayName || s.skillId}: import failed`
+  }
+  finally {
+    importingKey.value = null
+  }
+}
+
 // Panel filters — case-insensitive substring match against the displayed name.
 // Skills filter on the canonical folderName (falling back to name); agents on
 // `agent.name`. Both lists are alphabetized by display name first so that newly
@@ -1472,9 +1504,28 @@ function totalSkillCount(agentId: number) {
                     rel="noopener noreferrer"
                     class="text-xs text-accent hover:underline"
                   >GitHub ↗</a>
+                  <span
+                    v-if="importedKeys.has(catalogKey(s))"
+                    class="text-xs text-emerald-600 dark:text-emerald-400"
+                  >Imported ✓</span>
+                  <button
+                    v-else
+                    :disabled="importingKey === catalogKey(s)"
+                    class="text-xs px-2 py-1 border border-border text-fg-strong hover:bg-muted disabled:opacity-50"
+                    @click="importSkill(s)"
+                  >
+                    {{ importingKey === catalogKey(s) ? 'Importing…' : 'Import' }}
+                  </button>
                 </div>
               </li>
             </ul>
+          </div>
+
+          <div
+            v-if="importMessage"
+            class="px-4 py-2 border-t border-border text-xs text-red-600 dark:text-red-400 shrink-0"
+          >
+            {{ importMessage }}
           </div>
         </div>
       </div>

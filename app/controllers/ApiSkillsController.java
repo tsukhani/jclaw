@@ -15,6 +15,7 @@ import play.Logger;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.RegistrySkillImporter;
 import services.SkillBinaryScanner;
 import services.SkillCatalogService;
 import services.SkillPromotionService;
@@ -82,6 +83,8 @@ public class ApiSkillsController extends Controller {
 
     public record SkillPromoteRequest(Long agentId, String skillName) {}
 
+    public record SkillImportRequest(String source, String skillId) {}
+
     public record SkillPromoteResponse(String status, String skillName) {}
 
     public record SkillRenameRequest(String newName) {}
@@ -123,6 +126,29 @@ public class ApiSkillsController extends Controller {
     public static void catalogSearch(String q, Integer limit) {
         var result = SkillCatalogService.search(q, limit != null ? limit : 30);
         renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * POST /api/skills/catalog/import — Import a catalog skill from GitHub into
+     * the global registry. The skill is conformed to the skill-creator contract
+     * (tool-name mapping + frontmatter normalization), malware-scanned, and
+     * secret-sanitized before it is written. Runs synchronously — the conformance
+     * + sanitization LLM passes plus the GitHub fetch make this a multi-second call.
+     */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillImportRequest.class)))
+    @Operation(summary = "Import a catalog skill from GitHub into the global registry")
+    public static void catalogImport() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null || !body.has("source") || !body.has("skillId")) badRequest();
+
+        var source = body.get("source").getAsString();
+        var skillId = body.get("skillId").getAsString();
+
+        var result = RegistrySkillImporter.importToGlobal(source, skillId);
+        if (!result.ok()) {
+            renderJSON(gson.toJson(Map.of(KEY_STATUS, "failed", "message", result.message())));
+        }
+        renderJSON(gson.toJson(Map.of(KEY_STATUS, "imported", KEY_SKILL_NAME, result.skillName())));
     }
 
     /** GET /api/skills/{name} — Get a global skill with full content. */

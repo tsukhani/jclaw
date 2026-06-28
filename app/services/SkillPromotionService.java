@@ -268,13 +268,27 @@ public class SkillPromotionService {
         // ── Hash-based noop check ──
         if (skipForGlobalCheck(skillDir, skillName)) return;
 
+        publishToGlobal(skillDir, skillName);
+    }
+
+    /**
+     * Shared publish core behind both agent promotion and registry import:
+     * malware scan → read → enforce structure → strip credentials → LLM-sanitize
+     * → atomic write to the global registry. The caller owns any source-specific
+     * gating beforehand — promotion's capability + hash-noop checks, or the
+     * registry importer's conformance pass (which has already rewritten SKILL.md
+     * to the skill-creator contract by the time we get here). Returns true on a
+     * completed write, false when a gate (malware scan, unreadable files) refused;
+     * the refusal is already logged + notified.
+     */
+    public static boolean publishToGlobal(Path skillDir, String skillName) {
         // ── Malware scan ──
-        if (!checkMalwareScan(skillDir, skillName)) return;
+        if (!checkMalwareScan(skillDir, skillName)) return false;
 
         // ── Read source files ──
         var sourceTextFiles = new LinkedHashMap<String, String>();
         var sourceBinaryFiles = new ArrayList<String>();
-        if (!readSourceFiles(skillDir, sourceTextFiles, sourceBinaryFiles)) return;
+        if (!readSourceFiles(skillDir, sourceTextFiles, sourceBinaryFiles)) return false;
 
         // ── Enforce directory structure ──
         var textFiles = enforceTextFileStructure(sourceTextFiles);
@@ -294,6 +308,7 @@ public class SkillPromotionService {
 
         // ── Atomic write to global registry ──
         writeToGlobalRegistry(skillDir, skillName, sanitized, binaryFiles);
+        return true;
     }
 
     /**
