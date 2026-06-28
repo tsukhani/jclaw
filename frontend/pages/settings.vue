@@ -680,6 +680,62 @@ const { data: imagegenLocalState, refresh: refreshImagegenLocalState }
 
 const fluxUvAvailable = computed(() => imagegenLocalState.value?.uvAvailable ?? false)
 const fluxModelStatus = computed(() => imagegenLocalState.value?.modelStatus ?? 'ABSENT')
+
+// Self-Hosted hardware gate (mirrors the videogen capability probe): a manual "detect GPU" runs the image
+// sidecar's `uv run serve.py --probe` to check GPU + free VRAM; the Self-Hosted radio is disabled when the
+// probe says this machine can't run Flux (no GPU, or too little free VRAM).
+interface ImageCapability {
+  kind: string
+  gpu: string
+  freeVramGb: number
+  totalVramGb: number
+  runnable: boolean
+  tier: string
+  reason: string | null
+}
+interface ImageCapabilitySnapshot {
+  uvAvailable: boolean
+  uvReason: string | null
+  state: 'NEEDS_PROBE' | 'PROBING' | 'READY' | 'UNAVAILABLE' | 'ERROR'
+  capability: ImageCapability | null
+  error: string | null
+}
+const { data: imageCapability, refresh: refreshImageCapability }
+  = await useFetch<ImageCapabilitySnapshot>('/api/imagegen/capability')
+const imageCapState = computed(() => imageCapability.value?.state ?? 'NEEDS_PROBE')
+const imageCapDetectLabel = computed(() => {
+  switch (imageCapState.value) {
+    case 'PROBING': return 'detecting…'
+    case 'READY': return 're-detect'
+    default: return 'detect GPU'
+  }
+})
+const imageLocalUnsupported = computed(() =>
+  imageCapState.value === 'READY' && imageCapability.value?.capability?.runnable === false,
+)
+let imageCapPollTimer: ReturnType<typeof setInterval> | null = null
+function startImageCapPolling() {
+  if (imageCapPollTimer != null) return
+  imageCapPollTimer = setInterval(async () => {
+    await refreshImageCapability()
+    if (imageCapState.value !== 'PROBING') stopImageCapPolling()
+  }, 2000)
+}
+function stopImageCapPolling() {
+  if (imageCapPollTimer != null) {
+    clearInterval(imageCapPollTimer)
+    imageCapPollTimer = null
+  }
+}
+async function probeImageCapability() {
+  await $fetch('/api/imagegen/capability/probe', { method: 'POST' })
+  await refreshImageCapability()
+  startImageCapPolling()
+}
+onMounted(() => {
+  if (imageCapState.value === 'PROBING') startImageCapPolling()
+})
+onUnmounted(() => stopImageCapPolling())
 // Optional HF token (imagegen.local.hfToken) — passed to the sidecar as HF_TOKEN.
 // Set inline here; the stored value is masked so editValue starts blank.
 const hfTokenConfigured = computed(() => {
@@ -4675,35 +4731,75 @@ async function deleteLoggerLevel(logger: string) {
           <!-- Self-Hosted (Flux 2 Klein) — local Python sidecar; gated by uv presence,
                not an API key. Download + HF token live in this group (JCLAW-226). -->
           <div class="bg-surface-elevated border border-border">
-            <label
-              for="imagegen-provider-flux-local"
-              class="px-4 py-2.5 flex items-center gap-3"
-              :class="fluxUvAvailable
-                ? 'cursor-pointer'
-                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
-              :title="fluxUvAvailable ? '' : 'Install uv (astral.sh/uv) on the server to enable local generation.'"
+            <div
+              class="px-4 py-2.5 flex items-center gap-3 border-b border-border"
+              :class="fluxUvAvailable ? '' : 'bg-amber-50/40 dark:bg-amber-900/10'"
             >
-              <input
-                id="imagegen-provider-flux-local"
-                type="radio"
-                name="imagegen-provider"
-                value="flux-local"
-                :checked="imagegenProvider === 'flux-local'"
-                :disabled="!fluxUvAvailable"
-                class="accent-emerald-600"
-                @change="setImagegenProvider('flux-local')"
+              <label
+                for="imagegen-provider-flux-local"
+                class="flex-1 flex items-center gap-3"
+                :class="(fluxUvAvailable && !imageLocalUnsupported) ? 'cursor-pointer' : 'cursor-not-allowed'"
+                :title="fluxUvAvailable ? '' : 'Install uv (astral.sh/uv) on the server to enable local generation.'"
               >
-              <span
-                class="flex-1 text-sm"
-                :class="fluxUvAvailable
-                  ? 'text-fg-primary'
-                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
-              >Self-Hosted (Flux 2 Klein)</span>
+                <input
+                  id="imagegen-provider-flux-local"
+                  type="radio"
+                  name="imagegen-provider"
+                  value="flux-local"
+                  :checked="imagegenProvider === 'flux-local'"
+                  :disabled="!fluxUvAvailable || imageCapState === 'PROBING' || imageLocalUnsupported"
+                  class="accent-emerald-600"
+                  @change="setImagegenProvider('flux-local')"
+                >
+                <span
+                  class="text-sm"
+                  :class="(fluxUvAvailable && !imageLocalUnsupported)
+                    ? 'text-fg-primary'
+                    : 'text-amber-800 dark:text-amber-300 opacity-80'"
+                >Self-Hosted (Flux 2 Klein)</span>
+              </label>
               <span
                 v-if="!fluxUvAvailable"
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >uv not found — install uv</span>
-            </label>
+              <button
+                v-else
+                type="button"
+                class="shrink-0 text-[11px] text-fg-muted hover:text-fg-strong disabled:opacity-50"
+                :disabled="imageCapState === 'PROBING'"
+                @click="probeImageCapability()"
+              >
+                {{ imageCapDetectLabel }}
+              </button>
+            </div>
+
+            <!-- PROBING — the first run installs the Python image deps. -->
+            <div
+              v-if="imageCapState === 'PROBING'"
+              class="px-4 py-2.5 text-[11px] text-fg-muted"
+            >
+              Detecting GPU capability… the first run installs the Python image deps and can take a few minutes.
+            </div>
+            <!-- ERROR — probe failed. -->
+            <div
+              v-else-if="imageCapState === 'ERROR'"
+              class="px-4 py-2.5 text-[11px] text-rose-600 dark:text-rose-400"
+            >
+              {{ imageCapability?.error ?? 'Capability probe failed.' }}
+            </div>
+            <!-- READY — host summary + (when it can't run) why Self-Hosted is disabled. -->
+            <template v-else-if="imageCapState === 'READY' && imageCapability?.capability">
+              <div class="px-4 py-1.5 text-[11px] text-fg-muted">
+                {{ imageCapability.capability.gpu }} ·
+                {{ imageCapability.capability.freeVramGb }} GB free / {{ imageCapability.capability.totalVramGb }} GB total
+              </div>
+              <div
+                v-if="imageLocalUnsupported"
+                class="px-4 pb-2 text-[11px] text-amber-700 dark:text-amber-400"
+              >
+                This machine can't run local image generation — {{ imageCapability.capability.reason }}. Use a cloud provider instead.
+              </div>
+            </template>
 
             <!-- Model download status + button (shown when Self-Hosted is the active backend). -->
             <div

@@ -10,7 +10,9 @@ server like torchserve (too heavy for a single-user Personal Edition).
 
 Protocol (bound to 127.0.0.1 only):
   GET  /health  -> 200 {status, device, dtype, model, weights_present, loaded}
+  GET  /capability -> 200 {kind, gpu, freeVramGb, totalVramGb, runnable, tier, reason}
   GET  /progress-> 200 {percent}   (0..100 while generating, null when idle)
+  (CLI) --probe -> same capability JSON to stdout, one-shot (no server, no model load)
   POST /generate {prompt, width?, height?, steps?, seed?}
         -> 200 image/png  (raw bytes)
         -> 409 {error}     when weights are not present (call /pull first),
@@ -34,6 +36,8 @@ import fnmatch
 import io
 import json
 import os
+import platform
+import subprocess
 import sys
 import threading
 import time
@@ -50,6 +54,50 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 # single-file checkpoint (~7.7 GB) is the original/ComfyUI format and the *.jpg are
 # example images, so skipping them cuts ~33% off the ~23.7 GB download.
 IGNORE_PATTERNS = ["flux-2-klein-4b.safetensors", "*.jpg"]
+
+IS_APPLE_SILICON = platform.system() == "Darwin" and platform.machine() == "arm64"
+
+# Free-VRAM floors for Flux 2 Klein 4B (fp16): ~8 GB transformer + text encoder/VAE/activations. Estimates
+# to revisit from real runs; mirrors the video sidecar's per-engine min/comfortable tiers (JCLAW-232/233).
+FLUX_MIN_GB = 10
+FLUX_COMFORTABLE_GB = 14
+
+
+def detect_vram():
+    """(freeGb, totalGb, kind). FREE VRAM is what gates local generation. Torch-free on Apple Silicon
+    (unified memory via sysctl); torch only on the CUDA path. Mirrors the video sidecar's detector."""
+    if IS_APPLE_SILICON:
+        total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
+        return total * 0.7 / 1e9, total / 1e9, "mps"  # no free-VRAM API on unified memory; ~70% budget
+    try:
+        import torch
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info()
+            return free / 1e9, total / 1e9, "cuda"
+        if torch.backends.mps.is_available():
+            total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
+            return total * 0.7 / 1e9, total / 1e9, "mps"
+    except ImportError:
+        pass
+    return 0.0, 0.0, "cpu"
+
+
+def host_capability():
+    """GPU + free VRAM + whether THIS machine can run local Flux. Model-independent (no pipeline load) —
+    used by both `--probe` (one-shot) and the HTTP /capability endpoint. CPU is treated as not runnable:
+    Flux on CPU is too slow to be a real local option, so the Settings radio greys out."""
+    free, total, kind = detect_vram()
+    gpu = {"cuda": "NVIDIA (CUDA)", "mps": "Apple Silicon (unified)", "cpu": "CPU only"}[kind]
+    if kind == "cpu":
+        tier, reason = "no", "no GPU detected (CPU is too slow for Flux)"
+    elif free >= FLUX_COMFORTABLE_GB:
+        tier, reason = "ready", None
+    elif free >= FLUX_MIN_GB:
+        tier, reason = "fits", "runs but slow (low free VRAM)"
+    else:
+        tier, reason = "no", f"needs {FLUX_MIN_GB} GB free VRAM"
+    return {"kind": kind, "gpu": gpu, "freeVramGb": round(free, 1), "totalVramGb": round(total, 1),
+            "minVramGb": FLUX_MIN_GB, "tier": tier, "runnable": tier != "no", "reason": reason}
 
 
 class SidecarState:
@@ -242,6 +290,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path == "/capability":
+            # GPU + free-VRAM verdict for the Settings "can this machine run local Flux?" gate. Pure host
+            # detection (no model load); also runnable one-shot via --probe.
+            self._send_json(200, host_capability())
+            return
         if path == "/progress":
             # Live step progress for the chat's image-gen bar. Deliberately does NOT touch() — it's a
             # read-only status poll; the in-flight generation keeps the idle watcher at bay on its own.
@@ -357,11 +410,19 @@ def _idle_watcher(state: SidecarState, server: ThreadingHTTPServer):
 def main():
     ap = argparse.ArgumentParser(description="jclaw image sidecar")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, required=True)
-    ap.add_argument("--model", required=True, help="Hugging Face repo id")
+    ap.add_argument("--port", type=int)
+    ap.add_argument("--model", help="Hugging Face repo id")
     ap.add_argument("--cache-dir", default=os.path.join("data", "image-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
+    # One-shot capability probe: detect GPU + free VRAM, print the verdict, exit. No server, no model
+    # load — what the Settings "detect GPU" flow runs to decide whether local Flux is offered.
+    ap.add_argument("--probe", action="store_true")
     args = ap.parse_args()
+    if args.probe:
+        print(json.dumps(host_capability()))
+        return
+    if args.port is None or not args.model:
+        ap.error("--port and --model are required unless --probe is given")
 
     cache_dir = os.path.abspath(args.cache_dir)
     os.makedirs(cache_dir, exist_ok=True)

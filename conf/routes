@@ -33,6 +33,9 @@ POST    /api/imagegen/local/pull                ApiImagegenController.pull
 GET     /api/imagegen/models                     ApiImagegenController.models
 # Live step-progress of an in-flight local image generation — chat progress bar
 GET     /api/imagegen/progress                   ApiImagegenController.progress
+# Local image-gen host capability (GPU/VRAM) — Settings Self-Hosted hardware gate
+GET     /api/imagegen/capability                 ApiImagegenController.capability
+POST    /api/imagegen/capability/probe           ApiImagegenController.probeCapability
 
 # Video generation job status — chat progress polling (JCLAW-234)
 GET     /api/videogen/jobs                       ApiVideogenController.jobs

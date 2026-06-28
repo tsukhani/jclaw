@@ -9,6 +9,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
+import services.imagegen.ImageCapabilityProbe;
 import services.imagegen.ImageModelManager;
 import services.imagegen.LocalImageSidecarManager;
 import services.imagegen.ReplicateImageModelCatalog;
@@ -104,6 +105,25 @@ public class ApiImagegenController extends Controller {
     public static void progress() {
         var m = new LinkedHashMap<String, Object>();
         m.put("percent", LocalImageSidecarManager.currentProgressPercent());
+        renderJSON(gson.toJson(m));
+    }
+
+    /** GET /api/imagegen/capability — adaptive host-capability snapshot for the Settings Self-Hosted gate
+     *  (GPU + free VRAM + whether local Flux can run). The page polls this while PROBING, then disables
+     *  the Self-Hosted radio when the host can't run it. */
+    @Operation(summary = "Local image-gen host capability (GPU, free VRAM, whether Flux can run)")
+    public static void capability() {
+        renderJSON(gson.toJson(ImageCapabilityProbe.snapshot()));
+    }
+
+    /** POST /api/imagegen/capability/probe — kick off a background GPU/VRAM probe (one-shot
+     *  {@code uv run serve.py --probe}). Returns immediately; progress is observed via {@link #capability}. */
+    @Operation(summary = "Start a background local image-gen capability probe")
+    @ChatHidden("runs a GPU capability subprocess -- resource action")
+    public static void probeCapability() {
+        ImageCapabilityProbe.probe();
+        var m = new LinkedHashMap<String, Object>();
+        m.put("status", "probing");
         renderJSON(gson.toJson(m));
     }
 }
