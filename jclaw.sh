@@ -875,7 +875,7 @@ ${emerald}  ▟█▙  ▟█▙        ██╗ ██████╗██╗
     █████    ╚█████╔╝╚██████╗███████╗██║  ██║╚███╔███╔╝
      ███      ╚════╝  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝ ${reset}
 
-${dim}Java-first AI automation platform — Play 1.x backend, Nuxt 3 SPA,
+${dim}Java-first AI automation platform — Play 1.x backend, Nuxt 4 SPA,
 LLM agents, OCR, web tools.${reset}
 
 EOF
