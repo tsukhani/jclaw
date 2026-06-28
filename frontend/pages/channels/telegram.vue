@@ -29,20 +29,13 @@ interface ProbeResult {
   error: string | null
 }
 
-interface TailscaleStatus {
-  enabled: boolean
-  available: boolean
-  publicUrl: string | null
-  error: string | null
-}
-
 const [{ data: bindings, refresh }, { data: agents }] = await Promise.all([
   useFetch<TelegramBindingSummary[]>('/api/channels/telegram/bindings'),
   useFetch<Agent[]>('/api/agents'),
 ])
-// Funnel status shells out to `tailscale status` (~400ms) and only pre-fills the
-// webhook URL — load it lazily so it never blocks the page render.
-const { data: tailscale } = useFetch<TailscaleStatus>('/api/tailscale', { lazy: true })
+// Funnel status loads lazily (shells out to `tailscale status`, ~400ms) and only
+// pre-fills the webhook URL — shared across the channel pages via the composable.
+const { data: tailscale } = useTailscaleStatus()
 
 const enabledAgents = computed(() => (agents.value ?? []).filter(a => a.enabled))
 

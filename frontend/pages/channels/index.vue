@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import type { SlackBindingSummary, TelegramBindingSummary, WhatsAppBindingSummary } from '~/types/api'
 
-interface TailscaleStatus {
-  enabled: boolean
-  available: boolean
-  publicUrl: string | null
-  error: string | null
-}
-
 const [
   { data: telegramBindings, refresh: refreshBindings },
   { data: slackBindings, refresh: refreshSlackBindings },
@@ -18,11 +11,9 @@ const [
   useFetch<WhatsAppBindingSummary[]>('/api/channels/whatsapp/bindings'),
 ])
 
-// The funnel status shells out to `tailscale status` (~400ms); load it lazily so
-// the page paints immediately on the channel data and this secondary badge fills
-// in when ready, instead of gating the whole render on the slow probe.
-const { data: tailscale, refresh: refreshTailscale, status: tailscaleStatus }
-  = useFetch<TailscaleStatus>('/api/tailscale', { lazy: true })
+// Funnel status loads lazily (it shells out to `tailscale status`, ~400ms) so it
+// never gates the page render; shared across the channel pages via the composable.
+const { data: tailscale, refresh: refreshTailscale, status: tailscaleStatus } = useTailscaleStatus()
 
 const { mutate } = useApiMutation()
 
