@@ -142,10 +142,10 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CatalogPage.class)))
     @Operation(summary = "Browse or search a skill catalog")
     public static void catalogSearch(String catalog, String q, String category,
-                                     Integer page, Integer pageSize, String cursor) {
+                                     Integer page, Integer pageSize, String cursor, String sort) {
         var c = CatalogRegistry.byId(catalog);
         var query = new CatalogQuery(q, category, page != null ? page : 0,
-                pageSize != null ? pageSize : 20, cursor);
+                pageSize != null ? pageSize : 20, cursor, sort);
         renderJSON(gson.toJson(c.query(query)));
     }
 

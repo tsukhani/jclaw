@@ -110,11 +110,13 @@ public final class StaticDumpCatalog implements Catalog {
         }
 
         // Base set = query applied, category NOT applied (so facet counts span
-        // every category). Blank query browses the whole snapshot by installs.
+        // every category), ordered by the requested sort. Blank query browses
+        // the whole snapshot.
         var query = q.query();
-        List<CatalogSkill> base = (query == null || query.isBlank())
-                ? browseByInstalls(snapshot)
-                : searchLucene(query, snapshot);
+        var matched = (query == null || query.isBlank())
+                ? new ArrayList<>(snapshot)
+                : new ArrayList<>(searchLucene(query, snapshot));
+        var base = sorted(matched, q.sortByName());
 
         var facets = computeFacets(base);
 
@@ -145,10 +147,14 @@ public final class StaticDumpCatalog implements Catalog {
         }
     }
 
-    private List<CatalogSkill> browseByInstalls(List<CatalogSkill> snapshot) {
-        return snapshot.stream()
-                .sorted(Comparator.comparingLong(CatalogSkill::installs).reversed())
-                .toList();
+    /** Order a result list by name (A–Z) or install count (desc, default). */
+    private static List<CatalogSkill> sorted(List<CatalogSkill> rows, boolean byName) {
+        rows.sort(byName
+                ? Comparator.comparing((CatalogSkill s) -> nz(s.displayName()).toLowerCase())
+                        .thenComparing(s -> nz(s.skillId()))
+                : Comparator.comparingLong(CatalogSkill::installs).reversed()
+                        .thenComparing(s -> nz(s.displayName()).toLowerCase()));
+        return rows;
     }
 
     private List<CatalogSkill> searchLucene(String query, List<CatalogSkill> snapshot) {

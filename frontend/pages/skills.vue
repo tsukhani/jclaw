@@ -72,6 +72,7 @@ const catalogType = computed(() =>
   catalogs.value.find(c => c.id === selectedCatalog.value)?.type ?? 'static')
 
 const catalogQuery = ref('')
+const catalogSort = ref<'installs' | 'name'>('installs')
 const catalogLoading = ref(false)
 const catalogError = ref<string | null>(null)
 const catalogResults = ref<CatalogSkill[]>([])
@@ -108,6 +109,7 @@ async function runCatalogSearch() {
         page: catalogPage.value,
         pageSize: CATALOG_PAGE_SIZE,
         cursor: dynamic ? (cursorStack.value[cursorStack.value.length - 1] ?? '') : '',
+        sort: catalogSort.value,
       },
     })
     if (seq !== catalogSeq) return
@@ -151,6 +153,14 @@ function selectCatalog(id: string) {
   catalogQuery.value = ''
   catalogResults.value = []
   resetCatalogNav()
+  runCatalogSearch()
+}
+
+// Changing the sort restarts paging (page 0 / first cursor), keeping query + facet.
+function changeSort() {
+  catalogPage.value = 0
+  cursorStack.value = [null]
+  nextCursor.value = null
   runCatalogSearch()
 }
 
@@ -1555,20 +1565,6 @@ function totalSkillCount(agentId: number) {
             </button>
           </div>
 
-          <div class="px-4 py-3 border-b border-border shrink-0">
-            <div class="relative">
-              <MagnifyingGlassIcon class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
-              <input
-                v-model="catalogQuery"
-                type="text"
-                placeholder="Search skills by name…"
-                aria-label="Search importable skills"
-                class="w-full pl-8 pr-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
-                @keyup.enter="searchCatalog"
-              >
-            </div>
-          </div>
-
           <div
             v-if="catalogType === 'static' && catalogFacets.length"
             class="px-3 py-2 border-b border-border flex flex-wrap gap-1.5 shrink-0"
@@ -1579,7 +1575,7 @@ function totalSkillCount(agentId: number) {
               :class="[
                 'inline-flex items-center gap-1 px-2 py-0.5 text-xs border transition-colors',
                 catalogCategory === f.category
-                  ? 'border-ring bg-muted text-accent font-medium'
+                  ? 'border-ring bg-muted text-fg-strong font-medium'
                   : 'border-border text-fg-muted hover:bg-muted',
               ]"
               @click="selectFacet(f.category)"
@@ -1588,6 +1584,33 @@ function totalSkillCount(agentId: number) {
               <span>{{ f.category }}</span>
               <span class="text-fg-muted">{{ f.count.toLocaleString() }}</span>
             </button>
+          </div>
+
+          <div class="px-4 py-3 border-b border-border shrink-0 flex items-center gap-2">
+            <div class="relative flex-1">
+              <MagnifyingGlassIcon class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+              <input
+                v-model="catalogQuery"
+                type="text"
+                placeholder="Search skills by name…"
+                aria-label="Search importable skills"
+                class="w-full pl-8 pr-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
+                @keyup.enter="searchCatalog"
+              >
+            </div>
+            <select
+              v-model="catalogSort"
+              aria-label="Sort skills"
+              class="py-2 px-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
+              @change="changeSort"
+            >
+              <option value="installs">
+                Most installs
+              </option>
+              <option value="name">
+                Name (A–Z)
+              </option>
+            </select>
           </div>
 
           <div class="flex-1 min-h-0 overflow-y-auto">

@@ -39,7 +39,11 @@ class StaticDumpCatalogTest extends UnitTest {
             """;
 
     private static CatalogQuery q(String query, String category, int page, int pageSize) {
-        return new CatalogQuery(query, category, page, pageSize, null);
+        return new CatalogQuery(query, category, page, pageSize, null, "installs");
+    }
+
+    private static CatalogQuery qSort(String query, int page, int pageSize, String sort) {
+        return new CatalogQuery(query, null, page, pageSize, null, sort);
     }
 
     @BeforeEach
@@ -78,6 +82,15 @@ class StaticDumpCatalogTest extends UnitTest {
 
         assertEquals(List.of("git-commit-helper", "react-dashboard", "docker-deploy",
                 "react-router-guide", "pdf-extractor"), ids);
+    }
+
+    @Test
+    void sortByNameOrdersAlphabetically() {
+        var ids = CatalogRegistry.MASTRA.query(qSort("", 0, 50, "name")).results().stream()
+                .map(CatalogSkill::skillId).toList();
+        // By displayName: Docker Deploy, Git Commit Helper, PDF Extractor, React Dashboard, React Router Guide
+        assertEquals(List.of("docker-deploy", "git-commit-helper", "pdf-extractor",
+                "react-dashboard", "react-router-guide"), ids);
     }
 
     @Test

@@ -11,5 +11,15 @@ package services.catalog;
  * @param page     0-indexed page (static pagination)
  * @param pageSize results per page
  * @param cursor   opaque continuation token from a prior page's {@code nextCursor} (dynamic only)
+ * @param sort     result ordering: {@code "name"} (A–Z) or {@code "installs"} (default, desc).
+ *                 Static catalogs sort the whole result set; a dynamic catalog can only sort the
+ *                 current page (installs is the source's native order; name re-sorts the page).
  */
-public record CatalogQuery(String query, String category, int page, int pageSize, String cursor) {}
+public record CatalogQuery(String query, String category, int page, int pageSize, String cursor,
+                           String sort) {
+
+    /** True when the caller asked for alphabetical ordering (else install-desc). */
+    public boolean sortByName() {
+        return "name".equalsIgnoreCase(sort);
+    }
+}

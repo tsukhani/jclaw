@@ -12,6 +12,7 @@ import utils.HttpFactories;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -85,11 +86,23 @@ public final class ClawhubCatalog implements Catalog {
         int ps = Math.clamp(q.pageSize(), 1, MAX_PAGE_SIZE);
         var query = q.query();
         try {
-            return (query == null || query.isBlank()) ? browse(q.cursor(), ps) : search(query, ps);
+            var page = (query == null || query.isBlank()) ? browse(q.cursor(), ps) : search(query, ps);
+            return q.sortByName() ? resortByName(page) : page;
         } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY, "ClawHub query failed: " + e.getMessage());
             return CatalogPage.notReady(0, ps);
         }
+    }
+
+    /** Name-sort the CURRENT page only — a dynamic catalog never holds the whole
+     *  set, so installs stays the registry's native order and name re-sorts the
+     *  page in place. */
+    private static CatalogPage resortByName(CatalogPage page) {
+        var rows = new ArrayList<>(page.results());
+        rows.sort(Comparator.comparing((CatalogSkill s) -> nz(s.displayName()).toLowerCase())
+                .thenComparing(s -> nz(s.skillId())));
+        return new CatalogPage(page.ready(), List.copyOf(rows), page.total(), page.page(),
+                page.pageSize(), page.nextCursor(), page.facets(), page.catalogSize(), page.scrapedAt());
     }
 
     /** Browse the live registry by downloads, cursor-paginated. */
