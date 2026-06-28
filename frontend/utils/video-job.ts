@@ -104,7 +104,7 @@ export function videoGenMeta(generationMetadata: string | undefined): {
  */
 export function videoResultSizeBytes(att: VideoAttachmentLike, status: VideoJobStatus | undefined): number {
   if (status?.resultSizeBytes != null && status.resultSizeBytes > 0) return status.resultSizeBytes
-  return att.sizeBytes > 0 ? att.sizeBytes : 0
+  return Math.max(att.sizeBytes, 0)
 }
 
 /**

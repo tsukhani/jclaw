@@ -101,8 +101,9 @@ public final class ReplicateImageModelCatalog {
             var m = el.getAsJsonObject();
             var owner = asString(m, "owner");
             var name = asString(m, "name");
-            if (owner == null || owner.isBlank() || name == null || name.isBlank()) continue;
-            out.add(new ImageModel(owner + "/" + name, name, asString(m, "description")));
+            if (owner != null && !owner.isBlank() && name != null && !name.isBlank()) {
+                out.add(new ImageModel(owner + "/" + name, name, asString(m, "description")));
+            }
         }
         return out;
     }

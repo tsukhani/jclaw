@@ -79,10 +79,10 @@ public final class LocalImageSidecarManager {
     public static Integer currentProgressPercent() {
         var req = new Request.Builder().url(DAEMON.baseUrl() + "/progress").get().build();
         try (var resp = PROGRESS_CLIENT.newCall(req).execute()) {
-            if (!resp.isSuccessful() || resp.body() == null) return null;
+            if (!resp.isSuccessful()) return null;
             var pct = JsonParser.parseString(resp.body().string()).getAsJsonObject().get("percent");
             return pct == null || pct.isJsonNull() ? null : pct.getAsInt();
-        } catch (Exception e) {
+        } catch (Exception _) {
             return null; // sidecar down / idle-evicted / unreachable — no bar
         }
     }

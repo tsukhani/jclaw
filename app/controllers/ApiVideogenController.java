@@ -44,25 +44,31 @@ public class ApiVideogenController extends Controller {
             var parts = ids.split(",");
             int limit = Math.min(parts.length, MAX_IDS);
             for (int i = 0; i < limit; i++) {
-                var id = parseId(parts[i]);
-                if (id == null) continue;
-                VideoGenerationJob job = VideoGenerationJob.findById(id);
-                if (job == null) continue;
-                var m = new LinkedHashMap<String, Object>();
-                m.put("id", job.id);
-                m.put("state", job.state.name());
-                m.put("percent", job.percent); // real 0..100 for the local engine (JCLAW-232); null for cloud (SV-1)
-                m.put("errorMessage", job.errorMessage);
-                // The placeholder is filled in-place, so until a reload the chat still holds sizeBytes=0;
-                // hand it the result's uuid + size so the video chip can show the size live (JCLAW-234).
-                MessageAttachment result = job.resultAttachmentId != null
-                        ? MessageAttachment.findById(job.resultAttachmentId) : null;
-                m.put("resultAttachmentUuid", result == null ? null : result.uuid);
-                m.put("resultSizeBytes", result == null ? null : result.sizeBytes);
-                out.add(m);
+                var row = toJobStatus(parts[i]);
+                if (row != null) out.add(row);
             }
         }
         renderJSON(gson.toJson(out));
+    }
+
+    /** Status row for one raw id, or {@code null} to skip it (unparseable id, or no such job). */
+    private static LinkedHashMap<String, Object> toJobStatus(String rawId) {
+        var id = parseId(rawId);
+        if (id == null) return null;
+        VideoGenerationJob job = VideoGenerationJob.findById(id);
+        if (job == null) return null;
+        var m = new LinkedHashMap<String, Object>();
+        m.put("id", job.id);
+        m.put("state", job.state.name());
+        m.put("percent", job.percent); // real 0..100 for the local engine (JCLAW-232); null for cloud (SV-1)
+        m.put("errorMessage", job.errorMessage);
+        // The placeholder is filled in-place, so until a reload the chat still holds sizeBytes=0;
+        // hand it the result's uuid + size so the video chip can show the size live (JCLAW-234).
+        MessageAttachment result = job.resultAttachmentId != null
+                ? MessageAttachment.findById(job.resultAttachmentId) : null;
+        m.put("resultAttachmentUuid", result == null ? null : result.uuid);
+        m.put("resultSizeBytes", result == null ? null : result.sizeBytes);
+        return m;
     }
 
     /** GET /api/videogen/models — Replicate text-to-video models for the Settings model dropdown. */

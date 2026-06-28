@@ -654,7 +654,7 @@ const imagegenModelOptions = computed<ImageModel[]>(() => {
   }
   return discovered
 })
-async function saveImagegenField(configKey: string, value: string) {
+async function saveConfigField(configKey: string, value: string) {
   saving.value = true
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
@@ -814,14 +814,6 @@ async function setVideogenProvider(value: string) {
 async function toggleVideogenEnabled() {
   // Only Replicate is wired today; enabling selects it (its API key gates the toggle).
   await setVideogenProvider(videogenEnabled.value ? '' : 'replicate')
-}
-async function saveVideogenField(configKey: string, value: string) {
-  saving.value = true
-  try {
-    await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
-    refresh()
-  }
-  finally { saving.value = false }
 }
 // Model dropdown: Replicate curates a `text-to-video` collection; GET /api/videogen/models returns its
 // owner/model slugs (server-discovered, not hardcoded). The dropdown is the only way to pick a model —
@@ -4700,7 +4692,7 @@ async function deleteLoggerLevel(logger: string) {
                 :disabled="saving"
                 aria-label="Replicate image model"
                 class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-                @change="saveImagegenField('imagegen.cloud.model', ($event.target as HTMLSelectElement).value)"
+                @change="saveConfigField('imagegen.cloud.model', ($event.target as HTMLSelectElement).value)"
               >
                 <option value="">
                   Provider default (black-forest-labs/flux-schnell)
@@ -5363,7 +5355,7 @@ async function deleteLoggerLevel(logger: string) {
                 :disabled="saving"
                 aria-label="Replicate video model"
                 class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-                @change="saveVideogenField('videogen.cloud.model', ($event.target as HTMLSelectElement).value)"
+                @change="saveConfigField('videogen.cloud.model', ($event.target as HTMLSelectElement).value)"
               >
                 <option value="">
                   Provider default (wan-video/wan-2.2-t2v-fast)
@@ -5526,7 +5518,7 @@ async function deleteLoggerLevel(logger: string) {
             :disabled="saving"
             class="w-20 px-2 py-1 text-sm text-right bg-surface border border-border text-fg-primary"
             aria-label="Video job timeout in minutes"
-            @change="saveVideogenField('videogen.maxJobMinutes', ($event.target as HTMLInputElement).value)"
+            @change="saveConfigField('videogen.maxJobMinutes', ($event.target as HTMLInputElement).value)"
           >
         </label>
       </template>
