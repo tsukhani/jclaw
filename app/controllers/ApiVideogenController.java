@@ -44,19 +44,17 @@ public class ApiVideogenController extends Controller {
             var parts = ids.split(",");
             int limit = Math.min(parts.length, MAX_IDS);
             for (int i = 0; i < limit; i++) {
-                var row = toJobStatus(parts[i]);
-                if (row != null) out.add(row);
+                var id = parseId(parts[i]);
+                if (id == null) continue;
+                VideoGenerationJob job = VideoGenerationJob.findById(id);
+                if (job != null) out.add(toStatusRow(job));
             }
         }
         renderJSON(gson.toJson(out));
     }
 
-    /** Status row for one raw id, or {@code null} to skip it (unparseable id, or no such job). */
-    private static LinkedHashMap<String, Object> toJobStatus(String rawId) {
-        var id = parseId(rawId);
-        if (id == null) return null;
-        VideoGenerationJob job = VideoGenerationJob.findById(id);
-        if (job == null) return null;
+    /** Status row for one job — id, state, live progress, and the result uuid/size for the chat chip. */
+    private static LinkedHashMap<String, Object> toStatusRow(VideoGenerationJob job) {
         var m = new LinkedHashMap<String, Object>();
         m.put("id", job.id);
         m.put("state", job.state.name());
