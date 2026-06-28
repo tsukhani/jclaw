@@ -4,12 +4,15 @@ import agents.SkillLoader;
 import agents.ToolCatalog;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.Strictness;
+import com.google.gson.stream.JsonReader;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -59,9 +62,9 @@ public final class SkillConformanceService {
         static ConformanceResult ok(String skillName) { return new ConformanceResult(true, skillName, "conformed"); }
     }
 
-    /** The LLM's proposed normalization (generation half). */
-    public record ProposedSkill(String name, String description, String icon,
-                                List<String> tools, String body) {}
+    /** The LLM's proposed normalization (generation half) — frontmatter only;
+     *  the body is preserved verbatim, so the model never re-emits it. */
+    public record ProposedSkill(String name, String description, String icon, List<String> tools) {}
 
     /** A skill that passed the deterministic gate, ready to render as SKILL.md. */
     public record ConformedSkill(String name, String description, String icon,
@@ -114,12 +117,18 @@ public final class SkillConformanceService {
         }
 
         var stagedBinaries = listStagedBinaries(stagedDir);
+        // Preserve the original body verbatim; the LLM only normalizes frontmatter.
+        var split = SkillLoader.splitFrontmatter(raw);
+        var originalBody = (split != null && split.frontmatter() != null && !split.frontmatter().isBlank())
+                ? (split.body() != null ? split.body() : "")
+                : raw;
+
         var proposed = proposeWithLlm(raw, fallbackName);
         if (proposed == null) {
             return ConformanceResult.fail("conformance pass failed (LLM unavailable or returned an invalid response)");
         }
 
-        var gate = applyHardGates(proposed, fallbackName, stagedBinaries, provenance);
+        var gate = applyHardGates(proposed, fallbackName, stagedBinaries, provenance, originalBody);
         if (!gate.ok()) return ConformanceResult.fail(gate.reason());
 
         try {
@@ -147,7 +156,7 @@ public final class SkillConformanceService {
      * </ul>
      */
     public static GateOutcome applyHardGates(ProposedSkill proposed, String fallbackName,
-                                             Set<String> stagedBinaries, String author) {
+                                             Set<String> stagedBinaries, String author, String body) {
         if (proposed == null) return GateOutcome.reject("empty conformance proposal");
 
         var name = kebabOrNull(proposed.name());
@@ -172,9 +181,9 @@ public final class SkillConformanceService {
         var icon = proposed.icon() != null ? proposed.icon().strip() : "";
         if (icon.isBlank()) icon = DEFAULT_ICON;
 
-        var body = proposed.body() != null ? proposed.body() : "";
+        var safeBody = body != null ? body : "";
         var safeAuthor = author != null && !author.isBlank() ? author.strip() : "imported";
-        return GateOutcome.accept(new ConformedSkill(name, description, icon, tools, commands, safeAuthor, body));
+        return GateOutcome.accept(new ConformedSkill(name, description, icon, tools, commands, safeAuthor, safeBody));
     }
 
     // --- generation (LLM) ---
@@ -196,11 +205,8 @@ public final class SkillConformanceService {
                 ChatMessage.user("Skill id (fallback name): %s\n\nCurrent SKILL.md:\n%s".formatted(fallbackName, rawSkillMd)));
         try {
             var response = provider.chat(modelId, messages, null, null, null, LLM_TIMEOUT_SECONDS, null);
-            var text = response.choices().getFirst().message().content().toString().strip();
-            if (text.startsWith("```")) {
-                text = text.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").strip();
-            }
-            return parseProposed(JsonParser.parseString(text).getAsJsonObject());
+            var text = response.choices().getFirst().message().content().toString();
+            return parseProposed(parseJsonObjectLenient(text));
         } catch (Exception e) {
             EventLogger.warn(CATEGORY, "Conformance LLM pass failed: " + e.getMessage());
             return null;
@@ -208,34 +214,48 @@ public final class SkillConformanceService {
     }
 
     private static ProposedSkill parseProposed(JsonObject o) {
-        return new ProposedSkill(str(o, "name"), str(o, "description"), str(o, "icon"),
-                strList(o, "tools"), str(o, "body"));
+        return new ProposedSkill(str(o, "name"), str(o, "description"), str(o, "icon"), strList(o, "tools"));
+    }
+
+    /** Tolerant JSON extraction for LLM output: strip code fences + leading/trailing
+     *  prose (first '{' .. last '}'), then parse leniently. The model returns only
+     *  small frontmatter now (no body), so this rarely has to do much. */
+    private static JsonObject parseJsonObjectLenient(String raw) {
+        var t = raw == null ? "" : raw.strip();
+        if (t.startsWith("```")) {
+            t = t.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").strip();
+        }
+        int i = t.indexOf('{');
+        int j = t.lastIndexOf('}');
+        if (i >= 0 && j > i) t = t.substring(i, j + 1);
+        var reader = new JsonReader(new StringReader(t));
+        reader.setStrictness(Strictness.LENIENT);
+        return JsonParser.parseReader(reader).getAsJsonObject();
     }
 
     private static String conformanceSystemPrompt(String toolCatalog) {
         return """
-               You convert an external agent "skill" (authored for Claude Code, Cursor, or another
-               runtime) into JClaw's skill format. Rewrite it to conform to the contract below. Do NOT
-               change what the skill DOES — only its structure, frontmatter, and tool references.
+               You produce JClaw skill FRONTMATTER for an external agent "skill" (authored for Claude
+               Code, Cursor, or another runtime). The skill's BODY is preserved verbatim by JClaw — you
+               do NOT rewrite or return it; you only read it to decide which tools the skill needs.
 
-               JClaw skill contract:
+               Return these JClaw frontmatter fields:
                - name: kebab-case (e.g. web-scraper). Derive from the skill's purpose if the source name
                  isn't already kebab-case.
                - description: one concise sentence describing what the skill does.
                - tools: the EXACT JClaw tool names the skill needs, chosen ONLY from the Tool Catalog
-                 below. Map foreign tool names onto JClaw equivalents (e.g. Bash -> exec;
-                 Read/Write/Edit/Glob/Grep -> filesystem; WebFetch -> web_fetch; WebSearch -> web_search).
-                 If a needed capability has no Tool Catalog entry, omit it. Use [] when the skill is pure
-                 reasoning with no tool use. NEVER invent a name that is not in the catalog.
-               - body: the skill instructions as Markdown. Reference each declared tool by its JClaw name.
-                 Keep the useful content (steps, examples, edge cases); drop runtime-specific boilerplate.
+                 below, based on what the body actually does. Map foreign tool names onto JClaw
+                 equivalents (e.g. Bash -> exec; Read/Write/Edit/Glob/Grep -> filesystem;
+                 WebFetch -> web_fetch; WebSearch -> web_search). If a needed capability has no Tool
+                 Catalog entry, omit it. Use [] when the skill is pure reasoning with no tool use.
+                 NEVER invent a name that is not in the catalog.
                - icon: a single emoji representing the skill.
 
                Tool Catalog (the ONLY valid tool names):
                %s
 
-               Return ONLY a JSON object — no prose, no code fences:
-               {"name": "...", "description": "...", "icon": "X", "tools": ["..."], "body": "..."}
+               Return ONLY a JSON object — no prose, no code fences, no body field:
+               {"name": "...", "description": "...", "icon": "X", "tools": ["..."]}
                """.formatted(toolCatalog);
     }
 

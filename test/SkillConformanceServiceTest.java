@@ -17,15 +17,17 @@ import java.util.TreeSet;
  */
 class SkillConformanceServiceTest extends UnitTest {
 
+    private static final String BODY = "# Body\n\nDo the thing.";
+
     private static ProposedSkill proposed(String name, String desc, String icon, List<String> tools) {
-        return new ProposedSkill(name, desc, icon, tools, "# Body\n\nDo the thing.");
+        return new ProposedSkill(name, desc, icon, tools);
     }
 
     @Test
-    void acceptsCleanProposalAndKeepsKebabName() {
+    void acceptsCleanProposalAndPreservesBody() {
         var gate = SkillConformanceService.applyHardGates(
                 proposed("web-scraper", "Scrape a web page", "🕷️", List.of()),
-                "web-scraper-fallback", Set.of(), "vercel-labs/agent-skills");
+                "web-scraper-fallback", Set.of(), "vercel-labs/agent-skills", BODY);
 
         assertTrue(gate.ok(), gate.reason());
         var skill = gate.skill();
@@ -34,13 +36,14 @@ class SkillConformanceServiceTest extends UnitTest {
         assertEquals("vercel-labs/agent-skills", skill.author());
         assertTrue(skill.tools().isEmpty());
         assertTrue(skill.commands().isEmpty());
+        assertEquals(BODY, skill.body(), "the original body is preserved verbatim");
     }
 
     @Test
     void rejectsToolNotInThisBuild() {
         var gate = SkillConformanceService.applyHardGates(
                 proposed("x", "d", "🛠️", List.of("totally_unknown_tool_xyz")),
-                "x", Set.of(), "owner/repo");
+                "x", Set.of(), "owner/repo", BODY);
 
         assertFalse(gate.ok());
         assertTrue(gate.reason().contains("totally_unknown_tool_xyz"),
@@ -51,7 +54,7 @@ class SkillConformanceServiceTest extends UnitTest {
     void fallsBackToKebabbedCatalogIdWhenLlmNameIsNotKebab() {
         var gate = SkillConformanceService.applyHardGates(
                 proposed("Remotion Best Practices!", "d", "🎬", List.of()),
-                "remotion-best-practices", Set.of(), "remotion-dev/skills");
+                "remotion-best-practices", Set.of(), "remotion-dev/skills", BODY);
 
         assertTrue(gate.ok(), gate.reason());
         assertEquals("remotion-best-practices", gate.skill().name());
@@ -64,7 +67,7 @@ class SkillConformanceServiceTest extends UnitTest {
         var bins = new TreeSet<>(Set.of("wacli", "helper"));
         var gate = SkillConformanceService.applyHardGates(
                 proposed("wa-notifier", "Send messages", "💬", List.of()),
-                "wa-notifier", bins, "owner/repo");
+                "wa-notifier", bins, "owner/repo", BODY);
 
         assertTrue(gate.ok(), gate.reason());
         assertEquals(List.of("helper", "wacli"), gate.skill().commands());
@@ -74,7 +77,7 @@ class SkillConformanceServiceTest extends UnitTest {
     void defaultsMissingIconAndDescription() {
         var gate = SkillConformanceService.applyHardGates(
                 proposed("my-skill", "  ", "", List.of()),
-                "my-skill", Set.of(), "owner/repo");
+                "my-skill", Set.of(), "owner/repo", BODY);
 
         assertTrue(gate.ok(), gate.reason());
         assertEquals("🛠️", gate.skill().icon());

@@ -85,7 +85,7 @@ public class ApiSkillsController extends Controller {
 
     public record SkillPromoteRequest(Long agentId, String skillName) {}
 
-    public record SkillImportRequest(String source, String skillId) {}
+    public record SkillImportRequest(String source, String skillId, String provider) {}
 
     public record SkillPromoteResponse(String status, String skillName) {}
 
@@ -180,8 +180,10 @@ public class ApiSkillsController extends Controller {
 
         var source = body.get("source").getAsString();
         var skillId = body.get("skillId").getAsString();
+        var provider = body.has("provider") && !body.get("provider").isJsonNull()
+                ? body.get("provider").getAsString() : null;
 
-        var result = RegistrySkillImporter.importToGlobal(source, skillId);
+        var result = RegistrySkillImporter.importToGlobal(provider, source, skillId);
         if (!result.ok()) {
             renderJSON(gson.toJson(Map.of(KEY_STATUS, "failed", "message", result.message())));
         }

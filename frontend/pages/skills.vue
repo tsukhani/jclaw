@@ -226,7 +226,7 @@ async function openCatalog() {
 }
 
 // Import is only wired for the static GitHub catalog (clawhub import is a follow-up).
-const canImport = (s: CatalogSkill) => s.provider === 'mastra'
+const canImport = (s: CatalogSkill) => s.provider === 'mastra' || s.provider === 'clawhub'
 const catalogKey = (s: CatalogSkill) => `${s.provider}/${s.skillId}`
 const importingKey = ref<string | null>(null)
 const importedKeys = ref<Set<string>>(new Set())
@@ -239,7 +239,7 @@ async function importSkill(s: CatalogSkill) {
   try {
     const res = await $fetch<{ status: string, message?: string, skillName?: string }>(
       '/api/skills/catalog/import',
-      { method: 'POST', body: { source: s.source, skillId: s.skillId } },
+      { method: 'POST', body: { source: s.source, skillId: s.skillId, provider: s.provider } },
     )
     if (res.status === 'imported') {
       importedKeys.value.add(key)

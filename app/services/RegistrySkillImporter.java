@@ -8,8 +8,9 @@ import java.util.Set;
 /**
  * Imports a skill from the external catalog into JClaw's global registry:
  * <ol>
- *   <li>{@link GithubSkillFetcher} downloads the skill from GitHub (host-pinned,
- *       no auth) into a staging dir;</li>
+ *   <li>Fetch the skill's files into a staging dir, routed by source provider:
+ *       {@link GithubSkillFetcher} for the static GitHub dump (mastra),
+ *       {@link ClawhubSkillFetcher} for the dynamic ClawHub registry;</li>
  *   <li>{@link SkillConformanceService} rewrites it to the skill-creator contract
  *       (tool-name mapping, frontmatter normalization) and REJECTS anything that
  *       still can't conform;</li>
@@ -17,9 +18,10 @@ import java.util.Set;
  *       scan + secret sanitization + atomic write to the global registry — the
  *       exact path agent-workspace promotion uses.</li>
  * </ol>
- * The operator chose direct-to-global, so a successful import is live immediately;
- * the conformance gate + scan + sanitize are the safety stack standing in for the
- * human review that workspace promotion would otherwise provide.
+ * The fetch is the only provider-specific stage; conform → scan → sanitize →
+ * publish is shared. The operator chose direct-to-global, so a successful import
+ * is live immediately; the conformance gate + scan + sanitize are the safety
+ * stack standing in for the human review that workspace promotion would provide.
  */
 public final class RegistrySkillImporter {
 
@@ -34,20 +36,16 @@ public final class RegistrySkillImporter {
     }
 
     /**
-     * Import the catalog skill {@code skillId} from GitHub {@code source}
-     * (an {@code owner/repo} string) into the global registry. Never throws —
-     * failures return {@code ok=false} with a human-readable message.
+     * Import the catalog skill {@code skillId} into the global registry, fetching
+     * its files from the source named by {@code provider}: {@code "clawhub"} uses
+     * the ClawHub API (slug = skillId); anything else (the GitHub dump) parses
+     * {@code source} as {@code owner/repo}. Never throws — failures return
+     * {@code ok=false} with a human-readable message.
      */
-    public static ImportResult importToGlobal(String source, String skillId) {
-        var parts = source == null ? new String[0] : source.split("/");
-        if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
-            return ImportResult.fail("invalid source '%s' (expected owner/repo)".formatted(source));
-        }
+    public static ImportResult importToGlobal(String provider, String source, String skillId) {
         if (skillId == null || skillId.isBlank()) {
             return ImportResult.fail("missing skill id");
         }
-        var owner = parts[0];
-        var repo = parts[1];
 
         Path staged;
         try {
@@ -57,8 +55,23 @@ public final class RegistrySkillImporter {
         }
 
         try {
-            var fetch = GithubSkillFetcher.fetch(owner, repo, skillId, staged);
-            if (!fetch.ok()) return ImportResult.fail(fetch.message());
+            // Fetch — the only provider-specific stage.
+            boolean fetchOk;
+            String fetchMsg;
+            if ("clawhub".equalsIgnoreCase(provider)) {
+                var f = ClawhubSkillFetcher.fetch(skillId, staged);   // skillId == clawhub slug
+                fetchOk = f.ok();
+                fetchMsg = f.message();
+            } else {
+                var parts = source == null ? new String[0] : source.split("/");
+                if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
+                    return ImportResult.fail("invalid source '%s' (expected owner/repo)".formatted(source));
+                }
+                var f = GithubSkillFetcher.fetch(parts[0], parts[1], skillId, staged);
+                fetchOk = f.ok();
+                fetchMsg = f.message();
+            }
+            if (!fetchOk) return ImportResult.fail(fetchMsg);
 
             var conform = SkillConformanceService.conform(staged, skillId, source);
             if (!conform.ok()) return ImportResult.fail(conform.message());
@@ -72,7 +85,7 @@ public final class RegistrySkillImporter {
                 return ImportResult.fail("skill failed the malware scan or could not be written to the registry");
             }
 
-            EventLogger.info(CATEGORY, "Imported skill '%s' from %s".formatted(name, source));
+            EventLogger.info(CATEGORY, "Imported skill '%s' from %s (%s)".formatted(name, source, provider));
             return new ImportResult(true, name, "imported");
         } finally {
             try {
