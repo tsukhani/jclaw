@@ -160,7 +160,9 @@ public class ApiProvidersController extends Controller {
             error(400, "Provider '%s' has no base URL configured".formatted(name));
         }
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
-        var result = ModelDiscoveryService.discover(name, baseUrl, apiKey == null ? "" : apiKey);
+        // Page-load read (Settings video-model dropdown) — cached; the explicit
+        // POST /discover-models refresh still hits the provider live.
+        var result = ModelDiscoveryService.discoverCached(name, baseUrl, apiKey == null ? "" : apiKey);
         // MULTI_IMAGE providers (vLLM, Ollama) interpret sampled frames, so any vision-capable model
         // qualifies; a NATIVE_VIDEO provider (OpenRouter) needs true video input; an unrecognized
         // provider keeps the legacy supportsVideo filter. A video-capable model is also vision-capable,

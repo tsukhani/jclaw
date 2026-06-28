@@ -1,5 +1,7 @@
 package services;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -14,6 +16,7 @@ import utils.HttpKeys;
 import utils.Strings;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -99,6 +102,31 @@ public class ModelDiscoveryService {
     public sealed interface DiscoveryResult {
         record Ok(List<Map<String, Object>> models) implements DiscoveryResult {}
         record Error(int statusCode, String message) implements DiscoveryResult {}
+    }
+
+    // Provider model catalogs change on the order of days, so the read-heavy
+    // page-load paths (e.g. the Settings video-model dropdown, ~1.3s/call) cache
+    // discovery for 10 minutes rather than hitting the provider on every load.
+    // Keyed by name+baseUrl+apiKey so a config change re-discovers immediately;
+    // only Ok results are cached, so an error/misconfig retries on the next call.
+    // The explicit POST /discover-models refresh keeps calling uncached discover().
+    private static final Cache<String, DiscoveryResult> DISCOVER_CACHE = Caffeine.newBuilder()
+            .expireAfterWrite(Duration.ofMinutes(10))
+            .maximumSize(32)
+            .build();
+
+    /**
+     * Cached variant of {@link #discover} for page-load reads (see DISCOVER_CACHE).
+     * Use this on GET paths that re-discover on every render; keep {@link #discover}
+     * for explicit refreshes that must hit the provider live.
+     */
+    public static DiscoveryResult discoverCached(String providerName, String baseUrl, String apiKey) {
+        var key = providerName + "|" + baseUrl + "|" + (apiKey == null ? "" : apiKey);
+        var cached = DISCOVER_CACHE.getIfPresent(key);
+        if (cached != null) return cached;
+        var fresh = discover(providerName, baseUrl, apiKey);
+        if (fresh instanceof DiscoveryResult.Ok) DISCOVER_CACHE.put(key, fresh);
+        return fresh;
     }
 
     /**
