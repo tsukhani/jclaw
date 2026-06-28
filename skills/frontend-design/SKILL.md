@@ -1,6 +1,7 @@
 ---
 name: frontend-design
 description: Provides distinctive, opinionated visual design guidance for building UIs that avoid templated defaults through deliberate aesthetic choices.
+version: 1.0.0
 author: anthropics/skills
 tools: []
 commands: []

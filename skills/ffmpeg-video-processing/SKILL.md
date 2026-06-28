@@ -1,6 +1,7 @@
 ---
 name: ffmpeg-video-processing
 description: Video and audio processing with FFmpeg for format conversion, resizing, compression, audio extraction, and preparing assets for Remotion.
+version: 1.0.0
 author: digitalsamba/claude-code-video-toolkit
 tools: [exec, filesystem]
 commands: []
