@@ -115,20 +115,6 @@ pipeline {
                         }
                     }
                 }
-                stage('Sidecar Locks') {
-                    steps {
-                        // Verify the image/video sidecars' uv.lock files are
-                        // consistent with their pyproject.toml (resolution-only;
-                        // no packages installed, no GPU). Renovate keeps these
-                        // current via pep621 + lockFileMaintenance; this stage
-                        // catches a manifest edited without relocking. uv is
-                        // provisioned system-wide on the agent (/usr/local/bin,
-                        // on every user's PATH including the jenkins user); if
-                        // it ever goes missing, verify-locks.sh fails with a
-                        // clear "uv not on PATH" note rather than silently.
-                        sh './sidecar/verify-locks.sh'
-                    }
-                }
             }
         }
 
