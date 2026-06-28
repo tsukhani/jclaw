@@ -343,20 +343,7 @@ Default ports: backend on **:9000**, frontend on **:3000**.
 
 ### Production Deployment
 
-```bash
-# Deploy to /tmp (creates /tmp/jclaw), build everything, and start
-./jclaw.sh --deploy /tmp start
-
-# Stop
-./jclaw.sh --deploy /tmp stop
-
-# View logs
-./jclaw.sh --deploy /tmp logs
-```
-
-This packages the app with `play dist`, unzips to `<dir>/jclaw/`, installs dependencies, builds the frontend, and starts both services in production mode.
-
-To start an existing deployment (without re-packaging):
+For a turnkey production install, use the [Quick Install](#quick-install-one-line) (which downloads the self-contained `jclaw-bundle.zip`) or [Docker](#docker-production). To build that bundle yourself, run `./jclaw.sh bundle` — it produces a self-contained `dist/jclaw-bundle.zip` that runs with only a Java 25 JRE. Unzip it wherever you want to install JClaw, then start it in place:
 
 ```bash
 # Start
@@ -437,9 +424,6 @@ Use `--backend-port` and `--frontend-port` with any `jclaw.sh` mode. The fronten
 # Dev mode with custom ports
 ./jclaw.sh --dev --backend-port 8080 --frontend-port 4000 start
 
-# Production deploy with custom ports (creates /tmp/jclaw)
-./jclaw.sh --deploy /tmp --backend-port 8080 --frontend-port 4000 start
-
 # Bare start with custom backend port
 ./jclaw.sh --backend-port 8080 start
 ```
@@ -492,7 +476,7 @@ To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP
 - **State**: Composables backed by `useState` (no Pinia); `@vueuse/core` utilities
 - **Data & rendering**: `@tanstack/vue-table` for tables, `marked` + `dompurify` for safe Markdown, `zod` for validation
 - **API**: Cookie-session authenticated `$fetch` to the Play backend, proxied via Nitro in dev
-- **Tooling**: Vitest + `@nuxt/test-utils` + happy-dom, Playwright e2e, ESLint + Stylelint, `vue-tsc` typecheck, a11y via `vue-axe`/`axe-core`
+- **Tooling**: Vitest + `@nuxt/test-utils` + jsdom, Playwright e2e, ESLint + Stylelint, `vue-tsc` typecheck, a11y via `vue-axe`/`axe-core`
 
 ---
 

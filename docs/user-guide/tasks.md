@@ -174,7 +174,7 @@ When in doubt, ask the agent — `task_manager` knows Spring cron and can transl
 
 1. Per-task `timezone` (set by the agent or `updateTask`, validated as IANA — `America/New_York`, `Asia/Tokyo`, etc.).
 2. Operator default at **Settings → Tasks → Default timezone**.
-3. The `tasks.defaultTimezone` line in `application.conf` (default: `UTC`).
+3. The `tasks.defaultTimezone` line in `application.conf` (shipped commented-out; uncomment to pin a zone).
 4. The JVM default (`ZoneId.systemDefault()`).
 
 `INTERVAL` and `IMMEDIATE` tasks ignore timezone — their schedule is duration-based, not wall-clock.
