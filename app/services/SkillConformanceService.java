@@ -302,7 +302,8 @@ public final class SkillConformanceService {
         if (s == null) return null;
         var kebab = s.strip().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("(?:^-++)|(?:-++$)", "");  // strip leading/trailing hyphens (possessive: no backtracking — java:S5850/S5852)
+                .replaceAll("^-++", "")    // strip leading hyphens
+                .replaceAll("-++$", "");   // strip trailing hyphens (single anchored possessive pattern — no group, no alternation, no backtracking)
         return kebab.isBlank() ? null : kebab;
     }
 
