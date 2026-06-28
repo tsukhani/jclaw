@@ -21,4 +21,15 @@ public interface Catalog {
     /** Browse/search this catalog. Never throws — a failure returns
      *  {@link CatalogPage#notReady}. */
     CatalogPage query(CatalogQuery q);
+
+    /**
+     * Refresh the catalog's data from its source. For a {@link StaticDumpCatalog}
+     * this re-downloads the snapshot from its update URL on the next query;
+     * returns {@code true} when a refresh applies. A {@link CatalogType#DYNAMIC}
+     * catalog is always live (nothing is snapshotted), so the default is a no-op
+     * returning {@code false} (not applicable).
+     */
+    default boolean refresh() {
+        return false;
+    }
 }

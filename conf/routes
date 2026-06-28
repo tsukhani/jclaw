@@ -116,6 +116,7 @@ GET     /api/skills                             ApiSkillsController.list
 # Placed before the GET /api/skills/{name} pattern below so they resolve first.
 GET     /api/skills/catalogs                    ApiSkillsController.catalogs
 GET     /api/skills/catalog/search              ApiSkillsController.catalogSearch
+POST    /api/skills/catalog/refresh             ApiSkillsController.catalogRefresh
 POST    /api/skills/catalog/import              ApiSkillsController.catalogImport
 POST    /api/skills/promote                     ApiSkillsController.promote
 GET     /api/skills/{name}                      ApiSkillsController.get

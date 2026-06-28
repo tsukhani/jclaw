@@ -135,7 +135,8 @@ public final class StaticDumpCatalog implements Catalog {
 
     /** Re-download the dump on the next query (drops the disk cache + in-memory
      *  snapshot), so a stale static catalog can be updated from its url. */
-    public void refresh() {
+    @Override
+    public boolean refresh() {
         synchronized (loadLock) {
             try {
                 Files.deleteIfExists(cacheFile);
@@ -145,6 +146,8 @@ public final class StaticDumpCatalog implements Catalog {
             catalog = null;
             scrapedAt = null;
         }
+        EventLogger.info(CATEGORY, "Catalog '%s' refresh requested — next query re-downloads".formatted(id));
+        return true;
     }
 
     /** Order a result list by name (A–Z) or install count (desc, default). */

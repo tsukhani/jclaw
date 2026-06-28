@@ -150,6 +150,22 @@ public class ApiSkillsController extends Controller {
     }
 
     /**
+     * POST /api/skills/catalog/refresh — re-pull a static catalog's dump from its
+     * update URL (drops the disk cache; the next browse re-downloads + re-indexes).
+     * A dynamic catalog is always live, so it reports {@code refreshed=false}
+     * (not applicable).
+     */
+    @Operation(summary = "Refresh a static dump catalog from its update URL")
+    public static void catalogRefresh() {
+        var body = JsonBodyReader.readJsonBody();
+        var catalogId = body != null && body.has("catalog") ? body.get("catalog").getAsString() : null;
+        var c = CatalogRegistry.byId(catalogId);
+        var refreshed = c.refresh();
+        renderJSON(gson.toJson(Map.of("catalog", c.id(),
+                "type", c.type().name().toLowerCase(), "refreshed", refreshed)));
+    }
+
+    /**
      * POST /api/skills/catalog/import — Import a catalog skill from GitHub into
      * the global registry. The skill is conformed to the skill-creator contract
      * (tool-name mapping + frontmatter normalization), malware-scanned, and

@@ -6,6 +6,9 @@ import services.catalog.CatalogQuery;
 import services.catalog.CatalogRegistry;
 import services.catalog.CatalogSkill;
 import services.catalog.CategoryFacet;
+import services.catalog.MastraDumpParser;
+import services.catalog.StaticDumpCatalog;
+import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 
 import java.util.List;
@@ -127,6 +130,20 @@ class StaticDumpCatalogTest extends UnitTest {
         assertEquals(List.of("react-dashboard", "react-router-guide"),
                 r.results().stream().map(CatalogSkill::skillId).toList());
         assertEquals(5, r.facets().get(0).count());
+    }
+
+    @Test
+    void staticCatalogRefreshApplies() {
+        // Throwaway instance (own cache name) so we don't touch the real mastra cache.
+        var throwaway = new StaticDumpCatalog("test-refresh", "Test", "jclaw.test.unused.url",
+                "http://localhost/unused", "test-refresh.json",
+                LuceneIndexer.Scope.SKILLS_CATALOG, new MastraDumpParser());
+        assertTrue(throwaway.refresh(), "a static dump catalog refresh applies");
+    }
+
+    @Test
+    void dynamicCatalogRefreshIsNotApplicable() {
+        assertFalse(CatalogRegistry.CLAWHUB.refresh(), "a live registry has nothing to snapshot-refresh");
     }
 
     @Test

@@ -77,6 +77,7 @@ const catalogLoading = ref(false)
 const catalogError = ref<string | null>(null)
 const catalogResults = ref<CatalogSkill[]>([])
 const catalogSize = ref<number | null>(null)
+const catalogScrapedAt = ref<string | null>(null)
 // Static nav: facets + page-jump.
 const catalogCategory = ref('All')
 const catalogPage = ref(0)
@@ -120,6 +121,7 @@ async function runCatalogSearch() {
     }
     catalogResults.value = res.results
     catalogSize.value = res.catalogSize
+    catalogScrapedAt.value = res.scrapedAt
     catalogTotal.value = res.total
     catalogFacets.value = res.facets
     nextCursor.value = res.nextCursor
@@ -145,6 +147,30 @@ function resetCatalogNav() {
 function searchCatalog() {
   resetCatalogNav()
   runCatalogSearch()
+}
+
+// Snapshot age for static catalogs (dynamic returns null scrapedAt).
+const catalogScrapedLabel = computed(() => {
+  if (!catalogScrapedAt.value) return ''
+  const d = new Date(catalogScrapedAt.value)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString()
+})
+
+// Re-download a static catalog's snapshot from its source, then re-browse.
+const catalogRefreshing = ref(false)
+async function refreshCatalog() {
+  if (catalogType.value !== 'static' || catalogRefreshing.value) return
+  catalogRefreshing.value = true
+  try {
+    await $fetch('/api/skills/catalog/refresh', { method: 'POST', body: { catalog: selectedCatalog.value } })
+    catalogResults.value = []
+    resetCatalogNav()
+    await runCatalogSearch() // re-downloads + re-indexes lazily
+  }
+  catch { /* keep prior results; the user can retry */ }
+  finally {
+    catalogRefreshing.value = false
+  }
 }
 
 function selectCatalog(id: string) {
@@ -1529,16 +1555,27 @@ function totalSkillCount(agentId: number) {
                 v-if="catalogSize && catalogSize > 0"
                 class="text-xs text-fg-muted"
               >
-                {{ catalogSize.toLocaleString() }} skills in catalog
+                {{ catalogSize.toLocaleString() }} skills<span v-if="catalogScrapedLabel"> · snapshot {{ catalogScrapedLabel }}</span>
               </span>
             </div>
-            <button
-              class="text-fg-muted hover:text-fg-strong text-lg leading-none"
-              title="Close"
-              @click="catalogOpen = false"
-            >
-              ×
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                v-if="catalogType === 'static'"
+                :disabled="catalogRefreshing || catalogLoading"
+                class="text-xs px-2 py-1 border border-border text-fg-muted hover:text-fg-strong hover:bg-muted disabled:opacity-50"
+                title="Re-download the catalog snapshot from its source"
+                @click="refreshCatalog"
+              >
+                {{ catalogRefreshing ? 'Refreshing…' : 'Refresh' }}
+              </button>
+              <button
+                class="text-fg-muted hover:text-fg-strong text-lg leading-none"
+                title="Close"
+                @click="catalogOpen = false"
+              >
+                ×
+              </button>
+            </div>
           </div>
 
           <!-- Catalog selector: each is a self-contained source (static dump or live registry) -->
