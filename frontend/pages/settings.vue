@@ -865,6 +865,32 @@ function stopVideoCapPolling() {
     videoCapPollTimer = null
   }
 }
+// Top-level Self-Hosted vs Replicate choice. "Local" is any provider that isn't the lone cloud backend
+// (replicate) — i.e. an ltx-local / wan-local engine. The header radio shows checked whenever local is
+// active, even before a GPU probe, so the current backend is always clear.
+const videogenIsLocal = computed(() => {
+  const p = videogenProvider.value
+  return p !== '' && p !== 'replicate'
+})
+// Picking "Self-Hosted" needs a concrete engine, which needs a probe first. If engines are already known,
+// select the best runnable one immediately; otherwise probe and auto-select once it settles.
+const pendingLocalAutoSelect = ref(false)
+async function selectSelfHosted() {
+  if (videogenIsLocal.value) return // already on a local engine
+  const best = videoEngines.value.find(e => e.runnable)
+  if (videoCapState.value === 'READY' && best) {
+    await selectLocalEngine(best)
+    return
+  }
+  pendingLocalAutoSelect.value = true
+  await probeVideoCapability()
+}
+watch(videoCapState, (s) => {
+  if (s !== 'READY' || !pendingLocalAutoSelect.value) return
+  pendingLocalAutoSelect.value = false
+  const best = videoEngines.value.find(e => e.runnable)
+  if (best) void selectLocalEngine(best) // nothing runnable -> leave provider as-is; the list shows why
+})
 onMounted(() => {
   if (videoCapState.value === 'PROBING') startVideoCapPolling()
 })
@@ -5268,7 +5294,28 @@ async function deleteLoggerLevel(logger: string) {
                decide what's offered. WAN is greyed off NVIDIA; a fits-but-slow engine is still selectable. -->
           <div class="bg-surface-elevated border border-border">
             <div class="px-4 py-2.5 flex items-center gap-3 border-b border-border">
-              <span class="flex-1 text-sm text-fg-primary">Self-Hosted (on this machine)</span>
+              <!-- Top-level Self-Hosted radio: a peer of Replicate so local-vs-cloud is one clear choice.
+                   Checked whenever a local engine is active (even before a GPU probe). Picking it probes
+                   and selects the best runnable engine; the per-engine radios below refine the tier. -->
+              <label
+                for="videogen-provider-local"
+                class="flex-1 flex items-center gap-3"
+                :class="videoCapability?.uvAvailable ? 'cursor-pointer' : 'cursor-not-allowed'"
+              >
+                <input
+                  id="videogen-provider-local"
+                  type="radio"
+                  name="videogen-provider"
+                  :checked="videogenIsLocal"
+                  :disabled="!videoCapability?.uvAvailable || videoCapState === 'PROBING' || saving"
+                  class="accent-emerald-600"
+                  @change="selectSelfHosted()"
+                >
+                <span
+                  class="text-sm"
+                  :class="videoCapability?.uvAvailable ? 'text-fg-primary' : 'text-fg-muted'"
+                >Self-Hosted (on this machine)</span>
+              </label>
               <span
                 v-if="!videoCapability?.uvAvailable"
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 px-1"
@@ -5318,7 +5365,7 @@ async function deleteLoggerLevel(logger: string) {
                 <input
                   :id="`videogen-engine-${e.id}`"
                   type="radio"
-                  name="videogen-provider"
+                  name="videogen-engine"
                   :checked="isLocalEngineActive(e)"
                   :disabled="!e.runnable || saving"
                   class="accent-emerald-600"
