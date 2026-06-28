@@ -56,7 +56,32 @@
     // below — needed in this list so Renovate's manager-enable gate
     // doesn't filter our regex manager out before it runs.
     "custom.regex",
+    // pep621 covers the local image/video generation sidecars' Python
+    // stacks — sidecar/{image,video}/pyproject.toml + uv.lock (uv is a
+    // supported pep621 toolset). Both manifests are picked up via the
+    // manager's default pyproject.toml match; the lock refresh that
+    // advances the ref-less git LTX deps comes from lockFileMaintenance.
+    "pep621",
   ],
+
+  // Keep the sidecar uv.lock files fresh. pep621's normal updates only bump a
+  // PyPI dep when its constraint changes; the ref-less git LTX deps
+  // (Lightricks/LTX-2, dgrauet/ltx-2-mlx — pinned by commit in uv.lock but
+  // floating on each repo's default branch) advance ONLY via a full lock
+  // refresh, which lockFileMaintenance runs (`uv lock` upgrade). Locking is
+  // resolution-only — no torch/wheel download, no GPU — so it works inside the
+  // renovate/renovate image (uv auto-installed via containerbase).
+  //
+  // The schedule override is load-bearing: lockFileMaintenance defaults to
+  // "before 4am on monday", which would silently miss Jenkinsfile.renovate's
+  // ~6am Monday cron and never open a PR. "at any time" hands timing back to
+  // the Jenkins cron, matching the no-`schedule` rationale above. Scoped to
+  // the uv locks only — npm is carved out in packageRules so the frontend
+  // pnpm-lock.yaml isn't churned (gradle/docker carry no committed lockfile).
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ["at any time"],
+  },
 
   // Same family-grouping intent as the previous .github/dependabot.yml:
   // collapse the dozen-plus eslint plugins and similar lockstep-versioned
@@ -158,6 +183,27 @@
     {
       matchManagers: ["gradle", "gradle-wrapper"],
       matchUpdateTypes: ["minor"],
+      automerge: false,
+    },
+
+    // Scope lockFileMaintenance to the sidecar uv.lock files only: suppress it
+    // for npm so the top-level enable above doesn't also churn the frontend
+    // pnpm-lock.yaml. (gradle/dockerfile/docker-compose carry no committed
+    // lockfile, so they're already no-ops; uv.lock is the only other one.)
+    {
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["lockFileMaintenance"],
+      enabled: false,
+    },
+
+    // Never auto-merge a sidecar (pep621) bump. CI can resolve + import the
+    // Python stack but can't run a GPU generation test, so the one stack we
+    // can't fully validate drops to human review — open a PR, smoke-test on a
+    // GPU host, then merge. Same "needs human eyes" carve-out as the
+    // gradle-minors rule above; must sit after the minor/patch auto-merge
+    // catch-all (last match wins).
+    {
+      matchManagers: ["pep621"],
       automerge: false,
     },
   ],
