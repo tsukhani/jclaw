@@ -61,7 +61,7 @@
     --surface: #fff;                    /* page background — Unsloth white */
     --surface-elevated: #fcfcfc;           /* sidebar/header/composer — Unsloth 99% */
     --fg-primary: hsl(0 0% 27%);           /* body text — neutral-700 */
-    --fg-muted: hsl(0 0% 45%);             /* secondary text — neutral-500 */
+    --fg-muted: hsl(0 0% 43%);             /* secondary text — neutral; ≥4.5:1 incl. tinted surfaces (WCAG AA) */
     --fg-strong: hsl(0 0% 9%);             /* emphasis/hover — neutral-900 */
     --ok: hsl(160 84% 39%);                /* success — emerald-600 */
     --danger: hsl(0 72% 51%);              /* error — red-600 */
@@ -114,7 +114,7 @@
     --surface: #1a1b1e;                    /* page background — Unsloth */
     --surface-elevated: #222427;           /* sidebar/header/composer — Unsloth */
     --fg-primary: hsl(0 0% 83%);           /* body text — neutral-300 */
-    --fg-muted: hsl(0 0% 50%);             /* secondary text — WCAG AA adjusted */
+    --fg-muted: hsl(0 0% 56%);             /* secondary text — ~4.8:1 on elevated surface (WCAG AA; was 50%≈3.93:1) */
     --fg-strong: hsl(0 0% 100%);           /* emphasis/hover — white */
     --ok: hsl(160 84% 39%);                /* success — emerald-500 */
     --danger: hsl(0 84% 60%);              /* error — red-500 */

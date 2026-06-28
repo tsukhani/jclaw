@@ -1190,7 +1190,6 @@ function totalSkillCount(agentId: number) {
                   type="button"
                   class="w-full flex items-center justify-between gap-2 mb-1 text-left bg-transparent border-0 cursor-pointer"
                   :aria-expanded="!isAgentCollapsed(agent.id)"
-                  :aria-label="`${isAgentCollapsed(agent.id) ? 'Expand' : 'Collapse'} ${agent.name} skills`"
                   @click="toggleAgentCollapse(agent.id)"
                 >
                   <div class="flex items-center gap-2 min-w-0">
@@ -1553,7 +1552,7 @@ function totalSkillCount(agentId: number) {
               :class="[
                 'px-3 py-1.5 text-xs border-b-2 -mb-px transition-colors',
                 selectedCatalog === c.id
-                  ? 'border-accent text-fg-strong font-medium'
+                  ? 'border-ring text-fg-strong font-medium'
                   : 'border-transparent text-fg-muted hover:text-fg-strong',
               ]"
               @click="selectCatalog(c.id)"
