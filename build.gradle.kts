@@ -416,10 +416,10 @@ dependencies {
     // H2 triggers. tika-parsers-standard-package above already excludes
     // the transitive lucene pull (line 205), so these declarations own
     // the resolved graph.
-    implementation("org.apache.lucene:lucene-core:10.4.0")
-    implementation("org.apache.lucene:lucene-analysis-common:10.4.0")
+    implementation("org.apache.lucene:lucene-core:10.5.0")
+    implementation("org.apache.lucene:lucene-analysis-common:10.5.0")
     // QueryParser lives in its own artifact since Lucene 9.
-    implementation("org.apache.lucene:lucene-queryparser:10.4.0")
+    implementation("org.apache.lucene:lucene-queryparser:10.5.0")
 
     // JCLAW-448: Cobalt — the unofficial WhatsApp-Web (Baileys-equivalent) stack
     // for the WHATSAPP_WEB transport (QR-paired, group-capable, ban-warned).
