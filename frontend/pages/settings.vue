@@ -872,6 +872,11 @@ const videogenIsLocal = computed(() => {
   const p = videogenProvider.value
   return p !== '' && p !== 'replicate'
 })
+// Hardware verdict from the probe: once READY, "unsupported" means no engine can run on this machine
+// (no GPU, or too little free VRAM for even the smallest tier). Drives disabling the Self-Hosted radio.
+const videoLocalUnsupported = computed(() =>
+  videoCapState.value === 'READY' && !videoEngines.value.some(e => e.runnable),
+)
 // Picking "Self-Hosted" needs a concrete engine, which needs a probe first. If engines are already known,
 // select the best runnable one immediately; otherwise probe and auto-select once it settles.
 const pendingLocalAutoSelect = ref(false)
@@ -5307,13 +5312,13 @@ async function deleteLoggerLevel(logger: string) {
                   type="radio"
                   name="videogen-provider"
                   :checked="videogenIsLocal"
-                  :disabled="!videoCapability?.uvAvailable || videoCapState === 'PROBING' || saving"
+                  :disabled="!videoCapability?.uvAvailable || videoCapState === 'PROBING' || videoLocalUnsupported || saving"
                   class="accent-emerald-600"
                   @change="selectSelfHosted()"
                 >
                 <span
                   class="text-sm"
-                  :class="videoCapability?.uvAvailable ? 'text-fg-primary' : 'text-fg-muted'"
+                  :class="(videoCapability?.uvAvailable && !videoLocalUnsupported) ? 'text-fg-primary' : 'text-fg-muted'"
                 >Self-Hosted (on this machine)</span>
               </label>
               <span
@@ -5388,6 +5393,13 @@ async function deleteLoggerLevel(logger: string) {
                   class="text-[10px] text-fg-muted border border-border px-1"
                 >{{ e.reason ?? 'unavailable' }}</span>
               </label>
+              <!-- No engine fits this machine — Self-Hosted is disabled above; say why. -->
+              <div
+                v-if="videoLocalUnsupported"
+                class="px-4 py-2 text-[11px] text-amber-700 dark:text-amber-400 border-t border-border"
+              >
+                This machine can't run local video generation — no engine fits the detected GPU / free VRAM. Use Replicate instead.
+              </div>
             </template>
 
             <!-- NEEDS_PROBE — idle hint. -->
