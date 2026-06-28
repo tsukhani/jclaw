@@ -24,14 +24,37 @@ import java.util.concurrent.TimeUnit;
  * <h2>Retrieval model</h2>
  * <ul>
  *   <li>Blank query → browse {@code GET /api/v1/skills?sort=downloads} with
- *       opaque cursor pagination (Next/Prev). No global facet counts — we never
- *       hold the full catalog to count.</li>
+ *       opaque cursor pagination (Next/Prev).</li>
  *   <li>Non-blank query → {@code GET /api/v1/search?q=…}, a single relevance-ranked
  *       page (clawhub's search isn't cursor-paginated).</li>
  * </ul>
  * Each result is classified on the fly through the shared
  * {@link SkillCategoryClassifier} (using clawhub's richer description + topics),
  * so a row carries the same topical category as a static-catalog row.
+ *
+ * <h2>Why a dynamic catalog returns no facets</h2>
+ * {@link #query} always returns an empty {@code facets} list — and this is forced
+ * by the source, not a shortcut. Topical facet COUNTS require knowing the whole
+ * catalog (count every skill's category); a dynamic catalog deliberately never
+ * holds the whole catalog — it proxies a live registry one page at a time.
+ *
+ * <p>clawhub's public API offers no way to recover those counts. Verified against
+ * the live API + the {@code httpApiV1} route source (2026-06): there is no
+ * registry-stats endpoint (no totals), no topics/tags/categories listing with
+ * per-bucket counts, and browse/search responses carry only result items + a
+ * cursor — no aggregations. Per-skill {@code topics} arrays exist, but the
+ * {@code topic=}/{@code tag=} filter params have no effect on the list endpoint,
+ * so we can't even narrow by topic server-side. The "Topics" taxonomy on the
+ * clawhub website is computed by internal Convex queries the site calls directly,
+ * never exposed over {@code /api/v1}.
+ *
+ * <p>So facet counts here would mean paginating the ENTIRE live registry and
+ * counting client-side on every browse — which is exactly the "snapshot a live
+ * source" move the {@link CatalogType#DYNAMIC} model rejects (a large,
+ * rate-limited crawl whose counts are stale the instant they're computed). The
+ * UI therefore renders dynamic catalogs with search + cursor Next/Prev and no
+ * facet sidebar; the per-row category label (from {@code classifyText}) is the
+ * topical signal we CAN surface without holding the whole set.
  */
 public final class ClawhubCatalog implements Catalog {
 
