@@ -1647,7 +1647,7 @@ function totalSkillCount(agentId: number) {
                     target="_blank"
                     rel="noopener noreferrer"
                     :title="s.url"
-                    class="block text-sm text-fg-strong hover:text-accent hover:underline truncate"
+                    class="block text-sm text-fg-strong hover:underline truncate"
                   >{{ s.displayName || s.skillId }}</a>
                   <div class="text-xs text-fg-muted truncate">
                     {{ s.source }} · {{ s.category }}
