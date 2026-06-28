@@ -128,6 +128,7 @@ describe('slack bindings page — Request URL + setup (JCLAW-441)', () => {
     // AGENT (id 1) is the main agent; its binding has no owner.
     bindingsResponse = [binding({ id: 7, ownerUserId: null })]
     const c = await mountSuspended(Slack)
+    await flushPromises() // funnel status is lazy now — let it resolve before interacting
     await c.find('[aria-label="Edit binding"]').trigger('click')
     await nextTick()
     // The warning shows and Save is disabled while the owner is blank.

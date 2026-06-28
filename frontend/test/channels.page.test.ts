@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import Channels from '~/pages/channels/index.vue'
 
@@ -58,6 +59,7 @@ describe('channels page — binding-link cards (JCLAW-441/444) + Tailscale Funne
   it('disables Enable Funnel while Tailscale is unavailable', async () => {
     tailscaleResponse = { enabled: false, available: false, publicUrl: null, error: 'Tailscale is installed but not connected (state: Stopped)' }
     const component = await mountSuspended(Channels)
+    await flushPromises() // funnel status is lazy now — let it resolve before asserting
     const button = component.findAll('button').find(b => b.text() === 'Enable Funnel')
     expect(button?.attributes('disabled')).toBeDefined()
     // The resume hint only applies when the operator has the funnel switched on.
@@ -67,6 +69,7 @@ describe('channels page — binding-link cards (JCLAW-441/444) + Tailscale Funne
   it('enables Enable Funnel when Tailscale is installed and connected', async () => {
     tailscaleResponse = { enabled: false, available: true, publicUrl: null, error: null }
     const component = await mountSuspended(Channels)
+    await flushPromises() // funnel status is lazy now — let it resolve before asserting
     const button = component.findAll('button').find(b => b.text() === 'Enable Funnel')
     expect(button?.attributes('disabled')).toBeUndefined()
   })
@@ -74,6 +77,7 @@ describe('channels page — binding-link cards (JCLAW-441/444) + Tailscale Funne
   it('keeps Disable Funnel clickable even when Tailscale becomes unavailable', async () => {
     tailscaleResponse = { enabled: true, available: false, publicUrl: null, error: 'tailscale CLI not available or tailscaled not running' }
     const component = await mountSuspended(Channels)
+    await flushPromises() // funnel status is lazy now — let it resolve before asserting
     const button = component.findAll('button').find(b => b.text() === 'Disable Funnel')
     expect(button?.attributes('disabled')).toBeUndefined()
     // enabled (unavailable) is a self-healing state, not a stuck one — say so.

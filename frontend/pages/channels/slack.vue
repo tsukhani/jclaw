@@ -24,11 +24,13 @@ interface TailscaleStatus {
   error: string | null
 }
 
-const [{ data: bindings, refresh }, { data: agents }, { data: tailscale }] = await Promise.all([
+const [{ data: bindings, refresh }, { data: agents }] = await Promise.all([
   useFetch<SlackBindingSummary[]>('/api/channels/slack/bindings'),
   useFetch<Agent[]>('/api/agents'),
-  useFetch<TailscaleStatus>('/api/tailscale'),
 ])
+// Funnel status shells out to `tailscale status` (~400ms) and only pre-fills the
+// webhook URL — load it lazily so it never blocks the page render.
+const { data: tailscale } = useFetch<TailscaleStatus>('/api/tailscale', { lazy: true })
 
 const enabledAgents = computed(() => (agents.value ?? []).filter(a => a.enabled))
 

@@ -12,13 +12,17 @@ const [
   { data: telegramBindings, refresh: refreshBindings },
   { data: slackBindings, refresh: refreshSlackBindings },
   { data: whatsappBindings, refresh: refreshWhatsappBindings },
-  { data: tailscale, refresh: refreshTailscale },
 ] = await Promise.all([
   useFetch<TelegramBindingSummary[]>('/api/channels/telegram/bindings'),
   useFetch<SlackBindingSummary[]>('/api/channels/slack/bindings'),
   useFetch<WhatsAppBindingSummary[]>('/api/channels/whatsapp/bindings'),
-  useFetch<TailscaleStatus>('/api/tailscale'),
 ])
+
+// The funnel status shells out to `tailscale status` (~400ms); load it lazily so
+// the page paints immediately on the channel data and this secondary badge fills
+// in when ready, instead of gating the whole render on the slow probe.
+const { data: tailscale, refresh: refreshTailscale, status: tailscaleStatus }
+  = useFetch<TailscaleStatus>('/api/tailscale', { lazy: true })
 
 const { mutate } = useApiMutation()
 
@@ -132,7 +136,7 @@ onActivated(() => {
         <span
           :class="tailscale?.enabled && tailscale?.available ? 'text-green-400' : 'text-fg-muted'"
           class="text-xs font-mono"
-        >{{ tailscale?.enabled ? (tailscale?.available ? 'active' : 'enabled (unavailable)') : 'off' }}</span>
+        >{{ tailscaleStatus === 'pending' ? 'checking…' : (tailscale?.enabled ? (tailscale?.available ? 'active' : 'enabled (unavailable)') : 'off') }}</span>
       </div>
       <p class="text-xs text-fg-muted mb-3">
         Exposes this JClaw instance to the public internet over HTTPS via Tailscale
