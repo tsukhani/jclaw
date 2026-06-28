@@ -1642,21 +1642,19 @@ function totalSkillCount(agentId: number) {
                 class="px-4 py-2.5 flex items-center justify-between gap-3"
               >
                 <div class="min-w-0">
-                  <div class="text-sm text-fg-strong truncate">
-                    {{ s.displayName || s.skillId }}
-                  </div>
+                  <a
+                    :href="s.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    :title="s.url"
+                    class="block text-sm text-fg-strong hover:text-accent hover:underline truncate"
+                  >{{ s.displayName || s.skillId }}</a>
                   <div class="text-xs text-fg-muted truncate">
                     {{ s.source }} · {{ s.category }}
                   </div>
                 </div>
                 <div class="flex items-center gap-3 shrink-0">
                   <span class="text-xs text-fg-muted">{{ s.installs.toLocaleString() }} installs</span>
-                  <a
-                    :href="s.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="text-xs text-accent hover:underline"
-                  >Open ↗</a>
                   <template v-if="canImport(s)">
                     <span
                       v-if="importedKeys.has(catalogKey(s))"
