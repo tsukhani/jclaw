@@ -16,6 +16,8 @@ import DOMPurify from 'dompurify'
 import type {
   Agent,
   AgentSkill,
+  CatalogSearchResult,
+  CatalogSkill,
   Skill,
   SkillFile,
   SkillFileContent,
@@ -54,6 +56,52 @@ async function loadAllAgentSkills() {
 }
 
 watch(agents, () => loadAllAgentSkills(), { immediate: true })
+
+// --- Importable-skills catalog search (skills.sh / mastra-ai snapshot) ---
+// The backend lazily downloads + indexes the ~10 MB catalog snapshot on the
+// first search, so the first query is slower than later ones — hence the
+// loading copy. $fetch (not useFetch) keeps each search imperative + uncached.
+const catalogOpen = ref(false)
+const catalogQuery = ref('')
+const catalogLoading = ref(false)
+const catalogError = ref<string | null>(null)
+const catalogResults = ref<CatalogSkill[]>([])
+const catalogSize = ref<number | null>(null)
+// Monotonic guard so a slow in-flight search can't overwrite a newer one.
+let catalogSeq = 0
+
+async function searchCatalog() {
+  const seq = ++catalogSeq
+  catalogLoading.value = true
+  catalogError.value = null
+  try {
+    const res = await $fetch<CatalogSearchResult>('/api/skills/catalog/search', {
+      params: { q: catalogQuery.value, limit: 30 },
+    })
+    if (seq !== catalogSeq) return
+    if (!res.ready) {
+      catalogError.value = 'Could not load the skills catalog. Check connectivity and try again.'
+      catalogResults.value = []
+      return
+    }
+    catalogResults.value = res.results
+    catalogSize.value = res.catalogSize
+  }
+  catch {
+    if (seq !== catalogSeq) return
+    catalogError.value = 'Catalog search failed.'
+    catalogResults.value = []
+  }
+  finally {
+    if (seq === catalogSeq) catalogLoading.value = false
+  }
+}
+
+function openCatalog() {
+  catalogOpen.value = true
+  // Browse the most-installed skills on open (blank query) if nothing loaded yet.
+  if (!catalogResults.value.length && !catalogLoading.value) searchCatalog()
+}
 
 // Panel filters — case-insensitive substring match against the displayed name.
 // Skills filter on the canonical folderName (falling back to name); agents on
@@ -697,6 +745,13 @@ function totalSkillCount(agentId: number) {
       <h1 class="text-lg font-semibold text-fg-strong">
         Skills
       </h1>
+      <button
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border bg-surface-elevated text-fg-strong hover:bg-muted transition-colors"
+        @click="openCatalog"
+      >
+        <MagnifyingGlassIcon class="w-4 h-4" />
+        Browse catalog
+      </button>
     </div>
 
     <div
@@ -1331,6 +1386,99 @@ function totalSkillCount(agentId: number) {
         </div>
       </div>
     </div>
+    <!-- Importable-skills catalog browser (skills.sh / mastra-ai snapshot) -->
+    <Teleport to="body">
+      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions, vuejs-accessibility/click-events-have-key-events -- backdrop click-to-close is a convenience; the × button is the accessible close path -->
+      <div
+        v-if="catalogOpen"
+        class="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/40"
+        @click.self="catalogOpen = false"
+      >
+        <div class="w-full max-w-2xl max-h-full flex flex-col bg-surface-elevated border border-border shadow-xl">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+            <div class="flex flex-col">
+              <span class="text-sm font-semibold text-fg-strong">Browse importable skills</span>
+              <span
+                v-if="catalogSize"
+                class="text-xs text-fg-muted"
+              >
+                {{ catalogSize.toLocaleString() }} skills in catalog
+              </span>
+            </div>
+            <button
+              class="text-fg-muted hover:text-fg-strong text-lg leading-none"
+              title="Close"
+              @click="catalogOpen = false"
+            >
+              ×
+            </button>
+          </div>
+
+          <div class="px-4 py-3 border-b border-border shrink-0">
+            <div class="relative">
+              <MagnifyingGlassIcon class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-muted" />
+              <input
+                v-model="catalogQuery"
+                type="text"
+                placeholder="Search skills by name…"
+                aria-label="Search importable skills"
+                class="w-full pl-8 pr-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
+                @keyup.enter="searchCatalog"
+              >
+            </div>
+          </div>
+
+          <div class="flex-1 min-h-0 overflow-y-auto">
+            <div
+              v-if="catalogLoading"
+              class="px-4 py-8 text-center text-sm text-fg-muted"
+            >
+              Loading catalog… the first search downloads the snapshot.
+            </div>
+            <div
+              v-else-if="catalogError"
+              class="px-4 py-8 text-center text-sm text-red-600 dark:text-red-400"
+            >
+              {{ catalogError }}
+            </div>
+            <div
+              v-else-if="!catalogResults.length"
+              class="px-4 py-8 text-center text-sm text-fg-muted"
+            >
+              No skills match your search.
+            </div>
+            <ul
+              v-else
+              class="divide-y divide-border"
+            >
+              <li
+                v-for="s in catalogResults"
+                :key="`${s.source}/${s.skillId}`"
+                class="px-4 py-2.5 flex items-center justify-between gap-3"
+              >
+                <div class="min-w-0">
+                  <div class="text-sm text-fg-strong truncate">
+                    {{ s.displayName || s.skillId }}
+                  </div>
+                  <div class="text-xs text-fg-muted truncate">
+                    {{ s.source }}
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 shrink-0">
+                  <span class="text-xs text-fg-muted">{{ s.installs.toLocaleString() }} installs</span>
+                  <a
+                    :href="s.githubUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-xs text-accent hover:underline"
+                  >GitHub ↗</a>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 

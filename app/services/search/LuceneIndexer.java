@@ -83,7 +83,20 @@ public final class LuceneIndexer {
         /** Memory.text — per-agent memories. The only scope that carries an
          *  {@link #AGENT_FIELD} so search can be filtered to one agent
          *  (memories never cross agents). */
-        MEMORY("memory");
+        MEMORY("memory"),
+        /**
+         * External importable-skills catalog (the skills.sh / mastra-ai
+         * GitHub-scraped snapshot) backing the Skills page's "browse &amp;
+         * import" search. UNLIKE every scope above, this one is NOT derived
+         * from a JPA entity: it has no {@code @PostPersist}/{@code @PostUpdate}/
+         * {@code @PostRemove} hooks and NO backfiller in
+         * {@code DirectLuceneMessageSearchRepository}. It is (re)populated
+         * lazily by {@code services.SkillCatalogService} on the first search —
+         * which downloads the upstream snapshot, {@link #clear(Scope)}s this
+         * scope, and re-upserts every row keyed by its position in the loaded
+         * list (so a Lucene hit's id is an index back into the in-memory
+         * snapshot). Do not add a startup backfiller for it. */
+        SKILLS_CATALOG("skills_catalog");
 
         private final String dirName;
 
@@ -373,6 +386,28 @@ public final class LuceneIndexer {
             EventLogger.warn(CATEGORY, null, null,
                     "Lucene commit failed: scope=%s: %s"
                             .formatted(scope.name(), e.getMessage()));
+        }
+    }
+
+    /**
+     * Delete every document in one scope and commit, leaving the writer open.
+     * Used by externally-sourced scopes (currently {@link Scope#SKILLS_CATALOG})
+     * that fully reload from an upstream snapshot on each refresh rather than
+     * syncing row-by-row from JPA. The reload clears first so rows dropped
+     * upstream don't linger, and so position-keyed ids from a smaller new
+     * snapshot can't collide with stale higher-id docs. No-op if the scope
+     * isn't open; failures are logged, never propagated (same no-throw
+     * contract as {@link #upsert}).
+     */
+    public static void clear(Scope scope) {
+        var writer = WRITERS.get(scope);
+        if (writer == null) return;
+        try {
+            writer.deleteAll();
+            writer.commit();
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, null, null,
+                    "Lucene clear failed: scope=%s: %s".formatted(scope.name(), e.getMessage()));
         }
     }
 

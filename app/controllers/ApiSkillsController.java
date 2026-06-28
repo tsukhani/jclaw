@@ -16,6 +16,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 import services.SkillBinaryScanner;
+import services.SkillCatalogService;
 import services.SkillPromotionService;
 import services.Tx;
 
@@ -107,6 +108,20 @@ public class ApiSkillsController extends Controller {
             }
         }
         var result = skills.stream().map(s -> skillToMap(s, true)).toList();
+        renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * GET /api/skills/catalog/search — Search the external importable-skills
+     * catalog (the skills.sh / mastra-ai GitHub-scraped snapshot). The snapshot
+     * is downloaded and indexed lazily on the first call (then disk-cached), so
+     * the first search is slower than later ones. A blank {@code q} browses the
+     * most-installed skills.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCatalogService.CatalogSearchResult.class)))
+    @Operation(summary = "Search the external importable-skills catalog")
+    public static void catalogSearch(String q, Integer limit) {
+        var result = SkillCatalogService.search(q, limit != null ? limit : 30);
         renderJSON(gson.toJson(result));
     }
 

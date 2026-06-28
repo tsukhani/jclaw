@@ -112,6 +112,9 @@ PUT     /api/agents/{id}/tool-groups/{group}    ApiToolsController.updateGroupFo
 # promotion from an agent workspace. Manual file edits through the API are
 # forbidden — no POST /api/skills, no PUT .../files, no PUT .../{name}.
 GET     /api/skills                             ApiSkillsController.list
+# Importable-skills catalog search (skills.sh / mastra-ai snapshot, lazy-loaded).
+# Multi-segment path so it resolves before the GET /api/skills/{name} pattern below.
+GET     /api/skills/catalog/search              ApiSkillsController.catalogSearch
 POST    /api/skills/promote                     ApiSkillsController.promote
 GET     /api/skills/{name}                      ApiSkillsController.get
 PUT     /api/skills/{name}/rename               ApiSkillsController.rename

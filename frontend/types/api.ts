@@ -401,6 +401,36 @@ export interface SkillFileContent {
   content: string
 }
 
+/**
+ * One importable skill from the external catalog (the skills.sh / mastra-ai
+ * GitHub-scraped snapshot), as returned by GET /api/skills/catalog/search.
+ */
+export interface CatalogSkill {
+  skillId: string
+  displayName: string
+  /** GitHub `owner/repo` the skill lives in. */
+  source: string
+  owner: string
+  repo: string
+  githubUrl: string
+  /** Popularity signal from the upstream catalog; used for browse ranking. */
+  installs: number
+}
+
+/**
+ * Shape returned by GET /api/skills/catalog/search. `ready=false` means the
+ * upstream snapshot couldn't be loaded (download/parse failure) rather than
+ * "no matches".
+ */
+export interface CatalogSearchResult {
+  ready: boolean
+  /** Total skills in the loaded snapshot (not the result count). */
+  catalogSize: number
+  /** ISO-8601 timestamp of when the upstream snapshot was scraped. */
+  scrapedAt: string | null
+  results: CatalogSkill[]
+}
+
 /** A channel configuration status. */
 export interface ChannelStatus {
   channelType: string
