@@ -70,19 +70,50 @@ public final class TailscaleFunnel {
     private static final Runner PROCESS_RUNNER = TailscaleFunnel::execProcess;
     private static volatile String cachedBinary;
 
+    /** Short-TTL cache for the real-process {@link #status()} read path: the probe
+     *  shells out to {@code tailscale status --json} (~400ms) and the channel pages
+     *  read it on every load. Funnel state changes are rare and explicitly drop the
+     *  cache ({@link #invalidateStatusCache()} on enable/disable), so the TTL only
+     *  bounds staleness from out-of-band changes (daemon down, manual CLI). */
+    private static final Duration STATUS_CACHE_TTL = Duration.ofSeconds(10);
+    private static volatile CachedStatus statusCache;
+    private record CachedStatus(Status status, long atNanos) {}
+
     // ===================== public API (real process runner) =====================
 
-    /** Probe whether Funnel can be used here, and the node's public base URL. */
-    public static Status status() { return status(PROCESS_RUNNER); }
+    /** Probe whether Funnel can be used here, and the node's public base URL.
+     *  Cached for {@link #STATUS_CACHE_TTL} so repeated reads (channel pages load
+     *  this on mount) don't each pay the ~400ms {@code tailscale status} shell-out. */
+    public static Status status() {
+        var cached = statusCache;
+        if (cached != null && System.nanoTime() - cached.atNanos() < STATUS_CACHE_TTL.toNanos()) {
+            return cached.status();
+        }
+        var fresh = status(PROCESS_RUNNER);
+        statusCache = new CachedStatus(fresh, System.nanoTime());
+        return fresh;
+    }
 
     /** The node's public HTTPS base URL (e.g. {@code https://host.tailnet.ts.net}), or null. */
     public static String publicBaseUrl() { return publicBaseUrl(PROCESS_RUNNER); }
 
     /** Start funnelling {@code localPort} to the public internet (idempotent). */
-    public static boolean enable(int localPort) { return enable(localPort, PROCESS_RUNNER); }
+    public static boolean enable(int localPort) {
+        boolean ok = enable(localPort, PROCESS_RUNNER);
+        invalidateStatusCache();  // state changed — the next status() must re-probe
+        return ok;
+    }
 
     /** Stop funnelling (idempotent — safe even when nothing is configured). */
-    public static boolean disable() { return disable(PROCESS_RUNNER); }
+    public static boolean disable() {
+        boolean ok = disable(PROCESS_RUNNER);
+        invalidateStatusCache();
+        return ok;
+    }
+
+    /** Drop the cached status so the next {@link #status()} re-probes immediately,
+     *  rather than serving a pre-toggle snapshot for up to the TTL. */
+    private static void invalidateStatusCache() { statusCache = null; }
 
     // ===================== config-driven orchestration =====================
 
