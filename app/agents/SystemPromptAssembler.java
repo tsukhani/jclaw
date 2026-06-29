@@ -1,10 +1,13 @@
 package agents;
 
 import com.google.gson.Gson;
+import memory.MemoryStore;
 import memory.MemoryStoreFactory;
 import models.Agent;
+import models.Memory;
 import play.Play;
 import services.AgentService;
+import services.ConfigService;
 import services.EventLogger;
 import services.LoadTestRunner;
 import services.TimezoneResolver;
@@ -13,6 +16,7 @@ import utils.GsonHolder;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -333,6 +337,22 @@ public class SystemPromptAssembler {
         b.startSection("Environment");
         appendEnvironmentSection(b.sb, agent);
 
+        // 9b. Core memories (JCLAW-40) — the agent's high-importance, durable
+        // facts, auto-loaded every session. Placed in the cacheable prefix as
+        // the dynamic analogue of USER.md: core-category memories above the
+        // importance threshold are the slowest-changing memory tier, so the
+        // block stays byte-stable within an agent's lifetime and only busts the
+        // prefix cache when a core memory is actually added or edited. A token
+        // budget caps the block so it can never crowd out the context window;
+        // the returned ids let the per-turn recall below skip duplicates.
+        var coreMemoryIds = Set.<String>of();
+        var coreBlock = renderCoreMemories(agent);
+        if (!coreBlock.text().isEmpty()) {
+            b.startSection("Core Memories");
+            b.sb.append(coreBlock.text());
+            coreMemoryIds = coreBlock.ids();
+        }
+
         // === CACHE BOUNDARY ===
         // Everything above this line is deterministic for a given agent-day and
         // can be served from the LLM provider's prompt cache. Everything below
@@ -349,7 +369,7 @@ public class SystemPromptAssembler {
         // 11. Recalled memories — per-turn-variable, placed past the cache
         // boundary so updating it never invalidates the cacheable prefix.
         b.startSection("Relevant Memories");
-        appendMemories(b.sb, agent, userMessage);
+        appendMemories(b.sb, agent, userMessage, coreMemoryIds);
 
         return skills;
     }
@@ -523,15 +543,94 @@ public class SystemPromptAssembler {
         }
     }
 
-    private static void appendMemories(StringBuilder sb, Agent agent, String userMessage) {
+    /** Rendered core-memory block plus the ids it injected (for recall dedup). */
+    private record CoreMemoryBlock(String text, Set<String> ids) {
+        static CoreMemoryBlock empty() {
+            return new CoreMemoryBlock("", Set.of());
+        }
+    }
+
+    /**
+     * JCLAW-40: render the agent's high-importance {@code core} memories for the
+     * cacheable prefix. Ordered by importance then recency (via
+     * {@link Memory#findCore}) and truncated at a configurable token budget so
+     * the always-loaded block can't crowd out the context window. Returns
+     * {@link CoreMemoryBlock#empty()} when disabled, when the agent has no
+     * qualifying core memories, or on any error (recall must never block the
+     * agent).
+     */
+    private static CoreMemoryBlock renderCoreMemories(Agent agent) {
+        if (!ConfigService.getBoolean("memory.coreload.enabled", true)) return CoreMemoryBlock.empty();
+        try {
+            double minImportance = ConfigService.getDouble("memory.coreload.minImportance", 0.8);
+            int maxCount = ConfigService.getInt("memory.coreload.maxCount", 20);
+            int tokenBudget = ConfigService.getInt("memory.coreload.tokenBudget", 400);
+
+            var core = Memory.findCore(agent.name, minImportance, maxCount);
+            if (core.isEmpty()) return CoreMemoryBlock.empty();
+
+            var lines = new StringBuilder();
+            var ids = new HashSet<String>();
+            int usedTokens = 0;
+            for (var m : core) {
+                var line = "- " + m.text + "\n";
+                int lineTokens = estimateTokens(line);
+                if (usedTokens + lineTokens > tokenBudget) break;
+                lines.append(line);
+                usedTokens += lineTokens;
+                ids.add(String.valueOf(m.id));
+            }
+            if (lines.isEmpty()) return CoreMemoryBlock.empty();
+
+            var text = "\n## Core Memories\n"
+                    + "Durable, high-importance facts about the user and their setup, always in context:\n"
+                    + lines
+                    + "\n";
+            return new CoreMemoryBlock(text, ids);
+        } catch (Exception e) {
+            EventLogger.warn("agent", "Core memory load failed for agent %s: %s"
+                    .formatted(agent.name, e.getMessage()));
+            return CoreMemoryBlock.empty();
+        }
+    }
+
+    /** Cheap ~4-chars-per-token estimate, matching the heuristic SessionCompactor uses. */
+    private static int estimateTokens(String s) {
+        return (s.length() + 3) / 4;
+    }
+
+    private static void appendMemories(StringBuilder sb, Agent agent, String userMessage, Set<String> excludeIds) {
         if (userMessage == null || userMessage.isBlank()) return;
 
         try {
             var store = MemoryStoreFactory.get();
-            var memories = store.search(agent.name, userMessage, 10);
-            if (!memories.isEmpty()) {
+            int recallLimit = ConfigService.getInt("memory.recall.limit", 10);
+            // Over-fetch so core-memory exclusion and the importance re-rank still
+            // yield a full set.
+            var hits = store.search(agent.name, userMessage, recallLimit * 2);
+
+            // JCLAW-40 refinement: rank by relevance blended with importance, not
+            // similarity alone. The search already returns best-relevance-first, so
+            // we convert rank to a [0,1] relevance score and combine it with the
+            // stored importance — keeping relevance primary while letting a more
+            // important memory edge out a marginally-more-relevant one.
+            double relWeight = ConfigService.getDouble("memory.recall.relevanceWeight", 0.7);
+            double impWeight = ConfigService.getDouble("memory.recall.importanceWeight", 0.3);
+            int n = hits.size();
+            var scored = new ArrayList<ScoredMemory>();
+            for (int i = 0; i < n; i++) {
+                var e = hits.get(i);
+                if (excludeIds.contains(e.id())) continue;  // already shown as a core memory
+                double relevance = n <= 1 ? 1.0 : 1.0 - ((double) i / (n - 1));
+                scored.add(new ScoredMemory(e, relWeight * relevance + impWeight * e.importance()));
+            }
+            scored.sort((a, b) -> Double.compare(b.score(), a.score()));
+
+            var top = scored.stream().limit(recallLimit).toList();
+            if (!top.isEmpty()) {
                 sb.append("\n## Relevant Memories\n");
-                for (var mem : memories) {
+                for (var s : top) {
+                    var mem = s.entry();
                     sb.append("- ");
                     if (mem.category() != null && !mem.category().isEmpty()) {
                         sb.append("[%s] ".formatted(mem.category()));
@@ -547,6 +646,8 @@ public class SystemPromptAssembler {
                     .formatted(agent.name, e.getMessage()));
         }
     }
+
+    private record ScoredMemory(MemoryStore.MemoryEntry entry, double score) {}
 
     /**
      * Internal builder that wraps a {@link StringBuilder} and records each labeled

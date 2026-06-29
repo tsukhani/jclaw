@@ -91,6 +91,11 @@ GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspace
 GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspaceFile
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
 
+# Agent memories API (JCLAW-40)
+GET     /api/agents/{id}/memories               ApiMemoryController.listForAgent
+PUT     /api/agents/{id}/memories/{memoryId}    ApiMemoryController.updateForAgent
+DELETE  /api/agents/{id}/memories/{memoryId}    ApiMemoryController.deleteForAgent
+
 # MCP Servers API
 GET     /api/mcp-servers                        ApiMcpServersController.list
 POST    /api/mcp-servers                        ApiMcpServersController.create

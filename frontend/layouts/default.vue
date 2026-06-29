@@ -10,6 +10,7 @@ import {
   BookOpenIcon,
   ChatBubbleLeftRightIcon,
   ChatBubbleOvalLeftEllipsisIcon,
+  CircleStackIcon,
   ClipboardDocumentCheckIcon,
   Cog6ToothIcon,
   ComputerDesktopIcon,
@@ -207,6 +208,11 @@ const navGroups: NavGroup[] = [
     label: 'Ops',
     items: [
       { label: 'Agents', to: '/agents', icon: BotMessageSquare },
+      // Memory is the operator's window into what each agent has captured
+      // (JCLAW-40): importance, category, and source per memory, with manual
+      // importance adjustment and delete. Sits below Agents — it's a per-agent
+      // view of the agent's accumulated knowledge.
+      { label: 'Memory', to: '/memory', icon: CircleStackIcon },
       // Subagents is the operator-facing list of every subagent invocation
       // (RUNNING, COMPLETED, FAILED, KILLED, TIMEOUT) with status pills
       // and a kill action for RUNNING rows. Sits directly below Agents
