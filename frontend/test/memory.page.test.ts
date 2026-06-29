@@ -45,7 +45,7 @@ describe('memory admin page (JCLAW-40)', () => {
     expect(c.find('[data-testid="memory-empty"]').exists()).toBe(true)
   })
 
-  it('renders memories with category and importance', async () => {
+  it('renders memories with category, importance, and created date', async () => {
     memoriesResponse = [mem(), mem({ id: '11', text: 'Operator is the sole admin', category: 'core', importance: 0.9 })]
     const c = await mountSuspended(Memory)
     await flushPromises()
@@ -53,6 +53,7 @@ describe('memory admin page (JCLAW-40)', () => {
     expect(text).toContain('dark mode')
     expect(text).toContain('preference')
     expect(text).toContain('core')
+    expect(text).toContain('2026') // created date column (formatted from createdAt)
     expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(2)
   })
 

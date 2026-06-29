@@ -163,6 +163,9 @@ async function remove(mem: MemoryDto) {
             <th class="w-32 px-4 py-2.5 font-medium">
               Importance
             </th>
+            <th class="px-4 py-2.5 font-medium">
+              Created
+            </th>
             <th class="w-12 px-4 py-2.5 text-right font-medium" />
           </tr>
         </thead>
@@ -195,6 +198,9 @@ async function remove(mem: MemoryDto) {
                 class="w-20 border border-input bg-surface-elevated px-2 py-1 text-fg-strong"
                 @change="updateImportance(mem, ($event.target as HTMLInputElement).value)"
               >
+            </td>
+            <td class="whitespace-nowrap px-4 py-2.5 text-fg-muted">
+              {{ mem.createdAt ? formatDateTime(mem.createdAt) : '—' }}
             </td>
             <td class="px-4 py-2.5 text-right">
               <button
