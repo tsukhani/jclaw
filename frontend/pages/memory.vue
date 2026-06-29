@@ -92,26 +92,26 @@ async function remove(mem: MemoryDto) {
 </script>
 
 <template>
-  <div class="p-6 max-w-5xl mx-auto">
-    <header class="mb-6">
-      <h1 class="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-        Agent Memory
+  <div>
+    <div class="mb-6">
+      <h1 class="text-lg font-semibold text-fg-strong">
+        Memories
       </h1>
-      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+      <p class="mt-1 text-sm text-fg-muted">
         Durable facts each agent has captured. Adjust importance to influence recall ranking and
         core-memory auto-load, or delete entries.
       </p>
-    </header>
+    </div>
 
     <label
       for="agent-select"
-      class="mb-4 flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300"
+      class="mb-4 flex items-center gap-2 text-sm text-fg-muted"
     >
       <span>Agent</span>
       <select
         id="agent-select"
         v-model="selectedAgentId"
-        class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        class="border border-input bg-surface-elevated px-3 py-1.5 text-sm text-fg-strong"
       >
         <option
           v-for="a in agents ?? []"
@@ -125,14 +125,14 @@ async function remove(mem: MemoryDto) {
 
     <p
       v-if="loadError"
-      class="mb-4 text-sm text-red-600 dark:text-red-400"
+      class="mb-4 text-sm text-red-400"
     >
       {{ loadError }}
     </p>
 
     <div
       v-if="loadingMemories"
-      class="text-sm text-gray-500 dark:text-gray-400"
+      class="text-sm text-fg-muted"
     >
       Loading…
     </div>
@@ -140,79 +140,83 @@ async function remove(mem: MemoryDto) {
     <p
       v-else-if="memories.length === 0"
       data-testid="memory-empty"
-      class="text-sm text-gray-500 dark:text-gray-400"
+      class="border border-border bg-surface-elevated px-4 py-8 text-center text-sm text-fg-muted"
     >
       No memories captured for this agent yet.
     </p>
 
-    <table
+    <div
       v-else
-      data-testid="memory-table"
-      class="w-full border-collapse text-sm"
+      class="border border-border bg-surface-elevated"
     >
-      <thead>
-        <tr class="border-b border-gray-200 text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
-          <th class="py-2 pr-3 font-medium">
-            Memory
-          </th>
-          <th class="px-3 py-2 font-medium">
-            Category
-          </th>
-          <th class="w-32 px-3 py-2 font-medium">
-            Importance
-          </th>
-          <th class="px-3 py-2 font-medium">
-            Source
-          </th>
-          <th class="w-12 py-2 pl-3 font-medium" />
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="mem in memories"
-          :key="mem.id"
-          data-testid="memory-row"
-          class="border-b border-gray-100 align-top dark:border-gray-800"
-        >
-          <td class="py-2 pr-3 text-gray-900 dark:text-gray-100">
-            {{ mem.text }}
-          </td>
-          <td class="px-3 py-2">
-            <span
-              v-if="mem.category"
-              class="inline-block rounded px-2 py-0.5 text-xs font-medium"
-              :class="categoryClass(mem.category)"
-            >{{ mem.category }}</span>
-          </td>
-          <td class="px-3 py-2">
-            <input
-              type="number"
-              min="0"
-              max="1"
-              step="0.05"
-              :value="mem.importance"
-              data-testid="importance-input"
-              aria-label="Importance"
-              class="w-20 rounded border border-gray-300 bg-white px-2 py-1 text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-              @change="updateImportance(mem, ($event.target as HTMLInputElement).value)"
-            >
-          </td>
-          <td class="px-3 py-2 text-gray-500 dark:text-gray-400">
-            {{ mem.source }}
-          </td>
-          <td class="py-2 pl-3">
-            <button
-              type="button"
-              title="Delete memory"
-              data-testid="delete-memory"
-              class="text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-              @click="remove(mem)"
-            >
-              <TrashIcon class="h-5 w-5" />
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+      <table
+        data-testid="memory-table"
+        class="w-full text-sm"
+      >
+        <thead>
+          <tr class="border-b border-border text-left text-xs text-fg-muted">
+            <th class="px-4 py-2.5 font-medium">
+              Memory
+            </th>
+            <th class="px-4 py-2.5 font-medium">
+              Category
+            </th>
+            <th class="w-32 px-4 py-2.5 font-medium">
+              Importance
+            </th>
+            <th class="px-4 py-2.5 font-medium">
+              Source
+            </th>
+            <th class="w-12 px-4 py-2.5 text-right font-medium" />
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          <tr
+            v-for="mem in memories"
+            :key="mem.id"
+            data-testid="memory-row"
+            class="align-top"
+          >
+            <td class="px-4 py-2.5 text-fg-primary">
+              {{ mem.text }}
+            </td>
+            <td class="px-4 py-2.5">
+              <span
+                v-if="mem.category"
+                class="inline-block px-2 py-0.5 text-xs font-medium"
+                :class="categoryClass(mem.category)"
+              >{{ mem.category }}</span>
+            </td>
+            <td class="px-4 py-2.5">
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                :value="mem.importance"
+                data-testid="importance-input"
+                aria-label="Importance"
+                class="w-20 border border-input bg-surface-elevated px-2 py-1 text-fg-strong"
+                @change="updateImportance(mem, ($event.target as HTMLInputElement).value)"
+              >
+            </td>
+            <td class="px-4 py-2.5 text-fg-muted">
+              {{ mem.source }}
+            </td>
+            <td class="px-4 py-2.5 text-right">
+              <button
+                type="button"
+                title="Delete memory"
+                data-testid="delete-memory"
+                class="text-fg-muted transition-colors hover:text-red-400"
+                @click="remove(mem)"
+              >
+                <TrashIcon class="h-5 w-5" />
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
