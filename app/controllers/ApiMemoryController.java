@@ -8,22 +8,29 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import memory.MemoryCategory;
-import memory.MemoryStoreFactory;
-import models.Agent;
 import models.Memory;
+import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.EventLogger;
+import services.search.LuceneIndexer;
+import services.search.MessageSearch;
+import utils.JpqlFilter;
+
+import java.io.IOException;
+import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
 
 /**
- * Admin API for agent memories (JCLAW-40). Lists an agent's stored memories with
- * their importance and category so the operator can see what's been captured,
- * manually adjust importance (and category), and delete entries.
+ * Admin API for agent memories (JCLAW-40). A cross-agent view: lists every
+ * agent's stored memories with importance, category, and the owning agent,
+ * narrowed by a tasks-style query bar — free-text {@code q} over memory text
+ * plus {@code agent} / {@code category} / {@code importance} predicates. The
+ * operator can adjust importance (and category) or delete any memory by its id.
  *
- * <p>Memories are keyed by agent <em>name</em> in the store; every action
- * resolves the agent by id and scopes the row to that agent's name, so one
- * agent's id can never read or mutate another agent's memory.
+ * <p>Single-operator Personal Edition, so memories are addressed by their global
+ * id — there is no per-agent access boundary to enforce.
  */
 @With(AuthCheck.class)
 public class ApiMemoryController extends Controller {
@@ -32,40 +39,87 @@ public class ApiMemoryController extends Controller {
 
     private static final String KEY_IMPORTANCE = "importance";
     private static final String KEY_CATEGORY = "category";
+    private static final String FIELD_IMPORTANCE = "m.importance";
 
-    public record MemoryDto(String id, String text, String category,
+    public record MemoryDto(String id, String agentName, String text, String category,
                             double importance, String createdAt) {}
 
     public record MemoryUpdateRequest(Double importance, String category) {}
 
     /**
-     * GET /api/agents/{id}/memories — list an agent's memories, newest first.
+     * GET /api/memories — list memories across all agents, newest first, narrowed
+     * by optional filters: {@code q} (free-text over memory text via the MEMORY
+     * Lucene scope, with a LIKE fallback when search isn't initialized),
+     * {@code agent} (exact agent name), {@code category} (exact), and
+     * {@code importance} (a threshold like {@code >0.8}, {@code <=0.5}, or a bare
+     * number treated as {@code >=}).
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MemoryDto.class))))
-    @Operation(summary = "List an agent's stored memories with importance and category")
-    public static void listForAgent(Long id) {
-        Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+    @Operation(summary = "List memories across agents with a filter query (q / agent / category / importance)")
+    public static void list(String q, String agent, String category, String importance,
+                            Integer limit, Integer offset) {
+        int effLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
+        int effOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        var result = MemoryStoreFactory.get().list(agent.name).stream()
-                .map(e -> new MemoryDto(e.id(), e.text(), e.category(),
-                        e.importance(),
-                        e.createdAt() == null ? null : e.createdAt().toString()))
-                .toList();
-        renderJSON(gson.toJson(result));
+        var filter = new JpqlFilter()
+                .eq("m.agentId", blankToNull(agent))
+                .eq("m.category", normalizeCategory(category));
+        applyImportance(filter, importance);
+
+        // Free-text q: the MEMORY Lucene scope (unscoped — across all agents)
+        // when the backend is initialized; a LIKE fallback otherwise (test mode,
+        // where the index is closed / dialect is "none").
+        List<Long> ftsIds = null;
+        if (q != null && !q.isBlank()) {
+            if ("none".equals(MessageSearch.activeDialect())) {
+                filter.like("LOWER(m.text)", "%" + q.strip().toLowerCase() + "%");
+            } else {
+                try {
+                    var ids = MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), 500);
+                    if (ids.isEmpty()) {
+                        renderJSON("[]");
+                        return;
+                    }
+                    ftsIds = ids;
+                } catch (IOException e) {
+                    EventLogger.warn("search", null, null,
+                            "Memory FTS failed for q='%s': %s".formatted(q, e.getMessage()));
+                }
+            }
+        }
+
+        var where = filter.toWhereClause();
+        if (ftsIds != null) {
+            where = where.isEmpty() ? "m.id IN (:fts)" : where + " AND m.id IN (:fts)";
+        }
+        String jpql = where.isEmpty()
+                ? "SELECT m FROM Memory m ORDER BY m.updatedAt DESC"
+                : "SELECT m FROM Memory m WHERE " + where + " ORDER BY m.updatedAt DESC";
+        var jpaQ = JPA.em().createQuery(jpql, Memory.class);
+        var params = filter.paramList();
+        for (int i = 0; i < params.size(); i++) {
+            jpaQ.setParameter(i + 1, params.get(i));
+        }
+        if (ftsIds != null) jpaQ.setParameter("fts", ftsIds);
+        List<Memory> rows = jpaQ.setFirstResult(effOffset).setMaxResults(effLimit).getResultList();
+
+        renderJSON(gson.toJson(rows.stream().map(ApiMemoryController::toDto).toList()));
     }
 
     /**
-     * PUT /api/agents/{id}/memories/{memoryId} — adjust a memory's importance
-     * (0.0–1.0) and optionally its category. Operator-driven curation.
+     * PUT /api/memories/{memoryId} — adjust a memory's importance (0.0–1.0) and
+     * optionally its category. Operator-driven curation.
      */
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = MemoryUpdateRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryDto.class)))
     @Operation(summary = "Adjust a memory's importance and/or category")
-    public static void updateForAgent(Long id, Long memoryId) {
-        Memory memory = scopedMemory(id, memoryId);
-
+    public static void update(Long memoryId) {
+        Memory memory = Memory.findById(memoryId);
+        if (memory == null) {
+            notFound();
+            throw new AssertionError("unreachable: notFound() throws");
+        }
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -83,41 +137,58 @@ public class ApiMemoryController extends Controller {
             if (normalized != null) memory.category = normalized;
         }
         memory.save();
-
-        renderJSON(gson.toJson(new MemoryDto(String.valueOf(memory.id), memory.text,
-                memory.category, memory.importance,
-                memory.createdAt == null ? null : memory.createdAt.toString())));
+        renderJSON(gson.toJson(toDto(memory)));
     }
 
     /**
-     * DELETE /api/agents/{id}/memories/{memoryId} — remove a memory.
+     * DELETE /api/memories/{memoryId} — remove a memory.
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Delete a memory")
-    public static void deleteForAgent(Long id, Long memoryId) {
-        Memory memory = scopedMemory(id, memoryId);
+    public static void delete(Long memoryId) {
+        Memory memory = Memory.findById(memoryId);
+        if (memory == null) {
+            notFound();
+            throw new AssertionError("unreachable: notFound() throws");
+        }
         memory.delete();
         renderJSON("{\"status\":\"deleted\"}");
     }
 
+    // ─── helpers ──────────────────────────────────────────────────────────────
+
+    private static MemoryDto toDto(Memory m) {
+        return new MemoryDto(String.valueOf(m.id), m.agentId, m.text, m.category,
+                m.importance, m.createdAt == null ? null : m.createdAt.toString());
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.strip();
+    }
+
+    private static String normalizeCategory(String c) {
+        return c == null || c.isBlank() ? null : MemoryCategory.normalize(c);
+    }
+
     /**
-     * Resolve {@code memoryId} and confirm it belongs to the agent identified by
-     * {@code id}. 404s (never 403) on a missing agent, missing memory, or a
-     * cross-agent id mismatch — a not-yours row is indistinguishable from a
-     * not-existent one.
+     * Apply an importance threshold. Accepts a leading comparator ({@code >},
+     * {@code >=}, {@code <}, {@code <=}) or a bare number (treated as
+     * {@code >=}). {@code >}/{@code <} are applied as inclusive bounds (the
+     * JpqlFilter only offers {@code >=}/{@code <=}) — fine for a coarse
+     * importance filter. A non-numeric value is ignored.
      */
-    private static Memory scopedMemory(Long id, Long memoryId) {
-        Agent agent = Agent.findById(id);
-        if (agent == null) {
-            notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+    private static void applyImportance(JpqlFilter filter, String importance) {
+        if (importance == null || importance.isBlank()) return;
+        var v = importance.strip();
+        try {
+            if (v.startsWith(">=")) filter.gte(FIELD_IMPORTANCE, Double.parseDouble(v.substring(2).strip()));
+            else if (v.startsWith(">")) filter.gte(FIELD_IMPORTANCE, Double.parseDouble(v.substring(1).strip()));
+            else if (v.startsWith("<=")) filter.lte(FIELD_IMPORTANCE, Double.parseDouble(v.substring(2).strip()));
+            else if (v.startsWith("<")) filter.lte(FIELD_IMPORTANCE, Double.parseDouble(v.substring(1).strip()));
+            else filter.gte(FIELD_IMPORTANCE, Double.parseDouble(v));
+        } catch (NumberFormatException _) {
+            // ignore an unparseable importance filter
         }
-        Memory memory = Memory.findById(memoryId);
-        if (memory == null || !agent.name.equals(memory.agentId)) {
-            notFound();
-            throw new AssertionError("unreachable: notFound() throws");
-        }
-        return memory;
     }
 }

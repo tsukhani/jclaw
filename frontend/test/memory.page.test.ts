@@ -5,13 +5,13 @@ import { clearNuxtData } from '#app'
 import { useConfirm } from '~/composables/useConfirm'
 import Memory from '~/pages/memory.vue'
 
-// JCLAW-40: agent memory admin page — list, inline importance edit, delete.
-
-const AGENT = { id: 1, name: 'main', enabled: true, isMain: true, modelProvider: 'openrouter', modelId: 'gpt-4.1' }
+// JCLAW-40: cross-agent memory admin page — filter bar, agent column, inline
+// importance edit, delete.
 
 function mem(overrides: Record<string, unknown> = {}) {
   return {
     id: '10',
+    agentName: 'main',
     text: 'The user prefers dark mode',
     category: 'preference',
     importance: 0.7,
@@ -24,47 +24,51 @@ let memoriesResponse: unknown[] = []
 let putBody: Record<string, unknown> | null = null
 let deleted = false
 
-// GET endpoints are stable across tests; the row PUT/DELETE endpoints are
-// registered per-test (the 2-arg shorthand only matches GET, and the same path
-// can't carry two methods at once in the test router).
-registerEndpoint('/api/agents', () => [AGENT])
-registerEndpoint('/api/agents/1/memories', () => memoriesResponse)
+// GET is stable across tests (the page fetches /api/memories?...; the path
+// matches regardless of query string). PUT/DELETE on the row are registered
+// per-test (the 2-arg shorthand only matches GET).
+registerEndpoint('/api/memories', () => memoriesResponse)
 
 beforeEach(() => {
-  // useFetch('/api/agents') caches by URL across mounts; clear so each test re-fetches.
+  // useFetch caches by URL across mounts; clear so each test re-fetches.
   clearNuxtData()
   memoriesResponse = []
   putBody = null
   deleted = false
 })
 
-describe('memory admin page (JCLAW-40)', () => {
-  it('shows the empty state when an agent has no memories', async () => {
+describe('memories admin page (JCLAW-40)', () => {
+  it('shows the empty state when there are no memories', async () => {
     const c = await mountSuspended(Memory)
     await flushPromises()
     expect(c.find('[data-testid="memory-empty"]').exists()).toBe(true)
   })
 
-  it('renders memories with category, importance, and created date', async () => {
-    memoriesResponse = [mem(), mem({ id: '11', text: 'Operator is the sole admin', category: 'core', importance: 0.9 })]
+  it('renders memories across agents with agent, category, importance, and created date', async () => {
+    memoriesResponse = [
+      mem(),
+      mem({ id: '11', agentName: 'support', text: 'Operator is the sole admin', category: 'core', importance: 0.9 }),
+    ]
     const c = await mountSuspended(Memory)
     await flushPromises()
     const text = c.text()
     expect(text).toContain('dark mode')
+    expect(text).toContain('main') // agent column
+    expect(text).toContain('support') // second agent
     expect(text).toContain('preference')
     expect(text).toContain('core')
-    expect(text).toContain('2026') // created date column (formatted from createdAt)
+    expect(text).toContain('2026') // created date column
     expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(2)
   })
 
   it('PUTs the clamped importance when the input changes', async () => {
     memoriesResponse = [mem()]
-    registerEndpoint('/api/agents/1/memories/10', {
+    registerEndpoint('/api/memories/10', {
       method: 'PUT',
       handler: async (event) => {
         const { readBody } = await import('h3')
         putBody = await readBody(event) as Record<string, unknown>
-        return { id: '10', text: 'The user prefers dark mode', category: 'preference', importance: putBody.importance, createdAt: null }
+        return { id: '10', agentName: 'main', text: 'The user prefers dark mode', category: 'preference', importance: putBody.importance, createdAt: null }
       },
     })
     const c = await mountSuspended(Memory)
@@ -78,7 +82,7 @@ describe('memory admin page (JCLAW-40)', () => {
 
   it('deletes a memory after the operator confirms', async () => {
     memoriesResponse = [mem()]
-    registerEndpoint('/api/agents/1/memories/10', {
+    registerEndpoint('/api/memories/10', {
       method: 'DELETE',
       handler: () => {
         deleted = true

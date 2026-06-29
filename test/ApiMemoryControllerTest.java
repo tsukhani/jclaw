@@ -1,8 +1,9 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
 import memory.MemoryStoreFactory;
-import services.AgentService;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -11,7 +12,8 @@ class ApiMemoryControllerTest extends FunctionalTest {
     @BeforeEach
     void setup() {
         // Seeding memories triggers Memory @PostPersist Lucene indexing; close the
-        // index and serialize against the other Lucene tests.
+        // index (and hold the lock) so the q LIKE-fallback path is deterministic
+        // and we don't clash with the search-mode tests.
         LuceneTestSync.closedForTest();
         Fixtures.deleteDatabase();
         AuthFixture.seedAdminPassword("changeme");
@@ -30,7 +32,8 @@ class ApiMemoryControllerTest extends FunctionalTest {
     }
 
     // Seed in a fresh committed Tx on a separate thread so the HTTP handler sees
-    // it (the FunctionalTest carrier thread already holds an uncommitted Tx).
+    // it. agentName is just the stored Memory.agentId string — no Agent entity
+    // is needed (the cross-agent endpoints address memories by their own id).
     private static <T> T fetchInFreshTx(Supplier<T> block) {
         var ref = new AtomicReference<T>();
         var err = new AtomicReference<Throwable>();
@@ -51,10 +54,6 @@ class ApiMemoryControllerTest extends FunctionalTest {
         return ref.get();
     }
 
-    private Long createAgent(String name) {
-        return fetchInFreshTx(() -> AgentService.create(name, "openrouter", "gpt-4.1").id);
-    }
-
     private String seedMemory(String agentName, String text, String category, double importance) {
         return fetchInFreshTx(() ->
                 MemoryStoreFactory.get().store(agentName, text, category, importance));
@@ -64,52 +63,86 @@ class ApiMemoryControllerTest extends FunctionalTest {
 
     @Test
     void listRequiresAuth() {
-        assertEquals(401, GET("/api/agents/1/memories").status.intValue());
+        assertEquals(401, GET("/api/memories").status.intValue());
     }
 
     @Test
     void updateRequiresAuth() {
-        var resp = PUT("/api/agents/1/memories/1", "application/json", "{\"importance\":0.9}");
+        var resp = PUT("/api/memories/1", "application/json", "{\"importance\":0.9}");
         assertEquals(401, resp.status.intValue());
     }
 
     @Test
     void deleteRequiresAuth() {
-        assertEquals(401, DELETE("/api/agents/1/memories/1").status.intValue());
+        assertEquals(401, DELETE("/api/memories/1").status.intValue());
     }
 
-    // ─── List ────────────────────────────────────────────────────────────────
+    // ─── List + filters ──────────────────────────────────────────────────────
 
     @Test
-    void listsAgentMemories() {
-        var agentId = createAgent("mem-list");
-        seedMemory("mem-list", "The user prefers dark mode", "preference", 0.7);
-        seedMemory("mem-list", "Operator is the sole admin", "core", 0.9);
+    void listsMemoriesAcrossAgentsWithAgentName() {
+        seedMemory("alice", "The user prefers dark mode", "preference", 0.7);
+        seedMemory("bob", "Operator is the sole admin", "core", 0.9);
         login();
 
-        var resp = GET("/api/agents/" + agentId + "/memories");
-        assertIsOk(resp);
-        var body = getContent(resp);
-        assertTrue(body.contains("dark mode"), "memory text present");
-        assertTrue(body.contains("core"), "category present");
+        var body = getContent(GET("/api/memories"));
+        assertTrue(body.contains("dark mode"), "alice's memory text present");
+        assertTrue(body.contains("Operator is the sole admin"), "bob's memory text present");
+        assertTrue(body.contains("alice"), "agent name alice present");
+        assertTrue(body.contains("bob"), "agent name bob present");
     }
 
     @Test
-    void listUnknownAgentIs404() {
+    void filtersByAgent() {
+        seedMemory("alice", "alice only fact", "fact", 0.5);
+        seedMemory("bob", "bob only fact", "fact", 0.5);
         login();
-        assertEquals(404, GET("/api/agents/999999/memories").status.intValue());
+
+        var body = getContent(GET("/api/memories?agent=alice"));
+        assertTrue(body.contains("alice only fact"), "alice's memory present");
+        assertFalse(body.contains("bob only fact"), "bob's memory excluded");
     }
 
-    // ─── Update ──────────────────────────────────────────────────────────────
+    @Test
+    void filtersByCategory() {
+        seedMemory("alice", "a core memory", "core", 0.9);
+        seedMemory("alice", "a plain fact memory", "fact", 0.5);
+        login();
+
+        var body = getContent(GET("/api/memories?category=core"));
+        assertTrue(body.contains("a core memory"), "core memory present");
+        assertFalse(body.contains("a plain fact memory"), "fact excluded");
+    }
+
+    // NB: free-text `q` search is intentionally not asserted here. It routes
+    // through MessageSearch.searchIds(MEMORY, ...) (Lucene), whose behavior under
+    // the concurrent test runner depends on JVM-global search-backend state that
+    // leaks from the dedicated *SearchTest classes — making a deterministic q
+    // assertion in this (closed-index) controller test infeasible. The Lucene
+    // scope itself is covered by the search-infra tests; q is verified live in
+    // the Chrome UAT. The agent / category / importance filters below use plain
+    // JPQL and are fully deterministic.
+
+    @Test
+    void filtersByImportanceThreshold() {
+        seedMemory("alice", "high importance memory", "core", 0.9);
+        seedMemory("alice", "low importance memory", "fact", 0.4);
+        login();
+
+        var q = URLEncoder.encode(">0.8", StandardCharsets.UTF_8);
+        var body = getContent(GET("/api/memories?importance=" + q));
+        assertTrue(body.contains("high importance memory"), "above-threshold present");
+        assertFalse(body.contains("low importance memory"), "below-threshold excluded");
+    }
+
+    // ─── Update / Delete (by memory id) ──────────────────────────────────────
 
     @Test
     void updatesImportance() {
-        var agentId = createAgent("mem-upd");
-        var memId = seedMemory("mem-upd", "Tweak me", "fact", 0.4);
+        var memId = seedMemory("alice", "Tweak me", "fact", 0.4);
         login();
 
-        var resp = PUT("/api/agents/" + agentId + "/memories/" + memId,
-                "application/json", "{\"importance\":0.95}");
+        var resp = PUT("/api/memories/" + memId, "application/json", "{\"importance\":0.95}");
         assertIsOk(resp);
 
         var stored = fetchInFreshTx(() ->
@@ -119,37 +152,25 @@ class ApiMemoryControllerTest extends FunctionalTest {
 
     @Test
     void rejectsOutOfRangeImportance() {
-        var agentId = createAgent("mem-bad");
-        var memId = seedMemory("mem-bad", "x", "fact", 0.4);
+        var memId = seedMemory("alice", "x", "fact", 0.4);
         login();
-        var resp = PUT("/api/agents/" + agentId + "/memories/" + memId,
-                "application/json", "{\"importance\":1.5}");
+        var resp = PUT("/api/memories/" + memId, "application/json", "{\"importance\":1.5}");
         assertEquals(400, resp.status.intValue());
     }
 
     @Test
-    void updateForeignMemoryIs404() {
-        var agentA = createAgent("mem-a");
-        createAgent("mem-b");
-        var memOfB = seedMemory("mem-b", "B's private memory", "fact", 0.5);
+    void unknownMemoryUpdateIs404() {
         login();
-        // agentA's id paired with agentB's memory must 404 (scoped to the agent).
-        var resp = PUT("/api/agents/" + agentA + "/memories/" + memOfB,
-                "application/json", "{\"importance\":0.9}");
+        var resp = PUT("/api/memories/999999", "application/json", "{\"importance\":0.9}");
         assertEquals(404, resp.status.intValue());
     }
 
-    // ─── Delete ──────────────────────────────────────────────────────────────
-
     @Test
     void deletesMemory() {
-        var agentId = createAgent("mem-del");
-        var memId = seedMemory("mem-del", "Delete me", "fact", 0.5);
+        var memId = seedMemory("alice", "Delete me", "fact", 0.5);
         login();
 
-        var resp = DELETE("/api/agents/" + agentId + "/memories/" + memId);
-        assertIsOk(resp);
-
+        assertIsOk(DELETE("/api/memories/" + memId));
         var remaining = fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(memId)));
         assertNull(remaining);
     }

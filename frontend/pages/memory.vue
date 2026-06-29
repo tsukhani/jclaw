@@ -1,22 +1,25 @@
 <script setup lang="ts">
 import { TrashIcon } from '@heroicons/vue/24/outline'
-import type { Agent } from '~/types/api'
 
 /**
- * JCLAW-40: agent memory admin. Lists a selected agent's stored memories with
- * importance and category; the operator can adjust importance inline (which
- * influences recall ranking and core-memory auto-load) and delete entries.
- * Read path is GET /api/agents/{id}/memories; mutations go through
- * PUT/DELETE /api/agents/{id}/memories/{memoryId}.
+ * JCLAW-40: agent memory admin. A cross-agent view of every agent's captured
+ * memories — owning agent, text, category, importance, and created date —
+ * filtered via a tasks-style FilterBar (free-text `q` over memory text plus
+ * `agent` / `category` / `importance` predicates). The operator can adjust
+ * importance inline and delete entries. Read path is GET /api/memories?...;
+ * mutations go through PUT/DELETE /api/memories/{memoryId}.
  */
 
 interface MemoryDto {
   id: string
+  agentName: string
   text: string
   category: string | null
   importance: number
   createdAt: string | null
 }
+
+interface Filter { key: string, value: string }
 
 // Per-category badge colors, keyed by the six canonical MemoryCategory labels.
 // Unknown/legacy categories fall back to a neutral gray.
@@ -33,42 +36,43 @@ function categoryClass(cat: string | null): string {
   return CATEGORY_CLASS[cat ?? ''] ?? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
 }
 
-// Top-level await so the agent list is populated before first render (and so
-// mountSuspended resolves with data in tests). Default the selection to the
-// first agent.
-const { data: agents } = await useFetch<Agent[]>('/api/agents')
-const selectedAgentId = ref<number | null>(agents.value?.[0]?.id ?? null)
+// FilterBar-driven query state. Each chip maps to a backend query param;
+// removing a chip resets its ref to '' so that predicate clears.
+const qFilter = ref('')
+const agentFilter = ref('')
+const categoryFilter = ref('')
+const importanceFilter = ref('')
 
-const memories = ref<MemoryDto[]>([])
-const loadingMemories = ref(false)
-const loadError = ref<string | null>(null)
+function onFiltersChanged(filters: Filter[]) {
+  qFilter.value = filters.find(f => f.key === 'q')?.value ?? ''
+  agentFilter.value = filters.find(f => f.key === 'agent')?.value ?? ''
+  categoryFilter.value = filters.find(f => f.key === 'category')?.value ?? ''
+  importanceFilter.value = filters.find(f => f.key === 'importance')?.value ?? ''
+}
+
+const url = computed(() => {
+  const params = new URLSearchParams()
+  if (qFilter.value) params.set('q', qFilter.value)
+  if (agentFilter.value) params.set('agent', agentFilter.value)
+  if (categoryFilter.value) params.set('category', categoryFilter.value)
+  if (importanceFilter.value) params.set('importance', importanceFilter.value)
+  params.set('limit', '200')
+  return `/api/memories?${params}`
+})
+
+// Top-level await + reactive URL: re-fetches whenever a filter changes, and
+// mountSuspended resolves with data in tests.
+const { data: memoriesData, error: fetchError } = await useFetch<MemoryDto[]>(url)
+const memories = computed(() => memoriesData.value ?? [])
 
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
 
-watch(selectedAgentId, async (id) => {
-  if (id === null) return
-  loadingMemories.value = true
-  loadError.value = null
-  try {
-    memories.value = await $fetch<MemoryDto[]>(`/api/agents/${id}/memories`)
-  }
-  catch (e: unknown) {
-    loadError.value = e instanceof Error ? e.message : 'Failed to load memories'
-    memories.value = []
-  }
-  finally {
-    loadingMemories.value = false
-  }
-}, { immediate: true })
-
 async function updateImportance(mem: MemoryDto, raw: string) {
-  const id = selectedAgentId.value
-  if (id === null) return
   const parsed = Number.parseFloat(raw)
   if (Number.isNaN(parsed)) return
   const value = Math.min(1, Math.max(0, parsed))
-  const res = await mutate(`/api/agents/${id}/memories/${mem.id}`, {
+  const res = await mutate(`/api/memories/${mem.id}`, {
     method: 'PUT',
     body: { importance: value },
   })
@@ -76,8 +80,6 @@ async function updateImportance(mem: MemoryDto, raw: string) {
 }
 
 async function remove(mem: MemoryDto) {
-  const id = selectedAgentId.value
-  if (id === null) return
   const ok = await confirm({
     title: 'Delete memory',
     message: `Delete this memory?\n\n"${mem.text}"`,
@@ -85,8 +87,33 @@ async function remove(mem: MemoryDto) {
     confirmText: 'Delete',
   })
   if (!ok) return
-  const res = await mutate(`/api/agents/${id}/memories/${mem.id}`, { method: 'DELETE' })
-  if (res !== null) memories.value = memories.value.filter(m => m.id !== mem.id)
+  const res = await mutate(`/api/memories/${mem.id}`, { method: 'DELETE' })
+  if (res !== null) memoriesData.value = memories.value.filter(m => m.id !== mem.id)
+}
+
+function fileStamp(): string {
+  return new Date().toISOString().replaceAll(':', '-').slice(0, 19)
+}
+
+function downloadBlob(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type })
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+function exportMemories() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    memoryCount: memories.value.length,
+    memories: memories.value,
+  }
+  downloadBlob(`jclaw-memories-${fileStamp()}.json`, JSON.stringify(payload, null, 2), 'application/json')
 }
 </script>
 
@@ -97,51 +124,33 @@ async function remove(mem: MemoryDto) {
         Memories
       </h1>
       <p class="mt-1 text-sm text-fg-muted">
-        Durable facts each agent has captured. Adjust importance to influence recall ranking and
-        core-memory auto-load, or delete entries.
+        Durable facts your agents have captured. Search the text or filter by agent, category, or importance;
+        adjust importance inline (it drives recall ranking and core-memory auto-load), or delete entries.
       </p>
     </div>
 
-    <label
-      for="agent-select"
-      class="mb-4 flex items-center gap-2 text-sm text-fg-muted"
-    >
-      <span>Agent</span>
-      <select
-        id="agent-select"
-        v-model="selectedAgentId"
-        class="border border-input bg-surface-elevated px-3 py-1.5 text-sm text-fg-strong"
-      >
-        <option
-          v-for="a in agents ?? []"
-          :key="a.id"
-          :value="a.id"
-        >
-          {{ a.name }}
-        </option>
-      </select>
-    </label>
+    <FilterBar
+      storage-key="memories"
+      placeholder="Filter... (e.g., q:invoice category:core importance:>0.8 agent:main)"
+      :filter-keys="['q', 'agent', 'category', 'importance']"
+      class="mb-4"
+      @update:filters="onFiltersChanged"
+      @export="exportMemories"
+    />
 
     <p
-      v-if="loadError"
+      v-if="fetchError"
       class="mb-4 text-sm text-red-400"
     >
-      {{ loadError }}
+      Failed to load memories.
     </p>
-
-    <div
-      v-if="loadingMemories"
-      class="text-sm text-fg-muted"
-    >
-      Loading…
-    </div>
 
     <p
       v-else-if="memories.length === 0"
       data-testid="memory-empty"
       class="border border-border bg-surface-elevated px-4 py-8 text-center text-sm text-fg-muted"
     >
-      No memories captured for this agent yet.
+      No memories found.
     </p>
 
     <div
@@ -154,6 +163,9 @@ async function remove(mem: MemoryDto) {
       >
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
+            <th class="px-4 py-2.5 font-medium">
+              Agent
+            </th>
             <th class="px-4 py-2.5 font-medium">
               Memory
             </th>
@@ -176,6 +188,9 @@ async function remove(mem: MemoryDto) {
             data-testid="memory-row"
             class="align-top"
           >
+            <td class="whitespace-nowrap px-4 py-2.5 text-fg-muted">
+              {{ mem.agentName }}
+            </td>
             <td class="px-4 py-2.5 text-fg-primary">
               {{ mem.text }}
             </td>

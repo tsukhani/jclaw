@@ -91,10 +91,10 @@ GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspace
 GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspaceFile
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
 
-# Agent memories API (JCLAW-40)
-GET     /api/agents/{id}/memories               ApiMemoryController.listForAgent
-PUT     /api/agents/{id}/memories/{memoryId}    ApiMemoryController.updateForAgent
-DELETE  /api/agents/{id}/memories/{memoryId}    ApiMemoryController.deleteForAgent
+# Agent memories API (JCLAW-40) — cross-agent admin, addressed by memory id
+GET     /api/memories                           ApiMemoryController.list
+PUT     /api/memories/{memoryId}                ApiMemoryController.update
+DELETE  /api/memories/{memoryId}                ApiMemoryController.delete
 
 # MCP Servers API
 GET     /api/mcp-servers                        ApiMcpServersController.list
