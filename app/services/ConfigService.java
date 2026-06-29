@@ -55,6 +55,22 @@ public class ConfigService {
         }
     }
 
+    public static boolean getBoolean(String key, boolean defaultValue) {
+        var raw = get(key);
+        if (raw == null) return defaultValue;
+        return Boolean.parseBoolean(raw.trim());
+    }
+
+    public static double getDouble(String key, double defaultValue) {
+        var raw = get(key);
+        if (raw == null) return defaultValue;
+        try {
+            return Double.parseDouble(raw.trim());
+        } catch (NumberFormatException _) {
+            return defaultValue;
+        }
+    }
+
     public static void set(String key, String value) {
         Tx.run(() -> Config.upsert(key, value));
         cache.put(key, Optional.ofNullable(value));

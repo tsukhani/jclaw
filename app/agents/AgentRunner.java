@@ -8,6 +8,7 @@ import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
+import memory.MemoryAutoCapture;
 import models.Agent;
 import models.ChannelType;
 import models.Conversation;
@@ -637,6 +638,11 @@ public class AgentRunner {
                     "Response generated (%d chars%s)".formatted(response.length(),
                             truncated ? ", TRUNCATED" : ""));
 
+            // JCLAW-39: async memory auto-capture for the completed turn. Runs on
+            // its own virtual thread after the reply is persisted, so it never
+            // blocks the response. No-op in test mode / when disabled.
+            MemoryAutoCapture.captureAsync(agent, conversationId, userMessage, response);
+
             var updatedConversation = Tx.run(() -> ConversationService.findById(conversationId));
             return new RunResult(response, updatedConversation, truncated);
         } finally {
@@ -971,6 +977,11 @@ public class AgentRunner {
         trace.mark(LatencyTrace.STREAM_BODY_END);
         finalizeStreamingTurn(post.content(), post.replyTruncated(), turnUsage, modelInfo, streamStartMs,
                 agent, conversation, channelType, trace, sink, cb);
+
+        // JCLAW-39: async memory auto-capture for the completed streaming turn.
+        // Placed after finalize (response persisted + terminal emitted) so it
+        // never blocks delivery; the YIELDED_RESPONSE path above already returned.
+        MemoryAutoCapture.captureAsync(agent, conversation.id, userMessage, post.content());
     }
 
     /**
