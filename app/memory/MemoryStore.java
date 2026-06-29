@@ -19,21 +19,19 @@ public interface MemoryStore {
             String text,
             String category,
             double importance,
-            String source,
             Instant createdAt
     ) {}
 
     /**
-     * Store a memory with an explicit importance score and provenance. This is
-     * the primary contract (JCLAW-39/40); the three-arg convenience below
-     * delegates with a category-derived default importance and {@code "manual"}
-     * source, keeping pre-existing call sites source-compatible.
+     * Store a memory with an explicit importance score. This is the primary
+     * contract (JCLAW-39/40); the three-arg convenience below delegates with a
+     * category-derived default importance, keeping pre-existing call sites
+     * source-compatible.
      */
-    String store(String agentId, String text, String category, double importance, String source);
+    String store(String agentId, String text, String category, double importance);
 
     default String store(String agentId, String text, String category) {
-        return store(agentId, text, category,
-                MemoryCategory.defaultImportance(category), "manual");
+        return store(agentId, text, category, MemoryCategory.defaultImportance(category));
     }
 
     List<MemoryEntry> search(String agentId, String query, int limit);

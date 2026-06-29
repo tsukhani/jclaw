@@ -4,9 +4,9 @@ import type { Agent } from '~/types/api'
 
 /**
  * JCLAW-40: agent memory admin. Lists a selected agent's stored memories with
- * importance, category, and source; the operator can adjust importance inline
- * (which influences recall ranking and core-memory auto-load) and delete
- * entries. Read path is GET /api/agents/{id}/memories; mutations go through
+ * importance and category; the operator can adjust importance inline (which
+ * influences recall ranking and core-memory auto-load) and delete entries.
+ * Read path is GET /api/agents/{id}/memories; mutations go through
  * PUT/DELETE /api/agents/{id}/memories/{memoryId}.
  */
 
@@ -15,7 +15,6 @@ interface MemoryDto {
   text: string
   category: string | null
   importance: number
-  source: string
   createdAt: string | null
 }
 
@@ -164,9 +163,6 @@ async function remove(mem: MemoryDto) {
             <th class="w-32 px-4 py-2.5 font-medium">
               Importance
             </th>
-            <th class="px-4 py-2.5 font-medium">
-              Source
-            </th>
             <th class="w-12 px-4 py-2.5 text-right font-medium" />
           </tr>
         </thead>
@@ -199,9 +195,6 @@ async function remove(mem: MemoryDto) {
                 class="w-20 border border-input bg-surface-elevated px-2 py-1 text-fg-strong"
                 @change="updateImportance(mem, ($event.target as HTMLInputElement).value)"
               >
-            </td>
-            <td class="px-4 py-2.5 text-fg-muted">
-              {{ mem.source }}
             </td>
             <td class="px-4 py-2.5 text-right">
               <button

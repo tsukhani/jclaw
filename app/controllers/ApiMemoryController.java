@@ -18,8 +18,8 @@ import static utils.GsonHolder.INSTANCE;
 
 /**
  * Admin API for agent memories (JCLAW-40). Lists an agent's stored memories with
- * their importance / category / source so the operator can see what's been
- * captured, manually adjust importance (and category), and delete entries.
+ * their importance and category so the operator can see what's been captured,
+ * manually adjust importance (and category), and delete entries.
  *
  * <p>Memories are keyed by agent <em>name</em> in the store; every action
  * resolves the agent by id and scopes the row to that agent's name, so one
@@ -34,7 +34,7 @@ public class ApiMemoryController extends Controller {
     private static final String KEY_CATEGORY = "category";
 
     public record MemoryDto(String id, String text, String category,
-                            double importance, String source, String createdAt) {}
+                            double importance, String createdAt) {}
 
     public record MemoryUpdateRequest(Double importance, String category) {}
 
@@ -42,14 +42,14 @@ public class ApiMemoryController extends Controller {
      * GET /api/agents/{id}/memories — list an agent's memories, newest first.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MemoryDto.class))))
-    @Operation(summary = "List an agent's stored memories with importance, category, and source")
+    @Operation(summary = "List an agent's stored memories with importance and category")
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
 
         var result = MemoryStoreFactory.get().list(agent.name).stream()
                 .map(e -> new MemoryDto(e.id(), e.text(), e.category(),
-                        e.importance(), e.source(),
+                        e.importance(),
                         e.createdAt() == null ? null : e.createdAt().toString()))
                 .toList();
         renderJSON(gson.toJson(result));
@@ -85,7 +85,7 @@ public class ApiMemoryController extends Controller {
         memory.save();
 
         renderJSON(gson.toJson(new MemoryDto(String.valueOf(memory.id), memory.text,
-                memory.category, memory.importance, memory.source,
+                memory.category, memory.importance,
                 memory.createdAt == null ? null : memory.createdAt.toString())));
     }
 

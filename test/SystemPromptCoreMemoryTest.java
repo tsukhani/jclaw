@@ -32,7 +32,7 @@ class SystemPromptCoreMemoryTest extends UnitTest {
     }
 
     private void store(String agentName, String text, String category, double importance) {
-        memory.MemoryStoreFactory.get().store(agentName, text, category, importance, "auto-capture");
+        memory.MemoryStoreFactory.get().store(agentName, text, category, importance);
     }
 
     private static int countOccurrences(String haystack, String needle) {

@@ -15,7 +15,6 @@ function mem(overrides: Record<string, unknown> = {}) {
     text: 'The user prefers dark mode',
     category: 'preference',
     importance: 0.7,
-    source: 'auto-capture',
     createdAt: '2026-06-29T00:00:00Z',
     ...overrides,
   }
@@ -46,7 +45,7 @@ describe('memory admin page (JCLAW-40)', () => {
     expect(c.find('[data-testid="memory-empty"]').exists()).toBe(true)
   })
 
-  it('renders memories with category, importance, and source', async () => {
+  it('renders memories with category and importance', async () => {
     memoriesResponse = [mem(), mem({ id: '11', text: 'Operator is the sole admin', category: 'core', importance: 0.9 })]
     const c = await mountSuspended(Memory)
     await flushPromises()
@@ -54,7 +53,6 @@ describe('memory admin page (JCLAW-40)', () => {
     expect(text).toContain('dark mode')
     expect(text).toContain('preference')
     expect(text).toContain('core')
-    expect(text).toContain('auto-capture')
     expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(2)
   })
 
@@ -65,7 +63,7 @@ describe('memory admin page (JCLAW-40)', () => {
       handler: async (event) => {
         const { readBody } = await import('h3')
         putBody = await readBody(event) as Record<string, unknown>
-        return { id: '10', text: 'The user prefers dark mode', category: 'preference', importance: putBody.importance, source: 'auto-capture', createdAt: null }
+        return { id: '10', text: 'The user prefers dark mode', category: 'preference', importance: putBody.importance, createdAt: null }
       },
     })
     const c = await mountSuspended(Memory)

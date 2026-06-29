@@ -57,7 +57,7 @@ class ApiMemoryControllerTest extends FunctionalTest {
 
     private String seedMemory(String agentName, String text, String category, double importance) {
         return fetchInFreshTx(() ->
-                MemoryStoreFactory.get().store(agentName, text, category, importance, "auto-capture"));
+                MemoryStoreFactory.get().store(agentName, text, category, importance));
     }
 
     // ─── Auth gate ───────────────────────────────────────────────────────────
@@ -92,7 +92,6 @@ class ApiMemoryControllerTest extends FunctionalTest {
         var body = getContent(resp);
         assertTrue(body.contains("dark mode"), "memory text present");
         assertTrue(body.contains("core"), "category present");
-        assertTrue(body.contains("auto-capture"), "source present");
     }
 
     @Test

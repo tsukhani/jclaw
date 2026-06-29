@@ -206,7 +206,7 @@ public final class MemoryAutoCapture {
             if (n >= maxPerTurn) break;
             var toks = tokenize(c.text());
             if (isDuplicate(toks, seenTokens, dupThreshold)) continue;
-            store.store(agentName, c.text(), c.category(), c.importance(), "auto-capture");
+            store.store(agentName, c.text(), c.category(), c.importance());
             seenTokens.add(toks);
             n++;
         }

@@ -72,7 +72,6 @@ class MemoryAutoCaptureTest extends UnitTest {
         assertEquals(1, result.captured());
         var stored = MemoryStoreFactory.get().list("agent-cap");
         assertEquals(1, stored.size());
-        assertEquals("auto-capture", stored.getFirst().source());
         assertEquals("fact", stored.getFirst().category());
     }
 
@@ -91,7 +90,7 @@ class MemoryAutoCaptureTest extends UnitTest {
     @Test
     void captureDeduplicatesAgainstExisting() {
         var store = MemoryStoreFactory.get();
-        store.store("agent-dup", "The user prefers dark mode interfaces", "preference", 0.7, "manual");
+        store.store("agent-dup", "The user prefers dark mode interfaces", "preference", 0.7);
 
         MemoryAutoCapture.Extractor extractor = msgs ->
                 "{\"memories\":[{\"text\":\"The user prefers dark mode interfaces\",\"category\":\"preference\",\"importance\":0.7}]}";

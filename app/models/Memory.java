@@ -50,16 +50,6 @@ public class Memory extends Model {
     @ColumnDefault("0.5")
     public double importance = 0.5;
 
-    /**
-     * Provenance: {@code "manual"} (operator or programmatic) or
-     * {@code "auto-capture"} (the JCLAW-39 pipeline). Lets the admin view
-     * distinguish the two and lets capture avoid re-storing manual rows. NOT
-     * NULL with a DDL default for the populated-table ALTER.
-     */
-    @Column(length = 20, nullable = false)
-    @ColumnDefault("'manual'")
-    public String source = "manual";
-
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
