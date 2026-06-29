@@ -126,12 +126,15 @@ class ApiMemoryControllerTest extends FunctionalTest {
     @Test
     void filtersByImportanceThreshold() {
         seedMemory("alice", "high importance memory", "core", 0.9);
+        seedMemory("alice", "boundary importance memory", "fact", 0.8);
         seedMemory("alice", "low importance memory", "fact", 0.4);
         login();
 
+        // ">0.8" is strict: the 0.9 row stays; the 0.8 boundary and 0.4 row drop.
         var q = URLEncoder.encode(">0.8", StandardCharsets.UTF_8);
         var body = getContent(GET("/api/memories?importance=" + q));
         assertTrue(body.contains("high importance memory"), "above-threshold present");
+        assertFalse(body.contains("boundary importance memory"), "strict > excludes the boundary value");
         assertFalse(body.contains("low importance memory"), "below-threshold excluded");
     }
 

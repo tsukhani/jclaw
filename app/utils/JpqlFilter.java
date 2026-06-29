@@ -60,6 +60,16 @@ public final class JpqlFilter {
         return add("%1$s <= ?%2$d", field, value);
     }
 
+    /** Add a strict {@code >} predicate if the value is non-null. */
+    public JpqlFilter gt(String field, Object value) {
+        return add("%1$s > ?%2$d", field, value);
+    }
+
+    /** Add a strict {@code <} predicate if the value is non-null. */
+    public JpqlFilter lt(String field, Object value) {
+        return add("%1$s < ?%2$d", field, value);
+    }
+
     /** Returns the WHERE clause body (without the "WHERE" keyword), or empty string if no filters. */
     public String toWhereClause() {
         return String.join(" AND ", clauses);

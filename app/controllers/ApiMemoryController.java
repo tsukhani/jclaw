@@ -172,20 +172,18 @@ public class ApiMemoryController extends Controller {
     }
 
     /**
-     * Apply an importance threshold. Accepts a leading comparator ({@code >},
-     * {@code >=}, {@code <}, {@code <=}) or a bare number (treated as
-     * {@code >=}). {@code >}/{@code <} are applied as inclusive bounds (the
-     * JpqlFilter only offers {@code >=}/{@code <=}) — fine for a coarse
-     * importance filter. A non-numeric value is ignored.
+     * Apply an importance threshold. Accepts a leading comparator — {@code >}
+     * and {@code <} are strict, {@code >=} and {@code <=} inclusive — or a bare
+     * number (treated as {@code >=}). A non-numeric value is ignored.
      */
     private static void applyImportance(JpqlFilter filter, String importance) {
         if (importance == null || importance.isBlank()) return;
         var v = importance.strip();
         try {
             if (v.startsWith(">=")) filter.gte(FIELD_IMPORTANCE, Double.parseDouble(v.substring(2).strip()));
-            else if (v.startsWith(">")) filter.gte(FIELD_IMPORTANCE, Double.parseDouble(v.substring(1).strip()));
+            else if (v.startsWith(">")) filter.gt(FIELD_IMPORTANCE, Double.parseDouble(v.substring(1).strip()));
             else if (v.startsWith("<=")) filter.lte(FIELD_IMPORTANCE, Double.parseDouble(v.substring(2).strip()));
-            else if (v.startsWith("<")) filter.lte(FIELD_IMPORTANCE, Double.parseDouble(v.substring(1).strip()));
+            else if (v.startsWith("<")) filter.lt(FIELD_IMPORTANCE, Double.parseDouble(v.substring(1).strip()));
             else filter.gte(FIELD_IMPORTANCE, Double.parseDouble(v));
         } catch (NumberFormatException _) {
             // ignore an unparseable importance filter
