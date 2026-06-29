@@ -20,6 +20,7 @@ import tools.JClawApiTool;
 import tools.LoadTestSleepTool;
 import tools.MessageTool;
 import tools.PlaywrightBrowserTool;
+import tools.SaveMemoryTool;
 import tools.ShellExecTool;
 import tools.SubagentSpawnTool;
 import tools.SubagentYieldTool;
@@ -58,6 +59,10 @@ public class ToolRegistrationJob extends Job<Void> {
         // features/usage by searching the bundled docs/user-guide/ markdown.
         toolList.add(new UserGuideTool());
         toolList.add(new CheckListTool());
+        // JCLAW-530: save_memory — lets the agent durably remember a fact when
+        // the user explicitly asks ("remember that …"). Auto-capture (JCLAW-39)
+        // still handles facts mentioned in passing; this is the explicit path.
+        toolList.add(new SaveMemoryTool());
         toolList.add(new FileSystemTools());
         toolList.add(new DocumentsTool());
         toolList.add(new WebFetchTool());
