@@ -46,11 +46,13 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     @Override
-    public String store(String agentId, String text, String category) {
+    public String store(String agentId, String text, String category, double importance, String source) {
         var memory = new Memory();
         memory.agentId = agentId;
         memory.text = text;
         memory.category = category;
+        memory.importance = importance;
+        memory.source = source;
         memory.save();
 
         if (vectorEnabled) {
@@ -267,6 +269,8 @@ public class JpaMemoryStore implements MemoryStore {
                 m.agentId,
                 m.text,
                 m.category,
+                m.importance,
+                m.source,
                 m.createdAt
         );
     }

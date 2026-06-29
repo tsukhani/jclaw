@@ -110,6 +110,42 @@ class MemoryStoreTest extends UnitTest {
     }
 
     @Test
+    void threeArgStoreAppliesCategoryDefaultAndManualSource() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "User prefers dark mode", "preference");
+
+        var entry = store.list("agent-1").getFirst();
+        assertEquals(MemoryCategory.PREFERENCE.defaultImportance, entry.importance(), 1e-9);
+        assertEquals("manual", entry.source());
+    }
+
+    @Test
+    void fiveArgStorePersistsImportanceAndSource() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "Operator is the sole admin", "core", 0.95, "auto-capture");
+
+        var entry = store.list("agent-1").getFirst();
+        assertEquals(0.95, entry.importance(), 1e-9);
+        assertEquals("auto-capture", entry.source());
+        assertEquals("core", entry.category());
+    }
+
+    @Test
+    void findCoreFiltersCategoryAndRanksByImportance() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "Low core note", "core", 0.82, "auto-capture");
+        store.store("agent-1", "High core note", "core", 0.95, "auto-capture");
+        store.store("agent-1", "Below threshold core", "core", 0.50, "manual");
+        store.store("agent-1", "A mere fact", "fact", 0.99, "manual");
+
+        var core = models.Memory.findCore("agent-1", 0.8, 10);
+        assertEquals(2, core.size());
+        // Ranked by importance DESC — high before low; the fact is excluded by category.
+        assertEquals("High core note", core.get(0).text);
+        assertEquals("Low core note", core.get(1).text);
+    }
+
+    @Test
     void listReturnsEmptyForUnknownAgent() {
         var store = MemoryStoreFactory.get();
         var results = store.list("nonexistent-agent");

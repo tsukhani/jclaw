@@ -9,6 +9,7 @@ import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.ColumnDefault;
 import play.db.jpa.Model;
 import services.EventLogger;
 import services.search.LuceneIndexer;
@@ -22,7 +23,9 @@ import java.util.List;
 
 @Entity
 @Table(name = "memory", indexes = {
-        @Index(name = "idx_memory_agent", columnList = "agent_id")
+        @Index(name = "idx_memory_agent", columnList = "agent_id"),
+        // JCLAW-40: core-memory auto-load ranks by importance within an agent.
+        @Index(name = "idx_memory_agent_importance", columnList = "agent_id,importance")
 })
 public class Memory extends Model {
 
@@ -34,6 +37,28 @@ public class Memory extends Model {
 
     @Column(length = 50)
     public String category;
+
+    /**
+     * Importance score in [0.0, 1.0] (JCLAW-40). Drives core-memory auto-load
+     * ranking and the admin memory view, and is set by the auto-capture
+     * extractor (JCLAW-39). NOT NULL with a DDL default so the column ALTER
+     * stays safe on a populated table (same reason as the other
+     * {@code @ColumnDefault} columns in this schema). The {@code 0.5} literal
+     * mirrors {@code MemoryCategory.BASELINE_IMPORTANCE}.
+     */
+    @Column(nullable = false)
+    @ColumnDefault("0.5")
+    public double importance = 0.5;
+
+    /**
+     * Provenance: {@code "manual"} (operator or programmatic) or
+     * {@code "auto-capture"} (the JCLAW-39 pipeline). Lets the admin view
+     * distinguish the two and lets capture avoid re-storing manual rows. NOT
+     * NULL with a DDL default for the populated-table ALTER.
+     */
+    @Column(length = 20, nullable = false)
+    @ColumnDefault("'manual'")
+    public String source = "manual";
 
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
@@ -80,6 +105,19 @@ public class Memory extends Model {
 
     public static List<Memory> findByAgent(String agentId, int limit) {
         return Memory.find("agentId = ?1 ORDER BY updatedAt DESC", agentId).fetch(limit);
+    }
+
+    /**
+     * High-importance {@code core}-category memories for session-start auto-load
+     * (JCLAW-40), ranked by importance then recency and bounded by {@code limit}
+     * (the caller additionally enforces a token budget). The {@code core}
+     * category is matched as a literal to keep this {@code models} class free of
+     * a dependency on the {@code memory} package's {@code MemoryCategory}.
+     */
+    public static List<Memory> findCore(String agentId, double minImportance, int limit) {
+        return Memory.find(
+                "agentId = ?1 AND category = ?2 AND importance >= ?3 ORDER BY importance DESC, updatedAt DESC",
+                agentId, "core", minImportance).fetch(limit);
     }
 
     /**
