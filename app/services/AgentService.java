@@ -6,6 +6,7 @@ import mcp.McpAllowlist;
 import memory.MemoryStoreFactory;
 import models.Agent;
 import models.AgentToolConfig;
+import models.Config;
 import play.Play;
 import play.cache.Cache;
 import play.cache.CacheConfig;
@@ -203,6 +204,18 @@ public class AgentService {
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled, String thinkingMode, String description) {
+        // JCLAW-533: an agent's workspace directory and its agent.<name>.* config
+        // keys are partitioned by the mutable name, so a rename must migrate them
+        // (mirroring what delete() cleans up) or they orphan — and a reused name
+        // would inherit the previous agent's files. Capture the old name and, for a
+        // root agent, its workspace path BEFORE the rename. Subagents share their
+        // root's workspace (resolveWorkspaceOwnerName walks to the root), so only
+        // root agents own a directory to move.
+        var oldName = agent.name;
+        boolean nameChanged = !oldName.equals(name);
+        boolean rootAgent = agent.parentAgent == null;
+        Path workspaceSrc = (nameChanged && rootAgent) ? workspacePath(oldName) : null;
+
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
@@ -214,7 +227,62 @@ public class AgentService {
         agent.enabled = agent.isMain() || (enabled && isProviderConfigured(modelProvider, modelId));
         agent.thinkingMode = normalizeThinkingMode(thinkingMode, modelProvider, modelId);
         agent.save();
+
+        if (nameChanged) {
+            renameAgentConfigKeys(oldName, name);
+            // Moved last: a failure throws, rolling back the rename + config re-key
+            // (same request transaction) rather than leaving a stranded directory.
+            if (rootAgent) moveWorkspaceDirectory(workspaceSrc, workspacePath(name));
+        }
         return agent;
+    }
+
+    /**
+     * JCLAW-533: re-key the name-partitioned {@code agent.<name>.*} config rows
+     * when an agent is renamed, so per-agent settings (shell allowlist, queue
+     * mode, …) follow the agent instead of stranding under the old name. Uses a
+     * SELECT + per-row save rather than a bulk HQL UPDATE — the bulk form would
+     * provision an HTE_config id-table whose DDL emits the reserved word
+     * {@code key} unquoted (see the note in {@link #delete}).
+     */
+    private static void renameAgentConfigKeys(String oldName, String newName) {
+        var oldPrefix = "agent." + oldName + ".";
+        var newPrefix = "agent." + newName + ".";
+        // findAll + Java filter rather than a "key LIKE ?" query: `key` is a JPQL
+        // reserved word and the config table is tiny. Each per-row save is an
+        // UPDATE on the config_key column by id — no id-table, no reserved word.
+        boolean any = false;
+        for (Config c : Config.<Config>findAll()) {
+            if (c.key.startsWith(oldPrefix)) {
+                c.key = newPrefix + c.key.substring(oldPrefix.length());
+                c.save();
+                any = true;
+            }
+        }
+        if (any) ConfigService.clearCache();
+    }
+
+    /**
+     * JCLAW-533: move a root agent's workspace directory on rename so its skills
+     * and workspace files (SOUL/IDENTITY/USER/BOOTSTRAP/AGENT.md) follow the
+     * agent. Throws on failure so the caller's transaction rolls the rename back
+     * rather than leaving the entity renamed with a stranded directory. Freeing
+     * the old name also closes the reuse-leak: a new agent taking it later
+     * materialises a fresh, empty workspace via {@link #createWorkspace}.
+     */
+    private static void moveWorkspaceDirectory(Path src, Path dest) {
+        try {
+            if (!Files.exists(src)) return;          // workspace never materialised
+            if (Files.exists(dest)) {
+                throw new IllegalStateException("workspace target already exists: " + dest);
+            }
+            Files.createDirectories(dest.getParent());
+            Files.move(src, dest);
+            EventLogger.info(LOG_CATEGORY, "Moved agent workspace %s -> %s"
+                    .formatted(src.getFileName(), dest.getFileName()));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to move agent workspace on rename: " + e.getMessage(), e);
+        }
     }
 
     /**
