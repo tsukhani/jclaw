@@ -1,6 +1,7 @@
 package memory;
 
 import llm.ProviderRegistry;
+import models.Agent;
 import models.Memory;
 import play.Play;
 import play.cache.Cache;
@@ -48,7 +49,7 @@ public class JpaMemoryStore implements MemoryStore {
     @Override
     public String store(String agentId, String text, String category, double importance) {
         var memory = new Memory();
-        memory.agentId = agentId;
+        memory.agent = resolveAgent(agentId);   // JCLAW-537: real FK — the agent must exist
         memory.text = text;
         memory.category = category;
         memory.importance = importance;
@@ -89,7 +90,9 @@ public class JpaMemoryStore implements MemoryStore {
 
     @Override
     public List<MemoryEntry> list(String agentId, int limit, int offset) {
-        List<Memory> memories = Memory.find("agentId = ?1 ORDER BY updatedAt DESC", agentId)
+        Long pk = pkOrNull(agentId);
+        if (pk == null) return List.of();
+        List<Memory> memories = Memory.find("agent.id = ?1 ORDER BY updatedAt DESC", pk)
                 .from(offset).fetch(limit);
         return memories.stream()
                 .map(this::toEntry)
@@ -103,8 +106,12 @@ public class JpaMemoryStore implements MemoryStore {
         // Hibernate session that could conflict. We intentionally do NOT call
         // em.clear() here — the caller may still hold re-fetched entities
         // (e.g. the Agent itself) that must remain attached for subsequent ops.
-        return JPA.em().createQuery("DELETE FROM Memory m WHERE m.agentId = :agentId")
-                .setParameter("agentId", agentId)
+        // The FK's ON DELETE CASCADE (JCLAW-537) is the DB-level backstop for
+        // raw agent deletes; this explicit pass remains the service-path cleanup.
+        Long pk = pkOrNull(agentId);
+        if (pk == null) return 0;
+        return JPA.em().createQuery("DELETE FROM Memory m WHERE m.agent.id = :agentId")
+                .setParameter("agentId", pk)
                 .executeUpdate();
     }
 
@@ -118,6 +125,8 @@ public class JpaMemoryStore implements MemoryStore {
 
     @SuppressWarnings("unchecked")
     private List<MemoryEntry> fullTextSearch(String agentId, String query, int limit) {
+        Long pk = pkOrNull(agentId);
+        if (pk == null) return List.of();
         // Single native query returning full Memory entities ranked by FTS score.
         // Avoids the prior two-query pattern (IDs then re-fetch) and the in-memory re-sort.
         var sql = """
@@ -128,7 +137,7 @@ public class JpaMemoryStore implements MemoryStore {
                 """;
         try {
             List<Memory> memories = JPA.em().createNativeQuery(sql, Memory.class)
-                    .setParameter(1, agentId)
+                    .setParameter(1, pk)
                     .setParameter(2, query)
                     .setMaxResults(limit)
                     .getResultList();
@@ -141,6 +150,8 @@ public class JpaMemoryStore implements MemoryStore {
 
     @SuppressWarnings("unchecked")
     private List<MemoryEntry> hybridSearch(String agentId, String query, int limit) {
+        Long pk = pkOrNull(agentId);
+        if (pk == null) return List.of();
         // Combine PG full-text search + pgvector cosine similarity in a single query.
         try {
             var embedding = generateEmbedding(query);
@@ -158,7 +169,7 @@ public class JpaMemoryStore implements MemoryStore {
                     """;
 
             List<Memory> memories = JPA.em().createNativeQuery(sql, Memory.class)
-                    .setParameter(1, agentId)
+                    .setParameter(1, pk)
                     .setParameter(2, query)
                     .setParameter(3, embeddingStr)
                     .setMaxResults(limit)
@@ -265,11 +276,35 @@ public class JpaMemoryStore implements MemoryStore {
     private MemoryEntry toEntry(Memory m) {
         return new MemoryEntry(
                 m.id.toString(),
-                m.agentId,
+                String.valueOf(m.agent.id),   // lazy proxy supplies the id without loading the Agent
                 m.text,
                 m.category,
                 m.importance,
                 m.createdAt
         );
+    }
+
+    /** Parse an agent-id string to its PK, or null when null/non-numeric. */
+    private static Long pkOrNull(String agentId) {
+        if (agentId == null) return null;
+        try {
+            return Long.valueOf(agentId.strip());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Resolve the owning agent for a write. With the real FK (JCLAW-537) the
+     * agent must exist; a missing/invalid id is a programming error, surfaced
+     * loudly rather than persisting an orphan.
+     */
+    private static Agent resolveAgent(String agentId) {
+        Long pk = pkOrNull(agentId);
+        Agent agent = pk == null ? null : Agent.findById(pk);
+        if (agent == null) {
+            throw new IllegalArgumentException("Cannot store memory: no agent with id " + agentId);
+        }
+        return agent;
     }
 }

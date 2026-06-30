@@ -24,6 +24,19 @@ class MemoryAutoCaptureTest extends UnitTest {
         return new CircuitBreaker(20, 0.5, 5, 30_000L);
     }
 
+    /** Find-or-create a real agent; memories reference a real agent FK now (JCLAW-537). */
+    private String agentId(String name) {
+        var a = models.Agent.find("name = ?1", name).<models.Agent>first();
+        if (a == null) {
+            a = new models.Agent();
+            a.name = name;
+            a.modelProvider = "openrouter";
+            a.modelId = "gpt-4.1";
+            a.save();
+        }
+        return String.valueOf(a.id);
+    }
+
     // ─── parseCandidates ─────────────────────────────────────────────────────
 
     @Test
@@ -66,11 +79,11 @@ class MemoryAutoCaptureTest extends UnitTest {
     void captureStoresExtractedMemories() {
         MemoryAutoCapture.Extractor extractor = msgs ->
                 "{\"memories\":[{\"text\":\"The user works at Acme\",\"category\":\"fact\",\"importance\":0.6}]}";
-        var result = MemoryAutoCapture.capture("agent-cap", "agent-cap", "I work at Acme Corp on widgets",
+        var result = MemoryAutoCapture.capture(agentId("agent-cap"), "agent-cap", "I work at Acme Corp on widgets",
                 "Noted — Acme Corp.", extractor, freshBreaker());
 
         assertEquals(1, result.captured());
-        var stored = MemoryStoreFactory.get().list("agent-cap");
+        var stored = MemoryStoreFactory.get().list(agentId("agent-cap"));
         assertEquals(1, stored.size());
         assertEquals("fact", stored.getFirst().category());
     }
@@ -90,15 +103,15 @@ class MemoryAutoCaptureTest extends UnitTest {
     @Test
     void captureDeduplicatesAgainstExisting() {
         var store = MemoryStoreFactory.get();
-        store.store("agent-dup", "The user prefers dark mode interfaces", "preference", 0.7);
+        store.store(agentId("agent-dup"), "The user prefers dark mode interfaces", "preference", 0.7);
 
         MemoryAutoCapture.Extractor extractor = msgs ->
                 "{\"memories\":[{\"text\":\"The user prefers dark mode interfaces\",\"category\":\"preference\",\"importance\":0.7}]}";
-        var result = MemoryAutoCapture.capture("agent-dup", "agent-dup", "I really like dark mode in all my apps",
+        var result = MemoryAutoCapture.capture(agentId("agent-dup"), "agent-dup", "I really like dark mode in all my apps",
                 "Got it.", extractor, freshBreaker());
 
         assertEquals(0, result.captured());                 // NOOP — duplicate
-        assertEquals(1, store.list("agent-dup").size());    // store unchanged
+        assertEquals(1, store.list(agentId("agent-dup")).size());    // store unchanged
     }
 
     @Test
@@ -139,11 +152,11 @@ class MemoryAutoCaptureTest extends UnitTest {
         final var json = sb.toString();
         MemoryAutoCapture.Extractor extractor = msgs -> json;
 
-        var result = MemoryAutoCapture.capture("agent-cap5", "agent-cap5",
+        var result = MemoryAutoCapture.capture(agentId("agent-cap5"), "agent-cap5",
                 "Here are several facts about project alpha for you to remember going forward",
                 "Recorded.", extractor, freshBreaker());
         assertEquals(5, result.captured());  // default maxPerTurn=5
-        assertEquals(5, MemoryStoreFactory.get().list("agent-cap5").size());
+        assertEquals(5, MemoryStoreFactory.get().list(agentId("agent-cap5")).size());
     }
 
     @Test
@@ -152,12 +165,12 @@ class MemoryAutoCaptureTest extends UnitTest {
                 "{\"memories\":["
                 + "{\"text\":\"The user's API key is sk-abcdef0123456789abcdef0123ABCD\",\"category\":\"fact\",\"importance\":0.6},"
                 + "{\"text\":\"The user prefers dark themes everywhere\",\"category\":\"preference\",\"importance\":0.7}]}";
-        var result = MemoryAutoCapture.capture("agent-sec", "agent-sec",
+        var result = MemoryAutoCapture.capture(agentId("agent-sec"), "agent-sec",
                 "here is my api key sk-abcdef0123456789abcdef0123ABCD and I like dark themes everywhere",
                 "Noted.", extractor, freshBreaker());
 
         assertEquals(1, result.captured());   // JCLAW-535: only the non-secret memory persists
-        var stored = MemoryStoreFactory.get().list("agent-sec");
+        var stored = MemoryStoreFactory.get().list(agentId("agent-sec"));
         assertEquals(1, stored.size());
         assertTrue(stored.getFirst().text().contains("dark themes"));
         assertFalse(stored.getFirst().text().contains("sk-"), "the credential must not be persisted");

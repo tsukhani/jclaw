@@ -169,34 +169,47 @@ class ModelTest extends UnitTest {
         assertEquals("system", recent.getFirst().category);
     }
 
+    private static Agent mkAgent(String name) {
+        var a = new Agent();
+        a.name = name;
+        a.modelProvider = "openrouter";
+        a.modelId = "gpt-4.1";
+        a.save();
+        return a;
+    }
+
     @Test
     void canCreateMemory() {
         Fixtures.deleteDatabase();
+        var agent = mkAgent("main");
+        var key = String.valueOf(agent.id);
         var mem = new Memory();
-        mem.agentId = "main";
+        mem.agent = agent;
         mem.text = "The user prefers concise responses";
         mem.category = "preference";
         mem.save();
 
-        var found = Memory.findByAgent("main");
+        var found = Memory.findByAgent(key);
         assertEquals(1, found.size());
 
-        var searched = Memory.searchByText("main", "concise", 10);
+        var searched = Memory.searchByText(key, "concise", 10);
         assertEquals(1, searched.size());
 
-        var noResults = Memory.searchByText("main", "verbose", 10);
+        var noResults = Memory.searchByText(key, "verbose", 10);
         assertEquals(0, noResults.size());
     }
 
     @Test
     void memorySearchIsAgentScoped() {
         Fixtures.deleteDatabase();
+        var agentA = mkAgent("agentA");
+        var agentB = mkAgent("agentB");
         var a = new Memory();
-        a.agentId = "agentA";
+        a.agent = agentA;
         a.text = "shared widget knowledge";
         a.save();
         var b = new Memory();
-        b.agentId = "agentB";
+        b.agent = agentB;
         b.text = "shared widget knowledge";
         b.save();
 
@@ -204,15 +217,15 @@ class ModelTest extends UnitTest {
         // agent-scoped (privacy invariant, JCLAW-415) — each agent sees only
         // its own, never the other's. Holds across both the Lucene and the
         // LIKE-fallback backends.
-        var aResults = Memory.searchByText("agentA", "widget", 10);
+        var aResults = Memory.searchByText(String.valueOf(agentA.id), "widget", 10);
         assertEquals(1, aResults.size(), "search must be scoped to the calling agent");
-        assertEquals("agentA", aResults.get(0).agentId);
+        assertEquals(agentA.id, aResults.get(0).agent.id);
 
-        var bResults = Memory.searchByText("agentB", "widget", 10);
+        var bResults = Memory.searchByText(String.valueOf(agentB.id), "widget", 10);
         assertEquals(1, bResults.size());
-        assertEquals("agentB", bResults.get(0).agentId);
+        assertEquals(agentB.id, bResults.get(0).agent.id);
 
-        assertEquals(0, Memory.searchByText("agentA", "nonexistent", 10).size());
+        assertEquals(0, Memory.searchByText(String.valueOf(agentA.id), "nonexistent", 10).size());
     }
 
     @Test

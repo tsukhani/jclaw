@@ -68,7 +68,7 @@ public class ApiMemoryController extends Controller {
         // `agent` filter arrives as a human-readable name; resolve it to that id.
         // An unknown name matches nothing.
         var agentNames = agentNamesById();
-        String agentIdFilter = null;
+        Long agentIdFilter = null;
         if (agent != null && !agent.isBlank()) {
             agentIdFilter = agentIdForName(agent.strip());
             if (agentIdFilter == null) {
@@ -77,7 +77,7 @@ public class ApiMemoryController extends Controller {
             }
         }
         var filter = new JpqlFilter()
-                .eq("m.agentId", agentIdFilter)
+                .eq("m.agent.id", agentIdFilter)
                 .eq("m.category", normalizeCategory(category));
         applyImportance(filter, importance);
 
@@ -174,10 +174,10 @@ public class ApiMemoryController extends Controller {
     // ─── helpers ──────────────────────────────────────────────────────────────
 
     private static MemoryDto toDto(Memory m, Map<String, String> agentNames) {
-        // m.agentId is the immutable agent id (JCLAW-531); surface the current
-        // human name when the agent still exists, else fall back to the raw key
-        // (e.g. a memory orphaned by a deleted/renamed agent under the old scheme).
-        String name = agentNames.getOrDefault(m.agentId, m.agentId);
+        // The agent FK is the immutable id (JCLAW-531/537); surface the current
+        // human name, falling back to the raw id if the agent row is somehow gone.
+        String key = String.valueOf(m.agent.id);
+        String name = agentNames.getOrDefault(key, key);
         return new MemoryDto(String.valueOf(m.id), name, m.text, m.category,
                 m.importance, m.createdAt == null ? null : m.createdAt.toString());
     }
@@ -188,10 +188,10 @@ public class ApiMemoryController extends Controller {
                 .collect(Collectors.toMap(a -> String.valueOf(a.id), a -> a.name));
     }
 
-    /** Resolve an agent name to its immutable id string, or null when unknown. */
-    private static String agentIdForName(String name) {
+    /** Resolve an agent name to its immutable id, or null when unknown. */
+    private static Long agentIdForName(String name) {
         Agent a = Agent.find("name = ?1", name).first();
-        return a == null ? null : String.valueOf(a.id);
+        return a == null ? null : a.id;
     }
 
     private static String normalizeCategory(String c) {

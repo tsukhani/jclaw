@@ -2,7 +2,10 @@ package models;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PostRemove;
 import jakarta.persistence.PostUpdate;
@@ -10,6 +13,8 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 import services.EventLogger;
 import services.search.LuceneIndexer;
@@ -29,8 +34,21 @@ import java.util.List;
 })
 public class Memory extends Model {
 
-    @Column(name = "agent_id", nullable = false)
-    public String agentId;
+    /**
+     * Owning agent (JCLAW-537). A real foreign key with {@code ON DELETE CASCADE}
+     * so deleting an agent removes its memories at the DB level — referential
+     * integrity is DB-enforced, not only app-managed via {@code AgentService.delete}.
+     * Replaces the former opaque {@code String agentId} that existed so the
+     * {@code MemoryStore} abstraction could swap in Neo4j (now dropped).
+     *
+     * <p>{@code LAZY}: the recall, dedup, and index paths read only
+     * {@code agent.id}, which a lazy proxy supplies without loading the Agent row,
+     * so per-memory fetches don't drag the Agent along.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "agent_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
+    public Agent agent;
 
     @Column(nullable = false, columnDefinition = "TEXT")
     public String text;
@@ -69,15 +87,15 @@ public class Memory extends Model {
     }
 
     // JCLAW-415: index per-agent memories in the Lucene MEMORY scope (mirrors
-    // the sibling entities). agentId rides as the exact-match filter field so
-    // searchByText can scope results to one agent. The indexer never throws —
+    // the sibling entities). The agent id rides as the exact-match filter field
+    // so searchByText can scope results to one agent. The indexer never throws —
     // a transient FS issue must not abort the parent JPA transaction.
     @PostPersist
     @PostUpdate
     void onIndexUpsert() {
-        if (id != null) {
+        if (id != null && agent != null) {
             LuceneIndexer.upsert(
-                    LuceneIndexer.Scope.MEMORY, id, text, agentId);
+                    LuceneIndexer.Scope.MEMORY, id, text, String.valueOf(agent.id));
         }
     }
 
@@ -89,12 +107,24 @@ public class Memory extends Model {
         }
     }
 
+    /** Parse an agent-id string (the partition key callers pass) to its PK, or null when non-numeric. */
+    private static Long parsePk(String agentId) {
+        if (agentId == null) return null;
+        try {
+            return Long.valueOf(agentId.strip());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     public static List<Memory> findByAgent(String agentId) {
         return findByAgent(agentId, 200);
     }
 
     public static List<Memory> findByAgent(String agentId, int limit) {
-        return Memory.find("agentId = ?1 ORDER BY updatedAt DESC", agentId).fetch(limit);
+        Long pk = parsePk(agentId);
+        if (pk == null) return List.of();
+        return Memory.find("agent.id = ?1 ORDER BY updatedAt DESC", pk).fetch(limit);
     }
 
     /**
@@ -105,9 +135,11 @@ public class Memory extends Model {
      * a dependency on the {@code memory} package's {@code MemoryCategory}.
      */
     public static List<Memory> findCore(String agentId, double minImportance, int limit) {
+        Long pk = parsePk(agentId);
+        if (pk == null) return List.of();
         return Memory.find(
-                "agentId = ?1 AND category = ?2 AND importance >= ?3 ORDER BY importance DESC, updatedAt DESC",
-                agentId, "core", minImportance).fetch(limit);
+                "agent.id = ?1 AND category = ?2 AND importance >= ?3 ORDER BY importance DESC, updatedAt DESC",
+                pk, "core", minImportance).fetch(limit);
     }
 
     /**
@@ -128,10 +160,12 @@ public class Memory extends Model {
      */
     public static List<Memory> searchByText(String agentId, String query, int limit) {
         if (query == null || query.isBlank()) return List.of();
+        Long pk = parsePk(agentId);
+        if (pk == null) return List.of();
         if ("none".equals(MessageSearch.activeDialect())) {
             // Backend not initialized — substring fallback, agent-bounded.
-            return Memory.find("agentId = ?1 AND LOWER(text) LIKE ?2",
-                    agentId, "%" + query.toLowerCase() + "%").fetch(limit);
+            return Memory.find("agent.id = ?1 AND LOWER(text) LIKE ?2",
+                    pk, "%" + query.toLowerCase() + "%").fetch(limit);
         }
         List<Long> ids;
         try {
@@ -142,7 +176,7 @@ public class Memory extends Model {
             return List.of();
         }
         if (ids.isEmpty()) return List.of();
-        List<Memory> rows = Memory.find("agentId = ?1 AND id IN (?2)", agentId, ids).fetch();
+        List<Memory> rows = Memory.find("agent.id = ?1 AND id IN (?2)", pk, ids).fetch();
         var byId = new HashMap<Long, Memory>();
         for (var m : rows) byId.put(m.id, m);
         var ordered = new ArrayList<Memory>(ids.size());

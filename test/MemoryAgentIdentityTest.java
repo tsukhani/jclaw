@@ -83,4 +83,28 @@ class MemoryAgentIdentityTest extends UnitTest {
         assertFalse(assemble(second).contains("MARKER_DEL"),
                 "a name reused after deletion must not inherit the prior agent's memories");
     }
+
+    @Test
+    void rawAgentDeleteCascadesToMemoriesViaFk() {
+        // JCLAW-537: deleting the agent ROW removes its memories via the FK's
+        // ON DELETE CASCADE, independent of AgentService.delete (which also clears
+        // them explicitly). Use a bare agent (no tool configs / workspace) so the
+        // only FK referencing it is memory.agent_id, and a native DELETE so the
+        // DB cascade fires directly rather than Hibernate's session-level logic.
+        var agent = new Agent();
+        agent.name = "identity-fk";
+        agent.modelProvider = "openrouter";
+        agent.modelId = "gpt-4.1";
+        agent.save();
+        var key = String.valueOf(agent.id);
+        MemoryStoreFactory.get().store(key, "MARKER_FK a fact to cascade-delete", "fact", 0.5);
+        assertEquals(1, MemoryStoreFactory.get().list(key).size());
+
+        play.db.jpa.JPA.em().createNativeQuery("DELETE FROM agent WHERE id = ?1")
+                .setParameter(1, agent.id).executeUpdate();
+        play.db.jpa.JPA.em().clear();
+
+        assertEquals(0, MemoryStoreFactory.get().list(key).size(),
+                "ON DELETE CASCADE on memory.agent_id must remove the agent's memories");
+    }
 }

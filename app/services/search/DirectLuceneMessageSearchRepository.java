@@ -83,7 +83,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
                     row -> ((SubagentRun) row).id, row -> subagentRunContent((SubagentRun) row)),
             new Backfiller(LuceneIndexer.Scope.MEMORY, "SELECT m FROM Memory m",
                     row -> ((Memory) row).id, row -> ((Memory) row).text,
-                    row -> ((Memory) row).agentId));
+                    row -> String.valueOf(((Memory) row).agent.id)));
 
     /** {@inheritDoc} */
     @Override

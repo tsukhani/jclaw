@@ -113,10 +113,21 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         });
     }
 
-    private Long seedMemory(String agentId, String text) {
+    private Long makeAgent(String name) {
+        return commitInFreshTx(() -> {
+            var a = new Agent();
+            a.name = name;
+            a.modelProvider = "openrouter";
+            a.modelId = "gpt-4.1";
+            a.save();
+            return a.id;
+        });
+    }
+
+    private Long seedMemory(Long agentId, String text) {
         return commitInFreshTx(() -> {
             var m = new models.Memory();
-            m.agentId = agentId;
+            m.agent = Agent.findById(agentId);   // JCLAW-537: real FK
             m.text = text;
             m.save();
             return m.id;
@@ -125,18 +136,20 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
     @Test
     void memorySearchIsScopedToAgent() throws Exception {
-        // JCLAW-415: the MEMORY scope indexes an agent field so search is
-        // filtered to one owner. Both agents store the same "widget" term.
-        var aId = seedMemory("agentA", "shared widget knowledge");
-        var bId = seedMemory("agentB", "shared widget knowledge");
+        // JCLAW-415: the MEMORY scope indexes the agent id so search is filtered
+        // to one owner. Both agents store the same "widget" term.
+        var aId = makeAgent("agentA");
+        var bId = makeAgent("agentB");
+        var memA = seedMemory(aId, "shared widget knowledge");
+        var memB = seedMemory(bId, "shared widget knowledge");
 
         // Each agent sees only its own memory id — never the other's, even
         // though the content query alone would match both (privacy invariant).
-        assertEquals(List.of(aId), repo.searchMemoryIds("agentA", "widget", 10));
-        assertEquals(List.of(bId), repo.searchMemoryIds("agentB", "widget", 10));
+        assertEquals(List.of(memA), repo.searchMemoryIds(String.valueOf(aId), "widget", 10));
+        assertEquals(List.of(memB), repo.searchMemoryIds(String.valueOf(bId), "widget", 10));
 
         // A term in neither memory matches nothing.
-        assertTrue(repo.searchMemoryIds("agentA", "nonexistent", 10).isEmpty());
+        assertTrue(repo.searchMemoryIds(String.valueOf(aId), "nonexistent", 10).isEmpty());
     }
 
     @Test
