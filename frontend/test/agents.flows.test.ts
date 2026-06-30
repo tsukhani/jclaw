@@ -69,6 +69,8 @@ function setupAgentsApi(opts?: {
       compressionCode: true,
       compressionText: true,
       compressionTargetRatio: 0.3, acpAllowed: false,
+      memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
+      memoryAutocaptureProvider: 'ollama-cloud', memoryAutocaptureModel: 'kimi-k2.5',
       createdAt: '2026-04-01T10:00:00Z',
       updatedAt: '2026-04-22T10:00:00Z',
     },
@@ -86,6 +88,8 @@ function setupAgentsApi(opts?: {
       compressionCode: false,
       compressionText: false,
       compressionTargetRatio: 0.3, acpAllowed: false,
+      memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
+      memoryAutocaptureProvider: 'openai', memoryAutocaptureModel: 'gpt-4',
       createdAt: '2026-04-10T10:00:00Z',
       updatedAt: '2026-04-20T10:00:00Z',
     },
@@ -334,6 +338,32 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
     await vi.waitFor(() => expect(putBody).not.toBeNull())
 
     expect(putBody).toEqual({ acpAllowed: true })
+  })
+
+  it('PUTs a partial { memoryAutocaptureEnabled } immediately when the Memory toggle is clicked', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+
+    // The helper fixture defaults to auto-capture ON; the Memory card toggle
+    // saves immediately on click (JCLAW-534).
+    const toggle = component.find('button[title="Turn auto-capture off"]')
+    expect(toggle.exists(), 'memory auto-capture toggle should render').toBe(true)
+    await toggle.trigger('click')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+
+    expect(putBody).toEqual({ memoryAutocaptureEnabled: false })
   })
 
   it('PUTs a partial { compressionJson } when a sub-toggle is changed (master on)', async () => {

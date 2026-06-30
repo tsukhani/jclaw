@@ -318,6 +318,15 @@ const savingCompression = ref(false)
 // JCLAW-500: per-agent ACP external-harness grant (custom agents only; the main
 // agent is always allowed and shows no toggle). Immediate-save on toggle.
 const acpAllowed = ref(false)
+
+// JCLAW-534: per-agent memory auto-capture (immediate-save card, like ACP).
+// The toggle gates capture; the provider/model selects override the extractor
+// model (sent as null when they match the agent's default, so it keeps
+// inheriting the default and tracks it if the default later changes).
+const memoryAutocaptureEnabled = ref(true)
+const memoryAutocaptureProvider = ref('')
+const memoryAutocaptureModel = ref('')
+const savingMemory = ref(false)
 const savingAcpAllowed = ref(false)
 // Section-header count: the master plus each per-type sub-toggle that is
 // effectively on (sub-toggles are off while the master is off).
@@ -354,6 +363,8 @@ const agentProviderId = useId()
 const agentModelId = useId()
 const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
+const agentMemoryProviderId = useId()
+const agentMemoryModelId = useId()
 
 // --- System prompt breakdown dialog state ---
 // Scoped to a single agent: opened from a per-row button on the agent list, so
@@ -552,6 +563,12 @@ const availableModels = computed(() => {
   return provider?.models ?? []
 })
 
+// JCLAW-534: models for the per-agent autocapture extractor-model override.
+const autocaptureAvailableModels = computed(() => {
+  const provider = providers.value.find(p => p.name === memoryAutocaptureProvider.value)
+  return provider?.models ?? []
+})
+
 // The currently selected model's full metadata — drives the thinking-level dropdown.
 const selectedModel = computed<ProviderModel | null>(() =>
   availableModels.value.find(m => m.id === form.value.modelId) ?? null,
@@ -616,6 +633,9 @@ function editAgent(agent: Agent) {
   compressionText.value = agent.compressionText
   compressionTargetRatio.value = agent.compressionTargetRatio
   acpAllowed.value = agent.acpAllowed
+  memoryAutocaptureEnabled.value = agent.memoryAutocaptureEnabled
+  memoryAutocaptureProvider.value = agent.memoryAutocaptureProvider
+  memoryAutocaptureModel.value = agent.memoryAutocaptureModel
   creating.value = false
   saveError.value = null
   loadWorkspaceFile(agent.id, 'AGENT.md')
@@ -866,6 +886,71 @@ async function saveAcpAllowed() {
 function toggleAcpAllowed() {
   acpAllowed.value = !acpAllowed.value
   saveAcpAllowed()
+}
+
+// JCLAW-534: immediate-save the per-agent memory auto-capture enable, mirroring
+// saveAcpAllowed.
+async function saveMemoryEnabled() {
+  if (!editing.value) return
+  savingMemory.value = true
+  try {
+    await $fetch(`/api/agents/${editing.value.id}`, {
+      method: 'PUT',
+      body: { memoryAutocaptureEnabled: memoryAutocaptureEnabled.value },
+    })
+    editing.value.memoryAutocaptureEnabled = memoryAutocaptureEnabled.value
+    refresh()
+  }
+  catch (e) {
+    console.error('Failed to save memory auto-capture setting:', e)
+    memoryAutocaptureEnabled.value = editing.value.memoryAutocaptureEnabled
+  }
+  finally {
+    savingMemory.value = false
+  }
+}
+
+function toggleMemoryAutocapture() {
+  memoryAutocaptureEnabled.value = !memoryAutocaptureEnabled.value
+  saveMemoryEnabled()
+}
+
+// JCLAW-534: immediate-save the extractor-model override. Sent as null when the
+// selection equals the agent's default model, so the agent keeps inheriting the
+// default (and tracks it if the default later changes).
+async function saveMemoryModel() {
+  if (!editing.value) return
+  savingMemory.value = true
+  const isDefault = memoryAutocaptureProvider.value === editing.value.modelProvider
+    && memoryAutocaptureModel.value === editing.value.modelId
+  try {
+    const updated = await $fetch<Agent>(`/api/agents/${editing.value.id}`, {
+      method: 'PUT',
+      body: {
+        memoryAutocaptureProvider: isDefault ? null : memoryAutocaptureProvider.value,
+        memoryAutocaptureModel: isDefault ? null : memoryAutocaptureModel.value,
+      },
+    })
+    editing.value.memoryAutocaptureProvider = updated.memoryAutocaptureProvider
+    editing.value.memoryAutocaptureModel = updated.memoryAutocaptureModel
+    editing.value.memoryAutocaptureModelInherited = updated.memoryAutocaptureModelInherited
+    refresh()
+  }
+  catch (e) {
+    console.error('Failed to save extractor model:', e)
+    memoryAutocaptureProvider.value = editing.value.memoryAutocaptureProvider
+    memoryAutocaptureModel.value = editing.value.memoryAutocaptureModel
+  }
+  finally {
+    savingMemory.value = false
+  }
+}
+
+// The override model id won't exist under a newly-picked provider, so snap it to
+// that provider's first model, then save.
+function onAutocaptureProviderChange() {
+  memoryAutocaptureModel.value = autocaptureAvailableModels.value[0]?.id ?? ''
+  saveMemoryModel()
 }
 
 // JCLAW-463: per-type sub-toggle saves. Same immediate-save partial-PUT pattern
@@ -1533,6 +1618,95 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               />
             </div>
           </button>
+        </div>
+      </div>
+
+      <!-- JCLAW-534: per-agent memory auto-capture — enable toggle + extractor-
+           model override. Immediate-saves via a partial PUT, like the ACP and
+           compression cards. The model selects default to the agent's model and
+           are sent as null when unchanged so the agent keeps inheriting it. -->
+      <div
+        v-if="editing"
+        class="bg-surface-elevated border border-border"
+      >
+        <div class="px-4 py-2.5 flex items-center justify-between gap-4">
+          <div>
+            <span class="text-sm font-medium text-fg-strong">Memory</span>
+            <div class="text-xs text-neutral-500 mt-0.5">
+              Automatically capture durable facts from this agent's conversations
+              into long-term memory.
+            </div>
+          </div>
+          <button
+            type="button"
+            :title="memoryAutocaptureEnabled ? 'Turn auto-capture off' : 'Turn auto-capture on'"
+            :disabled="savingMemory"
+            class="shrink-0 disabled:opacity-50"
+            @click="toggleMemoryAutocapture"
+          >
+            <div
+              class="relative w-9 h-5 rounded-full transition-colors duration-200"
+              :class="memoryAutocaptureEnabled ? 'bg-emerald-500' : 'bg-muted'"
+            >
+              <div
+                class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                :class="memoryAutocaptureEnabled ? 'left-[18px]' : 'left-0.5'"
+              />
+            </div>
+          </button>
+        </div>
+        <div
+          v-if="memoryAutocaptureEnabled"
+          class="px-4 pb-3 pt-2 border-t border-border"
+        >
+          <div class="text-xs text-neutral-500 mt-2 mb-2">
+            Extractor model — defaults to the agent's model; pick another (e.g. a
+            cheaper one) to run memory extraction on it instead.
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <label
+              :for="agentMemoryProviderId"
+              class="block"
+            >
+              <span class="block text-xs text-neutral-500 mb-1">Provider</span>
+              <select
+                :id="agentMemoryProviderId"
+                v-model="memoryAutocaptureProvider"
+                :disabled="savingMemory"
+                class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50"
+                @change="onAutocaptureProviderChange"
+              >
+                <option
+                  v-for="p in providers"
+                  :key="p.name"
+                  :value="p.name"
+                >
+                  {{ p.name }}
+                </option>
+              </select>
+            </label>
+            <label
+              :for="agentMemoryModelId"
+              class="block"
+            >
+              <span class="block text-xs text-neutral-500 mb-1">Model</span>
+              <select
+                :id="agentMemoryModelId"
+                v-model="memoryAutocaptureModel"
+                :disabled="savingMemory"
+                class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50"
+                @change="saveMemoryModel"
+              >
+                <option
+                  v-for="m in autocaptureAvailableModels"
+                  :key="m.id"
+                  :value="m.id"
+                >
+                  {{ m.name || m.id }}
+                </option>
+              </select>
+            </label>
+          </div>
         </div>
       </div>
 

@@ -24,6 +24,13 @@ export interface Agent {
   compressionTargetRatio: number
   /** JCLAW-500: whether this agent may spawn subagents under the external ACP harness (runtime=acp). The main agent is always allowed; custom agents need this grant. */
   acpAllowed: boolean
+  /** JCLAW-534: per-agent memory auto-capture enable (on by default). */
+  memoryAutocaptureEnabled: boolean
+  /** JCLAW-534: true when the extractor model is inherited from the agent's default model (no override set). */
+  memoryAutocaptureModelInherited: boolean
+  /** JCLAW-534: effective extractor provider/model — the agent's default when inherited, else the override. */
+  memoryAutocaptureProvider: string
+  memoryAutocaptureModel: string
 }
 
 /**
