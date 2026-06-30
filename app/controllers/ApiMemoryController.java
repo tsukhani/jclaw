@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import memory.MemoryCategory;
+import models.Agent;
 import models.Memory;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
@@ -19,6 +20,8 @@ import utils.JpqlFilter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -61,8 +64,20 @@ public class ApiMemoryController extends Controller {
         int effLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         int effOffset = (offset != null && offset >= 0) ? offset : 0;
 
+        // Memories are partitioned on the immutable agent id (JCLAW-531). The
+        // `agent` filter arrives as a human-readable name; resolve it to that id.
+        // An unknown name matches nothing.
+        var agentNames = agentNamesById();
+        String agentIdFilter = null;
+        if (agent != null && !agent.isBlank()) {
+            agentIdFilter = agentIdForName(agent.strip());
+            if (agentIdFilter == null) {
+                renderJSON("[]");
+                return;
+            }
+        }
         var filter = new JpqlFilter()
-                .eq("m.agentId", blankToNull(agent))
+                .eq("m.agentId", agentIdFilter)
                 .eq("m.category", normalizeCategory(category));
         applyImportance(filter, importance);
 
@@ -103,7 +118,7 @@ public class ApiMemoryController extends Controller {
         if (ftsIds != null) jpaQ.setParameter("fts", ftsIds);
         List<Memory> rows = jpaQ.setFirstResult(effOffset).setMaxResults(effLimit).getResultList();
 
-        renderJSON(gson.toJson(rows.stream().map(ApiMemoryController::toDto).toList()));
+        renderJSON(gson.toJson(rows.stream().map(m -> toDto(m, agentNames)).toList()));
     }
 
     /**
@@ -137,7 +152,7 @@ public class ApiMemoryController extends Controller {
             if (normalized != null) memory.category = normalized;
         }
         memory.save();
-        renderJSON(gson.toJson(toDto(memory)));
+        renderJSON(gson.toJson(toDto(memory, agentNamesById())));
     }
 
     /**
@@ -158,13 +173,25 @@ public class ApiMemoryController extends Controller {
 
     // ─── helpers ──────────────────────────────────────────────────────────────
 
-    private static MemoryDto toDto(Memory m) {
-        return new MemoryDto(String.valueOf(m.id), m.agentId, m.text, m.category,
+    private static MemoryDto toDto(Memory m, Map<String, String> agentNames) {
+        // m.agentId is the immutable agent id (JCLAW-531); surface the current
+        // human name when the agent still exists, else fall back to the raw key
+        // (e.g. a memory orphaned by a deleted/renamed agent under the old scheme).
+        String name = agentNames.getOrDefault(m.agentId, m.agentId);
+        return new MemoryDto(String.valueOf(m.id), name, m.text, m.category,
                 m.importance, m.createdAt == null ? null : m.createdAt.toString());
     }
 
-    private static String blankToNull(String s) {
-        return s == null || s.isBlank() ? null : s.strip();
+    /** Map of agent id (as string) to current name, for resolving the display label. */
+    private static Map<String, String> agentNamesById() {
+        return Agent.<Agent>findAll().stream()
+                .collect(Collectors.toMap(a -> String.valueOf(a.id), a -> a.name));
+    }
+
+    /** Resolve an agent name to its immutable id string, or null when unknown. */
+    private static String agentIdForName(String name) {
+        Agent a = Agent.find("name = ?1", name).first();
+        return a == null ? null : String.valueOf(a.id);
     }
 
     private static String normalizeCategory(String c) {

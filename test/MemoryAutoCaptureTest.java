@@ -66,7 +66,7 @@ class MemoryAutoCaptureTest extends UnitTest {
     void captureStoresExtractedMemories() {
         MemoryAutoCapture.Extractor extractor = msgs ->
                 "{\"memories\":[{\"text\":\"The user works at Acme\",\"category\":\"fact\",\"importance\":0.6}]}";
-        var result = MemoryAutoCapture.capture("agent-cap", "I work at Acme Corp on widgets",
+        var result = MemoryAutoCapture.capture("agent-cap", "agent-cap", "I work at Acme Corp on widgets",
                 "Noted — Acme Corp.", extractor, freshBreaker());
 
         assertEquals(1, result.captured());
@@ -80,7 +80,7 @@ class MemoryAutoCaptureTest extends UnitTest {
         MemoryAutoCapture.Extractor extractor = msgs -> {
             throw new AssertionError("extractor must not run for a gated turn");
         };
-        var result = MemoryAutoCapture.capture("agent-triv", "thanks!", "You're welcome.",
+        var result = MemoryAutoCapture.capture("agent-triv", "agent-triv", "thanks!", "You're welcome.",
                 extractor, freshBreaker());
         assertEquals("trivial", result.skipReason());
         assertEquals(0, result.captured());
@@ -94,7 +94,7 @@ class MemoryAutoCaptureTest extends UnitTest {
 
         MemoryAutoCapture.Extractor extractor = msgs ->
                 "{\"memories\":[{\"text\":\"The user prefers dark mode interfaces\",\"category\":\"preference\",\"importance\":0.7}]}";
-        var result = MemoryAutoCapture.capture("agent-dup", "I really like dark mode in all my apps",
+        var result = MemoryAutoCapture.capture("agent-dup", "agent-dup", "I really like dark mode in all my apps",
                 "Got it.", extractor, freshBreaker());
 
         assertEquals(0, result.captured());                 // NOOP — duplicate
@@ -107,7 +107,7 @@ class MemoryAutoCaptureTest extends UnitTest {
         MemoryAutoCapture.Extractor extractor = msgs -> {
             throw new RuntimeException("boom");
         };
-        var result = MemoryAutoCapture.capture("agent-err", "I live in Berlin and work on ML",
+        var result = MemoryAutoCapture.capture("agent-err", "agent-err", "I live in Berlin and work on ML",
                 "Noted.", extractor, breaker);
         assertEquals("extraction_error", result.skipReason());
         assertEquals(CircuitBreaker.State.CLOSED, breaker.state()); // one failure, below minVolume
@@ -122,7 +122,7 @@ class MemoryAutoCaptureTest extends UnitTest {
         MemoryAutoCapture.Extractor extractor = msgs -> {
             throw new AssertionError("extractor must not run when breaker is open");
         };
-        var result = MemoryAutoCapture.capture("agent-open", "I prefer tabs over spaces",
+        var result = MemoryAutoCapture.capture("agent-open", "agent-open", "I prefer tabs over spaces",
                 "Understood.", extractor, breaker);
         assertEquals("breaker_open", result.skipReason());
     }
@@ -139,7 +139,7 @@ class MemoryAutoCaptureTest extends UnitTest {
         final var json = sb.toString();
         MemoryAutoCapture.Extractor extractor = msgs -> json;
 
-        var result = MemoryAutoCapture.capture("agent-cap5",
+        var result = MemoryAutoCapture.capture("agent-cap5", "agent-cap5",
                 "Here are several facts about project alpha for you to remember going forward",
                 "Recorded.", extractor, freshBreaker());
         assertEquals(5, result.captured());  // default maxPerTurn=5

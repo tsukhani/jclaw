@@ -567,7 +567,8 @@ public class SystemPromptAssembler {
             int maxCount = ConfigService.getInt("memory.coreload.maxCount", 20);
             int tokenBudget = ConfigService.getInt("memory.coreload.tokenBudget", 400);
 
-            var core = Memory.findCore(agent.name, minImportance, maxCount);
+            // Partition on the immutable agent id, not the mutable name (JCLAW-531).
+            var core = Memory.findCore(String.valueOf(agent.id), minImportance, maxCount);
             if (core.isEmpty()) return CoreMemoryBlock.empty();
 
             var lines = new StringBuilder();
@@ -608,7 +609,8 @@ public class SystemPromptAssembler {
             int recallLimit = ConfigService.getInt("memory.recall.limit", 10);
             // Over-fetch so core-memory exclusion and the importance re-rank still
             // yield a full set.
-            var hits = store.search(agent.name, userMessage, recallLimit * 2);
+            // Partition on the immutable agent id, not the mutable name (JCLAW-531).
+            var hits = store.search(String.valueOf(agent.id), userMessage, recallLimit * 2);
 
             // JCLAW-40 refinement: rank by relevance blended with importance, not
             // similarity alone. The search already returns best-relevance-first, so

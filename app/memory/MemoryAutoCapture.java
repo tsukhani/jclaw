@@ -100,6 +100,11 @@ public final class MemoryAutoCapture {
         if (Play.runningInTestMode()) return;
         if (!ConfigService.getBoolean("memory.autocapture.enabled", true)) return;
 
+        // Memory is partitioned on the immutable agent id, not the mutable name
+        // (JCLAW-531): a rename must not strand prior memories, and a name later
+        // reused by a different agent must not inherit them. The human-readable
+        // name still rides along purely for the event-log agent column.
+        final var agentKey = String.valueOf(agent.id);
         final var agentName = agent.name;
         Thread.ofVirtual().name("memory-capture").start(() -> {
             try {
@@ -118,7 +123,7 @@ public final class MemoryAutoCapture {
                 Extractor extractor = msgs -> SessionCompactor.firstChoiceText(
                         ctx.provider().chat(ctx.modelId(), msgs, List.of(), maxOutput, null, ctx.channelType()));
 
-                capture(agentName, userMessage, assistantResponse, extractor, SHARED_BREAKER);
+                capture(agentKey, agentName, userMessage, assistantResponse, extractor, SHARED_BREAKER);
             } catch (Exception e) {
                 EventLogger.warn(EVENT_CATEGORY, agentName, null,
                         "Auto-capture failed: %s".formatted(e.getMessage()));
@@ -147,9 +152,14 @@ public final class MemoryAutoCapture {
      * {@code breaker}: heuristic gate → breaker-guarded extraction → JSON parse →
      * dedup → persist. Never throws; returns a {@link CaptureResult} describing
      * the outcome.
+     *
+     * <p>{@code agentKey} is the immutable memory partition key (the agent id);
+     * {@code agentName} is the human-readable label used only for the event-log
+     * agent column (JCLAW-531). In tests with no Agent entity the two may be the
+     * same string.
      */
-    public static CaptureResult capture(String agentName, String userMessage, String assistantResponse,
-                                        Extractor extractor, CircuitBreaker breaker) {
+    public static CaptureResult capture(String agentKey, String agentName, String userMessage,
+                                        String assistantResponse, Extractor extractor, CircuitBreaker breaker) {
         var gate = MemoryAttentionGate.evaluate(userMessage);
         if (!gate.proceed()) {
             return logged(agentName, CaptureResult.skipped(gate.reason()));
@@ -186,11 +196,11 @@ public final class MemoryAutoCapture {
         double dupThreshold = ConfigService.getDouble("memory.autocapture.dedup.threshold", 0.85);
         int dedupScan = ConfigService.getInt("memory.autocapture.dedup.scanLimit", 100);
 
-        int stored = Tx.run(() -> persist(agentName, candidates, maxPerTurn, dupThreshold, dedupScan));
+        int stored = Tx.run(() -> persist(agentKey, candidates, maxPerTurn, dupThreshold, dedupScan));
         return logged(agentName, new CaptureResult(stored, candidates.size() - stored, null));
     }
 
-    private static int persist(String agentName, List<Candidate> candidates,
+    private static int persist(String agentKey, List<Candidate> candidates,
                                int maxPerTurn, double dupThreshold, int dedupScan) {
         var store = MemoryStoreFactory.get();
         // Dedup against the agent's recent memories with a deterministic token
@@ -198,7 +208,7 @@ public final class MemoryAutoCapture {
         // dialect-specific search backend). New stores join the comparison set
         // so later candidates dedup against earlier ones in the same batch too.
         var seenTokens = new ArrayList<Set<String>>();
-        for (var m : Memory.findByAgent(agentName, dedupScan)) {
+        for (var m : Memory.findByAgent(agentKey, dedupScan)) {
             seenTokens.add(tokenize(m.text));
         }
         int n = 0;
@@ -206,7 +216,7 @@ public final class MemoryAutoCapture {
             if (n >= maxPerTurn) break;
             var toks = tokenize(c.text());
             if (isDuplicate(toks, seenTokens, dupThreshold)) continue;
-            store.store(agentName, c.text(), c.category(), c.importance());
+            store.store(agentKey, c.text(), c.category(), c.importance());
             seenTokens.add(toks);
             n++;
         }

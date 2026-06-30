@@ -419,12 +419,13 @@ public class AgentService {
         // Re-fetch agent after session clear (it was detached by em.clear)
         agent = Agent.findById(agentId);
 
-        // Name-keyed side data (no FK, so no Hibernate cascade risk).
-        // Memory goes through the MemoryStore abstraction so the cleanup works
-        // regardless of which backend is active — a direct Memory.delete() would
-        // only wipe the JPA table, silently orphaning Neo4j memory nodes if that
-        // backend is ever enabled via memory.backend=neo4j.
-        MemoryStoreFactory.get().deleteAll(agentName);
+        // Memory is partitioned on the immutable agent id (JCLAW-531), so it is
+        // deleted by id — not by name like the config keys below. Goes through the
+        // MemoryStore abstraction so the cleanup works regardless of which backend
+        // is active — a direct Memory.delete() would only wipe the JPA table,
+        // silently orphaning Neo4j memory nodes if that backend is ever enabled
+        // via memory.backend=neo4j.
+        MemoryStoreFactory.get().deleteAll(String.valueOf(agentId));
         // Native delete (not a bulk HQL Config.delete): the HQL form makes
         // Hibernate provision an HTE_config id-table whose DDL emits the
         // entity attribute `key` unquoted, which H2 rejects as a reserved

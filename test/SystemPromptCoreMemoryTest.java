@@ -31,8 +31,9 @@ class SystemPromptCoreMemoryTest extends UnitTest {
         return AgentService.create(name, "openrouter", "gpt-4.1");
     }
 
-    private void store(String agentName, String text, String category, double importance) {
-        memory.MemoryStoreFactory.get().store(agentName, text, category, importance);
+    private void store(Agent agent, String text, String category, double importance) {
+        // Partition on the immutable agent id, matching production (JCLAW-531).
+        memory.MemoryStoreFactory.get().store(String.valueOf(agent.id), text, category, importance);
     }
 
     private static int countOccurrences(String haystack, String needle) {
@@ -48,7 +49,7 @@ class SystemPromptCoreMemoryTest extends UnitTest {
     @Test
     void coreMemoriesAppearInCacheablePrefix() {
         var agent = newAgent("spa-core-1");
-        store(agent.name, "MARKER_CORE_FACT operator is the sole admin", "core", 0.9);
+        store(agent,"MARKER_CORE_FACT operator is the sole admin", "core", 0.9);
 
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
         int coreIdx = prompt.indexOf("MARKER_CORE_FACT");
@@ -62,7 +63,7 @@ class SystemPromptCoreMemoryTest extends UnitTest {
     @Test
     void belowThresholdCoreMemoryIsNotAutoLoaded() {
         var agent = newAgent("spa-core-2");
-        store(agent.name, "MARKER_LOW below the default threshold", "core", 0.5);  // < 0.8
+        store(agent,"MARKER_LOW below the default threshold", "core", 0.5);  // < 0.8
 
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
         assertFalse(prompt.contains("MARKER_LOW"), "below-threshold core memory must not auto-load");
@@ -71,7 +72,7 @@ class SystemPromptCoreMemoryTest extends UnitTest {
     @Test
     void nonCoreCategoryIsNotAutoLoaded() {
         var agent = newAgent("spa-core-3");
-        store(agent.name, "MARKER_FACT a mere high-importance fact", "fact", 0.99);
+        store(agent,"MARKER_FACT a mere high-importance fact", "fact", 0.99);
 
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
         assertFalse(prompt.contains("## Core Memories"), "a non-core memory must not appear in the core block");
@@ -81,7 +82,7 @@ class SystemPromptCoreMemoryTest extends UnitTest {
     void tokenBudgetCapsTheCoreBlock() {
         var agent = newAgent("spa-core-4");
         for (int i = 0; i < 50; i++) {
-            store(agent.name, "COREFILL%02d ".formatted(i) + "x".repeat(80), "core", 0.9);
+            store(agent,"COREFILL%02d ".formatted(i) + "x".repeat(80), "core", 0.9);
         }
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
         int count = countOccurrences(prompt, "COREFILL");
@@ -92,7 +93,7 @@ class SystemPromptCoreMemoryTest extends UnitTest {
     @Test
     void coreMemoryIsExcludedFromPerTurnRecall() {
         var agent = newAgent("spa-core-5");
-        store(agent.name, "MARKER_DUAL widget preferences are important to track", "core", 0.9);
+        store(agent,"MARKER_DUAL widget preferences are important to track", "core", 0.9);
 
         // The userMessage is a substring of the memory text so the LIKE-fallback
         // recall returns it; the exclusion must keep it from being duplicated.

@@ -31,9 +31,8 @@ class ApiMemoryControllerTest extends FunctionalTest {
         assertIsOk(resp);
     }
 
-    // Seed in a fresh committed Tx on a separate thread so the HTTP handler sees
-    // it. agentName is just the stored Memory.agentId string — no Agent entity
-    // is needed (the cross-agent endpoints address memories by their own id).
+    // Run a block in a fresh committed Tx on a separate thread so the HTTP handler
+    // (its own Tx) sees the committed rows.
     private static <T> T fetchInFreshTx(Supplier<T> block) {
         var ref = new AtomicReference<T>();
         var err = new AtomicReference<Throwable>();
@@ -54,9 +53,17 @@ class ApiMemoryControllerTest extends FunctionalTest {
         return ref.get();
     }
 
+    // Memory is partitioned on the immutable agent id (JCLAW-531), and the
+    // controller resolves that id back to the agent's name for display + filtering,
+    // so a real Agent must exist. Create it once per name (reused across seeds).
     private String seedMemory(String agentName, String text, String category, double importance) {
-        return fetchInFreshTx(() ->
-                MemoryStoreFactory.get().store(agentName, text, category, importance));
+        return fetchInFreshTx(() -> {
+            models.Agent agent = models.Agent.find("name = ?1", agentName).first();
+            if (agent == null) {
+                agent = services.AgentService.create(agentName, "openrouter", "gpt-4.1");
+            }
+            return MemoryStoreFactory.get().store(String.valueOf(agent.id), text, category, importance);
+        });
     }
 
     // ─── Auth gate ───────────────────────────────────────────────────────────

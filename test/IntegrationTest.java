@@ -227,7 +227,7 @@ class IntegrationTest extends UnitTest {
 
         // Store a memory
         var store = memory.MemoryStoreFactory.get();
-        store.store(agent.name, "User prefers dark mode interfaces", "preference");
+        store.store(String.valueOf(agent.id), "User prefers dark mode interfaces", "preference");
 
         // Assemble prompt — should include the memory
         var assembled = SystemPromptAssembler.assemble(agent, "dark mode");

@@ -598,7 +598,8 @@ class AgentSystemTest extends UnitTest {
         task.save();
 
         var mem = new models.Memory();
-        mem.agentId = "delete-agent";
+        // Memory is partitioned on the immutable agent id, not the name (JCLAW-531).
+        mem.agentId = String.valueOf(agent.id);
         mem.text = "remember this";
         mem.save();
 
@@ -625,7 +626,7 @@ class AgentSystemTest extends UnitTest {
         assertEquals(0L, models.Conversation.count("agent.id = ?1", agentId));
         assertEquals(0L, models.Message.count("conversation.id = ?1", convoId));
         assertEquals(0L, models.Task.count("agent.id = ?1", agentId));
-        assertEquals(0L, models.Memory.count("agentId = ?1", "delete-agent"));
+        assertEquals(0L, models.Memory.count("agentId = ?1", String.valueOf(agentId)));
         assertNull(ConfigService.get("agent.delete-agent.shell.bypassAllowlist"));
         assertNull(ConfigService.get("agent.delete-agent.queue.mode"));
         assertFalse(Files.exists(workspace), "workspace directory should be removed");
