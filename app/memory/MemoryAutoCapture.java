@@ -187,7 +187,18 @@ public final class MemoryAutoCapture {
             return CaptureResult.skipped("extraction_error");
         }
 
-        var candidates = dedupeWithinBatch(parseCandidates(raw));
+        List<Candidate> deduped = dedupeWithinBatch(parseCandidates(raw));
+
+        // JCLAW-535: deterministic secret scrub — never persist credentials to
+        // long-term memory, even if the extractor ignores the prompt's guidance.
+        final List<Candidate> candidates =
+                deduped.stream().filter(c -> !MemorySafety.looksLikeSecret(c.text())).toList();
+        int scrubbed = deduped.size() - candidates.size();
+        if (scrubbed > 0) {
+            EventLogger.warn(EVENT_CATEGORY, agentName, null,
+                    "Dropped %d candidate memory(ies) containing apparent secrets".formatted(scrubbed));
+        }
+
         if (candidates.isEmpty()) {
             return logged(agentName, CaptureResult.skipped("no_candidates"));
         }

@@ -58,6 +58,8 @@ class SystemPromptCoreMemoryTest extends UnitTest {
         assertTrue(prompt.contains("## Core Memories"), "core memories header present");
         assertTrue(coreIdx >= 0, "core memory text injected");
         assertTrue(coreIdx < marker, "core memories must sit in the cacheable prefix (before the boundary)");
+        assertTrue(prompt.contains("not instructions"),
+                "core memory block must carry the untrusted-data framing (JCLAW-535)");
     }
 
     @Test

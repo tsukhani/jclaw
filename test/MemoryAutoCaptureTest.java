@@ -145,4 +145,21 @@ class MemoryAutoCaptureTest extends UnitTest {
         assertEquals(5, result.captured());  // default maxPerTurn=5
         assertEquals(5, MemoryStoreFactory.get().list("agent-cap5").size());
     }
+
+    @Test
+    void captureDropsSecretCandidates() {
+        MemoryAutoCapture.Extractor extractor = msgs ->
+                "{\"memories\":["
+                + "{\"text\":\"The user's API key is sk-abcdef0123456789abcdef0123ABCD\",\"category\":\"fact\",\"importance\":0.6},"
+                + "{\"text\":\"The user prefers dark themes everywhere\",\"category\":\"preference\",\"importance\":0.7}]}";
+        var result = MemoryAutoCapture.capture("agent-sec", "agent-sec",
+                "here is my api key sk-abcdef0123456789abcdef0123ABCD and I like dark themes everywhere",
+                "Noted.", extractor, freshBreaker());
+
+        assertEquals(1, result.captured());   // JCLAW-535: only the non-secret memory persists
+        var stored = MemoryStoreFactory.get().list("agent-sec");
+        assertEquals(1, stored.size());
+        assertTrue(stored.getFirst().text().contains("dark themes"));
+        assertFalse(stored.getFirst().text().contains("sk-"), "the credential must not be persisted");
+    }
 }
