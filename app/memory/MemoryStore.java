@@ -4,12 +4,12 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Pluggable memory backend interface. Implementations provide store, search, delete, list.
+ * Memory backend interface. Implementations provide store, search, delete, list.
  * The base contract is minimal — backends add richness internally.
  * <p>
- * Backends:
- * - JpaMemoryStore (default): H2/PostgreSQL with optional pgvector
- * - Neo4jMemoryStore (opt-in): requires neo4j-java-driver in lib/
+ * The sole implementation is {@link JpaMemoryStore} (H2/PostgreSQL; pgvector for
+ * vector similarity). The interface is retained as a seam for testing and future
+ * Postgres-backed strategies.
  */
 public interface MemoryStore {
 
