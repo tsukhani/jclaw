@@ -52,6 +52,9 @@ public class ApiAgentsController extends Controller {
     private static final String KEY_COMPRESSION_TEXT = "compressionText";
     private static final String KEY_COMPRESSION_TARGET_RATIO = "compressionTargetRatio";
     private static final String KEY_ACP_ALLOWED = "acpAllowed";
+    private static final String KEY_MEMORY_AUTOCAPTURE_ENABLED = "memoryAutocaptureEnabled";
+    private static final String KEY_MEMORY_AUTOCAPTURE_PROVIDER = "memoryAutocaptureProvider";
+    private static final String KEY_MEMORY_AUTOCAPTURE_MODEL = "memoryAutocaptureModel";
 
     /**
      * Slug regex enforced on every {@code name} received from the public
@@ -113,7 +116,11 @@ public class ApiAgentsController extends Controller {
                              boolean compressionEnabled,
                              boolean compressionJson, boolean compressionCode,
                              boolean compressionText, double compressionTargetRatio,
-                             boolean acpAllowed) {
+                             boolean acpAllowed,
+                             boolean memoryAutocaptureEnabled,
+                             boolean memoryAutocaptureModelInherited,
+                             String memoryAutocaptureProvider,
+                             String memoryAutocaptureModel) {
         static AgentView of(Agent a) {
             return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
         }
@@ -139,7 +146,11 @@ public class ApiAgentsController extends Controller {
                     a.compressionTargetRatio != null
                             ? a.compressionTargetRatio
                             : TextCompressor.DEFAULT_TARGET_RATIO,
-                    a.acpAllowed);
+                    a.acpAllowed,
+                    a.memoryAutocaptureEnabled,
+                    a.memoryAutocaptureProvider == null && a.memoryAutocaptureModel == null,
+                    a.autocaptureProviderEffective(),
+                    a.autocaptureModelEffective());
         }
     }
 
@@ -362,6 +373,9 @@ public class ApiAgentsController extends Controller {
             agent.acpAllowed = body.get(KEY_ACP_ALLOWED).getAsBoolean();
         }
 
+        // JCLAW-534: per-agent memory auto-capture enable + model override.
+        applyMemorySettings(agent, body);
+
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);
         renderJSON(gson.toJson(AgentView.of(agent)));
@@ -389,6 +403,25 @@ public class ApiAgentsController extends Controller {
         // JCLAW-464: clamp lives in TextCompressor; persist the operator's raw value.
         if (body.has(KEY_COMPRESSION_TARGET_RATIO) && !body.get(KEY_COMPRESSION_TARGET_RATIO).isJsonNull()) {
             agent.compressionTargetRatio = body.get(KEY_COMPRESSION_TARGET_RATIO).getAsDouble();
+        }
+    }
+
+    /**
+     * JCLAW-534: apply the per-agent memory auto-capture settings present in
+     * {@code body}. Absent keys leave the stored value untouched (partial-PUT).
+     * For the model override an explicit null/blank means "inherit the agent's
+     * default model"; a concrete value is an explicit override. Set directly on
+     * the entity so {@link AgentService#update}'s save() persists them.
+     */
+    private static void applyMemorySettings(Agent agent, JsonObject body) {
+        if (body.has(KEY_MEMORY_AUTOCAPTURE_ENABLED) && !body.get(KEY_MEMORY_AUTOCAPTURE_ENABLED).isJsonNull()) {
+            agent.memoryAutocaptureEnabled = body.get(KEY_MEMORY_AUTOCAPTURE_ENABLED).getAsBoolean();
+        }
+        if (body.has(KEY_MEMORY_AUTOCAPTURE_PROVIDER)) {
+            agent.memoryAutocaptureProvider = readOptionalString(body, KEY_MEMORY_AUTOCAPTURE_PROVIDER);
+        }
+        if (body.has(KEY_MEMORY_AUTOCAPTURE_MODEL)) {
+            agent.memoryAutocaptureModel = readOptionalString(body, KEY_MEMORY_AUTOCAPTURE_MODEL);
         }
     }
 

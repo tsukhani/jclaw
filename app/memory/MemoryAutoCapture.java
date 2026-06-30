@@ -1,6 +1,5 @@
 package memory;
 
-import agents.ModelResolver;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -8,7 +7,6 @@ import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
-import models.Conversation;
 import models.Memory;
 import play.Play;
 import services.ConfigService;
@@ -98,7 +96,8 @@ public final class MemoryAutoCapture {
         if (userMessage == null || userMessage.isBlank()
                 || assistantResponse == null || assistantResponse.isBlank()) return;
         if (Play.runningInTestMode()) return;
-        if (!ConfigService.getBoolean("memory.autocapture.enabled", true)) return;
+        // JCLAW-534: per-agent enable, on by default — no global switch.
+        if (!agent.memoryAutocaptureEnabled) return;
 
         // Memory is partitioned on the immutable agent id, not the mutable name
         // (JCLAW-531): a rename must not strand prior memories, and a name later
@@ -113,9 +112,9 @@ public final class MemoryAutoCapture {
                 var ctx = Tx.run(() -> {
                     var conv = ConversationService.findById(conversationId);
                     if (conv == null) return null;
-                    var provider = resolveProvider(agent, conv);
+                    var provider = resolveProvider(agent);
                     if (provider == null) return null;
-                    return new ExtractContext(provider, resolveModelId(agent, conv), conv.channelType);
+                    return new ExtractContext(provider, resolveModelId(agent), conv.channelType);
                 });
                 if (ctx == null) return;
 
@@ -131,18 +130,16 @@ public final class MemoryAutoCapture {
         });
     }
 
-    private static LlmProvider resolveProvider(Agent agent, Conversation conv) {
-        var p = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conv));
+    // JCLAW-534: the extractor runs on the agent's per-agent autocapture model —
+    // the agent's default model unless an operator set an explicit override in the
+    // agent's Memory section. No global model knob.
+    private static LlmProvider resolveProvider(Agent agent) {
+        var p = ProviderRegistry.get(agent.autocaptureProviderEffective());
         return p != null ? p : ProviderRegistry.getPrimary();
     }
 
-    private static String resolveModelId(Agent agent, Conversation conv) {
-        // Cheap-model knob: operators point memory.autocapture.model at a small
-        // model so per-turn extraction doesn't ride the (possibly premium) chat
-        // model. Falls back to the agent's effective model when unset.
-        var configured = ConfigService.get("memory.autocapture.model");
-        if (configured != null && !configured.isBlank()) return configured.strip();
-        return ModelResolver.effectiveModelId(agent, conv);
+    private static String resolveModelId(Agent agent) {
+        return agent.autocaptureModelEffective();
     }
 
     // ─── Testable core pipeline ──────────────────────────────────────────────

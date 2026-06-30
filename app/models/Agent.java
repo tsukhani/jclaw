@@ -123,6 +123,29 @@ public class Agent extends Model {
     @ColumnDefault("false")
     public boolean acpAllowed = false;
 
+    /**
+     * JCLAW-534: per-agent memory auto-capture enable. On by default for every
+     * agent; an operator turns it off in the agent's Memory section to stop
+     * capturing memories for that agent from then on. NOT NULL with a DDL default
+     * keeps the ALTER safe on a populated table (same pattern as {@link #acpAllowed}).
+     */
+    @Column(name = "memory_autocapture_enabled", nullable = false)
+    @ColumnDefault("true")
+    public boolean memoryAutocaptureEnabled = true;
+
+    /**
+     * JCLAW-534: per-agent override for the model that runs memory extraction.
+     * Null means "inherit the agent's default model" ({@link #modelProvider} /
+     * {@link #modelId}); an operator sets these only to point extraction at a
+     * different (e.g. cheaper) provider/model. Resolved via
+     * {@link #autocaptureProviderEffective()} / {@link #autocaptureModelEffective()}.
+     */
+    @Column(name = "memory_autocapture_provider")
+    public String memoryAutocaptureProvider;
+
+    @Column(name = "memory_autocapture_model")
+    public String memoryAutocaptureModel;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
@@ -184,5 +207,23 @@ public class Agent extends Model {
 
     public static List<Agent> findEnabled() {
         return Agent.find("enabled", true).fetch();
+    }
+
+    /**
+     * JCLAW-534: provider that runs memory extraction for this agent — the
+     * explicit override when set, otherwise the agent's default provider.
+     */
+    public String autocaptureProviderEffective() {
+        return memoryAutocaptureProvider != null && !memoryAutocaptureProvider.isBlank()
+                ? memoryAutocaptureProvider : modelProvider;
+    }
+
+    /**
+     * JCLAW-534: model that runs memory extraction for this agent — the explicit
+     * override when set, otherwise the agent's default model.
+     */
+    public String autocaptureModelEffective() {
+        return memoryAutocaptureModel != null && !memoryAutocaptureModel.isBlank()
+                ? memoryAutocaptureModel : modelId;
     }
 }

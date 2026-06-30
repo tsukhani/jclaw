@@ -83,6 +83,40 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     // =====================
+    // JCLAW-534: per-agent memory auto-capture settings
+    // =====================
+
+    @Test
+    void memoryAutocaptureSettingsRoundTrip() {
+        login();
+        var id = createAgent("mem-roundtrip");
+
+        // Default: enabled + inherited (effective model = the agent's default).
+        var initial = getContent(GET("/api/agents/" + id));
+        assertTrue(initial.contains("\"memoryAutocaptureEnabled\":true"), initial);
+        assertTrue(initial.contains("\"memoryAutocaptureModelInherited\":true"), initial);
+        assertTrue(initial.contains("\"memoryAutocaptureModel\":\"gpt-4.1\""), initial);
+
+        // Disable + override the extractor model.
+        var put = PUT("/api/agents/" + id, "application/json",
+                "{\"memoryAutocaptureEnabled\":false,\"memoryAutocaptureProvider\":\"openrouter\","
+                + "\"memoryAutocaptureModel\":\"cheap-model\"}");
+        assertIsOk(put);
+        var after = getContent(GET("/api/agents/" + id));
+        assertTrue(after.contains("\"memoryAutocaptureEnabled\":false"), after);
+        assertTrue(after.contains("\"memoryAutocaptureModelInherited\":false"), after);
+        assertTrue(after.contains("\"memoryAutocaptureModel\":\"cheap-model\""), after);
+
+        // Clearing the override (null) returns to inherit = the agent's default.
+        var put2 = PUT("/api/agents/" + id, "application/json",
+                "{\"memoryAutocaptureProvider\":null,\"memoryAutocaptureModel\":null}");
+        assertIsOk(put2);
+        var after2 = getContent(GET("/api/agents/" + id));
+        assertTrue(after2.contains("\"memoryAutocaptureModelInherited\":true"), after2);
+        assertTrue(after2.contains("\"memoryAutocaptureModel\":\"gpt-4.1\""), after2);
+    }
+
+    // =====================
     // GET /api/agents/{id}/shell/effective-allowlist
     // =====================
 
