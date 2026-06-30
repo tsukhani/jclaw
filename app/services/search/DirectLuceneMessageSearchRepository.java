@@ -226,8 +226,16 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
             var searcher = leased.get();
             var top = searcher.search(q, limit);
             var storedFields = searcher.storedFields();
-            for (var sd : top.scoreDocs) {
-                var doc = storedFields.document(sd.doc);
+            // JCLAW-532: on agent-scoped recall (agentKey != null) keep only hits
+            // within a fraction of the best match's score, so a long user message
+            // can't pull loosely-related memories into the prompt. The admin
+            // q-search (agentKey == null) keeps every match.
+            var sds = top.scoreDocs;
+            var scores = new float[sds.length];
+            for (int i = 0; i < sds.length; i++) scores[i] = sds[i].score;
+            int keep = (agentKey != null) ? recallFloorCount(scores, recallMinScoreRatio()) : sds.length;
+            for (int i = 0; i < keep; i++) {
+                var doc = storedFields.document(sds[i].doc);
                 var raw = doc.get(LuceneIndexer.ID_FIELD);
                 if (raw == null) continue;
                 try {
@@ -239,6 +247,34 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
             }
         }
         return ids;
+    }
+
+    /**
+     * JCLAW-532: agent-recall relevance floor, expressed as a fraction of the top
+     * hit's score (0 or negative disables). Hits scoring below
+     * {@code topScore * ratio} are dropped from recall so loosely-related
+     * memories don't crowd the prompt. Tunable via {@code memory.recall.minScoreRatio}.
+     */
+    private static double recallMinScoreRatio() {
+        return services.ConfigService.getDouble("memory.recall.minScoreRatio", 0.2);
+    }
+
+    /**
+     * Number of leading entries in a descending-sorted score array that clear the
+     * relevance floor ({@code scores[0] * ratio}). Public and pure so the floor
+     * decision is unit-testable without standing up a Lucene index (the end-to-end
+     * search path is JVM-global and flaky under the concurrent runner — see
+     * JCLAW-428).
+     */
+    public static int recallFloorCount(float[] scoresDesc, double ratio) {
+        if (ratio <= 0.0 || scoresDesc.length == 0) return scoresDesc.length;
+        float floor = (float) (scoresDesc[0] * ratio);
+        int n = 0;
+        for (float s : scoresDesc) {
+            if (s >= floor) n++;
+            else break;
+        }
+        return n;
     }
 
     private static List<TaskRunMessage> hydrateTaskRunMessagesInOrder(List<Long> ids) {
