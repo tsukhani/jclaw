@@ -12,6 +12,8 @@ import jakarta.persistence.PostRemove;
 import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 import services.search.LuceneIndexer;
 
@@ -53,6 +55,7 @@ public class TaskRunMessage extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "task_run_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public TaskRun taskRun;
 
     @Column(name = "turn_index", nullable = false)

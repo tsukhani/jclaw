@@ -12,6 +12,8 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -107,6 +109,7 @@ public class Agent extends Model {
      */
     @ManyToOne
     @JoinColumn(name = "parent_agent_id")
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent parentAgent;
 
     /**

@@ -8,6 +8,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.JPA;
 import play.db.jpa.Model;
 
@@ -48,6 +50,7 @@ public class AgentSkillAllowedTool extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "agent_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent agent;
 
     @Column(name = "skill_name", nullable = false)

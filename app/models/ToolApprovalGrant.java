@@ -7,6 +7,8 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PersistenceException;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 /**
@@ -30,6 +32,7 @@ public class ToolApprovalGrant extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "agent_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent agent;
 
     @Column(name = "tool_name", nullable = false)

@@ -8,6 +8,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 import java.util.List;
@@ -43,6 +45,7 @@ public class TelegramTopicBinding extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "binding_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public TelegramBinding binding;
 
     /**
@@ -70,6 +73,7 @@ public class TelegramTopicBinding extends Model {
      */
     @ManyToOne(optional = false)
     @JoinColumn(name = "agent_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent agent;
 
     public static List<TelegramTopicBinding> findByBinding(TelegramBinding binding) {

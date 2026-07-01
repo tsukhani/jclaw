@@ -11,6 +11,8 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -78,6 +80,7 @@ public class SlackBinding extends Model {
      */
     @ManyToOne(optional = false)
     @JoinColumn(name = "agent_id", nullable = false, unique = true)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent agent;
 
     /**

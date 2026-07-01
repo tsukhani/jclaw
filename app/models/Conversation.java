@@ -10,6 +10,8 @@ import jakarta.persistence.OrderBy;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -23,6 +25,7 @@ public class Conversation extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "agent_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent agent;
 
     @Column(name = "channel_type", nullable = false)
@@ -135,6 +138,7 @@ public class Conversation extends Model {
      */
     @ManyToOne
     @JoinColumn(name = "parent_conversation_id")
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Conversation parentConversation;
 
     /**

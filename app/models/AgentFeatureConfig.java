@@ -4,6 +4,8 @@ import jakarta.persistence.Column;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.MappedSuperclass;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 /**
@@ -25,6 +27,7 @@ public abstract class AgentFeatureConfig extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "agent_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent agent;
 
     @Column(nullable = false)

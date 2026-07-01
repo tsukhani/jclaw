@@ -12,6 +12,8 @@ import jakarta.persistence.PostRemove;
 import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 import services.search.LuceneIndexer;
 
@@ -47,18 +49,22 @@ public class SubagentRun extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "parent_agent_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent parentAgent;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "child_agent_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent childAgent;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "parent_conversation_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Conversation parentConversation;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "child_conversation_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Conversation childConversation;
 
     @Column(name = "started_at", nullable = false, updatable = false)

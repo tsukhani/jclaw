@@ -10,6 +10,8 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -45,6 +47,7 @@ public class MessageAttachment extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "message_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Message message;
 
     /** Client-facing opaque identifier; never the DB primary key. */

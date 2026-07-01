@@ -14,6 +14,8 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import org.hibernate.query.NativeQuery;
 import play.db.jpa.JPA;
 import play.db.jpa.Model;
@@ -81,6 +83,7 @@ public class Task extends Model {
 
     @ManyToOne
     @JoinColumn(name = "agent_id")
+    @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent agent;
 
     @Column(nullable = false)
