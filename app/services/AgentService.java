@@ -389,136 +389,71 @@ public class AgentService {
     }
 
     /**
-     * Delete an agent and every child row that references it. Play 1.x has no
-     * JPA cascade configured on the Agent relationships, so each child table
-     * must be swept explicitly — otherwise the parent delete trips an H2
-     * referential-integrity error.
+     * Delete an agent and its entire sub-agent subtree. Every FK from a child
+     * row back to this agent (or any descendant) now carries
+     * {@code ON DELETE CASCADE} (JCLAW-542), so deleting the root Agent row
+     * removes all descendant agents and every FK-linked child — conversations,
+     * messages, attachments, session compactions, tasks, task runs and their
+     * messages, subagent-run audit rows, channel bindings, skill/tool configs,
+     * tool-approval grants, and notifications — in one statement whose delete
+     * order the database computes. This replaces the ~18 hand-ordered bulk
+     * DELETEs (and the recursive per-node sweep) the method used to maintain.
      *
-     * <p>Order matters: deeper descendants (Message → Conversation → Agent)
-     * must go first. Task.agent is nullable but still FK-constrained, so tasks
-     * tied to this agent are deleted wholesale rather than nulled out (an
-     * orphaned task has no meaning without its agent). Config rows under
-     * {@code agent.{name}.*} and Memory rows keyed by agent name are also
-     * purged to avoid orphaned diagnostic data.
+     * <p>Three resources live outside the FK graph and are still cleaned up by
+     * an explicit walk over the subtree, since {@code ON DELETE CASCADE} governs
+     * only rows in FK-linked tables:
+     * <ul>
+     *   <li>the on-disk workspace directory of each agent;</li>
+     *   <li>{@code agent.{name}.*} config rows (keyed by a string LIKE, not an
+     *       FK);</li>
+     *   <li>Lucene index docs for each agent's memories — an external store the
+     *       DB cascade of the memory rows themselves cannot reach, so deletion
+     *       is routed through {@link MemoryStoreFactory}.</li>
+     * </ul>
      *
-     * <p>Sub-agent descendants (Agent rows whose {@code parent_agent_id}
-     * points at this agent or any of its descendants) are recursively deleted
-     * first — each gets the same full cleanup sweep, depth-first — so the
-     * Agent self-FK is satisfied by the time this agent's own delete fires.
-     * Without this step the {@code parent_agent_id} constraint blocks the
-     * delete with H2 error code 23503 (referential integrity violation).
-     *
-     * <p>The on-disk workspace directory is removed last, after DB state is
-     * clean, so a failed delete leaves the filesystem in a recoverable state.
+     * <p>Workspace directories are removed last, after DB state is clean, so a
+     * failed delete leaves the filesystem in a recoverable state.
      *
      * @param agent the agent to delete (must have a persisted id)
      */
     public static void delete(Agent agent) {
-        var agentId = agent.id;
-        var agentName = agent.name;
+        var rootId = agent.id;
 
-        // Cascade-delete descendant agents first. Sub-agents created by
-        // subagent_spawn live in a tree via Agent.parent_agent_id; their
-        // workspace, Telegram binding, shell allowlist, etc. all resolve
-        // via parent-chain walk from the root. Deleting the root without
-        // first deleting the descendants leaves orphan Agent rows whose
-        // FK references the now-doomed parent, tripping
-        // ConstraintViolationException on the agent.delete() at the end
-        // of this method. Recurse depth-first so each descendant gets the
-        // same full cleanup sweep (its own conversations, tasks, configs,
-        // workspace dir) before its Agent row goes.
-        for (var child : findDirectChildren(agentId)) {
-            delete(child);
-        }
+        // Collect the whole sub-agent subtree (root + all transitive
+        // descendants) up front, before anything is deleted. We need the set
+        // only for the out-of-band cleanup below; the database computes the
+        // actual row-delete order via the cascade when the root is removed.
+        var subtree = collectSubtree(agent);
+        var names = subtree.stream().map(a -> a.name).toList();
 
-        // Bulk-delete messages and conversations (the high-volume tables) via JPQL,
-        // then clear the Hibernate session to evict stale references. This replaces
-        // the O(N) per-entity loop with 2 queries regardless of row count.
-        // Session clear is necessary because JPQL DELETE bypasses Hibernate's cache.
         var em = JPA.em();
-        // MessageAttachment first — FK has no ON DELETE CASCADE (see ConversationService.deleteByIds).
-        em.createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation.id IN " +
-                        "(SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN " +
-                        "(SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        // SubagentRun rows reference Agent (parent + child) and Conversation
-        // (parent + child) via four NOT NULL FKs. Any run where this agent
-        // is either side, or where any of its conversations is either side,
-        // would block the Conversation and Agent deletes below. The run is
-        // historical metadata; once the conversations it references are
-        // gone, the transcript is gone too, so the row carries no useful
-        // signal. Drop matching rows in one pass before the conversation
-        // delete to keep the FK graph satisfied.
-        em.createQuery("DELETE FROM SubagentRun r WHERE r.parentAgent.id = :agentId "
-                        + "OR r.childAgent.id = :agentId "
-                        + "OR r.parentConversation.id IN (SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId) "
-                        + "OR r.childConversation.id IN (SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        // JCLAW-541: SessionCompaction FKs a conversation; delete before Conversation
-        // (a compacted conversation otherwise blocks the Conversation delete).
-        em.createQuery("DELETE FROM SessionCompaction sc WHERE sc.conversation.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM Conversation c WHERE c.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM AgentToolConfig t WHERE t.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM AgentSkillConfig s WHERE s.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM AgentSkillAllowedTool a WHERE a.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM AgentBinding b WHERE b.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        // JCLAW-541: TaskRun/TaskRunMessage FK the agent's tasks; delete the run
-        // history before Task (a task that has ever fired otherwise blocks the delete).
-        em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM TaskRun r WHERE r.task.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM Task t WHERE t.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        // Remaining agent-scoped FK tables that also block the agent.delete()
-        // below. TelegramTopicBinding before TelegramBinding (it FKs binding_id).
-        // ToolApprovalGrant is the one that surfaced (a subagent that requested
-        // tool approval carries a grant); the others are the same latent gap.
-        em.createQuery("DELETE FROM TelegramTopicBinding tb "
-                        + "WHERE tb.agent.id = :agentId OR tb.binding.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM TelegramBinding b WHERE b.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        // JCLAW-541: Slack/WhatsApp bindings FK the agent, same as TelegramBinding
-        // (both are unique per agent and were the latent gap in this sweep).
-        em.createQuery("DELETE FROM SlackBinding b WHERE b.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM WhatsAppBinding b WHERE b.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM ToolApprovalGrant g WHERE g.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
-        em.createQuery("DELETE FROM Notification n WHERE n.agent.id = :agentId")
-                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        // Out-of-band cleanup, per subtree node — the cascade only governs rows
+        // in FK-linked tables, never the filesystem, string-keyed config, or the
+        // external Lucene index:
+        //   - Memory rows cascade at the DB, but their Lucene docs are external,
+        //     so route deletion through the store to evict the index entries too.
+        //   - agent.<name>.* config rows are keyed by a LIKE, not an FK. Native
+        //     SQL, not a bulk HQL Config.delete: the HQL id-table DDL emits the
+        //     entity attribute `key` unquoted, which H2 rejects as reserved.
+        for (var node : subtree) {
+            MemoryStoreFactory.get().deleteAll(String.valueOf(node.id));
+            em.createNativeQuery("DELETE FROM config WHERE config_key LIKE ?1")
+                    .setParameter(1, "agent." + node.name + ".%").executeUpdate();
+        }
+        ConfigService.clearCache();
         em.flush();
         em.clear();
+        // Re-fetch the root as a managed entity; its delete cascades the whole
+        // subtree of Agent rows plus every FK-linked child at the DB level.
+        Agent root = Agent.findById(rootId);
+        root.delete();
+        em.flush();
 
-        // Re-fetch agent after session clear (it was detached by em.clear)
-        agent = Agent.findById(agentId);
-
-        // Memory is partitioned on the immutable agent id (JCLAW-531), so it is
-        // deleted by id — not by name like the config keys below. Goes through the
-        // MemoryStore abstraction (single Postgres/H2-backed store).
-        MemoryStoreFactory.get().deleteAll(String.valueOf(agentId));
-        // Native delete (not a bulk HQL Config.delete): the HQL form makes
-        // Hibernate provision an HTE_config id-table whose DDL emits the
-        // entity attribute `key` unquoted, which H2 rejects as a reserved
-        // word — ~600 failed CREATE statements in the trace log. Native SQL
-        // skips the id-table strategy and uses the real `config_key` column.
-        em.createNativeQuery("DELETE FROM config WHERE config_key LIKE ?1")
-                .setParameter(1, "agent." + agentName + ".%").executeUpdate();
-        ConfigService.clearCache();
-
-        agent.delete();
-        deleteWorkspaceDirectory(agentName);
-        EventLogger.info(LOG_CATEGORY, agentName, null, "Agent deleted");
+        // Workspace dirs last, after DB state is clean. One per subtree node.
+        for (var name : names) {
+            deleteWorkspaceDirectory(name);
+            EventLogger.info(LOG_CATEGORY, name, null, "Agent deleted");
+        }
     }
 
     /**
@@ -531,6 +466,26 @@ public class AgentService {
      */
     private static List<Agent> findDirectChildren(Long parentId) {
         return Agent.<Agent>find("parentAgent.id = ?1", parentId).fetch();
+    }
+
+    /**
+     * The agent plus all transitive sub-agent descendants (rows reachable by
+     * walking {@code parent_agent_id} downward), gathered depth-first. Used by
+     * {@link #delete} to run the out-of-band cleanup (workspace dirs, config
+     * rows, Lucene docs) on every node before one cascading root delete clears
+     * the DB rows themselves.
+     */
+    private static List<Agent> collectSubtree(Agent root) {
+        var acc = new ArrayList<Agent>();
+        collectSubtreeInto(root, acc);
+        return acc;
+    }
+
+    private static void collectSubtreeInto(Agent node, List<Agent> acc) {
+        for (var child : findDirectChildren(node.id)) {
+            collectSubtreeInto(child, acc);
+        }
+        acc.add(node);
     }
 
     private static void deleteWorkspaceDirectory(String agentName) {

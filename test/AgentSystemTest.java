@@ -677,6 +677,65 @@ class AgentSystemTest extends UnitTest {
         assertFalse(Files.exists(workspace), "workspace directory should be removed");
     }
 
+    @Test
+    void deleteAgentCascadesSubagentSubtree() {
+        // JCLAW-542: deleting a parent agent removes its whole sub-agent subtree
+        // via the Agent self-FK ON DELETE CASCADE (replacing the old recursive
+        // sweep), plus each descendant's FK-linked child rows and its out-of-band
+        // resources (workspace dir + agent.<name>.* config).
+        var parent = AgentService.create("subtree-parent", "openrouter", "gpt-4.1");
+        var child = AgentService.create("subtree-child", "openrouter", "gpt-4.1");
+        child.parentAgent = parent;
+        child.save();
+        var grandchild = AgentService.create("subtree-grandchild", "openrouter", "gpt-4.1");
+        grandchild.parentAgent = child;
+        grandchild.save();
+
+        // A subagent-run linking parent->child needs a conversation on each side.
+        var pconv = new models.Conversation();
+        pconv.agent = parent;
+        pconv.channelType = "web";
+        pconv.peerId = "p";
+        pconv.save();
+        var cconv = new models.Conversation();
+        cconv.agent = child;
+        cconv.channelType = "web";
+        cconv.peerId = "c";
+        cconv.save();
+
+        var run = new models.SubagentRun();
+        run.parentAgent = parent;
+        run.childAgent = child;
+        run.parentConversation = pconv;
+        run.childConversation = cconv;
+        run.startedAt = java.time.Instant.now();
+        run.status = models.SubagentRun.Status.RUNNING;
+        run.save();
+
+        ConfigService.set("agent.subtree-child.shell.bypassAllowlist", "true");
+
+        var parentId = parent.id;
+        var childId = child.id;
+        var runId = run.id;
+        var childWorkspace = AgentService.workspacePath("subtree-child");
+        assertTrue(Files.exists(childWorkspace), "precondition: child workspace exists");
+
+        AgentService.delete(parent);
+
+        // Whole subtree of Agent rows gone (self-FK cascade replaces recursion).
+        assertNull(Agent.findByName("subtree-parent"));
+        assertNull(Agent.findByName("subtree-child"), "child sub-agent must cascade");
+        assertNull(Agent.findByName("subtree-grandchild"), "grandchild must cascade");
+        // FK-linked children of the descendants cascade too.
+        assertEquals(0L, models.SubagentRun.count("id = ?1", runId));
+        assertEquals(0L, models.Conversation.count("agent.id = ?1", childId));
+        assertEquals(0L, models.Conversation.count("agent.id = ?1", parentId));
+        // Out-of-band cleanup reached the descendant.
+        assertNull(ConfigService.get("agent.subtree-child.shell.bypassAllowlist"),
+                "descendant config keys must be purged");
+        assertFalse(Files.exists(childWorkspace), "descendant workspace must be removed");
+    }
+
     // --- SystemPromptAssembler tests ---
 
     @Test
