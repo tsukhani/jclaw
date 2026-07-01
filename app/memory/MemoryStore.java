@@ -19,8 +19,20 @@ public interface MemoryStore {
             String text,
             String category,
             double importance,
-            Instant createdAt
-    ) {}
+            Instant createdAt,
+            double relevance
+    ) {
+        /**
+         * Non-recall paths (list, single fetch) carry no search relevance, so this
+         * convenience constructor defaults {@code relevance} to 1.0. The recall
+         * blend (JCLAW-532) reads {@link #relevance()}; a constant 1.0 makes it
+         * degrade to importance ordering when a backend can't supply real scores.
+         */
+        public MemoryEntry(String id, String agentId, String text, String category,
+                           double importance, Instant createdAt) {
+            this(id, agentId, text, category, importance, createdAt, 1.0);
+        }
+    }
 
     /**
      * Store a memory with an explicit importance score. This is the primary

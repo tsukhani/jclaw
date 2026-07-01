@@ -102,13 +102,24 @@ public interface MessageSearchRepository {
     List<Long> searchIds(LuceneIndexer.Scope scope, String query, int limit) throws IOException;
 
     /**
+     * A matching id paired with its relevance score, normalized to {@code [0,1]}
+     * with the top hit at {@code 1.0} (JCLAW-532). Lets the agent-recall caller
+     * rank by real relevance instead of list position.
+     */
+    record ScoredId(long id, double score) {}
+
+    /**
      * JCLAW-415: agent-scoped id search over the per-agent {@code MEMORY}
      * scope — returns only {@code agentId}'s matching memory ids, relevance
      * ordered and capped at {@code limit}. The Lucene backend filters on the
      * indexed agent field; the default returns empty (Memory-on-Postgres
      * searches via {@code to_tsvector} in {@code JpaMemoryStore}, not here).
+     *
+     * <p>JCLAW-532: each id carries its top-normalized relevance score so recall
+     * can blend real relevance with importance rather than deriving relevance
+     * from rank position.
      */
-    default List<Long> searchMemoryIds(String agentId, String query, int limit) throws IOException {
+    default List<ScoredId> searchMemoryIds(String agentId, String query, int limit) throws IOException {
         return List.of();
     }
 

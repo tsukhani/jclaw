@@ -101,7 +101,8 @@ public final class MessageSearch {
      * (the Lucene backend filters on the indexed agent field). Same pre-init
      * no-throw contract as {@link #searchIds}.
      */
-    public static List<Long> searchMemoryIds(String agentId, String query, int limit) throws IOException {
+    public static List<MessageSearchRepository.ScoredId> searchMemoryIds(String agentId, String query, int limit)
+            throws IOException {
         var current = repo;
         if (current == null) return List.of();
         return current.searchMemoryIds(agentId, query, limit);

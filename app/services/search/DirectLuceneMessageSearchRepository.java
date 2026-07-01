@@ -179,15 +179,15 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
 
     /** {@inheritDoc} */
     @Override
-    public List<Long> searchMemoryIds(String agentId, String query, int limit) throws IOException {
+    public List<ScoredId> searchMemoryIds(String agentId, String query, int limit) throws IOException {
         if (query == null || query.isBlank() || agentId == null) return List.of();
         var sm = LuceneIndexer.searcherManager(LuceneIndexer.Scope.MEMORY);
         if (sm == null) return List.of();
-        return collectMatchingIds(sm, query, agentId, limit);
+        return normalizeByTop(collectScored(sm, query, agentId, limit));
     }
 
     private static List<Long> collectMatchingIds(SearcherManager sm, String query, int limit) throws IOException {
-        return collectMatchingIds(sm, query, null, limit);
+        return collectScored(sm, query, null, limit).stream().map(ScoredId::id).toList();
     }
 
     /**
@@ -197,8 +197,8 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * per-agent {@link LuceneIndexer.Scope#MEMORY} scope). A null
      * {@code agentKey} searches unfiltered.
      */
-    private static List<Long> collectMatchingIds(SearcherManager sm, String query,
-                                                 String agentKey, int limit) throws IOException {
+    private static List<ScoredId> collectScored(SearcherManager sm, String query,
+                                                String agentKey, int limit) throws IOException {
         // QueryParser.parse throws on malformed input. Treat parse
         // failure as an empty result rather than propagating —
         // operators typing free-form text shouldn't 500 the UI.
@@ -221,7 +221,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         // visible. maybeRefresh is cheap when nothing changed.
         sm.maybeRefresh();
 
-        var ids = new ArrayList<Long>(limit);
+        var out = new ArrayList<ScoredId>(limit);
         try (var leased = new LeasedSearcher(sm)) {
             var searcher = leased.get();
             var top = searcher.search(q, limit);
@@ -239,14 +239,31 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
                 var raw = doc.get(LuceneIndexer.ID_FIELD);
                 if (raw == null) continue;
                 try {
-                    ids.add(Long.parseLong(raw));
+                    out.add(new ScoredId(Long.parseLong(raw), sds[i].score));
                 } catch (NumberFormatException _) {
                     // Skip rows with malformed id values; partial results
                     // beat failing the whole query.
                 }
             }
         }
-        return ids;
+        return out;
+    }
+
+    /**
+     * JCLAW-532: normalize raw Lucene scores (already descending, best-first) to
+     * {@code [0,1]} against the top hit, so the strongest match is {@code 1.0} and
+     * the recall caller can blend a real relevance score with importance instead
+     * of using rank position. Pure and public so it's unit-testable without a
+     * live index. A non-positive top score (degenerate/constant-score query)
+     * yields a uniform {@code 1.0} rather than dividing by zero.
+     */
+    public static List<ScoredId> normalizeByTop(List<ScoredId> rawDesc) {
+        if (rawDesc.isEmpty()) return rawDesc;
+        double topScore = rawDesc.get(0).score();
+        if (topScore <= 0.0) {
+            return rawDesc.stream().map(s -> new ScoredId(s.id(), 1.0)).toList();
+        }
+        return rawDesc.stream().map(s -> new ScoredId(s.id(), s.score() / topScore)).toList();
     }
 
     /**

@@ -145,8 +145,12 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
         // Each agent sees only its own memory id — never the other's, even
         // though the content query alone would match both (privacy invariant).
-        assertEquals(List.of(memA), repo.searchMemoryIds(String.valueOf(aId), "widget", 10));
-        assertEquals(List.of(memB), repo.searchMemoryIds(String.valueOf(bId), "widget", 10));
+        var aHits = repo.searchMemoryIds(String.valueOf(aId), "widget", 10);
+        var bHits = repo.searchMemoryIds(String.valueOf(bId), "widget", 10);
+        assertEquals(List.of(memA), aHits.stream().map(s -> s.id()).toList());
+        assertEquals(List.of(memB), bHits.stream().map(s -> s.id()).toList());
+        // JCLAW-532: the sole hit is the top hit, so its relevance normalizes to 1.0.
+        assertEquals(1.0, aHits.get(0).score(), 1e-9);
 
         // A term in neither memory matches nothing.
         assertTrue(repo.searchMemoryIds(String.valueOf(aId), "nonexistent", 10).isEmpty());

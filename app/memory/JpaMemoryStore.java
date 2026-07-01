@@ -15,6 +15,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -118,8 +119,11 @@ public class JpaMemoryStore implements MemoryStore {
     // --- Search strategies ---
 
     private List<MemoryEntry> likeSearch(String agentId, String query, int limit) {
-        return Memory.searchByText(agentId, query, limit).stream()
-                .map(this::toEntry)
+        // JCLAW-532: the Lucene-backed scored search carries a real top-normalized
+        // relevance score per hit; thread it onto the entry so recall can rank by
+        // relevance rather than list position.
+        return Memory.searchByTextScored(agentId, query, limit).stream()
+                .map(s -> toEntry(s.memory(), s.relevance()))
                 .toList();
     }
 
@@ -141,7 +145,7 @@ public class JpaMemoryStore implements MemoryStore {
                     .setParameter(2, query)
                     .setMaxResults(limit)
                     .getResultList();
-            return memories.stream().map(this::toEntry).toList();
+            return toEntriesRankScored(memories);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
             return likeSearch(agentId, query, limit);
@@ -174,7 +178,7 @@ public class JpaMemoryStore implements MemoryStore {
                     .setParameter(3, embeddingStr)
                     .setMaxResults(limit)
                     .getResultList();
-            return memories.stream().map(this::toEntry).toList();
+            return toEntriesRankScored(memories);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "Hybrid search failed, falling back to FTS: %s".formatted(e.getMessage()));
             return fullTextSearch(agentId, query, limit);
@@ -282,6 +286,37 @@ public class JpaMemoryStore implements MemoryStore {
                 m.importance,
                 m.createdAt
         );
+    }
+
+    private MemoryEntry toEntry(Memory m, double relevance) {
+        return new MemoryEntry(
+                m.id.toString(),
+                String.valueOf(m.agent.id),
+                m.text,
+                m.category,
+                m.importance,
+                m.createdAt,
+                relevance
+        );
+    }
+
+    /**
+     * JCLAW-532: the Postgres FTS/hybrid queries return rows already ordered by
+     * their (ts_rank / vector) score, but don't surface the raw score cheaply, so
+     * relevance is approximated from rank position (top = 1.0) — preserving the
+     * existing ordering while giving the recall blend a per-entry relevance.
+     * Real Postgres relevance scoring is deferred to the retrieval rework
+     * (JCLAW-527); the Lucene path (H2/default) already threads true normalized
+     * scores via {@link #likeSearch}.
+     */
+    private List<MemoryEntry> toEntriesRankScored(List<Memory> ordered) {
+        int n = ordered.size();
+        var out = new ArrayList<MemoryEntry>(n);
+        for (int i = 0; i < n; i++) {
+            double relevance = n <= 1 ? 1.0 : 1.0 - ((double) i / (n - 1));
+            out.add(toEntry(ordered.get(i), relevance));
+        }
+        return out;
     }
 
     /** Parse an agent-id string to its PK, or null when null/non-numeric. */

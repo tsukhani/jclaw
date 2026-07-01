@@ -19,6 +19,7 @@ import play.db.jpa.Model;
 import services.EventLogger;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
+import services.search.MessageSearchRepository;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -159,30 +160,46 @@ public class Memory extends Model {
      * {@code to_tsvector} directly.
      */
     public static List<Memory> searchByText(String agentId, String query, int limit) {
+        return searchByTextScored(agentId, query, limit).stream().map(ScoredMemory::memory).toList();
+    }
+
+    /** A recalled memory paired with its normalized relevance score (JCLAW-532). */
+    public record ScoredMemory(Memory memory, double relevance) {}
+
+    /**
+     * JCLAW-532: as {@link #searchByText}, but pairs each hit with a relevance
+     * score normalized to {@code [0,1]} (top hit = 1.0) so the recall path can
+     * rank by real relevance rather than list position. The substring fallback
+     * (search backend not initialized) has no scores, so each hit is scored 1.0 —
+     * recall then degrades to importance ordering, acceptable for that edge.
+     */
+    public static List<ScoredMemory> searchByTextScored(String agentId, String query, int limit) {
         if (query == null || query.isBlank()) return List.of();
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();
         if ("none".equals(MessageSearch.activeDialect())) {
             // Backend not initialized — substring fallback, agent-bounded.
-            return Memory.find("agent.id = ?1 AND LOWER(text) LIKE ?2",
+            List<Memory> rows = Memory.find("agent.id = ?1 AND LOWER(text) LIKE ?2",
                     pk, "%" + query.toLowerCase() + "%").fetch(limit);
+            return rows.stream().map(m -> new ScoredMemory(m, 1.0)).toList();
         }
-        List<Long> ids;
+        List<MessageSearchRepository.ScoredId> scored;
         try {
-            ids = MessageSearch.searchMemoryIds(agentId, query, limit);
+            scored = MessageSearch.searchMemoryIds(agentId, query, limit);
         } catch (IOException e) {
             EventLogger.warn("search", null, null,
                     "Memory search failed for agent %s: %s".formatted(agentId, e.getMessage()));
             return List.of();
         }
-        if (ids.isEmpty()) return List.of();
+        if (scored.isEmpty()) return List.of();
+        var ids = scored.stream().map(MessageSearchRepository.ScoredId::id).toList();
         List<Memory> rows = Memory.find("agent.id = ?1 AND id IN (?2)", pk, ids).fetch();
         var byId = new HashMap<Long, Memory>();
         for (var m : rows) byId.put(m.id, m);
-        var ordered = new ArrayList<Memory>(ids.size());
-        for (var rid : ids) {
-            var m = byId.get(rid);
-            if (m != null) ordered.add(m);
+        var ordered = new ArrayList<ScoredMemory>(scored.size());
+        for (var s : scored) {
+            var m = byId.get(s.id());
+            if (m != null) ordered.add(new ScoredMemory(m, s.score()));
         }
         return ordered;
     }

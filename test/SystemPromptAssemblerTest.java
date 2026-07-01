@@ -1,4 +1,5 @@
 import agents.SystemPromptAssembler;
+import memory.MemoryStore;
 import models.Agent;
 import org.junit.jupiter.api.*;
 import play.test.*;
@@ -7,6 +8,9 @@ import services.ConfigService;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Service-layer tests for {@link SystemPromptAssembler}, focused on the
@@ -33,6 +37,41 @@ class SystemPromptAssemblerTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
+    }
+
+    // ── JCLAW-532: recall ranking uses real relevance, not rank position ──
+
+    private static MemoryStore.MemoryEntry entry(String id, double importance, double relevance) {
+        return new MemoryStore.MemoryEntry(id, "1", "text-" + id, "fact",
+                importance, Instant.EPOCH, relevance);
+    }
+
+    @Test
+    void rankRecallRanksByRealRelevanceNotImportance() {
+        // A strongly-matching low-importance memory must beat a weakly-matching
+        // high-importance one. Weights 0.7 relevance / 0.3 importance:
+        //   strong = 0.7*1.0 + 0.3*0.2 = 0.76
+        //   weak   = 0.7*0.3 + 0.3*1.0 = 0.51
+        // The pre-fix code derived relevance from list position, so a weak hit at
+        // index 0/1 got ~0.9-1.0 and its importance weight could win.
+        var strong = entry("strong", 0.2, 1.0);
+        var weak = entry("weak", 1.0, 0.3);
+        var ranked = SystemPromptAssembler.rankRecall(
+                List.of(weak, strong), Set.of(), 0.7, 0.3, 10);
+        assertEquals(List.of("strong", "weak"),
+                ranked.stream().map(MemoryStore.MemoryEntry::id).toList());
+    }
+
+    @Test
+    void rankRecallExcludesCoreIdsAndHonorsLimit() {
+        var a = entry("a", 0.5, 1.0);
+        var b = entry("b", 0.5, 0.8);
+        var c = entry("c", 0.5, 0.6);
+        // "a" is already shown as a core memory -> excluded; limit caps to one.
+        var ranked = SystemPromptAssembler.rankRecall(
+                List.of(a, b, c), Set.of("a"), 0.7, 0.3, 1);
+        assertEquals(List.of("b"),
+                ranked.stream().map(MemoryStore.MemoryEntry::id).toList());
     }
 
     private Agent newAgent(String name) {
