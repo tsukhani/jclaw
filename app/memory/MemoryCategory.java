@@ -69,7 +69,7 @@ public enum MemoryCategory {
      * Default importance for a raw category string, or
      * {@link #BASELINE_IMPORTANCE} when it isn't one of the six.
      */
-    public static double defaultImportance(String raw) {
+    public static double defaultImportanceFor(String raw) {
         return from(raw).map(c -> c.defaultImportance).orElse(BASELINE_IMPORTANCE);
     }
 

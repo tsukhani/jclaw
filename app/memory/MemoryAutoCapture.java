@@ -56,6 +56,12 @@ public final class MemoryAutoCapture {
 
     private static final String EVENT_CATEGORY = "memory";
 
+    // Field names in the extractor's JSON output (see EXTRACTION_INSTRUCTIONS).
+    private static final String KEY_MEMORIES = "memories";
+    private static final String KEY_TEXT = "text";
+    private static final String KEY_CATEGORY = "category";
+    private static final String KEY_IMPORTANCE = "importance";
+
     /**
      * Functional seam for the extraction LLM call (mirrors
      * {@link SessionCompactor.Summarizer}). Production passes a lambda over
@@ -248,9 +254,9 @@ public final class MemoryAutoCapture {
         try {
             var root = JsonParser.parseString(stripFences(raw.strip()));
             JsonArray arr;
-            if (root.isJsonObject() && root.getAsJsonObject().has("memories")
-                    && root.getAsJsonObject().get("memories").isJsonArray()) {
-                arr = root.getAsJsonObject().getAsJsonArray("memories");
+            if (root.isJsonObject() && root.getAsJsonObject().has(KEY_MEMORIES)
+                    && root.getAsJsonObject().get(KEY_MEMORIES).isJsonArray()) {
+                arr = root.getAsJsonObject().getAsJsonArray(KEY_MEMORIES);
             } else if (root.isJsonArray()) {
                 arr = root.getAsJsonArray();
             } else {
@@ -259,15 +265,15 @@ public final class MemoryAutoCapture {
             for (var el : arr) {
                 if (!el.isJsonObject()) continue;
                 var o = el.getAsJsonObject();
-                if (!o.has("text") || o.get("text").isJsonNull()) continue;
-                var text = o.get("text").getAsString().strip();
+                if (!o.has(KEY_TEXT) || o.get(KEY_TEXT).isJsonNull()) continue;
+                var text = o.get(KEY_TEXT).getAsString().strip();
                 if (text.isEmpty()) continue;
-                var category = (o.has("category") && !o.get("category").isJsonNull())
-                        ? MemoryCategory.normalize(o.get("category").getAsString()) : null;
+                var category = (o.has(KEY_CATEGORY) && !o.get(KEY_CATEGORY).isJsonNull())
+                        ? MemoryCategory.normalize(o.get(KEY_CATEGORY).getAsString()) : null;
                 if (category == null) category = MemoryCategory.FACT.label;
-                double importance = (o.has("importance") && !o.get("importance").isJsonNull())
-                        ? clamp01(safeDouble(o.get("importance")))
-                        : MemoryCategory.defaultImportance(category);
+                double importance = (o.has(KEY_IMPORTANCE) && !o.get(KEY_IMPORTANCE).isJsonNull())
+                        ? clamp01(safeDouble(o.get(KEY_IMPORTANCE)))
+                        : MemoryCategory.defaultImportanceFor(category);
                 out.add(new Candidate(text, category, importance));
             }
         } catch (Exception _) {
@@ -346,11 +352,11 @@ public final class MemoryAutoCapture {
     }
 
     private static CaptureResult logged(String agentName, CaptureResult r) {
+        String skipSuffix = r.skipped() > 0 ? " (%d skipped)".formatted(r.skipped()) : "";
+        String reason = r.skipReason() != null ? r.skipReason() : "all_duplicates";
         String msg = r.captured() > 0
-                ? "Auto-captured %d memory(ies)%s".formatted(r.captured(),
-                        r.skipped() > 0 ? " (%d skipped)".formatted(r.skipped()) : "")
-                : "Auto-capture stored nothing (%s)".formatted(
-                        r.skipReason() != null ? r.skipReason() : "all_duplicates");
+                ? "Auto-captured %d memory(ies)%s".formatted(r.captured(), skipSuffix)
+                : "Auto-capture stored nothing (%s)".formatted(reason);
         EventLogger.info(EVENT_CATEGORY, agentName, null, msg);
         return r;
     }

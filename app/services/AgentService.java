@@ -15,6 +15,7 @@ import play.db.jpa.JPA;
 import tools.JClawApiTool;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -30,7 +31,8 @@ import java.util.stream.Stream;
 public class AgentService {
 
     private static final String LOG_CATEGORY = "agent";
-    private static final String PARAM_AGENT_ID = "agentId";
+    /** Prefix for the name-partitioned per-agent config keys ({@code agent.<name>.*}). */
+    private static final String AGENT_CONFIG_PREFIX = "agent.";
 
     private AgentService() {}
 
@@ -246,8 +248,8 @@ public class AgentService {
      * {@code key} unquoted (see the note in {@link #delete}).
      */
     private static void renameAgentConfigKeys(String oldName, String newName) {
-        var oldPrefix = "agent." + oldName + ".";
-        var newPrefix = "agent." + newName + ".";
+        var oldPrefix = AGENT_CONFIG_PREFIX + oldName + ".";
+        var newPrefix = AGENT_CONFIG_PREFIX + newName + ".";
         // findAll + Java filter rather than a "key LIKE ?" query: `key` is a JPQL
         // reserved word and the config table is tiny. Each per-row save is an
         // UPDATE on the config_key column by id — no id-table, no reserved word.
@@ -281,7 +283,7 @@ public class AgentService {
             EventLogger.info(LOG_CATEGORY, "Moved agent workspace %s -> %s"
                     .formatted(src.getFileName(), dest.getFileName()));
         } catch (IOException e) {
-            throw new RuntimeException("Failed to move agent workspace on rename: " + e.getMessage(), e);
+            throw new UncheckedIOException("Failed to move agent workspace on rename: " + e.getMessage(), e);
         }
     }
 
@@ -438,7 +440,7 @@ public class AgentService {
         for (var node : subtree) {
             MemoryStoreFactory.get().deleteAll(String.valueOf(node.id));
             em.createNativeQuery("DELETE FROM config WHERE config_key LIKE ?1")
-                    .setParameter(1, "agent." + node.name + ".%").executeUpdate();
+                    .setParameter(1, AGENT_CONFIG_PREFIX + node.name + ".%").executeUpdate();
         }
         ConfigService.clearCache();
         em.flush();

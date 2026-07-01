@@ -289,7 +289,7 @@ public class JpaMemoryStore implements MemoryStore {
         if (agentId == null) return null;
         try {
             return Long.valueOf(agentId.strip());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return null;
         }
     }

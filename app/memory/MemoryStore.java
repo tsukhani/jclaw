@@ -31,7 +31,7 @@ public interface MemoryStore {
     String store(String agentId, String text, String category, double importance);
 
     default String store(String agentId, String text, String category) {
-        return store(agentId, text, category, MemoryCategory.defaultImportance(category));
+        return store(agentId, text, category, MemoryCategory.defaultImportanceFor(category));
     }
 
     List<MemoryEntry> search(String agentId, String query, int limit);
