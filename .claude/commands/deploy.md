@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Bump application.version in conf/application.conf, commit all changes, and push to both git remotes (origin + github).
+description: Bump application.version (defaults to the active JCLAW sprint) in conf/application.conf, commit all changes, and push to both git remotes (origin + github).
 category: Release
 tags: [release, version, git, deploy]
 argument-hint: "[empty | patch | minor | major | x.y.z]"
@@ -14,9 +14,9 @@ Bump the project version, commit every pending change alongside it, and push the
 
 `$ARGUMENTS` may be one of:
 
-- *(empty)* → bump the **patch** segment (default). `0.7.5` → `0.7.6`.
-- `patch` / `minor` / `major` → bump that segment; lower segments reset to `0`. Examples: `minor` on `0.7.5` → `0.8.0`; `major` on `0.7.5` → `1.0.0`.
-- An explicit version string matching `\d+\.\d+\.\d+` (e.g. `1.0.0-rc.1`) → set the version to exactly that. Any leading `v` is stripped.
+- *(empty)* → **sprint-aware default**. Derive the version from the active sprint on the JCLAW board (see Phase 1, step 3): if the sprint's `MAJOR.MINOR` is ahead of the current version, bump to `<sprint>.0`; if it matches, bump the **patch**. This encodes the "version prefix = active sprint" convention.
+- `patch` / `minor` / `major` → bump that segment explicitly; lower segments reset to `0`. **Overrides** sprint auto-detection. Examples: `minor` on `0.7.5` → `0.8.0`; `major` on `0.7.5` → `1.0.0`.
+- An explicit version string matching `\d+\.\d+\.\d+` (e.g. `1.0.0-rc.1`) → set the version to exactly that. **Overrides** sprint auto-detection. Any leading `v` is stripped.
 
 Reject anything else with a clear message; do not guess.
 
@@ -26,9 +26,30 @@ Reject anything else with a clear message; do not guess.
 
 1. Read `conf/application.conf` and find the single line that starts with `application.version=`. If missing, stop and tell the user — this command only runs against a project that already uses that key.
 2. Parse the current value (right-hand side of `=`). Split on `.` to get the `MAJOR.MINOR.PATCH` triple; preserve any trailing `-suffix` pre-release tag by dropping it before bumping (explicit-version arg is the only way to set one back).
-3. Compute the new version per the argument rules above.
+3. **Determine the new version:**
+   - **Explicit version, or `patch`/`minor`/`major`** — apply directly per the argument rules above (these override sprint detection).
+   - **Empty (sprint-aware default)** — derive from the active sprint on the JCLAW board:
+     a. Query the active sprint name. The Jira PAT lives in `~/.claude.json` → `mcpServers["jira-confluence"].env`; the JCLAW board is discovered by project key (currently id 30):
+        ```bash
+        python3 - <<'PY'
+        import json, urllib.request, os
+        env=json.load(open(os.path.expanduser("~/.claude.json")))["mcpServers"]["jira-confluence"]["env"]
+        BASE,TOKEN=env["JIRA_URL"].rstrip("/"),env["JIRA_PERSONAL_TOKEN"]
+        def api(p):
+            r=urllib.request.Request(BASE+p); r.add_header("Authorization","Bearer "+TOKEN)
+            return json.loads(urllib.request.urlopen(r).read().decode())
+        board=next(b for b in api("/rest/agile/1.0/board?projectKeyOrId=JCLAW")["values"])
+        sp=api(f"/rest/agile/1.0/board/{board['id']}/sprint?state=active").get("values") or []
+        print(sp[0]["name"] if sp else "")
+        PY
+        ```
+     b. Parse `SMAJOR.SMINOR` from the sprint name — strip a leading `v` and take the leading `\d+\.\d+` (e.g. `v0.15` → `0.15`). If the query fails, returns empty, or the name has no parseable prefix, **fall back to a patch bump and warn prominently** that sprint auto-detection failed — do not block the release on a Jira hiccup.
+     c. Compare the sprint's `(SMAJOR, SMINOR)` tuple to the current `(MAJOR, MINOR)`:
+        - **ahead** (sprint > current) → new version = `SMAJOR.SMINOR.0` (e.g. current `0.14.52`, sprint `v0.15` → `0.15.0`).
+        - **equal** → **patch** bump → `MAJOR.MINOR.(PATCH+1)`.
+        - **behind** (sprint < current — should not happen) → **stop and warn**; never silently downgrade.
 4. Replace the line in place via the Edit tool — do **not** rewrite the file. The change must touch exactly one line.
-5. Record both the old and new version; you'll use both in the commit message.
+5. Record both the old and new version; you'll use both in the commit message. If sprint auto-detection drove the bump, name the sprint in the final report (Phase 4).
 
 **Phase 2: Stage everything and commit**
 
