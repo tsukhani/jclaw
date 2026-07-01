@@ -45,4 +45,14 @@ class AgentMemorySettingsTest extends UnitTest {
         assertEquals("openrouter", a.autocaptureProviderEffective());
         assertEquals("gpt-4.1", a.autocaptureModelEffective());
     }
+
+    @Test
+    void subagentDetectedByParent() {
+        // JCLAW-539: auto-capture skips subagents (agents with a parent).
+        var root = agent();
+        assertFalse(root.isSubagent(), "a root agent has no parent");
+        var child = agent();
+        child.parentAgent = root;
+        assertTrue(child.isSubagent(), "a spawned subagent has a parent");
+    }
 }

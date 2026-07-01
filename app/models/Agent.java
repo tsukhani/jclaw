@@ -180,6 +180,16 @@ public class Agent extends Model {
     }
 
     /**
+     * Whether this agent is a spawned subagent (has a parent). Subagents process
+     * delegated work rather than the operator's direct input, so callers like
+     * memory auto-capture (JCLAW-539) skip them — capturing there would flood
+     * memory with facts not tied to the operator's own turns.
+     */
+    public boolean isSubagent() {
+        return parentAgent != null;
+    }
+
+    /**
      * Effective compression-enabled state (JCLAW-465): the explicit per-agent
      * value when set, otherwise the role default — the main agent on, custom
      * agents off. The compression pipeline gates per agent through this.

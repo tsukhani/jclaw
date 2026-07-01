@@ -96,6 +96,10 @@ public final class MemoryAutoCapture {
         if (userMessage == null || userMessage.isBlank()
                 || assistantResponse == null || assistantResponse.isBlank()) return;
         if (Play.runningInTestMode()) return;
+        // JCLAW-539: capture only from operator-facing (root) agents. Subagents
+        // process delegated work, not user turns — capturing there would flood
+        // memory with facts not tied to the operator's own conversations.
+        if (agent.isSubagent()) return;
         // JCLAW-534: per-agent enable, on by default — no global switch.
         if (!agent.memoryAutocaptureEnabled) return;
 
