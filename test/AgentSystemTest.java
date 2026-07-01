@@ -603,6 +603,43 @@ class AgentSystemTest extends UnitTest {
         mem.text = "remember this";
         mem.save();
 
+        // JCLAW-541: the four dependents that used to be missing from the sweep.
+        var slack = new models.SlackBinding();
+        slack.agent = agent;
+        slack.botToken = "xoxb-delete-agent";
+        slack.signingSecret = "sec";
+        slack.save();
+
+        var wa = new models.WhatsAppBinding();
+        wa.agent = agent;
+        wa.transport = models.WhatsAppTransport.CLOUD_API;
+        wa.phoneNumberId = "pn-delete-agent";
+        wa.accessToken = "tok";
+        wa.enabled = true;
+        wa.save();
+
+        var compaction = new models.SessionCompaction();
+        compaction.conversation = convo;
+        compaction.turnCount = 2;
+        compaction.summaryTokens = 10;
+        compaction.model = "openrouter/gpt-4.1";
+        compaction.summary = "test compaction";
+        compaction.compactedAt = java.time.Instant.now();
+        compaction.save();
+
+        var run = new models.TaskRun();
+        run.task = task;
+        run.startedAt = java.time.Instant.now();
+        run.status = models.TaskRun.Status.COMPLETED;
+        run.save();
+
+        var runMsg = new models.TaskRunMessage();
+        runMsg.taskRun = run;
+        runMsg.turnIndex = 0;
+        runMsg.role = models.MessageRole.ASSISTANT;
+        runMsg.content = "run output";
+        runMsg.save();
+
         ConfigService.set("agent.delete-agent.shell.bypassAllowlist", "true");
         ConfigService.set("agent.delete-agent.queue.mode", "queue");
 
@@ -614,6 +651,8 @@ class AgentSystemTest extends UnitTest {
         // keeps the assertions independent of the now-transient entities.
         var agentId = agent.id;
         var convoId = convo.id;
+        var taskId = task.id;
+        var runId = run.id;
 
         // Act
         AgentService.delete(agent);
@@ -627,6 +666,12 @@ class AgentSystemTest extends UnitTest {
         assertEquals(0L, models.Message.count("conversation.id = ?1", convoId));
         assertEquals(0L, models.Task.count("agent.id = ?1", agentId));
         assertEquals(0L, models.Memory.count("agent.id = ?1", agentId));
+        // JCLAW-541: the previously-unswept dependents.
+        assertEquals(0L, models.SlackBinding.count("agent.id = ?1", agentId));
+        assertEquals(0L, models.WhatsAppBinding.count("agent.id = ?1", agentId));
+        assertEquals(0L, models.SessionCompaction.count("conversation.id = ?1", convoId));
+        assertEquals(0L, models.TaskRun.count("task.id = ?1", taskId));
+        assertEquals(0L, models.TaskRunMessage.count("taskRun.id = ?1", runId));
         assertNull(ConfigService.get("agent.delete-agent.shell.bypassAllowlist"));
         assertNull(ConfigService.get("agent.delete-agent.queue.mode"));
         assertFalse(Files.exists(workspace), "workspace directory should be removed");

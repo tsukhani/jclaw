@@ -456,6 +456,10 @@ public class AgentService {
                         + "OR r.parentConversation.id IN (SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId) "
                         + "OR r.childConversation.id IN (SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        // JCLAW-541: SessionCompaction FKs a conversation; delete before Conversation
+        // (a compacted conversation otherwise blocks the Conversation delete).
+        em.createQuery("DELETE FROM SessionCompaction sc WHERE sc.conversation.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM Conversation c WHERE c.agent.id = :agentId")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentToolConfig t WHERE t.agent.id = :agentId")
@@ -465,6 +469,12 @@ public class AgentService {
         em.createQuery("DELETE FROM AgentSkillAllowedTool a WHERE a.agent.id = :agentId")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentBinding b WHERE b.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        // JCLAW-541: TaskRun/TaskRunMessage FK the agent's tasks; delete the run
+        // history before Task (a task that has ever fired otherwise blocks the delete).
+        em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        em.createQuery("DELETE FROM TaskRun r WHERE r.task.agent.id = :agentId")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM Task t WHERE t.agent.id = :agentId")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
@@ -476,6 +486,12 @@ public class AgentService {
                         + "WHERE tb.agent.id = :agentId OR tb.binding.agent.id = :agentId")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM TelegramBinding b WHERE b.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        // JCLAW-541: Slack/WhatsApp bindings FK the agent, same as TelegramBinding
+        // (both are unique per agent and were the latent gap in this sweep).
+        em.createQuery("DELETE FROM SlackBinding b WHERE b.agent.id = :agentId")
+                .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
+        em.createQuery("DELETE FROM WhatsAppBinding b WHERE b.agent.id = :agentId")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
         em.createQuery("DELETE FROM ToolApprovalGrant g WHERE g.agent.id = :agentId")
                 .setParameter(PARAM_AGENT_ID, agentId).executeUpdate();
