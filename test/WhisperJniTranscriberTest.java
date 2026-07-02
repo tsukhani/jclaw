@@ -96,8 +96,11 @@ class WhisperJniTranscriberTest extends UnitTest {
     void applyLanguage_blankOnMultilingual_enablesAutoDetect() {
         var params = new io.github.givimad.whisperjni.WhisperFullParams();
         WhisperJniTranscriber.applyLanguage(params, null, true);
-        assertTrue(params.detectLanguage, "blank language on a multilingual model must auto-detect");
-        assertEquals("auto", params.language);
+        assertEquals("auto", params.language,
+                "blank language on a multilingual model must auto-detect via the 'auto' sentinel");
+        assertFalse(params.detectLanguage,
+                "detectLanguage means detect-then-RETURN (zero segments) in whisper.cpp — "
+                        + "it must never be set on the transcription path (JCLAW-559 UAT)");
     }
 
     @Test

@@ -124,17 +124,18 @@ public final class WhisperJniTranscriber {
     /**
      * Language selection on the raw params. Public only so tests (default
      * package) can reach it — not part of the caller contract.
-     * Blank language on a multilingual model turns on whisper.cpp's
-     * auto-detect (both the flag and the {@code "auto"} sentinel — either
-     * alone suffices in current whisper.cpp, setting both is
-     * version-drift-proof). Blank on an English-only model leaves the
-     * {@code "en"} default untouched: detection on {@code .en} models is
-     * rejected by whisper.cpp.
+     * Blank language on a multilingual model sets the {@code "auto"}
+     * sentinel, which makes whisper.cpp detect the language AND transcribe.
+     * {@code detectLanguage} must stay false: that flag means "detect the
+     * language, then return with zero segments" (whisper.cpp's
+     * --detect-language mode) — setting it silently empties every
+     * transcript (JCLAW-559 UAT finding). Blank on an English-only model
+     * leaves the {@code "en"} default untouched: detection on {@code .en}
+     * models is rejected by whisper.cpp.
      */
     public static void applyLanguage(WhisperFullParams params, String language, boolean multilingual) {
         if (language == null || language.isBlank()) {
             if (multilingual) {
-                params.detectLanguage = true;
                 params.language = "auto";
             }
             return;
