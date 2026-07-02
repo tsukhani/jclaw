@@ -76,6 +76,17 @@ public class Memory extends Model {
     public Instant updatedAt;
 
     /**
+     * JCLAW-526: when this memory last surfaced in recall (injected into a
+     * system prompt). Recency anchor for retrieval decay — a recently-accessed
+     * memory decays more slowly. Written by {@link #touchAccessed} via bulk
+     * JPQL, deliberately bypassing entity callbacks: a recall touch must not
+     * bump {@code updatedAt} (which means "content changed") nor re-index the
+     * row in Lucene on every chat turn. Nullable (never accessed yet).
+     */
+    @Column(name = "last_accessed_at")
+    public Instant lastAccessedAt;
+
+    /**
      * JCLAW-525: when non-null, this memory has been superseded by a newer
      * write on the same subject and is excluded from every recall path (search,
      * core auto-load, dedup scans) — but never hard-deleted: the row stays as
@@ -146,6 +157,32 @@ public class Memory extends Model {
             LuceneIndexer.remove(
                     LuceneIndexer.Scope.MEMORY, id);
         }
+    }
+
+    /**
+     * The decay anchor (JCLAW-526): the most recent of "content changed" and
+     * "surfaced in recall". Both a re-store and a recall access reset a
+     * memory's age for retrieval decay.
+     */
+    public Instant recencyAnchor() {
+        if (lastAccessedAt == null) return updatedAt;
+        if (updatedAt == null) return lastAccessedAt;
+        return lastAccessedAt.isAfter(updatedAt) ? lastAccessedAt : updatedAt;
+    }
+
+    /**
+     * JCLAW-526: stamp {@code lastAccessedAt} on the memories a recall just
+     * injected. Bulk JPQL so no {@code @PreUpdate}/{@code @PostUpdate}
+     * lifecycle fires — {@code updatedAt} keeps meaning "content changed" and
+     * the Lucene doc is not re-upserted on every chat turn.
+     */
+    public static void touchAccessed(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        play.db.jpa.JPA.em()
+                .createQuery("UPDATE Memory m SET m.lastAccessedAt = :now WHERE m.id IN (:ids)")
+                .setParameter("now", Instant.now())
+                .setParameter("ids", ids)
+                .executeUpdate();
     }
 
     /** Parse an agent-id string (the partition key callers pass) to its PK, or null when non-numeric. */

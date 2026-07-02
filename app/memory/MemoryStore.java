@@ -20,7 +20,8 @@ public interface MemoryStore {
             String category,
             double importance,
             Instant createdAt,
-            double relevance
+            double relevance,
+            Instant recencyAt
     ) {
         /**
          * Non-recall paths (list, single fetch) carry no search relevance, so this
@@ -31,6 +32,17 @@ public interface MemoryStore {
         public MemoryEntry(String id, String agentId, String text, String category,
                            double importance, Instant createdAt) {
             this(id, agentId, text, category, importance, createdAt, 1.0);
+        }
+
+        /**
+         * Source-compatible with the pre-JCLAW-526 canonical form: defaults the
+         * decay anchor ({@code recencyAt}) to {@code createdAt}. The store's
+         * recall paths pass the real anchor ({@code Memory.recencyAnchor()} —
+         * last content change or last recall access, whichever is newer).
+         */
+        public MemoryEntry(String id, String agentId, String text, String category,
+                           double importance, Instant createdAt, double relevance) {
+            this(id, agentId, text, category, importance, createdAt, relevance, createdAt);
         }
     }
 

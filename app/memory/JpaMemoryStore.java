@@ -541,7 +541,9 @@ public class JpaMemoryStore implements MemoryStore {
                 m.text,
                 m.category,
                 m.importance,
-                m.createdAt
+                m.createdAt,
+                1.0,
+                m.recencyAnchor()
         );
     }
 
@@ -553,7 +555,8 @@ public class JpaMemoryStore implements MemoryStore {
                 m.category,
                 m.importance,
                 m.createdAt,
-                relevance
+                relevance,
+                m.recencyAnchor()
         );
     }
 
