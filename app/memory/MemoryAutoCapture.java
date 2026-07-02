@@ -102,12 +102,10 @@ public final class MemoryAutoCapture {
         if (userMessage == null || userMessage.isBlank()
                 || assistantResponse == null || assistantResponse.isBlank()) return;
         if (Play.runningInTestMode()) return;
-        // JCLAW-539: capture only from operator-facing (root) agents. Subagents
-        // process delegated work, not user turns — capturing there would flood
-        // memory with facts not tied to the operator's own conversations.
-        if (agent.isSubagent()) return;
-        // JCLAW-534: per-agent enable, on by default — no global switch.
-        if (!agent.memoryAutocaptureEnabled) return;
+        // JCLAW-539 (skip subagents) + JCLAW-534 (per-agent enable, on by
+        // default): the agent-level eligibility gate, factored out so it's
+        // unit-testable without the async / test-mode plumbing above.
+        if (!captureEligible(agent)) return;
 
         // Memory is partitioned on the immutable agent id, not the mutable name
         // (JCLAW-531): a rename must not strand prior memories, and a name later
@@ -138,6 +136,17 @@ public final class MemoryAutoCapture {
                         "Auto-capture failed: %s".formatted(e.getMessage()));
             }
         });
+    }
+
+    /**
+     * Whether a just-completed turn on {@code agent} is eligible for auto-capture,
+     * independent of the async / test-mode plumbing in {@link #captureAsync}.
+     * Capture is for operator-facing (root) agents only — subagents process
+     * delegated work, not the operator's own turns (JCLAW-539) — and only when the
+     * agent has auto-capture enabled (JCLAW-534, on by default).
+     */
+    public static boolean captureEligible(Agent agent) {
+        return agent != null && !agent.isSubagent() && agent.memoryAutocaptureEnabled;
     }
 
     // JCLAW-534: the extractor runs on the agent's per-agent autocapture model —

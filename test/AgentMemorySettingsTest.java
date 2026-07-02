@@ -1,3 +1,4 @@
+import memory.MemoryAutoCapture;
 import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -54,5 +55,31 @@ class AgentMemorySettingsTest extends UnitTest {
         var child = agent();
         child.parentAgent = root;
         assertTrue(child.isSubagent(), "a spawned subagent has a parent");
+    }
+
+    @Test
+    void captureEligibleForRootEnabledAgent() {
+        // JCLAW-539 + JCLAW-534: a root agent with capture enabled is eligible —
+        // this is the branch captureAsync takes for operator-facing turns.
+        assertTrue(MemoryAutoCapture.captureEligible(agent()));
+    }
+
+    @Test
+    void captureSkipsSubagents() {
+        // JCLAW-539: the eligibility gate excludes a subagent even when capture
+        // is enabled, so captureAsync no-ops for delegated (subagent) turns.
+        var child = agent();
+        child.parentAgent = agent();
+        assertTrue(child.memoryAutocaptureEnabled, "guard: capture is on by default");
+        assertFalse(MemoryAutoCapture.captureEligible(child),
+                "a subagent must be excluded from auto-capture");
+    }
+
+    @Test
+    void captureSkipsDisabledRootAgent() {
+        // JCLAW-534: a root agent with capture turned off is not eligible.
+        var a = agent();
+        a.memoryAutocaptureEnabled = false;
+        assertFalse(MemoryAutoCapture.captureEligible(a));
     }
 }
