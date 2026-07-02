@@ -189,7 +189,7 @@ class GithubSkillFetcherTest extends UnitTest {
     // ==================== containment ====================
 
     @Test
-    void pathEscapingStagedDirIsSkippedNotWritten() throws Exception {
+    void pathEscapingStagedDirIsSkippedNotWritten() {
         server.enqueue(json(200, "{}"));
         server.enqueue(json(200, treeOf("skill/SKILL.md", "skill/../../evil.txt")));
         server.enqueue(raw(200, "doc"));
@@ -234,7 +234,7 @@ class GithubSkillFetcherTest extends UnitTest {
     }
 
     @Test
-    void fetchReportsConnectionFailureAsRepoResolutionFailure() throws Exception {
+    void fetchReportsConnectionFailureAsRepoResolutionFailure() {
         server.close(); // nothing listening -> connect fails fast
 
         var result = GithubSkillFetcher.fetch("acme", "toolbox", "x", stagedDir);
@@ -247,7 +247,7 @@ class GithubSkillFetcherTest extends UnitTest {
     // ==================== per-file failure tolerance ====================
 
     @Test
-    void failedFileDownloadIsSkippedButOthersStillStage() throws Exception {
+    void failedFileDownloadIsSkippedButOthersStillStage() {
         server.enqueue(json(200, "{}"));
         server.enqueue(json(200, treeOf("s/SKILL.md", "s/broken.md")));
         server.enqueue(raw(200, "doc"));
@@ -278,7 +278,7 @@ class GithubSkillFetcherTest extends UnitTest {
     // ==================== tree edge cases ====================
 
     @Test
-    void truncatedTreeStillFetchesWhatIsListed() throws Exception {
+    void truncatedTreeStillFetchesWhatIsListed() {
         server.enqueue(json(200, "{}"));
         server.enqueue(json(200, """
                 {"tree":[{"path":"s/SKILL.md","type":"blob"}],"truncated":true}
