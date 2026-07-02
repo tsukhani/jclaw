@@ -7,21 +7,34 @@ import play.Play;
 import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
+import play.db.DB;
 import play.db.jpa.JPA;
 import services.EventLogger;
+import services.search.DirectLuceneMessageSearchRepository;
+import services.search.LuceneIndexer;
+import services.search.MessageSearchRepository.ScoredId;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * JPA-backed memory store. Uses LIKE for H2 (dev/test), PostgreSQL full-text search
- * in production, and optional pgvector hybrid search when enabled.
+ * JPA-backed memory store. Text search runs on the direct Lucene index for H2
+ * (dev/test and the default Personal Edition) and PostgreSQL full-text search in
+ * a Postgres production deployment. When vector memory is enabled
+ * ({@code memory.jpa.vector.enabled}), the vector leg is dialect-split
+ * (JCLAW-555): pgvector hybrid SQL on Postgres, Lucene HNSW
+ * ({@code KnnFloatVectorField} on the MEMORY scope) everywhere else — selection
+ * follows the JDBC product name, mirroring {@code MessageSearch}, so a prod-mode
+ * boot on the bundled H2 never attempts pgvector SQL.
  */
 public class JpaMemoryStore implements MemoryStore {
 
@@ -32,18 +45,61 @@ public class JpaMemoryStore implements MemoryStore {
     private final String vectorModel;
     private final int vectorDimensions;
 
+    /**
+     * Test seam for embedding generation (mirrors {@code MemoryAutoCapture.Extractor}):
+     * when set, {@link #generateEmbedding} returns {@code override.apply(text)}
+     * directly — no provider call, no shared cache — so tests can drive the
+     * Lucene KNN path with canned vectors. Volatile: tests set/clear it around
+     * the {@code LuceneTestSync} lock while production threads read it.
+     */
+    private static volatile java.util.function.Function<String, float[]> embedderOverride;
+
+    /** Test-only: install (or clear with {@code null}) a canned embedder. */
+    public static void setEmbedderForTest(java.util.function.Function<String, float[]> override) {
+        embedderOverride = override;
+    }
+
     public JpaMemoryStore() {
-        var dbUrl = Play.configuration.getProperty("db.url", "");
-        this.isPostgres = dbUrl.contains("postgresql") || dbUrl.contains("postgres");
-        this.vectorEnabled = "true".equals(
-                Play.configuration.getProperty("memory.jpa.vector.enabled", "false"));
+        this("true".equals(Play.configuration.getProperty("memory.jpa.vector.enabled", "false")),
+                detectPostgres());
+    }
+
+    /**
+     * Test-visible constructor (JCLAW-555): lets a test fix the vector-enable and
+     * dialect flags without flipping process-global config (the play1 test engine
+     * runs unit + functional lanes concurrently — a config flip would leak into
+     * sibling tests constructing the store through {@link MemoryStoreFactory}).
+     * Public because the test tree compiles into the default package.
+     */
+    public JpaMemoryStore(boolean vectorEnabled, boolean isPostgres) {
+        this.isPostgres = isPostgres;
+        this.vectorEnabled = vectorEnabled;
         this.vectorModel = Play.configuration.getProperty("memory.jpa.vector.model", "text-embedding-3-small");
         this.vectorDimensions = Integer.parseInt(
                 Play.configuration.getProperty("memory.jpa.vector.dimensions", "1536"));
 
         if (vectorEnabled) {
-            EventLogger.info(EVENT_CATEGORY_MEMORY, "JPA memory store with pgvector enabled (model: %s, dims: %d)"
-                    .formatted(vectorModel, vectorDimensions));
+            EventLogger.info(EVENT_CATEGORY_MEMORY,
+                    "JPA memory store with vector search enabled: backend=%s (model: %s, dims: %d)"
+                            .formatted(isPostgres ? "pgvector" : "lucene-hnsw", vectorModel, vectorDimensions));
+        }
+    }
+
+    /**
+     * Dialect sniff (JCLAW-555): ask the live connection what it actually is —
+     * the {@code MessageSearch.chooseRepository} pattern — rather than
+     * string-matching config. The commented-out {@code %prod.db.*} PostgreSQL
+     * block in application.conf, a {@code -Ddb.url} override, or an edited conf
+     * all land on the same JDBC product name. Falls back to the configured
+     * {@code db.url} when no connection is available yet (very early boot).
+     */
+    private static boolean detectPostgres() {
+        try (var conn = DB.getDataSource().getConnection()) {
+            return conn.getMetaData().getDatabaseProductName()
+                    .toLowerCase(Locale.ROOT).contains("postgresql");
+        } catch (Exception e) {
+            var dbUrl = Play.configuration.getProperty("db.url", "");
+            return dbUrl.contains("postgresql") || dbUrl.contains("postgres");
         }
     }
 
@@ -57,7 +113,16 @@ public class JpaMemoryStore implements MemoryStore {
         memory.save();
 
         if (vectorEnabled) {
-            generateAndStoreEmbedding(memory);
+            // JCLAW-555: dialect-split embedding storage. Postgres writes the
+            // pgvector column; every other dialect re-upserts the row's Lucene
+            // MEMORY doc with a KNN vector field. No pgvector SQL is ever
+            // attempted on H2 (the pre-555 gap: the raw ::vector UPDATE ran on
+            // any dialect whenever the flag was on, failing on every store).
+            if (isPostgres) {
+                generateAndStoreEmbedding(memory);
+            } else {
+                generateAndIndexEmbedding(memory);
+            }
         }
 
         return memory.id.toString();
@@ -65,8 +130,10 @@ public class JpaMemoryStore implements MemoryStore {
 
     @Override
     public List<MemoryEntry> search(String agentId, String query, int limit) {
-        if (vectorEnabled && isPostgres) {
-            return hybridSearch(agentId, query, limit);
+        if (vectorEnabled) {
+            return isPostgres
+                    ? hybridSearch(agentId, query, limit)
+                    : luceneHybridSearch(agentId, query, limit);
         }
         if (isPostgres) {
             return fullTextSearch(agentId, query, limit);
@@ -185,7 +252,80 @@ public class JpaMemoryStore implements MemoryStore {
         }
     }
 
+    /**
+     * JCLAW-555: hybrid recall on the Lucene HNSW backend (H2 / any non-Postgres
+     * dialect). Two legs — the existing scored FTS search and a KNN
+     * cosine-similarity query over the MEMORY scope's vector field — fused by
+     * Reciprocal Rank Fusion (k = 60), the same fusion contract the Postgres
+     * retrieval rework (JCLAW-527) applies to its ts_rank + pgvector legs.
+     * Degrades to FTS-only when the query embedding is unavailable (no provider,
+     * embeddings endpoint down) or the KNN leg fails.
+     */
+    private List<MemoryEntry> luceneHybridSearch(String agentId, String query, int limit) {
+        var embedding = generateEmbedding(query);
+        if (embedding == null) {
+            return likeSearch(agentId, query, limit);
+        }
+        var fts = Memory.searchByTextScored(agentId, query, limit);
+        List<ScoredId> knn;
+        try {
+            knn = DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit);
+        } catch (IOException e) {
+            EventLogger.warn(EVENT_CATEGORY_MEMORY,
+                    "Lucene KNN search failed, falling back to FTS: %s".formatted(e.getMessage()));
+            knn = List.of();
+        }
+        if (knn.isEmpty()) {
+            return fts.stream().map(s -> toEntry(s.memory(), s.relevance())).toList();
+        }
+
+        var ftsIds = fts.stream().map(s -> s.memory().id).toList();
+        var knnIds = knn.stream().map(ScoredId::id).toList();
+        var fused = ReciprocalRankFusion.fuse(ReciprocalRankFusion.DEFAULT_K, ftsIds, knnIds);
+
+        // Hydrate: FTS hits are already loaded; KNN-only ids need a fetch.
+        var byId = new HashMap<Long, Memory>();
+        for (var s : fts) byId.put(s.memory().id, s.memory());
+        var missing = fused.stream().map(ReciprocalRankFusion.Ranked::id)
+                .filter(id -> !byId.containsKey(id)).toList();
+        if (!missing.isEmpty()) {
+            Long pk = pkOrNull(agentId);
+            // Re-bound to the agent so a stale/foreign index id can never leak
+            // another agent's memory into recall (same guard as searchByTextScored).
+            List<Memory> rows = pk == null ? List.of()
+                    : Memory.find("agent.id = ?1 AND id IN (?2)", pk, missing).fetch();
+            for (var m : rows) byId.put(m.id, m);
+        }
+        var out = new ArrayList<MemoryEntry>(Math.min(limit, fused.size()));
+        for (var r : fused) {
+            if (out.size() >= limit) break;
+            var m = byId.get(r.id());
+            if (m != null) out.add(toEntry(m, r.score()));
+        }
+        return out;
+    }
+
     // --- Embedding helpers ---
+
+    /**
+     * JCLAW-555: Lucene-side embedding persistence. Re-upserts the memory's
+     * MEMORY-scope document with the KNN vector field — repeating text and agent
+     * key because {@code updateDocument} replaces whole documents (the
+     * {@code @PostPersist} hook indexed the FTS-only doc a moment earlier; it
+     * can't carry the vector because embedding generation is an LLM call that
+     * must never run inside a JPA lifecycle callback).
+     *
+     * <p>Known trade-off: an update through any other write path re-fires the
+     * entity hook without a vector, dropping the doc out of the KNN graph until
+     * re-stored (FTS still matches it). Re-embedding on update is JCLAW-527-era
+     * work.
+     */
+    private void generateAndIndexEmbedding(Memory memory) {
+        var embedding = generateEmbedding(memory.text);
+        if (embedding == null) return;
+        LuceneIndexer.upsert(LuceneIndexer.Scope.MEMORY, memory.id, memory.text,
+                String.valueOf(memory.agent.id), embedding);
+    }
 
     private void generateAndStoreEmbedding(Memory memory) {
         try {
@@ -246,6 +386,14 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     private float[] generateEmbedding(String text) {
+        // Test seam: canned embeddings bypass the provider AND the shared cache
+        // so cross-test pollution through the static Caffeine instance is
+        // impossible (the cache would otherwise pin a canned vector under the
+        // real model's key for 24h).
+        var override = embedderOverride;
+        if (override != null) {
+            return override.apply(text);
+        }
         return embeddingCache.get(new EmbeddingKey(vectorModel, hashText(text)), k -> {
             try {
                 var provider = ProviderRegistry.getPrimary();

@@ -4,11 +4,13 @@ import models.TaskRunMessage;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.SearcherFactory;
 import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.store.FSDirectory;
@@ -117,6 +119,10 @@ public final class LuceneIndexer {
     /** Exact-match filter field, set only on scopes that need per-owner
      *  filtering (currently {@link Scope#MEMORY}, keyed by agent id). */
     static final String AGENT_FIELD = "agent";
+    /** KNN embedding field (JCLAW-555), set only on {@link Scope#MEMORY} docs
+     *  whose owning row has an embedding. Cosine similarity to match the
+     *  pgvector {@code <=>} operator on the Postgres side. */
+    static final String VECTOR_FIELD = "vector";
 
     /** EventLogger category for all messages emitted from this indexer. */
     private static final String CATEGORY = "search";
@@ -309,6 +315,24 @@ public final class LuceneIndexer {
      * matching every other scope.
      */
     public static void upsert(Scope scope, long id, String content, String agentKey) {
+        upsert(scope, id, content, agentKey, null);
+    }
+
+    /**
+     * As {@link #upsert(Scope, long, String, String)} but also indexes a
+     * {@link #VECTOR_FIELD} KNN embedding when {@code vector} is non-null
+     * (JCLAW-555: the Lucene HNSW backend for non-Postgres dialects). Because
+     * {@code updateDocument} replaces the whole document, callers re-upserting
+     * with a vector must repeat {@code content} and {@code agentKey}.
+     *
+     * <p>Catches {@link RuntimeException} in addition to {@link IOException}:
+     * a malformed vector (zero magnitude under cosine, dimension mismatch
+     * against segments already written) throws {@code IllegalArgumentException}
+     * from Lucene, and the no-throw contract of the entity-hook path must hold
+     * for the vector path too — a bad embedding must never lose the FTS doc or
+     * abort the caller.
+     */
+    public static void upsert(Scope scope, long id, String content, String agentKey, float[] vector) {
         var writer = WRITERS.get(scope);
         if (writer == null) return;
         try {
@@ -316,12 +340,15 @@ public final class LuceneIndexer {
             doc.add(new StringField(ID_FIELD, String.valueOf(id), Field.Store.YES));
             doc.add(new TextField(CONTENT_FIELD, content != null ? content : "", Field.Store.NO));
             if (agentKey != null) doc.add(new StringField(AGENT_FIELD, agentKey, Field.Store.NO));
+            if (vector != null) {
+                doc.add(new KnnFloatVectorField(VECTOR_FIELD, vector, VectorSimilarityFunction.COSINE));
+            }
             writer.updateDocument(new Term(ID_FIELD, String.valueOf(id)), doc);
             // No per-write commit: the write is searchable via the writer-NRT
             // SearcherManager's maybeRefresh (called on every query). Durability
             // comes from the periodic commit cadence plus close(), not an fsync
             // on every entity hook — see the COMMIT_INTERVAL_PROPERTY rationale.
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY, null, null,
                     "Lucene upsert failed: scope=%s id=%d: %s"
                             .formatted(scope.name(), id, e.getMessage()));

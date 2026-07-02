@@ -12,6 +12,7 @@ import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.search.TermQuery;
@@ -184,6 +185,48 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         var sm = LuceneIndexer.searcherManager(LuceneIndexer.Scope.MEMORY);
         if (sm == null) return List.of();
         return normalizeByTop(collectScored(sm, query, agentId, limit));
+    }
+
+    /**
+     * JCLAW-555: KNN recall leg for the Lucene HNSW vector backend (H2 / any
+     * non-Postgres dialect). Returns up to {@code k} memory ids nearest to
+     * {@code queryVector} by cosine similarity, restricted to {@code agentId}'s
+     * documents via the exact-match {@link LuceneIndexer#AGENT_FIELD} pre-filter
+     * (memories never cross agents). Docs without a
+     * {@link LuceneIndexer#VECTOR_FIELD} simply aren't in the KNN graph — rows
+     * whose embedding generation failed degrade to FTS-only matching.
+     *
+     * <p>Static rather than part of {@link MessageSearchRepository}: the KNN leg
+     * exists only on the Lucene backend (Postgres runs pgvector inside SQL), so
+     * putting it on the dialect-shared interface would force a meaningless
+     * implementation on {@link PostgresMessageSearchRepository}. Raw
+     * best-first-ordered scores are returned; the caller fuses ranks via RRF
+     * (rank-based — the raw score scale never matters).
+     */
+    public static List<ScoredId> searchMemoryIdsByVector(String agentId, float[] queryVector, int k)
+            throws IOException {
+        if (agentId == null || queryVector == null || k <= 0) return List.of();
+        var sm = LuceneIndexer.searcherManager(LuceneIndexer.Scope.MEMORY);
+        if (sm == null) return List.of();
+        var q = new KnnFloatVectorQuery(LuceneIndexer.VECTOR_FIELD, queryVector, k,
+                new TermQuery(new Term(LuceneIndexer.AGENT_FIELD, agentId)));
+        sm.maybeRefresh();
+        var out = new ArrayList<ScoredId>(k);
+        try (var leased = new LeasedSearcher(sm)) {
+            var searcher = leased.get();
+            var top = searcher.search(q, k);
+            var storedFields = searcher.storedFields();
+            for (var sd : top.scoreDocs) {
+                var raw = storedFields.document(sd.doc).get(LuceneIndexer.ID_FIELD);
+                if (raw == null) continue;
+                try {
+                    out.add(new ScoredId(Long.parseLong(raw), sd.score));
+                } catch (NumberFormatException _) {
+                    // Skip malformed ids; partial results beat failing the query.
+                }
+            }
+        }
+        return out;
     }
 
     private static List<Long> collectMatchingIds(SearcherManager sm, String query, int limit) throws IOException {
