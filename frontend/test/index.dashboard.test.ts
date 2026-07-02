@@ -106,26 +106,29 @@ describe('Dashboard — Chat Performance latency filters (JCLAW-515)', () => {
 describe('Dashboard — workspace disk footprint line', () => {
   beforeEach(() => clearNuxtData())
 
-  it('renders the size muted below the warn threshold', async () => {
+  it('renders the bare value with the unit named in the label below the warn threshold', async () => {
     setupApi({ workspaceBytes: 2048 })
     const c = await mountSuspended(Index, { global: { stubs: STUBS } })
     await flushPromises()
 
     const value = c.find('[data-testid="workspace-size-value"]')
     expect(value.exists()).toBe(true)
-    expect(value.text()).toBe('2.0 KB')
+    expect(value.text()).toBe('2.0')
     expect(value.classes()).not.toContain('text-amber-500')
+    expect(c.find('[data-testid="workspace-size-label"]').text()).toBe('Size (in KB)')
   })
 
-  it('turns amber and formats GB past the 10 GiB warn threshold', async () => {
-    // 30 GiB — the real incident size; also exercises formatSize's GB tier.
+  it('turns amber and steps the unit up to GB past the 10 GiB warn threshold', async () => {
+    // 30 GiB — the real incident size; the unit adapts so the value stays
+    // small (30.0 + GB label, never 30720 + MB).
     setupApi({ workspaceBytes: 30 * 1024 ** 3 })
     const c = await mountSuspended(Index, { global: { stubs: STUBS } })
     await flushPromises()
 
     const value = c.find('[data-testid="workspace-size-value"]')
-    expect(value.text()).toBe('30.0 GB')
+    expect(value.text()).toBe('30.0')
     expect(value.classes()).toContain('text-amber-500')
+    expect(c.find('[data-testid="workspace-size-label"]').text()).toBe('Size (in GB)')
   })
 
   it('hides the line when the walk failed (bytes = -1)', async () => {

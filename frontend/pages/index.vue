@@ -94,6 +94,8 @@ const [
 const { data: workspaceStats } = await useFetch<{ bytes: number }>('/api/workspace/stats',
   { default: () => ({ bytes: -1 }) })
 const workspaceBytes = computed(() => workspaceStats.value?.bytes ?? -1)
+/** Number and adaptive unit split apart: the card shows the value big and names the unit in the label. */
+const workspaceSize = computed(() => splitSize(Math.max(0, workspaceBytes.value)))
 /** Amber past 10 GiB — big enough to never flag normal use, small enough to catch a runaway early. */
 const WORKSPACE_WARN_BYTES = 10 * 1024 * 1024 * 1024
 
@@ -293,10 +295,13 @@ onBeforeUnmount(() => {
               :class="workspaceBytes >= WORKSPACE_WARN_BYTES ? 'text-amber-500' : 'text-fg-strong'"
               data-testid="workspace-size-value"
             >
-              {{ formatSize(workspaceBytes) }}
+              {{ workspaceSize.value }}
             </div>
-            <div class="text-xs text-fg-muted mt-1.5">
-              Workspace
+            <div
+              class="text-xs text-fg-muted mt-1.5"
+              data-testid="workspace-size-label"
+            >
+              Size (in {{ workspaceSize.unit }})
             </div>
           </div>
         </div>
