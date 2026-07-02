@@ -88,4 +88,19 @@ class WhatsAppChannelOutboundTest extends UnitTest {
         List<String> chunks = WhatsAppChannel.chunkText(text, WhatsAppChannel.MAX_TEXT_CHARS);
         assertEquals(1, chunks.size(), "an exactly-limit-length text is one chunk, no empty tail");
     }
+
+    @Test
+    void breakpointExactlyAtTheWindowEdgeStaysWithinTheLimit() {
+        // Regression for the JCLAW-447 off-by-one: a space AT index i+limit
+        // used to be matched by lastIndexOf(ch, end) (inclusive fromIndex),
+        // producing a limit+1-length chunk — a 4097-char body at the real
+        // 4096 cap, which Meta's API rejects (the chunk was lost after the
+        // single retry). chunkText now searches from end-1, so no chunk can
+        // exceed the limit; the edge space starts the next chunk instead.
+        var chunks = WhatsAppChannel.chunkText("aaaa b", 4);
+        assertEquals(List.of("aaaa", " b"), chunks,
+                "the window-edge space must start the next chunk, not overflow this one");
+        assertTrue(chunks.stream().allMatch(c -> c.length() <= 4),
+                "no chunk may ever exceed the limit");
+    }
 }
