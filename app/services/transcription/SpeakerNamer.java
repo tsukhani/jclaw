@@ -66,6 +66,13 @@ public final class SpeakerNamer {
         return !scanEnrollment().isEmpty();
     }
 
+    /** The enrollment folder root — where the {@code diarize_audio} tool's
+     *  enroll action (JCLAW-561) files reference clips, one subfolder per
+     *  person. Honors the test override. */
+    public static Path enrollmentRoot() {
+        return root;
+    }
+
     /**
      * Match diarized speakers against the enrolled voices. Returns
      * {@code speaker index → display name} for matches only; an empty map

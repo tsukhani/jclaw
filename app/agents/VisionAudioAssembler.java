@@ -249,20 +249,33 @@ public final class VisionAudioAssembler {
      * !supportsAudio branch. Missing/blank transcripts fall back to a
      * "transcription unavailable" note that preserves the user's
      * original filename.
+     *
+     * <p>Both shapes carry the audio's workspace-relative path (JCLAW-561),
+     * symmetric with {@link #collectCaptionBlocks}: without it the model has
+     * no way to know the audio exists as a file, and answers "I only receive
+     * the transcribed text" to any file-management request about it.
      */
     private static String collectTranscriptBlocks(List<MessageAttachment> atts) {
         var transcriptBlocks = new StringBuilder();
         for (var a : atts) {
             if (!a.isAudio()) continue;
             var transcript = a.transcript;
+            var fileNote = " (the audio file"
+                    + (a.originalFilename != null ? " \"" + a.originalFilename + "\"" : "")
+                    + " is in your workspace at \"" + AttachmentService.workspaceRelativePath(a)
+                    + "\" — manage it with the documents/filesystem tools, or use diarize_audio to "
+                    + "identify speakers or enroll this voice)";
             if (transcript != null && !transcript.isBlank()) {
                 transcriptBlocks.append("\n\n[Voice note transcription: ")
                         .append(transcript.trim())
+                        .append(fileNote)
                         .append("]");
             } else {
                 transcriptBlocks.append("\n\n[Voice note ")
                         .append(a.originalFilename != null ? a.originalFilename : "unnamed")
-                        .append(": transcription unavailable]");
+                        .append(": transcription unavailable")
+                        .append(fileNote)
+                        .append("]");
             }
         }
         return transcriptBlocks.toString();

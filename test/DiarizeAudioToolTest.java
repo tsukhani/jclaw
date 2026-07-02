@@ -13,7 +13,11 @@ import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
+import services.transcription.SpeakerNamer;
 import tools.DiarizeAudioTool;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * JCLAW-559: {@code diarize_audio} tool — registration, argument validation,
@@ -117,6 +121,73 @@ class DiarizeAudioToolTest extends UnitTest {
         // Neither file has bytes on disk; the missing-storage error names the
         // resolved attachment, proving the newest one won.
         assertTrue(out.contains("aud-new"), "newest audio attachment must be picked: " + out);
+    }
+
+    @Test
+    void enroll_requiresSpeakerName() {
+        var att = seedAttachmentWithBytes("aud-enr-1", "erin.ogg");
+        var out = ToolContext.withConversation(conv.id, () -> tool.execute(
+                "{\"action\":\"enroll_speaker\",\"attachment_uuid\":\"" + att.uuid + "\"}", agent));
+        assertTrue(out.contains("'speaker_name' is required"), out);
+    }
+
+    @Test
+    void enroll_rejectsPathTraversalNames() {
+        var att = seedAttachmentWithBytes("aud-enr-2", "erin.ogg");
+        for (var bad : new String[]{"../escape", "a/b", ".hidden", "x\\y"}) {
+            var out = ToolContext.withConversation(conv.id, () -> tool.execute(
+                    "{\"action\":\"enroll_speaker\",\"speaker_name\":\"" + bad.replace("\\", "\\\\")
+                            + "\",\"attachment_uuid\":\"" + att.uuid + "\"}", agent));
+            assertTrue(out.contains("not a valid speaker name"), bad + " must be rejected: " + out);
+        }
+    }
+
+    @Test
+    void enroll_copiesClipIntoNamedFolder() throws Exception {
+        var voicesRoot = Files.createTempDirectory("enroll-test-");
+        SpeakerNamer.setRootForTest(voicesRoot);
+        try {
+            var att = seedAttachmentWithBytes("aud-enr-3", "erin voice.ogg");
+            var out = ToolContext.withConversation(conv.id, () -> tool.execute(
+                    "{\"action\":\"enroll_speaker\",\"speaker_name\":\"Erin\"}", agent));
+
+            assertTrue(out.contains("Enrolled voice reference for \"Erin\""), out);
+            var clip = voicesRoot.resolve("Erin").resolve(att.uuid + ".ogg");
+            assertTrue(Files.isRegularFile(clip), "clip must land at " + clip);
+            assertTrue(SpeakerNamer.enrollmentPresent(),
+                    "enrollment scanner must see the new clip");
+        } finally {
+            SpeakerNamer.resetForTest();
+            deleteRecursive(voicesRoot);
+        }
+    }
+
+    @Test
+    void unknownAction_returnsError() {
+        seedAttachmentWithBytes("aud-enr-4", "x.ogg");
+        var out = ToolContext.withConversation(conv.id,
+                () -> tool.execute("{\"action\":\"transcode\"}", agent));
+        assertTrue(out.contains("unknown action 'transcode'"), out);
+    }
+
+    private MessageAttachment seedAttachmentWithBytes(String uuid, String filename) {
+        var att = seedAttachment(MessageAttachment.KIND_AUDIO, uuid, filename);
+        try {
+            var dir = AgentService.acquireWorkspacePath(agent.name, "attachments/" + conv.id);
+            Files.createDirectories(dir);
+            Files.write(dir.resolve(uuid), new byte[]{0, 1, 2, 3, 4, 5, 6, 7});
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+        return att;
+    }
+
+    private static void deleteRecursive(Path dir) throws java.io.IOException {
+        if (!Files.exists(dir)) return;
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> { try { Files.deleteIfExists(p); } catch (java.io.IOException _) {} });
+        }
     }
 
     private MessageAttachment seedAttachment(String kind, String uuid, String filename) {

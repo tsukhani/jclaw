@@ -101,6 +101,8 @@ class TranscriptionPipelineTest extends UnitTest {
                 "text must contain the transcription block: " + text);
         assertTrue(text.contains("hello, this is a voice note"),
                 "actual transcript must be in the text: " + text);
+        assertTrue(text.contains("is in your workspace at \"attachments/"),
+                "transcription block must carry the workspace path (JCLAW-561): " + text);
     }
 
     @Test
@@ -117,8 +119,10 @@ class TranscriptionPipelineTest extends UnitTest {
         var textPart = firstPartOfType(parts, "text");
         assertNotNull(textPart);
         var text = (String) textPart.get("text");
-        assertTrue(text.contains("[Voice note recording.ogg: transcription unavailable]"),
+        assertTrue(text.contains("[Voice note recording.ogg: transcription unavailable"),
                 "fallback note must carry the original filename: " + text);
+        assertTrue(text.contains("is in your workspace at \"attachments/"),
+                "fallback note must carry the workspace path (JCLAW-561): " + text);
         assertFalse(text.contains("[Voice note transcription:"),
                 "no transcription block when transcript is missing: " + text);
     }
