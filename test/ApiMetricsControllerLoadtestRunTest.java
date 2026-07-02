@@ -6,7 +6,9 @@ import play.Play;
 import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.LoadTestHarness;
 
+import java.net.ServerSocket;
 import java.util.HashMap;
 
 /**
@@ -93,5 +95,30 @@ class ApiMetricsControllerLoadtestRunTest extends FunctionalTest {
         assertEquals(1, turn1.get("count").getAsInt());
         assertEquals(2, turn2.get("turn").getAsInt());
         assertEquals(1, turn2.get("count").getAsInt());
+    }
+
+    /**
+     * Regression for the CI-only "Address already in use" 500: when the
+     * configured mock port is held by another process (a second JClaw on the
+     * Jenkins host, a parallel build), the harness must fall back to an
+     * ephemeral port instead of failing the loadtest — every consumer reads
+     * the actual port back via {@link LoadTestHarness#port()}. Lives in this
+     * class (not a unit test) so it shares a lane with the run test above:
+     * both mutate the JVM-global harness singleton.
+     */
+    @Test
+    void harnessFallsBackToAnEphemeralPortWhenTheConfiguredOneIsTaken() throws Exception {
+        LoadTestHarness.stop();
+        try (var squatter = new ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            int taken = squatter.getLocalPort();
+            int bound = LoadTestHarness.start(taken);
+            try {
+                assertTrue(LoadTestHarness.isRunning(), "harness must come up despite the squat");
+                assertNotEquals(taken, bound, "harness must not report the squatted port");
+                assertEquals(bound, LoadTestHarness.port(), "port() must expose the actual bound port");
+            } finally {
+                LoadTestHarness.stop();
+            }
+        }
     }
 }

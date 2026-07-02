@@ -124,7 +124,18 @@ public final class LoadTestHarness {
         // racing start() could have bound during the unlocked sleep.
         synchronized (lock) {
             if (server.get() != null) return port;
-            return bindAndStart(requestedPort);
+            try {
+                return bindAndStart(requestedPort);
+            } catch (BindException _) {
+                // The configured port is held by another process entirely (a
+                // second JClaw on the same host, a parallel CI build) — not a
+                // stale server of ours, or the retry would have won. The mock
+                // is loopback-only and every consumer reads the ACTUAL port
+                // back via port(), so an ephemeral port is fully equivalent:
+                // never fail a loadtest over a port squat.
+                stop();
+                return bindAndStart(0);
+            }
         }
     }
 
