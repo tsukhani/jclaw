@@ -2,6 +2,7 @@ package channels;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.slack.api.Slack;
 import com.slack.api.app_backend.SlackSignature;
 import com.slack.api.methods.SlackApiException;
@@ -394,7 +395,16 @@ public class SlackChannel implements Channel {
         if (botUserId != null && !botUserId.isBlank() && botUserId.equals(user)) {
             return null;
         }
-        var event = SLACK_GSON.fromJson(eventObj, MessageEvent.class);
+        MessageEvent event;
+        try {
+            event = SLACK_GSON.fromJson(eventObj, MessageEvent.class);
+        } catch (JsonParseException | IllegalStateException _) {
+            // A structurally malformed event (e.g. a files field that isn't an
+            // array) would otherwise throw inside Gson's typed mapping and
+            // crash the webhook handler — Slack retries erroring endpoints and
+            // eventually disables them. Not a plain user message → null.
+            return null;
+        }
         var text = event.getText() != null ? event.getText() : "";
         // JCLAW-354: channel_type ("im"/"channel"/"group"/"mpim") drives the access
         // gate (owner-only DM vs mention-gated channel); botMentioned is true when the

@@ -289,8 +289,11 @@ public class WhatsAppChannel implements Channel {
         while (i < n) {
             int end = Math.min(i + limit, n);
             if (end < n) {
-                int nl = text.lastIndexOf('\n', end);
-                int sp = text.lastIndexOf(' ', end);
+                // Search from end-1: lastIndexOf's fromIndex is inclusive, so
+                // searching from end would match a space AT the boundary and
+                // produce a limit+1-char chunk (4097 chars, which Meta rejects).
+                int nl = text.lastIndexOf('\n', end - 1);
+                int sp = text.lastIndexOf(' ', end - 1);
                 int brk = Math.max(nl, sp);
                 if (brk > i) {
                     end = brk + 1; // include the breakpoint char in this chunk

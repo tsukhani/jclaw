@@ -57,7 +57,8 @@ public class ApiMetricsController extends Controller {
     private static final String KEY_SINCE = "since";
     private static final String STATUS_RESET = "reset";
 
-    @Before(only = {"latency", "resetLatency", "cost", "compression", "resetCompression"})
+    @Before(only = {"latency", "resetLatency", "latencyRows", "clearLatencyRows",
+            "cost", "compression", "resetCompression"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
     }
@@ -471,7 +472,12 @@ public class ApiMetricsController extends Controller {
         if (input.turns() < 1 || input.turns() > maxTurns) {
             error(400, "turns must be between 1 and " + maxTurns);
         }
-        if (input.prompts() != null && input.prompts().size() < input.turns()) {
+        // Empty means "no varied-prompts mode" (parsePromptsField normalizes an
+        // absent field to List.of(), not null) — only a non-empty array must
+        // cover every turn. Checking size on the empty default rejected every
+        // promptless run with a bogus 400 (regression from the S2259 cleanup).
+        if (input.prompts() != null && !input.prompts().isEmpty()
+                && input.prompts().size() < input.turns()) {
             error(400, "prompts array has " + input.prompts().size() + " entries but turns=" + input.turns()
                     + "; provide at least one prompt per turn");
         }
