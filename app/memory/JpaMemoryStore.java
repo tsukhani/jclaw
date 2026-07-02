@@ -38,6 +38,12 @@ import java.util.Locale;
  * schema is provisioned at construction via {@link PgVectorProvisioner}
  * (JCLAW-528); when provisioning fails the vector leg is disabled and recall
  * degrades to full-text search.
+ *
+ * <p>Hybrid recall on both backends shares one retrieval contract (JCLAW-527):
+ * each backend supplies a keyword leg and a vector leg as ranked lists, and
+ * {@link #fuseHydrateRerank} — Reciprocal Rank Fusion (k = 60), agent-bounded
+ * hydration, optional {@link MemoryReranker cross-encoder rerank} — does the
+ * rest, written once above the backend seam.
  */
 public class JpaMemoryStore implements MemoryStore {
 
@@ -219,58 +225,91 @@ public class JpaMemoryStore implements MemoryStore {
                 .toList();
     }
 
-    @SuppressWarnings("unchecked")
     private List<MemoryEntry> fullTextSearch(String agentId, String query, int limit) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
-        // Single native query returning full Memory entities ranked by FTS score.
-        // Avoids the prior two-query pattern (IDs then re-fetch) and the in-memory re-sort.
-        var sql = """
-                SELECT m.* FROM memory m
-                WHERE m.agent_id = ?1
-                AND to_tsvector('english', m.text) @@ plainto_tsquery('english', ?2)
-                ORDER BY ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?2)) DESC
-                """;
         try {
-            List<Memory> memories = JPA.em().createNativeQuery(sql, Memory.class)
-                    .setParameter(1, pk)
-                    .setParameter(2, query)
-                    .setMaxResults(limit)
-                    .getResultList();
-            return toEntriesRankScored(memories);
+            return toEntriesRankScored(pgFtsRows(pk, query, limit));
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
             return likeSearch(agentId, query, limit);
         }
     }
 
+    /**
+     * JCLAW-527: the Postgres keyword leg — full Memory entities ranked by
+     * {@code ts_rank}. Single native query (no IDs-then-refetch round trip);
+     * shared by {@link #fullTextSearch} and the hybrid fusion.
+     */
     @SuppressWarnings("unchecked")
+    private List<Memory> pgFtsRows(Long pk, String query, int limit) {
+        var sql = """
+                SELECT m.* FROM memory m
+                WHERE m.agent_id = ?1
+                AND to_tsvector('english', m.text) @@ plainto_tsquery('english', ?2)
+                ORDER BY ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?2)) DESC
+                """;
+        return JPA.em().createNativeQuery(sql, Memory.class)
+                .setParameter(1, pk)
+                .setParameter(2, query)
+                .setMaxResults(limit)
+                .getResultList();
+    }
+
+    /**
+     * JCLAW-527: the Postgres vector leg. The {@code ORDER BY} is the bare
+     * cosine-distance operator over the raw column — the exact shape the
+     * planner can serve from the HNSW index provisioned in JCLAW-528. Any
+     * wrapping expression (the old {@code COALESCE(ts_rank …) * 0.3 + … * 0.7}
+     * weighted sum) forces a sequential scan of every embedding. Test-pinned.
+     */
+    public static final String PG_VECTOR_LEG_SQL = """
+            SELECT m.id FROM memory m
+            WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL
+            ORDER BY m.embedding <=> ?2::text::vector
+            """;
+
+    private List<Long> pgVectorIds(Long pk, float[] embedding, int limit) {
+        List<?> rows = JPA.em().createNativeQuery(PG_VECTOR_LEG_SQL)
+                .setParameter(1, pk)
+                .setParameter(2, toVectorLiteral(embedding))
+                .setMaxResults(limit)
+                .getResultList();
+        var ids = new ArrayList<Long>(rows.size());
+        for (Object r : rows) {
+            ids.add(((Number) r).longValue());
+        }
+        return ids;
+    }
+
+    /**
+     * JCLAW-527: hybrid recall on the Postgres backend. Two separately-indexed
+     * legs — {@code ts_rank} keyword rows and an HNSW-servable cosine KNN id
+     * list — fused by Reciprocal Rank Fusion instead of the old single-query
+     * weighted sum (0.3 ts_rank + 0.7 cosine), which mixed an unbounded and a
+     * bounded score scale and wrapped the {@code ORDER BY} in an expression no
+     * ANN index can serve. Fusion, hydration, and the optional rerank are the
+     * same {@link #fuseHydrateRerank} code path the Lucene backend runs, per
+     * the story's shared-contract AC. Degrades hybrid → FTS → LIKE, same as
+     * before.
+     */
     private List<MemoryEntry> hybridSearch(String agentId, String query, int limit) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
-        // Combine PG full-text search + pgvector cosine similarity in a single query.
         try {
             var embedding = generateEmbedding(query);
             if (embedding == null) {
                 return fullTextSearch(agentId, query, limit);
             }
-
-            var embeddingStr = toVectorLiteral(embedding);
-            var sql = """
-                    SELECT m.* FROM memory m
-                    WHERE m.agent_id = ?1
-                    AND m.embedding IS NOT NULL
-                    ORDER BY (COALESCE(ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?2)), 0) * 0.3
-                             + (1 - (m.embedding <=> ?3::text::vector)) * 0.7) DESC
-                    """;
-
-            List<Memory> memories = JPA.em().createNativeQuery(sql, Memory.class)
-                    .setParameter(1, pk)
-                    .setParameter(2, query)
-                    .setParameter(3, embeddingStr)
-                    .setMaxResults(limit)
-                    .getResultList();
-            return toEntriesRankScored(memories);
+            List<Memory> keywordLeg = pgFtsRows(pk, query, limit);
+            List<Long> vectorLeg = pgVectorIds(pk, embedding, limit);
+            if (vectorLeg.isEmpty()) {
+                return toEntriesRankScored(keywordLeg);
+            }
+            var keywordIds = keywordLeg.stream().map(m -> m.id).toList();
+            var preloaded = new HashMap<Long, Memory>();
+            for (var m : keywordLeg) preloaded.put(m.id, m);
+            return fuseHydrateRerank(agentId, query, keywordIds, vectorLeg, preloaded, limit);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "Hybrid search failed, falling back to FTS: %s".formatted(e.getMessage()));
             return fullTextSearch(agentId, query, limit);
@@ -281,8 +320,8 @@ public class JpaMemoryStore implements MemoryStore {
      * JCLAW-555: hybrid recall on the Lucene HNSW backend (H2 / any non-Postgres
      * dialect). Two legs — the existing scored FTS search and a KNN
      * cosine-similarity query over the MEMORY scope's vector field — fused by
-     * Reciprocal Rank Fusion (k = 60), the same fusion contract the Postgres
-     * retrieval rework (JCLAW-527) applies to its ts_rank + pgvector legs.
+     * Reciprocal Rank Fusion (k = 60) through the same
+     * {@link #fuseHydrateRerank} path the Postgres backend runs (JCLAW-527).
      * Degrades to FTS-only when the query embedding is unavailable (no provider,
      * embeddings endpoint down) or the KNN leg fails.
      */
@@ -306,26 +345,69 @@ public class JpaMemoryStore implements MemoryStore {
 
         var ftsIds = fts.stream().map(s -> s.memory().id).toList();
         var knnIds = knn.stream().map(ScoredId::id).toList();
-        var fused = ReciprocalRankFusion.fuse(ReciprocalRankFusion.DEFAULT_K, ftsIds, knnIds);
+        var preloaded = new HashMap<Long, Memory>();
+        for (var s : fts) preloaded.put(s.memory().id, s.memory());
+        return fuseHydrateRerank(agentId, query, ftsIds, knnIds, preloaded, limit);
+    }
 
-        // Hydrate: FTS hits are already loaded; KNN-only ids need a fetch.
-        var byId = new HashMap<Long, Memory>();
-        for (var s : fts) byId.put(s.memory().id, s.memory());
+    /**
+     * JCLAW-527: the shared retrieval contract — RRF fusion (k = 60), agent-
+     * bounded hydration, and the optional cross-encoder rerank — written once,
+     * above the backend seam. The Lucene path (H2, all dev/test) and the
+     * Postgres path (production) both land here, so the fusion logic the AC
+     * cares about is exercised by every test run, not only on live Postgres.
+     *
+     * <p>Legs arrive as best-first id lists plus whatever {@code Memory} rows
+     * the caller already loaded; KNN-only ids are hydrated re-bounded to the
+     * agent so a stale/foreign index id can never leak another agent's memory
+     * into recall (same guard as {@code Memory.searchByTextScored}).
+     *
+     * <p>When a rerank is active it runs over the full fused-and-hydrated
+     * shortlist (up to two legs' worth of candidates, before the limit cut) and
+     * the result carries rank-derived relevance — the cross-encoder's opinion
+     * replaces the fused scores, otherwise downstream importance blending
+     * (JCLAW-40) would re-sort on scores the rerank just overruled.
+     */
+    private List<MemoryEntry> fuseHydrateRerank(String agentId, String query,
+            List<Long> keywordIds, List<Long> vectorIds,
+            HashMap<Long, Memory> preloaded, int limit) {
+        var fused = ReciprocalRankFusion.fuse(ReciprocalRankFusion.DEFAULT_K, keywordIds, vectorIds);
+
         var missing = fused.stream().map(ReciprocalRankFusion.Ranked::id)
-                .filter(id -> !byId.containsKey(id)).toList();
+                .filter(id -> !preloaded.containsKey(id)).toList();
         if (!missing.isEmpty()) {
             Long pk = pkOrNull(agentId);
-            // Re-bound to the agent so a stale/foreign index id can never leak
-            // another agent's memory into recall (same guard as searchByTextScored).
             List<Memory> rows = pk == null ? List.of()
                     : Memory.find("agent.id = ?1 AND id IN (?2)", pk, missing).fetch();
-            for (var m : rows) byId.put(m.id, m);
+            for (var m : rows) preloaded.put(m.id, m);
         }
-        var out = new ArrayList<MemoryEntry>(Math.min(limit, fused.size()));
+
+        // The hydrated shortlist in fused order (stale index ids drop out here).
+        var shortlist = new ArrayList<Memory>(fused.size());
+        var scores = new ArrayList<Double>(fused.size());
         for (var r : fused) {
-            if (out.size() >= limit) break;
-            var m = byId.get(r.id());
-            if (m != null) out.add(toEntry(m, r.score()));
+            var m = preloaded.get(r.id());
+            if (m != null) {
+                shortlist.add(m);
+                scores.add(r.score());
+            }
+        }
+
+        if (MemoryReranker.active() && shortlist.size() > 1) {
+            var order = MemoryReranker.rerank(query,
+                    shortlist.stream().map(m -> m.text).toList());
+            var out = new ArrayList<MemoryEntry>(Math.min(limit, order.size()));
+            int n = order.size();
+            for (int pos = 0; pos < n && out.size() < limit; pos++) {
+                double relevance = n <= 1 ? 1.0 : 1.0 - ((double) pos / (n - 1));
+                out.add(toEntry(shortlist.get(order.get(pos)), relevance));
+            }
+            return out;
+        }
+
+        var out = new ArrayList<MemoryEntry>(Math.min(limit, shortlist.size()));
+        for (int i = 0; i < shortlist.size() && out.size() < limit; i++) {
+            out.add(toEntry(shortlist.get(i), scores.get(i)));
         }
         return out;
     }
@@ -474,13 +556,13 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     /**
-     * JCLAW-532: the Postgres FTS/hybrid queries return rows already ordered by
-     * their (ts_rank / vector) score, but don't surface the raw score cheaply, so
-     * relevance is approximated from rank position (top = 1.0) — preserving the
-     * existing ordering while giving the recall blend a per-entry relevance.
-     * Real Postgres relevance scoring is deferred to the retrieval rework
-     * (JCLAW-527); the Lucene path (H2/default) already threads true normalized
-     * scores via {@link #likeSearch}.
+     * JCLAW-532: the Postgres FTS-only query returns rows already ordered by
+     * {@code ts_rank}, but doesn't surface the raw score cheaply, so relevance
+     * is approximated from rank position (top = 1.0) — preserving the existing
+     * ordering while giving the recall blend a per-entry relevance. Since
+     * JCLAW-527 the hybrid path no longer comes through here — it carries real
+     * RRF fused scores; this remains only for the keyword-only (vector
+     * disabled / degraded) Postgres path.
      */
     private List<MemoryEntry> toEntriesRankScored(List<Memory> ordered) {
         int n = ordered.size();

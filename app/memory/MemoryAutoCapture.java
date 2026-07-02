@@ -340,7 +340,8 @@ public final class MemoryAutoCapture {
         return union == 0 ? 0.0 : (double) inter / union;
     }
 
-    private static String stripFences(String s) {
+    /** Package-visible: {@link MemoryReranker} parses LLM JSON the same way. */
+    static String stripFences(String s) {
         if (s.startsWith("```")) {
             int firstNl = s.indexOf('\n');
             if (firstNl >= 0) s = s.substring(firstNl + 1);

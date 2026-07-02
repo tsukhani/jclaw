@@ -158,6 +158,24 @@ class JpaMemoryStorePgDialectTest extends UnitTest {
         assertEquals(1, store.list(agent).size());
     }
 
+    // --- vector-leg SQL shape (JCLAW-527) ---
+
+    @Test
+    void pgVectorLegKeepsTheBareOrderByShapeHnswCanServe() {
+        // The AC pins the query shape: a bare `ORDER BY embedding <=> ?` the
+        // planner can serve from the JCLAW-528 HNSW index. The old hybrid
+        // wrapped the ORDER BY in a ts_rank/cosine weighted sum, forcing a
+        // sequential scan — executable only on live Postgres, so the shape is
+        // pinned here the same way PgVectorProvisionerTest pins its DDL.
+        var sql = JpaMemoryStore.PG_VECTOR_LEG_SQL;
+        assertTrue(sql.contains("ORDER BY m.embedding <=> ?2::text::vector"),
+                "the ORDER BY must be the bare cosine-distance operator");
+        assertFalse(sql.contains("ts_rank"),
+                "keyword scoring must not re-enter the vector leg (RRF fuses the legs instead)");
+        assertFalse(sql.contains("+"),
+                "no weighted-sum arithmetic may wrap the distance expression");
+    }
+
     // --- toEntriesRankScored (shared PG-success scorer, JCLAW-532) ---
 
     private static Method rankScorer() throws Exception {
