@@ -145,6 +145,33 @@ class ApiMemoryControllerTest extends FunctionalTest {
         assertFalse(body.contains("low importance memory"), "below-threshold excluded");
     }
 
+    @Test
+    void statusFilterSplitsActiveAndSupersededViews() {
+        // JCLAW-557: the default view matches recall (active only); the
+        // JCLAW-525 supersession trail is opt-in via status=superseded / all.
+        var oldId = seedMemory("alice", "The user lives in Berlin", "fact", 0.7);
+        var newId = seedMemory("alice", "The user lives in Porto", "fact", 0.7);
+        fetchInFreshTx(() -> {
+            models.Memory.<models.Memory>findById(Long.valueOf(oldId)).supersede(Long.valueOf(newId));
+            return null;
+        });
+        login();
+
+        var active = getContent(GET("/api/memories"));
+        assertTrue(active.contains("Porto"), "active memory in the default view");
+        assertFalse(active.contains("Berlin"), "superseded row hidden by default (matches recall)");
+
+        var superseded = getContent(GET("/api/memories?status=superseded"));
+        assertTrue(superseded.contains("Berlin"), "superseded view surfaces the trail");
+        assertFalse(superseded.contains("Porto"), "active row excluded from the superseded view");
+        assertTrue(superseded.contains("\"supersededAt\""), "DTO carries the supersession timestamp");
+        assertTrue(superseded.contains("\"supersededById\":\"" + newId + "\""),
+                "DTO carries the superseding memory id");
+
+        var all = getContent(GET("/api/memories?status=all"));
+        assertTrue(all.contains("Berlin") && all.contains("Porto"), "status=all shows both");
+    }
+
     // ─── Update / Delete (by memory id) ──────────────────────────────────────
 
     @Test

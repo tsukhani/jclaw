@@ -45,7 +45,8 @@ public class ApiMemoryController extends Controller {
     private static final String FIELD_IMPORTANCE = "m.importance";
 
     public record MemoryDto(String id, String agentName, String text, String category,
-                            double importance, String createdAt) {}
+                            double importance, String createdAt,
+                            String supersededAt, String supersededById) {}
 
     public record MemoryUpdateRequest(Double importance, String category) {}
 
@@ -56,11 +57,15 @@ public class ApiMemoryController extends Controller {
      * {@code agent} (exact agent name), {@code category} (exact), and
      * {@code importance} (a threshold like {@code >0.8}, {@code <=0.5}, or a bare
      * number treated as {@code >=}).
+     *
+     * <p>{@code status} (JCLAW-557): {@code active} (the default — matches what
+     * recall sees), {@code superseded} (only the JCLAW-525 supersession trail),
+     * or {@code all}. Any other value falls back to active.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MemoryDto.class))))
-    @Operation(summary = "List memories across agents with a filter query (q / agent / category / importance)")
+    @Operation(summary = "List memories across agents with a filter query (q / agent / category / importance / status)")
     public static void list(String q, String agent, String category, String importance,
-                            Integer limit, Integer offset) {
+                            String status, Integer limit, Integer offset) {
         int effLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         int effOffset = (offset != null && offset >= 0) ? offset : 0;
 
@@ -106,6 +111,10 @@ public class ApiMemoryController extends Controller {
         var where = filter.toWhereClause();
         if (ftsIds != null) {
             where = where.isEmpty() ? "m.id IN (:fts)" : where + " AND m.id IN (:fts)";
+        }
+        var statusCondition = statusCondition(status);
+        if (statusCondition != null) {
+            where = where.isEmpty() ? statusCondition : where + " AND " + statusCondition;
         }
         String jpql = where.isEmpty()
                 ? "SELECT m FROM Memory m ORDER BY m.updatedAt DESC"
@@ -179,7 +188,24 @@ public class ApiMemoryController extends Controller {
         String key = String.valueOf(m.agent.id);
         String name = agentNames.getOrDefault(key, key);
         return new MemoryDto(String.valueOf(m.id), name, m.text, m.category,
-                m.importance, m.createdAt == null ? null : m.createdAt.toString());
+                m.importance, m.createdAt == null ? null : m.createdAt.toString(),
+                m.supersededAt == null ? null : m.supersededAt.toString(),
+                m.supersededById == null ? null : String.valueOf(m.supersededById));
+    }
+
+    /**
+     * JPQL condition for the {@code status} filter (JCLAW-557), or null for
+     * {@code all}. Defaults to active-only so the table matches what recall
+     * sees; the JCLAW-525 supersession trail is opt-in via
+     * {@code status:superseded} or {@code status:all}.
+     */
+    private static String statusCondition(String status) {
+        var s = status == null ? "" : status.strip().toLowerCase(java.util.Locale.ROOT);
+        return switch (s) {
+            case "all" -> null;
+            case "superseded" -> "m.supersededAt IS NOT NULL";
+            default -> "m.supersededAt IS NULL";
+        };
     }
 
     /** Map of agent id (as string) to current name, for resolving the display label. */

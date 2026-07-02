@@ -5,9 +5,13 @@ import { TrashIcon } from '@heroicons/vue/24/outline'
  * JCLAW-40: agent memory admin. A cross-agent view of every agent's captured
  * memories — owning agent, text, category, importance, and created date —
  * filtered via a tasks-style FilterBar (free-text `q` over memory text plus
- * `agent` / `category` / `importance` predicates). The operator can adjust
- * importance inline and delete entries. Read path is GET /api/memories?...;
- * mutations go through PUT/DELETE /api/memories/{memoryId}.
+ * `agent` / `category` / `importance` / `status` predicates). The operator can
+ * adjust importance inline and delete entries. Read path is GET
+ * /api/memories?...; mutations go through PUT/DELETE /api/memories/{memoryId}.
+ *
+ * JCLAW-557: the default view shows active memories only (matching recall);
+ * `status:superseded` / `status:all` expose the JCLAW-525 supersession trail,
+ * rendered dimmed with a "superseded" badge that carries the when/by-whom.
  */
 
 interface MemoryDto {
@@ -17,6 +21,8 @@ interface MemoryDto {
   category: string | null
   importance: number
   createdAt: string | null
+  supersededAt: string | null
+  supersededById: string | null
 }
 
 interface Filter { key: string, value: string }
@@ -42,12 +48,15 @@ const qFilter = ref('')
 const agentFilter = ref('')
 const categoryFilter = ref('')
 const importanceFilter = ref('')
+// JCLAW-557: active (default, matches recall) / superseded / all.
+const statusFilter = ref('')
 
 function onFiltersChanged(filters: Filter[]) {
   qFilter.value = filters.find(f => f.key === 'q')?.value ?? ''
   agentFilter.value = filters.find(f => f.key === 'agent')?.value ?? ''
   categoryFilter.value = filters.find(f => f.key === 'category')?.value ?? ''
   importanceFilter.value = filters.find(f => f.key === 'importance')?.value ?? ''
+  statusFilter.value = filters.find(f => f.key === 'status')?.value ?? ''
 }
 
 const url = computed(() => {
@@ -56,9 +65,16 @@ const url = computed(() => {
   if (agentFilter.value) params.set('agent', agentFilter.value)
   if (categoryFilter.value) params.set('category', categoryFilter.value)
   if (importanceFilter.value) params.set('importance', importanceFilter.value)
+  if (statusFilter.value) params.set('status', statusFilter.value)
   params.set('limit', '200')
   return `/api/memories?${params}`
 })
+
+function supersededTitle(mem: MemoryDto): string {
+  const when = mem.supersededAt ? formatDateTime(mem.supersededAt) : ''
+  const by = mem.supersededById ? ` by memory #${mem.supersededById}` : ''
+  return `Superseded${by} at ${when} — excluded from recall`
+}
 
 // Top-level await + reactive URL: re-fetches whenever a filter changes, and
 // mountSuspended resolves with data in tests.
@@ -131,8 +147,8 @@ function exportMemories() {
 
     <FilterBar
       storage-key="memories"
-      placeholder="Filter... (e.g., q:invoice category:core importance:>0.8 agent:main)"
-      :filter-keys="['q', 'agent', 'category', 'importance']"
+      placeholder="Filter... (e.g., q:invoice category:core importance:>0.8 agent:main status:superseded)"
+      :filter-keys="['q', 'agent', 'category', 'importance', 'status']"
       class="mb-4"
       @update:filters="onFiltersChanged"
       @export="exportMemories"
@@ -187,12 +203,19 @@ function exportMemories() {
             :key="mem.id"
             data-testid="memory-row"
             class="align-top"
+            :class="{ 'opacity-50': mem.supersededAt }"
           >
             <td class="whitespace-nowrap px-4 py-2.5 text-fg-muted">
               {{ mem.agentName }}
             </td>
             <td class="px-4 py-2.5 text-fg-primary">
               {{ mem.text }}
+              <span
+                v-if="mem.supersededAt"
+                data-testid="superseded-badge"
+                class="ml-2 inline-block bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                :title="supersededTitle(mem)"
+              >superseded</span>
             </td>
             <td class="px-4 py-2.5">
               <span

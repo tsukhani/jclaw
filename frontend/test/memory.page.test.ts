@@ -16,6 +16,8 @@ function mem(overrides: Record<string, unknown> = {}) {
     category: 'preference',
     importance: 0.7,
     createdAt: '2026-06-29T00:00:00Z',
+    supersededAt: null,
+    supersededById: null,
     ...overrides,
   }
 }
@@ -78,6 +80,30 @@ describe('memories admin page (JCLAW-40)', () => {
     await input.trigger('change')
     await vi.waitFor(() => expect(putBody).not.toBeNull())
     expect(putBody).toEqual({ importance: 0.95 })
+  })
+
+  it('renders superseded rows dimmed with a badge, active rows without (JCLAW-557)', async () => {
+    memoriesResponse = [
+      mem(),
+      mem({
+        id: '11',
+        text: 'The user lives in Berlin',
+        supersededAt: '2026-07-03T00:00:00Z',
+        supersededById: '12',
+      }),
+    ]
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    const rows = c.findAll('[data-testid="memory-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.classes()).not.toContain('opacity-50')
+    expect(rows[0]!.find('[data-testid="superseded-badge"]').exists()).toBe(false)
+    expect(rows[1]!.classes()).toContain('opacity-50')
+    const badge = rows[1]!.find('[data-testid="superseded-badge"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('superseded')
+    expect(badge.attributes('title')).toContain('by memory #12')
   })
 
   it('deletes a memory after the operator confirms', async () => {
