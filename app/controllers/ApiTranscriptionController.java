@@ -12,6 +12,7 @@ import services.EventLogger;
 import services.transcription.DiarizedTranscript;
 import services.transcription.FfmpegProbe;
 import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
 import services.transcription.WhisperModel;
@@ -20,6 +21,7 @@ import services.transcription.WhisperModelManager;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -155,7 +157,14 @@ public class ApiTranscriptionController extends Controller {
             var transcript = WhisperJniTranscriber.transcribeSegments(audio.toPath(), model, lang);
             var speakers = SherpaDiarizer.diarize(audio.toPath(), threshold,
                     numSpeakers == null ? -1 : numSpeakers);
-            entries = DiarizedTranscript.merge(transcript, speakers);
+            // JCLAW-558: automatic when data/speaker-voices has enrollment;
+            // enrollmentPresent() short-circuits everything (models, natives,
+            // ffmpeg) when it doesn't, so the un-enrolled path is unchanged.
+            var names = SpeakerNamer.enrollmentPresent()
+                    ? SpeakerNamer.nameSpeakers(audio.toPath(), speakers,
+                            (float) ConfigService.getDouble("transcription.diarization.speakerMatchThreshold", 0.6))
+                    : Map.<Integer, String>of();
+            entries = DiarizedTranscript.merge(transcript, speakers, names);
         } catch (TranscriptionException e) {
             // Operator-fixable preconditions (model not downloaded, ffmpeg
             // absent) and backend failures both surface here; 409 matches the

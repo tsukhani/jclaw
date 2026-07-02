@@ -70,6 +70,17 @@ class DiarizedTranscriptTest extends UnitTest {
     }
 
     @Test
+    void merge_appliesEnrolledNames_withAnonymousFallback() {
+        var transcript = List.of(seg(0, 2000, "hello"), seg(2000, 4000, "hi"));
+        var speakers = List.of(spk(0.0, 2.0, 0), spk(2.0, 4.0, 1));
+
+        var entries = DiarizedTranscript.merge(transcript, speakers, java.util.Map.of(0, "Alice"));
+
+        assertEquals("Alice", entries.get(0).speaker(), "matched speaker gets the enrolled name");
+        assertEquals("SPEAKER_01", entries.get(1).speaker(), "unmatched speaker keeps the anonymous label");
+    }
+
+    @Test
     void toText_collapsesConsecutiveSameSpeaker() {
         var entries = List.of(
                 new DiarizedTranscript.Entry("SPEAKER_00", 0, 2, "Good morning."),

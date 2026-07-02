@@ -83,6 +83,10 @@ public class DefaultConfigJob extends Job<Void> {
         // spike found separating similar same-gender voices without
         // oversplitting; raise toward 0.5 if distinct voices get split.
         seedIfAbsent("transcription.diarization.threshold", "0.3");
+        // JCLAW-558: minimum cosine similarity for renaming a diarized
+        // speaker to an enrolled voice. Lower if known speakers stay
+        // anonymous (far-field mics); raise if wrong names appear.
+        seedIfAbsent("transcription.diarization.speakerMatchThreshold", "0.6");
     }
 
     /**

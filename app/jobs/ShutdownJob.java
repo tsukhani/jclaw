@@ -13,6 +13,7 @@ import services.imagegen.LocalImageSidecarManager;
 import services.videogen.LocalVideoSidecarManager;
 import services.search.LuceneIndexer;
 import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerNamer;
 import services.transcription.WhisperJniTranscriber;
 import tools.PlaywrightBrowserTool;
 
@@ -69,6 +70,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("whisper-transcriber", WhisperJniTranscriber::shutdown),
                 new Component("sherpa-diarizer", SherpaDiarizer::shutdown),
+                new Component("speaker-namer", SpeakerNamer::shutdown),
                 new Component("imagegen-sidecar", LocalImageSidecarManager::stop),
                 new Component("videogen-sidecar", LocalVideoSidecarManager::stop),
                 new Component("mcp-connections", McpConnectionManager::shutdown),

@@ -3,6 +3,7 @@ package services.transcription;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 import static utils.GsonHolder.INSTANCE;
@@ -32,11 +33,21 @@ public final class DiarizedTranscript {
      */
     public static List<Entry> merge(List<WhisperJniTranscriber.Segment> transcript,
                                     List<SherpaDiarizer.SpeakerSegment> speakers) {
+        return merge(transcript, speakers, Map.of());
+    }
+
+    /** As {@link #merge(List, List)}, substituting enrolled display names
+     *  (JCLAW-558) for the speaker indices present in {@code names};
+     *  unmatched speakers keep their anonymous SPEAKER_NN label. */
+    public static List<Entry> merge(List<WhisperJniTranscriber.Segment> transcript,
+                                    List<SherpaDiarizer.SpeakerSegment> speakers,
+                                    Map<Integer, String> names) {
         var entries = new ArrayList<Entry>(transcript.size());
         for (var seg : transcript) {
             double start = seg.startMs() / 1000.0;
             double end = seg.endMs() / 1000.0;
-            entries.add(new Entry(speakerLabel(speakerFor(start, end, speakers)),
+            int speaker = speakerFor(start, end, speakers);
+            entries.add(new Entry(names.getOrDefault(speaker, speakerLabel(speaker)),
                     start, end, seg.text().strip()));
         }
         return entries;
