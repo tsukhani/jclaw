@@ -12,9 +12,16 @@
   <a href="https://jenkins.abundent.com/job/JClaw/"><img src="https://jenkins.abundent.com/buildStatus/icon?job=JClaw&style=flat-square" alt="Build Status"></a>
   <img src="https://img.shields.io/github/v/release/tsukhani/jclaw?style=flat-square&label=release&color=blue" alt="Release">
   <img src="https://img.shields.io/github/repo-size/tsukhani/jclaw?style=flat-square&label=repo%20size&color=blue" alt="Repo Size">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT">
+  <img src="https://img.shields.io/badge/license-PolyForm%20NC%201.0.0-blue?style=flat-square" alt="License: PolyForm Noncommercial 1.0.0">
+  <img src="https://img.shields.io/badge/source-available-orange?style=flat-square" alt="Source-available">
   <img src="https://img.shields.io/badge/JDK-25%2B-orange?style=flat-square" alt="JDK: 25+">
 </p>
+
+> **Licensing at a glance.** JClaw is **source-available**, dual-licensed by
+> [Abundent Sdn Bhd](https://abundent.com): free for noncommercial use under the
+> [PolyForm Noncommercial License 1.0.0](LICENSE.md); **any commercial use requires a
+> [commercial license](COMMERCIAL-LICENSE.md)**. JClaw is not open-source software.
+> Versions through v0.15.4 remain available under their original MIT License.
 
 <br>
 
@@ -71,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh \
 
 ## Overview
 
-JClaw is Abundent's AI-powered automation platform — built from scratch in **pure Java** on a customized [Play Framework 1.x](https://github.com/tsukhani/play1) foundation. It draws ideas and feature designs from three predecessor projects:
+JClaw is Abundent's AI-powered automation platform, built from scratch in **pure Java** on a customized [Play Framework 1.x](https://github.com/tsukhani/play1) foundation. It draws ideas and feature designs from three predecessor projects:
 
 - **[OpenClaw](https://github.com/tsukhani/openclaw)** (Node.js/TypeScript) — agent orchestration, memory system, conversational AI patterns
 - **[JavaClaw](https://github.com/jobrunr/javaclaw)** (Spring Boot) — job scheduling, background task processing, browser automation
@@ -501,13 +508,39 @@ To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP
 
 ## Contributing
 
-This is an internal Abundent project. For questions or contributions, [reach out to the team](mailto:support@abundent.com).
+JClaw is developed **exclusively by the internal Abundent team**. We do not
+accept external contributions: pull requests from outside the team will be
+closed without review, however good the code. This is a deliberate legal
+choice that keeps the project's chain of title unambiguous under its
+dual-licensing model — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Bug reports and questions are very welcome** via
+[GitHub issues](https://github.com/tsukhani/jclaw/issues) or
+[support@abundent.com](mailto:support@abundent.com).
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+JClaw is **source-available** and dual-licensed:
+
+- **Noncommercial use** — free under the
+  [PolyForm Noncommercial License 1.0.0](LICENSE.md). This covers personal,
+  academic, research, and evaluation use, and use by registered non-profits,
+  educational institutions, and government bodies.
+- **Commercial use of any kind** — requires a
+  [commercial license from Abundent Sdn Bhd](COMMERCIAL-LICENSE.md). Company
+  size affects pricing (small-business, mid-market, and enterprise tiers),
+  never the requirement itself.
+
+JClaw is **not open-source software** as defined by the Open Source
+Definition, because the noncommercial license restricts the field of use.
+The source is public and free to read, study, and use noncommercially.
+
+**Historical versions:** releases up to and including **v0.15.4** were
+published under the MIT License and remain available under that license from
+the corresponding git tags. The dual-licensing model applies from **v0.16.0**
+onward.
 
 ---
 
