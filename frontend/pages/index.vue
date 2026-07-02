@@ -278,6 +278,20 @@ onBeforeUnmount(() => {
         <div class="text-xs text-fg-muted mt-1">
           Active
         </div>
+        <!-- Workspace disk footprint: the agents' shared on-disk workspace,
+             amber past the warn threshold so a runaway file (e.g. a shell
+             loop appending forever) is visible without reaching for ncdu. -->
+        <div
+          v-if="workspaceBytes >= 0"
+          data-testid="workspace-size"
+          class="text-xs text-fg-muted mt-1.5"
+        >
+          Workspace:
+          <span
+            :class="workspaceBytes >= WORKSPACE_WARN_BYTES ? 'font-medium text-amber-500' : 'text-fg-primary'"
+            data-testid="workspace-size-value"
+          >{{ formatSize(workspaceBytes) }}</span>
+        </div>
       </div>
       <div class="bg-surface-elevated border border-border p-4">
         <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
@@ -356,21 +370,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-
-    <!-- Workspace disk footprint: quiet single line under the stat cards,
-         amber once it crosses the warn threshold so a runaway file (e.g. a
-         shell loop appending forever) is visible without reaching for ncdu. -->
-    <p
-      v-if="workspaceBytes >= 0"
-      data-testid="workspace-size"
-      class="-mt-6 mb-8 text-xs text-fg-muted"
-    >
-      Workspace on disk:
-      <span
-        :class="workspaceBytes >= WORKSPACE_WARN_BYTES ? 'font-medium text-amber-500' : 'text-fg-primary'"
-        data-testid="workspace-size-value"
-      >{{ formatSize(workspaceBytes) }}</span>
-    </p>
 
     <!-- Chat Cost (JCLAW-28): persisted aggregated token usage and cost.
          Driven on the parent's 5 s tick (see pollTimer below) so all three
