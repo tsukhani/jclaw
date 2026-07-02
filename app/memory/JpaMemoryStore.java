@@ -97,7 +97,7 @@ public class JpaMemoryStore implements MemoryStore {
         try (var conn = DB.getDataSource().getConnection()) {
             return conn.getMetaData().getDatabaseProductName()
                     .toLowerCase(Locale.ROOT).contains("postgresql");
-        } catch (Exception e) {
+        } catch (Exception _) {
             var dbUrl = Play.configuration.getProperty("db.url", "");
             return dbUrl.contains("postgresql") || dbUrl.contains("postgres");
         }
