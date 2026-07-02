@@ -16,6 +16,7 @@ import services.EventLogger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -243,8 +244,8 @@ public final class TelegramInboundParser {
      * </ul>
      */
     private static boolean detectBotAddressed(Message msg, String botUsername, Long botUserId) {
-        if (entitiesAddressBot(msg.getText(), msg.getEntities(), botUsername, botUserId)
-                || entitiesAddressBot(msg.getCaption(), msg.getCaptionEntities(), botUsername, botUserId)) {
+        if (entitiesAddressBot(msg.getText(), safeEntities(msg::getEntities), botUsername, botUserId)
+                || entitiesAddressBot(msg.getCaption(), safeEntities(msg::getCaptionEntities), botUsername, botUserId)) {
             return true;
         }
         if (isReplyToBot(msg, botUserId)) return true;
@@ -340,6 +341,24 @@ public final class TelegramInboundParser {
     }
 
     /** Scan one text/entity pair for a mention, text_mention, or bot_command suffix addressing the bot. */
+    /**
+     * Defensive fetch of the SDK's entity list. telegrambots'
+     * {@code Message.getEntities}/{@code getCaptionEntities} eagerly run
+     * {@code MessageEntity.computeText}, which substring-slices the body with
+     * the raw wire offsets — an entity whose offset/length lies beyond the
+     * body throws {@code StringIndexOutOfBoundsException} inside the SDK
+     * before our clamped {@link #entitySlice} ever sees it. Update payloads
+     * are untrusted input; treat a malformed one as having no entities rather
+     * than letting it crash inbound parsing.
+     */
+    private static List<MessageEntity> safeEntities(Supplier<List<MessageEntity>> getter) {
+        try {
+            return getter.get();
+        } catch (IndexOutOfBoundsException _) {
+            return null;
+        }
+    }
+
     private static boolean entitiesAddressBot(String body, List<MessageEntity> entities,
                                               String botUsername, Long botUserId) {
         if (body == null || entities == null) return false;

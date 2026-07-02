@@ -179,17 +179,20 @@ public class Memory extends Model {
         if (pk == null) return List.of();
         if ("none".equals(MessageSearch.activeDialect())) {
             // Backend not initialized — substring fallback, agent-bounded.
-            List<Memory> rows = Memory.find("agent.id = ?1 AND LOWER(text) LIKE ?2",
-                    pk, "%" + query.toLowerCase() + "%").fetch(limit);
-            return rows.stream().map(m -> new ScoredMemory(m, 1.0)).toList();
+            return likeFallback(pk, query, limit);
         }
         List<MessageSearchRepository.ScoredId> scored;
         try {
             scored = MessageSearch.searchMemoryIds(agentId, query, limit);
         } catch (IOException e) {
+            // Backend initialized but unavailable (index closed, IO error) —
+            // degrade to the same LIKE fallback instead of silently recalling
+            // nothing: an empty recall looks identical to "no memories exist",
+            // which is the worse failure mode.
             EventLogger.warn("search", null, null,
-                    "Memory search failed for agent %s: %s".formatted(agentId, e.getMessage()));
-            return List.of();
+                    "Memory search failed for agent %s, using LIKE fallback: %s"
+                            .formatted(agentId, e.getMessage()));
+            return likeFallback(pk, query, limit);
         }
         if (scored.isEmpty()) return List.of();
         var ids = scored.stream().map(MessageSearchRepository.ScoredId::id).toList();
@@ -202,5 +205,17 @@ public class Memory extends Model {
             if (m != null) ordered.add(new ScoredMemory(m, s.score()));
         }
         return ordered;
+    }
+
+    /**
+     * Agent-bounded case-insensitive substring search — the degraded recall
+     * path when the search backend is uninitialized or unavailable. Substring
+     * matching carries no relevance signal, so every hit scores 1.0 and recall
+     * effectively degrades to importance ordering.
+     */
+    private static List<ScoredMemory> likeFallback(Long pk, String query, int limit) {
+        List<Memory> rows = Memory.find("agent.id = ?1 AND LOWER(text) LIKE ?2",
+                pk, "%" + query.toLowerCase() + "%").fetch(limit);
+        return rows.stream().map(m -> new ScoredMemory(m, 1.0)).toList();
     }
 }

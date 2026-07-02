@@ -31,6 +31,15 @@ public final class GithubSkillFetcher {
     private static final String API = "https://api.github.com";
     private static final String RAW = "https://raw.githubusercontent.com";
     private static final String TOKEN_PROPERTY = "jclaw.skills.catalog.github.token";
+    /**
+     * Optional base-URL overrides (test seam + GitHub Enterprise mirrors),
+     * mirroring {@link ClawhubSkillFetcher}'s {@code BASE_URL_PROPERTY}
+     * pattern. These come from operator config (application.conf), never from
+     * the untrusted catalog rows, so the trust boundary above is unchanged —
+     * absent config, the hosts stay pinned to github.com.
+     */
+    private static final String API_URL_PROPERTY = "jclaw.skills.catalog.github.api.url";
+    private static final String RAW_URL_PROPERTY = "jclaw.skills.catalog.github.raw.url";
     private static final String SKILL_MD = "SKILL.md";
     private static final String KEY_DEFAULT_BRANCH = "default_branch";
     private static final int TIMEOUT_SECONDS = 60;
@@ -89,7 +98,7 @@ public final class GithubSkillFetcher {
     // --- GitHub API ---
 
     private static String defaultBranch(String owner, String repo) throws IOException {
-        var body = getString(API + "/repos/" + owner + "/" + repo);
+        var body = getString(apiBase() + "/repos/" + owner + "/" + repo);
         var json = JsonParser.parseString(body).getAsJsonObject();
         if (json.has(KEY_DEFAULT_BRANCH) && !json.get(KEY_DEFAULT_BRANCH).isJsonNull()) {
             return json.get(KEY_DEFAULT_BRANCH).getAsString();
@@ -99,7 +108,7 @@ public final class GithubSkillFetcher {
 
     /** Recursive tree of blob (file) paths for the branch. */
     private static List<String> repoBlobPaths(String owner, String repo, String branch) throws IOException {
-        var body = getString(API + "/repos/" + owner + "/" + repo + "/git/trees/" + branch + "?recursive=1");
+        var body = getString(apiBase() + "/repos/" + owner + "/" + repo + "/git/trees/" + branch + "?recursive=1");
         var json = JsonParser.parseString(body).getAsJsonObject();
         var out = new ArrayList<String>();
         if (json.has("tree") && json.get("tree").isJsonArray()) {
@@ -156,7 +165,7 @@ public final class GithubSkillFetcher {
 
     private static byte[] downloadRaw(String owner, String repo, String branch, String path) throws IOException {
         var call = HttpFactories.general().newCall(authorized(
-                new Request.Builder().url(RAW + "/" + owner + "/" + repo + "/" + branch + "/" + path).get()).build());
+                new Request.Builder().url(rawBase() + "/" + owner + "/" + repo + "/" + branch + "/" + path).get()).build());
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var rb = resp.body();
@@ -177,6 +186,19 @@ public final class GithubSkillFetcher {
             }
             return rb.string();
         }
+    }
+
+    private static String apiBase() {
+        return baseOrDefault(API_URL_PROPERTY, API);
+    }
+
+    private static String rawBase() {
+        return baseOrDefault(RAW_URL_PROPERTY, RAW);
+    }
+
+    private static String baseOrDefault(String property, String pinnedDefault) {
+        var configured = Play.configuration.getProperty(property);
+        return (configured == null || configured.isBlank()) ? pinnedDefault : configured.trim();
     }
 
     /** Attach a GitHub token when configured, to raise the API rate limit. */
