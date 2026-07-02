@@ -92,6 +92,31 @@ class WhisperJniTranscriberTest extends UnitTest {
                 "error must explain the model is not downloaded: " + ex.getMessage());
     }
 
+    @Test
+    void applyLanguage_blankOnMultilingual_enablesAutoDetect() {
+        var params = new io.github.givimad.whisperjni.WhisperFullParams();
+        WhisperJniTranscriber.applyLanguage(params, null, true);
+        assertTrue(params.detectLanguage, "blank language on a multilingual model must auto-detect");
+        assertEquals("auto", params.language);
+    }
+
+    @Test
+    void applyLanguage_blankOnEnglishOnly_keepsEnDefault() {
+        var params = new io.github.givimad.whisperjni.WhisperFullParams();
+        WhisperJniTranscriber.applyLanguage(params, "  ", false);
+        assertFalse(params.detectLanguage,
+                "detection must stay off for .en models — whisper.cpp rejects it");
+        assertEquals("en", params.language, "whisper-jni's en default must survive untouched");
+    }
+
+    @Test
+    void applyLanguage_explicitCode_isPassedThrough() {
+        var params = new io.github.givimad.whisperjni.WhisperFullParams();
+        WhisperJniTranscriber.applyLanguage(params, "ms", true);
+        assertEquals("ms", params.language);
+        assertFalse(params.detectLanguage, "an explicit language must not trigger detection");
+    }
+
     /**
      * Write a minimal WAV (PCM16 little-endian, mono) of pure silence. Hand-
      * rolled so we don't depend on {@code javax.sound.sampled} which may

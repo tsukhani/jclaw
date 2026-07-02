@@ -1,0 +1,147 @@
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
+import services.transcription.DiarizedTranscript;
+import services.transcription.SherpaDiarizer;
+import services.transcription.WhisperJniTranscriber;
+
+import java.util.List;
+
+/**
+ * JCLAW-556: merge + formatting layer of the diarization pipeline. Pure
+ * functions — no models, no natives — so every branch is exercised here:
+ * overlap-based speaker assignment (including the no-overlap nearest-span
+ * fallback and the empty-diarization degenerate case), the consecutive-
+ * speaker collapse in TXT, the SRT/VTT timestamp shapes, and the format
+ * dispatcher.
+ */
+class DiarizedTranscriptTest extends UnitTest {
+
+    private static WhisperJniTranscriber.Segment seg(long startMs, long endMs, String text) {
+        return new WhisperJniTranscriber.Segment(startMs, endMs, text);
+    }
+
+    private static SherpaDiarizer.SpeakerSegment spk(double start, double end, int speaker) {
+        return new SherpaDiarizer.SpeakerSegment(start, end, speaker);
+    }
+
+    @Test
+    void merge_assignsSpeakerWithMaxOverlap() {
+        var transcript = List.of(seg(0, 4000, " hello there"), seg(4000, 8000, " hi yourself"));
+        var speakers = List.of(spk(0.0, 3.9, 0), spk(3.9, 8.0, 1));
+
+        var entries = DiarizedTranscript.merge(transcript, speakers);
+
+        assertEquals(2, entries.size());
+        assertEquals("SPEAKER_00", entries.get(0).speaker());
+        assertEquals("SPEAKER_01", entries.get(1).speaker());
+        assertEquals("hello there", entries.get(0).text(), "whisper's leading space is stripped");
+        assertEquals(0.0, entries.get(0).start(), 1e-9);
+        assertEquals(4.0, entries.get(0).end(), 1e-9, "millisecond inputs surface as seconds");
+    }
+
+    @Test
+    void merge_straddlingSegment_goesToLargerOverlap() {
+        // Whisper segment 2s–6s straddles the 4s speaker boundary: 2s of
+        // speaker 0 vs 2.5s of speaker 1 → speaker 1 wins.
+        var transcript = List.of(seg(2000, 6500, "straddler"));
+        var speakers = List.of(spk(0.0, 4.0, 0), spk(4.0, 9.0, 1));
+
+        var entries = DiarizedTranscript.merge(transcript, speakers);
+
+        assertEquals("SPEAKER_01", entries.get(0).speaker());
+    }
+
+    @Test
+    void merge_noOverlap_borrowsNearestSpan() {
+        // Whisper transcribed 10s–11s but the diarizer only marked speech at
+        // 0–2s (speaker 0) and 12–14s (speaker 1). Nearest span is speaker 1.
+        var transcript = List.of(seg(10_000, 11_000, "orphan"));
+        var speakers = List.of(spk(0.0, 2.0, 0), spk(12.0, 14.0, 1));
+
+        var entries = DiarizedTranscript.merge(transcript, speakers);
+
+        assertEquals("SPEAKER_01", entries.get(0).speaker());
+    }
+
+    @Test
+    void merge_emptyDiarization_defaultsToSpeakerZero() {
+        var entries = DiarizedTranscript.merge(List.of(seg(0, 1000, "solo")), List.of());
+        assertEquals("SPEAKER_00", entries.get(0).speaker());
+    }
+
+    @Test
+    void toText_collapsesConsecutiveSameSpeaker() {
+        var entries = List.of(
+                new DiarizedTranscript.Entry("SPEAKER_00", 0, 2, "Good morning."),
+                new DiarizedTranscript.Entry("SPEAKER_00", 2, 4, "Thanks for joining."),
+                new DiarizedTranscript.Entry("SPEAKER_01", 4, 6, "Happy to be here."));
+
+        assertEquals("""
+                SPEAKER_00: Good morning. Thanks for joining.
+                SPEAKER_01: Happy to be here.""",
+                DiarizedTranscript.toText(entries));
+    }
+
+    @Test
+    void toSrt_formatsCuesWithCommaMillis() {
+        var entries = List.of(
+                new DiarizedTranscript.Entry("SPEAKER_00", 0.0, 2.5, "Hello."),
+                new DiarizedTranscript.Entry("SPEAKER_01", 3661.25, 3662.0, "Over an hour in."));
+
+        assertEquals("""
+                1
+                00:00:00,000 --> 00:00:02,500
+                SPEAKER_00: Hello.
+
+                2
+                01:01:01,250 --> 01:01:02,000
+                SPEAKER_01: Over an hour in.
+
+                """,
+                DiarizedTranscript.toSrt(entries));
+    }
+
+    @Test
+    void toVtt_hasHeaderAndDotMillis() {
+        var vtt = DiarizedTranscript.toVtt(List.of(
+                new DiarizedTranscript.Entry("SPEAKER_00", 0.0, 1.5, "Hi.")));
+
+        assertTrue(vtt.startsWith("WEBVTT\n\n"), "VTT files must open with the WEBVTT header");
+        assertTrue(vtt.contains("00:00:00.000 --> 00:00:01.500"),
+                "VTT uses a dot millisecond separator: " + vtt);
+    }
+
+    @Test
+    void formatters_skipEmptyTextSegments() {
+        var entries = List.of(
+                new DiarizedTranscript.Entry("SPEAKER_00", 0, 1, ""),
+                new DiarizedTranscript.Entry("SPEAKER_01", 1, 2, "Real content."));
+
+        assertFalse(DiarizedTranscript.toText(entries).contains("SPEAKER_00"));
+        assertTrue(DiarizedTranscript.toSrt(entries).startsWith("1\n00:00:01,000"),
+                "SRT numbering must not burn an index on a skipped empty segment");
+    }
+
+    @Test
+    void toJson_carriesAllFields() {
+        var json = DiarizedTranscript.toJson(List.of(
+                new DiarizedTranscript.Entry("SPEAKER_00", 0.5, 1.5, "hey")));
+
+        assertTrue(json.contains("\"speaker\""), json);
+        assertTrue(json.contains("\"SPEAKER_00\""), json);
+        assertTrue(json.contains("\"text\""), json);
+        assertTrue(json.contains("\"hey\""), json);
+    }
+
+    @Test
+    void format_dispatchesCaseInsensitively_andRejectsUnknown() {
+        var entries = List.of(new DiarizedTranscript.Entry("SPEAKER_00", 0, 1, "x"));
+
+        assertTrue(DiarizedTranscript.format(entries, "SRT").isPresent());
+        assertTrue(DiarizedTranscript.format(entries, "json").isPresent());
+        assertTrue(DiarizedTranscript.format(entries, "vtt").isPresent());
+        assertTrue(DiarizedTranscript.format(entries, "txt").isPresent());
+        assertTrue(DiarizedTranscript.format(entries, "pdf").isEmpty());
+        assertTrue(DiarizedTranscript.format(entries, null).isEmpty());
+    }
+}

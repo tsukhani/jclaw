@@ -11,6 +11,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -52,6 +54,13 @@ public final class WhisperJniTranscriber {
     private WhisperJniTranscriber() {}
 
     /**
+     * One recognised segment with whisper.cpp's native timestamps converted
+     * to milliseconds ({@code whisper_full_get_segment_t0/t1} report
+     * centiseconds; we multiply by 10 so callers never see the odd unit).
+     */
+    public record Segment(long startMs, long endMs, String text) {}
+
+    /**
      * Transcribe an audio file using the named whisper model. Blocks the
      * caller; long-running and CPU-bound. Caller is responsible for running
      * this off the request thread (via a virtual thread or job).
@@ -62,6 +71,30 @@ public final class WhisperJniTranscriber {
      * downloaded" error.
      */
     public static String transcribe(Path audioFile, WhisperModel model) {
+        return transcribe(audioFile, model, null);
+    }
+
+    /** As {@link #transcribe(Path, WhisperModel)} with an explicit language
+     *  (see {@link #transcribeSegments} for the language contract). */
+    public static String transcribe(Path audioFile, WhisperModel model, String language) {
+        var sb = new StringBuilder();
+        for (var segment : transcribeSegments(audioFile, model, language)) {
+            sb.append(segment.text());
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * Segment-level transcription for the diarization pipeline (JCLAW-556).
+     * Same blocking/preconditions contract as {@link #transcribe}; returns
+     * one {@link Segment} per whisper.cpp segment, in order.
+     *
+     * <p>{@code language}: an ISO 639-1 code ({@code "en"}, {@code "ms"}, …)
+     * forces that language. Null/blank means auto-detect on multilingual
+     * models and whisper-jni's {@code "en"} default on English-only models
+     * (whisper.cpp rejects detection on {@code .en} models).
+     */
+    public static List<Segment> transcribeSegments(Path audioFile, WhisperModel model, String language) {
         if (!FfmpegProbe.isAvailable()) {
             throw new TranscriptionException(
                     "ffmpeg is not available on PATH — install ffmpeg to enable local transcription");
@@ -77,17 +110,42 @@ public final class WhisperJniTranscriber {
         synchronized (inferenceLock) {
             ensureContextLoaded(model);
             var params = new WhisperFullParams();
+            applyLanguage(params, language, jni.isMultilingual(activeContext));
             int rc = jni.full(activeContext, params, samples, samples.length);
             if (rc != 0) {
                 throw new TranscriptionException("whisper_full returned non-zero status %d".formatted(rc));
             }
             int segCount = jni.fullNSegments(activeContext);
-            var sb = new StringBuilder();
+            var segments = new ArrayList<Segment>(segCount);
             for (int i = 0; i < segCount; i++) {
-                sb.append(jni.fullGetSegmentText(activeContext, i));
+                segments.add(new Segment(
+                        jni.fullGetSegmentTimestamp0(activeContext, i) * 10L,
+                        jni.fullGetSegmentTimestamp1(activeContext, i) * 10L,
+                        jni.fullGetSegmentText(activeContext, i)));
             }
-            return sb.toString().trim();
+            return segments;
         }
+    }
+
+    /**
+     * Language selection on the raw params. Public only so tests (default
+     * package) can reach it — not part of the caller contract.
+     * Blank language on a multilingual model turns on whisper.cpp's
+     * auto-detect (both the flag and the {@code "auto"} sentinel — either
+     * alone suffices in current whisper.cpp, setting both is
+     * version-drift-proof). Blank on an English-only model leaves the
+     * {@code "en"} default untouched: detection on {@code .en} models is
+     * rejected by whisper.cpp.
+     */
+    public static void applyLanguage(WhisperFullParams params, String language, boolean multilingual) {
+        if (language == null || language.isBlank()) {
+            if (multilingual) {
+                params.detectLanguage = true;
+                params.language = "auto";
+            }
+            return;
+        }
+        params.language = language;
     }
 
     /** Free the active native context on JVM shutdown. Wired from {@link jobs.ShutdownJob}. */

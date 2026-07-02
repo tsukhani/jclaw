@@ -27,6 +27,7 @@ POST    /api/onboarding/tour-progress           ApiOnboardingController.recordPr
 # Transcription API (JCLAW-164)
 GET     /api/transcription/state                ApiTranscriptionController.state
 POST    /api/transcription/models/{id}/download ApiTranscriptionController.download
+POST    /api/transcription/diarize              ApiTranscriptionController.diarize
 
 # Local image generation API (JCLAW-226)
 GET     /api/imagegen/local/state               ApiImagegenController.state

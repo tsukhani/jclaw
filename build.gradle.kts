@@ -211,6 +211,20 @@ sonar {
 
 repositories {
     mavenCentral()
+    // sherpa-onnx publishes its Java API + per-platform native jars only as
+    // GitHub release assets (no Maven Central presence) — expose the release
+    // download URL as an ivy repo so the jars resolve and cache like any
+    // other dependency. exclusiveContent keeps every other lookup off it.
+    exclusiveContent {
+        forRepository {
+            ivy {
+                url = uri("https://github.com/k2-fsa/sherpa-onnx/releases/download")
+                patternLayout { artifact("v[revision]/[artifact]-v[revision].[ext]") }
+                metadataSources { artifact() }
+            }
+        }
+        filter { includeGroup("com.k2fsa.sherpa.onnx") }
+    }
 }
 
 dependencies {
@@ -388,6 +402,17 @@ dependencies {
     // bundles native libs for every developer-laptop platform (mac arm64/x64,
     // linux x64, win x64) so there's no per-platform install dance.
     implementation("io.github.givimad:whisper-jni:1.7.1")
+
+    // JCLAW-556: speaker diarization via sherpa-onnx (pyannote segmentation +
+    // wespeaker embeddings over onnxruntime, JNI bindings). The API jar's
+    // LibraryUtils self-extracts the JNI dylib/so from whichever native jar is
+    // on the classpath (resource path sherpa-onnx/native/{os-arch}/), so the
+    // per-platform native jars below need no java.library.path plumbing —
+    // same zero-setup posture as whisper-jni. Resolved from the GitHub-releases
+    // ivy repo declared above.
+    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx:1.13.3")
+    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx-native-lib-osx-aarch64:1.13.3") // dev Macs
+    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx-native-lib-linux-x64:1.13.3")   // CI / server
 
     // WebP decode for image captioning: caption models vary in format support — local Ollama vision
     // models reject WebP ("Failed to load image"). This TwelveMonkeys ImageIO plugin auto-registers a

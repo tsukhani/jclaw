@@ -25,6 +25,8 @@ public final class WhisperLocalTranscriptionService implements TranscriptionServ
         var modelId = ConfigService.get("transcription.localModel");
         var model = WhisperModel.byId(modelId).orElse(WhisperModel.DEFAULT);
         var path = AgentService.workspaceRoot().resolve(attachment.storagePath);
-        return WhisperJniTranscriber.transcribe(path, model);
+        // Blank/null → auto-detect on multilingual models (JCLAW-556); before
+        // this key existed, multilingual models were silently decoded as "en".
+        return WhisperJniTranscriber.transcribe(path, model, ConfigService.get("transcription.language"));
     }
 }

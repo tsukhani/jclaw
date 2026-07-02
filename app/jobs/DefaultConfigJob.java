@@ -79,6 +79,13 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("transcription.provider", "whisper-local");
         seedIfAbsent("transcription.localModel",
                 WhisperModel.DEFAULT.id());
+        // JCLAW-556: blank = auto-detect on multilingual models, "en" on
+        // English-only models; set an ISO 639-1 code to force a language.
+        seedIfAbsent("transcription.language", "");
+        // JCLAW-556: sherpa-onnx clustering threshold. 0.3 was the value the
+        // spike found separating similar same-gender voices without
+        // oversplitting; raise toward 0.5 if distinct voices get split.
+        seedIfAbsent("transcription.diarization.threshold", "0.3");
     }
 
     /**
