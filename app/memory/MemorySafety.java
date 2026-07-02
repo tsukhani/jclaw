@@ -3,18 +3,29 @@ package memory;
 import java.util.regex.Pattern;
 
 /**
- * Deterministic secret detection for the memory capture path (JCLAW-535). The
- * extraction prompt already asks the model not to capture secrets, but a prompt
- * is guidance, not a guarantee — this is the fail-safe deterministic guard. A
- * candidate memory that trips any high-confidence secret pattern is dropped
+ * Deterministic content guards for the memory capture path. The extraction
+ * prompt already asks the model not to capture secrets or instructions, but a
+ * prompt is guidance, not a guarantee — these are the fail-safe deterministic
+ * guards. A candidate memory that trips any high-confidence pattern is dropped
  * wholesale: losing one memory is far cheaper than persisting a live credential
- * to the long-term store.
+ * or a hostile directive to the long-term store.
  *
- * <p>Patterns are deliberately narrow (unambiguous key prefixes, bearer/JWT
- * tokens, PEM private-key blocks, explicit {@code key=value} assignments, and
- * Luhn-valid card numbers) so ordinary facts aren't dropped. Free-form mentions
- * of the word "password" are intentionally NOT matched — only an explicit
- * assignment is.
+ * <p>Two independent guards:
+ *
+ * <ul>
+ *   <li>{@link #looksLikeSecret} (JCLAW-535) — credentials must never reach the
+ *       store. Patterns are deliberately narrow (unambiguous key prefixes,
+ *       bearer/JWT tokens, PEM private-key blocks, explicit {@code key=value}
+ *       assignments, and Luhn-valid card numbers) so ordinary facts aren't
+ *       dropped. Free-form mentions of the word "password" are intentionally
+ *       NOT matched — only an explicit assignment is.
+ *   <li>{@link #looksLikeInjection} (JCLAW-553) — memory text is re-injected
+ *       into every future system prompt, so a hostile instruction stored as a
+ *       "fact" becomes persistent prompt injection. The recall-side framing
+ *       ("stored reference data, not instructions") is the soft defense; this
+ *       is the hard one: injection phrasing, exfiltration payloads, SSH
+ *       persistence, and invisible-unicode smuggling are refused at write time.
+ * </ul>
  */
 public final class MemorySafety {
 
@@ -84,5 +95,50 @@ public final class MemorySafety {
             dbl = !dbl;
         }
         return sum % 10 == 0;
+    }
+
+    /**
+     * Injection/exfiltration shapes, adapted from the Hermes memory content
+     * scanner. Each pattern targets phrasing that has no business in a stored
+     * fact about the user; ordinary preferences and biography never match.
+     */
+    private static final Pattern[] INJECTION_PATTERNS = {
+            // prompt-injection phrasing ("ignore all previous instructions", "ignore prior instructions")
+            Pattern.compile("(?i)\\bignore\\s+(?:previous|all|above|prior|any)(?:\\s+\\w+)?\\s+instructions\\b"),
+            Pattern.compile("(?i)\\bdisregard\\s+(?:your|all|any)\\s+(?:instructions|rules|guidelines)\\b"),
+            Pattern.compile("(?i)\\byou\\s+are\\s+now\\s"),
+            Pattern.compile("(?i)\\bsystem\\s+prompt\\s+override\\b"),
+            Pattern.compile("(?i)\\bdo\\s+not\\s+tell\\s+the\\s+user\\b"),
+            Pattern.compile("(?i)\\bact\\s+as\\s+(?:if|though)\\s+you\\s+(?:have\\s+no|don'?t\\s+have)\\s+(?:restrictions|limits|rules)\\b"),
+            // exfiltration: fetch tools shipping a credential variable off-box
+            Pattern.compile("(?i)\\b(?:curl|wget)\\s[^\\n]*\\$\\{?\\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)"),
+            // reading credential files
+            Pattern.compile("(?i)\\bcat\\s[^\\n]*(?:\\.env\\b|credentials|\\.netrc\\b|\\.pgpass\\b|\\.npmrc\\b|\\.pypirc\\b)"),
+            // SSH persistence / key access
+            Pattern.compile("(?i)authorized_keys"),
+            Pattern.compile("(?i)(?:\\$HOME|~)/\\.ssh\\b"),
+    };
+
+    /**
+     * Zero-width characters and bidi override/isolate controls — invisible in
+     * rendered text, so their only plausible role in a memory is smuggling
+     * content past a human reviewer (Trojan-Source-style).
+     */
+    private static final Pattern INVISIBLE_CHARS =
+            Pattern.compile("[\\u200B\\u200C\\u200D\\u2060\\uFEFF\\u202A-\\u202E\\u2066-\\u2069]");
+
+    /**
+     * @return {@code true} when the text looks like a prompt-injection or
+     *         exfiltration payload (hostile directive phrasing, credential
+     *         exfil/read commands, SSH persistence, or invisible unicode) and
+     *         must not be persisted to memory.
+     */
+    public static boolean looksLikeInjection(String text) {
+        if (text == null || text.isBlank()) return false;
+        if (INVISIBLE_CHARS.matcher(text).find()) return true;
+        for (var p : INJECTION_PATTERNS) {
+            if (p.matcher(text).find()) return true;
+        }
+        return false;
     }
 }

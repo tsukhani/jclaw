@@ -207,12 +207,22 @@ public final class MemoryAutoCapture {
 
         // JCLAW-535: deterministic secret scrub — never persist credentials to
         // long-term memory, even if the extractor ignores the prompt's guidance.
-        final List<Candidate> candidates =
+        final List<Candidate> noSecrets =
                 deduped.stream().filter(c -> !MemorySafety.looksLikeSecret(c.text())).toList();
-        int scrubbed = deduped.size() - candidates.size();
+        int scrubbed = deduped.size() - noSecrets.size();
         if (scrubbed > 0) {
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
                     "Dropped %d candidate memory(ies) containing apparent secrets".formatted(scrubbed));
+        }
+
+        // JCLAW-553: stored memories are re-injected into every future system
+        // prompt, so injection/exfiltration payloads are refused at write time.
+        final List<Candidate> candidates =
+                noSecrets.stream().filter(c -> !MemorySafety.looksLikeInjection(c.text())).toList();
+        int blocked = noSecrets.size() - candidates.size();
+        if (blocked > 0) {
+            EventLogger.warn(EVENT_CATEGORY, agentName, null,
+                    "Dropped %d candidate memory(ies) containing apparent injection payloads".formatted(blocked));
         }
 
         if (candidates.isEmpty()) {
