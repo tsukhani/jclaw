@@ -152,10 +152,18 @@ class WhatsAppChannelTest extends UnitTest {
         binding.phoneNumberId = "1550009";
         binding.accessToken = "tok";
         var ch = WhatsAppChannel.forBinding(binding);
+        EventLogger.clear();
         assertFalse(ch.sendReaction("15550001111", null, "👍").ok(),
                 "null target message id → FAILED");
         assertFalse(ch.sendReaction("15550001111", "   ", "👍").ok(),
                 "blank target message id → FAILED");
+        EventLogger.flush();
+        // The guard's own log line distinguishes "guard fired" from "guard
+        // deleted and a live graph.facebook.com call failed" — both would
+        // otherwise surface as the same FAILED result.
+        assertEquals(2L, EventLog.count("category = ?1 AND message LIKE ?2",
+                        "channel", "%sendReaction skipped: no target message id%"),
+                "each guarded call must log the skip, proving no wire attempt was made");
     }
 
     // ── 24h customer-service window gating (JCLAW-447) ──

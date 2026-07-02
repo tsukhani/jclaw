@@ -221,11 +221,19 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
     void downloadAllCloudApiWithoutATokenStagesNothing() {
         var binding = cloudBinding(null);
         var msg = msgWithMedia(List.of(media("MEDIA-X", "image/jpeg", null)));
+        services.EventLogger.clear();
         assertTrue(WhatsAppMediaDownloader.downloadAll(binding, msg, "wa-dl-notoken").isEmpty(),
                 "a binding with no access token must skip every part (no way to authenticate)");
         binding.accessToken = "   ";
         assertTrue(WhatsAppMediaDownloader.downloadAll(binding, msg, "wa-dl-notoken").isEmpty(),
                 "a blank token is as unusable as a missing one");
+        services.EventLogger.flush();
+        // The guard's log line distinguishes "guard fired before any HTTP"
+        // from "guard deleted and a live graph.facebook.com call failed" —
+        // downloadAll returns empty either way, so the result alone can't.
+        assertEquals(2L, models.EventLog.count("category = ?1 AND message LIKE ?2",
+                        "channel", "%binding has no access token%"),
+                "each guarded call must log the skip, proving no wire attempt was made");
     }
 
     @Test

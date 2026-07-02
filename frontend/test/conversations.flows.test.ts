@@ -310,16 +310,18 @@ describe('Conversations — quick preview peek panel', () => {
     await flushPromises()
     await nextTick()
 
-    // PeekPanel teleports to <body> (Sheet). Title is the preview text.
-    const body = document.body.textContent ?? ''
-    expect(body).toContain('Hi there')
-    expect(body).toContain('hello from user')
-    expect(body).toContain('assistant says hi')
+    // PeekPanel teleports to <body> (Sheet). Scope to the sheet's own content:
+    // the background table row still renders 'Hi there'/'web'/'main', so a
+    // whole-body check would pass even with the panel's meta strip broken.
+    const panelText = document.body.querySelector('[data-slot="sheet-content"]')?.textContent ?? ''
+    expect(panelText).toContain('Hi there')
+    expect(panelText).toContain('hello from user')
+    expect(panelText).toContain('assistant says hi')
     // Empty tool-message content falls back to the placeholder.
-    expect(body).toContain('(tool call)')
+    expect(panelText).toContain('(tool call)')
     // Meta strip shows channel/agent/peer/count.
-    expect(body).toContain('web')
-    expect(body).toContain('main')
+    expect(panelText).toContain('web')
+    expect(panelText).toContain('main')
 
     // No navigation happened — the preview button stops propagation so the
     // row-click handler (which would navigate to /chat) never fires.

@@ -209,7 +209,13 @@ public class WhatsAppChannel implements Channel {
     public SendResult sendReaction(String peerId, String targetMessageId, String emoji) {
         var config = effectiveConfig();
         if (config == null) return SendResult.FAILED;
-        if (targetMessageId == null || targetMessageId.isBlank()) return SendResult.FAILED;
+        if (targetMessageId == null || targetMessageId.isBlank()) {
+            // Logged so a guard-fired FAILED is diagnosable (and distinguishable
+            // from a wire failure — both surface as FAILED to the caller).
+            EventLogger.warn(CHANNEL, null, WHATSAPP,
+                    "sendReaction skipped: no target message id for %s".formatted(peerId));
+            return SendResult.FAILED;
+        }
         var body = gson.toJson(Map.of(
                 MESSAGING_PRODUCT, WHATSAPP,
                 "to", peerId,

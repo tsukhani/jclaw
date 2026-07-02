@@ -336,10 +336,11 @@ describe('ChatCostSection — Turns sort + per-agent chart', () => {
     await wrapper.findAll('button').find(b => b.attributes('title') === 'Bar chart view')!.trigger('click')
     await flushPromises()
 
-    const text = wrapper.text()
-    expect(text).toContain('main')
-    expect(text).toContain('helper')
-    expect(text).toContain('agent #99')
+    // Scope to the chart's bar labels: the agent-filter <select> in the header
+    // also renders 'main'/'helper', so whole-component text would pass even if
+    // the chart's agentLabel() lookup regressed to the id fallback.
+    const barLabels = wrapper.findAll('div.font-mono.text-fg-primary.truncate').map(el => el.text())
+    expect(barLabels).toEqual(expect.arrayContaining(['main', 'helper', 'agent #99']))
 
     // Clicking the table tab restores the per-model table.
     await wrapper.findAll('button').find(b => b.attributes('title') === 'Table view')!.trigger('click')
