@@ -29,7 +29,9 @@ load — a per-request subprocess would re-pay it every time, and a model server
 | Method | Path        | Body / Response |
 |--------|-------------|-----------------|
 | GET    | `/health`   | `{status, device, dtype, model, weights_present, loaded}` |
+| GET    | `/capability` | `{kind, gpu, freeVramGb, totalVramGb, runnable, tier, reason}` — host GPU/VRAM verdict for the Settings gate (also one-shot via `--probe`) |
 | POST   | `/generate` | `{prompt, width?, height?, steps?, seed?}` → `image/png` bytes; `409` if weights absent |
+| GET    | `/progress` | `{percent}` — live 0–100 step progress, `null` when idle (polled for the chat progress bar) |
 | POST   | `/pull`     | `application/x-ndjson` progress lines, then `{"status":"done"}` |
 
 Device/dtype is picked here (the JVM can't see CUDA/MPS): `mps`→fp16

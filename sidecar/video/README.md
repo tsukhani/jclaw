@@ -8,7 +8,8 @@ Async local video generation. One model per process (`--model`), one job at a ti
 Protocol (SV-3 / JCLAW-512): `GET /health`, `GET /capability`, `POST /jobs` -> 202 {job_id},
 `GET /jobs/<id>` -> {state,percent}, `GET /jobs/<id>/result` -> mp4, `POST /pull` -> ndjson progress.
 
-Models: `ltx`, `wan-5b`, `wan-14b`. WAN is NVIDIA-only (SV-2). On Linux+NVIDIA use the CUDA torch
+Models: `ltx` (plus `ltx-q8`/`ltx-bf16` on Apple Silicon, `ltx-fp8`/`ltx-fp8-offload` on CUDA — the
+tier spectrum below), `wan-5b`, `wan-14b`. WAN is NVIDIA-only (SV-2). On Linux+NVIDIA use the CUDA torch
 wheel: `UV_TORCH_BACKEND=cu124 uv run serve.py ...`.
 
 The `ltx` engine is **dual-runtime** (JCLAW-233):
