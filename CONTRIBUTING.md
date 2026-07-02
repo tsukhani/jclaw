@@ -9,7 +9,7 @@ your code.
 
 This is a deliberate legal decision, not gatekeeping for its own sake. JClaw
 is dual-licensed (noncommercial under
-[PolyForm Noncommercial 1.0.0](LICENSE), commercial licenses from
+[PolyForm Noncommercial 1.0.0](LICENSE.md), commercial licenses from
 [Abundent Sdn Bhd](COMMERCIAL-LICENSE.md)). That model depends on Abundent holding
 unambiguous rights to every line in the repository. Merging external code,
 even one small patch, would introduce third-party copyright into the codebase
@@ -68,7 +68,7 @@ and release channel.
 
 ```java
 // Copyright Abundent Sdn Bhd (https://abundent.com)
-// Dual-licensed: PolyForm Noncommercial 1.0.0 (see LICENSE)
+// Dual-licensed: PolyForm Noncommercial 1.0.0 (see LICENSE.md)
 // or a commercial license from Abundent (see COMMERCIAL-LICENSE.md).
 ```
 

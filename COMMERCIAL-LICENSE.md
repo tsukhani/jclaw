@@ -4,7 +4,7 @@ JClaw is **source-available** software, dual-licensed by Abundent Sdn Bhd:
 
 | Use | License |
 | --- | --- |
-| Noncommercial (personal, academic, research, evaluation, registered non-profit) | Free, under the [PolyForm Noncommercial License 1.0.0](LICENSE) |
+| Noncommercial (personal, academic, research, evaluation, registered non-profit) | Free, under the [PolyForm Noncommercial License 1.0.0](LICENSE.md) |
 | **Commercial use of any kind** | Requires a commercial license from Abundent Sdn Bhd |
 
 The boundary is deliberately simple: **if your use is commercial, you need a
