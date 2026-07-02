@@ -216,13 +216,35 @@ pipeline {
                     // Both assets live on the same release, so the 'Cleanup Old
                     // Releases' stage (keep last 5) prunes them together — the
                     // bundle gets the same release retention as the dist.
+                    //
+                    // Release notes come from the release commit body: /deploy
+                    // writes a human-authored summary paragraph into every
+                    // "Release vX.Y.Z" commit, so we surface that on the
+                    // release page. --generate-notes is only the fallback —
+                    // it builds notes from merged PRs, and this repo pushes
+                    // straight to main with no PRs, so on its own it produces
+                    // little more than a "Full Changelog" compare link. The
+                    // subject-line guard keeps us from pasting an unrelated
+                    // commit's body if a RELEASE build is ever run on a
+                    // non-release HEAD.
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release delete ${version} --repo tsukhani/jclaw --yes || true
+
+                            : > release-notes.md
+                            if [ "\$(git log -1 --format=%s HEAD)" = "Release ${version}" ]; then
+                                git log -1 --format=%b HEAD | sed '/^Co-Authored-By:/d' > release-notes.md
+                            fi
+                            if grep -q '[^[:space:]]' release-notes.md; then
+                                NOTES_ARG='--notes-file release-notes.md'
+                            else
+                                NOTES_ARG='--generate-notes'
+                            fi
+
                             gh release create ${version} dist/jclaw.zip dist/jclaw-bundle.zip \
                                 --repo tsukhani/jclaw \
                                 --title "JClaw ${version}" \
-                                --generate-notes
+                                \$NOTES_ARG
                         """
 
                         // Multi-arch Docker image to GitHub Container Registry.
