@@ -340,7 +340,6 @@ public final class TelegramInboundParser {
         return List.copyOf(out);
     }
 
-    /** Scan one text/entity pair for a mention, text_mention, or bot_command suffix addressing the bot. */
     /**
      * Defensive fetch of the SDK's entity list. telegrambots'
      * {@code Message.getEntities}/{@code getCaptionEntities} eagerly run
@@ -355,10 +354,11 @@ public final class TelegramInboundParser {
         try {
             return getter.get();
         } catch (IndexOutOfBoundsException _) {
-            return null;
+            return List.of();
         }
     }
 
+    /** Scan each text/entity pair for a mention, text_mention, or bot_command suffix addressing the bot. */
     private static boolean entitiesAddressBot(String body, List<MessageEntity> entities,
                                               String botUsername, Long botUserId) {
         if (body == null || entities == null) return false;
