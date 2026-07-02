@@ -124,6 +124,17 @@ class DiarizeAudioToolTest extends UnitTest {
     }
 
     @Test
+    void defaultResolution_skipsGeneratedAudio() {
+        seedAttachment(MessageAttachment.KIND_AUDIO, "aud-user", "meeting.ogg");
+        var lineup = seedAttachment(MessageAttachment.KIND_AUDIO, "aud-lineup", "lineup.wav");
+        lineup.generated = true; // the extract action's own playback file
+        lineup.save();
+        var out = ToolContext.withConversation(conv.id, () -> tool.execute("{}", agent));
+        assertTrue(out.contains("aud-user"),
+                "the user's upload must outrank a newer generated lineup: " + out);
+    }
+
+    @Test
     void enroll_requiresSpeakerName() {
         var att = seedAttachmentWithBytes("aud-enr-1", "erin.ogg");
         var out = ToolContext.withConversation(conv.id, () -> tool.execute(
@@ -168,6 +179,66 @@ class DiarizeAudioToolTest extends UnitTest {
         var out = ToolContext.withConversation(conv.id,
                 () -> tool.execute("{\"action\":\"transcode\"}", agent));
         assertTrue(out.contains("unknown action 'transcode'"), out);
+    }
+
+    @Test
+    void enrollFromStaging_filesClipUnderName() throws Exception {
+        var voicesRoot = Files.createTempDirectory("staging-test-");
+        SpeakerNamer.setRootForTest(voicesRoot);
+        try {
+            var staging = voicesRoot.resolve(".staging").resolve(String.valueOf(conv.id));
+            Files.createDirectories(staging);
+            Files.write(staging.resolve("voice-2.wav"), new byte[]{1, 2, 3, 4});
+
+            var out = ToolContext.withConversation(conv.id, () -> tool.execute(
+                    "{\"action\":\"enroll_speaker\",\"clip_label\":\"voice-2\",\"speaker_name\":\"Erin\"}",
+                    agent));
+
+            assertTrue(out.contains("Enrolled voice reference for \"Erin\""), out);
+            assertTrue(Files.isRegularFile(
+                            voicesRoot.resolve("Erin").resolve(conv.id + "-voice-2.wav")),
+                    "staged clip must be filed under the name");
+        } finally {
+            SpeakerNamer.resetForTest();
+            deleteRecursive(voicesRoot);
+        }
+    }
+
+    @Test
+    void enrollFromStaging_rejectsNonLabelStrings() throws Exception {
+        var voicesRoot = Files.createTempDirectory("staging-test-");
+        SpeakerNamer.setRootForTest(voicesRoot);
+        try {
+            for (var bad : new String[]{"../../etc/passwd", "voice-", "clip-1", "voice-1x"}) {
+                var out = ToolContext.withConversation(conv.id, () -> tool.execute(
+                        "{\"action\":\"enroll_speaker\",\"clip_label\":\"" + bad
+                                + "\",\"speaker_name\":\"Erin\"}", agent));
+                assertTrue(out.contains("not a clip label"), bad + " must be rejected: " + out);
+            }
+        } finally {
+            SpeakerNamer.resetForTest();
+            deleteRecursive(voicesRoot);
+        }
+    }
+
+    @Test
+    void enrollFromStaging_missingClip_andMissingScope_returnErrors() throws Exception {
+        var voicesRoot = Files.createTempDirectory("staging-test-");
+        SpeakerNamer.setRootForTest(voicesRoot);
+        try {
+            var noScope = tool.execute(
+                    "{\"action\":\"enroll_speaker\",\"clip_label\":\"voice-1\",\"speaker_name\":\"Erin\"}",
+                    agent);
+            assertTrue(noScope.contains("no conversation in scope"), noScope);
+
+            var noClip = ToolContext.withConversation(conv.id, () -> tool.execute(
+                    "{\"action\":\"enroll_speaker\",\"clip_label\":\"voice-1\",\"speaker_name\":\"Erin\"}",
+                    agent));
+            assertTrue(noClip.contains("no staged clip 'voice-1'"), noClip);
+        } finally {
+            SpeakerNamer.resetForTest();
+            deleteRecursive(voicesRoot);
+        }
     }
 
     private MessageAttachment seedAttachmentWithBytes(String uuid, String filename) {

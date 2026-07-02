@@ -1,5 +1,6 @@
 package tools;
 
+import agents.GeneratedAttachment;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
@@ -11,6 +12,7 @@ import services.ConfigService;
 import services.Tx;
 import services.transcription.DiarizedTranscript;
 import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerClipExtractor;
 import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
@@ -18,9 +20,11 @@ import services.transcription.WhisperModel;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * {@code diarize_audio} (JCLAW-559): on-demand speaker identification for an
@@ -46,9 +50,20 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final String ARG_NUM_SPEAKERS = "num_speakers";
     private static final String ARG_LANGUAGE = "language";
     private static final String ARG_SPEAKER_NAME = "speaker_name";
+    private static final String ARG_CLIP_LABEL = "clip_label";
 
     private static final String ACTION_DIARIZE = "diarize";
     private static final String ACTION_ENROLL = "enroll_speaker";
+    private static final String ACTION_EXTRACT = "extract_speaker_clips";
+    private static final Set<String> ACTIONS = Set.of(ACTION_DIARIZE, ACTION_ENROLL, ACTION_EXTRACT);
+
+    /** Clip labels are tool-assigned ({@code voice-1}…) — anything else in
+     *  {@code clip_label} is rejected before it can touch a path. */
+    private static final java.util.regex.Pattern CLIP_LABEL_PATTERN =
+            java.util.regex.Pattern.compile("^voice-\\d{1,3}$");
+
+    private static final double CLIP_TARGET_SECONDS = 5.0;
+    private static final double CLIP_MIN_SECONDS = 1.0;
 
     /** Display names become enrollment folder names — letters/digits/space
      *  and a few name punctuation marks, no separators, no leading dot. */
@@ -67,13 +82,19 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 speakers in a recording; ordinary voice notes are already transcribed automatically. \
                 Slow: expect roughly a tenth of the recording's duration. Returns a transcript with \
                 one line per turn, labeled with enrolled speaker names where the voice matches, or \
-                SPEAKER_00-style tags otherwise. Action 'enroll_speaker' saves the recording as a \
-                voice reference for 'speaker_name', so future diarizations label that voice by name — \
-                use it when the user asks to remember/enroll a voice or store an audio file under the \
-                speaker-voices folder. Both actions default to the most recent audio attachment in \
-                this conversation; pass 'attachment_uuid' to pick a specific one. For diarize, set \
-                'num_speakers' when the user states the exact count and 'language' (ISO 639-1, e.g. \
-                'ms') to force the transcription language.""";
+                SPEAKER_00-style tags otherwise. Action 'enroll_speaker' saves a voice reference for \
+                'speaker_name', so future diarizations label that voice by name — use it when the \
+                user asks to remember/enroll a voice or store an audio file under the speaker-voices \
+                folder; it enrolls either the whole attachment or, with 'clip_label', one clip staged \
+                by extract_speaker_clips. Action 'extract_speaker_clips' cuts a short sample of every \
+                speaker in the recording and attaches one playback file (the voices in order, \
+                separated by silence) — use it when the user wants to enroll the people in a \
+                recording without separate per-person samples: ask the user who each voice is, then \
+                enroll each answer via enroll_speaker with its clip_label. Attachment-based actions \
+                default to the most recent audio attachment in this conversation; pass \
+                'attachment_uuid' to pick a specific one. For diarize/extract, set 'num_speakers' \
+                when the user states the exact count; for diarize, 'language' (ISO 639-1, e.g. 'ms') \
+                forces the transcription language.""";
     }
 
     @Override
@@ -87,7 +108,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
                         ARG_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of(ACTION_DIARIZE, ACTION_ENROLL),
+                                SchemaKeys.ENUM, List.of(ACTION_DIARIZE, ACTION_ENROLL, ACTION_EXTRACT),
                                 SchemaKeys.DESCRIPTION,
                                 "What to do with the recording. Defaults to 'diarize'."),
                         ARG_UUID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
@@ -105,7 +126,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                         ARG_SPEAKER_NAME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
                                 "enroll_speaker only: the person's display name — future diarized "
-                                        + "transcripts label this voice with it.")
+                                        + "transcripts label this voice with it."),
+                        ARG_CLIP_LABEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION,
+                                "enroll_speaker only: enroll a clip staged by extract_speaker_clips "
+                                        + "(e.g. 'voice-2') instead of a whole attachment.")
                 ),
                 SchemaKeys.REQUIRED, List.of()
         );
@@ -116,12 +141,34 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     @Override
     public String execute(String argsJson, Agent agent) {
+        // Text-only fallback; the dispatcher uses executeRich (which also
+        // carries the extract action's playback file). One code path.
+        return executeRich(argsJson, agent).text();
+    }
+
+    @Override
+    public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
         JsonObject args;
         try {
             args = JsonParser.parseString(argsJson == null || argsJson.isBlank() ? "{}" : argsJson)
                     .getAsJsonObject();
         } catch (RuntimeException _) {
-            return "Error: invalid arguments for " + TOOL_NAME + ".";
+            return ToolRegistry.ToolResult.text("Error: invalid arguments for " + TOOL_NAME + ".");
+        }
+
+        var action = optString(args, ARG_ACTION);
+        if (action == null || action.isBlank()) action = ACTION_DIARIZE;
+        if (!ACTIONS.contains(action)) {
+            return ToolRegistry.ToolResult.text("Error: unknown action '%s' (expected %s).".formatted(
+                    action, String.join(", ", ACTIONS)));
+        }
+
+        // Staged-clip enrollment references a clip by label, not an
+        // attachment — no attachment resolution on that path.
+        var clipLabel = optString(args, ARG_CLIP_LABEL);
+        if (ACTION_ENROLL.equals(action) && clipLabel != null && !clipLabel.isBlank()) {
+            return ToolRegistry.ToolResult.text(
+                    enrollFromStaging(clipLabel, optString(args, ARG_SPEAKER_NAME)));
         }
 
         // Tool dispatch runs on a bare virtual thread with no JPA context
@@ -130,31 +177,34 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         // lookup runs inside it; the minutes of native inference below must
         // never hold a transaction open.
         var attachment = Tx.run(() -> resolveAttachment(optString(args, ARG_UUID)));
-        if (attachment.error() != null) return attachment.error();
+        if (attachment.error() != null) return ToolRegistry.ToolResult.text(attachment.error());
         var att = attachment.value();
 
         var path = AgentService.workspaceRoot().resolve(att.storagePath);
         if (!Files.isRegularFile(path)) {
-            return "Error: the audio file for attachment %s is missing from storage.".formatted(att.uuid);
+            return ToolRegistry.ToolResult.text(
+                    "Error: the audio file for attachment %s is missing from storage.".formatted(att.uuid));
         }
 
-        var action = optString(args, ARG_ACTION);
+        Integer numSpeakers = optInt(args, ARG_NUM_SPEAKERS);
         if (ACTION_ENROLL.equals(action)) {
-            return enrollSpeaker(path, att, optString(args, ARG_SPEAKER_NAME));
+            return ToolRegistry.ToolResult.text(
+                    enrollSpeaker(path, att, optString(args, ARG_SPEAKER_NAME)));
         }
-        if (action != null && !ACTION_DIARIZE.equals(action)) {
-            return "Error: unknown action '%s' (expected %s or %s).".formatted(
-                    action, ACTION_DIARIZE, ACTION_ENROLL);
+        if (ACTION_EXTRACT.equals(action)) {
+            return extractSpeakerClips(path, att, numSpeakers);
         }
+        return ToolRegistry.ToolResult.text(
+                diarize(path, att, numSpeakers, optString(args, ARG_LANGUAGE)));
+    }
 
+    private static String diarize(Path path, MessageAttachment att, Integer numSpeakers, String language) {
         var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                 .orElse(WhisperModel.DEFAULT);
         float clusterThreshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
-        Integer numSpeakers = optInt(args, ARG_NUM_SPEAKERS);
 
         try {
-            var transcript = WhisperJniTranscriber.transcribeSegments(
-                    path, model, optString(args, ARG_LANGUAGE));
+            var transcript = WhisperJniTranscriber.transcribeSegments(path, model, language);
             var speakers = SherpaDiarizer.diarize(path, clusterThreshold,
                     numSpeakers == null ? -1 : numSpeakers);
             var names = SpeakerNamer.enrollmentPresent()
@@ -174,6 +224,101 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     }
 
     /**
+     * extract_speaker_clips (JCLAW-562): cut up to {@value #CLIP_TARGET_SECONDS}
+     * seconds of every diarized speaker's clearest speech, stage the clips for
+     * label-based enrollment, and return ONE playback WAV (the voices in label
+     * order, separated by silence) as a generated attachment — the operator
+     * listens, names the voices, and the model enrolls each via
+     * {@code enroll_speaker + clip_label}. A single combined file (rather than
+     * one attachment per clip) because a tool result carries exactly one
+     * generated attachment through the commit path.
+     */
+    private static ToolRegistry.ToolResult extractSpeakerClips(
+            Path path, MessageAttachment att, Integer numSpeakers) {
+        var conversationId = ToolContext.conversationId(); // non-null: resolution required scope
+        float clusterThreshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
+        try {
+            var speakers = SherpaDiarizer.diarize(path, clusterThreshold,
+                    numSpeakers == null ? -1 : numSpeakers);
+            var clips = SpeakerClipExtractor.extract(path, speakers, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS);
+            if (clips.isEmpty()) {
+                return ToolRegistry.ToolResult.text(
+                        "No speaker in %s has a continuous speech segment of at least %.0f second(s) — "
+                                + "cannot extract usable voice clips.".formatted(att.originalFilename, CLIP_MIN_SECONDS));
+            }
+
+            // Stage per-clip files for the enrollment follow-up. One staging
+            // dir per conversation, replaced wholesale on every extraction so
+            // labels always refer to the latest lineup. Dot-prefixed → the
+            // enrollment scanner never mistakes staged clips for enrollment.
+            var staging = stagingDir(conversationId);
+            deleteRecursive(staging);
+            Files.createDirectories(staging);
+            for (var clip : clips) {
+                Files.write(staging.resolve(clip.label() + ".wav"),
+                        SpeakerClipExtractor.toWavPcm16(clip.samples()));
+            }
+
+            var lineup = new StringBuilder();
+            double offset = 0;
+            for (var clip : clips) {
+                lineup.append("\n- %s: plays at %d:%04.1f (%.1fs, taken from %.1fs into the recording)"
+                        .formatted(clip.label(), (int) (offset / 60), offset % 60,
+                                clip.duration(), clip.start()));
+                offset += clip.duration() + 1.0;
+            }
+            var meta = new JsonObject();
+            meta.addProperty("source", att.originalFilename);
+            meta.addProperty("clips", clips.size());
+            var text = ("Extracted %d voice clip(s) from %s. A single playback file is attached and "
+                    + "already shown to the user (do not re-embed or link it) — the voices play in "
+                    + "order, separated by one second of silence:%s\n"
+                    + "Ask the user to listen and say who each voice is. Then enroll every voice they "
+                    + "identify by calling this tool with action=%s, clip_label=<label>, "
+                    + "speaker_name=<their name>. Skip voices the user does not identify.")
+                    .formatted(clips.size(), att.originalFilename, lineup, ACTION_ENROLL);
+            return ToolRegistry.ToolResult.withImage(text, null,
+                    new GeneratedAttachment(SpeakerClipExtractor.montageWav(clips, 1.0),
+                            "audio/wav", meta.toString()));
+        } catch (TranscriptionException e) {
+            return ToolRegistry.ToolResult.text("Speaker clip extraction failed: " + e.getMessage());
+        } catch (IOException e) {
+            return ToolRegistry.ToolResult.text("Error: failed to stage voice clips: " + e.getMessage());
+        }
+    }
+
+    /** enroll_speaker with clip_label (JCLAW-562): file a clip staged by
+     *  extract_speaker_clips under the given name. */
+    private static String enrollFromStaging(String label, String name) {
+        var conversationId = ToolContext.conversationId();
+        if (conversationId == null) {
+            return "Error: no conversation in scope — staged clips belong to a chat conversation.";
+        }
+        if (!CLIP_LABEL_PATTERN.matcher(label.strip()).matches()) {
+            return "Error: '%s' is not a clip label (expected voice-N from extract_speaker_clips)."
+                    .formatted(label);
+        }
+        var clip = stagingDir(conversationId).resolve(label.strip() + ".wav");
+        if (!Files.isRegularFile(clip)) {
+            return "Error: no staged clip '%s' in this conversation — run extract_speaker_clips first."
+                    .formatted(label.strip());
+        }
+        return storeEnrollment(clip, conversationId + "-" + label.strip() + ".wav", name);
+    }
+
+    private static Path stagingDir(Long conversationId) {
+        return SpeakerNamer.enrollmentRoot().resolve(".staging").resolve(String.valueOf(conversationId));
+    }
+
+    private static void deleteRecursive(Path dir) throws IOException {
+        if (!Files.exists(dir)) return;
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException _) {} });
+        }
+    }
+
+    /**
      * enroll_speaker (JCLAW-561): copy the attachment into
      * {@code data/speaker-voices/{name}/} so {@link SpeakerNamer} labels this
      * voice by name in future diarizations. This is the sanctioned crossing
@@ -183,7 +328,19 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      * {@link #SPEAKER_NAME_PATTERN}, and the file leaf is regenerated from
      * the attachment uuid (never from user-controlled names).
      */
-    private static String enrollSpeaker(java.nio.file.Path source, MessageAttachment att, String name) {
+    private static String enrollSpeaker(Path source, MessageAttachment att, String name) {
+        var extension = att.originalFilename != null && att.originalFilename.lastIndexOf('.') > 0
+                ? att.originalFilename.substring(att.originalFilename.lastIndexOf('.'))
+                : ".wav";
+        if (!extension.matches("\\.[A-Za-z0-9]{1,8}")) extension = ".wav";
+        return storeEnrollment(source, att.uuid + extension, name);
+    }
+
+    /** Shared tail of both enrollment paths: name validation + the copy into
+     *  {@code data/speaker-voices/{name}/{destLeaf}}. {@code destLeaf} is
+     *  always tool-generated (attachment uuid / staged clip label), never a
+     *  user-controlled string. */
+    private static String storeEnrollment(Path source, String destLeaf, String name) {
         if (name == null || name.isBlank()) {
             return "Error: 'speaker_name' is required for enroll_speaker.";
         }
@@ -192,16 +349,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return ("Error: '%s' is not a valid speaker name — use letters, digits, spaces or "
                     + "-_'. (max 64 chars, must not start with a dot).").formatted(trimmed);
         }
-
-        var extension = att.originalFilename != null && att.originalFilename.lastIndexOf('.') > 0
-                ? att.originalFilename.substring(att.originalFilename.lastIndexOf('.'))
-                : ".wav";
-        if (!extension.matches("\\.[A-Za-z0-9]{1,8}")) extension = ".wav";
         try {
             var personDir = SpeakerNamer.enrollmentRoot().resolve(trimmed);
             Files.createDirectories(personDir);
-            var dest = personDir.resolve(att.uuid + extension);
-            Files.copy(source, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(source, personDir.resolve(destLeaf),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             long clips;
             try (var files = Files.list(personDir)) {
                 clips = files.filter(Files::isRegularFile)
@@ -246,8 +398,14 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return Resolved.of(att);
         }
 
+        // generated = false: tool-produced audio (the extract action's own
+        // voice-lineup file) must never become the implicit target — "most
+        // recent audio" means the user's upload (JCLAW-562 UAT finding: the
+        // lineup outranked the recording it was cut from). An explicit
+        // attachment_uuid can still address generated audio deliberately.
         MessageAttachment att = MessageAttachment.find(
-                "message.conversation.id = ?1 and kind = ?2 and deleted = false order by id desc",
+                "message.conversation.id = ?1 and kind = ?2 and deleted = false "
+                        + "and generated = false order by id desc",
                 conversationId, MessageAttachment.KIND_AUDIO).first();
         if (att == null) {
             return Resolved.fail("Error: this conversation has no audio attachments to diarize. "

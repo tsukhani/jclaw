@@ -219,6 +219,9 @@ public final class AttachmentService {
             case "image/jpeg" -> "jpg";
             case "image/webp" -> "webp";
             case "image/gif" -> "gif";
+            // JCLAW-562: the diarize_audio voice-lineup result rides the same
+            // generated-attachment path as images.
+            case "audio/wav" -> "wav";
             default -> "png";
         };
     }
