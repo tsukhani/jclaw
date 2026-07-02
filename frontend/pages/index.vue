@@ -310,10 +310,10 @@ onBeforeUnmount(() => {
         <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
           Conversations
         </div>
-        <div class="text-2xl font-semibold text-fg-strong">
+        <div class="text-2xl font-semibold text-fg-strong leading-none">
           {{ totalConversations.toLocaleString() }}
         </div>
-        <div class="text-xs text-fg-muted mt-1">
+        <div class="text-xs text-fg-muted mt-1.5">
           Total
         </div>
       </div>
@@ -321,10 +321,10 @@ onBeforeUnmount(() => {
         <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
           Channels
         </div>
-        <div class="text-2xl font-semibold text-fg-strong">
+        <div class="text-2xl font-semibold text-fg-strong leading-none">
           {{ channelCount }}
         </div>
-        <div class="text-xs text-fg-muted mt-1">
+        <div class="text-xs text-fg-muted mt-1.5">
           Active
         </div>
       </div>
