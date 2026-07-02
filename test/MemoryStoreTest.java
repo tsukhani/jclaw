@@ -240,4 +240,45 @@ class MemoryStoreTest extends UnitTest {
         assertEquals(0, removed);
         assertEquals(1, store.list(agentId("agent-keep")).size());
     }
+
+    @Test
+    void storeThrowsForUnknownNumericAgentId() {
+        // JCLAW-537: memories carry a real FK — a write against a missing agent
+        // is a programming error and must fail loudly, never persist an orphan.
+        var store = MemoryStoreFactory.get();
+        var ex = assertThrows(IllegalArgumentException.class,
+                () -> store.store("424242", "orphan memory", "fact"));
+        assertTrue(ex.getMessage().contains("424242"),
+                "the failing agent id must be named in the error");
+    }
+
+    @Test
+    void storeThrowsForNonNumericAgentId() {
+        var store = MemoryStoreFactory.get();
+        assertThrows(IllegalArgumentException.class,
+                () -> store.store("not-a-pk", "orphan memory", "fact"));
+    }
+
+    @Test
+    void storeThrowsForNullAgentId() {
+        var store = MemoryStoreFactory.get();
+        assertThrows(IllegalArgumentException.class,
+                () -> store.store(null, "orphan memory", "fact"));
+    }
+
+    @Test
+    void blankQuerySearchReturnsEmpty() {
+        var store = MemoryStoreFactory.get();
+        store.store(agentId("agent-blank"), "Something about cats", "fact");
+        assertTrue(store.search(agentId("agent-blank"), "   ", 10).isEmpty(),
+                "blank query must short-circuit to empty, not match everything");
+    }
+
+    @Test
+    void paginatedListReturnsEmptyForNonNumericAgentId() {
+        // Covers the pkOrNull guard in list(agentId, limit, offset).
+        var store = MemoryStoreFactory.get();
+        store.store(agentId("agent-guard"), "real row", "fact");
+        assertTrue(store.list("not-a-pk", 10, 0).isEmpty());
+    }
 }

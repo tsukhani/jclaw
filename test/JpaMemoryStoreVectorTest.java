@@ -23,10 +23,21 @@ class JpaMemoryStoreVectorTest extends UnitTest {
     private static final String BERLIN = "The user lives in Berlin and enjoys hiking";
     private static final String VIM = "Favourite editor is Vim with a dark theme";
     private static final String FINANCE = "Quarterly finance report is due in October";
+    /** Deliberately absent from the canned map — stores with NO vector doc. */
+    private static final String DEPLOY = "The deploy pipeline requires manual approval";
     /** Lexically matches NOTHING stored — only the KNN leg can recall via it. */
     private static final String NONSENSE_QUERY = "zebra quix flurble";
     /** Lexically overlaps the Berlin memory — exercises FTS + KNN fusion. */
     private static final String BERLIN_QUERY = "hiking in Berlin";
+    /** Lexically overlaps only DEPLOY; its vector is far from every memory. */
+    private static final String DEPLOY_QUERY = "deploy pipeline";
+    /**
+     * Lexically matches only the Vim memory while its vector points at
+     * Berlin/finance. Single token on purpose: the unit lane's FTS leg is the
+     * substring-LIKE fallback ({@code MessageSearch.activeDialect() == "none"}),
+     * so the query must be a literal substring of the stored text.
+     */
+    private static final String VIM_NEAR_BERLIN_QUERY = "Vim";
 
     /**
      * Canned 4-dim embeddings. Berlin-ish vectors cluster on the first axis,
@@ -39,7 +50,9 @@ class JpaMemoryStoreVectorTest extends UnitTest {
             VIM, new float[] {0f, 1f, 0f, 0f},
             FINANCE, new float[] {0.95f, 0.05f, 0f, 0f},
             NONSENSE_QUERY, new float[] {0.9f, 0.1f, 0f, 0f},
-            BERLIN_QUERY, new float[] {0.85f, 0.15f, 0f, 0f});
+            BERLIN_QUERY, new float[] {0.85f, 0.15f, 0f, 0f},
+            DEPLOY_QUERY, new float[] {0f, 0f, 1f, 0f},
+            VIM_NEAR_BERLIN_QUERY, new float[] {0.9f, 0.1f, 0f, 0f});
 
     private MemoryStore store;
 
@@ -143,5 +156,65 @@ class JpaMemoryStoreVectorTest extends UnitTest {
         assertNotNull(id);
         assertEquals(1, store.list(agent).size());
         assertFalse(store.search(agent, NONSENSE_QUERY, 5).isEmpty());
+    }
+
+    @Test
+    void storeWithoutEmbeddingDegradesToFtsOnlyRecall() {
+        // DEPLOY has no canned vector: the store must skip vector indexing
+        // (never fail the write) and, because no doc carries a vector, the KNN
+        // leg comes back empty at search time — recall must return the pure
+        // FTS ranking, relevance intact (JCLAW-532: top hit = 1.0).
+        var agent = agentId("vec-ftsonly");
+        var id = store.store(agent, DEPLOY, "fact", 0.6);
+        assertNotNull(id, "an unavailable embedding must never fail the write");
+
+        // DEPLOY_QUERY has a vector (the KNN leg runs) but only lexical overlap
+        // can produce the hit — there is nothing in the KNN graph.
+        var results = store.search(agent, DEPLOY_QUERY, 5);
+
+        assertEquals(1, results.size(), "FTS leg alone must still recall");
+        assertEquals(DEPLOY, results.getFirst().text());
+        assertEquals(1.0, results.getFirst().relevance(), 1e-9,
+                "FTS-only degradation keeps the normalized FTS score");
+    }
+
+    @Test
+    void fusedResultsAreTruncatedToLimit() {
+        // Legs deliberately disagree: the FTS leg (substring LIKE in this lane)
+        // matches only Vim, while the KNN top-2 for the query vector are
+        // finance (cos ≈ .998) then Berlin (cos ≈ .994). Union = 3 candidates,
+        // limit = 2 — the fused list must be cut at the limit, dropping the
+        // weakest (Berlin: KNN rank 2 only, 1/62, vs the rank-1 legs at 1/61).
+        var agent = agentId("vec-limit");
+        store.store(agent, BERLIN, "fact", 0.6);
+        store.store(agent, VIM, "preference", 0.6);
+        store.store(agent, FINANCE, "fact", 0.6);
+
+        var results = store.search(agent, VIM_NEAR_BERLIN_QUERY, 2);
+
+        assertEquals(2, results.size(), "fusion must honor the caller's limit");
+        assertTrue(results.stream().noneMatch(e -> e.text().equals(BERLIN)),
+                "the lowest-fused candidate is the one truncated");
+        assertEquals(1.0, results.getFirst().relevance(), 1e-9);
+    }
+
+    @Test
+    void staleIndexIdNeverLeaksAPhantomEntry() {
+        // A KNN hit whose DB row no longer exists (stale index doc) must be
+        // silently dropped at hydration — never surface as a phantom memory.
+        var agent = agentId("vec-stale");
+        store.store(agent, BERLIN, "fact", 0.6);
+        // Plant a vector doc under this agent's key with an id that has no
+        // Memory row; its vector is the closest to the query, so it tops the
+        // KNN leg — the exact shape of an index left behind by a deleted row.
+        services.search.LuceneIndexer.upsert(services.search.LuceneIndexer.Scope.MEMORY,
+                999_999L, "ghost row", agent, new float[] {0.95f, 0.05f, 0f, 0f});
+
+        var results = store.search(agent, NONSENSE_QUERY, 5);
+
+        assertEquals(1, results.size(), "only the real row may be returned");
+        assertEquals(BERLIN, results.getFirst().text());
+        assertTrue(results.stream().noneMatch(e -> e.id().equals("999999")),
+                "the dangling index id must not hydrate into a result");
     }
 }
