@@ -463,7 +463,7 @@ describe('Agents page — toggle agent enabled from the row', () => {
   })
 })
 
-describe('Agents page — bulk-delete via ConfirmDialog', () => {
+describe('Agents page — per-card delete via ConfirmDialog', () => {
   it('cancel on the dialog preserves the helper row and skips the DELETE', async () => {
     let deleted = false
     registerEndpoint('/api/agents/2', {
@@ -477,22 +477,10 @@ describe('Agents page — bulk-delete via ConfirmDialog', () => {
     const component = await mountSuspended(AgentsHarness)
     await flushPromises()
 
-    // Enter select mode via the trash button on the toolbar.
-    const enterBtn = component.find('button[title="Delete an agent"]')
-    expect(enterBtn.exists()).toBe(true)
-    await enterBtn.trigger('click')
-    await flushPromises()
-
-    // Tick the helper agent's selection checkbox.
-    const checkboxes = component.findAll<HTMLInputElement>('input[type="checkbox"]')
-    expect(checkboxes.length).toBeGreaterThanOrEqual(1)
-    await checkboxes[0]!.trigger('click')
-    await flushPromises()
-
-    // Click the Delete N button on the toolbar.
-    const deleteBtn = component.findAll('button').find(b => b.text().startsWith('Delete') && b.text().match(/Delete \d/))
-    expect(deleteBtn, 'delete-N button should exist').toBeTruthy()
-    await deleteBtn!.trigger('click')
+    // Each custom-agent card carries a trash button titled "Delete <name>".
+    const deleteBtn = component.find('button[title="Delete helper"]')
+    expect(deleteBtn.exists(), 'per-card delete button should exist').toBe(true)
+    await deleteBtn.trigger('click')
     await flushPromises()
 
     // Click Cancel on the ConfirmDialog (teleported to body).
@@ -506,7 +494,7 @@ describe('Agents page — bulk-delete via ConfirmDialog', () => {
     expect(deleted).toBe(false)
   })
 
-  it('confirm on the dialog fires DELETE /api/agents/:id for each selected agent', async () => {
+  it('confirm on the dialog fires DELETE /api/agents/:id for the agent', async () => {
     let deleted = false
     registerEndpoint('/api/agents/2', {
       method: 'DELETE',
@@ -519,16 +507,9 @@ describe('Agents page — bulk-delete via ConfirmDialog', () => {
     const component = await mountSuspended(AgentsHarness)
     await flushPromises()
 
-    const enterBtn = component.find('button[title="Delete an agent"]')
-    await enterBtn.trigger('click')
-    await flushPromises()
-
-    const checkboxes = component.findAll<HTMLInputElement>('input[type="checkbox"]')
-    await checkboxes[0]!.trigger('click')
-    await flushPromises()
-
-    const deleteBtn = component.findAll('button').find(b => b.text().match(/Delete \d/))
-    await deleteBtn!.trigger('click')
+    const deleteBtn = component.find('button[title="Delete helper"]')
+    expect(deleteBtn.exists()).toBe(true)
+    await deleteBtn.trigger('click')
     await flushPromises()
 
     // Click the Delete confirm button (variant=danger, label='Delete').
@@ -538,25 +519,41 @@ describe('Agents page — bulk-delete via ConfirmDialog', () => {
     confirmBtn!.click()
     await vi.waitFor(() => expect(deleted).toBe(true))
   })
+})
 
-  it('cancelling select mode without confirming exits select mode', async () => {
+describe('Agents page — Delete All via ConfirmDialog', () => {
+  it('type-gate + confirm fires DELETE for every custom agent', async () => {
+    let deleted = false
+    registerEndpoint('/api/agents/2', {
+      method: 'DELETE',
+      handler: () => {
+        deleted = true
+        return { status: 'ok' }
+      },
+    })
     setupAgentsApi()
-    const component = await mountSuspended(Agents)
+    const component = await mountSuspended(AgentsHarness)
     await flushPromises()
 
-    const enterBtn = component.find('button[title="Delete an agent"]')
-    await enterBtn.trigger('click')
-    await flushPromises()
-    expect(component.text()).toContain('Cancel')
-
-    const cancelBtn = component.findAll('button').find(b => b.text().trim() === 'Cancel')
-    expect(cancelBtn).toBeTruthy()
-    await cancelBtn!.trigger('click')
+    // The "Delete All" button sits on the Custom Agents header row.
+    const deleteAllBtn = component.findAll('button').find(b => b.text().trim() === 'Delete All')
+    expect(deleteAllBtn, 'Delete All button should exist').toBeTruthy()
+    await deleteAllBtn!.trigger('click')
     await flushPromises()
 
-    // Select-mode toolbar gone; New Agent visible again.
-    const newBtn = component.find('button[title="New Agent"]')
-    expect(newBtn.exists()).toBe(true)
+    // The wipe-all confirm requires typing 'delete' into the gate input.
+    const gateInput = document.body.querySelector<HTMLInputElement>('[role="dialog"] input[type="text"]')
+    expect(gateInput, 'require-text gate input should render').toBeTruthy()
+    gateInput!.value = 'delete'
+    gateInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    // confirmText is "Delete 1" for the single-custom-agent fixture.
+    const confirmBtn = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(b => (b.textContent ?? '').trim() === 'Delete 1')
+    expect(confirmBtn, 'Delete-N confirm button should exist').toBeTruthy()
+    confirmBtn!.click()
+    await vi.waitFor(() => expect(deleted).toBe(true))
   })
 })
 

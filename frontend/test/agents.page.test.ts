@@ -14,7 +14,8 @@ import Agents from '~/pages/agents.vue'
  *       modal, but one whose form fields exist (name input, provider/model).</li>
  *   <li>Clicking an existing agent's card transitions into edit mode, with
  *       the agent's data populated in the form.</li>
- *   <li>Entering select mode reveals the bulk-delete affordance.</li>
+ *   <li>The Custom Agents header exposes a "Delete All" affordance and each
+ *       custom-agent card carries its own trash button.</li>
  *   <li>The main agent renders with the appropriate "main" indicator and
  *       remains in the list (only {@code __loadtest__} is hidden).</li>
  * </ul>
@@ -130,31 +131,20 @@ describe('Agents page — edit flow', () => {
   })
 })
 
-describe('Agents page — bulk select mode', () => {
-  it('exposes a select-mode toggle that reveals selection checkboxes', async () => {
+describe('Agents page — delete affordances', () => {
+  it('renders a "Delete All" button on the Custom Agents header and a per-card trash button', async () => {
     setupAgentsApi()
     const component = await mountSuspended(Agents)
     await flushPromises()
 
-    // Look for the select-mode entry button; the existing setup test in
-    // pages.test.ts shows New Agent uses title="New Agent" so other tool
-    // buttons follow the same convention. We look for any button whose text
-    // hints at selection.
-    const buttons = component.findAll('button')
-    const selectBtn = buttons.find(b => /select/i.test(b.text() + (b.attributes('title') ?? '')))
-    if (selectBtn) {
-      await selectBtn.trigger('click')
-      await flushPromises()
-      // Once select mode is on, selection checkboxes appear on each card.
-      // (The main agent stays click-disabled but renders anyway.)
-      const checkboxes = component.findAll('input[type="checkbox"]')
-      expect(checkboxes.length).toBeGreaterThanOrEqual(1)
-    }
-    else {
-      // Some builds may iconify the button — skip cleanly rather than
-      // fabricate a false positive.
-      expect(true).toBe(true)
-    }
+    // Header-level wipe-all affordance.
+    const deleteAllBtn = component.findAll('button').find(b => b.text().trim() === 'Delete All')
+    expect(deleteAllBtn, 'Delete All button should exist while custom agents are present').toBeTruthy()
+
+    // Per-card single-agent delete: the helper card carries a trash button
+    // titled "Delete <name>".
+    const cardDeleteBtn = component.find('button[title="Delete helper"]')
+    expect(cardDeleteBtn.exists(), 'per-card delete button should exist').toBe(true)
   })
 })
 

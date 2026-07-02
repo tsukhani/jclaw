@@ -349,12 +349,11 @@ const saving = ref(false)
  */
 const saveError = ref<string | null>(null)
 
-// Bulk-delete selection state for the Custom Agents list. When selectMode is on,
-// row clicks toggle selection instead of opening the edit form, and the header
-// shows Cancel + "Delete N" instead of "New Agent" + "Delete".
-const selectMode = ref(false)
-const selectedIds = ref<Set<number>>(new Set())
-const deletingBulk = ref(false)
+// Delete state for the Custom Agents list. `deletingAll` gates the header's
+// "Delete All" button (wipes every custom agent); `deletingId` gates a single
+// card's trash button so an in-flight delete disables just that row.
+const deletingAll = ref(false)
+const deletingId = ref<number | null>(null)
 
 // A11y: stable ids for label/control association in the edit form
 const agentNameId = useId()
@@ -1140,48 +1139,58 @@ async function toggleAgentEnabled(agent: Agent) {
   }
 }
 
-function enterSelectMode() {
-  selectMode.value = true
-  selectedIds.value = new Set()
-}
-
-function exitSelectMode() {
-  selectMode.value = false
-  selectedIds.value = new Set()
-}
-
-function toggleSelection(id: number) {
-  const next = new Set(selectedIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selectedIds.value = next
-}
-
-async function deleteSelected() {
-  if (!selectedIds.value.size) return
-  const count = selectedIds.value.size
+// Delete a single custom agent from its card's trash button. Guarded by a
+// confirm dialog; `deletingId` disables just this row while the DELETE is
+// in flight.
+async function deleteAgent(agent: Agent) {
   const ok = await confirm({
-    title: 'Delete custom agents',
-    message: `Delete ${count} custom agent${count === 1 ? '' : 's'}? This cannot be undone.`,
+    title: 'Delete agent',
+    message: `Delete the "${agent.name}" agent? This cannot be undone.`,
     confirmText: 'Delete',
     variant: 'danger',
   })
   if (!ok) return
-  deletingBulk.value = true
+  deletingId.value = agent.id
   try {
-    // Sequential deletes keep per-row error handling simple and avoid thundering
-    // the API with parallel DELETEs. The selection is small (user-curated).
-    for (const id of selectedIds.value) {
-      await $fetch(`/api/agents/${id}`, { method: 'DELETE' })
-    }
-    exitSelectMode()
+    await $fetch(`/api/agents/${agent.id}`, { method: 'DELETE' })
     refresh()
   }
   catch (e) {
-    console.error('Failed to delete selected agents:', e)
+    console.error('Failed to delete agent:', e)
   }
   finally {
-    deletingBulk.value = false
+    deletingId.value = null
+  }
+}
+
+// Wipe every custom agent (the main agent is a singleton and unaffected).
+// Gated behind a type-'delete' confirm, matching the Conversations wipe-all.
+async function deleteAll() {
+  const targets = customAgents.value
+  if (!targets.length || deletingAll.value) return
+  const count = targets.length
+  const ok = await confirm({
+    title: 'Delete all custom agents',
+    message: `Delete all ${count} custom agent${count === 1 ? '' : 's'}? This cannot be undone. The main agent is not affected.`,
+    confirmText: `Delete ${count}`,
+    variant: 'danger',
+    requireText: 'delete',
+  })
+  if (!ok) return
+  deletingAll.value = true
+  try {
+    // Sequential deletes keep per-row error handling simple and avoid thundering
+    // the API with parallel DELETEs. The list is small (user-curated).
+    for (const agent of targets) {
+      await $fetch(`/api/agents/${agent.id}`, { method: 'DELETE' })
+    }
+    refresh()
+  }
+  catch (e) {
+    console.error('Failed to delete all agents:', e)
+  }
+  finally {
+    deletingAll.value = false
   }
 }
 
@@ -1227,50 +1236,20 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       <h1 class="text-lg font-semibold text-fg-strong">
         Agents
       </h1>
-      <div
+      <button
         v-if="!editing && !creating"
-        class="flex items-center gap-2"
+        type="button"
+        :disabled="!providers.length"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-600 transition-colors"
+        title="New Agent"
+        @click="newAgent"
       >
-        <template v-if="!selectMode">
-          <button
-            :disabled="!providers.length"
-            class="p-2 border border-input text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 hover:border-emerald-600/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
-            title="New Agent"
-            @click="newAgent"
-          >
-            <PlusIcon
-              class="w-4 h-4"
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            :disabled="!customAgents.length"
-            class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
-            title="Delete an agent"
-            @click="enterSelectMode"
-          >
-            <TrashIcon
-              class="w-4 h-4"
-              aria-hidden="true"
-            />
-          </button>
-        </template>
-        <template v-else>
-          <button
-            class="px-3 py-1.5 border border-input text-fg-muted text-xs hover:text-fg-strong hover:border-neutral-500 transition-colors"
-            @click="exitSelectMode"
-          >
-            Cancel
-          </button>
-          <button
-            :disabled="!selectedIds.size || deletingBulk"
-            class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 transition-colors"
-            @click="deleteSelected"
-          >
-            Delete {{ selectedIds.size || '' }}
-          </button>
-        </template>
-      </div>
+        <PlusIcon
+          class="w-4 h-4"
+          aria-hidden="true"
+        />
+        New Agent
+      </button>
     </div>
 
     <div
@@ -1341,33 +1320,36 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       v-if="!editing && !creating"
       class="mb-6 space-y-2"
     >
-      <h2 class="text-sm font-medium text-fg-muted">
-        Custom Agents
-      </h2>
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="text-sm font-medium text-fg-muted">
+          Custom Agents
+        </h2>
+        <button
+          v-if="customAgents.length"
+          type="button"
+          :disabled="deletingAll"
+          class="px-3 py-1.5 border border-red-700 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          @click="deleteAll"
+        >
+          {{ deletingAll ? 'Deleting…' : 'Delete All' }}
+        </button>
+      </div>
       <p class="text-xs text-fg-muted">
         Additional agents you create for specific channels, peers, or workflows.
       </p>
       <div class="bg-surface-elevated border border-border">
-        <!-- Row uses ARIA button semantics on a div because it contains a nested checkbox input and a ModelCapabilityPills child; an actual button would nest interactive elements. The tabindex plus keydown handlers expose a button click target safely. -->
+        <!-- Row uses ARIA button semantics on a div because it contains a ModelCapabilityPills child plus nested toggle/delete buttons; an actual button would nest interactive elements. The tabindex plus keydown handlers expose a button click target safely. -->
         <div
           v-for="agent in customAgents"
           :key="agent.id"
           role="button"
           tabindex="0"
-          class="px-4 py-3 border-b border-border last:border-b-0 flex items-center justify-between hover:bg-muted cursor-pointer transition-colors"
-          @click="selectMode ? toggleSelection(agent.id) : editAgent(agent)"
-          @keydown.enter.prevent="selectMode ? toggleSelection(agent.id) : editAgent(agent)"
-          @keydown.space.prevent="selectMode ? toggleSelection(agent.id) : editAgent(agent)"
+          class="px-4 py-3 border-b border-border last:border-b-0 hover:bg-muted cursor-pointer transition-colors"
+          @click="editAgent(agent)"
+          @keydown.enter.prevent="editAgent(agent)"
+          @keydown.space.prevent="editAgent(agent)"
         >
-          <div class="flex items-center gap-3 min-w-0">
-            <input
-              v-if="selectMode"
-              type="checkbox"
-              :checked="selectedIds.has(agent.id)"
-              :aria-label="`Select ${agent.name}`"
-              class="accent-red-500 shrink-0"
-              @click.stop="toggleSelection(agent.id)"
-            >
+          <div class="flex items-center justify-between gap-3">
             <div class="min-w-0">
               <span class="text-sm text-fg-strong">{{ agent.name }}</span>
               <div
@@ -1386,23 +1368,40 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 @toggle="(cap) => toggleListingCapability(agent, cap)"
               />
             </div>
-          </div>
-          <div class="flex items-center gap-3 shrink-0">
-            <span
-              v-if="agent.enabled && !agent.providerConfigured"
-              class="text-[10px] font-mono text-amber-400 border border-amber-400/30 px-1"
-            >provider not configured</span>
-            <!-- Enabled toggle (hidden in select mode to keep the row's action surface unambiguous) -->
-            <button
-              v-if="!selectMode"
-              :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
-              class="relative w-9 h-5 rounded-full transition-colors"
-              :title="agent.enabled ? 'Disable agent' : 'Enable agent'"
-              @click.stop="toggleAgentEnabled(agent)"
-            >
+            <div class="flex items-center gap-3 shrink-0">
               <span
-                :class="agent.enabled ? 'translate-x-4' : 'translate-x-0.5'"
-                class="block w-4 h-4 bg-white rounded-full transition-transform"
+                v-if="agent.enabled && !agent.providerConfigured"
+                class="text-[10px] font-mono text-amber-400 border border-amber-400/30 px-1"
+              >provider not configured</span>
+              <!-- Enabled toggle -->
+              <button
+                :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
+                class="relative w-9 h-5 rounded-full transition-colors"
+                :title="agent.enabled ? 'Disable agent' : 'Enable agent'"
+                @click.stop="toggleAgentEnabled(agent)"
+              >
+                <span
+                  :class="agent.enabled ? 'translate-x-4' : 'translate-x-0.5'"
+                  class="block w-4 h-4 bg-white rounded-full transition-transform"
+                />
+              </button>
+            </div>
+          </div>
+          <!-- Per-agent delete: bottom-right trash. @click/keydown .stop keeps
+               activating it from bubbling up and opening the edit form. -->
+          <div class="flex justify-end mt-3">
+            <button
+              type="button"
+              :disabled="deletingId === agent.id"
+              class="p-1.5 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 transition-colors"
+              :title="`Delete ${agent.name}`"
+              @click.stop="deleteAgent(agent)"
+              @keydown.enter.stop="deleteAgent(agent)"
+              @keydown.space.stop.prevent="deleteAgent(agent)"
+            >
+              <TrashIcon
+                class="w-4 h-4"
+                aria-hidden="true"
               />
             </button>
           </div>
