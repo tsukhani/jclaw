@@ -75,6 +75,38 @@ public class Memory extends Model {
     @Column(name = "updated_at", nullable = false)
     public Instant updatedAt;
 
+    /**
+     * JCLAW-525: when non-null, this memory has been superseded by a newer
+     * write on the same subject and is excluded from every recall path (search,
+     * core auto-load, dedup scans) — but never hard-deleted: the row stays as
+     * an auditable trail (Zep-style temporal invalidation). Nullable adds are
+     * safe on a populated table without a DDL default.
+     */
+    @Column(name = "superseded_at")
+    public Instant supersededAt;
+
+    /**
+     * The id of the memory that superseded this one. A plain id, not a foreign
+     * key — this schema has no cascades beyond the agent FK (JCLAW-540 policy),
+     * and a dangling pointer after the newer memory is itself deleted is
+     * harmless provenance.
+     */
+    @Column(name = "superseded_by_id")
+    public Long supersededById;
+
+    /**
+     * Mark this memory superseded by {@code newerId} (JCLAW-525). Saving fires
+     * {@code @PostUpdate}, which removes the row's Lucene doc — FTS and KNN
+     * vector leave the index together — while the DB-side
+     * {@code supersededAt IS NULL} filters on the recall queries act as the
+     * backstop for anything already hydrating.
+     */
+    public void supersede(Long newerId) {
+        supersededAt = Instant.now();
+        supersededById = newerId;
+        save();
+    }
+
     @PrePersist
     void onCreate() {
         var now = Instant.now();
@@ -91,10 +123,18 @@ public class Memory extends Model {
     // the sibling entities). The agent id rides as the exact-match filter field
     // so searchByText can scope results to one agent. The indexer never throws —
     // a transient FS issue must not abort the parent JPA transaction.
+    // JCLAW-525: a superseded row leaves the index instead — recall must not
+    // spend FTS/KNN top-k slots on invalidated facts, and removing the whole
+    // doc drops its vector too (an update would otherwise re-upsert it).
     @PostPersist
     @PostUpdate
     void onIndexUpsert() {
-        if (id != null && agent != null) {
+        if (id == null) return;
+        if (supersededAt != null) {
+            LuceneIndexer.remove(LuceneIndexer.Scope.MEMORY, id);
+            return;
+        }
+        if (agent != null) {
             LuceneIndexer.upsert(
                     LuceneIndexer.Scope.MEMORY, id, text, String.valueOf(agent.id));
         }
@@ -118,6 +158,14 @@ public class Memory extends Model {
         }
     }
 
+    /**
+     * Active (non-superseded) memories for one agent, newest first. Superseded
+     * rows are excluded (JCLAW-525): every caller — recall, the auto-capture
+     * dedup scan, the store's list API — wants the agent's <em>current</em>
+     * memory, and a superseded old fact must not NOOP-dedup a re-emerging new
+     * one. The admin view reads the table through its own query and still sees
+     * everything.
+     */
     public static List<Memory> findByAgent(String agentId) {
         return findByAgent(agentId, 200);
     }
@@ -125,7 +173,8 @@ public class Memory extends Model {
     public static List<Memory> findByAgent(String agentId, int limit) {
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();
-        return Memory.find("agent.id = ?1 ORDER BY updatedAt DESC", pk).fetch(limit);
+        return Memory.find("agent.id = ?1 AND supersededAt IS NULL ORDER BY updatedAt DESC", pk)
+                .fetch(limit);
     }
 
     /**
@@ -139,7 +188,8 @@ public class Memory extends Model {
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();
         return Memory.find(
-                "agent.id = ?1 AND category = ?2 AND importance >= ?3 ORDER BY importance DESC, updatedAt DESC",
+                "agent.id = ?1 AND category = ?2 AND importance >= ?3 AND supersededAt IS NULL"
+                        + " ORDER BY importance DESC, updatedAt DESC",
                 pk, "core", minImportance).fetch(limit);
     }
 
@@ -196,7 +246,10 @@ public class Memory extends Model {
         }
         if (scored.isEmpty()) return List.of();
         var ids = scored.stream().map(MessageSearchRepository.ScoredId::id).toList();
-        List<Memory> rows = Memory.find("agent.id = ?1 AND id IN (?2)", pk, ids).fetch();
+        // supersededAt IS NULL: backstop for an index doc whose row was
+        // superseded but whose removal hasn't landed yet (JCLAW-525).
+        List<Memory> rows = Memory.find(
+                "agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL", pk, ids).fetch();
         var byId = new HashMap<Long, Memory>();
         for (var m : rows) byId.put(m.id, m);
         var ordered = new ArrayList<ScoredMemory>(scored.size());
@@ -214,7 +267,8 @@ public class Memory extends Model {
      * effectively degrades to importance ordering.
      */
     private static List<ScoredMemory> likeFallback(Long pk, String query, int limit) {
-        List<Memory> rows = Memory.find("agent.id = ?1 AND LOWER(text) LIKE ?2",
+        List<Memory> rows = Memory.find(
+                "agent.id = ?1 AND LOWER(text) LIKE ?2 AND supersededAt IS NULL",
                 pk, "%" + query.toLowerCase() + "%").fetch(limit);
         return rows.stream().map(m -> new ScoredMemory(m, 1.0)).toList();
     }

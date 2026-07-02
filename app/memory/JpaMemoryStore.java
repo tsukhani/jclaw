@@ -191,7 +191,8 @@ public class JpaMemoryStore implements MemoryStore {
     public List<MemoryEntry> list(String agentId, int limit, int offset) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
-        List<Memory> memories = Memory.find("agent.id = ?1 ORDER BY updatedAt DESC", pk)
+        List<Memory> memories = Memory.find(
+                "agent.id = ?1 AND supersededAt IS NULL ORDER BY updatedAt DESC", pk)
                 .from(offset).fetch(limit);
         return memories.stream()
                 .map(this::toEntry)
@@ -245,7 +246,7 @@ public class JpaMemoryStore implements MemoryStore {
     private List<Memory> pgFtsRows(Long pk, String query, int limit) {
         var sql = """
                 SELECT m.* FROM memory m
-                WHERE m.agent_id = ?1
+                WHERE m.agent_id = ?1 AND m.superseded_at IS NULL
                 AND to_tsvector('english', m.text) @@ plainto_tsquery('english', ?2)
                 ORDER BY ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?2)) DESC
                 """;
@@ -265,7 +266,7 @@ public class JpaMemoryStore implements MemoryStore {
      */
     public static final String PG_VECTOR_LEG_SQL = """
             SELECT m.id FROM memory m
-            WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL
+            WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL AND m.superseded_at IS NULL
             ORDER BY m.embedding <=> ?2::text::vector
             """;
 
@@ -378,7 +379,8 @@ public class JpaMemoryStore implements MemoryStore {
         if (!missing.isEmpty()) {
             Long pk = pkOrNull(agentId);
             List<Memory> rows = pk == null ? List.of()
-                    : Memory.find("agent.id = ?1 AND id IN (?2)", pk, missing).fetch();
+                    : Memory.find("agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL",
+                            pk, missing).fetch();
             for (var m : rows) preloaded.put(m.id, m);
         }
 
