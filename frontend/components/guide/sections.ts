@@ -23,6 +23,7 @@ import {
   BookOpenIcon,
   ChatBubbleOvalLeftEllipsisIcon,
   ChartBarIcon,
+  CircleStackIcon,
   ClipboardDocumentCheckIcon,
   Cog6ToothIcon,
   LinkIcon,
@@ -44,6 +45,7 @@ import remindersMd from '../../../docs/user-guide/reminders.md?raw'
 import subagentsTasksRemindersMd from '../../../docs/user-guide/subagents-tasks-reminders.md?raw'
 import skillsToolsMcpMd from '../../../docs/user-guide/skills-tools-mcp.md?raw'
 import settingsMd from '../../../docs/user-guide/settings.md?raw'
+import memoryMd from '../../../docs/user-guide/memory.md?raw'
 import logsDashboardMd from '../../../docs/user-guide/logs-and-dashboard.md?raw'
 
 export interface GuideSection {
@@ -118,6 +120,12 @@ export const sections: GuideSection[] = [
     title: 'Settings',
     icon: Cog6ToothIcon,
     content: settingsMd,
+  },
+  {
+    id: 'memory',
+    title: 'Memory',
+    icon: CircleStackIcon,
+    content: memoryMd,
   },
   {
     id: 'logs-and-dashboard',
