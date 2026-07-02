@@ -272,25 +272,33 @@ onBeforeUnmount(() => {
         <div class="text-[10px] font-medium uppercase tracking-wider text-fg-muted mb-3">
           Agents
         </div>
-        <div class="text-2xl font-semibold text-fg-strong">
-          {{ enabledAgents }}/{{ agentCount }}
-        </div>
-        <div class="text-xs text-fg-muted mt-1">
-          Active
-        </div>
-        <!-- Workspace disk footprint: the agents' shared on-disk workspace,
-             amber past the warn threshold so a runaway file (e.g. a shell
-             loop appending forever) is visible without reaching for ncdu. -->
-        <div
-          v-if="workspaceBytes >= 0"
-          data-testid="workspace-size"
-          class="text-xs text-fg-muted mt-1.5"
-        >
-          Workspace:
-          <span
-            :class="workspaceBytes >= WORKSPACE_WARN_BYTES ? 'font-medium text-amber-500' : 'text-fg-primary'"
-            data-testid="workspace-size-value"
-          >{{ formatSize(workspaceBytes) }}</span>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <div class="text-2xl font-semibold text-fg-strong leading-none">
+              {{ enabledAgents }}/{{ agentCount }}
+            </div>
+            <div class="text-xs text-fg-muted mt-1.5">
+              Active
+            </div>
+          </div>
+          <!-- Workspace disk footprint: the agents' shared on-disk workspace,
+               amber past the warn threshold so a runaway file (e.g. a shell
+               loop appending forever) is visible without reaching for ncdu. -->
+          <div
+            v-if="workspaceBytes >= 0"
+            data-testid="workspace-size"
+          >
+            <div
+              class="text-2xl font-semibold leading-none"
+              :class="workspaceBytes >= WORKSPACE_WARN_BYTES ? 'text-amber-500' : 'text-fg-strong'"
+              data-testid="workspace-size-value"
+            >
+              {{ formatSize(workspaceBytes) }}
+            </div>
+            <div class="text-xs text-fg-muted mt-1.5">
+              Workspace
+            </div>
+          </div>
         </div>
       </div>
       <div class="bg-surface-elevated border border-border p-4">
