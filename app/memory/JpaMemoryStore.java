@@ -34,7 +34,10 @@ import java.util.Locale;
  * (JCLAW-555): pgvector hybrid SQL on Postgres, Lucene HNSW
  * ({@code KnnFloatVectorField} on the MEMORY scope) everywhere else — selection
  * follows the JDBC product name, mirroring {@code MessageSearch}, so a prod-mode
- * boot on the bundled H2 never attempts pgvector SQL.
+ * boot on the bundled H2 never attempts pgvector SQL. On Postgres the pgvector
+ * schema is provisioned at construction via {@link PgVectorProvisioner}
+ * (JCLAW-528); when provisioning fails the vector leg is disabled and recall
+ * degrades to full-text search.
  */
 public class JpaMemoryStore implements MemoryStore {
 
@@ -60,8 +63,30 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     public JpaMemoryStore() {
-        this("true".equals(Play.configuration.getProperty("memory.jpa.vector.enabled", "false")),
-                detectPostgres());
+        this(detectPostgres());
+    }
+
+    private JpaMemoryStore(boolean isPostgres) {
+        this(resolveVectorEnabled(isPostgres), isPostgres);
+    }
+
+    /**
+     * Effective vector enablement (JCLAW-528). On Postgres the pgvector leg
+     * needs its schema provisioned (extension + embedding column + HNSW index)
+     * — {@link PgVectorProvisioner#ensureProvisioned()} runs the idempotent
+     * guarded step and reports readiness. When it cannot provision (pgvector
+     * not installed, missing privilege) the provisioner has already logged the
+     * error and the store degrades to full-text search rather than attempting
+     * embedding SQL that fails on every write. Non-Postgres dialects need no
+     * provisioning: their vector leg is the Lucene HNSW backend (JCLAW-555).
+     */
+    private static boolean resolveVectorEnabled(boolean isPostgres) {
+        boolean enabled = "true".equals(
+                Play.configuration.getProperty("memory.jpa.vector.enabled", "false"));
+        if (!enabled || !isPostgres) {
+            return enabled;
+        }
+        return PgVectorProvisioner.ensureProvisioned();
     }
 
     /**
