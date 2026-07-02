@@ -10,7 +10,7 @@ import Index from '~/pages/index.vue'
  * /api/videogen/jobs/recent and renders a job-status table with a "see in conversation" deep-link.
  */
 
-function setupApi(opts?: { events?: unknown[], videoJobs?: unknown[], latency?: unknown }) {
+function setupApi(opts?: { events?: unknown[], videoJobs?: unknown[], latency?: unknown, workspaceBytes?: number }) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels/active', () => ({ count: 0, channelTypes: [] }))
   registerEndpoint('/api/tasks', () => [])
@@ -18,6 +18,7 @@ function setupApi(opts?: { events?: unknown[], videoJobs?: unknown[], latency?: 
   registerEndpoint('/api/metrics/latency/rows', () => opts?.latency ?? ({ since: '', channels: [], segments: {} }))
   registerEndpoint('/api/logs', () => ({ events: opts?.events ?? [] }))
   registerEndpoint('/api/videogen/jobs/recent', () => opts?.videoJobs ?? [])
+  registerEndpoint('/api/workspace/stats', () => ({ bytes: opts?.workspaceBytes ?? 2048 }))
 }
 
 // The Chat Cost / Compression sections own their own fetches; stub them so the test only exercises
@@ -99,5 +100,39 @@ describe('Dashboard — Chat Performance latency filters (JCLAW-515)', () => {
     const channelOpts = channelSelect.findAll('option').map(o => (o.element as HTMLOptionElement).value)
     expect(channelOpts).toContain('web')
     expect(channelOpts).toContain('telegram')
+  })
+})
+
+describe('Dashboard — workspace disk footprint line', () => {
+  beforeEach(() => clearNuxtData())
+
+  it('renders the size muted below the warn threshold', async () => {
+    setupApi({ workspaceBytes: 2048 })
+    const c = await mountSuspended(Index, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const value = c.find('[data-testid="workspace-size-value"]')
+    expect(value.exists()).toBe(true)
+    expect(value.text()).toBe('2.0 KB')
+    expect(value.classes()).not.toContain('text-amber-500')
+  })
+
+  it('turns amber and formats GB past the 10 GiB warn threshold', async () => {
+    // 30 GiB — the real incident size; also exercises formatSize's GB tier.
+    setupApi({ workspaceBytes: 30 * 1024 ** 3 })
+    const c = await mountSuspended(Index, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const value = c.find('[data-testid="workspace-size-value"]')
+    expect(value.text()).toBe('30.0 GB')
+    expect(value.classes()).toContain('text-amber-500')
+  })
+
+  it('hides the line when the walk failed (bytes = -1)', async () => {
+    setupApi({ workspaceBytes: -1 })
+    const c = await mountSuspended(Index, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    expect(c.find('[data-testid="workspace-size"]').exists()).toBe(false)
   })
 })

@@ -10,6 +10,8 @@ GET     /public/                                staticDir:public
 
 # API endpoints for Nuxt frontend
 GET     /api/status                             ApiController.status
+# Workspace disk footprint for the dashboard's runaway-growth line (session-gated)
+GET     /api/workspace/stats                    ApiController.workspaceStats
 
 # Auth API
 GET     /api/auth/status                        ApiAuthController.status

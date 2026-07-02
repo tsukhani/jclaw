@@ -88,6 +88,15 @@ const [
   }),
 ])
 
+// Workspace disk footprint — a runaway shell loop once grew a 30 GiB file in
+// workspace/main/ unnoticed; this line makes such growth visible on the
+// dashboard. bytes = -1 (walk failed) hides the line rather than lying.
+const { data: workspaceStats } = await useFetch<{ bytes: number }>('/api/workspace/stats',
+  { default: () => ({ bytes: -1 }) })
+const workspaceBytes = computed(() => workspaceStats.value?.bytes ?? -1)
+/** Amber past 10 GiB — big enough to never flag normal use, small enough to catch a runaway early. */
+const WORKSPACE_WARN_BYTES = 10 * 1024 * 1024 * 1024
+
 const agentCount = computed(() => agents.value?.length ?? 0)
 const enabledAgents = computed(() => agents.value?.filter(a => a.enabled).length ?? 0)
 const channelCount = computed(() => activeChannels.value?.count ?? 0)
@@ -347,6 +356,21 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    <!-- Workspace disk footprint: quiet single line under the stat cards,
+         amber once it crosses the warn threshold so a runaway file (e.g. a
+         shell loop appending forever) is visible without reaching for ncdu. -->
+    <p
+      v-if="workspaceBytes >= 0"
+      data-testid="workspace-size"
+      class="-mt-6 mb-8 text-xs text-fg-muted"
+    >
+      Workspace on disk:
+      <span
+        :class="workspaceBytes >= WORKSPACE_WARN_BYTES ? 'font-medium text-amber-500' : 'text-fg-primary'"
+        data-testid="workspace-size-value"
+      >{{ formatSize(workspaceBytes) }}</span>
+    </p>
 
     <!-- Chat Cost (JCLAW-28): persisted aggregated token usage and cost.
          Driven on the parent's 5 s tick (see pollTimer below) so all three
