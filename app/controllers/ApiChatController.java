@@ -320,22 +320,18 @@ public class ApiChatController extends Controller {
 
     /**
      * Tika reads file magic bytes — authoritative over browser-declared
-     * Content-Type for spoofing-resistance. ONE narrow exception
-     * (JCLAW-165 follow-up): Tika sniffs a WebM container as
-     * video/webm regardless of whether it has video tracks, so
-     * browser-recorded voice notes from MediaRecorder({audio:true})
-     * get misclassified as KIND_FILE and never enter the
-     * transcription pipeline. When the browser explicitly declared
-     * audio/* AND Tika returned the ambiguous video/webm, trust
-     * the browser hint. Other ambiguities still fall to Tika.
+     * Content-Type for spoofing-resistance. ONE narrow exception: Tika
+     * sniffs every WebM/Matroska container as video/* regardless of
+     * whether it has video tracks. {@link services.MatroskaTracks}
+     * resolves that ambiguity — an audio/* browser hint wins (voice
+     * notes from MediaRecorder({audio:true}), the JCLAW-165 follow-up),
+     * otherwise the container's track codecs decide (file-picker
+     * uploads of audio-only .webm, JCLAW-560). Other ambiguities still
+     * fall to Tika.
      */
     private static String sniffMime(File f, String browserMime) throws IOException {
         var sniffedMime = TIKA.detect(f);
-        if ("video/webm".equals(sniffedMime)
-                && browserMime != null && browserMime.startsWith("audio/")) {
-            return "audio/webm";
-        }
-        return sniffedMime;
+        return services.MatroskaTracks.disambiguate(sniffedMime, browserMime, f.toPath());
     }
 
     @SuppressWarnings("java:S2259")

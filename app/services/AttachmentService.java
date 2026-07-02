@@ -81,17 +81,13 @@ public final class AttachmentService {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to inspect staged attachment: " + e.getMessage(), e);
         }
-        // Mirror the WebM disambiguation in ApiChatController.uploadChatFiles
-        // (JCLAW-165 follow-up): Tika sniffs every WebM container as video/webm
-        // regardless of whether it has video tracks, so browser-recorded voice
-        // notes were getting reclassified to KIND_FILE here even after the
-        // upload endpoint correctly classified them as KIND_AUDIO. Use the
-        // upload's classification (carried in input.mimeType) as a hint to
-        // override the re-sniff when it's the ambiguous video/webm case.
-        if ("video/webm".equals(sniffedMime)
-                && input.mimeType() != null && input.mimeType().startsWith("audio/")) {
-            sniffedMime = "audio/webm";
-        }
+        // WebM/Matroska disambiguation, shared with ApiChatController.sniffMime
+        // (JCLAW-165 follow-up + JCLAW-560): Tika sniffs every such container
+        // as video/* regardless of track content. The upload's classification
+        // (carried in input.mimeType) is the fast-path hint; without it the
+        // container's track codecs decide, so an audio-only .webm re-sniffed
+        // here keeps (or gains) its KIND_AUDIO classification either way.
+        sniffedMime = MatroskaTracks.disambiguate(sniffedMime, input.mimeType(), stagedFile);
         var kind = MessageAttachment.kindForMime(sniffedMime);
 
         var leaf = stagedFile.getFileName().toString();
