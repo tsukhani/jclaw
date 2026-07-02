@@ -71,14 +71,8 @@ public final class WhisperJniTranscriber {
      * downloaded" error.
      */
     public static String transcribe(Path audioFile, WhisperModel model) {
-        return transcribe(audioFile, model, null);
-    }
-
-    /** As {@link #transcribe(Path, WhisperModel)} with an explicit language
-     *  (see {@link #transcribeSegments} for the language contract). */
-    public static String transcribe(Path audioFile, WhisperModel model, String language) {
         var sb = new StringBuilder();
-        for (var segment : transcribeSegments(audioFile, model, language)) {
+        for (var segment : transcribeSegments(audioFile, model, null)) {
             sb.append(segment.text());
         }
         return sb.toString().trim();

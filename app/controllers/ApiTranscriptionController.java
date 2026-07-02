@@ -129,7 +129,8 @@ public class ApiTranscriptionController extends Controller {
      * @param format      json (default) | txt | srt | vtt
      * @param numSpeakers exact speaker count when known; omit to cluster by
      *                    threshold ({@code transcription.diarization.threshold})
-     * @param language    ISO 639-1 override; omit to use {@code transcription.language}
+     * @param language    ISO 639-1 override for this recording; omit to follow
+     *                    the model (auto-detect on multilingual, English on .en)
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiarizedTranscript.Entry.class)))
@@ -145,9 +146,7 @@ public class ApiTranscriptionController extends Controller {
 
         var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                 .orElse(WhisperModel.DEFAULT);
-        var lang = language != null && !language.isBlank()
-                ? language
-                : ConfigService.get("transcription.language");
+        var lang = language != null && !language.isBlank() ? language : null;
         float threshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
 
         List<DiarizedTranscript.Entry> entries;
