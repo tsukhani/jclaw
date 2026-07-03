@@ -48,6 +48,9 @@ class DiarizeAudioToolTest extends UnitTest {
         var registered = ToolRegistry.lookupTool(DiarizeAudioTool.TOOL_NAME);
         assertNotNull(registered, "diarize_audio must be registered by ToolRegistrationJob");
         assertFalse(registered.parallelSafe(), "minutes-long native inference must not run in parallel");
+        assertEquals(java.util.List.of("diarize", "enroll_speaker", "extract_speaker_clips"),
+                registered.actions().stream().map(a -> a.name()).toList(),
+                "the Tools UI 'Functions' disclosure must list all three actions");
     }
 
     @Test

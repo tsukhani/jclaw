@@ -1,6 +1,7 @@
 package tools;
 
 import agents.GeneratedAttachment;
+import agents.ToolAction;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
@@ -73,6 +74,18 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     @Override public String name() { return TOOL_NAME; }
     @Override public String category() { return "Utilities"; }
     @Override public String icon() { return "mic"; }
+
+    @Override
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction(ACTION_DIARIZE,
+                        "Identify who spoke when — speaker-attributed transcript, with enrolled names"),
+                new ToolAction(ACTION_ENROLL,
+                        "Save a voice reference under a name (whole attachment or a staged clip_label)"),
+                new ToolAction(ACTION_EXTRACT,
+                        "Cut a short clip of every speaker and play the lineup back for identification")
+        );
+    }
 
     @Override
     public String description() {
