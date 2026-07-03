@@ -16,6 +16,7 @@ import {
   FolderIcon,
   GlobeAltIcon,
   MagnifyingGlassIcon,
+  MicrophoneIcon,
   PaperAirplaneIcon,
   PauseIcon,
   PhotoIcon,
@@ -143,6 +144,7 @@ const TOOL_ICON_COMPONENTS = {
   'send': PaperAirplaneIcon,
   'list': QueueListIcon,
   'chat-bubble': ChatBubbleLeftRightIcon,
+  'mic': MicrophoneIcon,
 } as const
 // Per-icon-key class overrides. Heroicons' PaperAirplaneIcon points up-and-
 // right at ~45° by default; the chat-input send button (chat.vue:3751)
