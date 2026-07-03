@@ -255,7 +255,7 @@ describe('Settings page — OCR section', () => {
     clearNuxtData()
   })
 
-  it('renders the OCR section between LLM Providers and Search Providers', async () => {
+  it('renders the OCR section between Search Providers and Transcription', async () => {
     setupConfigApi()
     const component = await mountSuspended(Settings)
     await flushPromises()
@@ -264,19 +264,22 @@ describe('Settings page — OCR section', () => {
     expect(text).toContain('OCR')
     expect(text).toContain('Tesseract OCR')
 
-    // Slot order: LLM Providers heading must appear before the OCR heading,
-    // which must appear before Search Providers. The heading text is unique
-    // enough to survive other matches in the page (no other element renders
-    // the bare string "OCR" at the section-heading level).
+    // Slot order (operator request 2026-07-03): LLM Providers, then Search
+    // Providers, then the OCR heading, then Transcription. The heading text
+    // is unique enough to survive other matches in the page (no other
+    // element renders the bare string "OCR" at the section-heading level).
     const html = component.html()
     const llmIdx = html.indexOf('LLM Providers')
-    const ocrIdx = html.search(/<h2[^>]*>\s*OCR\s*</)
     const searchIdx = html.indexOf('Search Providers')
+    const ocrIdx = html.search(/<h2[^>]*>\s*OCR\s*</)
+    const transcriptionIdx = html.indexOf('Enable transcription')
     expect(llmIdx).toBeGreaterThan(-1)
-    expect(ocrIdx).toBeGreaterThan(-1)
     expect(searchIdx).toBeGreaterThan(-1)
-    expect(llmIdx).toBeLessThan(ocrIdx)
-    expect(ocrIdx).toBeLessThan(searchIdx)
+    expect(ocrIdx).toBeGreaterThan(-1)
+    expect(transcriptionIdx).toBeGreaterThan(-1)
+    expect(llmIdx).toBeLessThan(searchIdx)
+    expect(searchIdx).toBeLessThan(ocrIdx)
+    expect(ocrIdx).toBeLessThan(transcriptionIdx)
   })
 
   it('shows the active pill and an interactive toggle when tesseract is detected', async () => {

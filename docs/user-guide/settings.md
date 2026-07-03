@@ -35,16 +35,6 @@ For each provider you can:
 
 If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
 
-## OCR
-
-Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
-
-- **active** — binary detected on PATH *and* enabled.
-- **disabled** — detected but turned off.
-- **not detected** — binary missing on PATH; install hint shown inline.
-
-Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
-
 ## Search Providers
 
 Web search engines available to the `web_search` tool. Drag rows to **reorder priority** — providers are tried in order, and the next one is tried automatically if the first fails. Each row shows three states:
@@ -54,6 +44,16 @@ Web search engines available to the `web_search` tool. Drag rows to **reorder pr
 - **disabled** — turned off.
 
 Typical providers: **Tavily**, **Brave Search**, **DuckDuckGo** (no key needed), **Serper**, **Bing**, **Google**, **Perplexity**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
+
+## OCR
+
+Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
+
+- **active** — binary detected on PATH *and* enabled.
+- **disabled** — detected but turned off.
+- **not detected** — binary missing on PATH; install hint shown inline.
+
+Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
 
 ## Transcription
 
