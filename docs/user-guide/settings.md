@@ -67,6 +67,8 @@ Master toggle, then a backend radio group:
 
 Cloud backends are disabled in the radio group until their underlying provider key is configured in LLM Providers. An **Active:** status line above the toggle shows the current backend (cloud provider, or Self-Hosted Whisper with the chosen model), or that transcription is off.
 
+Below the backend picker, **Emotion labels on diarized transcripts** toggles the speaker-diarization emotion layer: each diarized turn is tagged with how it was said (happy, sad, angry, disgust, fear or neutral), classified locally from the voice's tone — the ~95 MB model downloads from Hugging Face on first use. Independent of the master transcription toggle, since the diarize-audio tool runs its own local pipeline; ordinary voice-note transcription is unaffected.
+
 ## Image Captioning
 
 The vision analogue of Transcription: non-vision chat models get a short **text description** of an uploaded image before it reaches the LLM. Vision-capable models still receive the image natively. WebP and other formats are transcoded to PNG first so every backend can read them.

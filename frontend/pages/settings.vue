@@ -377,6 +377,24 @@ async function toggleTranscriptionEnabled() {
   finally { saving.value = false }
 }
 
+// JCLAW-563: per-turn emotion labels on diarized transcripts. Independent of
+// the master toggle above — the diarize_audio tool always runs the local
+// pipeline, whatever the inbound-transcription provider. Default-on mirrors
+// the backend's ConfigService.getBoolean(key, true): anything but an
+// explicit 'false' counts as enabled.
+const emotionEnabled = computed(() =>
+  (configData.value?.entries?.find(e => e.key === 'transcription.emotion.enabled')?.value ?? 'true') !== 'false',
+)
+async function toggleEmotionEnabled() {
+  saving.value = true
+  try {
+    const next = emotionEnabled.value ? 'false' : 'true'
+    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.emotion.enabled', value: next } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+
 // JCLAW-28 follow-up: opt-in nightly LiteLLM pricing refresh. Off by
 // default — flipping on causes the LiteLlmPriceRefreshJob to fetch the
 // community pricing manifest each night and backfill missing prices on
@@ -4230,6 +4248,38 @@ async function deleteLoggerLevel(logger: string) {
           </div>
         </div>
       </template>
+
+      <!-- JCLAW-563: emotion labels on diarized transcripts. Deliberately
+           outside the master-toggle template — the diarize_audio tool runs
+           the local pipeline even when inbound transcription is off, so
+           this switch must stay reachable. -->
+      <div class="bg-surface-elevated border border-border">
+        <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+          <button
+            type="button"
+            :aria-pressed="emotionEnabled"
+            aria-label="Enable emotion labels on diarized transcripts"
+            :class="emotionEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            @click="toggleEmotionEnabled"
+          >
+            <span
+              :class="emotionEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
+          </button>
+          <span class="text-sm font-medium text-fg-strong">Emotion labels on diarized transcripts</span>
+          <span class="ml-auto text-[11px] text-fg-muted">
+            {{ emotionEnabled ? 'on' : 'off' }}
+          </span>
+        </div>
+        <div class="px-4 pb-2.5 text-[11px] text-fg-muted">
+          Speaker diarization tags each turn with how it was said — happy, sad, angry, disgust,
+          fear or neutral — classified locally from the voice's tone (the ~95 MB model downloads
+          from Hugging Face on first use). Applies to the diarize-audio tool and the REST diarize
+          endpoint; ordinary voice-note transcription is unaffected.
+        </div>
+      </div>
     </div>
 
     <!-- Image Captioning (JCLAW-214) -->

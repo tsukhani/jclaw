@@ -1273,6 +1273,42 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(hit!.value).toBe('whisper-local')
   })
 
+  it('emotion toggle defaults ON and POSTs transcription.emotion.enabled="false" when flipped (JCLAW-563)', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: defaultConfigEntries() }),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key?: string, value?: string }
+        captured.push(body)
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    // No transcription.emotion.enabled entry in the default fixture → the
+    // toggle renders ON, mirroring the backend's getBoolean(key, true).
+    const emotionBtn = component.find('button[aria-label="Enable emotion labels on diarized transcripts"]')
+    expect(emotionBtn.exists()).toBe(true)
+    expect(emotionBtn.attributes('aria-pressed')).toBe('true')
+    await emotionBtn.trigger('click')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'transcription.emotion.enabled')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('false')
+  })
+
   it('POSTs transcription.provider on @change of an enabled cloud-provider radio', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerEndpoint('/api/agents', () => [])
