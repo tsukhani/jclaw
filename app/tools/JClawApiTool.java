@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -106,6 +107,14 @@ public class JClawApiTool implements ToolRegistry.Tool {
     @Override public String name() { return TOOL_NAME; }
     @Override public String category() { return "System"; }
     @Override public String icon() { return "cog"; }
+
+    @Override
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction("call", "Invoke a JClaw API endpoint via method and path"),
+                new ToolAction("discover", "List the callable API endpoints, optionally filtered")
+        );
+    }
 
     @Override
     public String shortDescription() {
