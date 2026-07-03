@@ -40,6 +40,13 @@ public final class SpeakerClipExtractor {
 
     private SpeakerClipExtractor() {}
 
+    /** As {@link #extract(float[], List, double, double)}, decoding the audio
+     *  file first (same ffmpeg path as the rest of the pipeline). */
+    public static List<Clip> extract(Path audioFile, List<SherpaDiarizer.SpeakerSegment> segments,
+                                     double targetSeconds, double minSeconds) {
+        return extract(WhisperJniTranscriber.ffmpegToPcmF32(audioFile), segments, targetSeconds, minSeconds);
+    }
+
     /**
      * One clip per distinct speaker: up to {@code targetSeconds} cut from the
      * <b>middle</b> of that speaker's longest diarized segment (mid-speech
@@ -48,13 +55,6 @@ public final class SpeakerClipExtractor {
      * skipped — sub-second snippets make unreliable voice references.
      * Labels number the clips {@code voice-1..N} in speaker-index order.
      */
-    /** As {@link #extract(float[], List, double, double)}, decoding the audio
-     *  file first (same ffmpeg path as the rest of the pipeline). */
-    public static List<Clip> extract(Path audioFile, List<SherpaDiarizer.SpeakerSegment> segments,
-                                     double targetSeconds, double minSeconds) {
-        return extract(WhisperJniTranscriber.ffmpegToPcmF32(audioFile), segments, targetSeconds, minSeconds);
-    }
-
     public static List<Clip> extract(float[] samples, List<SherpaDiarizer.SpeakerSegment> segments,
                                      double targetSeconds, double minSeconds) {
         Map<Integer, SherpaDiarizer.SpeakerSegment> longest = new TreeMap<>();

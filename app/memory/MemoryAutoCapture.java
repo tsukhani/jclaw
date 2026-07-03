@@ -465,24 +465,37 @@ public final class MemoryAutoCapture {
                 return Map.of();
             }
             for (var el : root.getAsJsonObject().getAsJsonArray(KEY_SUPERSESSIONS)) {
-                if (!el.isJsonObject()) continue;
-                var o = el.getAsJsonObject();
-                if (!o.has(KEY_NEW) || !o.has(KEY_OLD) || !o.get(KEY_OLD).isJsonArray()) continue;
-                int newIdx = o.get(KEY_NEW).getAsInt();
-                if (newIdx < 0 || newIdx >= newCount) continue;
-                var olds = new ArrayList<Integer>();
-                for (var oldEl : o.getAsJsonArray(KEY_OLD)) {
-                    int oldIdx = oldEl.getAsInt();
-                    if (oldIdx >= 0 && oldIdx < existingCount && !olds.contains(oldIdx)) {
-                        olds.add(oldIdx);
-                    }
-                }
-                if (!olds.isEmpty()) out.merge(newIdx, olds, (a, b) -> a);
+                addSupersessionIfValid(el, newCount, existingCount, out);
             }
         } catch (Exception _) {
             return Map.of();
         }
         return out;
+    }
+
+    /**
+     * Validate one judge entry and record it. Guards mirror the JCLAW-525
+     * contract: non-object entries, missing/mis-typed fields, and
+     * out-of-range indices are dropped; duplicate old-indices collapse. A
+     * parse throw propagates to {@code parseSupersessions}' catch, which
+     * discards the whole batch — same fail-open behavior as before the
+     * extraction.
+     */
+    private static void addSupersessionIfValid(JsonElement el, int newCount, int existingCount,
+            Map<Integer, List<Integer>> out) {
+        if (!el.isJsonObject()) return;
+        var o = el.getAsJsonObject();
+        if (!o.has(KEY_NEW) || !o.has(KEY_OLD) || !o.get(KEY_OLD).isJsonArray()) return;
+        int newIdx = o.get(KEY_NEW).getAsInt();
+        if (newIdx < 0 || newIdx >= newCount) return;
+        var olds = new ArrayList<Integer>();
+        for (var oldEl : o.getAsJsonArray(KEY_OLD)) {
+            int oldIdx = oldEl.getAsInt();
+            if (oldIdx >= 0 && oldIdx < existingCount && !olds.contains(oldIdx)) {
+                olds.add(oldIdx);
+            }
+        }
+        if (!olds.isEmpty()) out.merge(newIdx, olds, (a, b) -> a);
     }
 
     private static String renderConsolidation(ConsolidationPlan plan) {

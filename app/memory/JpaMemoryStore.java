@@ -373,16 +373,7 @@ public class JpaMemoryStore implements MemoryStore {
             List<Long> keywordIds, List<Long> vectorIds,
             HashMap<Long, Memory> preloaded, int limit) {
         var fused = ReciprocalRankFusion.fuse(ReciprocalRankFusion.DEFAULT_K, keywordIds, vectorIds);
-
-        var missing = fused.stream().map(ReciprocalRankFusion.Ranked::id)
-                .filter(id -> !preloaded.containsKey(id)).toList();
-        if (!missing.isEmpty()) {
-            Long pk = pkOrNull(agentId);
-            List<Memory> rows = pk == null ? List.of()
-                    : Memory.find("agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL",
-                            pk, missing).fetch();
-            for (var m : rows) preloaded.put(m.id, m);
-        }
+        hydrateMissing(agentId, fused, preloaded);
 
         // The hydrated shortlist in fused order (stale index ids drop out here).
         var shortlist = new ArrayList<Memory>(fused.size());
@@ -396,20 +387,41 @@ public class JpaMemoryStore implements MemoryStore {
         }
 
         if (MemoryReranker.active() && shortlist.size() > 1) {
-            var order = MemoryReranker.rerank(query,
-                    shortlist.stream().map(m -> m.text).toList());
-            var out = new ArrayList<MemoryEntry>(Math.min(limit, order.size()));
-            int n = order.size();
-            for (int pos = 0; pos < n && out.size() < limit; pos++) {
-                double relevance = n <= 1 ? 1.0 : 1.0 - ((double) pos / (n - 1));
-                out.add(toEntry(shortlist.get(order.get(pos)), relevance));
-            }
-            return out;
+            return rerankedEntries(query, shortlist, limit);
         }
 
         var out = new ArrayList<MemoryEntry>(Math.min(limit, shortlist.size()));
         for (int i = 0; i < shortlist.size() && out.size() < limit; i++) {
             out.add(toEntry(shortlist.get(i), scores.get(i)));
+        }
+        return out;
+    }
+
+    /** Load the fused ids the legs didn't already hydrate, re-bounded to the
+     *  agent (and to non-superseded rows) so a stale/foreign index id can
+     *  never leak another agent's memory into recall. */
+    private void hydrateMissing(String agentId, List<ReciprocalRankFusion.Ranked> fused,
+            HashMap<Long, Memory> preloaded) {
+        var missing = fused.stream().map(ReciprocalRankFusion.Ranked::id)
+                .filter(id -> !preloaded.containsKey(id)).toList();
+        if (missing.isEmpty()) return;
+        Long pk = pkOrNull(agentId);
+        List<Memory> rows = pk == null ? List.of()
+                : Memory.find("agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL",
+                        pk, missing).fetch();
+        for (var m : rows) preloaded.put(m.id, m);
+    }
+
+    /** Cross-encoder path: the rerank's order replaces the fused scores, with
+     *  relevance derived from rank position (1.0 best → 0.0 worst). */
+    private List<MemoryEntry> rerankedEntries(String query, List<Memory> shortlist, int limit) {
+        var order = MemoryReranker.rerank(query,
+                shortlist.stream().map(m -> m.text).toList());
+        var out = new ArrayList<MemoryEntry>(Math.min(limit, order.size()));
+        int n = order.size();
+        for (int pos = 0; pos < n && out.size() < limit; pos++) {
+            double relevance = n <= 1 ? 1.0 : 1.0 - ((double) pos / (n - 1));
+            out.add(toEntry(shortlist.get(order.get(pos)), relevance));
         }
         return out;
     }

@@ -70,6 +70,9 @@ public class JClawApiTool implements ToolRegistry.Tool {
     public static final String TOOL_NAME = "jclaw_api";
 
     private static final String KEY_ACTION = "action";
+    private static final String ACTION_CALL = "call";
+    private static final String ACTION_DISCOVER = "discover";
+
     private static final String KEY_FILTER = "filter";
     private static final String KEY_METHOD = "method";
     private static final String KEY_PATH = "path";
@@ -111,8 +114,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
     @Override
     public List<ToolAction> actions() {
         return List.of(
-                new ToolAction("call", "Invoke a JClaw API endpoint via method and path"),
-                new ToolAction("discover", "List the callable API endpoints, optionally filtered")
+                new ToolAction(ACTION_CALL, "Invoke a JClaw API endpoint via method and path"),
+                new ToolAction(ACTION_DISCOVER, "List the callable API endpoints, optionally filtered")
         );
     }
 
@@ -139,7 +142,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
                 SchemaKeys.PROPERTIES, Map.of(
                         KEY_ACTION, Map.of(
                                 SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of("call", "discover"),
+                                SchemaKeys.ENUM, List.of(ACTION_CALL, ACTION_DISCOVER),
                                 SchemaKeys.DESCRIPTION, "\"discover\" lists the callable endpoints; \"call\" (default) invokes one via method+path"),
                         KEY_FILTER, Map.of(
                                 SchemaKeys.TYPE, SchemaKeys.STRING,
@@ -179,7 +182,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         }
 
         var action = stringField(args, KEY_ACTION);
-        if (action != null && "discover".equalsIgnoreCase(action)) {
+        if (action != null && ACTION_DISCOVER.equalsIgnoreCase(action)) {
             return discover(stringField(args, KEY_FILTER));
         }
 
