@@ -145,6 +145,38 @@ class DiarizedTranscriptTest extends UnitTest {
     }
 
     @Test
+    void toText_showsEmotionTag_andSplitsCollapseOnEmotionChange() {
+        // JCLAW-563: same speaker throughout, but the emotion flips mid-way —
+        // the collapse must break so the label stays truthful per line.
+        var entries = List.of(
+                new DiarizedTranscript.Entry("SPEAKER_00", 0, 2, "Everything is fine.", "neutral"),
+                new DiarizedTranscript.Entry("SPEAKER_00", 2, 4, "Totally fine.", "neutral"),
+                new DiarizedTranscript.Entry("SPEAKER_00", 4, 6, "WHO BROKE THE BUILD?", "angry"));
+
+        assertEquals("""
+                SPEAKER_00 (neutral): Everything is fine. Totally fine.
+                SPEAKER_00 (angry): WHO BROKE THE BUILD?""",
+                DiarizedTranscript.toText(entries));
+    }
+
+    @Test
+    void toText_withoutEmotion_keepsPlainSpeakerTag() {
+        // Null emotion (analysis disabled/unavailable) renders exactly the
+        // pre-JCLAW-563 shape — no empty parentheses, no format drift.
+        var entries = List.of(new DiarizedTranscript.Entry("Alice", 0, 2, "Hello."));
+        assertEquals("Alice: Hello.", DiarizedTranscript.toText(entries));
+    }
+
+    @Test
+    void toJson_carriesEmotionField() {
+        var json = DiarizedTranscript.toJson(List.of(
+                new DiarizedTranscript.Entry("SPEAKER_00", 0.5, 1.5, "hey", "happy")));
+
+        assertTrue(json.contains("\"emotion\""), json);
+        assertTrue(json.contains("\"happy\""), json);
+    }
+
+    @Test
     void format_dispatchesCaseInsensitively_andRejectsUnknown() {
         var entries = List.of(new DiarizedTranscript.Entry("SPEAKER_00", 0, 1, "x"));
 

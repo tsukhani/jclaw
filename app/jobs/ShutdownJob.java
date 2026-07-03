@@ -12,6 +12,7 @@ import services.TailscaleFunnel;
 import services.imagegen.LocalImageSidecarManager;
 import services.videogen.LocalVideoSidecarManager;
 import services.search.LuceneIndexer;
+import services.transcription.EmotionRecognizer;
 import services.transcription.SherpaDiarizer;
 import services.transcription.SpeakerNamer;
 import services.transcription.WhisperJniTranscriber;
@@ -71,6 +72,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("whisper-transcriber", WhisperJniTranscriber::shutdown),
                 new Component("sherpa-diarizer", SherpaDiarizer::shutdown),
                 new Component("speaker-namer", SpeakerNamer::shutdown),
+                new Component("emotion-recognizer", EmotionRecognizer::shutdown),
                 new Component("imagegen-sidecar", LocalImageSidecarManager::stop),
                 new Component("videogen-sidecar", LocalVideoSidecarManager::stop),
                 new Component("mcp-connections", McpConnectionManager::shutdown),

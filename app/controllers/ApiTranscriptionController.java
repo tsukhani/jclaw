@@ -10,6 +10,7 @@ import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 import services.transcription.DiarizedTranscript;
+import services.transcription.EmotionRecognizer;
 import services.transcription.FfmpegProbe;
 import services.transcription.SherpaDiarizer;
 import services.transcription.SpeakerNamer;
@@ -121,7 +122,9 @@ public class ApiTranscriptionController extends Controller {
      * POST /api/transcription/diarize — speaker-diarized transcription of an
      * uploaded audio file (JCLAW-556). Runs whisper (segment-level) and the
      * sherpa-onnx diarizer over the same audio, merges by temporal overlap,
-     * and renders in the requested format.
+     * annotates each turn with an acoustic emotion label (JCLAW-563, unless
+     * {@code transcription.emotion.enabled} is off), and renders in the
+     * requested format.
      *
      * <p>Synchronous by design — the ticket's "single command" contract; a
      * 10-minute file takes on the order of a minute (whisper dominates).
@@ -165,6 +168,12 @@ public class ApiTranscriptionController extends Controller {
                             (float) ConfigService.getDouble("transcription.diarization.speakerMatchThreshold", 0.6))
                     : Map.<Integer, String>of();
             entries = DiarizedTranscript.merge(transcript, speakers, names);
+            // JCLAW-563: per-turn acoustic emotion labels (json 'emotion'
+            // field, "(happy)" tag in txt). Best-effort inside annotate() —
+            // the transcript renders regardless.
+            if (ConfigService.getBoolean("transcription.emotion.enabled", true)) {
+                entries = EmotionRecognizer.annotate(audio.toPath(), entries);
+            }
         } catch (TranscriptionException e) {
             // Operator-fixable preconditions (model not downloaded, ffmpeg
             // absent) and backend failures both surface here; 409 matches the

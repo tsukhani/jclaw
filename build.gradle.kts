@@ -414,6 +414,14 @@ dependencies {
     implementation("com.k2fsa.sherpa.onnx:sherpa-onnx-native-lib-osx-aarch64:1.13.3") // dev Macs
     implementation("com.k2fsa.sherpa.onnx:sherpa-onnx-native-lib-linux-x64:1.13.3")   // CI / server
 
+    // JCLAW-563: speech emotion recognition — a wav2vec2 SER fine-tune (ONNX
+    // export, Apache-2.0) run in-process through ONNX Runtime's Java API. The
+    // jar bundles native libs for mac arm64/x64, linux x64/arm64 and win x64
+    // and self-extracts at load — same zero-setup, no-sidecar posture as
+    // whisper-jni and sherpa-onnx above. (sherpa links its own onnxruntime
+    // copy statically; the two loads don't interact.)
+    implementation("com.microsoft.onnxruntime:onnxruntime:1.26.0")
+
     // WebP decode for image captioning: caption models vary in format support — local Ollama vision
     // models reject WebP ("Failed to load image"). This TwelveMonkeys ImageIO plugin auto-registers a
     // WebP ImageReader so CaptionImageNormalizer can transcode WebP → PNG before sending. Pure-Java,

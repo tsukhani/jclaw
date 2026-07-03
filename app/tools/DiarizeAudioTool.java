@@ -12,6 +12,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.Tx;
 import services.transcription.DiarizedTranscript;
+import services.transcription.EmotionRecognizer;
 import services.transcription.SherpaDiarizer;
 import services.transcription.SpeakerClipExtractor;
 import services.transcription.SpeakerNamer;
@@ -79,7 +80,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     public List<ToolAction> actions() {
         return List.of(
                 new ToolAction(ACTION_DIARIZE,
-                        "Identify who spoke when — speaker-attributed transcript, with enrolled names"),
+                        "Identify who spoke when and how — speaker-attributed transcript with "
+                                + "enrolled names and per-turn emotion labels"),
                 new ToolAction(ACTION_ENROLL,
                         "Save a voice reference under a name (whole attachment or a staged clip_label)"),
                 new ToolAction(ACTION_EXTRACT,
@@ -95,7 +97,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 speakers in a recording; ordinary voice notes are already transcribed automatically. \
                 Slow: expect roughly a tenth of the recording's duration. Returns a transcript with \
                 one line per turn, labeled with enrolled speaker names where the voice matches, or \
-                SPEAKER_00-style tags otherwise. Action 'enroll_speaker' saves a voice reference for \
+                SPEAKER_00-style tags otherwise, plus a per-turn emotion label in parentheses \
+                (happy, sad, angry, disgust, fear, neutral) classified from the voice's acoustics — \
+                tone, not word choice. Action 'enroll_speaker' saves a voice reference for \
                 'speaker_name', so future diarizations label that voice by name — use it when the \
                 user asks to remember/enroll a voice or store an audio file under the speaker-voices \
                 folder; it enrolls either the whole attachment or, with 'clip_label', one clip staged \
@@ -226,6 +230,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                             "transcription.diarization.speakerMatchThreshold", 0.6))
                     : Map.<Integer, String>of();
             var entries = DiarizedTranscript.merge(transcript, speakers, names);
+            // JCLAW-563: annotate each turn with an acoustic emotion label.
+            // Best-effort inside annotate() — a transcript never fails
+            // because the emotion model couldn't run.
+            if (ConfigService.getBoolean("transcription.emotion.enabled", true)) {
+                entries = EmotionRecognizer.annotate(path, entries);
+            }
 
             var labels = new LinkedHashSet<String>();
             entries.forEach(e -> labels.add(e.speaker()));

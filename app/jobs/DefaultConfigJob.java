@@ -87,6 +87,11 @@ public class DefaultConfigJob extends Job<Void> {
         // speaker to an enrolled voice. Lower if known speakers stay
         // anonymous (far-field mics); raise if wrong names appear.
         seedIfAbsent("transcription.diarization.speakerMatchThreshold", "0.6");
+        // JCLAW-563: per-turn acoustic emotion labels on diarized
+        // transcripts. On by default (best-effort — failures never break a
+        // transcript); set false to skip the ~95 MB model download and the
+        // extra per-turn inference.
+        seedIfAbsent("transcription.emotion.enabled", "true");
     }
 
     /**

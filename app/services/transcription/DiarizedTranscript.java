@@ -17,8 +17,15 @@ import static utils.GsonHolder.INSTANCE;
  */
 public final class DiarizedTranscript {
 
-    /** One speaker-attributed transcript segment; times in seconds. */
-    public record Entry(String speaker, double start, double end, String text) {}
+    /** One speaker-attributed transcript segment; times in seconds.
+     *  {@code emotion} is the JCLAW-563 acoustic label ({@code happy},
+     *  {@code sad}, …), or null when the segment was too short to classify
+     *  or emotion analysis is disabled/unavailable. */
+    public record Entry(String speaker, double start, double end, String text, String emotion) {
+        public Entry(String speaker, double start, double end, String text) {
+            this(speaker, start, end, text, null);
+        }
+    }
 
     private DiarizedTranscript() {}
 
@@ -97,18 +104,24 @@ public final class DiarizedTranscript {
     }
 
     /** Conversation-style text: consecutive entries by the same speaker
-     *  collapse into one "SPEAKER_NN: …" line. */
+     *  collapse into one "SPEAKER_NN: …" line — or "SPEAKER_NN (happy): …"
+     *  when the entry carries an emotion label (JCLAW-563); an emotion
+     *  change mid-speaker starts a new line so the label stays truthful
+     *  for every word after it. */
     public static String toText(List<Entry> entries) {
         var sb = new StringBuilder();
-        String currentSpeaker = null;
+        String currentTag = null;
         for (var e : entries) {
             if (e.text().isEmpty()) continue;
-            if (e.speaker().equals(currentSpeaker)) {
+            var tag = e.emotion() == null
+                    ? e.speaker()
+                    : "%s (%s)".formatted(e.speaker(), e.emotion());
+            if (tag.equals(currentTag)) {
                 sb.append(' ').append(e.text());
             } else {
-                if (currentSpeaker != null) sb.append('\n');
-                sb.append(e.speaker()).append(": ").append(e.text());
-                currentSpeaker = e.speaker();
+                if (currentTag != null) sb.append('\n');
+                sb.append(tag).append(": ").append(e.text());
+                currentTag = tag;
             }
         }
         return sb.toString();
