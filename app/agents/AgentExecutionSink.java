@@ -87,20 +87,22 @@ public interface AgentExecutionSink {
     }
 
     /**
-     * JCLAW-228: persist a tool-call assistant turn AND inline a tool-produced image onto it (the
-     * {@code generate_image} tool). The default ignores the image — sinks with no chat surface (e.g.
-     * {@code TaskRunSink}) fall back to the plain overload; {@link ConversationSink} overrides to
-     * attach it via {@code AttachmentService.persistGeneratedImage} so the image renders in chat.
+     * JCLAW-228/562: persist a tool-call assistant turn AND inline the tool-produced attachments onto
+     * it ({@code generate_image}'s image, {@code diarize_audio}'s per-speaker voice clips). The default
+     * ignores the attachments — sinks with no chat surface (e.g. {@code TaskRunSink}) fall back to the
+     * plain overload; {@link ConversationSink} overrides to attach them via
+     * {@code AttachmentService.persistGeneratedAttachment} so they render in chat.
      *
-     * @param content   assistant text (typically {@code null} for a pure tool-call dispatch)
-     * @param toolCalls JSON-encoded tool-call list
-     * @param image     the produced image to inline, or {@code null} for an ordinary tool call
-     * @return the persisted {@link models.MessageAttachment} when an image was inlined (so the caller
-     *         can surface it on the live SSE {@code tool_call} frame), or {@code null} otherwise
+     * @param content     assistant text (typically {@code null} for a pure tool-call dispatch)
+     * @param toolCalls   JSON-encoded tool-call list
+     * @param attachments the produced attachments to inline, in order; empty for an ordinary tool call
+     * @return the persisted {@link models.MessageAttachment} rows (so the caller can surface them on
+     *         the live SSE {@code tool_call} frame), empty when nothing was inlined
      */
-    default MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
+    default java.util.List<MessageAttachment> appendAssistantMessage(
+            String content, String toolCalls, java.util.List<GeneratedAttachment> attachments) {
         appendAssistantMessage(content, toolCalls);
-        return null;
+        return java.util.List.of();
     }
 
     /**

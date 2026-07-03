@@ -134,9 +134,10 @@ public class AgentRunner {
         String arguments,
         String resultText,
         String resultStructuredJson,
-        // JCLAW-228: JSON of a tool-produced attachment (generate_image) so the live SSE tool_call
-        // frame can render the image inline; null for every ordinary tool call.
-        String generatedAttachmentJson
+        // JCLAW-228/562: JSON array of tool-produced attachments (generate_image's image,
+        // diarize_audio's voice clips) so the live SSE tool_call frame can render them inline;
+        // null for every ordinary tool call.
+        String generatedAttachmentsJson
     ) {}
 
     /**

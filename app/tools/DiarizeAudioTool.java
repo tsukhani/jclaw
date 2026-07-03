@@ -100,10 +100,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 user asks to remember/enroll a voice or store an audio file under the speaker-voices \
                 folder; it enrolls either the whole attachment or, with 'clip_label', one clip staged \
                 by extract_speaker_clips. Action 'extract_speaker_clips' cuts a short sample of every \
-                speaker in the recording and attaches one playback file (the voices in order, \
-                separated by silence) — use it when the user wants to enroll the people in a \
-                recording without separate per-person samples: ask the user who each voice is, then \
-                enroll each answer via enroll_speaker with its clip_label. Attachment-based actions \
+                speaker in the recording and attaches each as its own playable file named after its \
+                label (voice-1.wav, ...) — use it when the user wants to hear the speakers \
+                individually or enroll the people in a recording without separate per-person \
+                samples: ask the user who each voice is, then enroll each answer via enroll_speaker \
+                with its clip_label. Attachment-based actions \
                 default to the most recent audio attachment in this conversation; pass \
                 'attachment_uuid' to pick a specific one. For diarize/extract, set 'num_speakers' \
                 when the user states the exact count; for diarize, 'language' (ISO 639-1, e.g. 'ms') \
@@ -239,12 +240,10 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     /**
      * extract_speaker_clips (JCLAW-562): cut up to {@value #CLIP_TARGET_SECONDS}
      * seconds of every diarized speaker's clearest speech, stage the clips for
-     * label-based enrollment, and return ONE playback WAV (the voices in label
-     * order, separated by silence) as a generated attachment — the operator
-     * listens, names the voices, and the model enrolls each via
-     * {@code enroll_speaker + clip_label}. A single combined file (rather than
-     * one attachment per clip) because a tool result carries exactly one
-     * generated attachment through the commit path.
+     * label-based enrollment, and attach each clip as its OWN playable audio
+     * file ({@code voice-N.wav}) on the assistant turn — the operator plays
+     * each one, names the voices, and the model enrolls each via
+     * {@code enroll_speaker + clip_label}.
      */
     private static ToolRegistry.ToolResult extractSpeakerClips(
             Path path, MessageAttachment att, Integer numSpeakers) {
@@ -267,32 +266,29 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             var staging = stagingDir(conversationId);
             deleteRecursive(staging);
             Files.createDirectories(staging);
-            for (var clip : clips) {
-                Files.write(staging.resolve(clip.label() + ".wav"),
-                        SpeakerClipExtractor.toWavPcm16(clip.samples()));
-            }
 
             var lineup = new StringBuilder();
-            double offset = 0;
+            var generated = new java.util.ArrayList<GeneratedAttachment>(clips.size());
             for (var clip : clips) {
-                lineup.append("\n- %s: plays at %d:%04.1f (%.1fs, taken from %.1fs into the recording)"
-                        .formatted(clip.label(), (int) (offset / 60), offset % 60,
-                                clip.duration(), clip.start()));
-                offset += clip.duration() + 1.0;
+                var wav = SpeakerClipExtractor.toWavPcm16(clip.samples());
+                Files.write(staging.resolve(clip.label() + ".wav"), wav);
+                var meta = new JsonObject();
+                meta.addProperty("label", clip.label());
+                meta.addProperty("source", att.originalFilename);
+                meta.addProperty("sourceStartSeconds", clip.start());
+                generated.add(new GeneratedAttachment(wav, "audio/wav", meta.toString(),
+                        clip.label() + ".wav"));
+                lineup.append("\n- %s: %.1fs of speech, taken from %.1fs into the recording"
+                        .formatted(clip.label(), clip.duration(), clip.start()));
             }
-            var meta = new JsonObject();
-            meta.addProperty("source", att.originalFilename);
-            meta.addProperty("clips", clips.size());
-            var text = ("Extracted %d voice clip(s) from %s. A single playback file is attached and "
-                    + "already shown to the user (do not re-embed or link it) — the voices play in "
-                    + "order, separated by one second of silence:%s\n"
-                    + "Ask the user to listen and say who each voice is. Then enroll every voice they "
-                    + "identify by calling this tool with action=%s, clip_label=<label>, "
+            var text = ("Extracted %d voice clip(s) from %s, each attached as its own playable audio "
+                    + "file named after its label (already shown to the user — do not re-embed or "
+                    + "link them):%s\n"
+                    + "Ask the user to play each clip and say who the voice is. Then enroll every "
+                    + "voice they identify by calling this tool with action=%s, clip_label=<label>, "
                     + "speaker_name=<their name>. Skip voices the user does not identify.")
                     .formatted(clips.size(), att.originalFilename, lineup, ACTION_ENROLL);
-            return ToolRegistry.ToolResult.withImage(text, null,
-                    new GeneratedAttachment(SpeakerClipExtractor.montageWav(clips, 1.0),
-                            "audio/wav", meta.toString()));
+            return ToolRegistry.ToolResult.withAttachments(text, null, generated);
         } catch (TranscriptionException e) {
             return ToolRegistry.ToolResult.text("Speaker clip extraction failed: " + e.getMessage());
         } catch (IOException e) {

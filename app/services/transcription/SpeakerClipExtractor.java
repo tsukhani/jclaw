@@ -16,9 +16,9 @@ import java.util.TreeMap;
  * and names the voices, instead of having to produce a clean per-person
  * sample.
  *
- * <p>Pure sample-array functions — no I/O, no natives — so clip selection,
- * the lineup montage, and the WAV encoding are all unit-testable. All audio
- * is the pipeline-wide shape: PCM float mono at 16 kHz.
+ * <p>Pure sample-array functions — no I/O, no natives — so clip selection
+ * and the WAV encoding are unit-testable. All audio is the pipeline-wide
+ * shape: PCM float mono at 16 kHz.
  */
 public final class SpeakerClipExtractor {
 
@@ -85,26 +85,6 @@ public final class SpeakerClipExtractor {
                     Arrays.copyOfRange(samples, from, to)));
         }
         return clips;
-    }
-
-    /**
-     * Single playback file for chat: the clips in label order, separated by
-     * {@code gapSeconds} of silence, encoded as a PCM16 WAV. The operator
-     * listens once and identifies each voice by its position.
-     */
-    public static byte[] montageWav(List<Clip> clips, double gapSeconds) {
-        int gap = (int) Math.round(gapSeconds * SAMPLE_RATE);
-        int total = clips.stream().mapToInt(c -> c.samples().length).sum()
-                + gap * Math.max(0, clips.size() - 1);
-        var joined = new float[total];
-        int at = 0;
-        for (int i = 0; i < clips.size(); i++) {
-            if (i > 0) at += gap; // silence is already zero-initialised
-            var s = clips.get(i).samples();
-            System.arraycopy(s, 0, joined, at, s.length);
-            at += s.length;
-        }
-        return toWavPcm16(joined);
     }
 
     /** Encode PCM float mono 16 kHz samples as a 16-bit WAV file. */

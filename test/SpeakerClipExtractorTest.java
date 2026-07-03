@@ -77,18 +77,6 @@ class SpeakerClipExtractorTest extends UnitTest {
     }
 
     @Test
-    void montage_joinsClipsWithSilenceGaps() {
-        var clips = List.of(
-                new SpeakerClipExtractor.Clip("voice-1", 0, 0, new float[2 * SR]),
-                new SpeakerClipExtractor.Clip("voice-2", 1, 0, new float[3 * SR]));
-
-        var wav = SpeakerClipExtractor.montageWav(clips, 1.0);
-
-        // 2s + 1s gap + 3s = 6s of PCM16 → 44-byte header + 6*SR*2 bytes.
-        assertEquals(44 + 6 * SR * 2, wav.length);
-    }
-
-    @Test
     void toWavPcm16_writesValidHeader() {
         var wav = SpeakerClipExtractor.toWavPcm16(new float[SR]); // 1s silence
 

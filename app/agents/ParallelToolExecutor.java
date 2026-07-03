@@ -12,6 +12,7 @@ import services.Tx;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -311,20 +312,23 @@ public final class ParallelToolExecutor {
             }
             final String r = text;
             final String s = structured;
-            // JCLAW-228: a generate_image tool result carries the produced image; the sink inlines it
-            // on the assistant turn that called the tool (no-op image for every ordinary tool) and
-            // returns the persisted row so we can push it onto the live SSE tool_call frame.
-            final var image = result.image();
+            // JCLAW-228/562: a tool result may carry produced attachments (generate_image's image,
+            // diarize_audio's per-speaker voice clips); the sink inlines them on the ONE assistant
+            // turn that called the tool (empty list for every ordinary tool) and returns the
+            // persisted rows so we can push them onto the live SSE tool_call frame.
+            final var attachments = result.attachments();
             final var videoJob = result.videoJob();
-            final var attHolder = new AtomicReference<MessageAttachment>();
+            final var attHolder = new AtomicReference<List<MessageAttachment>>(List.of());
             Tx.run(() -> {
                 // JCLAW-235: a generate_video result carries a submitted-job ref instead of bytes — the
-                // sink creates a zero-byte placeholder linked to it; every other tool takes the image path
-                // (no-op image for ordinary calls).
-                var att = videoJob != null
-                        ? sink.appendVideoPlaceholder(null, gson.toJson(tc), videoJob)
-                        : sink.appendAssistantMessage(null, gson.toJson(tc), image);
-                if (att != null) attHolder.set(att);
+                // sink creates a zero-byte placeholder linked to it; every other tool takes the
+                // attachments path (no-op for ordinary calls).
+                if (videoJob != null) {
+                    var placeholder = sink.appendVideoPlaceholder(null, gson.toJson(tc), videoJob);
+                    if (placeholder != null) attHolder.set(List.of(placeholder));
+                } else {
+                    attHolder.set(sink.appendAssistantMessage(null, gson.toJson(tc), attachments));
+                }
                 sink.appendToolResult(tc.id(), r, s);
             });
             // JCLAW-170: surface the completed call to the SSE stream so the
@@ -339,28 +343,33 @@ public final class ParallelToolExecutor {
                         tc.function().arguments(),
                         text,
                         structured,
-                        generatedAttachmentJson(attHolder.get())));
+                        generatedAttachmentsJson(attHolder.get())));
             }
         }
     }
 
     /**
-     * JCLAW-228: serialize a tool-produced attachment for the live SSE {@code tool_call} frame, in the
-     * same shape {@code ApiConversationsController.attachmentsToList} uses, so the chat UI can render
-     * the generated image inline without waiting for a reload. {@code null} when no image was produced.
+     * JCLAW-228/562: serialize the tool-produced attachments for the live SSE {@code tool_call} frame
+     * as a JSON array, in the same per-item shape {@code ApiConversationsController.attachmentsToList}
+     * uses, so the chat UI can render generated images / voice clips inline without waiting for a
+     * reload. {@code null} when the call produced nothing.
      */
-    private static String generatedAttachmentJson(MessageAttachment att) {
-        if (att == null) return null;
-        var m = new LinkedHashMap<String, Object>();
-        m.put("uuid", att.uuid);
-        m.put("originalFilename", att.originalFilename);
-        m.put("mimeType", att.mimeType);
-        m.put("sizeBytes", att.sizeBytes);
-        m.put("kind", att.kind);
-        m.put("generated", att.generated);
-        if (att.generationMetadata != null) m.put("generationMetadata", att.generationMetadata);
-        if (att.generationJobId != null) m.put("generationJobId", att.generationJobId); // JCLAW-234: chat polls this job
-        return gson.toJson(m);
+    private static String generatedAttachmentsJson(List<MessageAttachment> atts) {
+        if (atts == null || atts.isEmpty()) return null;
+        var list = new java.util.ArrayList<Map<String, Object>>(atts.size());
+        for (var att : atts) {
+            var m = new LinkedHashMap<String, Object>();
+            m.put("uuid", att.uuid);
+            m.put("originalFilename", att.originalFilename);
+            m.put("mimeType", att.mimeType);
+            m.put("sizeBytes", att.sizeBytes);
+            m.put("kind", att.kind);
+            m.put("generated", att.generated);
+            if (att.generationMetadata != null) m.put("generationMetadata", att.generationMetadata);
+            if (att.generationJobId != null) m.put("generationJobId", att.generationJobId); // JCLAW-234: chat polls this job
+            list.add(m);
+        }
+        return gson.toJson(list);
     }
 
 }

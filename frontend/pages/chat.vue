@@ -2158,9 +2158,10 @@ interface ToolCallEvent {
   arguments?: string
   resultText?: string | null
   resultStructured?: ToolCall['resultStructured']
-  // JCLAW-228: a generate_image tool produced an inline image; the backend ships its attachment so
-  // it renders live on the streaming bubble (not only after a reload).
-  generatedAttachment?: MessageAttachment
+  // JCLAW-228/562: the tool produced inline attachments (generate_image's image, diarize_audio's
+  // per-speaker voice clips); the backend ships them so they render live on the streaming bubble
+  // (not only after a reload).
+  generatedAttachments?: MessageAttachment[]
 }
 
 function handleStreamToolCallEvent(ctx: StreamContext, event: ToolCallEvent) {
@@ -2187,12 +2188,15 @@ function handleStreamToolCallEvent(ctx: StreamContext, event: ToolCallEvent) {
     resultStructured: event.resultStructured ?? null,
     _expanded: true,
   })
-  // JCLAW-228: a generate_image call produced an inline image — attach it to the streaming bubble so
-  // it renders immediately (the server already persisted it on the assistant turn).
-  if (event.generatedAttachment) {
+  // JCLAW-228/562: the call produced inline attachments (image / voice clips) — attach them to the
+  // streaming bubble so they render immediately (the server already persisted them on the
+  // assistant turn).
+  if (event.generatedAttachments?.length) {
     if (!m.attachments) m.attachments = []
-    if (!m.attachments.some(a => a.uuid === event.generatedAttachment!.uuid)) {
-      m.attachments.push(event.generatedAttachment)
+    for (const att of event.generatedAttachments) {
+      if (!m.attachments.some(a => a.uuid === att.uuid)) {
+        m.attachments.push(att)
+      }
     }
     startVideoPolling() // a generate_video placeholder (JCLAW-234) needs the progress poll to begin
   }

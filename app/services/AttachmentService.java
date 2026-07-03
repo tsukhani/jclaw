@@ -132,8 +132,19 @@ public final class AttachmentService {
      */
     public static MessageAttachment persistGeneratedImage(Agent agent, Message message, byte[] bytes,
             String mimeType, String generationMetadata) {
+        return persistGeneratedAttachment(agent, message, bytes, mimeType, generationMetadata, null);
+    }
+
+    /**
+     * As {@link #persistGeneratedImage} for any tool-produced content (JCLAW-562: the diarize_audio
+     * per-speaker voice clips). {@code displayFilename} overrides the default
+     * {@code generated-<timestamp>} chip name — clip lineups name their clips {@code voice-N.wav} so
+     * the operator can tell them apart; the on-disk leaf stays uuid-keyed either way.
+     */
+    public static MessageAttachment persistGeneratedAttachment(Agent agent, Message message, byte[] bytes,
+            String mimeType, String generationMetadata, String displayFilename) {
         if (bytes == null || bytes.length == 0) {
-            throw new IllegalArgumentException("generated image bytes are required");
+            throw new IllegalArgumentException("generated attachment bytes are required");
         }
         var mime = (mimeType == null || mimeType.isBlank()) ? "image/png" : mimeType;
         var uuid = UUID.randomUUID().toString();
@@ -156,7 +167,9 @@ public final class AttachmentService {
         var att = new MessageAttachment();
         att.message = message;
         att.uuid = uuid;
-        att.originalFilename = "generated-" + GENERATED_TS.format(LocalDateTime.now()) + "." + ext;
+        att.originalFilename = displayFilename != null && !displayFilename.isBlank()
+                ? displayFilename
+                : "generated-" + GENERATED_TS.format(LocalDateTime.now()) + "." + ext;
         att.storagePath = toStoragePath(agent.name, message.conversation.id, leaf);
         att.mimeType = mime;
         att.sizeBytes = bytes.length;

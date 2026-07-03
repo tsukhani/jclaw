@@ -41,23 +41,32 @@ public class ToolRegistry {
      *                       so re-opening a conversation keeps the richer
      *                       render. {@code null} means "no structured view".
      */
-    public record ToolResult(String text, String structuredJson, GeneratedAttachment image, VideoJobRef videoJob) {
+    public record ToolResult(String text, String structuredJson, List<GeneratedAttachment> attachments, VideoJobRef videoJob) {
         /** Back-compat 2-arg form — most tools produce no inline attachment. */
         public ToolResult(String text, String structuredJson) {
-            this(text, structuredJson, null, null);
+            this(text, structuredJson, List.of(), null);
         }
-        public static ToolResult text(String text) { return new ToolResult(text, null, null, null); }
+        public ToolResult {
+            attachments = attachments == null ? List.of() : List.copyOf(attachments);
+        }
+        public static ToolResult text(String text) { return new ToolResult(text, null, List.of(), null); }
         /** JCLAW-228: a tool ({@code generate_image}) that produced an image to inline on the
-         *  assistant turn. The commit path ({@link ParallelToolExecutor}) attaches {@code image} to
+         *  assistant turn. The commit path ({@link ParallelToolExecutor}) attaches it to
          *  the assistant message via {@link AgentExecutionSink}; the model still sees {@code text}. */
         public static ToolResult withImage(String text, String structuredJson, GeneratedAttachment image) {
-            return new ToolResult(text, structuredJson, image, null);
+            return new ToolResult(text, structuredJson, image == null ? List.of() : List.of(image), null);
+        }
+        /** JCLAW-562: a tool that produced several inline attachments (the diarize_audio
+         *  extract action's per-speaker voice clips). All land on the one assistant turn
+         *  that carried the tool call. */
+        public static ToolResult withAttachments(String text, String structuredJson, List<GeneratedAttachment> attachments) {
+            return new ToolResult(text, structuredJson, attachments, null);
         }
         /** JCLAW-235: a tool ({@code generate_video}) that submitted an async job. The commit path
          *  creates a placeholder MessageAttachment linked to the job on the assistant turn (JCLAW-234);
          *  the model sees {@code text} (a "generating, appears when ready" confirmation). */
         public static ToolResult withVideoJob(String text, Long jobId, String generationMetadata) {
-            return new ToolResult(text, null, null, new VideoJobRef(jobId, generationMetadata));
+            return new ToolResult(text, null, List.of(), new VideoJobRef(jobId, generationMetadata));
         }
     }
 

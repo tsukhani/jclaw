@@ -615,11 +615,12 @@ public class ApiChatController extends Controller {
             payload.put("resultStructured",
                     JsonParser.parseString(ev.resultStructuredJson()));
         }
-        // JCLAW-228: a generate_image tool produced an inline image; ship its attachment metadata so the
-        // chat UI renders it live on the streaming bubble rather than only after a reload.
-        if (ev.generatedAttachmentJson() != null) {
-            payload.put("generatedAttachment",
-                    JsonParser.parseString(ev.generatedAttachmentJson()));
+        // JCLAW-228/562: the tool produced inline attachments (image / voice clips); ship their
+        // metadata so the chat UI renders them live on the streaming bubble rather than only
+        // after a reload.
+        if (ev.generatedAttachmentsJson() != null) {
+            payload.put("generatedAttachments",
+                    JsonParser.parseString(ev.generatedAttachmentsJson()));
         }
         sse.send(payload);
     }

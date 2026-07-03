@@ -70,10 +70,12 @@ class GenerateImageToolTest extends UnitTest {
 
         var result = new GenerateImageTool().executeRich("{\"prompt\":\"a red bicycle\"}", new Agent());
 
-        assertNotNull(result.image(), "a successful generation must carry the image on the result");
-        assertArrayEquals(imageBytes, result.image().bytes());
-        assertEquals("image/png", result.image().mimeType());
-        assertTrue(result.image().metadata().contains("a red bicycle"), result.image().metadata());
+        assertEquals(1, result.attachments().size(),
+                "a successful generation must carry the image on the result");
+        var image = result.attachments().get(0);
+        assertArrayEquals(imageBytes, image.bytes());
+        assertEquals("image/png", image.mimeType());
+        assertTrue(image.metadata().contains("a red bicycle"), image.metadata());
     }
 
     @Test
@@ -92,7 +94,7 @@ class GenerateImageToolTest extends UnitTest {
         var result = new GenerateImageTool().executeRich(
                 "{\"prompt\":\"a kite\",\"aspect_ratio\":\"16:9\"}", new Agent());
 
-        var meta = result.image().metadata();
+        var meta = result.attachments().get(0).metadata();
         assertTrue(meta.contains("\"width\":1536"), meta);
         assertTrue(meta.contains("\"height\":864"), meta);
     }
@@ -101,7 +103,7 @@ class GenerateImageToolTest extends UnitTest {
     void toolReportsWhenNotConfigured() {
         // No imagegen.provider → the router is empty; the tool reports, doesn't throw, no image.
         var result = new GenerateImageTool().executeRich("{\"prompt\":\"anything\"}", new Agent());
-        assertNull(result.image());
+        assertTrue(result.attachments().isEmpty());
         assertTrue(result.text().toLowerCase().contains("not configured"), result.text());
     }
 
@@ -123,10 +125,10 @@ class GenerateImageToolTest extends UnitTest {
         var meta = "{\"prompt\":\"a cat\",\"generatedBy\":\"openai:gpt-image-1\"}";
 
         var returned = new ConversationSink(conv).appendAssistantMessage(
-                null, "[]", new GeneratedAttachment(bytes, "image/png", meta));
-        // JCLAW-228: the sink returns the persisted row so the runner can ship it on the live SSE frame.
-        assertNotNull(returned, "the sink must return the persisted attachment for the live tool_call frame");
-        assertTrue(returned.generated);
+                null, "[]", java.util.List.of(new GeneratedAttachment(bytes, "image/png", meta)));
+        // JCLAW-228: the sink returns the persisted rows so the runner can ship them on the live SSE frame.
+        assertEquals(1, returned.size(), "the sink must return the persisted attachment for the live tool_call frame");
+        assertTrue(returned.get(0).generated);
 
         var att = (MessageAttachment) MessageAttachment.find("generated = ?1", true).first();
         assertNotNull(att, "a generated attachment must be persisted onto the assistant turn");

@@ -92,20 +92,23 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
-    public MessageAttachment appendAssistantMessage(String content, String toolCalls, GeneratedAttachment image) {
+    public java.util.List<MessageAttachment> appendAssistantMessage(
+            String content, String toolCalls, java.util.List<GeneratedAttachment> attachments) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
-            return null;
+            return java.util.List.of();
         }
         var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
-        if (image != null) {
-            // JCLAW-228: inline the generate_image output on the assistant turn that called the tool,
-            // and return the row so the runner can push it onto the live SSE tool_call frame.
-            return AttachmentService.persistGeneratedImage(
-                    managed.agent, msg, image.bytes(), image.mimeType(), image.metadata());
+        // JCLAW-228/562: inline every tool-produced attachment on the ONE assistant turn that
+        // carried the call, and return the rows so the runner can push them onto the live SSE
+        // tool_call frame.
+        var persisted = new java.util.ArrayList<MessageAttachment>(attachments.size());
+        for (var a : attachments) {
+            persisted.add(AttachmentService.persistGeneratedAttachment(
+                    managed.agent, msg, a.bytes(), a.mimeType(), a.metadata(), a.filename()));
         }
-        return null;
+        return persisted;
     }
 
     @Override
