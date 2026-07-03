@@ -1,6 +1,7 @@
 package tools;
 
 import agents.GeneratedAttachment;
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -33,6 +34,12 @@ public class GenerateImageTool implements ToolRegistry.Tool {
     @Override public String name() { return "generate_image"; }
     @Override public String category() { return "Utilities"; }
     @Override public String icon() { return "image"; }
+
+    @Override
+    public List<ToolAction> actions() {
+        return List.of(new ToolAction("generate",
+                "Produce an image from a text prompt via the configured backend and show it inline"));
+    }
 
     @Override
     public String description() {

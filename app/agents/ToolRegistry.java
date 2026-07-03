@@ -111,10 +111,14 @@ public class ToolRegistry {
          *  Defaults to {@link #summary()}. */
         default String shortDescription() { return summary(); }
 
-        /** Enumerated actions this tool exposes. The admin UI renders these as a
-         *  "Show actions" disclosure under each tool card; the names typically
-         *  match the {@code action} field in {@link #parameters()}. Empty by
-         *  default for single-action tools that would repeat their own name. */
+        /** Enumerated actions this tool exposes. The admin UI renders these as
+         *  the "Functions" disclosure under each tool card. Convention: every
+         *  tool declares at least one — multi-action tools mirror the
+         *  {@code action} enum in {@link #parameters()} exactly, and
+         *  single-action tools describe their one function with a short verb
+         *  name (see {@code exec}, {@code web_search}). The empty default
+         *  exists only so a forgotten override fails visibly as "Functions 0"
+         *  rather than breaking registration. */
         default List<ToolAction> actions() { return List.of(); }
 
         /** Runtime config key (in {@code ConfigService}) that must be truthy for

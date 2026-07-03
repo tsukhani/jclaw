@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -41,6 +42,12 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
     @Override public String name() { return "generate_video"; }
     @Override public String category() { return "Utilities"; }
     @Override public String icon() { return "video"; }
+
+    @Override
+    public List<ToolAction> actions() {
+        return List.of(new ToolAction("generate",
+                "Submit an async text-to-video job; the clip appears in chat when ready"));
+    }
 
     @Override
     public String description() {

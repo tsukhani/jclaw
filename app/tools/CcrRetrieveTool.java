@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
@@ -35,6 +36,12 @@ import java.util.function.Function;
 public class CcrRetrieveTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "ccr_retrieve";
+
+    @Override
+    public java.util.List<ToolAction> actions() {
+        return java.util.List.of(new ToolAction("retrieve",
+                "Return the full original tool result for a compression hash"));
+    }
 
     @Override
     public String name() {

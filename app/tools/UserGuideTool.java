@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -84,6 +85,12 @@ public class UserGuideTool implements ToolRegistry.Tool {
     @Override
     public String icon() {
         return "book";
+    }
+
+    @Override
+    public List<ToolAction> actions() {
+        return List.of(new ToolAction("search",
+                "Search the bundled user guide and answer from the matching sections"));
     }
 
     /** Read-only retrieval, no shared mutable state — safe to run concurrently. */

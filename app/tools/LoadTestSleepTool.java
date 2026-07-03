@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -26,6 +27,12 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
     @Override public String name() { return "loadtest_sleep"; }
     @Override public String category() { return "System"; }
     @Override public String icon() { return "clock"; }
+
+    @Override
+    public java.util.List<ToolAction> actions() {
+        return java.util.List.of(new ToolAction("sleep",
+                "Block for the requested duration (load-test latency stand-in)"));
+    }
     @Override public String shortDescription() {
         return "Internal load-testing sleep tool — not surfaced in the admin UI.";
     }
