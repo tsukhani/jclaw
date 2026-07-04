@@ -68,6 +68,10 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     private static final double CLIP_TARGET_SECONDS = 5.0;
     private static final double CLIP_MIN_SECONDS = 1.0;
+    /** Reference clips staged per speaker for enrollment (JCLAW-606): the
+     *  lineup clip plus up to this many minus one hidden extras from other
+     *  segments — enrolling one voice stores an averaged-quality clip set. */
+    private static final int ENROLLMENT_CLIPS_PER_SPEAKER = 3;
 
     /** Display names become enrollment folder names — letters/digits/space
      *  and a few name punctuation marks, no separators, no leading dot. */
@@ -292,9 +296,19 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             deleteRecursive(staging);
             Files.createDirectories(staging);
 
+            // JCLAW-606: stage hidden extra reference clips per speaker so
+            // the enroll action stores a multi-clip set (the JCLAW-605
+            // lesson: averaged multi-clip references beat single clips).
+            // Only the lineup clip is attached/playable — UX unchanged.
             var lineup = new StringBuilder();
             var generated = new java.util.ArrayList<GeneratedAttachment>(clips.size());
             for (var clip : clips) {
+                var refs = SpeakerClipExtractor.referenceClips(path, speakers, clip.speaker(),
+                        ENROLLMENT_CLIPS_PER_SPEAKER, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS);
+                for (int r = 1; r < refs.size(); r++) {
+                    Files.write(staging.resolve(clip.label() + "-ref" + (r + 1) + ".wav"),
+                            SpeakerClipExtractor.toWavPcm16(refs.get(r)));
+                }
                 var wav = SpeakerClipExtractor.toWavPcm16(clip.samples());
                 Files.write(staging.resolve(clip.label() + ".wav"), wav);
                 var meta = new JsonObject();
@@ -337,7 +351,18 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return "Error: no staged clip '%s' in this conversation — run extract_speaker_clips first."
                     .formatted(label.strip());
         }
-        return storeEnrollment(clip, conversationId + "-" + label.strip() + ".wav", name);
+        var result = storeEnrollment(clip, conversationId + "-" + label.strip() + ".wav", name);
+        if (result.startsWith("Error")) return result;
+        // JCLAW-606: also file the hidden reference clips staged alongside
+        // the lineup clip, so the person's voiceprint averages several
+        // segments instead of leaning on one. Best-effort per clip.
+        for (int r = 2; r <= ENROLLMENT_CLIPS_PER_SPEAKER; r++) {
+            var ref = stagingDir(conversationId).resolve(label.strip() + "-ref" + r + ".wav");
+            if (Files.isRegularFile(ref)) {
+                storeEnrollment(ref, conversationId + "-" + label.strip() + "-ref" + r + ".wav", name);
+            }
+        }
+        return result;
     }
 
     private static Path stagingDir(Long conversationId) {

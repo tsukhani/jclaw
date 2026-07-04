@@ -192,6 +192,7 @@ class DiarizeAudioToolTest extends UnitTest {
             var staging = voicesRoot.resolve(".staging").resolve(String.valueOf(conv.id));
             Files.createDirectories(staging);
             Files.write(staging.resolve("voice-2.wav"), new byte[]{1, 2, 3, 4});
+            Files.write(staging.resolve("voice-2-ref2.wav"), new byte[]{5, 6, 7, 8});
 
             var out = ToolContext.withConversation(conv.id, () -> tool.execute(
                     "{\"action\":\"enroll_speaker\",\"clip_label\":\"voice-2\",\"speaker_name\":\"Erin\"}",
@@ -201,6 +202,12 @@ class DiarizeAudioToolTest extends UnitTest {
             assertTrue(Files.isRegularFile(
                             voicesRoot.resolve("Erin").resolve(conv.id + "-voice-2.wav")),
                     "staged clip must be filed under the name");
+            assertTrue(Files.isRegularFile(
+                            voicesRoot.resolve("Erin").resolve(conv.id + "-voice-2-ref2.wav")),
+                    "hidden reference clips staged with the lineup clip must be filed too (JCLAW-606)");
+            assertFalse(Files.exists(
+                            voicesRoot.resolve("Erin").resolve(conv.id + "-voice-2-ref3.wav")),
+                    "absent staged refs are skipped, not errors");
         } finally {
             SpeakerNamer.resetForTest();
             deleteRecursive(voicesRoot);

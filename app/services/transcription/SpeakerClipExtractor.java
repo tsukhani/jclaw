@@ -87,6 +87,49 @@ public final class SpeakerClipExtractor {
         return clips;
     }
 
+    /**
+     * Up to {@code maxClips} reference clips for one speaker (JCLAW-606),
+     * cut mid-segment from the speaker's LONGEST segments in descending
+     * length order — one clip per segment, deterministic. The first clip is
+     * identical to the lineup clip {@link #extract} produces for that
+     * speaker; the rest capture voice variation from other parts of the
+     * recording so enrollment stores an averaged-reference-quality set.
+     */
+    /** As {@link #referenceClips(float[], List, int, int, double, double)},
+     *  decoding the audio file first (same ffmpeg path as the pipeline). */
+    public static List<float[]> referenceClips(Path audioFile,
+                                               List<SherpaDiarizer.SpeakerSegment> segments,
+                                               int speaker, int maxClips,
+                                               double targetSeconds, double minSeconds) {
+        return referenceClips(WhisperJniTranscriber.ffmpegToPcmF32(audioFile),
+                segments, speaker, maxClips, targetSeconds, minSeconds);
+    }
+
+    public static List<float[]> referenceClips(float[] samples,
+                                               List<SherpaDiarizer.SpeakerSegment> segments,
+                                               int speaker, int maxClips,
+                                               double targetSeconds, double minSeconds) {
+        var own = segments.stream()
+                .filter(s -> s.speaker() == speaker)
+                .sorted((a, b) -> Double.compare(b.end() - b.start(), a.end() - a.start()))
+                .toList();
+        var clips = new ArrayList<float[]>();
+        for (var seg : own) {
+            if (clips.size() >= maxClips) break;
+            double segLength = seg.end() - seg.start();
+            if (segLength < minSeconds) break; // sorted: everything after is shorter
+            double duration = Math.min(segLength, targetSeconds);
+            double start = seg.start() + (segLength - duration) / 2;
+            int durSamples = (int) Math.round(duration * SAMPLE_RATE);
+            int from = Math.clamp(Math.round(start * SAMPLE_RATE), 0,
+                    Math.max(0, samples.length - durSamples));
+            int to = Math.min(from + durSamples, samples.length);
+            if (to <= from) continue;
+            clips.add(Arrays.copyOfRange(samples, from, to));
+        }
+        return clips;
+    }
+
     /** Encode PCM float mono 16 kHz samples as a 16-bit WAV file. */
     public static byte[] toWavPcm16(float[] samples) {
         int dataSize = samples.length * 2;

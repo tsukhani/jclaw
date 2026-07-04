@@ -2,7 +2,6 @@ package services.transcription;
 
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor;
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig;
-import com.k2fsa.sherpa.onnx.SpeakerEmbeddingManager;
 import play.Logger;
 
 import java.io.IOException;
@@ -10,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -26,12 +26,16 @@ import java.util.stream.Stream;
  *   Bob/interview-clip.wav
  * </pre>
  *
- * <p>Each clip is embedded with sherpa-onnx's {@link SpeakerEmbeddingExtractor}
- * (the same WeSpeaker ResNet34-LM model the diarizer already downloads) and
- * registered in a {@link SpeakerEmbeddingManager}; each diarized speaker's
- * speech is then embedded and searched against the enrolled set. Cosine
- * similarity at or above the threshold renames the speaker; anything else
- * keeps its anonymous SPEAKER_NN label.
+ * <p>Matching (rewritten in JCLAW-606 on the JCLAW-605 evidence that
+ * reference quality dominates): every clip of a person is decoded, chunked
+ * into 5s pieces, each chunk embedded with sherpa-onnx's
+ * {@link SpeakerEmbeddingExtractor} (the same WeSpeaker model the diarizer
+ * downloads), and the embeddings AVERAGED into one reference voiceprint;
+ * each diarized cluster's speech gets the same chunk-averaged treatment.
+ * Assignment is greedy and EXCLUSIVE — one enrolled name claims at most one
+ * cluster — which structurally prevents the "every cluster matched the one
+ * enrolled voice" collapse; clusters whose top two candidates are within
+ * {@link #AMBIGUITY_GAP} stay anonymous rather than guessing.
  *
  * <p>Lifecycle mirrors {@link SherpaDiarizer}: the native extractor is cached
  * for the JVM's lifetime, inference is serialized under {@link #lock}, and
@@ -50,6 +54,14 @@ public final class SpeakerNamer {
      *  embeddings saturate well before this; capping keeps naming O(seconds)
      *  even for hour-long single-speaker stretches. */
     private static final int MAX_SAMPLES_PER_SPEAKER = 20 * 16_000;
+
+    /** Chunk length for averaged voiceprints (JCLAW-606): embeddings are
+     *  computed per 5s chunk and averaged — the JCLAW-605 experiment's
+     *  winning reference scheme. */
+    static final int CHUNK_SAMPLES = 5 * 16_000;
+    /** A cluster whose top two enrolled candidates score within this gap is
+     *  left anonymous rather than guessed. */
+    static final double AMBIGUITY_GAP = 0.03;
 
     private static final Object lock = new Object();
     // Guarded by lock.
@@ -90,23 +102,100 @@ public final class SpeakerNamer {
 
         synchronized (lock) {
             ensureExtractor(embeddingModel);
-            var manager = new SpeakerEmbeddingManager(extractor.getDim());
-            try {
-                int enrolled = enroll(manager, enrollment);
-                if (enrolled == 0) return Map.of();
-
-                var names = new HashMap<Integer, String>();
-                for (var e : samplesPerSpeaker(samples, segments).entrySet()) {
-                    var name = manager.search(embeddingOf(e.getValue()), threshold);
-                    if (name != null && !name.isEmpty()) {
-                        names.put(e.getKey(), name);
+            // Person references: chunk-averaged across ALL enrolled clips.
+            var references = new LinkedHashMap<String, float[]>();
+            for (var person : enrollment.entrySet()) {
+                var chunks = new java.util.ArrayList<float[]>();
+                for (var clip : person.getValue()) {
+                    try {
+                        chunks.addAll(chunksOf(WhisperJniTranscriber.ffmpegToPcmF32(clip)));
+                    } catch (TranscriptionException e) {
+                        Logger.warn("SpeakerNamer: skipping unreadable enrollment clip %s (%s)",
+                                clip, e.getMessage());
                     }
                 }
-                return names;
-            } finally {
-                manager.release();
+                var avg = averagedEmbedding(chunks);
+                if (avg != null) references.put(person.getKey(), avg);
+            }
+            if (references.isEmpty()) return Map.of();
+
+            // Cluster voiceprints: same chunk-averaged scheme.
+            var scoresByCluster = new LinkedHashMap<Integer, Map<String, Double>>();
+            for (var e : samplesPerSpeaker(samples, segments).entrySet()) {
+                var voiceprint = averagedEmbedding(chunksOf(e.getValue()));
+                if (voiceprint == null) continue;
+                var scores = new HashMap<String, Double>();
+                for (var ref : references.entrySet()) {
+                    scores.put(ref.getKey(), OverlapReattributor.cosine(voiceprint, ref.getValue()));
+                }
+                scoresByCluster.put(e.getKey(), scores);
+            }
+            return assignExclusive(scoresByCluster, threshold, AMBIGUITY_GAP);
+        }
+    }
+
+    /**
+     * Greedy exclusive assignment (JCLAW-606): all (cluster, person, score)
+     * candidates sorted best-first; each person names at most one cluster
+     * and each cluster takes at most one name — the structural fix for the
+     * collapse where every cluster independently matched the single
+     * enrolled voice. Clusters whose top two candidates sit within
+     * {@code ambiguityGap} stay anonymous. Public so tests drive the rule
+     * table with synthetic scores — no models, no natives.
+     */
+    public static Map<Integer, String> assignExclusive(
+            Map<Integer, Map<String, Double>> scoresByCluster, float threshold, double ambiguityGap) {
+        record Candidate(int cluster, String person, double score) {}
+        var candidates = new java.util.ArrayList<Candidate>();
+        for (var e : scoresByCluster.entrySet()) {
+            var scores = e.getValue();
+            if (scores.size() >= 2) {
+                var sorted = scores.values().stream().sorted(java.util.Comparator.reverseOrder()).toList();
+                if (sorted.get(0) - sorted.get(1) < ambiguityGap) continue; // too close to call
+            }
+            for (var s : scores.entrySet()) {
+                if (s.getValue() >= threshold) {
+                    candidates.add(new Candidate(e.getKey(), s.getKey(), s.getValue()));
+                }
             }
         }
+        candidates.sort(java.util.Comparator.comparingDouble(Candidate::score).reversed());
+        var names = new HashMap<Integer, String>();
+        var takenPersons = new java.util.HashSet<String>();
+        for (var c : candidates) {
+            if (names.containsKey(c.cluster()) || takenPersons.contains(c.person())) continue;
+            names.put(c.cluster(), c.person());
+            takenPersons.add(c.person());
+        }
+        return names;
+    }
+
+    /** Split samples into {@link #CHUNK_SAMPLES} pieces, dropping a trailing
+     *  fragment under 1s. */
+    private static java.util.List<float[]> chunksOf(float[] samples) {
+        var chunks = new java.util.ArrayList<float[]>();
+        for (int at = 0; at < samples.length; at += CHUNK_SAMPLES) {
+            int len = Math.min(CHUNK_SAMPLES, samples.length - at);
+            if (len < 16_000) break;
+            var chunk = new float[len];
+            System.arraycopy(samples, at, chunk, 0, len);
+            chunks.add(chunk);
+        }
+        return chunks;
+    }
+
+    /** Average of the chunks' embeddings, or null with no usable chunk.
+     *  Caller must hold {@link #lock}. */
+    private static float[] averagedEmbedding(java.util.List<float[]> chunks) {
+        float[] avg = null;
+        for (var chunk : chunks) {
+            var emb = embeddingOf(chunk);
+            if (avg == null) avg = new float[emb.length];
+            for (int i = 0; i < emb.length; i++) avg[i] += emb[i];
+        }
+        if (avg == null) return null;
+        for (int i = 0; i < avg.length; i++) avg[i] /= chunks.size();
+        return avg;
     }
 
     /**
@@ -160,30 +249,6 @@ public final class SpeakerNamer {
             return Map.of();
         }
         return enrollment;
-    }
-
-    /** Embed every readable clip and register it under the person's name.
-     *  A clip ffmpeg can't decode is skipped with a warning rather than
-     *  failing the whole transcription. Returns the number of people
-     *  successfully enrolled. Caller must hold {@link #lock}. */
-    private static int enroll(SpeakerEmbeddingManager manager, Map<String, List<Path>> enrollment) {
-        int enrolled = 0;
-        for (var person : enrollment.entrySet()) {
-            var embeddings = new ArrayList<float[]>();
-            for (var clip : person.getValue()) {
-                try {
-                    embeddings.add(embeddingOf(WhisperJniTranscriber.ffmpegToPcmF32(clip)));
-                } catch (TranscriptionException e) {
-                    Logger.warn("SpeakerNamer: skipping unreadable enrollment clip %s (%s)",
-                            clip, e.getMessage());
-                }
-            }
-            if (!embeddings.isEmpty()
-                    && manager.add(person.getKey(), embeddings.toArray(float[][]::new))) {
-                enrolled++;
-            }
-        }
-        return enrolled;
     }
 
     /** Concatenate each speaker's diarized sample ranges, capped at

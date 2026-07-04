@@ -52,11 +52,18 @@ public final class OverlapReattributor {
      *  over 4s were never misattributed. */
     static final double MAX_ADJACENT_TURN_SECONDS = 4.0;
     /** Winner must beat the runner-up by this cosine margin to override.
-     *  Calibrated across the JCLAW-605 experiments with multi-chunk
-     *  averaged references: wrong-flip candidates max out at 0.078 (offline
-     *  and live), correct flips start at 0.097 (live) up to 0.266 — 0.085
-     *  is the midpoint of the measured gap. */
-    static final double DECISION_MARGIN = 0.085;
+     *  Whisper-boundary jitter moves a given turn's margin by ~0.02 between
+     *  runs (the flagship case measured 0.078-0.097 on identical audio), so
+     *  the stem margin alone cannot be the sole guard; the mixed-audio
+     *  ambiguity gate below carries the structural discrimination and this
+     *  threshold only rejects clear noise. */
+    static final double DECISION_MARGIN = 0.07;
+    /** A flip is only allowed when the ORIGINAL mixed audio does not
+     *  strongly support the current label — the cross-talk signature.
+     *  Genuinely buried voices measure as near-ties on mixed audio
+     *  (flagship: 0.724 vs 0.751); wrong-flip candidates are clean speech
+     *  whose mixed evidence decisively backs the current label. */
+    static final double MIXED_SUPPORT_GAP = 0.10;
     /** Stem windows quieter than this RMS are silence — not evidence. */
     static final double MIN_STEM_RMS = 0.008;
     /** Separation window: overlap region padded on both sides. */
@@ -178,6 +185,9 @@ public final class OverlapReattributor {
             double winStart = regionStarts.get(w);
             for (int i : regionEntryIndexes.get(w)) {
                 var entry = out.get(i);
+                if (mixedAudioBacksCurrentLabel(entry, pcm, references, embedder)) {
+                    continue; // clean, confidently-attributed speech: not ours to touch
+                }
                 var scores = stemScores(entry, winStart, stems, references, embedder);
                 var winner = decide(entry.speaker(), scores, DECISION_MARGIN);
                 if (winner == null && !scores.isEmpty()
@@ -200,6 +210,33 @@ public final class OverlapReattributor {
             Logger.info("OverlapReattributor: reassigned %d overlap turn(s)", reassigned);
         }
         return out;
+    }
+
+    /**
+     * The cross-talk gate: embed the entry's window of the ORIGINAL mixed
+     * audio; when the current label wins there by {@link #MIXED_SUPPORT_GAP}
+     * or more, the attribution rests on solid evidence and no stem-based
+     * flip is permitted. Buried voices cannot produce such support — their
+     * mixed windows are near-ties by definition.
+     */
+    static boolean mixedAudioBacksCurrentLabel(DiarizedTranscript.Entry entry, float[] pcm,
+                                               Map<String, float[]> references, Embedder embedder) {
+        var current = references.get(entry.speaker());
+        if (current == null) return false; // unknown label: no basis to protect it
+        int from = (int) Math.clamp(Math.round(entry.start() * SAMPLE_RATE), 0, pcm.length);
+        int to = (int) Math.clamp(Math.round(entry.end() * SAMPLE_RATE), from, pcm.length);
+        if (to - from < SAMPLE_RATE / 2) return false;
+        var window = new float[to - from];
+        System.arraycopy(pcm, from, window, 0, window.length);
+        var emb = embedder.embed(window);
+        double currentScore = cosine(emb, current);
+        double bestOther = Double.NEGATIVE_INFINITY;
+        for (var ref : references.entrySet()) {
+            if (!ref.getKey().equals(entry.speaker())) {
+                bestOther = Math.max(bestOther, cosine(emb, ref.getValue()));
+            }
+        }
+        return currentScore - bestOther >= MIXED_SUPPORT_GAP;
     }
 
     /**

@@ -90,6 +90,46 @@ class SpeakerNamerTest extends UnitTest {
     }
 
     @Test
+    void assignExclusive_preventsTheCollapse() {
+        // The original failure: both clusters exceed threshold against ONE
+        // enrolled person — only the better-scoring cluster may take the
+        // name (JCLAW-606 regression test).
+        var scores = java.util.Map.of(
+                0, java.util.Map.of("Podcaster", 0.82),
+                1, java.util.Map.of("Podcaster", 0.71));
+        var names = SpeakerNamer.assignExclusive(scores, 0.6f, 0.03);
+        assertEquals(java.util.Map.of(0, "Podcaster"), names,
+                "one enrolled voice must name at most one cluster");
+    }
+
+    @Test
+    void assignExclusive_greedyBestFirst_acrossTwoPeople() {
+        var scores = java.util.Map.of(
+                0, java.util.Map.of("Podcaster", 0.85, "Firdaus", 0.62),
+                1, java.util.Map.of("Podcaster", 0.70, "Firdaus", 0.78));
+        var names = SpeakerNamer.assignExclusive(scores, 0.6f, 0.03);
+        assertEquals("Podcaster", names.get(0));
+        assertEquals("Firdaus", names.get(1),
+                "cluster 1 takes its remaining best after Podcaster is claimed");
+    }
+
+    @Test
+    void assignExclusive_leavesAmbiguousClustersAnonymous() {
+        // Top two candidates within the ambiguity gap: no guess.
+        var scores = java.util.Map.of(
+                0, java.util.Map.of("Podcaster", 0.71, "Firdaus", 0.695));
+        assertTrue(SpeakerNamer.assignExclusive(scores, 0.6f, 0.03).isEmpty(),
+                "a coin-flip cluster stays SPEAKER_NN");
+    }
+
+    @Test
+    void assignExclusive_respectsThreshold() {
+        var scores = java.util.Map.of(
+                0, java.util.Map.of("Podcaster", 0.55, "Firdaus", 0.31));
+        assertTrue(SpeakerNamer.assignExclusive(scores, 0.6f, 0.03).isEmpty());
+    }
+
+    @Test
     void nameSpeakers_matchesEnrolledVoices_endToEnd() {
         assumeTrue(FfmpegProbe.probe().available(), "ffmpeg not on PATH — skipping");
         assumeTrue(DiarizationModelManager.availableLocally(DiarizationModel.SEGMENTATION)

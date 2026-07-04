@@ -144,20 +144,47 @@ class OverlapReattributorTest extends UnitTest {
         assertTrue(OverlapReattributor.belongsToRegion(shortTurn, new double[]{15.8, 16.0}));
     }
 
+    @Test
+    void reattribute_neverFlips_whenMixedAudioBacksTheCurrentLabel() {
+        // The cross-talk gate (JCLAW-606 hardening of 605): the disputed
+        // entry's ORIGINAL audio is pure B (0.2) — decisively the current
+        // label — so even unanimous stem evidence for A must not flip it.
+        var pcm = new float[20 * SR];
+        Arrays.fill(pcm, 0, 8 * SR, 0.8f);          // A clean
+        Arrays.fill(pcm, 8 * SR, 20 * SR, 0.2f);    // B clean through the "overlap"
+        var entries = List.of(
+                entry("A", 0, 8),
+                entry("B", 8, 16),
+                entry("B", 16.5, 19.5));
+        var overlaps = List.<double[]>of(new double[]{16, 20});
+        OverlapReattributor.Separator separator = windows -> windows.stream().map(window -> {
+            var stemA = new float[window.length];
+            Arrays.fill(stemA, 0.8f);
+            return List.of(stemA, new float[window.length]);
+        }).toList();
+
+        var out = OverlapReattributor.reattribute(entries, overlaps, pcm, separator, MEAN_EMBEDDER);
+
+        assertEquals("B", out.get(2).speaker(),
+                "confident mixed-audio attribution is not overridable by stems");
+    }
+
     // ---- decide() rule table ---------------------------------------------
 
     @Test
     void decide_flipsOnlyOnClearMargin() {
-        // Calibration across the JCLAW-605 experiments (multi-chunk averaged
-        // references): wrong-flip candidates max at 0.078, correct flips
-        // start at 0.097 — 0.085 is the measured gap's midpoint.
-        assertEquals("A", OverlapReattributor.decide("B", Map.of("A", 0.774, "B", 0.677), 0.085),
-                "the live flagship margin (0.097) must flip");
-        assertNull(OverlapReattributor.decide("B", Map.of("A", 0.68, "B", 0.602), 0.085),
-                "the worst wrong-flip candidate (0.078) must be blocked");
-        assertNull(OverlapReattributor.decide("A", Map.of("A", 0.774, "B", 0.677), 0.085),
+        // Margin rejects only clear noise (0.07); structural discrimination
+        // against wrong flips lives in the mixed-audio gate. The flagship's
+        // jitter band (0.078-0.097 on identical audio) must always flip.
+        assertEquals("A", OverlapReattributor.decide("B", Map.of("A", 0.7177, "B", 0.6396), 0.07),
+                "the flagship's low-jitter margin (0.078) must flip");
+        assertEquals("A", OverlapReattributor.decide("B", Map.of("A", 0.774, "B", 0.677), 0.07),
+                "the flagship's high-jitter margin (0.097) must flip");
+        assertNull(OverlapReattributor.decide("B", Map.of("A", 0.68, "B", 0.64), 0.07),
+                "sub-margin noise keeps the current label");
+        assertNull(OverlapReattributor.decide("A", Map.of("A", 0.774, "B", 0.677), 0.07),
                 "agreeing winner is a no-op");
-        assertNull(OverlapReattributor.decide("B", Map.of("A", 0.72), 0.085),
+        assertNull(OverlapReattributor.decide("B", Map.of("A", 0.72), 0.07),
                 "a single scored reference is no contest");
     }
 

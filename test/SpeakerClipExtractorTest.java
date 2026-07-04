@@ -92,4 +92,41 @@ class SpeakerClipExtractorTest extends UnitTest {
         buf.position(40);
         assertEquals(SR * 2, buf.getInt(), "data chunk size");
     }
+
+    @Test
+    void referenceClips_cutFromDistinctSegments_longestFirst() {
+        var samples = new float[60 * SpeakerClipExtractor.SAMPLE_RATE];
+        for (int i = 0; i < samples.length; i++) samples[i] = (i % 100) / 100f;
+        var segments = java.util.List.of(
+                new services.transcription.SherpaDiarizer.SpeakerSegment(0, 8, 0),    // longest
+                new services.transcription.SherpaDiarizer.SpeakerSegment(20, 26, 0),  // second
+                new services.transcription.SherpaDiarizer.SpeakerSegment(40, 43, 0),  // third
+                new services.transcription.SherpaDiarizer.SpeakerSegment(50, 50.4, 0), // below min
+                new services.transcription.SherpaDiarizer.SpeakerSegment(10, 18, 1)); // other speaker
+
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 3, 5.0, 1.0);
+
+        assertEquals(3, refs.size(), "one clip per qualifying segment, capped at maxClips");
+        assertEquals(5 * SpeakerClipExtractor.SAMPLE_RATE, refs.get(0).length,
+                "full 5s from the 8s segment");
+        assertEquals(3 * SpeakerClipExtractor.SAMPLE_RATE, refs.get(2).length,
+                "third clip limited by its 3s segment");
+    }
+
+    @Test
+    void referenceClips_firstClipMatchesTheLineupCut() {
+        // The lineup clip is the mid-cut of the longest segment; the first
+        // reference clip must be the identical cut so enroll(voice-N) files
+        // the exact clip the operator listened to.
+        var samples = new float[40 * SpeakerClipExtractor.SAMPLE_RATE];
+        for (int i = 0; i < samples.length; i++) samples[i] = (float) Math.sin(i * 0.01);
+        var segments = java.util.List.of(
+                new services.transcription.SherpaDiarizer.SpeakerSegment(2, 12, 0),
+                new services.transcription.SherpaDiarizer.SpeakerSegment(20, 24, 0));
+
+        var lineup = SpeakerClipExtractor.extract(samples, segments, 5.0, 1.0);
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 3, 5.0, 1.0);
+
+        assertArrayEquals(lineup.get(0).samples(), refs.get(0), 0f);
+    }
 }
