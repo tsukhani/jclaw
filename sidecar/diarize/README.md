@@ -25,6 +25,13 @@ The audio file is passed **by path** (same host; attachments are already on
 disk). One diarization at a time; concurrent callers get `409` and queue in
 the JVM.
 
+Segments come from pyannote 4's **exclusive** diarization (one speaker at a
+time — the model resolves overlapping speech to the dominant/transcribable
+voice). jclaw's only consumer is a mono ASR transcript, so exclusive output
+beats handing overlap-aware segments to a naive max-overlap merge: on the
+JCLAW-565 debate benchmark it cut DER 12.5% → 7.9% with identical turn
+attribution.
+
 ## Requirements
 
 - `uv` on PATH (shared prerequisite with the image/video sidecars).
