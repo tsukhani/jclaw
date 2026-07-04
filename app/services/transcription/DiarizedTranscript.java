@@ -20,10 +20,19 @@ public final class DiarizedTranscript {
     /** One speaker-attributed transcript segment; times in seconds.
      *  {@code emotion} is the JCLAW-563 acoustic label ({@code happy},
      *  {@code sad}, …), or null when the segment was too short to classify
-     *  or emotion analysis is disabled/unavailable. */
-    public record Entry(String speaker, double start, double end, String text, String emotion) {
+     *  or emotion analysis is disabled/unavailable. {@code crossTalk} is
+     *  the JCLAW-607 honesty marker: the overlap re-attribution pass
+     *  confirmed the turn sits in genuine cross-talk but the separated-stem
+     *  evidence could not decide the speaker — the label shown is the
+     *  diarizer's best guess and a reviewer should re-listen. */
+    public record Entry(String speaker, double start, double end, String text, String emotion,
+                        boolean crossTalk) {
         public Entry(String speaker, double start, double end, String text) {
-            this(speaker, start, end, text, null);
+            this(speaker, start, end, text, null, false);
+        }
+
+        public Entry(String speaker, double start, double end, String text, String emotion) {
+            this(speaker, start, end, text, emotion, false);
         }
     }
 
@@ -107,15 +116,23 @@ public final class DiarizedTranscript {
      *  collapse into one "SPEAKER_NN: …" line — or "SPEAKER_NN (happy): …"
      *  when the entry carries an emotion label (JCLAW-563); an emotion
      *  change mid-speaker starts a new line so the label stays truthful
-     *  for every word after it. */
+     *  for every word after it. Undecidable overlap turns (JCLAW-607)
+     *  render as "SPEAKER_NN (cross-talk?)" / "SPEAKER_NN (happy,
+     *  cross-talk?)" so the uncertainty is visible where it matters. */
     public static String toText(List<Entry> entries) {
         var sb = new StringBuilder();
         String currentTag = null;
         for (var e : entries) {
             if (e.text().isEmpty()) continue;
-            var tag = e.emotion() == null
+            var qualifiers = new StringBuilder();
+            if (e.emotion() != null) qualifiers.append(e.emotion());
+            if (e.crossTalk()) {
+                if (qualifiers.length() > 0) qualifiers.append(", ");
+                qualifiers.append("cross-talk?");
+            }
+            var tag = qualifiers.length() == 0
                     ? e.speaker()
-                    : "%s (%s)".formatted(e.speaker(), e.emotion());
+                    : "%s (%s)".formatted(e.speaker(), qualifiers);
             if (tag.equals(currentTag)) {
                 sb.append(' ').append(e.text());
             } else {

@@ -187,4 +187,18 @@ class DiarizedTranscriptTest extends UnitTest {
         assertTrue(DiarizedTranscript.format(entries, "pdf").isEmpty());
         assertTrue(DiarizedTranscript.format(entries, null).isEmpty());
     }
+
+    @Test
+    void toText_rendersCrossTalkMarker_aloneAndWithEmotion() {
+        var entries = java.util.List.of(
+                new DiarizedTranscript.Entry("Podcaster", 0, 2, "Clean turn.", null, false),
+                new DiarizedTranscript.Entry("Firdaus", 2, 4, "Contested turn.", null, true),
+                new DiarizedTranscript.Entry("Firdaus", 4, 6, "Contested and angry.", "angry", true));
+
+        var text = DiarizedTranscript.toText(entries);
+
+        assertTrue(text.contains("Podcaster: Clean turn."), text);
+        assertTrue(text.contains("Firdaus (cross-talk?): Contested turn."), text);
+        assertTrue(text.contains("Firdaus (angry, cross-talk?): Contested and angry."), text);
+    }
 }

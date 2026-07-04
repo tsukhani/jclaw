@@ -190,19 +190,19 @@ public final class OverlapReattributor {
                 }
                 var scores = stemScores(entry, winStart, stems, references, embedder);
                 var winner = decide(entry.speaker(), scores, DECISION_MARGIN);
-                if (winner == null && !scores.isEmpty()
-                        && !entry.speaker().equals(bestLabel(scores))) {
-                    // Near-miss diagnostics: the evidence disagreed with the
-                    // label but not decisively — visible without log spam.
-                    Logger.info("OverlapReattributor: kept \"%s\" as %s (near-miss, scores %s)",
-                            truncate(entry.text()), entry.speaker(), scores);
-                }
                 if (winner != null) {
                     out.set(i, new DiarizedTranscript.Entry(
                             winner, entry.start(), entry.end(), entry.text(), entry.emotion()));
                     reassigned++;
                     Logger.info("OverlapReattributor: \"%s\" %s -> %s (scores %s)",
                             truncate(entry.text()), entry.speaker(), winner, scores);
+                } else if (undecidable(scores)) {
+                    // JCLAW-607: confirmed cross-talk, evidence a coin flip —
+                    // keep the label but say so instead of feigning certainty.
+                    out.set(i, new DiarizedTranscript.Entry(entry.speaker(), entry.start(),
+                            entry.end(), entry.text(), entry.emotion(), true));
+                    Logger.info("OverlapReattributor: marked \"%s\" cross-talk (scores %s)",
+                            truncate(entry.text()), scores);
                 }
             }
         }
@@ -447,10 +447,14 @@ public final class OverlapReattributor {
         return Math.max(0, Math.min(entry.end(), region[1]) - Math.max(entry.start(), region[0]));
     }
 
-    private static String bestLabel(java.util.Map<String, Double> scores) {
-        return scores.entrySet().stream()
-                .max(java.util.Map.Entry.comparingByValue())
-                .map(java.util.Map.Entry::getKey).orElse(null);
+    /** The turn is confirmed cross-talk (gate already said contested) and
+     *  the stem evidence cannot call it: no scored stems at all, or the
+     *  top two labels sit inside the decision margin — whoever leads. */
+    public static boolean undecidable(Map<String, Double> scores) {
+        if (scores.size() < 2) return true;
+        var sorted = scores.values().stream()
+                .sorted(java.util.Comparator.reverseOrder()).toList();
+        return sorted.get(0) - sorted.get(1) < DECISION_MARGIN;
     }
 
     public static double rms(float[] samples) {

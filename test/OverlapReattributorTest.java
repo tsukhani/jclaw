@@ -169,6 +169,60 @@ class OverlapReattributorTest extends UnitTest {
                 "confident mixed-audio attribution is not overridable by stems");
     }
 
+    @Test
+    void reattribute_marksUndecidableContestedTurns_asCrossTalk() {
+        // JCLAW-607: stems come back as a blend (0.5 — near-tie against both
+        // references), the mixed-audio gate confirms contested: keep the
+        // label but carry the cross-talk flag instead of feigning certainty.
+        var entries = List.of(
+                entry("A", 0, 8),
+                entry("B", 8, 16),
+                entry("B", 16.5, 19.5));
+        var overlaps = List.<double[]>of(new double[]{16, 20});
+        OverlapReattributor.Separator separator = windows -> windows.stream().map(window -> {
+            var blended = new float[window.length];
+            Arrays.fill(blended, 0.5f);
+            return List.of(blended, new float[window.length]);
+        }).toList();
+
+        var out = OverlapReattributor.reattribute(entries, overlaps, pcm(), separator, MEAN_EMBEDDER);
+
+        assertEquals("B", out.get(2).speaker(), "undecidable keeps the label");
+        assertTrue(out.get(2).crossTalk(), "and must carry the cross-talk marker");
+        assertFalse(out.get(0).crossTalk(), "clean entries untouched");
+        assertFalse(out.get(1).crossTalk());
+    }
+
+    @Test
+    void reattribute_leavesDecisiveOutcomes_unmarked() {
+        var entries = List.of(
+                entry("A", 0, 8),
+                entry("B", 8, 16),
+                entry("B", 16.5, 19.5));
+        var overlaps = List.<double[]>of(new double[]{16, 20});
+        // Stem decisively A: flips — flipped turns are resolved, not marked.
+        OverlapReattributor.Separator separator = windows -> windows.stream().map(window -> {
+            var stemA = new float[window.length];
+            Arrays.fill(stemA, 0.8f);
+            return List.of(stemA, new float[window.length]);
+        }).toList();
+
+        var out = OverlapReattributor.reattribute(entries, overlaps, pcm(), separator, MEAN_EMBEDDER);
+
+        assertEquals("A", out.get(2).speaker());
+        assertFalse(out.get(2).crossTalk(), "a decisive flip carries no marker");
+    }
+
+    @Test
+    void undecidable_ruleTable() {
+        assertTrue(OverlapReattributor.undecidable(Map.of()), "no evidence at all");
+        assertTrue(OverlapReattributor.undecidable(Map.of("A", 0.7)), "one label scored");
+        assertTrue(OverlapReattributor.undecidable(Map.of("A", 0.70, "B", 0.66)),
+                "inside the decision margin");
+        assertFalse(OverlapReattributor.undecidable(Map.of("A", 0.75, "B", 0.60)),
+                "a clear leader is decidable");
+    }
+
     // ---- decide() rule table ---------------------------------------------
 
     @Test
