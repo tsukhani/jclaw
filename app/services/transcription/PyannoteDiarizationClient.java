@@ -32,7 +32,16 @@ public class PyannoteDiarizationClient {
     private final OkHttpClient client;
 
     public PyannoteDiarizationClient() {
-        this(null, HttpFactories.general());
+        // Derived from the shared general client (reuses its pool/dispatcher)
+        // but with the per-read socket timeout lifted: the sidecar's first
+        // /diarize lazily loads the pipeline (gated download + torch import)
+        // and legitimately sends nothing for minutes. The JCLAW-565 UAT
+        // caught general()'s 30s read timeout firing mid-load and falling
+        // back to sherpa while the sidecar went on to succeed. The per-call
+        // callTimeout below still bounds the whole request.
+        this(null, HttpFactories.general().newBuilder()
+                .readTimeout(java.time.Duration.ZERO)
+                .build());
     }
 
     /** Test seam: fixed base URL (no sidecar spawn) + injected client. */
