@@ -40,10 +40,12 @@ class DiarizationRouterTest extends UnitTest {
         }
 
         @Override
-        public List<SherpaDiarizer.SpeakerSegment> diarize(Path audioFile, int numSpeakers) {
+        public DiarizationOutput diarizeRich(Path audioFile, int numSpeakers) {
+            // The router goes through diarizeRich (JCLAW-605); diarize()
+            // delegates to it in the base class, so this intercepts both.
             called = true;
             if (failure != null) throw failure;
-            return STUB_SEGMENTS;
+            return new DiarizationOutput(STUB_SEGMENTS, List.of());
         }
     }
 

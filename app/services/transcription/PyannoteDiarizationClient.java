@@ -26,6 +26,11 @@ import java.util.concurrent.TimeUnit;
  */
 public class PyannoteDiarizationClient {
 
+    /** Full /diarize output: segments plus the overlap regions the
+     *  overlap-aware annotation detected (JCLAW-605 re-attribution gate). */
+    public record DiarizationOutput(List<SherpaDiarizer.SpeakerSegment> segments,
+                                    List<double[]> overlaps) {}
+
     private static final MediaType JSON = MediaType.get("application/json");
 
     private final String baseUrlOverride;
@@ -60,6 +65,11 @@ public class PyannoteDiarizationClient {
      *                    to let the pipeline find the count itself
      */
     public List<SherpaDiarizer.SpeakerSegment> diarize(Path audioFile, int numSpeakers) {
+        return diarizeRich(audioFile, numSpeakers).segments();
+    }
+
+    /** As {@link #diarize} but keeping the overlap regions (JCLAW-605). */
+    public DiarizationOutput diarizeRich(Path audioFile, int numSpeakers) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
 
         var body = new JsonObject();
@@ -82,7 +92,7 @@ public class PyannoteDiarizationClient {
                         "pyannote sidecar diarize failed: HTTP %d — %s".formatted(
                                 resp.code(), truncate(text)));
             }
-            return parseSegments(text);
+            return new DiarizationOutput(parseSegments(text), parseOverlaps(text));
         } catch (IOException e) {
             throw new TranscriptionException(
                     "pyannote sidecar unreachable: " + e.getMessage(), e);
@@ -111,6 +121,74 @@ public class PyannoteDiarizationClient {
         } catch (RuntimeException e) {
             throw new TranscriptionException(
                     "pyannote sidecar returned an unparseable response: " + truncate(json), e);
+        }
+    }
+
+    /** Parse {@code overlaps:[{start,end}...]}; tolerant of absence (older
+     *  sidecar builds) so a version skew degrades to "no re-attribution". */
+    public static List<double[]> parseOverlaps(String json) {
+        try {
+            var root = JsonParser.parseString(json).getAsJsonObject();
+            if (!root.has("overlaps") || !root.get("overlaps").isJsonArray()) return List.of();
+            var out = new ArrayList<double[]>();
+            for (var el : root.getAsJsonArray("overlaps")) {
+                var o = el.getAsJsonObject();
+                out.add(new double[]{o.get("start").getAsDouble(), o.get("end").getAsDouble()});
+            }
+            return out;
+        } catch (RuntimeException _) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Separate prepared 16 kHz mono WAVs into two stems each via the
+     * sidecar's MossFormer2 endpoint (JCLAW-605). Batched: the sidecar
+     * shells one separator process for the whole list, so the model loads
+     * once per diarization, not once per overlap region. Returns stem-path
+     * pairs aligned with the inputs; the caller owns temp-dir cleanup.
+     */
+    public List<List<Path>> separate(List<Path> windowWavs) {
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
+        var body = new JsonObject();
+        var arr = new com.google.gson.JsonArray();
+        windowWavs.forEach(w -> arr.add(w.toAbsolutePath().toString()));
+        body.add("audio_paths", arr);
+        var call = client.newCall(new Request.Builder()
+                .url(baseUrl + "/separate")
+                .post(RequestBody.create(body.toString(), JSON))
+                .build());
+        // First call downloads + loads MossFormer2; generous deadline.
+        call.timeout().timeout(ConfigService.getInt(
+                PyannoteSidecarManager.CONFIG_PREFIX + ".timeoutSeconds", 1800), TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            var text = resp.body().string();
+            if (!resp.isSuccessful()) {
+                throw new TranscriptionException(
+                        "pyannote sidecar separate failed: HTTP %d — %s".formatted(
+                                resp.code(), truncate(text)));
+            }
+            var root = JsonParser.parseString(text).getAsJsonObject();
+            var byInput = root.getAsJsonObject("stems");
+            var out = new ArrayList<List<Path>>(windowWavs.size());
+            for (var wav : windowWavs) {
+                var key = wav.toAbsolutePath().toString();
+                if (!byInput.has(key) || byInput.getAsJsonArray(key).size() != 2) {
+                    throw new TranscriptionException(
+                            "sidecar returned no stem pair for " + key);
+                }
+                var pair = new ArrayList<Path>(2);
+                byInput.getAsJsonArray(key).forEach(el -> pair.add(Path.of(el.getAsString())));
+                out.add(pair);
+            }
+            return out;
+        } catch (IOException e) {
+            throw new TranscriptionException(
+                    "pyannote sidecar unreachable: " + e.getMessage(), e);
+        } catch (RuntimeException e) {
+            if (e instanceof TranscriptionException te) throw te;
+            throw new TranscriptionException(
+                    "pyannote sidecar returned an unparseable separate response: " + e.getMessage(), e);
         }
     }
 

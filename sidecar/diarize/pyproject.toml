@@ -12,6 +12,10 @@ dependencies = [
     "torchaudio>=2.4",
     "huggingface_hub>=0.26",
 ]
+# NOTE (JCLAW-605): the MossFormer2 separator does NOT live in this env —
+# clearvoice pins numpy<2 while pyannote-core 6 needs numpy>=2. It runs in
+# its own uv-managed script env (separate.py, PEP 723 inline metadata),
+# shelled out from serve.py per /separate call.
 
 # torch wheels are platform-specific (same posture as sidecar/image):
 #  - macOS / Apple Silicon: the default PyPI wheel ships CPU + MPS — no extra config.

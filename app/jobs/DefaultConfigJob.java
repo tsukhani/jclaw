@@ -102,6 +102,11 @@ public class DefaultConfigJob extends Job<Void> {
         // with neither set the sidecar is ineligible in auto mode. Masked in
         // Settings (key name contains "token").
         seedIfAbsent("transcription.diarization.local.hfToken", "");
+        // JCLAW-605: cross-talk turns re-attributed via MossFormer2 source
+        // separation in the sidecar + WeSpeaker stem voiceprints. Only
+        // activates on the pyannote path when overlap regions exist; every
+        // failure degrades to the merge's attribution.
+        seedIfAbsent("transcription.diarization.overlapReattribution", "true");
     }
 
     /**

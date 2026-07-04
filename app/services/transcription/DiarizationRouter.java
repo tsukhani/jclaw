@@ -37,6 +37,12 @@ public final class DiarizationRouter {
     public static final String BACKEND_PYANNOTE = "pyannote-local";
     public static final String BACKEND_SHERPA = "sherpa";
 
+    /** Diarization plus the overlap regions (empty on the sherpa path —
+     *  its output is not overlap-aware) and which engine produced it. */
+    public record Result(List<SherpaDiarizer.SpeakerSegment> segments,
+                         List<double[]> overlaps,
+                         boolean viaPyannote) {}
+
     // Test seam: lets router tests exercise selection/fallback without a
     // sidecar. Production never writes this field.
     static PyannoteDiarizationClient clientOverride = null;
@@ -54,14 +60,30 @@ public final class DiarizationRouter {
      */
     public static List<SherpaDiarizer.SpeakerSegment> diarize(
             Path audioFile, float sherpaThreshold, int numSpeakers) {
+        return diarizeRich(audioFile, sherpaThreshold, numSpeakers).segments();
+    }
+
+    /** As {@link #diarize} but keeping overlap regions and engine identity
+     *  for the JCLAW-605 re-attribution pass. */
+    public static Result diarizeRich(Path audioFile, float sherpaThreshold, int numSpeakers) {
         var backend = ConfigService.get(BACKEND_KEY, BACKEND_AUTO);
         return switch (backend) {
-            case BACKEND_SHERPA -> SherpaDiarizer.diarize(audioFile, sherpaThreshold, numSpeakers);
+            case BACKEND_SHERPA -> sherpaResult(audioFile, sherpaThreshold, numSpeakers);
             // Explicit choice: failures surface to the operator instead of
             // silently producing lower-quality diarization.
-            case BACKEND_PYANNOTE -> client().diarize(audioFile, numSpeakers);
+            case BACKEND_PYANNOTE -> pyannoteResult(audioFile, numSpeakers);
             default -> auto(audioFile, sherpaThreshold, numSpeakers);
         };
+    }
+
+    private static Result sherpaResult(Path audioFile, float threshold, int numSpeakers) {
+        return new Result(SherpaDiarizer.diarize(audioFile, threshold, numSpeakers),
+                List.of(), false);
+    }
+
+    private static Result pyannoteResult(Path audioFile, int numSpeakers) {
+        var output = client().diarizeRich(audioFile, numSpeakers);
+        return new Result(output.segments(), output.overlaps(), true);
     }
 
     /** Whether auto mode would attempt the pyannote sidecar. The token check
@@ -72,19 +94,18 @@ public final class DiarizationRouter {
         return token != null && !token.isBlank() && UvProbe.isAvailable();
     }
 
-    private static List<SherpaDiarizer.SpeakerSegment> auto(
-            Path audioFile, float sherpaThreshold, int numSpeakers) {
+    private static Result auto(Path audioFile, float sherpaThreshold, int numSpeakers) {
         if (!pyannoteEligible()) {
-            return SherpaDiarizer.diarize(audioFile, sherpaThreshold, numSpeakers);
+            return sherpaResult(audioFile, sherpaThreshold, numSpeakers);
         }
         try {
-            return client().diarize(audioFile, numSpeakers);
+            return pyannoteResult(audioFile, numSpeakers);
         } catch (TranscriptionException e) {
             // Best-effort contract: a broken sidecar must never fail a
             // transcript that sherpa can still produce.
             Logger.warn("DiarizationRouter: pyannote sidecar failed (%s) — falling back to sherpa",
                     e.getMessage());
-            return SherpaDiarizer.diarize(audioFile, sherpaThreshold, numSpeakers);
+            return sherpaResult(audioFile, sherpaThreshold, numSpeakers);
         }
     }
 

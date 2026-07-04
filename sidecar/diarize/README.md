@@ -19,7 +19,8 @@ segmentation are jointly tuned). ~18x realtime on Apple MPS.
 | Method | Path | Body → Response |
 |---|---|---|
 | GET | `/health` | → `{status, device, model, loaded}` |
-| POST | `/diarize` | `{audio_path, num_speakers?}` → `{segments: [{start, end, speaker}...], device, seconds}`; `400` bad path, `409` busy, `500` load/inference error |
+| POST | `/diarize` | `{audio_path, num_speakers?}` → `{segments: [{start, end, speaker}...], overlaps: [{start, end}...], device, seconds}`; `400` bad path, `409` busy, `500` load/inference error |
+| POST | `/separate` | `{audio_path}` (ready-made 16 kHz mono WAV) → `{stems: ["..._s1.wav", "..._s2.wav"]}` — MossFormer2 2-speaker separation, stems written beside the input (JCLAW-605) |
 
 The audio file is passed **by path** (same host; attachments are already on
 disk). One diarization at a time; concurrent callers get `409` and queue in
@@ -48,6 +49,7 @@ attribution.
   © pyannoteAI, **CC-BY-4.0** — this attribution satisfies the license's
   requirement; the operator downloads the weights directly from Hugging Face.
 - Library: [pyannote.audio](https://github.com/pyannote/pyannote-audio), MIT.
+- Separator: [MossFormer2 via ClearerVoice-Studio](https://github.com/modelscope/ClearerVoice-Studio), Apache-2.0 (JCLAW-605); weights download on first `/separate`.
 
 ## Running by hand (debugging)
 

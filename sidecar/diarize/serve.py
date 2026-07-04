@@ -20,7 +20,16 @@ the conditions on the model page and configure a HF token in jclaw Settings
 Protocol (bound to 127.0.0.1 only):
   GET  /health  -> 200 {status, device, model, loaded}
   POST /diarize {audio_path, num_speakers?}
-        -> 200 {segments: [{start, end, speaker}, ...], device, seconds}
+        -> 200 {segments: [{start, end, speaker}, ...],
+                overlaps: [{start, end}, ...], device, seconds}
+           (overlaps = regions where the overlap-aware annotation has 2+
+            active speakers — the JCLAW-605 re-attribution gate)
+  POST /separate {audio_paths: ["<w1.wav>", ...]}
+        -> 200 {stems: {"<w1.wav>": ["..._s1.wav", "..._s2.wav"], ...}}
+           (MossFormer2 2-speaker separation of ready-made 16kHz mono WAVs;
+            runs in a SEPARATE uv script env — clearvoice pins numpy<2,
+            incompatible with this env's pyannote 4 — shelled out once per
+            batch so the model loads once; stems written beside each input)
            (speaker is a zero-based int index, times in seconds — the same
             shape jclaw's SherpaDiarizer produces)
         -> 400 {error}   audio_path missing/unreadable
@@ -100,6 +109,7 @@ class SidecarState:
             raise
 
 
+
 class Handler(BaseHTTPRequestHandler):
     state: SidecarState = None
 
@@ -140,6 +150,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if self.path == "/separate":
+            self._handle_separate()
+            return
         if self.path != "/diarize":
             self._send_json(404, {"error": "unknown path %s" % self.path})
             return
@@ -183,12 +196,64 @@ class Handler(BaseHTTPRequestHandler):
                 segments.append({"start": round(turn.start, 3),
                                  "end": round(turn.end, 3),
                                  "speaker": idx})
+            # JCLAW-605: overlap regions from the overlap-aware annotation —
+            # where re-attribution is even possible. The exclusive annotation
+            # above intentionally has no overlaps.
+            plain = getattr(result, "speaker_diarization", None)
+            overlaps = []
+            if plain is not None and hasattr(plain, "get_overlap"):
+                for seg in plain.get_overlap():
+                    overlaps.append({"start": round(seg.start, 3), "end": round(seg.end, 3)})
             seconds = time.time() - t0
-            sys.stderr.write("[diarize-sidecar] %s: %d segments, %d speaker(s) in %.1fs\n"
-                             % (os.path.basename(audio_path), len(segments), len(labels), seconds))
+            sys.stderr.write("[diarize-sidecar] %s: %d segments, %d speaker(s), "
+                             "%d overlap region(s) in %.1fs\n"
+                             % (os.path.basename(audio_path), len(segments), len(labels),
+                                len(overlaps), seconds))
             self._send_json(200, {"segments": segments,
+                                  "overlaps": overlaps,
                                   "device": self.state.device,
                                   "seconds": round(seconds, 1)})
+        except Exception as e:  # noqa: BLE001 — reported to the client verbatim
+            self._send_json(500, {"error": str(e)})
+        finally:
+            self.state.touch()
+            self.state.run_lock.release()
+
+
+    def _handle_separate(self):
+        """JCLAW-605: batch MossFormer2 separation via the separate.py
+        script env (clearvoice is numpy<2, incompatible with this env)."""
+        self.state.touch()
+        try:
+            req = self._read_json()
+        except (ValueError, UnicodeDecodeError) as e:
+            self._send_json(400, {"error": "invalid JSON body: %s" % e})
+            return
+        paths = req.get("audio_paths") or ([req["audio_path"]] if req.get("audio_path") else [])
+        if not paths or not all(os.path.isfile(p) for p in paths):
+            self._send_json(400, {"error": "audio_paths missing or not files: %r" % paths})
+            return
+        if not self.state.run_lock.acquire(blocking=False):
+            self._send_json(409, {"error": "another inference is already in progress"})
+            return
+        try:
+            import subprocess
+            t0 = time.time()
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            proc = subprocess.run(
+                ["uv", "run", "separate.py", *paths],
+                cwd=script_dir, capture_output=True, text=True, timeout=1740)
+            for line in proc.stderr.splitlines():
+                sys.stderr.write("[diarize-sidecar] %s\n" % line)
+            if proc.returncode != 0:
+                raise RuntimeError("separate.py exited %d: %s"
+                                   % (proc.returncode, proc.stderr.strip()[-300:]))
+            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+            if "error" in payload:
+                raise RuntimeError(payload["error"])
+            sys.stderr.write("[diarize-sidecar] separated %d window(s) in %.1fs\n"
+                             % (len(paths), time.time() - t0))
+            self._send_json(200, payload)
         except Exception as e:  # noqa: BLE001 — reported to the client verbatim
             self._send_json(500, {"error": str(e)})
         finally:

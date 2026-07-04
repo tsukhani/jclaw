@@ -109,6 +109,21 @@ public final class SpeakerNamer {
         }
     }
 
+    /**
+     * Embed an arbitrary PCM float mono 16 kHz window with the shared
+     * WeSpeaker extractor (JCLAW-605: stem attribution in the overlap
+     * re-attribution pass). Blocking; ensures the embedding model is on
+     * disk first.
+     */
+    public static float[] embedWindow(float[] samples) {
+        var embeddingModel = DiarizationModelManager.ensureAvailable(
+                DiarizationModelManager.DiarizationModel.EMBEDDING);
+        synchronized (lock) {
+            ensureExtractor(embeddingModel);
+            return embeddingOf(samples);
+        }
+    }
+
     /** Free the native extractor on JVM shutdown. Wired from {@link jobs.ShutdownJob}. */
     public static void shutdown() {
         synchronized (lock) {

@@ -12,6 +12,7 @@ import services.EventLogger;
 import services.transcription.DiarizedTranscript;
 import services.transcription.DiarizationRouter;
 import services.transcription.EmotionRecognizer;
+import services.transcription.OverlapReattributor;
 import services.transcription.FfmpegProbe;
 import services.transcription.SegmentWordSplitter;
 import services.transcription.SpeakerNamer;
@@ -159,8 +160,9 @@ public class ApiTranscriptionController extends Controller {
         long startedAt = System.currentTimeMillis();
         try {
             var transcript = WhisperJniTranscriber.transcribeSegments(audio.toPath(), model, lang);
-            var speakers = DiarizationRouter.diarize(audio.toPath(), threshold,
+            var diarization = DiarizationRouter.diarizeRich(audio.toPath(), threshold,
                     numSpeakers == null ? -1 : numSpeakers);
+            var speakers = diarization.segments();
             // JCLAW-558: automatic when data/speaker-voices has enrollment;
             // enrollmentPresent() short-circuits everything (models, natives,
             // ffmpeg) when it doesn't, so the un-enrolled path is unchanged.
@@ -171,6 +173,11 @@ public class ApiTranscriptionController extends Controller {
             // JCLAW-603: word-level split of boundary-straddling segments.
             transcript = SegmentWordSplitter.split(transcript, speakers, audio.toPath());
             entries = DiarizedTranscript.merge(transcript, speakers, names);
+            // JCLAW-605: overlap re-attribution. Best-effort inside reattribute().
+            if (!diarization.overlaps().isEmpty()
+                    && ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
+                entries = OverlapReattributor.reattribute(entries, diarization.overlaps(), audio.toPath());
+            }
             // JCLAW-563: per-turn acoustic emotion labels (json 'emotion'
             // field, "(happy)" tag in txt). Best-effort inside annotate() —
             // the transcript renders regardless.

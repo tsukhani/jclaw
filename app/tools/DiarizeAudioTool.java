@@ -14,6 +14,7 @@ import services.Tx;
 import services.transcription.DiarizationRouter;
 import services.transcription.DiarizedTranscript;
 import services.transcription.EmotionRecognizer;
+import services.transcription.OverlapReattributor;
 import services.transcription.SegmentWordSplitter;
 import services.transcription.SpeakerClipExtractor;
 import services.transcription.SpeakerNamer;
@@ -225,8 +226,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
         try {
             var transcript = WhisperJniTranscriber.transcribeSegments(path, model, language);
-            var speakers = DiarizationRouter.diarize(path, clusterThreshold,
+            var diarization = DiarizationRouter.diarizeRich(path, clusterThreshold,
                     numSpeakers == null ? -1 : numSpeakers);
+            var speakers = diarization.segments();
             var names = SpeakerNamer.enrollmentPresent()
                     ? SpeakerNamer.nameSpeakers(path, speakers, (float) ConfigService.getDouble(
                             "transcription.diarization.speakerMatchThreshold", 0.6))
@@ -237,6 +239,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             // no-op when nothing straddles; best-effort inside split().
             transcript = SegmentWordSplitter.split(transcript, speakers, path);
             var entries = DiarizedTranscript.merge(transcript, speakers, names);
+            // JCLAW-605: cross-talk turns re-attributed via sidecar source
+            // separation + stem voiceprints. Best-effort inside reattribute().
+            if (!diarization.overlaps().isEmpty()
+                    && ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
+                entries = OverlapReattributor.reattribute(entries, diarization.overlaps(), path);
+            }
             // JCLAW-563: annotate each turn with an acoustic emotion label.
             // Best-effort inside annotate() — a transcript never fails
             // because the emotion model couldn't run.
