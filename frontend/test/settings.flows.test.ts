@@ -1309,6 +1309,44 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(hit!.value).toBe('false')
   })
 
+  it('diarization HF token save POSTs transcription.diarization.local.hfToken (JCLAW-565)', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: defaultConfigEntries() }),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key?: string, value?: string }
+        captured.push(body)
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    await component.find('button[aria-label="Edit diarization Hugging Face token"]').trigger('click')
+    const input = component.find('input[aria-label="Diarization Hugging Face token"]')
+    expect(input.exists()).toBe(true)
+    await input.setValue('hf_new-token')
+    // The save (check) button renders directly after the input while editing.
+    const save = component.findAll('button[title="Save"]').at(0)
+    expect(save).toBeTruthy()
+    await save!.trigger('click')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'transcription.diarization.local.hfToken')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('hf_new-token')
+  })
+
   it('POSTs transcription.provider on @change of an enabled cloud-provider radio', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerEndpoint('/api/agents', () => [])

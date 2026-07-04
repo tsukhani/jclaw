@@ -47,10 +47,24 @@ public final class PyannoteSidecarManager {
                         "the pyannote diarization sidecar requires 'uv' on PATH: "
                                 + UvProbe.lastResult().reason());
             }
-            DAEMON.spawn(ConfigService.get(CONFIG_PREFIX + ".model", DEFAULT_MODEL));
+            DAEMON.spawn(ConfigService.get(CONFIG_PREFIX + ".model", DEFAULT_MODEL),
+                    effectiveHfToken());
             DAEMON.awaitHealthy();
             return DAEMON.baseUrl();
         }
+    }
+
+    /**
+     * The HF token the sidecar runs with: the diarization key when set,
+     * otherwise the image-generation sidecar's token ({@code
+     * imagegen.local.hfToken}) — an operator who already pasted a token for
+     * gated image models shouldn't have to paste the same token twice
+     * (JCLAW-565 follow-up). Blank/null when neither is configured.
+     */
+    public static String effectiveHfToken() {
+        var own = ConfigService.get(CONFIG_PREFIX + ".hfToken");
+        if (own != null && !own.isBlank()) return own;
+        return ConfigService.get("imagegen.local.hfToken");
     }
 
     /** Stop the sidecar if running. Wired into {@code jobs.ShutdownJob}. */

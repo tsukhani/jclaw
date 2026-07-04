@@ -24,9 +24,11 @@ import java.util.List;
  * <p>{@code transcription.diarization.backend} picks: {@code auto} (default —
  * pyannote when its prerequisites are met, sherpa otherwise, with a logged
  * fallback to sherpa if the sidecar fails), or the explicit {@code
- * pyannote-local} / {@code sherpa}. Auto's token gate is deliberately the
- * config key only — not ambient ~/.cache/huggingface state — so backend
- * choice is deterministic and visible in Settings.
+ * pyannote-local} / {@code sherpa}. Auto's token gate reads config keys
+ * only — the diarization token, falling back to the image-generation
+ * sidecar's ({@code imagegen.local.hfToken}) — never ambient
+ * ~/.cache/huggingface state, so backend choice is deterministic and
+ * visible in Settings.
  */
 public final class DiarizationRouter {
 
@@ -62,9 +64,11 @@ public final class DiarizationRouter {
         };
     }
 
-    /** Whether auto mode would attempt the pyannote sidecar. */
+    /** Whether auto mode would attempt the pyannote sidecar. The token check
+     *  honors the imagegen-token fallback (see
+     *  {@link PyannoteSidecarManager#effectiveHfToken()}). */
     public static boolean pyannoteEligible() {
-        var token = ConfigService.get(PyannoteSidecarManager.CONFIG_PREFIX + ".hfToken");
+        var token = PyannoteSidecarManager.effectiveHfToken();
         return token != null && !token.isBlank() && UvProbe.isAvailable();
     }
 

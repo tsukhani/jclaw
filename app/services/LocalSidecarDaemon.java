@@ -82,8 +82,20 @@ public final class LocalSidecarDaemon {
         }
     }
 
-    /** Spawn the sidecar serving {@code model}. The caller must hold {@link #lock()}. */
+    /** As {@link #spawn(String, String)}, reading the HF token from the
+     *  domain's own {@code <prefix>.hfToken} config key. */
     public void spawn(String model) {
+        spawn(model, ConfigService.get(cfg.configPrefix() + ".hfToken"));
+    }
+
+    /**
+     * Spawn the sidecar serving {@code model}, passing {@code hfToken} (when
+     * non-blank) to the child as {@code HF_TOKEN}. The token parameter exists
+     * so a facade can resolve the token from more than one config key — the
+     * diarization sidecar reuses the image-generation token when its own is
+     * blank (JCLAW-565 follow-up). The caller must hold {@link #lock()}.
+     */
+    public void spawn(String model, String hfToken) {
         var sidecarDir = new File(Play.applicationPath, cfg.sidecarSubdir());
         var serve = new File(sidecarDir, "serve.py");
         if (!serve.isFile()) {
@@ -103,7 +115,6 @@ public final class LocalSidecarDaemon {
             // Optional HF token → HF_TOKEN env. huggingface_hub reads it automatically,
             // so the sidecar needs no change; the secret stays scoped to the child
             // process and is never written to a token file under data/.
-            var hfToken = ConfigService.get(cfg.configPrefix() + ".hfToken");
             if (hfToken != null && !hfToken.isBlank()) {
                 pb.environment().put("HF_TOKEN", hfToken);
             }

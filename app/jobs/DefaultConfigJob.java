@@ -98,8 +98,9 @@ public class DefaultConfigJob extends Job<Void> {
         // sidecar failure; 'pyannote-local' / 'sherpa' pin one engine.
         seedIfAbsent("transcription.diarization.backend", "auto");
         // Hugging Face token for the gated community-1 weights, passed to the
-        // sidecar process as HF_TOKEN. Blank = sidecar ineligible in auto
-        // mode. Masked in Settings (key name contains "token").
+        // sidecar process as HF_TOKEN. Blank = reuse imagegen.local.hfToken;
+        // with neither set the sidecar is ineligible in auto mode. Masked in
+        // Settings (key name contains "token").
         seedIfAbsent("transcription.diarization.local.hfToken", "");
     }
 

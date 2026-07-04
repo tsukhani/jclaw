@@ -61,12 +61,16 @@ class DiarizationRouterTest extends UnitTest {
         UvProbe.setForTest(null);
         ConfigService.delete(DiarizationRouter.BACKEND_KEY);
         ConfigService.delete("transcription.diarization.local.hfToken");
+        ConfigService.delete("imagegen.local.hfToken");
         Files.deleteIfExists(audio);
     }
 
     private void configure(String backend, String hfToken) {
         ConfigService.set(DiarizationRouter.BACKEND_KEY, backend);
         ConfigService.set("transcription.diarization.local.hfToken", hfToken);
+        // Most cases isolate from the imagegen-token fallback; the fallback
+        // has its own dedicated test below.
+        ConfigService.set("imagegen.local.hfToken", "");
     }
 
     @Test
@@ -118,6 +122,20 @@ class DiarizationRouterTest extends UnitTest {
         assertTrue(stub.called, "auto must try the sidecar first");
         assertTrue(e.getMessage().contains("ffmpeg"),
                 "fallback must land on the sherpa path: " + e.getMessage());
+    }
+
+    @Test
+    void auto_reusesImagegenToken_whenDiarizationTokenBlank() {
+        // JCLAW-565 follow-up: an operator who already pasted an HF token for
+        // gated image models shouldn't have to paste it twice.
+        configure(DiarizationRouter.BACKEND_AUTO, "");
+        ConfigService.set("imagegen.local.hfToken", "hf_from-imagegen");
+        var stub = new StubClient(null);
+        DiarizationRouter.setClientForTest(stub);
+
+        assertTrue(DiarizationRouter.pyannoteEligible());
+        assertEquals(STUB_SEGMENTS, DiarizationRouter.diarize(audio, 0.3f, -1));
+        assertTrue(stub.called, "imagegen token must make the sidecar eligible");
     }
 
     @Test

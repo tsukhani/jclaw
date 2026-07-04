@@ -377,6 +377,19 @@ async function toggleTranscriptionEnabled() {
   finally { saving.value = false }
 }
 
+// JCLAW-565: diarization sidecar HF token. Masked at rest, so the editor
+// starts blank (same pattern as imagegen.local.hfToken). When blank, the
+// backend reuses the image-generation token — hfTokenConfigured (imagegen)
+// drives the "using the image-generation token" hint.
+const diarizeHfTokenConfigured = computed(() => {
+  const v = configData.value?.entries?.find(e => e.key === 'transcription.diarization.local.hfToken')?.value
+  return !!v && v.trim().length > 0
+})
+function startEditDiarizeHfToken() {
+  editingKey.value = 'transcription.diarization.local.hfToken'
+  editValue.value = ''
+}
+
 // JCLAW-563: per-turn emotion labels on diarized transcripts. Independent of
 // the master toggle above — the diarize_audio tool always runs the local
 // pipeline, whatever the inbound-transcription provider. Default-on mirrors
@@ -4249,12 +4262,80 @@ async function deleteLoggerLevel(logger: string) {
         </div>
       </template>
 
-      <!-- JCLAW-563: emotion labels on diarized transcripts. Deliberately
-           outside the master-toggle template — the diarize_audio tool runs
-           the local pipeline even when inbound transcription is off, so
-           this switch must stay reachable. -->
+      <!-- JCLAW-565: Diarization subsection. Deliberately outside the
+           master-toggle template — the diarize_audio tool runs the local
+           pipeline even when inbound transcription is off, so everything
+           here must stay reachable. -->
       <div class="bg-surface-elevated border border-border">
-        <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+        <div class="px-4 py-2.5 border-b border-border">
+          <span class="text-sm font-medium text-fg-strong">Diarization</span>
+        </div>
+        <div class="px-4 pt-2.5 text-[11px] text-fg-muted">
+          Who-spoke-when for the diarize-audio tool and the REST diarize endpoint. Two engines:
+          the built-in one (zero setup), and a higher-accuracy
+          <span class="font-mono">pyannote community-1</span> sidecar (managed automatically via
+          <span class="font-mono">uv</span>) that finds the number of speakers by itself. The
+          sidecar activates once a Hugging Face token is set — the model is gated, so first accept
+          its conditions on the
+          <a
+            href="https://huggingface.co/pyannote/speaker-diarization-community-1"
+            target="_blank"
+            rel="noopener"
+            class="text-fg-primary hover:text-fg-strong underline"
+          >model page</a>. If a token is already set under Image Generation it is reused here;
+          any sidecar failure falls back to the built-in engine.
+        </div>
+        <div class="px-4 py-2.5 flex items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Hugging Face token (optional)</span>
+          <template v-if="editingKey === 'transcription.diarization.local.hfToken'">
+            <input
+              v-model="editValue"
+              type="password"
+              aria-label="Diarization Hugging Face token"
+              placeholder="hf_… — leave blank to reuse the Image Generation token"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            >
+            <button
+              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+              title="Save"
+              @click="updateEntry('transcription.diarization.local.hfToken')"
+            >
+              <CheckIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Cancel"
+              @click="editingKey = null"
+            >
+              <XMarkIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+          <template v-else>
+            <span class="flex-1 text-sm text-fg-primary font-mono truncate">
+              {{ diarizeHfTokenConfigured ? '••••••••' : (hfTokenConfigured ? 'using the Image Generation token' : '(not set)') }}
+            </span>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              :title="diarizeHfTokenConfigured ? 'Change token' : 'Set token'"
+              aria-label="Edit diarization Hugging Face token"
+              @click="startEditDiarizeHfToken()"
+            >
+              <PencilIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+        </div>
+        <!-- JCLAW-563: emotion labels ride the diarized transcript, so the
+             toggle lives in this subsection. -->
+        <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer border-t border-border">
           <button
             type="button"
             :aria-pressed="emotionEnabled"
@@ -4274,10 +4355,10 @@ async function deleteLoggerLevel(logger: string) {
           </span>
         </div>
         <div class="px-4 pb-2.5 text-[11px] text-fg-muted">
-          Speaker diarization tags each turn with how it was said — happy, sad, angry, disgust,
+          Each diarized turn is tagged with how it was said — happy, sad, angry, disgust,
           fear, surprised or neutral — classified locally from the voice's tone by a multilingual
-          model (~360 MB, downloads from Hugging Face on first use). Applies to the diarize-audio
-          tool and the REST diarize endpoint; ordinary voice-note transcription is unaffected.
+          model (~360 MB, downloads from Hugging Face on first use). Ordinary voice-note
+          transcription is unaffected.
         </div>
       </div>
     </div>
