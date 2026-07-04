@@ -110,6 +110,19 @@ class SegmentWordSplitterTest extends UnitTest {
     }
 
     @Test
+    void split_keepsOriginal_whenACutWouldStrandASingleWord() {
+        // Diarizer flicker: a boundary at 5.0s would strand "word" alone in
+        // the second part (uniform: midpoints 0.75, 2.25, 3.75, 5.25) — the
+        // flicker guard keeps whole-segment attribution.
+        var transcript = List.of(seg(0, 6000, " a fluent phrase word"));
+        var speakers = List.of(spk(0, 4.9, 0), spk(5.1, 6, 1));
+
+        var out = SegmentWordSplitter.split(transcript, speakers, UNIFORM);
+
+        assertEquals(transcript, out, "single-word parts must not be split off");
+    }
+
+    @Test
     void split_handlesMultipleBoundaries_inOneSegment() {
         // A-B-A exchange inside one 9s segment: boundaries at 3.0 and 6.0.
         var transcript = List.of(seg(0, 9000, " one two three four five six seven eight nine"));

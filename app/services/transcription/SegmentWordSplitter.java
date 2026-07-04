@@ -138,6 +138,12 @@ public final class SegmentWordSplitter {
         }
         parts.add(current);
         if (parts.size() < 2) return List.of(segment); // all words fell on one side
+        // Flicker guard: a part with a single word is far more likely a
+        // spurious diarizer micro-span than a real interjection (live case:
+        // a 0.5s "You" flipped inside a monologue) — real one-word
+        // interjections arrive as their own whisper segments and never
+        // reach this splitter. Keep whole-segment attribution instead.
+        if (parts.stream().anyMatch(p -> p.size() < 2)) return List.of(segment);
 
         var result = new ArrayList<WhisperJniTranscriber.Segment>(parts.size());
         for (int p = 0; p < parts.size(); p++) {
