@@ -13,6 +13,7 @@ import services.transcription.DiarizedTranscript;
 import services.transcription.DiarizationRouter;
 import services.transcription.EmotionRecognizer;
 import services.transcription.FfmpegProbe;
+import services.transcription.SegmentWordSplitter;
 import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
@@ -167,6 +168,8 @@ public class ApiTranscriptionController extends Controller {
                     ? SpeakerNamer.nameSpeakers(audio.toPath(), speakers,
                             (float) ConfigService.getDouble("transcription.diarization.speakerMatchThreshold", 0.6))
                     : Map.<Integer, String>of();
+            // JCLAW-603: word-level split of boundary-straddling segments.
+            transcript = SegmentWordSplitter.split(transcript, speakers, audio.toPath());
             entries = DiarizedTranscript.merge(transcript, speakers, names);
             // JCLAW-563: per-turn acoustic emotion labels (json 'emotion'
             // field, "(happy)" tag in txt). Best-effort inside annotate() —

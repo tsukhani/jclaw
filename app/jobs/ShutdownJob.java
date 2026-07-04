@@ -12,6 +12,7 @@ import services.TailscaleFunnel;
 import services.imagegen.LocalImageSidecarManager;
 import services.videogen.LocalVideoSidecarManager;
 import services.search.LuceneIndexer;
+import services.transcription.CtcForcedAligner;
 import services.transcription.EmotionRecognizer;
 import services.transcription.PyannoteSidecarManager;
 import services.transcription.SherpaDiarizer;
@@ -74,6 +75,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("sherpa-diarizer", SherpaDiarizer::shutdown),
                 new Component("speaker-namer", SpeakerNamer::shutdown),
                 new Component("emotion-recognizer", EmotionRecognizer::shutdown),
+                new Component("ctc-aligner", CtcForcedAligner::shutdown),
                 new Component("diarize-sidecar", PyannoteSidecarManager::stop),
                 new Component("imagegen-sidecar", LocalImageSidecarManager::stop),
                 new Component("videogen-sidecar", LocalVideoSidecarManager::stop),

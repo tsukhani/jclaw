@@ -14,6 +14,7 @@ import services.Tx;
 import services.transcription.DiarizationRouter;
 import services.transcription.DiarizedTranscript;
 import services.transcription.EmotionRecognizer;
+import services.transcription.SegmentWordSplitter;
 import services.transcription.SpeakerClipExtractor;
 import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
@@ -230,6 +231,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     ? SpeakerNamer.nameSpeakers(path, speakers, (float) ConfigService.getDouble(
                             "transcription.diarization.speakerMatchThreshold", 0.6))
                     : Map.<Integer, String>of();
+            // JCLAW-603: segments straddling a speaker change are split at
+            // word boundaries (CTC forced alignment) so rapid exchanges
+            // attribute per word, not per whisper segment. Self-gating —
+            // no-op when nothing straddles; best-effort inside split().
+            transcript = SegmentWordSplitter.split(transcript, speakers, path);
             var entries = DiarizedTranscript.merge(transcript, speakers, names);
             // JCLAW-563: annotate each turn with an acoustic emotion label.
             // Best-effort inside annotate() — a transcript never fails
