@@ -258,9 +258,19 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
             var labels = new LinkedHashSet<String>();
             entries.forEach(e -> labels.add(e.speaker()));
-            return "Diarized transcript of %s — %d speaker(s) detected: %s%n%n%s".formatted(
+            // JCLAW-608: anonymous speakers mean no enrolled voice matched —
+            // steer the agent into the identification flow instead of leaving
+            // the user with SPEAKER_NN tags and no way forward.
+            var anonymous = labels.stream().filter(l -> l.startsWith("SPEAKER_")).toList();
+            var lineupHint = anonymous.isEmpty() ? "" : ("%n%nNote: %s could not be matched to an "
+                    + "enrolled voice. To label speakers with real names, call this tool with "
+                    + "action 'extract_speaker_clips' (attaches one short clip per voice), ask the "
+                    + "user to identify each voice, record each answer via action 'enroll_speaker' "
+                    + "(clip_label + speaker_name), then re-run 'diarize' for a named transcript. "
+                    + "Offer this to the user now.").formatted(String.join(", ", anonymous));
+            return "Diarized transcript of %s — %d speaker(s) detected: %s%n%n%s%s".formatted(
                     att.originalFilename, labels.size(), String.join(", ", labels),
-                    DiarizedTranscript.toText(entries));
+                    DiarizedTranscript.toText(entries), lineupHint);
         } catch (TranscriptionException e) {
             return "Speaker diarization failed: " + e.getMessage();
         }

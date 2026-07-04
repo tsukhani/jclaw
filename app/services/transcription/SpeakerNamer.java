@@ -130,7 +130,10 @@ public final class SpeakerNamer {
                 }
                 scoresByCluster.put(e.getKey(), scores);
             }
-            return assignExclusive(scoresByCluster, threshold, AMBIGUITY_GAP);
+            var names = assignExclusive(scoresByCluster, threshold, AMBIGUITY_GAP);
+            Logger.info("SpeakerNamer: scores %s -> %s (threshold %.2f, ambiguity gap %.2f)",
+                    scoresByCluster, names, threshold, AMBIGUITY_GAP);
+            return names;
         }
     }
 
