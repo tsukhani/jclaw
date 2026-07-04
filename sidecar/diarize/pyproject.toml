@@ -1,0 +1,21 @@
+[project]
+name = "jclaw-diarize-sidecar"
+version = "0.1.0"
+description = "Local speaker-diarization sidecar for jclaw — pyannote community-1 (JCLAW-565)"
+requires-python = ">=3.11"
+# pyannote.audio 4 brings torch/torchaudio/pyannote.core transitively; the explicit
+# torch floor documents the MPS requirement (Apple-GPU inference needs torch>=2.4's
+# MPS coverage). `uv run` resolves and writes uv.lock on first launch.
+dependencies = [
+    "pyannote.audio>=4.0",
+    "torch>=2.4",
+    "torchaudio>=2.4",
+    "huggingface_hub>=0.26",
+]
+
+# torch wheels are platform-specific (same posture as sidecar/image):
+#  - macOS / Apple Silicon: the default PyPI wheel ships CPU + MPS — no extra config.
+#  - Linux + NVIDIA: the default PyPI wheel is CPU-only; install the CUDA build via
+#      UV_TORCH_BACKEND=cu124 uv run serve.py ...
+# Diarization also runs acceptably on CPU (roughly 0.2x realtime for the community-1
+# pipeline), so unlike imagegen there is no hard GPU requirement.

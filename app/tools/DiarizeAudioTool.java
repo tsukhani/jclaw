@@ -11,9 +11,9 @@ import models.MessageAttachment;
 import services.AgentService;
 import services.ConfigService;
 import services.Tx;
+import services.transcription.DiarizationRouter;
 import services.transcription.DiarizedTranscript;
 import services.transcription.EmotionRecognizer;
-import services.transcription.SherpaDiarizer;
 import services.transcription.SpeakerClipExtractor;
 import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
@@ -224,7 +224,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
         try {
             var transcript = WhisperJniTranscriber.transcribeSegments(path, model, language);
-            var speakers = SherpaDiarizer.diarize(path, clusterThreshold,
+            var speakers = DiarizationRouter.diarize(path, clusterThreshold,
                     numSpeakers == null ? -1 : numSpeakers);
             var names = SpeakerNamer.enrollmentPresent()
                     ? SpeakerNamer.nameSpeakers(path, speakers, (float) ConfigService.getDouble(
@@ -261,7 +261,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         var conversationId = ToolContext.conversationId(); // non-null: resolution required scope
         float clusterThreshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
         try {
-            var speakers = SherpaDiarizer.diarize(path, clusterThreshold,
+            var speakers = DiarizationRouter.diarize(path, clusterThreshold,
                     numSpeakers == null ? -1 : numSpeakers);
             var clips = SpeakerClipExtractor.extract(path, speakers, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS);
             if (clips.isEmpty()) {

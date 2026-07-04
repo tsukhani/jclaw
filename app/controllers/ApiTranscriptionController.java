@@ -10,9 +10,9 @@ import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 import services.transcription.DiarizedTranscript;
+import services.transcription.DiarizationRouter;
 import services.transcription.EmotionRecognizer;
 import services.transcription.FfmpegProbe;
-import services.transcription.SherpaDiarizer;
 import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
@@ -158,7 +158,7 @@ public class ApiTranscriptionController extends Controller {
         long startedAt = System.currentTimeMillis();
         try {
             var transcript = WhisperJniTranscriber.transcribeSegments(audio.toPath(), model, lang);
-            var speakers = SherpaDiarizer.diarize(audio.toPath(), threshold,
+            var speakers = DiarizationRouter.diarize(audio.toPath(), threshold,
                     numSpeakers == null ? -1 : numSpeakers);
             // JCLAW-558: automatic when data/speaker-voices has enrollment;
             // enrollmentPresent() short-circuits everything (models, natives,

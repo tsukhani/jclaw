@@ -92,6 +92,15 @@ public class DefaultConfigJob extends Job<Void> {
         // transcript); set false to skip the ~95 MB model download and the
         // extra per-turn inference.
         seedIfAbsent("transcription.emotion.enabled", "true");
+        // JCLAW-565: diarization backend. auto = the pyannote community-1
+        // sidecar when uv is on PATH and the hfToken below is set (the model
+        // is HF-gated), falling back to the in-process sherpa engine on any
+        // sidecar failure; 'pyannote-local' / 'sherpa' pin one engine.
+        seedIfAbsent("transcription.diarization.backend", "auto");
+        // Hugging Face token for the gated community-1 weights, passed to the
+        // sidecar process as HF_TOKEN. Blank = sidecar ineligible in auto
+        // mode. Masked in Settings (key name contains "token").
+        seedIfAbsent("transcription.diarization.local.hfToken", "");
     }
 
     /**

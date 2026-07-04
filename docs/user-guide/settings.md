@@ -69,6 +69,8 @@ Cloud backends are disabled in the radio group until their underlying provider k
 
 Below the backend picker, **Emotion labels on diarized transcripts** toggles the speaker-diarization emotion layer: each diarized turn is tagged with how it was said (happy, sad, angry, disgust, fear, surprised or neutral), classified locally from the voice's tone by a multilingual emotion2vec+ model — ~360 MB, downloads from Hugging Face on first use, and holds up on non-English speech. Independent of the master transcription toggle, since the diarize-audio tool runs its own local pipeline; ordinary voice-note transcription is unaffected.
 
+Speaker diarization itself has two engines, selected by the `transcription.diarization.backend` key (default `auto`): the built-in sherpa-onnx engine (zero setup), and a higher-accuracy **pyannote community-1 sidecar** (Python, managed automatically via `uv`) that finds the number of speakers by itself. The sidecar activates in `auto` mode once `uv` is installed and a Hugging Face token is set in `transcription.diarization.local.hfToken` — the community-1 model is gated, so accept its conditions on the Hugging Face model page first. Any sidecar failure falls back to the built-in engine; a diarization never fails because the sidecar couldn't run.
+
 ## Image Captioning
 
 The vision analogue of Transcription: non-vision chat models get a short **text description** of an uploaded image before it reaches the LLM. Vision-capable models still receive the image natively. WebP and other formats are transcoded to PNG first so every backend can read them.
