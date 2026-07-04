@@ -98,8 +98,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 Slow: expect roughly a tenth of the recording's duration. Returns a transcript with \
                 one line per turn, labeled with enrolled speaker names where the voice matches, or \
                 SPEAKER_00-style tags otherwise, plus a per-turn emotion label in parentheses \
-                (happy, sad, angry, disgust, fear, neutral) classified from the voice's acoustics — \
-                tone, not word choice. Action 'enroll_speaker' saves a voice reference for \
+                (happy, sad, angry, disgust, fear, surprised, neutral) classified from the \
+                voice's acoustics — tone, not word choice, so it works across languages. \
+                Action 'enroll_speaker' saves a voice reference for \
                 'speaker_name', so future diarizations label that voice by name — use it when the \
                 user asks to remember/enroll a voice or store an audio file under the speaker-voices \
                 folder; it enrolls either the whole attachment or, with 'clip_label', one clip staged \

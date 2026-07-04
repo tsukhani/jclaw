@@ -15,25 +15,52 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
 /**
- * Downloader for the speech-emotion-recognition model (JCLAW-563): the
- * int8-quantized ONNX export of the wav2vec2-base SER fine-tune
- * (DunnBC22/wav2vec2-base-Speech_Emotion_Recognition, Apache-2.0 — the same
- * wav2vec2 family as SpeechBrain's IEMOCAP classifier, but pre-exported to
- * ONNX so it runs in-process with no Python sidecar).
+ * Downloader for the two speech-emotion-recognition artifacts (JCLAW-564):
+ * the emotion2vec+ base ONNX export and its external linear classifier
+ * head. emotion2vec+ (ACL 2024, {@code emotion2vec/emotion2vec_plus_base}
+ * upstream) is self-supervised on large-scale multilingual speech and
+ * fine-tuned on ~40k hours of pseudo-labeled emotion data, which is what
+ * makes its prosody reading hold up on non-English speech — the
+ * English-only wav2vec2-base model it replaces produced incoherent labels
+ * on Malay turns (the JCLAW-564 evidence). License: FunASR Model Open
+ * Source License Agreement (free to use/modify/share with attribution);
+ * the operator downloads directly from Hugging Face at runtime, JClaw
+ * redistributes nothing.
+ *
+ * <p>The ONNX graph ends at the 768-d frame embeddings — emotion2vec's
+ * classifier head is exported separately ({@code classifier.bin}, a raw
+ * 9×768 linear layer) because the graph-internal masking logic doesn't
+ * survive ONNX export upstream. {@link EmotionRecognizer} applies the
+ * head in plain Java.
  *
  * <p>Same trust chain as {@link DiarizationModelManager}: fetched from
  * Hugging Face's resolve endpoint, whose {@code X-Linked-Etag} header
- * carries the Git-LFS SHA256 of the content; we hash the streamed body and
- * compare. At ~95 MB the download runs synchronously on first use — callers
- * are already minutes into blocking native inference by the time emotion
- * analysis starts.
+ * carries the Git-LFS SHA256 of the content; we hash the streamed body
+ * and compare. At ~356 MB the download runs synchronously on first use —
+ * callers are already minutes into blocking native inference by the time
+ * emotion analysis starts.
  */
 public final class EmotionModelManager {
 
-    public static final String FILENAME = "wav2vec2-base-ser-quantized.onnx";
-    static final String URL =
-            "https://huggingface.co/onnx-community/wav2vec2-base-Speech_Emotion_Recognition-ONNX"
-                    + "/resolve/main/onnx/model_quantized.onnx";
+    private static final String REPO =
+            "https://huggingface.co/ykevinc/emotion2vec-plus-base-onnx/resolve/main";
+
+    /** The two artifacts, keyed by their role in the emotion pipeline. */
+    public enum EmotionModel {
+        EMBEDDING("emotion2vec-plus-base.onnx", REPO + "/model.onnx"),
+        CLASSIFIER("emotion2vec-classifier.bin", REPO + "/classifier.bin");
+
+        private final String filename;
+        private final String url;
+
+        EmotionModel(String filename, String url) {
+            this.filename = filename;
+            this.url = url;
+        }
+
+        public String filename() { return filename; }
+        public String url() { return url; }
+    }
 
     private static final Path DEFAULT_ROOT = Path.of("data", "emotion-models");
     // Production never writes this field; tests set it before use (same
@@ -42,26 +69,27 @@ public final class EmotionModelManager {
 
     private EmotionModelManager() {}
 
-    public static Path localPath() {
-        return root.resolve(FILENAME);
+    public static Path localPath(EmotionModel model) {
+        return root.resolve(model.filename());
     }
 
-    public static boolean availableLocally() {
-        return Files.isRegularFile(localPath());
+    public static boolean availableLocally(EmotionModel model) {
+        return Files.isRegularFile(localPath(model));
     }
 
     /**
-     * Ensure the model file is on disk and SHA256-verified, downloading
+     * Ensure the artifact is on disk and SHA256-verified, downloading
      * synchronously if absent. Throws {@link TranscriptionException} with a
      * clear operator-facing message on any failure.
      */
-    public static Path ensureAvailable() {
-        if (availableLocally()) return localPath();
+    public static Path ensureAvailable(EmotionModel model) {
+        if (availableLocally(model)) return localPath(model);
         try {
-            return doDownload(URL);
+            return doDownload(model, model.url());
         } catch (IOException e) {
             throw new TranscriptionException(
-                    "failed to download emotion recognition model %s: %s".formatted(FILENAME, e.getMessage()), e);
+                    "failed to download emotion recognition model %s: %s"
+                            .formatted(model.filename(), e.getMessage()), e);
         }
     }
 
@@ -71,7 +99,7 @@ public final class EmotionModelManager {
      * rename. URL parameter so tests can point at a mock server, mirroring
      * {@link DiarizationModelManager#doDownload}.
      */
-    public static Path doDownload(String url) throws IOException {
+    public static Path doDownload(EmotionModel model, String url) throws IOException {
         Files.createDirectories(root);
 
         var client = HttpFactories.general();
@@ -91,9 +119,9 @@ public final class EmotionModelManager {
             expectedSha256 = etag.replace("\"", "").toLowerCase();
         }
 
-        var tmp = root.resolve(FILENAME + ".part");
+        var tmp = root.resolve(model.filename() + ".part");
         var digest = newSha256();
-        // ~95 MB: too big for general()'s default 60s call deadline on slow
+        // ~356 MB: too big for general()'s default 60s call deadline on slow
         // links — clear the per-call timeout like the whisper downloads do
         // (read/connect timeouts still bound each socket operation).
         var download = client.newBuilder()
@@ -120,15 +148,15 @@ public final class EmotionModelManager {
         var actual = HexFormat.of().formatHex(digest.digest());
         if (!actual.equals(expectedSha256)) {
             Files.deleteIfExists(tmp);
-            throw new IOException(
-                    "SHA256 mismatch for %s: expected %s, got %s".formatted(FILENAME, expectedSha256, actual));
+            throw new IOException("SHA256 mismatch for %s: expected %s, got %s"
+                    .formatted(model.filename(), expectedSha256, actual));
         }
 
-        var finalPath = localPath();
+        var finalPath = localPath(model);
         Files.move(tmp, finalPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         EventLogger.info("transcription",
-                "Emotion recognition model %s downloaded and verified".formatted(FILENAME));
-        Logger.info("EmotionModelManager: %s ready at %s", FILENAME, finalPath);
+                "Emotion recognition model %s downloaded and verified".formatted(model.filename()));
+        Logger.info("EmotionModelManager: %s ready at %s", model.filename(), finalPath);
         return finalPath;
     }
 

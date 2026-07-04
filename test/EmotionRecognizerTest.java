@@ -2,19 +2,25 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.DiarizedTranscript;
 import services.transcription.EmotionRecognizer;
+import services.transcription.TranscriptionException;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.List;
 
 /**
- * JCLAW-563: the pure layers of the emotion recognizer — window arithmetic,
- * wav2vec2 normalization, softmax, and the annotate() skip paths. Everything
- * below the ONNX session boundary needs the 95 MB model on disk and is
- * exercised by UAT (suite section 16), not here — same split as the sherpa
- * and whisper tests.
+ * JCLAW-563/564: the pure layers of the emotion recognizer — window
+ * arithmetic, emotion2vec's waveform layer-norm, the external classifier
+ * head (parse, mean-pool, linear+softmax, label mapping), and the
+ * annotate() skip paths. Everything below the ONNX session boundary needs
+ * the ~356 MB backbone on disk and is exercised by UAT (suite section 16),
+ * not here — same split as the sherpa and whisper tests.
  */
 class EmotionRecognizerTest extends UnitTest {
 
     private static final int SR = 16_000;
+    private static final int ROWS = EmotionRecognizer.LABELS.length;
+    private static final int COLS = 768;
 
     // ---- window() -------------------------------------------------------
 
@@ -99,20 +105,76 @@ class EmotionRecognizerTest extends UnitTest {
 
     @Test
     void softmax_stableUnderLargeLogits() {
-        // Max-subtraction keeps exp() from overflowing — quantized models
-        // can emit large logits.
         var probs = EmotionRecognizer.softmax(new float[]{500f, 400f});
         assertEquals(1.0f, probs[0], 1e-5);
         assertFalse(Float.isNaN(probs[1]));
     }
 
-    // ---- labels / annotate skip paths -----------------------------------
+    // ---- classifier head (JCLAW-564) -------------------------------------
 
     @Test
-    void labels_matchTheOnnxExportsIdToLabelOrder() {
-        assertArrayEquals(new String[]{"sad", "angry", "disgust", "fear", "happy", "neutral"},
-                EmotionRecognizer.LABELS);
+    void labels_matchEmotion2vecOrder_andDisplayMappingDropsNonEmotions() {
+        assertArrayEquals(new String[]{"angry", "disgusted", "fearful", "happy",
+                "neutral", "other", "sad", "surprised", "unknown"}, EmotionRecognizer.LABELS);
+        assertEquals(EmotionRecognizer.LABELS.length, EmotionRecognizer.DISPLAY_LABELS.length);
+        assertNull(EmotionRecognizer.DISPLAY_LABELS[5], "'other' must not surface as an emotion");
+        assertNull(EmotionRecognizer.DISPLAY_LABELS[8], "'unknown' must not surface as an emotion");
+        assertEquals("disgust", EmotionRecognizer.DISPLAY_LABELS[1],
+                "display vocabulary keeps the JCLAW-563 adjectives");
     }
+
+    @Test
+    void parseClassifier_readsHeaderWeightsAndBias() {
+        var c = EmotionRecognizer.parseClassifier(syntheticClassifier(2, 0.5f));
+
+        assertEquals(ROWS, c.weights().length);
+        assertEquals(COLS, c.weights()[0].length);
+        assertEquals(0.5f, c.weights()[2][0], 1e-6, "favored row carries the weight");
+        assertEquals(0.0f, c.weights()[0][0], 1e-6);
+        assertEquals(1.0f, c.bias()[2], 1e-6);
+    }
+
+    @Test
+    void parseClassifier_rejectsWrongShape() {
+        var bad = ByteBuffer.allocate(8 + 4).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(3).putInt(1).putFloat(1f).array();
+        var e = assertThrows(TranscriptionException.class,
+                () -> EmotionRecognizer.parseClassifier(bad));
+        assertTrue(e.getMessage().contains("unexpected shape"), e.getMessage());
+    }
+
+    @Test
+    void classifyEmbedding_picksFavoredRow_andMapsDisplayLabel() {
+        // Row 3 = "happy": weights of 1 on every embedding dim, bias 1.
+        var c = EmotionRecognizer.parseClassifier(syntheticClassifier(3, 1f));
+        var emb = new float[COLS];
+        java.util.Arrays.fill(emb, 0.1f);
+
+        var emotion = EmotionRecognizer.classifyEmbedding(emb, c);
+
+        assertEquals("happy", emotion.label());
+        assertTrue(emotion.confidence() > 0.9, "one hot row should dominate the softmax");
+    }
+
+    @Test
+    void classifyEmbedding_returnsNullLabel_forOtherAndUnknown() {
+        // Row 5 = "other", row 8 = "unknown": both map to no annotation.
+        for (int row : new int[]{5, 8}) {
+            var c = EmotionRecognizer.parseClassifier(syntheticClassifier(row, 1f));
+            var emb = new float[COLS];
+            java.util.Arrays.fill(emb, 0.1f);
+            assertNull(EmotionRecognizer.classifyEmbedding(emb, c).label(),
+                    "row " + row + " must not annotate the transcript");
+        }
+    }
+
+    @Test
+    void meanPool_averagesFrames() {
+        var pooled = EmotionRecognizer.meanPool(new float[][]{{1f, 4f}, {3f, 8f}});
+        assertArrayEquals(new float[]{2f, 6f}, pooled, 1e-6f);
+    }
+
+    // ---- annotate skip paths ---------------------------------------------
 
     @Test
     void annotate_leavesShortEntriesUnlabeled_withoutTouchingModelOrNetwork() {
@@ -130,5 +192,18 @@ class EmotionRecognizerTest extends UnitTest {
         assertNull(out.get(0).emotion());
         assertNull(out.get(1).emotion());
         assertEquals("hm", out.get(0).text(), "entries pass through untouched");
+    }
+
+    /** Classifier bytes where {@code favoredRow} has weight {@code w} on
+     *  every dim and bias 1; all other rows are zero. */
+    private static byte[] syntheticClassifier(int favoredRow, float w) {
+        var buf = ByteBuffer.allocate(8 + 4 * ROWS * COLS + 4 * ROWS)
+                .order(ByteOrder.LITTLE_ENDIAN);
+        buf.putInt(ROWS).putInt(COLS);
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) buf.putFloat(r == favoredRow ? w : 0f);
+        }
+        for (int r = 0; r < ROWS; r++) buf.putFloat(r == favoredRow ? 1f : 0f);
+        return buf.array();
     }
 }

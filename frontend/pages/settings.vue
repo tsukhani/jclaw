@@ -4275,9 +4275,9 @@ async function deleteLoggerLevel(logger: string) {
         </div>
         <div class="px-4 pb-2.5 text-[11px] text-fg-muted">
           Speaker diarization tags each turn with how it was said — happy, sad, angry, disgust,
-          fear or neutral — classified locally from the voice's tone (the ~95 MB model downloads
-          from Hugging Face on first use). Applies to the diarize-audio tool and the REST diarize
-          endpoint; ordinary voice-note transcription is unaffected.
+          fear, surprised or neutral — classified locally from the voice's tone by a multilingual
+          model (~360 MB, downloads from Hugging Face on first use). Applies to the diarize-audio
+          tool and the REST diarize endpoint; ordinary voice-note transcription is unaffected.
         </div>
       </div>
     </div>
