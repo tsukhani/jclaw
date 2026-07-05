@@ -25,8 +25,16 @@ import java.util.Map;
  * covered there, not here; the rank-position scorer they share is pinned via
  * reflection instead.
  *
- * <p>The index is forced closed (LuceneTestSync, JCLAW-428) so the terminal
- * LIKE fallback is the deterministic agent-bounded substring scan.
+ * <p>JCLAW-615 root cause of the historical flake: the PG chain's terminal
+ * "LIKE fallback" used to re-enter {@code Memory.searchByTextScored}, whose
+ * behavior depends on the JVM-global Lucene index. Forcing the index closed
+ * (LuceneTestSync) only guarded against tests that opt into the sync — any
+ * concurrent test whose PRODUCTION code opened the index flipped recall onto
+ * a Lucene path missing the rows seeded here ("expected 1 but was 0",
+ * intermittent under the concurrent unit+functional lanes, app running or
+ * not). Fixed at source: the PG chain now terminates in the genuine SQL
+ * substring scan ({@code Memory.likeFallback}), so these tests are
+ * independent of Lucene state and need no serialization at all.
  */
 class JpaMemoryStorePgDialectTest extends UnitTest {
 
@@ -36,14 +44,12 @@ class JpaMemoryStorePgDialectTest extends UnitTest {
 
     @BeforeEach
     void setup() {
-        LuceneTestSync.closedForTest();
         Fixtures.deleteDatabase();
     }
 
     @AfterEach
     void teardown() {
         JpaMemoryStore.setEmbedderForTest(null);
-        LuceneTestSync.release();
     }
 
     /** Create a real agent (memories carry a real FK, JCLAW-537). */

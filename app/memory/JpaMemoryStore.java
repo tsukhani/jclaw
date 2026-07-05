@@ -217,6 +217,19 @@ public class JpaMemoryStore implements MemoryStore {
 
     // --- Search strategies ---
 
+    /** JCLAW-615: the PG chain's terminal fallback. Goes STRAIGHT to the
+     *  SQL substring scan — the chain exists because SQL constructs failed,
+     *  and re-entering the search abstraction here made the result depend on
+     *  JVM-global Lucene index state (a concurrent test/caller opening the
+     *  index flipped recall onto an index missing the rows). */
+    private List<MemoryEntry> sqlLikeSearch(String agentId, String query, int limit) {
+        Long pk = pkOrNull(agentId);
+        if (pk == null) return List.of();
+        return models.Memory.likeFallback(pk, query, limit).stream()
+                .map(s -> toEntry(s.memory(), s.relevance()))
+                .toList();
+    }
+
     private List<MemoryEntry> likeSearch(String agentId, String query, int limit) {
         // JCLAW-532: the Lucene-backed scored search carries a real top-normalized
         // relevance score per hit; thread it onto the entry so recall can rank by
@@ -233,7 +246,7 @@ public class JpaMemoryStore implements MemoryStore {
             return toEntriesRankScored(pgFtsRows(pk, query, limit));
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
-            return likeSearch(agentId, query, limit);
+            return sqlLikeSearch(agentId, query, limit);
         }
     }
 

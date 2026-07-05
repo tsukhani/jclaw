@@ -211,11 +211,12 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 "seeded allowlist row never became visible to a fresh Tx");
         var resp = DELETE("/api/mcp-servers/" + id);
         assertIsOk(resp);
-        // Verify in a fresh VT/Tx so the read sees the controller's committed
-        // state, not the test's stale carrier-tx snapshot.
-        var remaining = commitInFreshTx(() ->
-                AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean"));
-        assertEquals(0L, (long) remaining,
+        // JCLAW-615: the same visibility lag the seed barrier above guards
+        // against applies symmetrically to the controller's commit — a single
+        // fresh-Tx read raced it ("expected 0 but was 1" under concurrent-lane
+        // load). Spin until the delete's cascade is globally visible; normally
+        // one no-spin read.
+        awaitCommitted(() -> AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean") == 0L,
                 "delete must cascade through stop() and clear allowlist rows");
     }
 
