@@ -33,6 +33,13 @@ public class PyannoteDiarizationClient {
 
     private static final MediaType JSON = MediaType.get("application/json");
 
+    /** JCLAW-620: the sidecar is one-inference-at-a-time by design (HTTP
+     *  409 when busy). Serialize all sidecar calls JVM-wide with a FAIR
+     *  lock so concurrent conversations queue instead of surfacing a
+     *  retryable busy condition as a user-facing failure. */
+    private static final java.util.concurrent.locks.ReentrantLock SIDECAR_LOCK =
+            new java.util.concurrent.locks.ReentrantLock(true);
+
     private final String baseUrlOverride;
     private final OkHttpClient client;
 
@@ -70,6 +77,15 @@ public class PyannoteDiarizationClient {
 
     /** As {@link #diarize} but keeping the overlap regions (JCLAW-605). */
     public DiarizationOutput diarizeRich(Path audioFile, int numSpeakers) {
+        SIDECAR_LOCK.lock();
+        try {
+            return diarizeRichLocked(audioFile, numSpeakers);
+        } finally {
+            SIDECAR_LOCK.unlock();
+        }
+    }
+
+    private DiarizationOutput diarizeRichLocked(Path audioFile, int numSpeakers) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
 
         var body = new JsonObject();
@@ -149,6 +165,15 @@ public class PyannoteDiarizationClient {
      * pairs aligned with the inputs; the caller owns temp-dir cleanup.
      */
     public List<List<Path>> separate(List<Path> windowWavs) {
+        SIDECAR_LOCK.lock();
+        try {
+            return separateLocked(windowWavs);
+        } finally {
+            SIDECAR_LOCK.unlock();
+        }
+    }
+
+    private List<List<Path>> separateLocked(List<Path> windowWavs) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
         var body = new JsonObject();
         var arr = new com.google.gson.JsonArray();
@@ -199,6 +224,15 @@ public class PyannoteDiarizationClient {
      * model — the generous shared deadline applies.
      */
     public List<SpeakerSegment> msdd(Path audioFile, int numSpeakers) {
+        SIDECAR_LOCK.lock();
+        try {
+            return msddLocked(audioFile, numSpeakers);
+        } finally {
+            SIDECAR_LOCK.unlock();
+        }
+    }
+
+    private List<SpeakerSegment> msddLocked(Path audioFile, int numSpeakers) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("audio_path", audioFile.toAbsolutePath().toString());
