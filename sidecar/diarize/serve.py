@@ -315,6 +315,11 @@ def _idle_watcher(state: SidecarState):
         return
     while True:
         time.sleep(min(60.0, state.idle_timeout_s))
+        # JCLAW-619: an in-flight inference holds run_lock but does not touch
+        # last_activity — a single run longer than the idle timeout (CPU-only
+        # is ~0.2x realtime) must never be killed mid-inference.
+        if state.run_lock.locked():
+            continue
         if time.monotonic() - state.last_activity >= state.idle_timeout_s:
             sys.stderr.write("[diarize-sidecar] idle for %.0fs — exiting\n" % state.idle_timeout_s)
             os._exit(0)
