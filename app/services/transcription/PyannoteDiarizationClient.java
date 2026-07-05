@@ -192,6 +192,37 @@ public class PyannoteDiarizationClient {
         }
     }
 
+    /**
+     * MSDD second opinion for contested turns (JCLAW-612): overlap-aware
+     * segments from NeMo's profile-conditioned decoder, run by the sidecar
+     * in its own script env. First call may build that env and download the
+     * model — the generous shared deadline applies.
+     */
+    public List<SherpaDiarizer.SpeakerSegment> msdd(Path audioFile, int numSpeakers) {
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
+        var body = new JsonObject();
+        body.addProperty("audio_path", audioFile.toAbsolutePath().toString());
+        body.addProperty("num_speakers", numSpeakers);
+        var call = client.newCall(new Request.Builder()
+                .url(baseUrl + "/msdd")
+                .post(RequestBody.create(body.toString(), JSON))
+                .build());
+        call.timeout().timeout(ConfigService.getInt(
+                PyannoteSidecarManager.CONFIG_PREFIX + ".timeoutSeconds", 1800), TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            var text = resp.body().string();
+            if (!resp.isSuccessful()) {
+                throw new TranscriptionException(
+                        "pyannote sidecar msdd failed: HTTP %d — %s".formatted(
+                                resp.code(), truncate(text)));
+            }
+            return parseSegments(text);
+        } catch (IOException e) {
+            throw new TranscriptionException(
+                    "pyannote sidecar unreachable: " + e.getMessage(), e);
+        }
+    }
+
     private static String truncate(String s) {
         if (s == null) return "";
         var oneLine = s.replaceAll("\\s+", " ").strip();

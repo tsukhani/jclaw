@@ -24,6 +24,11 @@ Protocol (bound to 127.0.0.1 only):
                 overlaps: [{start, end}, ...], device, seconds}
            (overlaps = regions where the overlap-aware annotation has 2+
             active speakers — the JCLAW-605 re-attribution gate)
+  POST /msdd {audio_path, num_speakers}
+        -> 200 {segments: [{start, end, speaker}, ...]}
+           (NeMo MSDD second opinion, TS-VAD lineage — overlap-aware,
+            segments may overlap in time; runs in its OWN uv script env
+            like the separator; JCLAW-612)
   POST /separate {audio_paths: ["<w1.wav>", ...]}
         -> 200 {stems: {"<w1.wav>": ["..._s1.wav", "..._s2.wav"], ...}}
            (MossFormer2 2-speaker separation of ready-made 16kHz mono WAVs;
@@ -153,6 +158,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/separate":
             self._handle_separate()
             return
+        if self.path == "/msdd":
+            self._handle_msdd()
+            return
         if self.path != "/diarize":
             self._send_json(404, {"error": "unknown path %s" % self.path})
             return
@@ -219,6 +227,44 @@ class Handler(BaseHTTPRequestHandler):
             self.state.touch()
             self.state.run_lock.release()
 
+
+    def _handle_msdd(self):
+        """JCLAW-612: MSDD second opinion via the msdd.py script env."""
+        self.state.touch()
+        try:
+            req = self._read_json()
+        except (ValueError, UnicodeDecodeError) as e:
+            self._send_json(400, {"error": "invalid JSON body: %s" % e})
+            return
+        audio_path = req.get("audio_path")
+        if not audio_path or not os.path.isfile(audio_path):
+            self._send_json(400, {"error": "audio_path missing or not a file: %r" % audio_path})
+            return
+        num_speakers = int(req.get("num_speakers") or 2)
+        if not self.state.run_lock.acquire(blocking=False):
+            self._send_json(409, {"error": "another inference is already in progress"})
+            return
+        try:
+            import subprocess
+            t0 = time.time()
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            proc = subprocess.run(
+                ["uv", "run", "msdd.py", audio_path, str(num_speakers)],
+                cwd=script_dir, capture_output=True, text=True, timeout=1740)
+            for line in proc.stderr.splitlines()[-20:]:
+                sys.stderr.write("[diarize-sidecar] %s\n" % line)
+            if proc.returncode != 0:
+                raise RuntimeError("msdd.py exited %d: %s"
+                                   % (proc.returncode, proc.stderr.strip()[-300:]))
+            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+            sys.stderr.write("[diarize-sidecar] msdd: %d segment(s) in %.1fs\n"
+                             % (len(payload.get("segments", [])), time.time() - t0))
+            self._send_json(200, payload)
+        except Exception as e:  # noqa: BLE001 — reported to the client verbatim
+            self._send_json(500, {"error": str(e)})
+        finally:
+            self.state.touch()
+            self.state.run_lock.release()
 
     def _handle_separate(self):
         """JCLAW-605: batch MossFormer2 separation via the separate.py

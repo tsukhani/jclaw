@@ -223,6 +223,73 @@ class OverlapReattributorTest extends UnitTest {
                 "a clear leader is decidable");
     }
 
+    @Test
+    void reattribute_msddSecondOpinion_flipsNearTieTurn_outsideDetectedOverlap() {
+        // The JCLAW-611 residual shape: NO overlap region detected, but a
+        // short turn's mixed audio is a near-tie (the 0.5 blend) — MSDD's
+        // frame tracking says it belongs to A. Must flip, no marker.
+        var pcm = new float[20 * SR];
+        Arrays.fill(pcm, 0, 8 * SR, 0.8f);
+        Arrays.fill(pcm, 8 * SR, 16 * SR, 0.2f);
+        Arrays.fill(pcm, 16 * SR, 19 * SR, 0.5f);  // near-tie zone, no overlap region
+        var entries = List.of(
+                entry("A", 0, 8),
+                entry("B", 8, 16),
+                entry("B", 16.5, 18.5));            // 2s near-tie turn, truly A
+        java.util.function.Supplier<List<services.transcription.SherpaDiarizer.SpeakerSegment>> msdd =
+                () -> List.of(
+                        new services.transcription.SherpaDiarizer.SpeakerSegment(0, 7.5, 1),
+                        new services.transcription.SherpaDiarizer.SpeakerSegment(8.2, 15.8, 0),
+                        new services.transcription.SherpaDiarizer.SpeakerSegment(16.4, 18.6, 1));
+
+        var out = OverlapReattributor.reattribute(entries, List.of(), pcm,
+                null, MEAN_EMBEDDER, msdd);
+
+        assertEquals("A", out.get(2).speaker(), "MSDD second opinion must flip the near-tie turn");
+        assertFalse(out.get(2).crossTalk(), "a decisive second opinion carries no marker");
+        assertEquals("A", out.get(0).speaker());
+        assertEquals("B", out.get(1).speaker());
+    }
+
+    @Test
+    void reattribute_msddUnavailable_marksNearTieTurn() {
+        var pcm = new float[20 * SR];
+        Arrays.fill(pcm, 0, 8 * SR, 0.8f);
+        Arrays.fill(pcm, 8 * SR, 16 * SR, 0.2f);
+        Arrays.fill(pcm, 16 * SR, 19 * SR, 0.5f);
+        var entries = List.of(entry("A", 0, 8), entry("B", 8, 16), entry("B", 16.5, 18.5));
+        java.util.function.Supplier<List<services.transcription.SherpaDiarizer.SpeakerSegment>> broken =
+                () -> { throw new TranscriptionException("sidecar down"); };
+
+        var out = OverlapReattributor.reattribute(entries, List.of(), pcm,
+                null, MEAN_EMBEDDER, broken);
+
+        assertEquals("B", out.get(2).speaker(), "no evidence: label kept");
+        assertTrue(out.get(2).crossTalk(), "contested without evidence: honesty marker");
+    }
+
+    @Test
+    void reattribute_msddInterjectionEvidence_neverFlips() {
+        // Sub-second MSDD coverage (its blind spot) must not flip anything —
+        // the turn stays with its label and gets the marker instead.
+        var pcm = new float[20 * SR];
+        Arrays.fill(pcm, 0, 8 * SR, 0.8f);
+        Arrays.fill(pcm, 8 * SR, 16 * SR, 0.2f);
+        Arrays.fill(pcm, 16 * SR, 19 * SR, 0.5f);
+        var entries = List.of(entry("A", 0, 8), entry("B", 8, 16), entry("B", 16.5, 18.5));
+        java.util.function.Supplier<List<services.transcription.SherpaDiarizer.SpeakerSegment>> msdd =
+                () -> List.of(
+                        new services.transcription.SherpaDiarizer.SpeakerSegment(0, 7.5, 1),
+                        new services.transcription.SherpaDiarizer.SpeakerSegment(8.2, 15.8, 0),
+                        new services.transcription.SherpaDiarizer.SpeakerSegment(17.0, 17.6, 1));
+
+        var out = OverlapReattributor.reattribute(entries, List.of(), pcm,
+                null, MEAN_EMBEDDER, msdd);
+
+        assertEquals("B", out.get(2).speaker(), "0.6s of MSDD evidence is not sustained speech");
+        assertTrue(out.get(2).crossTalk());
+    }
+
     // ---- decide() rule table ---------------------------------------------
 
     @Test

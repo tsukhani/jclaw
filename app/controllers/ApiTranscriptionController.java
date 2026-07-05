@@ -174,9 +174,8 @@ public class ApiTranscriptionController extends Controller {
             transcript = SegmentWordSplitter.split(transcript, speakers, audio.toPath());
             entries = DiarizedTranscript.merge(transcript, speakers, names);
             // JCLAW-605: overlap re-attribution. Best-effort inside reattribute().
-            if (!diarization.overlaps().isEmpty()
-                    && ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
-                entries = OverlapReattributor.reattribute(entries, diarization.overlaps(), audio.toPath());
+            if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
+                entries = OverlapReattributor.reattribute(entries, diarization, audio.toPath());
             }
             // JCLAW-563: per-turn acoustic emotion labels (json 'emotion'
             // field, "(happy)" tag in txt). Best-effort inside annotate() —

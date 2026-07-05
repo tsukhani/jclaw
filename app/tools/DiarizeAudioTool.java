@@ -283,9 +283,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             var entries = DiarizedTranscript.merge(transcript, speakers, names);
             // JCLAW-605: cross-talk turns re-attributed via sidecar source
             // separation + stem voiceprints. Best-effort inside reattribute().
-            if (!diarization.overlaps().isEmpty()
-                    && ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
-                entries = OverlapReattributor.reattribute(entries, diarization.overlaps(), path);
+            if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
+                entries = OverlapReattributor.reattribute(entries, diarization, path);
             }
             // JCLAW-563: annotate each turn with an acoustic emotion label.
             // Best-effort inside annotate() — a transcript never fails

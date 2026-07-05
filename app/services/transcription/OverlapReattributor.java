@@ -37,6 +37,12 @@ import java.util.Map;
 public final class OverlapReattributor {
 
     public static final String ENABLED_KEY = "transcription.diarization.overlapReattribution";
+    public static final String MSDD_KEY = "transcription.diarization.msddSecondOpinion";
+
+    /** Near-tie candidacy floor (JCLAW-612): turns shorter than this can
+     *  never earn a decisive MSDD verdict (sustained-speech threshold), so
+     *  flagging them would only add marker noise. */
+    static final double MIN_NEAR_TIE_SECONDS = 1.0;
 
     /** An entry participates when at least this much of it lies in overlap. */
     static final double MIN_INTERSECT_FRACTION = 0.5;
@@ -101,38 +107,74 @@ public final class OverlapReattributor {
     private OverlapReattributor() {}
 
     /**
-     * Re-attribute overlap-region entries of {@code entries} using sidecar
-     * separation. Best-effort: returns the input unchanged on any failure.
-     * Blocking — the separator's first call downloads MossFormer2 weights.
+     * Re-attribute contested entries of {@code entries}: overlap-region
+     * turns via sidecar separation (JCLAW-605) and, on the pyannote path,
+     * an MSDD second opinion for contested turns including near-tie short
+     * turns outside detected overlap (JCLAW-612). Best-effort: returns the
+     * input unchanged on any failure. Blocking — first calls may download
+     * model weights.
      */
     public static List<DiarizedTranscript.Entry> reattribute(
-            List<DiarizedTranscript.Entry> entries, List<double[]> overlaps, Path audioFile) {
-        if (overlaps.isEmpty()) return entries;
+            List<DiarizedTranscript.Entry> entries, DiarizationRouter.Result diarization,
+            Path audioFile) {
         try {
             float[] pcm = WhisperJniTranscriber.ffmpegToPcmF32(audioFile);
-            return reattribute(entries, overlaps, pcm,
-                    OverlapReattributor::separateViaSidecar, SpeakerNamer::embedWindow);
+            Separator separator = diarization.viaPyannote()
+                    ? OverlapReattributor::separateViaSidecar : null;
+            java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> msdd = null;
+            if (diarization.viaPyannote()
+                    && services.ConfigService.getBoolean(MSDD_KEY, true)) {
+                int speakers = Math.max(2, (int) entries.stream()
+                        .map(DiarizedTranscript.Entry::speaker).distinct().count());
+                float[] pcmForMsdd = pcm;
+                msdd = () -> msddViaSidecar(pcmForMsdd, speakers);
+            }
+            return reattribute(entries, diarization.overlaps(), pcm, separator,
+                    SpeakerNamer::embedWindow, msdd);
         } catch (RuntimeException e) {
             Logger.warn("OverlapReattributor: re-attribution skipped: %s", e.getMessage());
             return entries;
         }
     }
 
-    /** Throwing core with injected seams — the testable path. */
+    /** Seam-based core without a second opinion — kept for the JCLAW-605/607
+     *  rule-table tests; production goes through the 6-argument form. */
     public static List<DiarizedTranscript.Entry> reattribute(
             List<DiarizedTranscript.Entry> entries, List<double[]> overlaps,
             float[] pcm, Separator separator, Embedder embedder) {
+        return reattribute(entries, overlaps, pcm, separator, embedder, null);
+    }
+
+    /** Throwing core with injected seams — the testable path. */
+    public static List<DiarizedTranscript.Entry> reattribute(
+            List<DiarizedTranscript.Entry> entries, List<double[]> overlaps,
+            float[] pcm, Separator separator, Embedder embedder,
+            java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> msddOpinion) {
         var affected = new ArrayList<Integer>();
         for (int i = 0; i < entries.size(); i++) {
             if (inOverlap(entries.get(i), overlaps)) affected.add(i);
         }
-        if (affected.isEmpty()) return entries;
+        if (affected.isEmpty() && msddOpinion == null) return entries;
 
         var references = references(entries, overlaps, pcm, embedder);
         if (references.size() < 2) {
             Logger.info("OverlapReattributor: fewer than 2 clean speaker references — skipping");
             return entries;
         }
+
+        // JCLAW-612: near-tie candidacy — short turns whose mixed-audio
+        // evidence does not decisively back their label are contested even
+        // outside detected overlap (the detector misses soft cross-talk;
+        // the "thank you" residual lived exactly there).
+        var nearTie = msddOpinion == null ? List.<Integer>of()
+                : nearTieCandidates(entries, affected, pcm, references, embedder);
+        if (affected.isEmpty() && nearTie.isEmpty()) return entries;
+
+        var msdd = fetchOpinion(msddOpinion);
+        var contested = new java.util.LinkedHashSet<Integer>(affected);
+        contested.addAll(nearTie);
+        var mapping = msdd == null ? Map.<Integer, String>of()
+                : MsddSecondOpinion.mapSpeakers(entries, contested, msdd);
 
         // Stage every region window first, then separate the whole batch in
         // one call — the separator loads its model once per diarization.
@@ -169,26 +211,49 @@ public final class OverlapReattributor {
             regionStarts.add(winStart);
             regionEntryIndexes.add(regionEntries);
         }
-        if (windows.isEmpty()) return entries;
+        if (windows.isEmpty() && msdd == null && nearTie.isEmpty()) return entries;
         // Coalesce windows that now overlap after expansion (30s minimum
         // windows over adjacent regions would otherwise re-separate the same
         // audio repeatedly).
         coalesce(regionStarts, regionEntryIndexes, windows, pcm);
-        Logger.info("OverlapReattributor: checking %d turn(s) across %d overlap window(s)",
-                regionEntryIndexes.stream().mapToInt(List::size).sum(), windows.size());
-        var stemsPerWindow = separator.separate(windows);
+        Logger.info("OverlapReattributor: checking %d turn(s) across %d overlap window(s)%s",
+                contested.size(), windows.size(), msdd == null ? "" : " + MSDD second opinion");
+        var stemsPerWindow = separator == null || windows.isEmpty()
+                ? List.<List<float[]>>of() : separator.separate(windows);
+
+        // Per-entry stem context from the staged windows.
+        var stemWindow = new java.util.HashMap<Integer, Integer>();
+        for (int w = 0; w < regionEntryIndexes.size() && w < stemsPerWindow.size(); w++) {
+            for (int i : regionEntryIndexes.get(w)) stemWindow.put(i, w);
+        }
 
         var out = new ArrayList<>(entries);
         int reassigned = 0;
-        for (int w = 0; w < windows.size(); w++) {
-            var stems = stemsPerWindow.get(w);
-            double winStart = regionStarts.get(w);
-            for (int i : regionEntryIndexes.get(w)) {
-                var entry = out.get(i);
-                if (mixedAudioBacksCurrentLabel(entry, pcm, references, embedder)) {
-                    continue; // clean, confidently-attributed speech: not ours to touch
+        for (int i : contested) {
+            var entry = out.get(i);
+            if (mixedAudioBacksCurrentLabel(entry, pcm, references, embedder)) {
+                continue; // clean, confidently-attributed speech: not ours to touch
+            }
+            // 1) MSDD second opinion — frame-level tracking resolves what
+            //    window embeddings cannot; only adopted on sustained speech.
+            if (msdd != null) {
+                var opinion = MsddSecondOpinion.verdict(entry, msdd, mapping);
+                if (opinion != null) {
+                    if (!opinion.equals(entry.speaker())) {
+                        out.set(i, new DiarizedTranscript.Entry(
+                                opinion, entry.start(), entry.end(), entry.text(), entry.emotion()));
+                        reassigned++;
+                        Logger.info("OverlapReattributor: \"%s\" %s -> %s (MSDD second opinion)",
+                                truncate(entry.text()), entry.speaker(), opinion);
+                    }
+                    continue; // decisive either way: no marker
                 }
-                var scores = stemScores(entry, winStart, stems, references, embedder);
+            }
+            // 2) Separation-stem evidence (overlap-window candidates only).
+            Integer w = stemWindow.get(i);
+            if (w != null) {
+                var scores = stemScores(entry, regionStarts.get(w), stemsPerWindow.get(w),
+                        references, embedder);
                 var winner = decide(entry.speaker(), scores, DECISION_MARGIN);
                 if (winner != null) {
                     out.set(i, new DiarizedTranscript.Entry(
@@ -196,15 +261,14 @@ public final class OverlapReattributor {
                     reassigned++;
                     Logger.info("OverlapReattributor: \"%s\" %s -> %s (scores %s)",
                             truncate(entry.text()), entry.speaker(), winner, scores);
-                } else if (undecidable(scores)) {
-                    // JCLAW-607: confirmed cross-talk, evidence a coin flip —
-                    // keep the label but say so instead of feigning certainty.
-                    out.set(i, new DiarizedTranscript.Entry(entry.speaker(), entry.start(),
-                            entry.end(), entry.text(), entry.emotion(), true));
-                    Logger.info("OverlapReattributor: marked \"%s\" cross-talk (scores %s)",
-                            truncate(entry.text()), scores);
+                    continue;
                 }
+                if (!undecidable(scores)) continue;
             }
+            // 3) Confirmed contested, no decisive evidence: honesty marker.
+            out.set(i, new DiarizedTranscript.Entry(entry.speaker(), entry.start(),
+                    entry.end(), entry.text(), entry.emotion(), true));
+            Logger.info("OverlapReattributor: marked \"%s\" cross-talk", truncate(entry.text()));
         }
         if (reassigned > 0) {
             Logger.info("OverlapReattributor: reassigned %d overlap turn(s)", reassigned);
@@ -402,6 +466,53 @@ public final class OverlapReattributor {
             }
         }
         return false;
+    }
+
+    /** Short turns whose mixed-audio evidence does not decisively back
+     *  their label — contested even without a detected overlap region. */
+    private static List<Integer> nearTieCandidates(
+            List<DiarizedTranscript.Entry> entries, List<Integer> affected,
+            float[] pcm, Map<String, float[]> references, Embedder embedder) {
+        var out = new ArrayList<Integer>();
+        for (int i = 0; i < entries.size(); i++) {
+            if (affected.contains(i)) continue;
+            var e = entries.get(i);
+            double duration = e.end() - e.start();
+            if (duration < MIN_NEAR_TIE_SECONDS || duration > MAX_ADJACENT_TURN_SECONDS) continue;
+            if (!references.containsKey(e.speaker())) continue;
+            if (!mixedAudioBacksCurrentLabel(e, pcm, references, embedder)) out.add(i);
+        }
+        return out;
+    }
+
+    /** Stage the pipeline's 16kHz mono PCM as a temp WAV for /msdd —
+     *  NeMo's VAD collate crashes on the original stereo/44.1kHz upload
+     *  (torch.cat dimension mismatch on 2-D signals). */
+    private static List<SherpaDiarizer.SpeakerSegment> msddViaSidecar(float[] pcm, int speakers) {
+        Path tmpDir = null;
+        try {
+            tmpDir = Files.createTempDirectory("jclaw-msdd-");
+            var wav = tmpDir.resolve("audio.wav");
+            Files.write(wav, SpeakerClipExtractor.toWavPcm16(pcm));
+            return new PyannoteDiarizationClient().msdd(wav, speakers);
+        } catch (IOException e) {
+            throw new TranscriptionException("failed to stage MSDD audio: " + e.getMessage(), e);
+        } finally {
+            if (tmpDir != null) deleteRecursive(tmpDir);
+        }
+    }
+
+    /** Fetch the MSDD opinion once, best-effort. */
+    private static List<SherpaDiarizer.SpeakerSegment> fetchOpinion(
+            java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> supplier) {
+        if (supplier == null) return null;
+        try {
+            var segments = supplier.get();
+            return segments == null || segments.isEmpty() ? null : segments;
+        } catch (RuntimeException e) {
+            Logger.warn("OverlapReattributor: MSDD second opinion unavailable (%s)", e.getMessage());
+            return null;
+        }
     }
 
     /** Merge adjacent/overlapping expanded windows in place: windows are
