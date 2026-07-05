@@ -137,6 +137,13 @@ public final class LocalSidecarDaemon {
                 "--idle-timeout-min", String.valueOf(idleMin));
         try {
             var pb = new ProcessBuilder(cmd).directory(sidecarDir);
+            // JCLAW-641: the sidecar's subprocess ceilings derive from the
+            // JVM's timeout knob (minus a margin so the sidecar errors
+            // before the JVM's socket gives up). Sidecars without the
+            // concept ignore the env var.
+            int jvmTimeout = ConfigService.getInt(cfg.configPrefix() + ".timeoutSeconds", 1800);
+            pb.environment().put("SIDECAR_REQUEST_TIMEOUT_SEC",
+                    String.valueOf(Math.max(60, jvmTimeout - 60)));
             // Optional HF token → HF_TOKEN env. huggingface_hub reads it automatically,
             // so the sidecar needs no change; the secret stays scoped to the child
             // process and is never written to a token file under data/.

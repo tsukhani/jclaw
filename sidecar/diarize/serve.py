@@ -64,6 +64,12 @@ import json
 import os
 import sys
 import threading
+
+# JCLAW-641: subprocess ceilings derive from the JVM's one knob
+# (transcription.diarization.local.timeoutSeconds), passed at spawn as an
+# env var with a 60s margin so the sidecar gives up BEFORE the JVM does
+# and can return a real error instead of a hung socket.
+REQUEST_TIMEOUT_SEC = int(os.environ.get("SIDECAR_REQUEST_TIMEOUT_SEC", "1740"))
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -172,6 +178,11 @@ class Handler(BaseHTTPRequestHandler):
     # ---- endpoints ------------------------------------------------------
     def do_GET(self):
         if self.path == "/health":
+            # JCLAW-641: a health probe signals imminent use — touching the
+            # idle clock closes the evict race between the JVM's check and
+            # its POST. Only ensureRunning probes health, so this cannot
+            # keep an unused sidecar alive.
+            self.state.touch()
             self._send_json(200, {
                 "status": "ok",
                 "device": self.state.device,
@@ -293,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             proc = subprocess.run(
                 ["uv", "run", "transcribe.py", audio_path, model, language],
-                cwd=script_dir, capture_output=True, text=True, timeout=1740)
+                cwd=script_dir, capture_output=True, text=True, timeout=REQUEST_TIMEOUT_SEC)
             for line in proc.stderr.splitlines()[-10:]:
                 sys.stderr.write("[diarize-sidecar] %s\n" % line)
             if proc.returncode != 0:
@@ -365,7 +376,7 @@ class Handler(BaseHTTPRequestHandler):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             proc = subprocess.run(
                 ["uv", "run", "msdd.py", audio_path, str(num_speakers)],
-                cwd=script_dir, capture_output=True, text=True, timeout=1740)
+                cwd=script_dir, capture_output=True, text=True, timeout=REQUEST_TIMEOUT_SEC)
             for line in proc.stderr.splitlines()[-20:]:
                 sys.stderr.write("[diarize-sidecar] %s\n" % line)
             if proc.returncode != 0:
@@ -403,7 +414,7 @@ class Handler(BaseHTTPRequestHandler):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             proc = subprocess.run(
                 ["uv", "run", "separate.py", *paths],
-                cwd=script_dir, capture_output=True, text=True, timeout=1740)
+                cwd=script_dir, capture_output=True, text=True, timeout=REQUEST_TIMEOUT_SEC)
             for line in proc.stderr.splitlines():
                 sys.stderr.write("[diarize-sidecar] %s\n" % line)
             if proc.returncode != 0:
@@ -456,7 +467,7 @@ def _prewarm(state: SidecarState):
         try:
             t0 = time.time()
             proc = subprocess.run(cmd, cwd=script_dir, capture_output=True,
-                                  text=True, timeout=1740)
+                                  text=True, timeout=REQUEST_TIMEOUT_SEC)
             sys.stderr.write("[diarize-sidecar] prewarm %s: rc=%d in %.0fs\n"
                              % (label, proc.returncode, time.time() - t0))
         except Exception as e:  # noqa: BLE001 — prewarm must never hurt

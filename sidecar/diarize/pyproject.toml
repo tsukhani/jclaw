@@ -13,7 +13,12 @@ dependencies = [
     "huggingface_hub>=0.26",
     # JCLAW-634: resident WeSpeaker embedding — sherpa-onnx is numpy>=2
     # compatible so it lives in the daemon env (no per-call subprocess).
+    # sherpa-onnx-core must be EXPLICIT: it carries the native dylibs
+    # (installed into sherpa_onnx/lib), and uv's universal project
+    # resolution drops it from the lock even though per-platform script
+    # envs resolve it fine — without it dlopen fails on libonnxruntime.
     "sherpa-onnx>=1.12",
+    "sherpa-onnx-core>=1.12",
 ]
 # NOTE (JCLAW-605): the MossFormer2 separator does NOT live in this env —
 # clearvoice pins numpy<2 while pyannote-core 6 needs numpy>=2. It runs in

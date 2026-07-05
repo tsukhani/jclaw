@@ -88,6 +88,21 @@ public class PyannoteDiarizationClient {
     }
 
     private DiarizationOutput diarizeRichLocked(Path audioFile, int numSpeakers) {
+        try {
+            return diarizeRichOnce(audioFile, numSpeakers);
+        } catch (TranscriptionException e) {
+            // JCLAW-641: the idle self-evict can fire between the health
+            // check and this POST — one respawn-and-retry absorbs it.
+            if (baseUrlOverride == null && e.getCause() instanceof java.net.ConnectException) {
+                Logger.info("PyannoteDiarizationClient: sidecar evicted between health check "
+                        + "and request — respawning once");
+                return diarizeRichOnce(audioFile, numSpeakers);
+            }
+            throw e;
+        }
+    }
+
+    private DiarizationOutput diarizeRichOnce(Path audioFile, int numSpeakers) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
 
         var body = new JsonObject();
@@ -105,6 +120,13 @@ public class PyannoteDiarizationClient {
 
         try (var resp = call.execute()) {
             var text = resp.body().string();
+            if (resp.code() == 409) {
+                // JCLAW-641: raw "already in progress" reads like a crash.
+                throw new TranscriptionException(
+                        "the diarization sidecar is still busy with an earlier recording "
+                                + "(long inferences keep running even if their caller gave up) — "
+                                + "try again in a few minutes");
+            }
             if (!resp.isSuccessful()) {
                 throw new TranscriptionException(
                         "pyannote sidecar diarize failed: HTTP %d — %s".formatted(
