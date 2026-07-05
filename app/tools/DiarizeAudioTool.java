@@ -17,6 +17,7 @@ import services.transcription.EmotionRecognizer;
 import services.transcription.OverlapReattributor;
 import services.transcription.SegmentWordSplitter;
 import services.transcription.SpeakerClipExtractor;
+import services.transcription.SherpaDiarizer;
 import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
@@ -55,6 +56,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final String ARG_LANGUAGE = "language";
     private static final String ARG_SPEAKER_NAME = "speaker_name";
     private static final String ARG_CLIP_LABEL = "clip_label";
+    private static final String ARG_ALLOW_ANONYMOUS = "allow_anonymous";
 
     private static final String ACTION_DIARIZE = "diarize";
     private static final String ACTION_ENROLL = "enroll_speaker";
@@ -102,11 +104,18 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 Speaker tools for an uploaded audio recording. Action 'diarize' (default) identifies \
                 who spoke when — use it only when the user asks to identify, separate, or label the \
                 speakers in a recording; ordinary voice notes are already transcribed automatically. \
-                Slow: expect roughly a tenth of the recording's duration. Returns a transcript with \
-                one line per turn, labeled with enrolled speaker names where the voice matches, or \
-                SPEAKER_00-style tags otherwise, plus a per-turn emotion label in parentheses \
-                (happy, sad, angry, disgust, fear, surprised, neutral) classified from the \
-                voice's acoustics — tone, not word choice, so it works across languages. \
+                Identification-first: it matches the voices against enrolled speakers BEFORE \
+                transcribing. If every voice is recognized (or 'allow_anonymous' is true) it \
+                returns the full transcript — one line per turn, labeled with speaker names (or \
+                SPEAKER_00-style tags), plus a per-turn emotion label in parentheses (happy, sad, \
+                angry, disgust, fear, surprised, neutral) classified from the voice's acoustics — \
+                tone, not word choice, so it works across languages. If some voices are NOT \
+                recognized, it skips transcription and instead attaches a playable clip per unknown \
+                voice with instructions: ask the user who each voice is, enroll the answers, then \
+                call diarize again (fast — the diarization is cached) or pass allow_anonymous=true \
+                if the user declines. allow_anonymous is only honored after that identification \
+                step has run once for the attachment — never set it on a first call. Transcription \
+                takes roughly a tenth of the recording's duration. \
                 Action 'enroll_speaker' saves a voice reference for \
                 'speaker_name', so future diarizations label that voice by name — use it when the \
                 user asks to remember/enroll a voice or store an audio file under the speaker-voices \
@@ -141,6 +150,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION,
                                 "UUID of the audio attachment to use. Omit to use the most recent "
                                         + "audio attachment in this conversation."),
+                        ARG_ALLOW_ANONYMOUS, Map.of(SchemaKeys.TYPE, "boolean",
+                                SchemaKeys.DESCRIPTION,
+                                "diarize only: produce the transcript even when voices are not "
+                                        + "enrolled, labeling them SPEAKER_00-style. Set it when the "
+                                        + "user explicitly does not care about speaker names or has "
+                                        + "declined to identify the voices."),
                         ARG_NUM_SPEAKERS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                                 SchemaKeys.DESCRIPTION,
                                 "diarize only: exact number of speakers, when the user states it. "
@@ -220,24 +235,46 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         if (ACTION_EXTRACT.equals(action)) {
             return extractSpeakerClips(path, att, numSpeakers);
         }
-        return ToolRegistry.ToolResult.text(
-                diarize(path, att, numSpeakers, optString(args, ARG_LANGUAGE)));
+        boolean allowAnonymous = args.has(ARG_ALLOW_ANONYMOUS)
+                && !args.get(ARG_ALLOW_ANONYMOUS).isJsonNull()
+                && args.get(ARG_ALLOW_ANONYMOUS).getAsBoolean();
+        return diarize(path, att, numSpeakers, optString(args, ARG_LANGUAGE), allowAnonymous);
     }
 
-    private static String diarize(Path path, MessageAttachment att, Integer numSpeakers, String language) {
+    private static ToolRegistry.ToolResult diarize(Path path, MessageAttachment att,
+                                                   Integer numSpeakers, String language,
+                                                   boolean allowAnonymous) {
         var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                 .orElse(WhisperModel.DEFAULT);
         float clusterThreshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
 
         try {
-            var transcript = WhisperJniTranscriber.transcribeSegments(path, model, language);
-            var diarization = DiarizationRouter.diarizeRich(path, clusterThreshold,
-                    numSpeakers == null ? -1 : numSpeakers);
+            // JCLAW-611 identification-first: diarize + match BEFORE the
+            // expensive transcription. Unknown voices stop the pipeline and
+            // come back as a lineup so the user can name them; whisper runs
+            // exactly once, after identities are settled (or waived).
+            var diarization = cachedDiarization(path, clusterThreshold, numSpeakers);
             var speakers = diarization.segments();
             var names = SpeakerNamer.enrollmentPresent()
                     ? SpeakerNamer.nameSpeakers(path, speakers, (float) ConfigService.getDouble(
                             "transcription.diarization.speakerMatchThreshold", 0.6))
                     : Map.<Integer, String>of();
+            var unmatched = speakers.stream().map(SherpaDiarizer.SpeakerSegment::speaker)
+                    .distinct().filter(id -> !names.containsKey(id)).toList();
+            // The anonymous escape hatch is only honored AFTER identification
+            // was actually attempted in this conversation (JCLAW-611 UAT: the
+            // model set allow_anonymous on its very first call, skipping the
+            // flow it was told to follow — determinism beats instructions).
+            if (allowAnonymous && !identificationAttempted(att)) {
+                play.Logger.info("DiarizeAudioTool: ignoring allow_anonymous before any "
+                        + "identification attempt for %s", att.uuid);
+                allowAnonymous = false;
+            }
+            if (!unmatched.isEmpty() && !allowAnonymous) {
+                return identificationRequest(path, att, diarization, names, unmatched);
+            }
+
+            var transcript = WhisperJniTranscriber.transcribeSegments(path, model, language);
             // JCLAW-603: segments straddling a speaker change are split at
             // word boundaries (CTC forced alignment) so rapid exchanges
             // attribute per word, not per whisper segment. Self-gating —
@@ -259,21 +296,76 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
             var labels = new LinkedHashSet<String>();
             entries.forEach(e -> labels.add(e.speaker()));
-            // JCLAW-608: anonymous speakers mean no enrolled voice matched —
-            // steer the agent into the identification flow instead of leaving
-            // the user with SPEAKER_NN tags and no way forward.
             var anonymous = labels.stream().filter(l -> l.startsWith("SPEAKER_")).toList();
-            var lineupHint = anonymous.isEmpty() ? "" : ("%n%nNote: %s could not be matched to an "
-                    + "enrolled voice. To label speakers with real names, call this tool with "
-                    + "action 'extract_speaker_clips' (attaches one short clip per voice), ask the "
-                    + "user to identify each voice, record each answer via action 'enroll_speaker' "
-                    + "(clip_label + speaker_name), then re-run 'diarize' for a named transcript. "
-                    + "Offer this to the user now.").formatted(String.join(", ", anonymous));
-            return "Diarized transcript of %s — %d speaker(s) detected: %s%n%n%s%s".formatted(
-                    att.originalFilename, labels.size(), String.join(", ", labels),
-                    DiarizedTranscript.toText(entries), lineupHint);
+            var note = anonymous.isEmpty() ? "" : ("%n%n(Anonymous transcript as requested — "
+                    + "the user can enroll %s later via extract_speaker_clips + enroll_speaker.)")
+                    .formatted(String.join(", ", anonymous));
+            return ToolRegistry.ToolResult.text(
+                    "Diarized transcript of %s — %d speaker(s) detected: %s%n%n%s%s".formatted(
+                            att.originalFilename, labels.size(), String.join(", ", labels),
+                            DiarizedTranscript.toText(entries), note));
         } catch (TranscriptionException e) {
-            return "Speaker diarization failed: " + e.getMessage();
+            return ToolRegistry.ToolResult.text("Speaker diarization failed: " + e.getMessage());
+        }
+    }
+
+    /** Cache-through diarization (JCLAW-611): the identification round and
+     *  the post-enrollment transcript round must see IDENTICAL segments. */
+    private static DiarizationRouter.Result cachedDiarization(
+            Path path, float clusterThreshold, Integer numSpeakers) {
+        int n = numSpeakers == null ? -1 : numSpeakers;
+        var cached = services.transcription.DiarizationCache.read(path, clusterThreshold, n);
+        if (cached != null) return cached;
+        var result = DiarizationRouter.diarizeRich(path, clusterThreshold, n);
+        services.transcription.DiarizationCache.write(path, clusterThreshold, n, result);
+        return result;
+    }
+
+    /**
+     * JCLAW-611: some voices matched no enrolled speaker — stop before the
+     * expensive transcription and hand the agent everything it needs to
+     * resolve identities: purity-gated lineup clips for the UNKNOWN voices
+     * only, plus the follow-up script. Recognized voices are reported so
+     * partially-enrolled recordings only ask about the new people.
+     */
+    private static ToolRegistry.ToolResult identificationRequest(
+            Path path, MessageAttachment att, DiarizationRouter.Result diarization,
+            Map<Integer, String> names, List<Integer> unmatched) {
+        var known = names.isEmpty() ? "none"
+                : String.join(", ", new java.util.TreeMap<>(names).values());
+        var preamble = ("Transcription NOT run yet (identification-first): %d voice(s) in %s "
+                + "did not match any enrolled speaker (recognized: %s).")
+                .formatted(unmatched.size(), att.originalFilename, known);
+        var followUp = ("Ask the user to play each clip and say who the voice is, enroll every "
+                + "answer via action=%s (clip_label + speaker_name), then call action=%s again "
+                + "for the full named transcript (the diarization is cached — only transcription "
+                + "remains). If the user declines to identify the voices, call action=%s with "
+                + "%s=true for an anonymous transcript.")
+                .formatted(ACTION_ENROLL, ACTION_DIARIZE, ACTION_DIARIZE, ARG_ALLOW_ANONYMOUS);
+        var response = stageLineup(path, att, diarization, new java.util.HashSet<>(unmatched), preamble, followUp);
+        markIdentificationAttempted(att);
+        return response;
+    }
+
+    /** Marker: an identification lineup was produced for this attachment in
+     *  this conversation — only then is {@code allow_anonymous} honored. */
+    private static Path identificationMarker(MessageAttachment att) {
+        var conversationId = ToolContext.conversationId();
+        return SpeakerNamer.enrollmentRoot().resolve(".staging")
+                .resolve(String.valueOf(conversationId)).resolve(".identified-" + att.uuid);
+    }
+
+    private static boolean identificationAttempted(MessageAttachment att) {
+        return Files.isRegularFile(identificationMarker(att));
+    }
+
+    private static void markIdentificationAttempted(MessageAttachment att) {
+        try {
+            var marker = identificationMarker(att);
+            Files.createDirectories(marker.getParent());
+            Files.writeString(marker, "");
+        } catch (IOException e) {
+            play.Logger.warn("DiarizeAudioTool: could not write identification marker (%s)", e.getMessage());
         }
     }
 
@@ -287,11 +379,29 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      */
     private static ToolRegistry.ToolResult extractSpeakerClips(
             Path path, MessageAttachment att, Integer numSpeakers) {
-        var conversationId = ToolContext.conversationId(); // non-null: resolution required scope
         float clusterThreshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
         try {
-            var diarization = DiarizationRouter.diarizeRich(path, clusterThreshold,
-                    numSpeakers == null ? -1 : numSpeakers);
+            var diarization = cachedDiarization(path, clusterThreshold, numSpeakers);
+            var followUp = ("Ask the user to play each clip and say who the voice is. Then enroll "
+                    + "every voice they identify by calling this tool with action=%s, "
+                    + "clip_label=<label>, speaker_name=<their name>. Skip voices the user does "
+                    + "not identify.").formatted(ACTION_ENROLL);
+            return stageLineup(path, att, diarization, null, null, followUp);
+        } catch (TranscriptionException e) {
+            return ToolRegistry.ToolResult.text("Speaker clip extraction failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Shared lineup machinery (JCLAW-562/609/611): purity-gated clip
+     * extraction + staging + playable attachments, optionally restricted to
+     * a subset of diarized speakers ({@code onlySpeakers == null} = all).
+     */
+    private static ToolRegistry.ToolResult stageLineup(
+            Path path, MessageAttachment att, DiarizationRouter.Result diarization,
+            Set<Integer> onlySpeakers, String preamble, String followUp) {
+        var conversationId = ToolContext.conversationId(); // non-null: resolution required scope
+        try {
             // JCLAW-609: cut clips only from PURE speech — exclusive-mode
             // segments absorb cross-talk, so overlap regions (padded) are
             // subtracted first. A shorter pure clip beats a contaminated 5s one.
@@ -299,6 +409,17 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             play.Logger.info("DiarizeAudioTool: extracting from %d pure span(s) (%d segments, %d overlap region(s) excluded)",
                     speakers.size(), diarization.segments().size(), diarization.overlaps().size());
             var clips = SpeakerClipExtractor.extract(path, speakers, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS);
+            if (onlySpeakers != null) {
+                var filtered = new java.util.ArrayList<SpeakerClipExtractor.Clip>();
+                int n = 1;
+                for (var clip : clips) {
+                    if (onlySpeakers.contains(clip.speaker())) {
+                        filtered.add(new SpeakerClipExtractor.Clip(
+                                "voice-" + n++, clip.speaker(), clip.start(), clip.samples()));
+                    }
+                }
+                clips = filtered;
+            }
             if (clips.isEmpty()) {
                 return ToolRegistry.ToolResult.text(
                         "No speaker in %s has a continuous speech segment of at least %.0f second(s) — "
@@ -343,13 +464,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 lineup.append("\n- %s: %.1fs of speech, taken from %.1fs into the recording"
                         .formatted(clip.label(), clip.duration(), clip.start()));
             }
-            var text = ("Extracted %d voice clip(s) from %s, each attached as its own playable audio "
-                    + "file named after its label (already shown to the user — do not re-embed or "
-                    + "link them):%s\n"
-                    + "Ask the user to play each clip and say who the voice is. Then enroll every "
-                    + "voice they identify by calling this tool with action=%s, clip_label=<label>, "
-                    + "speaker_name=<their name>. Skip voices the user does not identify.")
-                    .formatted(clips.size(), att.originalFilename, lineup, ACTION_ENROLL);
+            var text = ("%sExtracted %d voice clip(s) from %s, each attached as its own playable "
+                    + "audio file named after its label (already shown to the user — do not "
+                    + "re-embed or link them):%s\n%s")
+                    .formatted(preamble == null ? "" : preamble + "\n\n",
+                            clips.size(), att.originalFilename, lineup, followUp);
             return ToolRegistry.ToolResult.withAttachments(text, null, generated);
         } catch (TranscriptionException e) {
             return ToolRegistry.ToolResult.text("Speaker clip extraction failed: " + e.getMessage());
