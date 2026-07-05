@@ -192,7 +192,8 @@ public final class SpeakerNamer {
     private static float[] averagedEmbedding(java.util.List<float[]> chunks) {
         float[] avg = null;
         for (var chunk : chunks) {
-            var emb = embeddingOf(chunk);
+            // JCLAW-623: unit-scale each chunk so loud chunks don't dominate.
+            var emb = OverlapReattributor.l2normalize(embeddingOf(chunk));
             if (avg == null) avg = new float[emb.length];
             for (int i = 0; i < emb.length; i++) avg[i] += emb[i];
         }

@@ -417,7 +417,7 @@ public final class OverlapReattributor {
                 int used = 0;
                 for (var clip : files) {
                     try {
-                        var emb = embedder.embed(WhisperJniTranscriber.ffmpegToPcmF32(clip));
+                        var emb = l2normalize(embedder.embed(WhisperJniTranscriber.ffmpegToPcmF32(clip)));
                         if (avg == null) avg = new float[emb.length];
                         for (int i = 0; i < emb.length; i++) avg[i] += emb[i];
                         used++;
@@ -468,7 +468,7 @@ public final class OverlapReattributor {
                 if (len < SAMPLE_RATE) break; // trailing fragment under 1s
                 var chunk = new float[len];
                 System.arraycopy(buf, at, chunk, 0, len);
-                var emb = embedder.embed(chunk);
+                var emb = l2normalize(embedder.embed(chunk));
                 if (avg == null) avg = new float[emb.length];
                 for (int i = 0; i < emb.length; i++) avg[i] += emb[i];
                 chunks++;
@@ -629,6 +629,20 @@ public final class OverlapReattributor {
         double sum = 0;
         for (float s : samples) sum += (double) s * s;
         return Math.sqrt(sum / samples.length);
+    }
+
+    /** L2-normalize in place and return the same array (JCLAW-623):
+     *  chunk embeddings are unit-scaled BEFORE averaging so loud or long
+     *  chunks cannot dominate the centroid direction — standard
+     *  speaker-verification practice. Cosine comparisons are unaffected
+     *  by the final centroid's scale, only by this per-chunk weighting. */
+    public static float[] l2normalize(float[] v) {
+        double norm = 0;
+        for (float x : v) norm += (double) x * x;
+        norm = Math.sqrt(norm);
+        if (norm < 1e-12) return v;
+        for (int i = 0; i < v.length; i++) v[i] /= (float) norm;
+        return v;
     }
 
     static double cosine(float[] a, float[] b) {

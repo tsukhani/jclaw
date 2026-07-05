@@ -208,7 +208,8 @@ public final class EnrollmentHarvester {
                 int len = Math.min(CHUNK_SAMPLES, to - at);
                 if (len < SAMPLE_RATE) break;
                 bySpeaker.computeIfAbsent(seg.speaker(), _ -> new ArrayList<>())
-                        .add(embedder.embed(Arrays.copyOfRange(pcm, at, at + len)));
+                        .add(OverlapReattributor.l2normalize(
+                                embedder.embed(Arrays.copyOfRange(pcm, at, at + len))));
                 have += len;
             }
             collected.put(seg.speaker(), have);
