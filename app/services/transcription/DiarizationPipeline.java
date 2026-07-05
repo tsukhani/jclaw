@@ -55,8 +55,17 @@ public final class DiarizationPipeline {
                 ? cachedDiarization(audio, opts.numSpeakers())
                 : DiarizationRouter.diarizeRich(audio, opts.numSpeakers() == null ? -1 : opts.numSpeakers());
         var speakers = diarization.segments();
+        // JCLAW-640: decode the recording at most ONCE per run and share the
+        // array — the stages previously each spawned their own full ffmpeg
+        // decode (~3.8 MB/minute of transient heap apiece). Lazy: a run that
+        // halts for identification without enrollment never decodes at all.
+        var pcmHolder = new float[1][];
+        java.util.function.Supplier<float[]> pcm = () -> {
+            if (pcmHolder[0] == null) pcmHolder[0] = WhisperJniTranscriber.ffmpegToPcmF32(audio);
+            return pcmHolder[0];
+        };
         var names = SpeakerNamer.enrollmentPresent()
-                ? SpeakerNamer.nameSpeakers(audio, speakers, (float) ConfigService.getDouble(
+                ? SpeakerNamer.nameSpeakers(pcm.get(), speakers, (float) ConfigService.getDouble(
                         "transcription.diarization.speakerMatchThreshold", 0.6))
                 : Map.<Integer, String>of();
 
@@ -82,16 +91,16 @@ public final class DiarizationPipeline {
             }
         }
         // JCLAW-603: word-level split of boundary-straddling segments.
-        transcript = SegmentWordSplitter.split(transcript, speakers, audio);
+        transcript = SegmentWordSplitter.split(transcript, speakers, pcm);
         var entries = DiarizedTranscript.merge(transcript, speakers, names);
         // JCLAW-605/612/613: overlap re-attribution, MSDD second opinion,
         // under-speech recovery. Best-effort inside reattribute().
         if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
-            entries = OverlapReattributor.reattribute(entries, diarization, audio);
+            entries = OverlapReattributor.reattribute(entries, diarization, audio, pcm.get());
         }
         // JCLAW-563: per-turn acoustic emotion labels. Best-effort.
         if (ConfigService.getBoolean("transcription.emotion.enabled", true)) {
-            entries = EmotionRecognizer.annotate(audio, entries);
+            entries = EmotionRecognizer.annotateBestEffort(pcm.get(), entries);
         }
         return new Transcript(entries, diarization);
     }

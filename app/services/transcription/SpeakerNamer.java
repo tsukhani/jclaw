@@ -89,8 +89,15 @@ public final class SpeakerNamer {
             Path audioFile, List<SpeakerSegment> segments, float threshold) {
         var enrollment = scanEnrollment();
         if (enrollment.isEmpty() || segments.isEmpty()) return Map.of();
+        return nameSpeakers(WhisperJniTranscriber.ffmpegToPcmF32(audioFile), segments, threshold);
+    }
 
-        float[] samples = WhisperJniTranscriber.ffmpegToPcmF32(audioFile);
+    /** As above with pre-decoded PCM (JCLAW-640: the pipeline decodes the
+     *  recording once and shares the array across stages). */
+    public static Map<Integer, String> nameSpeakers(
+            float[] samples, List<SpeakerSegment> segments, float threshold) {
+        var enrollment = scanEnrollment();
+        if (enrollment.isEmpty() || segments.isEmpty()) return Map.of();
 
         {
             // Person references: chunk-averaged across ALL enrolled clips.

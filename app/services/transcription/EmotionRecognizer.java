@@ -97,6 +97,21 @@ public final class EmotionRecognizer {
         }
     }
 
+    /** Best-effort with pre-decoded PCM (JCLAW-640): same skip conditions
+     *  and swallow-and-warn posture as the Path wrapper. */
+    public static List<DiarizedTranscript.Entry> annotateBestEffort(
+            float[] pcm, List<DiarizedTranscript.Entry> entries) {
+        if (entries.stream().noneMatch(e -> e.end() - e.start() >= MIN_SECONDS)) {
+            return entries;
+        }
+        try {
+            return annotate(pcm, entries);
+        } catch (RuntimeException e) {
+            Logger.warn("EmotionRecognizer: emotion analysis skipped: %s", e.getMessage());
+            return entries;
+        }
+    }
+
     /** Throwing core of {@link #annotate(Path, List)}; public (like
      *  WhisperJniTranscriber.applyLanguage) so tests reach it from the
      *  default package. */

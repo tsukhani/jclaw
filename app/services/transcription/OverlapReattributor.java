@@ -126,8 +126,16 @@ public final class OverlapReattributor {
     public static List<DiarizedTranscript.Entry> reattribute(
             List<DiarizedTranscript.Entry> entries, DiarizationRouter.Result diarization,
             Path audioFile) {
+        return reattribute(entries, diarization, audioFile,
+                WhisperJniTranscriber.ffmpegToPcmF32(audioFile));
+    }
+
+    /** As above with pre-decoded PCM (JCLAW-640). {@code audioFile} is still
+     *  needed for the per-attachment MSDD cache key. */
+    public static List<DiarizedTranscript.Entry> reattribute(
+            List<DiarizedTranscript.Entry> entries, DiarizationRouter.Result diarization,
+            Path audioFile, float[] pcm) {
         try {
-            float[] pcm = WhisperJniTranscriber.ffmpegToPcmF32(audioFile);
             Separator separator = OverlapReattributor::separateViaSidecar;
             java.util.function.Supplier<List<SpeakerSegment>> msdd = null;
             if (services.ConfigService.getBoolean(MSDD_KEY, true)) {

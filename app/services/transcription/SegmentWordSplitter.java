@@ -52,7 +52,31 @@ public final class SegmentWordSplitter {
                 s -> !interiorBoundaries(s, boundaries).isEmpty())) {
             return transcript;
         }
-        float[] samples = WhisperJniTranscriber.ffmpegToPcmF32(audioFile);
+        return split(transcript, speakers, WhisperJniTranscriber.ffmpegToPcmF32(audioFile));
+    }
+
+    /** Lazy-decode variant (JCLAW-640): the supplier is consulted only when
+     *  a boundary-straddling segment actually exists, preserving this
+     *  stage's "no straddle → no ffmpeg, no model" contract while letting
+     *  the pipeline share one decoded array across stages. */
+    public static List<WhisperJniTranscriber.Segment> split(
+            List<WhisperJniTranscriber.Segment> transcript,
+            List<SpeakerSegment> speakers,
+            java.util.function.Supplier<float[]> samplesSupplier) {
+        var boundaries = speakerChangeBoundaries(speakers);
+        if (boundaries.isEmpty() || transcript.stream().noneMatch(
+                s -> !interiorBoundaries(s, boundaries).isEmpty())) {
+            return transcript;
+        }
+        return split(transcript, speakers, samplesSupplier.get());
+    }
+
+    /** As above with pre-decoded PCM (JCLAW-640). Callers keep the laziness
+     *  contract: only decode when a straddling segment exists. */
+    public static List<WhisperJniTranscriber.Segment> split(
+            List<WhisperJniTranscriber.Segment> transcript,
+            List<SpeakerSegment> speakers,
+            float[] samples) {
         return split(transcript, speakers, (start, end, words) -> CtcForcedAligner.alignWords(
                 samples,
                 (int) Math.clamp(Math.round(start * 16_000), 0, samples.length),
