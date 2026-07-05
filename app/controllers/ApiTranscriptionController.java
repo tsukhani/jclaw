@@ -154,13 +154,12 @@ public class ApiTranscriptionController extends Controller {
         var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                 .orElse(WhisperModel.DEFAULT);
         var lang = language != null && !language.isBlank() ? language : null;
-        float threshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
 
         List<DiarizedTranscript.Entry> entries;
         long startedAt = System.currentTimeMillis();
         try {
             var transcript = WhisperJniTranscriber.transcribeSegments(audio.toPath(), model, lang);
-            var diarization = DiarizationRouter.diarizeRich(audio.toPath(), threshold,
+            var diarization = DiarizationRouter.diarizeRich(audio.toPath(),
                     numSpeakers == null ? -1 : numSpeakers);
             var speakers = diarization.segments();
             // JCLAW-558: automatic when data/speaker-voices has enrollment;

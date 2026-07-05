@@ -45,7 +45,7 @@ public final class SegmentWordSplitter {
      */
     public static List<WhisperJniTranscriber.Segment> split(
             List<WhisperJniTranscriber.Segment> transcript,
-            List<SherpaDiarizer.SpeakerSegment> speakers,
+            List<SpeakerSegment> speakers,
             Path audioFile) {
         var boundaries = speakerChangeBoundaries(speakers);
         if (boundaries.isEmpty() || transcript.stream().noneMatch(
@@ -63,7 +63,7 @@ public final class SegmentWordSplitter {
     /** Testable core: same splitting logic with an injected aligner. */
     public static List<WhisperJniTranscriber.Segment> split(
             List<WhisperJniTranscriber.Segment> transcript,
-            List<SherpaDiarizer.SpeakerSegment> speakers,
+            List<SpeakerSegment> speakers,
             WordAligner aligner) {
         var boundaries = speakerChangeBoundaries(speakers);
         if (boundaries.isEmpty()) return transcript;
@@ -89,9 +89,9 @@ public final class SegmentWordSplitter {
 
     /** Times where the diarizer says the active speaker changes: midpoint
      *  between consecutive spans with different speaker indices. */
-    public static List<Double> speakerChangeBoundaries(List<SherpaDiarizer.SpeakerSegment> speakers) {
+    public static List<Double> speakerChangeBoundaries(List<SpeakerSegment> speakers) {
         var sorted = speakers.stream()
-                .sorted(java.util.Comparator.comparingDouble(SherpaDiarizer.SpeakerSegment::start))
+                .sorted(java.util.Comparator.comparingDouble(SpeakerSegment::start))
                 .toList();
         var boundaries = new ArrayList<Double>();
         for (int i = 1; i < sorted.size(); i++) {

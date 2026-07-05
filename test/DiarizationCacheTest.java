@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.DiarizationCache;
 import services.transcription.DiarizationRouter;
-import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerSegment;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,17 +29,16 @@ class DiarizationCacheTest extends UnitTest {
 
     private static DiarizationRouter.Result result() {
         return new DiarizationRouter.Result(
-                List.of(new SherpaDiarizer.SpeakerSegment(0.5, 4.25, 0),
-                        new SherpaDiarizer.SpeakerSegment(4.5, 9.0, 1)),
-                List.of(new double[]{4.0, 4.6}),
-                true);
+                List.of(new SpeakerSegment(0.5, 4.25, 0),
+                        new SpeakerSegment(4.5, 9.0, 1)),
+                List.of(new double[]{4.0, 4.6}));
     }
 
     @Test
-    void roundTrip_preservesSegmentsOverlapsAndBackend() {
-        DiarizationCache.write(audio, 0.3f, -1, result());
+    void roundTrip_preservesSegmentsAndOverlaps() {
+        DiarizationCache.write(audio, -1, result());
 
-        var cached = DiarizationCache.read(audio, 0.3f, -1);
+        var cached = DiarizationCache.read(audio, -1);
 
         assertNotNull(cached);
         assertEquals(2, cached.segments().size());
@@ -47,20 +46,17 @@ class DiarizationCacheTest extends UnitTest {
         assertEquals(1, cached.segments().get(1).speaker());
         assertEquals(1, cached.overlaps().size());
         assertEquals(4.0, cached.overlaps().get(0)[0], 1e-9);
-        assertTrue(cached.viaPyannote());
     }
 
     @Test
     void read_missesOnChangedInputs_absence_andCorruption() throws Exception {
-        assertNull(DiarizationCache.read(audio, 0.3f, -1), "no cache file yet");
+        assertNull(DiarizationCache.read(audio, -1), "no cache file yet");
 
-        DiarizationCache.write(audio, 0.3f, -1, result());
-        assertNull(DiarizationCache.read(audio, 0.3f, 2),
+        DiarizationCache.write(audio, -1, result());
+        assertNull(DiarizationCache.read(audio, 2),
                 "a different requested speaker count must miss");
-        assertNull(DiarizationCache.read(audio, 0.4f, -1),
-                "a different cluster threshold must miss");
 
         Files.writeString(DiarizationCache.cacheFile(audio), "not json at all");
-        assertNull(DiarizationCache.read(audio, 0.3f, -1), "corruption reads as a miss");
+        assertNull(DiarizationCache.read(audio, -1), "corruption reads as a miss");
     }
 }

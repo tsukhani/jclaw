@@ -120,19 +120,16 @@ public final class OverlapReattributor {
             Path audioFile) {
         try {
             float[] pcm = WhisperJniTranscriber.ffmpegToPcmF32(audioFile);
-            Separator separator = diarization.viaPyannote()
-                    ? OverlapReattributor::separateViaSidecar : null;
-            java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> msdd = null;
-            if (diarization.viaPyannote()
-                    && services.ConfigService.getBoolean(MSDD_KEY, true)) {
+            Separator separator = OverlapReattributor::separateViaSidecar;
+            java.util.function.Supplier<List<SpeakerSegment>> msdd = null;
+            if (services.ConfigService.getBoolean(MSDD_KEY, true)) {
                 int speakers = Math.max(2, (int) entries.stream()
                         .map(DiarizedTranscript.Entry::speaker).distinct().count());
                 float[] pcmForMsdd = pcm;
                 msdd = () -> msddViaSidecar(pcmForMsdd, speakers);
             }
             UnderSpeechRecovery.Transcriber transcriber =
-                    diarization.viaPyannote()
-                            && services.ConfigService.getBoolean(UNDER_SPEECH_KEY, true)
+                    services.ConfigService.getBoolean(UNDER_SPEECH_KEY, true)
                     ? OverlapReattributor::transcribeSlice : null;
             return reattribute(entries, diarization.overlaps(), pcm, separator,
                     SpeakerNamer::embedWindow, msdd, transcriber);
@@ -153,7 +150,7 @@ public final class OverlapReattributor {
     public static List<DiarizedTranscript.Entry> reattribute(
             List<DiarizedTranscript.Entry> entries, List<double[]> overlaps,
             float[] pcm, Separator separator, Embedder embedder,
-            java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> msddOpinion) {
+            java.util.function.Supplier<List<SpeakerSegment>> msddOpinion) {
         return reattribute(entries, overlaps, pcm, separator, embedder, msddOpinion, null);
     }
 
@@ -161,7 +158,7 @@ public final class OverlapReattributor {
     public static List<DiarizedTranscript.Entry> reattribute(
             List<DiarizedTranscript.Entry> entries, List<double[]> overlaps,
             float[] pcm, Separator separator, Embedder embedder,
-            java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> msddOpinion,
+            java.util.function.Supplier<List<SpeakerSegment>> msddOpinion,
             UnderSpeechRecovery.Transcriber transcriber) {
         var affected = new ArrayList<Integer>();
         for (int i = 0; i < entries.size(); i++) {
@@ -504,7 +501,7 @@ public final class OverlapReattributor {
     /** Stage the pipeline's 16kHz mono PCM as a temp WAV for /msdd —
      *  NeMo's VAD collate crashes on the original stereo/44.1kHz upload
      *  (torch.cat dimension mismatch on 2-D signals). */
-    private static List<SherpaDiarizer.SpeakerSegment> msddViaSidecar(float[] pcm, int speakers) {
+    private static List<SpeakerSegment> msddViaSidecar(float[] pcm, int speakers) {
         Path tmpDir = null;
         try {
             tmpDir = Files.createTempDirectory("jclaw-msdd-");
@@ -544,8 +541,8 @@ public final class OverlapReattributor {
     }
 
     /** Fetch the MSDD opinion once, best-effort. */
-    private static List<SherpaDiarizer.SpeakerSegment> fetchOpinion(
-            java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> supplier) {
+    private static List<SpeakerSegment> fetchOpinion(
+            java.util.function.Supplier<List<SpeakerSegment>> supplier) {
         if (supplier == null) return null;
         try {
             var segments = supplier.get();

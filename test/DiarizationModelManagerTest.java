@@ -23,9 +23,11 @@ import java.util.HexFormat;
  */
 class DiarizationModelManagerTest extends UnitTest {
 
+    private static final DiarizationModelManager.DiarizationModel MODEL =
+            DiarizationModelManager.DiarizationModel.EMBEDDING;
+
     private MockWebServer server;
     private Path tempRoot;
-    private static final DiarizationModel MODEL = DiarizationModel.SEGMENTATION;
 
     @BeforeEach
     void setUp() throws Exception {

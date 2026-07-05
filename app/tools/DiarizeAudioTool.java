@@ -17,7 +17,7 @@ import services.transcription.EmotionRecognizer;
 import services.transcription.OverlapReattributor;
 import services.transcription.SegmentWordSplitter;
 import services.transcription.SpeakerClipExtractor;
-import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerSegment;
 import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
@@ -246,20 +246,19 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                                                    boolean allowAnonymous) {
         var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                 .orElse(WhisperModel.DEFAULT);
-        float clusterThreshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
 
         try {
             // JCLAW-611 identification-first: diarize + match BEFORE the
             // expensive transcription. Unknown voices stop the pipeline and
             // come back as a lineup so the user can name them; whisper runs
             // exactly once, after identities are settled (or waived).
-            var diarization = cachedDiarization(path, clusterThreshold, numSpeakers);
+            var diarization = cachedDiarization(path, numSpeakers);
             var speakers = diarization.segments();
             var names = SpeakerNamer.enrollmentPresent()
                     ? SpeakerNamer.nameSpeakers(path, speakers, (float) ConfigService.getDouble(
                             "transcription.diarization.speakerMatchThreshold", 0.6))
                     : Map.<Integer, String>of();
-            var unmatched = speakers.stream().map(SherpaDiarizer.SpeakerSegment::speaker)
+            var unmatched = speakers.stream().map(SpeakerSegment::speaker)
                     .distinct().filter(id -> !names.containsKey(id)).toList();
             // The anonymous escape hatch is only honored AFTER identification
             // was actually attempted in this conversation (JCLAW-611 UAT: the
@@ -310,13 +309,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     /** Cache-through diarization (JCLAW-611): the identification round and
      *  the post-enrollment transcript round must see IDENTICAL segments. */
-    private static DiarizationRouter.Result cachedDiarization(
-            Path path, float clusterThreshold, Integer numSpeakers) {
+    private static DiarizationRouter.Result cachedDiarization(Path path, Integer numSpeakers) {
         int n = numSpeakers == null ? -1 : numSpeakers;
-        var cached = services.transcription.DiarizationCache.read(path, clusterThreshold, n);
+        var cached = services.transcription.DiarizationCache.read(path, n);
         if (cached != null) return cached;
-        var result = DiarizationRouter.diarizeRich(path, clusterThreshold, n);
-        services.transcription.DiarizationCache.write(path, clusterThreshold, n, result);
+        var result = DiarizationRouter.diarizeRich(path, n);
+        services.transcription.DiarizationCache.write(path, n, result);
         return result;
     }
 
@@ -378,9 +376,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      */
     private static ToolRegistry.ToolResult extractSpeakerClips(
             Path path, MessageAttachment att, Integer numSpeakers) {
-        float clusterThreshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
         try {
-            var diarization = cachedDiarization(path, clusterThreshold, numSpeakers);
+            var diarization = cachedDiarization(path, numSpeakers);
             var followUp = ("Ask the user to play each clip and say who the voice is. Then enroll "
                     + "every voice they identify by calling this tool with action=%s, "
                     + "clip_label=<label>, speaker_name=<their name>. Skip voices the user does "
@@ -442,8 +439,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     path, speakers, clips.stream().map(SpeakerClipExtractor.Clip::speaker).toList(),
                     ENROLLMENT_TARGET_SECONDS, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS,
                     SpeakerNamer::embedWindow,
-                    diarization.viaPyannote()
-                            ? services.transcription.OverlapReattributor::separateViaSidecar : null);
+                    services.transcription.OverlapReattributor::separateViaSidecar);
             var lineup = new StringBuilder();
             var generated = new java.util.ArrayList<GeneratedAttachment>(clips.size());
             for (var clip : clips) {

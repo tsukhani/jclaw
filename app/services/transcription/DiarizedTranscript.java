@@ -53,7 +53,7 @@ public final class DiarizedTranscript {
      * single-voice reading of "the diarizer found no boundaries".
      */
     public static List<Entry> merge(List<WhisperJniTranscriber.Segment> transcript,
-                                    List<SherpaDiarizer.SpeakerSegment> speakers) {
+                                    List<SpeakerSegment> speakers) {
         return merge(transcript, speakers, Map.of());
     }
 
@@ -61,7 +61,7 @@ public final class DiarizedTranscript {
      *  (JCLAW-558) for the speaker indices present in {@code names};
      *  unmatched speakers keep their anonymous SPEAKER_NN label. */
     public static List<Entry> merge(List<WhisperJniTranscriber.Segment> transcript,
-                                    List<SherpaDiarizer.SpeakerSegment> speakers,
+                                    List<SpeakerSegment> speakers,
                                     Map<Integer, String> names) {
         var entries = new ArrayList<Entry>(transcript.size());
         for (var seg : transcript) {
@@ -74,7 +74,7 @@ public final class DiarizedTranscript {
         return entries;
     }
 
-    private static int speakerFor(double start, double end, List<SherpaDiarizer.SpeakerSegment> speakers) {
+    private static int speakerFor(double start, double end, List<SpeakerSegment> speakers) {
         int best = 0;
         double bestOverlap = 0;
         double bestDistance = Double.MAX_VALUE;

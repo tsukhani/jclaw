@@ -20,9 +20,9 @@ import java.util.ArrayList;
  * second call from this cache keeps both runs on identical segments.
  *
  * <p>The cache lives beside the attachment file
- * ({@code <attachment>.diarization.json}) and is keyed by the inputs that
- * change segmentation: the requested speaker count and the sherpa cluster
- * threshold. A mismatch (or any parse problem) reads as a miss.
+ * ({@code <attachment>.diarization.json}) and is keyed by the input that
+ * changes segmentation: the requested speaker count. A mismatch (or any
+ * parse problem) reads as a miss.
  */
 public final class DiarizationCache {
 
@@ -33,19 +33,18 @@ public final class DiarizationCache {
     }
 
     /** Cached result for identical inputs, or null (miss / stale / corrupt). */
-    public static DiarizationRouter.Result read(Path audioFile, float clusterThreshold, int numSpeakers) {
+    public static DiarizationRouter.Result read(Path audioFile, int numSpeakers) {
         var file = cacheFile(audioFile);
         if (!Files.isRegularFile(file)) return null;
         try {
             var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
-            if (root.get("numSpeakers").getAsInt() != numSpeakers
-                    || Math.abs(root.get("clusterThreshold").getAsDouble() - clusterThreshold) > 1e-6) {
+            if (root.get("numSpeakers").getAsInt() != numSpeakers) {
                 return null;
             }
-            var segments = new ArrayList<SherpaDiarizer.SpeakerSegment>();
+            var segments = new ArrayList<SpeakerSegment>();
             for (var el : root.getAsJsonArray("segments")) {
                 var o = el.getAsJsonObject();
-                segments.add(new SherpaDiarizer.SpeakerSegment(
+                segments.add(new SpeakerSegment(
                         o.get("start").getAsDouble(), o.get("end").getAsDouble(),
                         o.get("speaker").getAsInt()));
             }
@@ -56,8 +55,7 @@ public final class DiarizationCache {
             }
             Logger.info("DiarizationCache: reusing cached diarization for %s (%d segments)",
                     audioFile.getFileName(), segments.size());
-            return new DiarizationRouter.Result(segments, overlaps,
-                    root.get("viaPyannote").getAsBoolean());
+            return new DiarizationRouter.Result(segments, overlaps);
         } catch (IOException | RuntimeException e) {
             Logger.warn("DiarizationCache: unreadable cache for %s (%s) — recomputing",
                     audioFile.getFileName(), e.getMessage());
@@ -66,12 +64,10 @@ public final class DiarizationCache {
     }
 
     /** Best-effort write; a failed write only costs a future recompute. */
-    public static void write(Path audioFile, float clusterThreshold, int numSpeakers,
+    public static void write(Path audioFile, int numSpeakers,
                              DiarizationRouter.Result result) {
         var root = new JsonObject();
         root.addProperty("numSpeakers", numSpeakers);
-        root.addProperty("clusterThreshold", clusterThreshold);
-        root.addProperty("viaPyannote", result.viaPyannote());
         var segments = new JsonArray();
         for (var s : result.segments()) {
             var o = new JsonObject();

@@ -2,7 +2,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.DiarizedTranscript;
 import services.transcription.MsddSecondOpinion;
-import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerSegment;
 
 import java.util.List;
 import java.util.Map;
@@ -20,8 +20,8 @@ class MsddSecondOpinionTest extends UnitTest {
         return new DiarizedTranscript.Entry(speaker, start, end, "t", null);
     }
 
-    private static SherpaDiarizer.SpeakerSegment seg(double s, double e, int spk) {
-        return new SherpaDiarizer.SpeakerSegment(s, e, spk);
+    private static SpeakerSegment seg(double s, double e, int spk) {
+        return new SpeakerSegment(s, e, spk);
     }
 
     @Test

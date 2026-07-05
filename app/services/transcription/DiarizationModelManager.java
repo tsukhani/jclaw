@@ -32,9 +32,6 @@ public final class DiarizationModelManager {
 
     /** The two model files, keyed by their role in the sherpa pipeline. */
     public enum DiarizationModel {
-        SEGMENTATION(
-                "pyannote-segmentation-3.0.onnx",
-                "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx"),
         EMBEDDING(
                 "wespeaker_en_voxceleb_resnet34_LM.onnx",
                 "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/wespeaker_en_voxceleb_resnet34_LM.onnx");

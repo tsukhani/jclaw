@@ -40,7 +40,7 @@ public final class MsddSecondOpinion {
      */
     public static Map<Integer, String> mapSpeakers(
             List<DiarizedTranscript.Entry> entries, Set<Integer> contestedIndexes,
-            List<SherpaDiarizer.SpeakerSegment> msdd) {
+            List<SpeakerSegment> msdd) {
         var votes = new HashMap<Integer, Map<String, Double>>();
         for (int i = 0; i < entries.size(); i++) {
             if (contestedIndexes.contains(i)) continue;
@@ -66,7 +66,7 @@ public final class MsddSecondOpinion {
      * below the sustained-speech thresholds (its interjection blind spot).
      */
     public static String verdict(DiarizedTranscript.Entry entry,
-                                 List<SherpaDiarizer.SpeakerSegment> msdd,
+                                 List<SpeakerSegment> msdd,
                                  Map<Integer, String> mapping) {
         var active = new HashMap<String, Double>();
         for (var seg : msdd) {

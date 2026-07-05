@@ -92,7 +92,7 @@ public final class SpeakerNamer {
      * Blocking and CPU-bound like the rest of the pipeline.
      */
     public static Map<Integer, String> nameSpeakers(
-            Path audioFile, List<SherpaDiarizer.SpeakerSegment> segments, float threshold) {
+            Path audioFile, List<SpeakerSegment> segments, float threshold) {
         var enrollment = scanEnrollment();
         if (enrollment.isEmpty() || segments.isEmpty()) return Map.of();
 
@@ -257,7 +257,7 @@ public final class SpeakerNamer {
     /** Concatenate each speaker's diarized sample ranges, capped at
      *  {@link #MAX_SAMPLES_PER_SPEAKER}. */
     private static Map<Integer, float[]> samplesPerSpeaker(
-            float[] samples, List<SherpaDiarizer.SpeakerSegment> segments) {
+            float[] samples, List<SpeakerSegment> segments) {
         var chunks = new HashMap<Integer, List<float[]>>();
         var lengths = new HashMap<Integer, Integer>();
         for (var seg : segments) {

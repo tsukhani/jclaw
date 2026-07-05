@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
  * HTTP client for the pyannote diarization sidecar (JCLAW-565). Sends the
  * audio file <b>by absolute path</b> — both processes share a filesystem, so
  * streaming megabytes through the localhost socket would be waste — and maps
- * the response into the same {@link SherpaDiarizer.SpeakerSegment} shape the
+ * the response into the same {@link SpeakerSegment} shape the
  * rest of the pipeline consumes, so {@link DiarizedTranscript},
  * {@link SpeakerNamer} and the emotion annotator are backend-agnostic.
  */
@@ -28,7 +28,7 @@ public class PyannoteDiarizationClient {
 
     /** Full /diarize output: segments plus the overlap regions the
      *  overlap-aware annotation detected (JCLAW-605 re-attribution gate). */
-    public record DiarizationOutput(List<SherpaDiarizer.SpeakerSegment> segments,
+    public record DiarizationOutput(List<SpeakerSegment> segments,
                                     List<double[]> overlaps) {}
 
     private static final MediaType JSON = MediaType.get("application/json");
@@ -64,7 +64,7 @@ public class PyannoteDiarizationClient {
      * @param numSpeakers exact speaker count when known, or any value below 2
      *                    to let the pipeline find the count itself
      */
-    public List<SherpaDiarizer.SpeakerSegment> diarize(Path audioFile, int numSpeakers) {
+    public List<SpeakerSegment> diarize(Path audioFile, int numSpeakers) {
         return diarizeRich(audioFile, numSpeakers).segments();
     }
 
@@ -102,16 +102,16 @@ public class PyannoteDiarizationClient {
     /** Parse the sidecar's {@code {segments:[{start,end,speaker}...]}} response.
      *  Public (like WhisperJniTranscriber.applyLanguage) so tests reach it from
      *  the default package. */
-    public static List<SherpaDiarizer.SpeakerSegment> parseSegments(String json) {
+    public static List<SpeakerSegment> parseSegments(String json) {
         try {
             var root = JsonParser.parseString(json).getAsJsonObject();
             var device = root.has("device") && !root.get("device").isJsonNull()
                     ? root.get("device").getAsString() : "?";
             var arr = root.getAsJsonArray("segments");
-            var segments = new ArrayList<SherpaDiarizer.SpeakerSegment>(arr.size());
+            var segments = new ArrayList<SpeakerSegment>(arr.size());
             for (var el : arr) {
                 var o = el.getAsJsonObject();
-                segments.add(new SherpaDiarizer.SpeakerSegment(
+                segments.add(new SpeakerSegment(
                         o.get("start").getAsDouble(),
                         o.get("end").getAsDouble(),
                         o.get("speaker").getAsInt()));
@@ -198,7 +198,7 @@ public class PyannoteDiarizationClient {
      * in its own script env. First call may build that env and download the
      * model — the generous shared deadline applies.
      */
-    public List<SherpaDiarizer.SpeakerSegment> msdd(Path audioFile, int numSpeakers) {
+    public List<SpeakerSegment> msdd(Path audioFile, int numSpeakers) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("audio_path", audioFile.toAbsolutePath().toString());

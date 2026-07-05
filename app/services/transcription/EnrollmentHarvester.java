@@ -68,7 +68,7 @@ public final class EnrollmentHarvester {
      *                  or null to skip the stem gate (no sidecar available)
      */
     public static Map<Integer, List<float[]>> harvest(
-            Path audioFile, List<SherpaDiarizer.SpeakerSegment> purifiedSegments,
+            Path audioFile, List<SpeakerSegment> purifiedSegments,
             List<Integer> speakerIds, double targetSeconds, double lineupSeconds,
             double minSeconds, SpeakerClipExtractor.Embedder embedder,
             OverlapReattributor.Separator separator) {
@@ -79,7 +79,7 @@ public final class EnrollmentHarvester {
 
     /** Decoded-samples core — the testable path. */
     public static Map<Integer, List<float[]>> harvest(
-            float[] pcm, List<SherpaDiarizer.SpeakerSegment> purifiedSegments,
+            float[] pcm, List<SpeakerSegment> purifiedSegments,
             List<Integer> speakerIds, double targetSeconds, double lineupSeconds,
             double minSeconds, SpeakerClipExtractor.Embedder embedder,
             OverlapReattributor.Separator separator) {
@@ -137,7 +137,7 @@ public final class EnrollmentHarvester {
      * always true). Best-effort: any failure passes everything.
      */
     private static Map<Integer, List<Boolean>> stemGateVerdicts(
-            float[] pcm, List<SherpaDiarizer.SpeakerSegment> purifiedSegments,
+            float[] pcm, List<SpeakerSegment> purifiedSegments,
             Map<Integer, List<float[]>> candidates,
             SpeakerClipExtractor.Embedder embedder, OverlapReattributor.Separator separator) {
         try {
@@ -190,7 +190,7 @@ public final class EnrollmentHarvester {
     /** Chunk-averaged voiceprint per speaker from the purified segments —
      *  the same reference scheme the matcher uses. */
     public static Map<Integer, float[]> clusterVoiceprints(
-            float[] pcm, List<SherpaDiarizer.SpeakerSegment> segments,
+            float[] pcm, List<SpeakerSegment> segments,
             SpeakerClipExtractor.Embedder embedder) {
         var bySpeaker = new LinkedHashMap<Integer, List<float[]>>();
         var collected = new LinkedHashMap<Integer, Integer>();

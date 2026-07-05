@@ -84,10 +84,10 @@ public final class SpeakerClipExtractor {
      * only one person was speaking. With no overlap data (sherpa path) this
      * is the identity.
      */
-    public static List<SherpaDiarizer.SpeakerSegment> purify(
-            List<SherpaDiarizer.SpeakerSegment> segments, List<double[]> overlaps) {
+    public static List<SpeakerSegment> purify(
+            List<SpeakerSegment> segments, List<double[]> overlaps) {
         if (overlaps.isEmpty()) return segments;
-        var pure = new ArrayList<SherpaDiarizer.SpeakerSegment>();
+        var pure = new ArrayList<SpeakerSegment>();
         for (var seg : segments) {
             var spans = new ArrayList<double[]>();
             spans.add(new double[]{seg.start(), seg.end()});
@@ -106,7 +106,7 @@ public final class SpeakerClipExtractor {
                 spans = next;
             }
             for (var span : spans) {
-                pure.add(new SherpaDiarizer.SpeakerSegment(span[0], span[1], seg.speaker()));
+                pure.add(new SpeakerSegment(span[0], span[1], seg.speaker()));
             }
         }
         return pure;
@@ -114,7 +114,7 @@ public final class SpeakerClipExtractor {
 
     /** As {@link #extract(float[], List, double, double)}, decoding the audio
      *  file first (same ffmpeg path as the rest of the pipeline). */
-    public static List<Clip> extract(Path audioFile, List<SherpaDiarizer.SpeakerSegment> segments,
+    public static List<Clip> extract(Path audioFile, List<SpeakerSegment> segments,
                                      double targetSeconds, double minSeconds) {
         return extract(WhisperJniTranscriber.ffmpegToPcmF32(audioFile), segments, targetSeconds, minSeconds);
     }
@@ -127,9 +127,9 @@ public final class SpeakerClipExtractor {
      * skipped — sub-second snippets make unreliable voice references.
      * Labels number the clips {@code voice-1..N} in speaker-index order.
      */
-    public static List<Clip> extract(float[] samples, List<SherpaDiarizer.SpeakerSegment> segments,
+    public static List<Clip> extract(float[] samples, List<SpeakerSegment> segments,
                                      double targetSeconds, double minSeconds) {
-        Map<Integer, SherpaDiarizer.SpeakerSegment> longest = new TreeMap<>();
+        Map<Integer, SpeakerSegment> longest = new TreeMap<>();
         for (var s : segments) {
             var current = longest.get(s.speaker());
             if (current == null || s.end() - s.start() > current.end() - current.start()) {
@@ -174,7 +174,7 @@ public final class SpeakerClipExtractor {
      * matches the weight of the in-recording centroids the matcher builds.
      */
     public static List<float[]> referenceClips(Path audioFile,
-                                               List<SherpaDiarizer.SpeakerSegment> segments,
+                                               List<SpeakerSegment> segments,
                                                int speaker, double targetTotalSeconds,
                                                double lineupSeconds, double minSeconds,
                                                Embedder embedder) {
@@ -183,7 +183,7 @@ public final class SpeakerClipExtractor {
     }
 
     public static List<float[]> referenceClips(float[] samples,
-                                               List<SherpaDiarizer.SpeakerSegment> segments,
+                                               List<SpeakerSegment> segments,
                                                int speaker, double targetTotalSeconds,
                                                double lineupSeconds, double minSeconds,
                                                Embedder embedder) {

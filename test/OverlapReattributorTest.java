@@ -236,11 +236,11 @@ class OverlapReattributorTest extends UnitTest {
                 entry("A", 0, 8),
                 entry("B", 8, 16),
                 entry("B", 16.5, 18.5));            // 2s near-tie turn, truly A
-        java.util.function.Supplier<List<services.transcription.SherpaDiarizer.SpeakerSegment>> msdd =
+        java.util.function.Supplier<List<services.transcription.SpeakerSegment>> msdd =
                 () -> List.of(
-                        new services.transcription.SherpaDiarizer.SpeakerSegment(0, 7.5, 1),
-                        new services.transcription.SherpaDiarizer.SpeakerSegment(8.2, 15.8, 0),
-                        new services.transcription.SherpaDiarizer.SpeakerSegment(16.4, 18.6, 1));
+                        new services.transcription.SpeakerSegment(0, 7.5, 1),
+                        new services.transcription.SpeakerSegment(8.2, 15.8, 0),
+                        new services.transcription.SpeakerSegment(16.4, 18.6, 1));
 
         var out = OverlapReattributor.reattribute(entries, List.of(), pcm,
                 null, MEAN_EMBEDDER, msdd);
@@ -258,7 +258,7 @@ class OverlapReattributorTest extends UnitTest {
         Arrays.fill(pcm, 8 * SR, 16 * SR, 0.2f);
         Arrays.fill(pcm, 16 * SR, 19 * SR, 0.5f);
         var entries = List.of(entry("A", 0, 8), entry("B", 8, 16), entry("B", 16.5, 18.5));
-        java.util.function.Supplier<List<services.transcription.SherpaDiarizer.SpeakerSegment>> broken =
+        java.util.function.Supplier<List<services.transcription.SpeakerSegment>> broken =
                 () -> { throw new TranscriptionException("sidecar down"); };
 
         var out = OverlapReattributor.reattribute(entries, List.of(), pcm,
@@ -277,11 +277,11 @@ class OverlapReattributorTest extends UnitTest {
         Arrays.fill(pcm, 8 * SR, 16 * SR, 0.2f);
         Arrays.fill(pcm, 16 * SR, 19 * SR, 0.5f);
         var entries = List.of(entry("A", 0, 8), entry("B", 8, 16), entry("B", 16.5, 18.5));
-        java.util.function.Supplier<List<services.transcription.SherpaDiarizer.SpeakerSegment>> msdd =
+        java.util.function.Supplier<List<services.transcription.SpeakerSegment>> msdd =
                 () -> List.of(
-                        new services.transcription.SherpaDiarizer.SpeakerSegment(0, 7.5, 1),
-                        new services.transcription.SherpaDiarizer.SpeakerSegment(8.2, 15.8, 0),
-                        new services.transcription.SherpaDiarizer.SpeakerSegment(17.0, 17.6, 1));
+                        new services.transcription.SpeakerSegment(0, 7.5, 1),
+                        new services.transcription.SpeakerSegment(8.2, 15.8, 0),
+                        new services.transcription.SpeakerSegment(17.0, 17.6, 1));
 
         var out = OverlapReattributor.reattribute(entries, List.of(), pcm,
                 null, MEAN_EMBEDDER, msdd);

@@ -82,7 +82,6 @@ public class DefaultConfigJob extends Job<Void> {
         // JCLAW-556: sherpa-onnx clustering threshold. 0.3 was the value the
         // spike found separating similar same-gender voices without
         // oversplitting; raise toward 0.5 if distinct voices get split.
-        seedIfAbsent("transcription.diarization.threshold", "0.3");
         // JCLAW-558: minimum cosine similarity for renaming a diarized
         // speaker to an enrolled voice. Lower if known speakers stay
         // anonymous (far-field mics); raise if wrong names appear.
@@ -96,7 +95,6 @@ public class DefaultConfigJob extends Job<Void> {
         // sidecar when uv is on PATH and the hfToken below is set (the model
         // is HF-gated), falling back to the in-process sherpa engine on any
         // sidecar failure; 'pyannote-local' / 'sherpa' pin one engine.
-        seedIfAbsent("transcription.diarization.backend", "auto");
         // Hugging Face token for the gated community-1 weights, passed to the
         // sidecar process as HF_TOKEN. Blank = reuse imagegen.local.hfToken;
         // with neither set the sidecar is ineligible in auto mode. Masked in

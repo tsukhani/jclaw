@@ -2,7 +2,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.EnrollmentHarvester;
 import services.transcription.OverlapReattributor;
-import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerSegment;
 import services.transcription.SpeakerClipExtractor;
 
 import java.util.Arrays;
@@ -35,9 +35,9 @@ class EnrollmentHarvesterTest extends UnitTest {
         return pcm;
     }
 
-    private static final List<SherpaDiarizer.SpeakerSegment> SEGMENTS = List.of(
-            new SherpaDiarizer.SpeakerSegment(0, 30, 0),
-            new SherpaDiarizer.SpeakerSegment(35, 65, 1));
+    private static final List<SpeakerSegment> SEGMENTS = List.of(
+            new SpeakerSegment(0, 30, 0),
+            new SpeakerSegment(35, 65, 1));
 
     /** Separator whose second stem is the OTHER voice for windows of the
      *  given speaker — simulating simultaneous bleed under that speaker. */

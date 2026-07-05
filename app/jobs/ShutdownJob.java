@@ -15,7 +15,6 @@ import services.search.LuceneIndexer;
 import services.transcription.CtcForcedAligner;
 import services.transcription.EmotionRecognizer;
 import services.transcription.PyannoteSidecarManager;
-import services.transcription.SherpaDiarizer;
 import services.transcription.SpeakerNamer;
 import services.transcription.WhisperJniTranscriber;
 import tools.PlaywrightBrowserTool;
@@ -72,7 +71,6 @@ public class ShutdownJob extends Job<Void> {
                 new Component("whatsapp-cobalt", WhatsAppCobaltRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("whisper-transcriber", WhisperJniTranscriber::shutdown),
-                new Component("sherpa-diarizer", SherpaDiarizer::shutdown),
                 new Component("speaker-namer", SpeakerNamer::shutdown),
                 new Component("emotion-recognizer", EmotionRecognizer::shutdown),
                 new Component("ctc-aligner", CtcForcedAligner::shutdown),

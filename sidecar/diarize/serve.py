@@ -8,8 +8,9 @@ Apple MPS). Chosen over the in-process sherpa-onnx path by the JCLAW-565
 bake-off: on real 2-speaker podcast audio the community-1 pipeline scored
 DER 12.5% / pairwise F1 0.864 with the speaker count found automatically,
 where sherpa's threshold clustering capped at F1 0.799 and over- or
-under-split depending on a knife-edge threshold. sherpa remains jclaw's
-zero-setup fallback; this sidecar is opt-in via uv + a Hugging Face token.
+under-split depending on a knife-edge threshold. The sherpa fallback was
+scrapped (JCLAW-614): this sidecar IS jclaw's diarization engine, and its
+prerequisites (uv + a Hugging Face token) are hard requirements.
 
 Attribution: pyannote community-1 model (c) pyannoteAI, released under
 CC-BY-4.0 (https://huggingface.co/pyannote/speaker-diarization-community-1);

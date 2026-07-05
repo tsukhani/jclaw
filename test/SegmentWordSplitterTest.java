@@ -1,7 +1,7 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.SegmentWordSplitter;
-import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerSegment;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
 
@@ -21,8 +21,8 @@ class SegmentWordSplitterTest extends UnitTest {
         return new WhisperJniTranscriber.Segment(startMs, endMs, text);
     }
 
-    private static SherpaDiarizer.SpeakerSegment spk(double start, double end, int speaker) {
-        return new SherpaDiarizer.SpeakerSegment(start, end, speaker);
+    private static SpeakerSegment spk(double start, double end, int speaker) {
+        return new SpeakerSegment(start, end, speaker);
     }
 
     /** Aligner that spreads words uniformly across the requested window. */

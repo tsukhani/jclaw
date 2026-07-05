@@ -1,10 +1,11 @@
 # jclaw diarization sidecar (JCLAW-565)
 
 Speaker diarization via the **pyannote community-1** pipeline. Launched +
-lifecycle-owned by `services.transcription.PyannoteSidecarManager`; selected by
-`DiarizationRouter` when `transcription.diarization.backend` is `auto` (with a
-Hugging Face token configured) or `pyannote-local`. The in-process sherpa-onnx
-path remains the zero-setup fallback.
+lifecycle-owned by `services.transcription.PyannoteSidecarManager`. This
+sidecar is jclaw's ONLY diarization engine (JCLAW-614 scrapped the inferior
+in-process sherpa fallback, matching the image/video sidecar architecture):
+missing prerequisites or sidecar failures surface as actionable errors —
+nothing silently degrades.
 
     uv run serve.py --port 9529 --cache-dir ../../data/pyannote-models --idle-timeout-min 15
 

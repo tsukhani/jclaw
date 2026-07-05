@@ -14,7 +14,7 @@ import java.nio.file.Path;
 /**
  * JCLAW-565: the pyannote sidecar HTTP protocol — request shape (path-based
  * audio handoff, optional num_speakers), response parsing into
- * SherpaDiarizer.SpeakerSegment, and error mapping. MockWebServer + the
+ * SpeakerSegment, and error mapping. MockWebServer + the
  * base-URL test ctor, mirroring {@link LocalVideoGenerationClientTest}; the
  * manager/daemon layer is never touched.
  */

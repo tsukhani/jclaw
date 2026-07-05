@@ -2,19 +2,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.transcription.DiarizationModelManager;
-import services.transcription.DiarizationModelManager.DiarizationModel;
 import services.transcription.FfmpegProbe;
-import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerSegment;
 import services.transcription.SpeakerNamer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * JCLAW-558: enrollment scanning edge cases run everywhere; the real
@@ -81,7 +76,7 @@ class SpeakerNamerTest extends UnitTest {
         try {
             var names = SpeakerNamer.nameSpeakers(
                     tempRoot.resolve("whatever.wav"),
-                    List.of(new SherpaDiarizer.SpeakerSegment(0, 1, 0)),
+                    List.of(new SpeakerSegment(0, 1, 0)),
                     0.6f);
             assertTrue(names.isEmpty());
         } finally {
@@ -129,25 +124,4 @@ class SpeakerNamerTest extends UnitTest {
         assertTrue(SpeakerNamer.assignExclusive(scores, 0.6f, 0.03).isEmpty());
     }
 
-    @Test
-    void nameSpeakers_matchesEnrolledVoices_endToEnd() {
-        assumeTrue(FfmpegProbe.probe().available(), "ffmpeg not on PATH — skipping");
-        assumeTrue(DiarizationModelManager.availableLocally(DiarizationModel.SEGMENTATION)
-                        && DiarizationModelManager.availableLocally(DiarizationModel.EMBEDDING),
-                "diarization models not downloaded — skipping");
-        var voicesRoot = Path.of("data", "speaker-voices");
-        var fixture = voicesRoot.resolve(".fixtures").resolve("en3.wav");
-        assumeTrue(Files.isRegularFile(fixture) && SpeakerNamer.enrollmentPresent(),
-                "local enrollment fixtures absent — skipping (dev-machine-only test)");
-
-        var speakers = SherpaDiarizer.diarize(fixture, 0.3f, 3);
-        var names = SpeakerNamer.nameSpeakers(fixture, speakers, 0.6f);
-
-        Set<Integer> distinct = new HashSet<>();
-        speakers.forEach(s -> distinct.add(s.speaker()));
-        assertEquals(distinct.size(), names.size(),
-                "every diarized speaker should match an enrolled voice: " + names);
-        assertTrue(names.values().containsAll(Set.of("Daniel", "Samantha", "Albert")),
-                "expected the three enrolled names, got: " + names);
-    }
 }

@@ -1,6 +1,6 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.transcription.SherpaDiarizer;
+import services.transcription.SpeakerSegment;
 import services.transcription.SpeakerClipExtractor;
 
 import java.nio.ByteBuffer;
@@ -15,8 +15,8 @@ class SpeakerClipExtractorTest extends UnitTest {
 
     private static final int SR = SpeakerClipExtractor.SAMPLE_RATE;
 
-    private static SherpaDiarizer.SpeakerSegment seg(double start, double end, int speaker) {
-        return new SherpaDiarizer.SpeakerSegment(start, end, speaker);
+    private static SpeakerSegment seg(double start, double end, int speaker) {
+        return new SpeakerSegment(start, end, speaker);
     }
 
     /** Voice-discriminating fake embedder: loud fills (mean >= 0.05) embed
@@ -107,11 +107,11 @@ class SpeakerClipExtractorTest extends UnitTest {
         var samples = new float[60 * SpeakerClipExtractor.SAMPLE_RATE];
         for (int i = 0; i < samples.length; i++) samples[i] = (i % 100) / 100f;
         var segments = java.util.List.of(
-                new services.transcription.SherpaDiarizer.SpeakerSegment(0, 8, 0),    // longest
-                new services.transcription.SherpaDiarizer.SpeakerSegment(20, 26, 0),  // second
-                new services.transcription.SherpaDiarizer.SpeakerSegment(40, 43, 0),  // third
-                new services.transcription.SherpaDiarizer.SpeakerSegment(50, 50.4, 0), // below min
-                new services.transcription.SherpaDiarizer.SpeakerSegment(10, 18, 1)); // other speaker
+                new services.transcription.SpeakerSegment(0, 8, 0),    // longest
+                new services.transcription.SpeakerSegment(20, 26, 0),  // second
+                new services.transcription.SpeakerSegment(40, 43, 0),  // third
+                new services.transcription.SpeakerSegment(50, 50.4, 0), // below min
+                new services.transcription.SpeakerSegment(10, 18, 1)); // other speaker
 
         var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0, VOICE_EMBEDDER);
 
@@ -136,7 +136,7 @@ class SpeakerClipExtractorTest extends UnitTest {
         var samples = new float[60 * SpeakerClipExtractor.SAMPLE_RATE];
         java.util.Arrays.fill(samples, 0.1f);
         var segments = java.util.List.of(
-                new services.transcription.SherpaDiarizer.SpeakerSegment(5, 45, 0)); // one 40s span
+                new services.transcription.SpeakerSegment(5, 45, 0)); // one 40s span
 
         var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0, VOICE_EMBEDDER);
 
@@ -158,8 +158,8 @@ class SpeakerClipExtractorTest extends UnitTest {
         var samples = new float[40 * SpeakerClipExtractor.SAMPLE_RATE];
         for (int i = 0; i < samples.length; i++) samples[i] = (float) Math.sin(i * 0.01);
         var segments = java.util.List.of(
-                new services.transcription.SherpaDiarizer.SpeakerSegment(2, 12, 0),
-                new services.transcription.SherpaDiarizer.SpeakerSegment(20, 24, 0));
+                new services.transcription.SpeakerSegment(2, 12, 0),
+                new services.transcription.SpeakerSegment(20, 24, 0));
 
         var lineup = SpeakerClipExtractor.extract(samples, segments, 5.0, 1.0);
         var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0, VOICE_EMBEDDER);
@@ -170,8 +170,8 @@ class SpeakerClipExtractorTest extends UnitTest {
     @Test
     void purify_splitsSegmentsAroundPaddedOverlaps_andKeepsSpeaker() {
         var segments = java.util.List.of(
-                new services.transcription.SherpaDiarizer.SpeakerSegment(0, 10, 0),
-                new services.transcription.SherpaDiarizer.SpeakerSegment(12, 14, 1));
+                new services.transcription.SpeakerSegment(0, 10, 0),
+                new services.transcription.SpeakerSegment(12, 14, 1));
         // Overlap 4-6s inside speaker 0's span; pad 0.75s each side.
         var overlaps = java.util.List.<double[]>of(new double[]{4, 6});
 
@@ -189,7 +189,7 @@ class SpeakerClipExtractorTest extends UnitTest {
     @Test
     void purify_dropsFullyOverlappedSpans_andIsIdentityWithoutOverlaps() {
         var segments = java.util.List.of(
-                new services.transcription.SherpaDiarizer.SpeakerSegment(5, 6, 0));
+                new services.transcription.SpeakerSegment(5, 6, 0));
         assertTrue(SpeakerClipExtractor.purify(segments,
                         java.util.List.<double[]>of(new double[]{4.9, 6.0})).isEmpty(),
                 "a span living entirely inside cross-talk yields nothing");
@@ -204,7 +204,7 @@ class SpeakerClipExtractorTest extends UnitTest {
         var samples = new float[12 * SpeakerClipExtractor.SAMPLE_RATE];
         java.util.Arrays.fill(samples, 0.1f);
         var segments = java.util.List.of(
-                new services.transcription.SherpaDiarizer.SpeakerSegment(0, 10, 0));
+                new services.transcription.SpeakerSegment(0, 10, 0));
         var pure = SpeakerClipExtractor.purify(segments,
                 java.util.List.<double[]>of(new double[]{3, 7}));
 
