@@ -10,6 +10,7 @@ import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 import services.transcription.DiarizedTranscript;
+import services.transcription.DiarizationPipeline;
 import services.transcription.DiarizationRouter;
 import services.transcription.EmotionRecognizer;
 import services.transcription.OverlapReattributor;
@@ -151,37 +152,19 @@ public class ApiTranscriptionController extends Controller {
             error(400, "Unknown format: %s (expected json, txt, srt or vtt)".formatted(fmt));
         }
 
-        var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
-                .orElse(WhisperModel.DEFAULT);
         var lang = language != null && !language.isBlank() ? language : null;
 
         List<DiarizedTranscript.Entry> entries;
         long startedAt = System.currentTimeMillis();
         try {
-            var transcript = WhisperJniTranscriber.transcribeSegments(audio.toPath(), model, lang);
-            var diarization = DiarizationRouter.diarizeRich(audio.toPath(),
-                    numSpeakers == null ? -1 : numSpeakers);
-            var speakers = diarization.segments();
-            // JCLAW-558: automatic when data/speaker-voices has enrollment;
-            // enrollmentPresent() short-circuits everything (models, natives,
-            // ffmpeg) when it doesn't, so the un-enrolled path is unchanged.
-            var names = SpeakerNamer.enrollmentPresent()
-                    ? SpeakerNamer.nameSpeakers(audio.toPath(), speakers,
-                            (float) ConfigService.getDouble("transcription.diarization.speakerMatchThreshold", 0.6))
-                    : Map.<Integer, String>of();
-            // JCLAW-603: word-level split of boundary-straddling segments.
-            transcript = SegmentWordSplitter.split(transcript, speakers, audio.toPath());
-            entries = DiarizedTranscript.merge(transcript, speakers, names);
-            // JCLAW-605: overlap re-attribution. Best-effort inside reattribute().
-            if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
-                entries = OverlapReattributor.reattribute(entries, diarization, audio.toPath());
-            }
-            // JCLAW-563: per-turn acoustic emotion labels (json 'emotion'
-            // field, "(happy)" tag in txt). Best-effort inside annotate() —
-            // the transcript renders regardless.
-            if (ConfigService.getBoolean("transcription.emotion.enabled", true)) {
-                entries = EmotionRecognizer.annotate(audio.toPath(), entries);
-            }
+            // JCLAW-628: the stage sequence lives in DiarizationPipeline.
+            // The stateless API cannot converse, so identification-first is
+            // off and the transcript always renders (anonymous labels when
+            // voices are unknown). This also gains the diarization cache and
+            // the cheaper diarize-before-transcribe ordering the tool had.
+            var outcome = DiarizationPipeline.run(audio.toPath(),
+                    new DiarizationPipeline.Options(numSpeakers, lang, false, true));
+            entries = ((DiarizationPipeline.Transcript) outcome).entries();
         } catch (TranscriptionException e) {
             // Operator-fixable preconditions (model not downloaded, ffmpeg
             // absent) and backend failures both surface here; 409 matches the

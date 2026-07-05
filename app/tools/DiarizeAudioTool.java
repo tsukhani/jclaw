@@ -11,6 +11,7 @@ import models.MessageAttachment;
 import services.AgentService;
 import services.ConfigService;
 import services.Tx;
+import services.transcription.DiarizationPipeline;
 import services.transcription.DiarizationRouter;
 import services.transcription.DiarizedTranscript;
 import services.transcription.EmotionRecognizer;
@@ -245,22 +246,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static ToolRegistry.ToolResult diarize(Path path, MessageAttachment att,
                                                    Integer numSpeakers, String language,
                                                    boolean allowAnonymous) {
-        var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
-                .orElse(WhisperModel.DEFAULT);
-
         try {
-            // JCLAW-611 identification-first: diarize + match BEFORE the
-            // expensive transcription. Unknown voices stop the pipeline and
-            // come back as a lineup so the user can name them; whisper runs
-            // exactly once, after identities are settled (or waived).
-            var diarization = cachedDiarization(path, numSpeakers);
-            var speakers = diarization.segments();
-            var names = SpeakerNamer.enrollmentPresent()
-                    ? SpeakerNamer.nameSpeakers(path, speakers, (float) ConfigService.getDouble(
-                            "transcription.diarization.speakerMatchThreshold", 0.6))
-                    : Map.<Integer, String>of();
-            var unmatched = speakers.stream().map(SpeakerSegment::speaker)
-                    .distinct().filter(id -> !names.containsKey(id)).toList();
             // The anonymous escape hatch is only honored AFTER identification
             // was actually attempted in this conversation (JCLAW-611 UAT: the
             // model set allow_anonymous on its very first call, skipping the
@@ -270,28 +256,15 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                         + "identification attempt for %s", att.uuid);
                 allowAnonymous = false;
             }
-            if (!unmatched.isEmpty() && !allowAnonymous) {
-                return identificationRequest(path, att, diarization, names, unmatched);
+            // JCLAW-628: the stage sequence lives in DiarizationPipeline —
+            // identification-first is this tool's mode (it can converse).
+            var outcome = DiarizationPipeline.run(path, new DiarizationPipeline.Options(
+                    numSpeakers, language, true, allowAnonymous));
+            if (outcome instanceof DiarizationPipeline.IdentificationNeeded need) {
+                return identificationRequest(path, att, need.diarization(),
+                        need.names(), need.unmatched());
             }
-
-            var transcript = WhisperJniTranscriber.transcribeSegments(path, model, language);
-            // JCLAW-603: segments straddling a speaker change are split at
-            // word boundaries (CTC forced alignment) so rapid exchanges
-            // attribute per word, not per whisper segment. Self-gating —
-            // no-op when nothing straddles; best-effort inside split().
-            transcript = SegmentWordSplitter.split(transcript, speakers, path);
-            var entries = DiarizedTranscript.merge(transcript, speakers, names);
-            // JCLAW-605: cross-talk turns re-attributed via sidecar source
-            // separation + stem voiceprints. Best-effort inside reattribute().
-            if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
-                entries = OverlapReattributor.reattribute(entries, diarization, path);
-            }
-            // JCLAW-563: annotate each turn with an acoustic emotion label.
-            // Best-effort inside annotate() — a transcript never fails
-            // because the emotion model couldn't run.
-            if (ConfigService.getBoolean("transcription.emotion.enabled", true)) {
-                entries = EmotionRecognizer.annotate(path, entries);
-            }
+            var entries = ((DiarizationPipeline.Transcript) outcome).entries();
 
             var labels = new LinkedHashSet<String>();
             entries.forEach(e -> labels.add(e.speaker()));
@@ -306,17 +279,6 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         } catch (TranscriptionException e) {
             return ToolRegistry.ToolResult.text("Speaker diarization failed: " + e.getMessage());
         }
-    }
-
-    /** Cache-through diarization (JCLAW-611): the identification round and
-     *  the post-enrollment transcript round must see IDENTICAL segments. */
-    private static DiarizationRouter.Result cachedDiarization(Path path, Integer numSpeakers) {
-        int n = numSpeakers == null ? -1 : numSpeakers;
-        var cached = services.transcription.DiarizationCache.read(path, n);
-        if (cached != null) return cached;
-        var result = DiarizationRouter.diarizeRich(path, n);
-        services.transcription.DiarizationCache.write(path, n, result);
-        return result;
     }
 
     /**
@@ -378,7 +340,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static ToolRegistry.ToolResult extractSpeakerClips(
             Path path, MessageAttachment att, Integer numSpeakers) {
         try {
-            var diarization = cachedDiarization(path, numSpeakers);
+            var diarization = DiarizationPipeline.cachedDiarization(path, numSpeakers);
             var followUp = ("Ask the user to play each clip and say who the voice is. Then enroll "
                     + "every voice they identify by calling this tool with action=%s, "
                     + "clip_label=<label>, speaker_name=<their name>. Skip voices the user does "
