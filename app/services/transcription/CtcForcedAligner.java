@@ -12,6 +12,17 @@ import java.util.List;
 import java.util.Map;
 
 /**
+ * JCLAW-643 alignment-model decision: this stays the LibriSpeech English
+ * wav2vec2-base-960h char-CTC checkpoint, DELIBERATELY, for now. The
+ * deployment is English/Malay code-switched; Malay is Latin-script and
+ * phonetically regular, so char-level CTC alignment degrades gracefully
+ * (approximate boundaries, never failures). The measured instrument for
+ * revisiting is eval.py's cpWER mode against the committed gold transcript
+ * (sidecar/diarize/eval/gold/haram-debate-transcript.json): if boundary
+ * cuts start mis-attributing words at speaker changes, cpWER shows it.
+ * The upgrade path is an MMS-style multilingual char-CTC checkpoint with
+ * the same interface — swap MODEL_URL, re-measure cpWER, done.
+ *
  * CTC forced alignment (JCLAW-603, the WhisperX technique in-process):
  * given audio and the text whisper already produced for it, find when each
  * word was spoken. Runs the wav2vec2-base-960h character-CTC model over the

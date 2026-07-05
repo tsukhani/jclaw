@@ -395,7 +395,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             var refsBySpeaker = services.transcription.EnrollmentHarvester.harvest(
                     path, speakers, clips.stream().map(SpeakerClipExtractor.Clip::speaker).toList(),
                     ENROLLMENT_TARGET_SECONDS, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS,
-                    SpeakerNamer::embedWindow,
+                    services.transcription.SidecarEmbedder.INSTANCE,
                     services.transcription.OverlapReattributor::separateViaSidecar);
             var lineup = new StringBuilder();
             var generated = new java.util.ArrayList<GeneratedAttachment>(clips.size());

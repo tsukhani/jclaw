@@ -154,7 +154,11 @@ public final class OverlapReattributor {
                     services.ConfigService.getBoolean(UNDER_SPEECH_KEY, true)
                     ? OverlapReattributor::transcribeSlice : null;
             return reattribute(entries, diarization.overlaps(), pcm, separator,
-                    SpeakerNamer::embedWindow, msdd, transcriber);
+                    // SidecarEmbedder.INSTANCE, not a method ref: the instance
+                    // overrides embedAll with ONE batched HTTP call — a lambda
+                    // would silently degrade every batch to per-window singles
+                    // via the interface default (JCLAW-634 post-measurement fix).
+                    SidecarEmbedder.INSTANCE, msdd, transcriber);
         } catch (RuntimeException e) {
             Logger.warn("OverlapReattributor: re-attribution skipped: %s", e.getMessage());
             return entries;
