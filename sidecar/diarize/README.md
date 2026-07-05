@@ -54,6 +54,29 @@ attribution.
 - Separator: [MossFormer2 via ClearerVoice-Studio](https://github.com/modelscope/ClearerVoice-Studio), Apache-2.0 (JCLAW-605); weights download on first `/separate`.
 - Second opinion: [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) MSDD (`diar_msdd_telephonic` + `titanet_large`), Apache-2.0 toolkit / CC-BY-4.0 weights (JCLAW-612); runs in its own uv script env (`msdd.py`), first `/msdd` builds it.
 
+## Evaluation (JCLAW-617)
+
+Run the DER/JER harness whenever a calibrated threshold changes (the
+constants in OverlapReattributor, MsddSecondOpinion, EnrollmentHarvester,
+SpeakerClipExtractor, SpeakerNamer) or the model/pipeline is upgraded:
+
+```bash
+# Score a cached production diarization against the committed gold:
+uv run eval.py score /path/to/<attachment>.wav.diarization.json \
+  eval/gold/haram-debate.rttm --uem eval/gold/haram-debate.uem
+
+# Or run the pipeline fresh on audio and score it:
+HF_TOKEN=hf_... uv run eval.py run recording.wav eval/gold/haram-debate.rttm --uem ...
+```
+
+Committed gold: `eval/gold/haram-debate.{rttm,uem}` — 68 turn-level
+references derived from an independent frontier-model transcription plus
+operator verification (English/Malay code-switched, 2 speakers). Baseline
+raw community-1 against this gold: **DER 11.69% / JER 18.85%** (the full
+pipeline's correction passes recover most of the confusion downstream).
+`eval/fetch-ami.sh` adds AMI ES2004a (4 speakers, close-talk + far-field,
+CC-BY-4.0). A dedicated non-English recording remains a documented gap.
+
 ## Running by hand (debugging)
 
 ```bash
