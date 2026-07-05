@@ -259,6 +259,60 @@ public class PyannoteDiarizationClient {
         }
     }
 
+    /**
+     * GPU ASR via the sidecar (JCLAW-627): mlx-whisper on Apple silicon,
+     * faster-whisper elsewhere — same weights as whisper.cpp, 5-20x faster.
+     * First call may build the script env and download weights.
+     */
+    public List<WhisperJniTranscriber.Segment> transcribe(Path audioFile, String model,
+                                                          String language) {
+        SIDECAR_LOCK.lock();
+        try {
+            return transcribeLocked(audioFile, model, language);
+        } finally {
+            SIDECAR_LOCK.unlock();
+        }
+    }
+
+    private List<WhisperJniTranscriber.Segment> transcribeLocked(Path audioFile, String model,
+                                                                 String language) {
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
+        var body = new JsonObject();
+        body.addProperty("audio_path", audioFile.toAbsolutePath().toString());
+        body.addProperty("model", model);
+        if (language != null && !language.isBlank()) body.addProperty("language", language);
+        var call = client.newCall(new Request.Builder()
+                .url(baseUrl + "/transcribe")
+                .post(RequestBody.create(body.toString(), JSON))
+                .build());
+        call.timeout().timeout(ConfigService.getInt(
+                PyannoteSidecarManager.CONFIG_PREFIX + ".timeoutSeconds", 1800), TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            var text = resp.body().string();
+            if (!resp.isSuccessful()) {
+                throw new TranscriptionException(
+                        "pyannote sidecar transcribe failed: HTTP %d — %s".formatted(
+                                resp.code(), truncate(text)));
+            }
+            var root = JsonParser.parseString(text).getAsJsonObject();
+            var segments = new ArrayList<WhisperJniTranscriber.Segment>();
+            for (var el : root.getAsJsonArray("segments")) {
+                var o = el.getAsJsonObject();
+                segments.add(new WhisperJniTranscriber.Segment(
+                        o.get("startMs").getAsLong(), o.get("endMs").getAsLong(),
+                        o.get("text").getAsString()));
+            }
+            return segments;
+        } catch (IOException e) {
+            throw new TranscriptionException(
+                    "pyannote sidecar unreachable: " + e.getMessage(), e);
+        } catch (RuntimeException e) {
+            if (e instanceof TranscriptionException te) throw te;
+            throw new TranscriptionException(
+                    "pyannote sidecar returned an unparseable transcribe response: " + e.getMessage(), e);
+        }
+    }
+
     private static String truncate(String s) {
         if (s == null) return "";
         var oneLine = s.replaceAll("\\s+", " ").strip();

@@ -89,6 +89,30 @@ public final class WhisperJniTranscriber {
      * (whisper.cpp rejects detection on {@code .en} models).
      */
     public static List<Segment> transcribeSegments(Path audioFile, WhisperModel model, String language) {
+        // JCLAW-627: prefer the sidecar's GPU engines (mlx-whisper on Apple
+        // silicon, faster-whisper elsewhere) — same Whisper weights, 5-20x
+        // faster. Fallback to in-process whisper.cpp is quality-EQUAL (unlike
+        // the scrapped sherpa fallback), only slower, so degrading here is
+        // legitimate: plain voice notes keep working without the sidecar
+        // prerequisites, and a sidecar hiccup costs latency, not accuracy.
+        if (sidecarAsrEligible()) {
+            try {
+                return new PyannoteDiarizationClient().transcribe(audioFile, model.id(), language);
+            } catch (TranscriptionException e) {
+                Logger.warn("WhisperJniTranscriber: sidecar ASR failed (%s) — "
+                        + "falling back to in-process whisper.cpp", e.getMessage());
+            }
+        }
+        return transcribeSegmentsJni(audioFile, model, language);
+    }
+
+    private static boolean sidecarAsrEligible() {
+        if (!services.ConfigService.getBoolean("transcription.asr.sidecar", true)) return false;
+        var token = PyannoteSidecarManager.effectiveHfToken();
+        return token != null && !token.isBlank() && services.UvProbe.isAvailable();
+    }
+
+    private static List<Segment> transcribeSegmentsJni(Path audioFile, WhisperModel model, String language) {
         if (!FfmpegProbe.isAvailable()) {
             throw new TranscriptionException(
                     "ffmpeg is not available on PATH — install ffmpeg to enable local transcription");

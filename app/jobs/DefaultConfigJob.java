@@ -111,6 +111,9 @@ public class DefaultConfigJob extends Job<Void> {
         // JCLAW-613: transcribe backchannel interjections from minor
         // separation stems so under-speech appears as its own turn.
         seedIfAbsent("transcription.diarization.underSpeechRecovery", "true");
+        // JCLAW-627: GPU ASR via the diarize sidecar (mlx-whisper / faster-
+        // whisper); off falls back to in-process whisper.cpp (same weights).
+        seedIfAbsent("transcription.asr.sidecar", "true");
     }
 
     /**

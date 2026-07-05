@@ -30,6 +30,10 @@ Protocol (bound to 127.0.0.1 only):
            (NeMo MSDD second opinion, TS-VAD lineage — overlap-aware,
             segments may overlap in time; runs in its OWN uv script env
             like the separator; JCLAW-612)
+  POST /transcribe {audio_path, model, language?}
+        -> 200 {segments: [{startMs, endMs, text}, ...]}
+           (GPU ASR, JCLAW-627 — mlx-whisper on Apple silicon,
+            faster-whisper CUDA/CPU elsewhere; own uv script env)
   POST /separate {audio_paths: ["<w1.wav>", ...]}
         -> 200 {stems: {"<w1.wav>": ["..._s1.wav", "..._s2.wav"], ...}}
            (MossFormer2 2-speaker separation of ready-made 16kHz mono WAVs;
@@ -156,6 +160,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if self.path == "/transcribe":
+            self._handle_transcribe()
+            return
         if self.path == "/separate":
             self._handle_separate()
             return
@@ -228,6 +235,46 @@ class Handler(BaseHTTPRequestHandler):
             self.state.touch()
             self.state.run_lock.release()
 
+
+    def _handle_transcribe(self):
+        """JCLAW-627: GPU ASR via the transcribe.py script env."""
+        self.state.touch()
+        try:
+            req = self._read_json()
+        except (ValueError, UnicodeDecodeError) as e:
+            self._send_json(400, {"error": "invalid JSON body: %s" % e})
+            return
+        audio_path = req.get("audio_path")
+        if not audio_path or not os.path.isfile(audio_path):
+            self._send_json(400, {"error": "audio_path missing or not a file: %r" % audio_path})
+            return
+        model = req.get("model") or "large"
+        language = req.get("language") or "-"
+        if not self.state.run_lock.acquire(blocking=False):
+            self._send_json(409, {"error": "another inference is already in progress"})
+            return
+        try:
+            import subprocess
+            t0 = time.time()
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            proc = subprocess.run(
+                ["uv", "run", "transcribe.py", audio_path, model, language],
+                cwd=script_dir, capture_output=True, text=True, timeout=1740)
+            for line in proc.stderr.splitlines()[-10:]:
+                sys.stderr.write("[diarize-sidecar] %s\n" % line)
+            if proc.returncode != 0:
+                raise RuntimeError("transcribe.py exited %d: %s"
+                                   % (proc.returncode, proc.stderr.strip()[-300:]))
+            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+            sys.stderr.write("[diarize-sidecar] transcribed %s: %d segment(s) in %.1fs\n"
+                             % (os.path.basename(audio_path),
+                                len(payload.get("segments", [])), time.time() - t0))
+            self._send_json(200, payload)
+        except Exception as e:  # noqa: BLE001 — reported to the client verbatim
+            self._send_json(500, {"error": str(e)})
+        finally:
+            self.state.touch()
+            self.state.run_lock.release()
 
     def _handle_msdd(self):
         """JCLAW-612: MSDD second opinion via the msdd.py script env."""
