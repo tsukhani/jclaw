@@ -39,16 +39,19 @@ public final class PyannoteSidecarManager {
      * healthy in time.
      */
     public static String ensureRunning() {
-        if (DAEMON.isHealthy()) return DAEMON.baseUrl();
+        // JCLAW-637: the fast path validates IDENTITY, not just liveness —
+        // an orphan adopted after a JVM crash may serve a stale model, and
+        // the cache would fingerprint its results under the new name.
+        var model = ConfigService.get(CONFIG_PREFIX + ".model", DEFAULT_MODEL);
+        if (DAEMON.isHealthy(model)) return DAEMON.baseUrl();
         synchronized (DAEMON.lock()) {
-            if (DAEMON.isHealthy()) return DAEMON.baseUrl();
+            if (DAEMON.isHealthy(model)) return DAEMON.baseUrl();
             if (!UvProbe.isAvailable()) {
                 throw new TranscriptionException(
                         "the pyannote diarization sidecar requires 'uv' on PATH: "
                                 + UvProbe.lastResult().reason());
             }
-            DAEMON.spawn(ConfigService.get(CONFIG_PREFIX + ".model", DEFAULT_MODEL),
-                    effectiveHfToken());
+            DAEMON.spawn(model, effectiveHfToken());
             DAEMON.awaitHealthy();
             return DAEMON.baseUrl();
         }

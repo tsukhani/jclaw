@@ -183,6 +183,21 @@ public final class LocalSidecarDaemon {
 
     /** Cheap liveness check: GET /health with a short per-call deadline. */
     public boolean isHealthy() {
+        return isHealthy(null);
+    }
+
+    /**
+     * As {@link #isHealthy()}, additionally validating sidecar IDENTITY
+     * (JCLAW-637): a sidecar that survived a JVM crash is adopted by the
+     * restarted JVM via this fast path, and if the configured model changed
+     * between runs the orphan would serve the OLD model while the cache
+     * fingerprints results with the NEW name — mislabeled entries surviving
+     * the very model bump the fingerprint exists to invalidate. On mismatch
+     * the orphan is evicted via POST /shutdown (no Process handle exists
+     * for an adopted process) and this reports unhealthy so the caller
+     * respawns with the right model.
+     */
+    public boolean isHealthy(String expectedModel) {
         var call = HttpFactories.general().newCall(
                 new Request.Builder().url(baseUrl() + "/health").get().build());
         call.timeout().timeout(5, TimeUnit.SECONDS);
@@ -190,10 +205,41 @@ public final class LocalSidecarDaemon {
             // Drain the body so the sidecar finishes its write — closing the connection
             // early races its socket write and spams its stderr with BrokenPipe tracebacks
             // (the body is tiny, so this is cheap).
-            resp.body().bytes();
-            return resp.isSuccessful();
+            var body = new String(resp.body().bytes(), StandardCharsets.UTF_8);
+            if (!resp.isSuccessful()) return false;
+            if (expectedModel == null || expectedModel.isBlank()) return true;
+            var served = healthModel(body);
+            if (served == null || served.equals(expectedModel)) return true;
+            play.Logger.warn("%s: adopted sidecar serves model '%s' but config wants '%s' — evicting",
+                    cfg.displayName(), served, expectedModel);
+            evict();
+            return false;
         } catch (IOException _) {
             return false;
+        }
+    }
+
+    /** The "model" field of a /health JSON body, or null if unparseable. */
+    public static String healthModel(String healthJson) {
+        try {
+            var root = com.google.gson.JsonParser.parseString(healthJson).getAsJsonObject();
+            return root.has("model") ? root.get("model").getAsString() : null;
+        } catch (RuntimeException _) {
+            return null;
+        }
+    }
+
+    /** Best-effort POST /shutdown for a process we hold no handle to. */
+    private void evict() {
+        var call = HttpFactories.general().newCall(new Request.Builder()
+                .url(baseUrl() + "/shutdown")
+                .post(okhttp3.RequestBody.create(new byte[0]))
+                .build());
+        call.timeout().timeout(5, TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            resp.body().bytes();
+        } catch (IOException _) {
+            // it may have died mid-response; the respawn path handles the rest
         }
     }
 
