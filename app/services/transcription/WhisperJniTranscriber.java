@@ -201,6 +201,10 @@ public final class WhisperJniTranscriber {
      * mono, return the samples. Stderr is captured separately so it can be
      * surfaced in error messages without polluting the sample stream.
      */
+    /** Decode ceiling: 2 hours of 16kHz mono floats is ~440MB alone, and
+     *  the overlap pipeline multiplies that several-fold. */
+    static final int MAX_DECODE_SECONDS = 2 * 60 * 60;
+
     static float[] ffmpegToPcmF32(Path audioFile) {
         try {
             var stderrFile = Files.createTempFile("ffmpeg-stderr", ".log");
@@ -239,6 +243,17 @@ public final class WhisperJniTranscriber {
                 }
 
                 int sampleCount = pcm.length / 4;
+                // JCLAW-626: the diarization pipeline holds several copies of
+                // this array at once (mixed PCM, separation windows, stems, a
+                // staged WAV for MSDD) — a multi-hour upload would OOM the
+                // JVM opaquely. A clear ceiling beats a heap dump.
+                if (sampleCount > MAX_DECODE_SECONDS * 16_000) {
+                    throw new TranscriptionException(
+                            "Audio is longer than the %d-minute processing ceiling (%.0f minutes) — "
+                                    + "split the recording and process the parts separately."
+                                    .formatted(MAX_DECODE_SECONDS / 60,
+                                            sampleCount / 16_000.0 / 60.0));
+                }
                 var samples = new float[sampleCount];
                 ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(samples);
                 return samples;

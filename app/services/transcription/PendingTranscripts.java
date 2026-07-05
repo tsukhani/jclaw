@@ -30,9 +30,22 @@ public final class PendingTranscripts {
 
     private PendingTranscripts() {}
 
+    /** JCLAW-626: a consumer that dies between register and await would
+     *  leak the map entry forever — evict entries after this long as a
+     *  backstop (far beyond any legitimate transcription duration). */
+    private static final long EVICTION_MS = 60 * 60 * 1000L;
+
     /** Register a freshly-spawned future against {@code attachmentId}. */
     public static void register(Long attachmentId, CompletableFuture<String> future) {
         if (attachmentId == null || future == null) return;
+        var scheduler = java.util.concurrent.CompletableFuture.delayedExecutor(
+                EVICTION_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        scheduler.execute(() -> {
+            if (futures.remove(attachmentId, future)) {
+                play.Logger.warn("PendingTranscripts: evicted abandoned entry for attachment %d",
+                        attachmentId);
+            }
+        });
         futures.put(attachmentId, future);
     }
 

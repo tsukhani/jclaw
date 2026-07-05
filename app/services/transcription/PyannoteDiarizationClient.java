@@ -48,9 +48,11 @@ public class PyannoteDiarizationClient {
         // but with the per-read socket timeout lifted: the sidecar's first
         // /diarize lazily loads the pipeline (gated download + torch import)
         // and legitimately sends nothing for minutes. The JCLAW-565 UAT
-        // caught general()'s 30s read timeout firing mid-load and falling
-        // back to sherpa while the sidecar went on to succeed. The per-call
-        // callTimeout below still bounds the whole request.
+        // caught general()'s 30s read timeout firing mid-load while the
+        // sidecar went on to succeed. DELIBERATE TRADEOFF (JCLAW-626): with
+        // readTimeout=0, a genuinely hung socket is bounded ONLY by the
+        // 1800s per-call callTimeout set on every request below — do not
+        // "fix" the zero without replacing that bound.
         this(null, HttpFactories.general().newBuilder()
                 .readTimeout(java.time.Duration.ZERO)
                 .build());

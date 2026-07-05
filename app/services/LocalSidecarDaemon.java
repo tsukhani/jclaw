@@ -82,6 +82,14 @@ public final class LocalSidecarDaemon {
         }
     }
 
+    /** JCLAW-626: after a spawn failure, fail fast for a cooldown instead
+     *  of letting every caller pay the full startup timeout in a row.
+     *  Cleared by a successful spawn or config change won't rescue it —
+     *  the memo simply expires. */
+    private volatile long spawnFailedUntil = 0;
+    private volatile String spawnFailureMessage = null;
+    private static final long SPAWN_FAILURE_COOLDOWN_MS = 60_000;
+
     /** As {@link #spawn(String, String)}, reading the HF token from the
      *  domain's own {@code <prefix>.hfToken} config key. */
     public void spawn(String model) {
@@ -96,6 +104,23 @@ public final class LocalSidecarDaemon {
      * blank (JCLAW-565 follow-up). The caller must hold {@link #lock()}.
      */
     public void spawn(String model, String hfToken) {
+        if (System.currentTimeMillis() < spawnFailedUntil) {
+            throw cfg.fail().apply(
+                    "%s recently failed to start (%s) — retrying automatically in under a minute"
+                            .formatted(cfg.displayName(), spawnFailureMessage), null);
+        }
+        try {
+            spawnNow(model, hfToken);
+            spawnFailedUntil = 0;
+            spawnFailureMessage = null;
+        } catch (RuntimeException e) {
+            spawnFailedUntil = System.currentTimeMillis() + SPAWN_FAILURE_COOLDOWN_MS;
+            spawnFailureMessage = e.getMessage();
+            throw e;
+        }
+    }
+
+    private void spawnNow(String model, String hfToken) {
         var sidecarDir = new File(Play.applicationPath, cfg.sidecarSubdir());
         var serve = new File(sidecarDir, "serve.py");
         if (!serve.isFile()) {
