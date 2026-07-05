@@ -63,7 +63,9 @@ public final class UnderSpeechRecovery {
             List<float[]> windows, List<Double> windowStarts,
             List<List<float[]>> stemsPerWindow, Map<String, float[]> references,
             OverlapReattributor.Embedder embedder, Transcriber transcriber) {
-        if (transcriber == null || references.size() < 2) return entries;
+        // JCLAW-618: "the other speaker" is only well-defined with exactly
+        // two references — anything else risks fabricated attribution.
+        if (transcriber == null || references.size() != 2) return entries;
         var out = new ArrayList<>(entries);
         int recovered = 0;
         for (var region : overlaps) {

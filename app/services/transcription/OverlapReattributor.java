@@ -176,6 +176,19 @@ public final class OverlapReattributor {
         // evidence does not decisively back their label are contested even
         // outside detected overlap (the detector misses soft cross-talk;
         // the "thank you" residual lived exactly there).
+        // JCLAW-618: every separation-based instrument is 2-speaker by
+        // construction (MossFormer2_SS_16K emits exactly two stems; the MSDD
+        // checkpoint is telephony 2-speaker; under-speech picks "the other"
+        // speaker). On 3+ speaker recordings they fabricate attributions —
+        // worse than a miss — so the correction stack stands down entirely.
+        long distinctLabels = entries.stream()
+                .map(DiarizedTranscript.Entry::speaker).distinct().count();
+        if (distinctLabels > 2) {
+            Logger.info("OverlapReattributor: %d speakers — 2-speaker correction stack skipped",
+                    distinctLabels);
+            return entries;
+        }
+
         var nearTie = msddOpinion == null ? List.<Integer>of()
                 : nearTieCandidates(entries, affected, pcm, references, embedder);
         if (affected.isEmpty() && nearTie.isEmpty()) return entries;
@@ -250,8 +263,7 @@ public final class OverlapReattributor {
                 var opinion = MsddSecondOpinion.verdict(entry, msdd, mapping);
                 if (opinion != null) {
                     if (!opinion.equals(entry.speaker())) {
-                        out.set(i, new DiarizedTranscript.Entry(
-                                opinion, entry.start(), entry.end(), entry.text(), entry.emotion()));
+                        out.set(i, entry.withSpeaker(opinion));
                         reassigned++;
                         Logger.info("OverlapReattributor: \"%s\" %s -> %s (MSDD second opinion)",
                                 truncate(entry.text()), entry.speaker(), opinion);
@@ -266,8 +278,7 @@ public final class OverlapReattributor {
                         references, embedder);
                 var winner = decide(entry.speaker(), scores, DECISION_MARGIN);
                 if (winner != null) {
-                    out.set(i, new DiarizedTranscript.Entry(
-                            winner, entry.start(), entry.end(), entry.text(), entry.emotion()));
+                    out.set(i, entry.withSpeaker(winner));
                     reassigned++;
                     Logger.info("OverlapReattributor: \"%s\" %s -> %s (scores %s)",
                             truncate(entry.text()), entry.speaker(), winner, scores);
@@ -277,7 +288,8 @@ public final class OverlapReattributor {
             }
             // 3) Confirmed contested, no decisive evidence: honesty marker.
             out.set(i, new DiarizedTranscript.Entry(entry.speaker(), entry.start(),
-                    entry.end(), entry.text(), entry.emotion(), true));
+                    entry.end(), entry.text(), entry.emotion(), true,
+                    entry.underSpeech(), entry.noSpeakerEvidence()));
             Logger.info("OverlapReattributor: marked \"%s\" cross-talk", truncate(entry.text()));
         }
         if (reassigned > 0) {

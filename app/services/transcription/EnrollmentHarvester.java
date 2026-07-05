@@ -91,7 +91,11 @@ public final class EnrollmentHarvester {
                     lineupSeconds, minSeconds, embedder));
         }
 
-        var verdicts = separator == null
+        // JCLAW-618: MossFormer2 emits exactly two stems; with 3+ speakers a
+        // stem is a two-voice mixture and the bleed verdicts are meaningless.
+        long distinctSpeakers = purifiedSegments.stream()
+                .map(SpeakerSegment::speaker).distinct().count();
+        var verdicts = separator == null || distinctSpeakers != 2
                 ? null
                 : stemGateVerdicts(pcm, purifiedSegments, candidates, embedder, separator);
 

@@ -108,6 +108,22 @@ class EnrollmentHarvesterTest extends UnitTest {
     }
 
     @Test
+    void harvest_skipsStemGate_onThreeSpeakerRecordings() {
+        // JCLAW-618: with 3+ speakers a MossFormer stem is a two-voice
+        // mixture — bleed verdicts are meaningless and must not reject.
+        var threeSpeakers = List.of(
+                new SpeakerSegment(0, 30, 0),
+                new SpeakerSegment(35, 65, 1),
+                new SpeakerSegment(66, 69, 2));
+        var out = EnrollmentHarvester.harvest(pcm(), threeSpeakers, List.of(0),
+                20.0, 5.0, 1.0, VOICE_EMBEDDER, bleedingFor(0.1f));
+
+        double total = out.get(0).stream().mapToInt(c -> c.length).sum() / (double) SR;
+        assertEquals(20.0, total, 0.2,
+                "the bleeding separator is never consulted on 3+ speakers");
+    }
+
+    @Test
     void clusterVoiceprints_averagePerSpeaker() {
         var prints = EnrollmentHarvester.clusterVoiceprints(pcm(), SEGMENTS, VOICE_EMBEDDER);
         assertEquals(2, prints.size());

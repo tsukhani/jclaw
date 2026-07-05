@@ -91,6 +91,21 @@ class UnderSpeechRecoveryTest extends UnitTest {
     }
 
     @Test
+    void recover_standsDown_withThreeReferences() {
+        // JCLAW-618: "the other speaker" is undefined with 3 voices.
+        var refs = Map.of("Podcaster", new float[]{1, 0, 0},
+                "Firdaus", new float[]{0, 1, 0},
+                "Third", new float[]{0, 0, 1});
+        var entries = List.of(entry("Podcaster", 0, 20), entry("Firdaus", 20, 25));
+
+        var out = UnderSpeechRecovery.recover(entries,
+                List.of(new double[]{10.0, 11.0}), WINDOWS, STARTS,
+                stems(), refs, VOICE_EMBEDDER, slice -> "Yeah.");
+
+        assertEquals(entries, out);
+    }
+
+    @Test
     void recover_skipsWhenNoStemMatchesTheUnderSpeaker() {
         // Both stems carry the OWNER's voice (bad separation) — the relative
         // voiceprint gate must reject the region.

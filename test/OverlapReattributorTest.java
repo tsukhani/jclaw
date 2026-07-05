@@ -290,6 +290,29 @@ class OverlapReattributorTest extends UnitTest {
         assertTrue(out.get(2).crossTalk());
     }
 
+    @Test
+    void reattribute_standsDown_onThreeSpeakerRecordings() {
+        // JCLAW-618: every separation instrument is 2-speaker; on 3+ the
+        // whole correction stack must leave the transcript untouched even
+        // when the fakes would produce "decisive" evidence.
+        var pcm = new float[24 * SR];
+        Arrays.fill(pcm, 0, 8 * SR, 0.8f);
+        Arrays.fill(pcm, 8 * SR, 16 * SR, 0.2f);
+        Arrays.fill(pcm, 16 * SR, 24 * SR, 0.5f);
+        var entries = List.of(entry("A", 0, 8), entry("B", 8, 16),
+                entry("C", 16, 20), entry("B", 20.5, 22.5));
+        var overlaps = List.<double[]>of(new double[]{20, 23});
+        OverlapReattributor.Separator separator = windows -> windows.stream().map(window -> {
+            var stemA = new float[window.length];
+            Arrays.fill(stemA, 0.8f);
+            return List.of(stemA, new float[window.length]);
+        }).toList();
+
+        var out = OverlapReattributor.reattribute(entries, overlaps, pcm, separator, MEAN_EMBEDDER);
+
+        assertEquals(entries, out, "3-speaker recordings bypass the 2-speaker machinery");
+    }
+
     // ---- decide() rule table ---------------------------------------------
 
     @Test
