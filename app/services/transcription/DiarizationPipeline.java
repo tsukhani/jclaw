@@ -24,9 +24,17 @@ public final class DiarizationPipeline {
 
     /** Caller knobs. {@code identificationFirst} halts before transcription
      *  when voices are unknown (tool-only); {@code allowAnonymous} waives
-     *  that halt. */
+     *  that halt. {@code cacheable} = false for transient inputs (JCLAW-636:
+     *  the REST endpoint's multipart temp uploads get a fresh path per
+     *  request, so sibling cache files could never HIT and outlived Play's
+     *  temp-file cleanup — pure litter). */
     public record Options(Integer numSpeakers, String language, boolean identificationFirst,
-                          boolean allowAnonymous) {}
+                          boolean allowAnonymous, boolean cacheable) {
+        public Options(Integer numSpeakers, String language, boolean identificationFirst,
+                       boolean allowAnonymous) {
+            this(numSpeakers, language, identificationFirst, allowAnonymous, true);
+        }
+    }
 
     /** Either a finished transcript or a request to identify voices. */
     public sealed interface Outcome permits Transcript, IdentificationNeeded {}
@@ -43,7 +51,9 @@ public final class DiarizationPipeline {
     private DiarizationPipeline() {}
 
     public static Outcome run(Path audio, Options opts) {
-        var diarization = cachedDiarization(audio, opts.numSpeakers());
+        var diarization = opts.cacheable()
+                ? cachedDiarization(audio, opts.numSpeakers())
+                : DiarizationRouter.diarizeRich(audio, opts.numSpeakers() == null ? -1 : opts.numSpeakers());
         var speakers = diarization.segments();
         var names = SpeakerNamer.enrollmentPresent()
                 ? SpeakerNamer.nameSpeakers(audio, speakers, (float) ConfigService.getDouble(
@@ -63,10 +73,13 @@ public final class DiarizationPipeline {
         // JCLAW-629: raw ASR is deterministic given (audio, model, language)
         // — cache it beside the diarization so the post-enrollment second
         // round performs no full-recording inference at all.
-        var transcript = DiarizationCache.readTranscript(audio, model.id(), opts.language());
+        var transcript = opts.cacheable()
+                ? DiarizationCache.readTranscript(audio, model.id(), opts.language()) : null;
         if (transcript == null) {
             transcript = WhisperJniTranscriber.transcribeSegments(audio, model, opts.language());
-            DiarizationCache.writeTranscript(audio, model.id(), opts.language(), transcript);
+            if (opts.cacheable()) {
+                DiarizationCache.writeTranscript(audio, model.id(), opts.language(), transcript);
+            }
         }
         // JCLAW-603: word-level split of boundary-straddling segments.
         transcript = SegmentWordSplitter.split(transcript, speakers, audio);

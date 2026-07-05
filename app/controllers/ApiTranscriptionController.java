@@ -160,10 +160,11 @@ public class ApiTranscriptionController extends Controller {
             // JCLAW-628: the stage sequence lives in DiarizationPipeline.
             // The stateless API cannot converse, so identification-first is
             // off and the transcript always renders (anonymous labels when
-            // voices are unknown). This also gains the diarization cache and
-            // the cheaper diarize-before-transcribe ordering the tool had.
+            // voices are unknown). cacheable=false (JCLAW-636): the multipart
+            // temp upload gets a fresh path per request, so a sibling cache
+            // file could never hit and would outlive Play's temp cleanup.
             var outcome = DiarizationPipeline.run(audio.toPath(),
-                    new DiarizationPipeline.Options(numSpeakers, lang, false, true));
+                    new DiarizationPipeline.Options(numSpeakers, lang, false, true, false));
             entries = ((DiarizationPipeline.Transcript) outcome).entries();
         } catch (TranscriptionException e) {
             // Operator-fixable preconditions (model not downloaded, ffmpeg
