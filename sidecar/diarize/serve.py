@@ -34,6 +34,10 @@ Protocol (bound to 127.0.0.1 only):
         -> 200 {segments: [{startMs, endMs, text}, ...]}
            (GPU ASR, JCLAW-627 — mlx-whisper on Apple silicon,
             faster-whisper CUDA/CPU elsewhere; own uv script env)
+  POST /embed {audio_paths: ["<w1.wav>", ...], model}
+        -> 200 {embeddings: [[...], ...]}
+           (batched WeSpeaker embeddings, JCLAW-630 — same ONNX + feature
+            pipeline as the retired JVM JNI stack; own uv script env)
   POST /separate {audio_paths: ["<w1.wav>", ...]}
         -> 200 {stems: {"<w1.wav>": ["..._s1.wav", "..._s2.wav"], ...}}
            (MossFormer2 2-speaker separation of ready-made 16kHz mono WAVs;
@@ -169,6 +173,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/msdd":
             self._handle_msdd()
             return
+        if self.path == "/embed":
+            self._handle_embed()
+            return
         if self.path != "/diarize":
             self._send_json(404, {"error": "unknown path %s" % self.path})
             return
@@ -276,6 +283,47 @@ class Handler(BaseHTTPRequestHandler):
             self.state.touch()
             self.state.run_lock.release()
 
+    def _handle_embed(self):
+        """JCLAW-630: batched WeSpeaker embeddings via the embed.py env.
+        Deliberately NOT under run_lock: embedding batches are sub-second
+        CPU work and must not queue behind minutes-long GPU inference."""
+        self.state.touch()
+        try:
+            req = self._read_json()
+        except (ValueError, UnicodeDecodeError) as e:
+            self._send_json(400, {"error": "invalid JSON body: %s" % e})
+            return
+        paths = req.get("audio_paths") or []
+        model = req.get("model")
+        if not paths or not all(os.path.isfile(p) for p in paths) \
+                or not model or not os.path.isfile(model):
+            self._send_json(400, {"error": "audio_paths/model missing or not files"})
+            return
+        try:
+            import subprocess, tempfile
+            t0 = time.time()
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                json.dump({"paths": paths}, f)
+                spec = f.name
+            try:
+                proc = subprocess.run(
+                    ["uv", "run", "embed.py", model, spec],
+                    cwd=script_dir, capture_output=True, text=True, timeout=600)
+            finally:
+                os.unlink(spec)
+            if proc.returncode != 0:
+                raise RuntimeError("embed.py exited %d: %s"
+                                   % (proc.returncode, proc.stderr.strip()[-300:]))
+            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+            sys.stderr.write("[diarize-sidecar] embedded %d window(s) in %.1fs\n"
+                             % (len(paths), time.time() - t0))
+            self._send_json(200, payload)
+        except Exception as e:  # noqa: BLE001
+            self._send_json(500, {"error": str(e)})
+        finally:
+            self.state.touch()
+
     def _handle_msdd(self):
         """JCLAW-612: MSDD second opinion via the msdd.py script env."""
         self.state.touch()
@@ -368,6 +416,7 @@ def _prewarm(state: SidecarState):
         (["uv", "sync", "--script", "transcribe.py"], "transcribe env"),
         (["uv", "sync", "--script", "separate.py"], "separate env"),
         (["uv", "sync", "--script", "msdd.py"], "msdd env"),
+        (["uv", "sync", "--script", "embed.py"], "embed env"),
     ]
     for cmd, label in steps:
         while state.run_lock.locked():

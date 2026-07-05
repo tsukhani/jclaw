@@ -99,10 +99,18 @@ public final class OverlapReattributor {
         List<List<float[]>> separate(List<float[]> windows);
     }
 
-    /** Test seam: PCM float window in, speaker embedding out. */
+    /** Test seam: PCM float window in, speaker embedding out. The batched
+     *  form lets production make one sidecar call per loop (JCLAW-630);
+     *  fakes get it for free via the default. */
     @FunctionalInterface
     public interface Embedder {
         float[] embed(float[] samples);
+
+        default List<float[]> embedAll(List<float[]> windows) {
+            var out = new java.util.ArrayList<float[]>(windows.size());
+            for (var w : windows) out.add(embed(w));
+            return out;
+        }
     }
 
     private OverlapReattributor() {}
@@ -196,7 +204,8 @@ public final class OverlapReattributor {
         }
 
         var nearTie = msddOpinion == null ? List.<Integer>of()
-                : nearTieCandidates(entries, affected, pcm, references, embedder);
+                : nearTieCandidates(entries, new java.util.HashSet<>(affected), pcm,
+                        references, embedder);
         if (affected.isEmpty() && nearTie.isEmpty()) return entries;
 
         var msdd = fetchOpinion(msddOpinion);
@@ -324,10 +333,18 @@ public final class OverlapReattributor {
         var window = new float[to - from];
         System.arraycopy(pcm, from, window, 0, window.length);
         var emb = embedder.embed(window);
+        return marginBacksLabel(emb, entry.speaker(), references);
+    }
+
+    /** The JCLAW-612 mixed-support margin on a precomputed embedding. */
+    static boolean marginBacksLabel(float[] emb, String speaker,
+                                    Map<String, float[]> references) {
+        var current = references.get(speaker);
+        if (current == null) return false;
         double currentScore = cosine(emb, current);
         double bestOther = Double.NEGATIVE_INFINITY;
         for (var ref : references.entrySet()) {
-            if (!ref.getKey().equals(entry.speaker())) {
+            if (!ref.getKey().equals(speaker)) {
                 bestOther = Math.max(bestOther, cosine(emb, ref.getValue()));
             }
         }
@@ -342,6 +359,7 @@ public final class OverlapReattributor {
                                           List<float[]> stems, Map<String, float[]> references,
                                           Embedder embedder) {
         var scores = new HashMap<String, Double>();
+        var slices = new ArrayList<float[]>();
         for (var stem : stems) {
             int from = (int) Math.clamp(Math.round((entry.start() - windowStart) * SAMPLE_RATE),
                     0, stem.length);
@@ -351,7 +369,10 @@ public final class OverlapReattributor {
             var slice = new float[to - from];
             System.arraycopy(stem, from, slice, 0, slice.length);
             if (rms(slice) < MIN_STEM_RMS) continue;
-            var emb = embedder.embed(slice);
+            slices.add(slice);
+        }
+        // JCLAW-630: both stems in one sidecar call.
+        for (var emb : embedder.embedAll(slices)) {
             for (var ref : references.entrySet()) {
                 double c = cosine(emb, ref.getValue());
                 scores.merge(ref.getKey(), c, Math::max);
@@ -502,16 +523,34 @@ public final class OverlapReattributor {
     /** Short turns whose mixed-audio evidence does not decisively back
      *  their label — contested even without a detected overlap region. */
     private static List<Integer> nearTieCandidates(
-            List<DiarizedTranscript.Entry> entries, List<Integer> affected,
+            List<DiarizedTranscript.Entry> entries, java.util.Set<Integer> affected,
             float[] pcm, Map<String, float[]> references, Embedder embedder) {
-        var out = new ArrayList<Integer>();
+        // JCLAW-630: collect every candidate window first, embed them in ONE
+        // sidecar batch, then apply the margin test — the scan previously
+        // paid one HTTP round trip per short turn.
+        var indices = new ArrayList<Integer>();
+        var windows = new ArrayList<float[]>();
         for (int i = 0; i < entries.size(); i++) {
             if (affected.contains(i)) continue;
             var e = entries.get(i);
             double duration = e.end() - e.start();
             if (duration < MIN_NEAR_TIE_SECONDS || duration > MAX_ADJACENT_TURN_SECONDS) continue;
             if (!references.containsKey(e.speaker())) continue;
-            if (!mixedAudioBacksCurrentLabel(e, pcm, references, embedder)) out.add(i);
+            int from = (int) Math.clamp(Math.round(e.start() * SAMPLE_RATE), 0, pcm.length);
+            int to = (int) Math.clamp(Math.round(e.end() * SAMPLE_RATE), from, pcm.length);
+            if (to - from < SAMPLE_RATE / 2) continue;
+            var window = new float[to - from];
+            System.arraycopy(pcm, from, window, 0, window.length);
+            indices.add(i);
+            windows.add(window);
+        }
+        var out = new ArrayList<Integer>();
+        var embeddings = embedder.embedAll(windows);
+        for (int k = 0; k < indices.size(); k++) {
+            var e = entries.get(indices.get(k));
+            if (!marginBacksLabel(embeddings.get(k), e.speaker(), references)) {
+                out.add(indices.get(k));
+            }
         }
         return out;
     }

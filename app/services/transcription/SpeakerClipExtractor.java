@@ -71,6 +71,12 @@ public final class SpeakerClipExtractor {
     @FunctionalInterface
     public interface Embedder {
         float[] embed(float[] samples);
+
+        default List<float[]> embedAll(List<float[]> windows) {
+            var out = new ArrayList<float[]>(windows.size());
+            for (var w : windows) out.add(embed(w));
+            return out;
+        }
     }
 
     private SpeakerClipExtractor() {}

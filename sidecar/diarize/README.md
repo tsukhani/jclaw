@@ -23,6 +23,7 @@ segmentation are jointly tuned). ~18x realtime on Apple MPS.
 | POST | `/diarize` | `{audio_path, num_speakers?}` → `{segments: [{start, end, speaker}...], overlaps: [{start, end}...], device, seconds}`; `400` bad path, `409` busy, `500` load/inference error |
 | POST | `/separate` | `{audio_paths: [...]}` (ready-made 16 kHz mono WAVs) → `{stems: {"<path>": ["..._s1.wav", "..._s2.wav"], ...}}` — batched MossFormer2 2-speaker separation, one model load per batch, stems written beside each input (JCLAW-605) |
 | POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — GPU ASR: mlx-whisper (Apple silicon) / faster-whisper (CUDA, CPU int8), own uv script env (JCLAW-627) |
+| POST | `/embed` | `{audio_paths: [...], model}` → `{embeddings: [[...], ...]}` — batched WeSpeaker embeddings, same ONNX + feature pipeline as the retired JVM JNI stack (JCLAW-630) |
 | POST | `/msdd` | `{audio_path, num_speakers}` (16 kHz mono WAV) → `{segments: [{start, end, speaker}...]}` — NeMo MSDD second opinion, overlap-aware, segments may overlap in time (JCLAW-612) |
 
 The audio file is passed **by path** (same host; attachments are already on

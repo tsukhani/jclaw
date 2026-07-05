@@ -313,6 +313,50 @@ public class PyannoteDiarizationClient {
         }
     }
 
+    /**
+     * Batched WeSpeaker embeddings via the sidecar (JCLAW-630) — same ONNX
+     * and feature pipeline as the retired JNI stack, so results are
+     * compatible with every calibrated threshold. One call per batch.
+     */
+    public List<float[]> embedBatch(List<Path> windowWavs, Path modelOnnx) {
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
+        var body = new JsonObject();
+        var arr = new com.google.gson.JsonArray();
+        windowWavs.forEach(w -> arr.add(w.toAbsolutePath().toString()));
+        body.add("audio_paths", arr);
+        body.addProperty("model", modelOnnx.toAbsolutePath().toString());
+        var call = client.newCall(new Request.Builder()
+                .url(baseUrl + "/embed")
+                .post(RequestBody.create(body.toString(), JSON))
+                .build());
+        call.timeout().timeout(ConfigService.getInt(
+                PyannoteSidecarManager.CONFIG_PREFIX + ".timeoutSeconds", 1800), TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            var text = resp.body().string();
+            if (!resp.isSuccessful()) {
+                throw new TranscriptionException(
+                        "pyannote sidecar embed failed: HTTP %d — %s".formatted(
+                                resp.code(), truncate(text)));
+            }
+            var root = JsonParser.parseString(text).getAsJsonObject();
+            var out = new ArrayList<float[]>();
+            for (var el : root.getAsJsonArray("embeddings")) {
+                var a = el.getAsJsonArray();
+                var v = new float[a.size()];
+                for (int i = 0; i < v.length; i++) v[i] = a.get(i).getAsFloat();
+                out.add(v);
+            }
+            if (out.size() != windowWavs.size()) {
+                throw new TranscriptionException("sidecar returned %d embeddings for %d windows"
+                        .formatted(out.size(), windowWavs.size()));
+            }
+            return out;
+        } catch (IOException e) {
+            throw new TranscriptionException(
+                    "pyannote sidecar unreachable: " + e.getMessage(), e);
+        }
+    }
+
     private static String truncate(String s) {
         if (s == null) return "";
         var oneLine = s.replaceAll("\\s+", " ").strip();

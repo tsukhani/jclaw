@@ -1,7 +1,5 @@
 package services.transcription;
 
-import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor;
-import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig;
 import play.Logger;
 
 import java.io.IOException;
@@ -63,10 +61,6 @@ public final class SpeakerNamer {
      *  left anonymous rather than guessed. */
     static final double AMBIGUITY_GAP = 0.03;
 
-    private static final Object lock = new Object();
-    // Guarded by lock.
-    private static SpeakerEmbeddingExtractor extractor = null;
-
     private SpeakerNamer() {}
 
     /**
@@ -96,12 +90,9 @@ public final class SpeakerNamer {
         var enrollment = scanEnrollment();
         if (enrollment.isEmpty() || segments.isEmpty()) return Map.of();
 
-        var embeddingModel = DiarizationModelManager.ensureAvailable(
-                DiarizationModelManager.DiarizationModel.EMBEDDING);
         float[] samples = WhisperJniTranscriber.ffmpegToPcmF32(audioFile);
 
-        synchronized (lock) {
-            ensureExtractor(embeddingModel);
+        {
             // Person references: chunk-averaged across ALL enrolled clips.
             var references = new LinkedHashMap<String, float[]>();
             for (var person : enrollment.entrySet()) {
@@ -188,16 +179,16 @@ public final class SpeakerNamer {
     }
 
     /** Average of the chunks' embeddings, or null with no usable chunk.
-     *  Caller must hold {@link #lock}. */
+     *  One batched sidecar call for the whole chunk list (JCLAW-630). */
     private static float[] averagedEmbedding(java.util.List<float[]> chunks) {
+        if (chunks.isEmpty()) return null;
         float[] avg = null;
-        for (var chunk : chunks) {
+        for (var emb : SidecarEmbedder.INSTANCE.embedAll(chunks)) {
             // JCLAW-623: unit-scale each chunk so loud chunks don't dominate.
-            var emb = OverlapReattributor.l2normalize(embeddingOf(chunk));
+            emb = OverlapReattributor.l2normalize(emb);
             if (avg == null) avg = new float[emb.length];
             for (int i = 0; i < emb.length; i++) avg[i] += emb[i];
         }
-        if (avg == null) return null;
         for (int i = 0; i < avg.length; i++) avg[i] /= chunks.size();
         return avg;
     }
@@ -209,27 +200,7 @@ public final class SpeakerNamer {
      * disk first.
      */
     public static float[] embedWindow(float[] samples) {
-        var embeddingModel = DiarizationModelManager.ensureAvailable(
-                DiarizationModelManager.DiarizationModel.EMBEDDING);
-        synchronized (lock) {
-            ensureExtractor(embeddingModel);
-            return embeddingOf(samples);
-        }
-    }
-
-    /** Free the native extractor on JVM shutdown. Wired from {@link jobs.ShutdownJob}. */
-    public static void shutdown() {
-        synchronized (lock) {
-            if (extractor != null) {
-                try {
-                    extractor.release();
-                } catch (@SuppressWarnings("java:S1181") Throwable t) {
-                    // JNI release can surface native errors; shutdown must continue
-                    Logger.warn(t, "SpeakerNamer: error releasing extractor");
-                }
-                extractor = null;
-            }
-        }
+        return SidecarEmbedder.INSTANCE.embed(samples);
     }
 
     /** {@code display name → reference clips}, hidden entries ignored. */
@@ -287,45 +258,13 @@ public final class SpeakerNamer {
         return voice;
     }
 
-    /** Caller must hold {@link #lock}. */
-    private static float[] embeddingOf(float[] samples) {
-        var stream = extractor.createStream();
-        try {
-            stream.acceptWaveform(samples, 16_000);
-            stream.inputFinished();
-            return extractor.compute(stream);
-        } finally {
-            stream.release();
-        }
-    }
-
-    /** Caller must hold {@link #lock}. */
-    private static void ensureExtractor(Path embeddingModel) {
-        if (extractor != null) return;
-        try {
-            extractor = new SpeakerEmbeddingExtractor(
-                    SpeakerEmbeddingExtractorConfig.builder()
-                            .setModel(embeddingModel.toString())
-                            .build());
-            Logger.info("SpeakerNamer: embedding extractor loaded (dim=%d)", extractor.getDim());
-        } catch (RuntimeException e) {
-            throw new TranscriptionException(
-                    "failed to initialise sherpa-onnx speaker-embedding extractor: " + e.getMessage(), e);
-        } catch (@SuppressWarnings("java:S1181") UnsatisfiedLinkError e) {
-            throw new TranscriptionException(
-                    "sherpa-onnx native library unavailable on this platform — "
-                            + "speaker naming needs a sherpa-onnx-native-lib jar for this OS/arch", e);
-        }
-    }
-
     /** Test-only: redirect the enrollment root. */
     public static void setRootForTest(Path testRoot) {
         root = testRoot == null ? DEFAULT_ROOT : testRoot;
     }
 
-    /** Test-only: drop the cached extractor so tests don't bleed. */
+    /** Test-only: restore the default enrollment root. */
     public static void resetForTest() {
-        shutdown();
         root = DEFAULT_ROOT;
     }
 }

@@ -208,8 +208,7 @@ public final class EnrollmentHarvester {
                 int len = Math.min(CHUNK_SAMPLES, to - at);
                 if (len < SAMPLE_RATE) break;
                 bySpeaker.computeIfAbsent(seg.speaker(), _ -> new ArrayList<>())
-                        .add(OverlapReattributor.l2normalize(
-                                embedder.embed(Arrays.copyOfRange(pcm, at, at + len))));
+                        .add(Arrays.copyOfRange(pcm, at, at + len));
                 have += len;
             }
             collected.put(seg.speaker(), have);
@@ -217,7 +216,10 @@ public final class EnrollmentHarvester {
         var out = new LinkedHashMap<Integer, float[]>();
         for (var e : bySpeaker.entrySet()) {
             float[] avg = null;
-            for (var emb : e.getValue()) {
+            // JCLAW-630: one batched embed call per speaker; JCLAW-623:
+            // unit-scale each chunk before averaging.
+            for (var emb : embedder.embedAll(e.getValue())) {
+                emb = OverlapReattributor.l2normalize(emb);
                 if (avg == null) avg = new float[emb.length];
                 for (int i = 0; i < emb.length; i++) avg[i] += emb[i];
             }
