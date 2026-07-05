@@ -22,9 +22,17 @@ import sys
 
 def main():
     audio, num_speakers = sys.argv[1], int(sys.argv[2])
+    import torch
     from nemo.collections.asr.models.msdd_models import NeuralDiarizer
-    sys.stderr.write("[msdd] loading diar_msdd_telephonic\n")
+    # JCLAW-638: NeMo supports CUDA but not MPS — pick CUDA when present,
+    # otherwise CPU, and SAY so (the silent-CPU-on-Mac behavior hid a 5x
+    # cost). serve.py logs devices the same way.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    sys.stderr.write("[msdd] loading diar_msdd_telephonic on %s%s\n"
+                     % (device, " (NeMo has no MPS support)" if device == "cpu"
+                        and torch.backends.mps.is_available() else ""))
     diarizer = NeuralDiarizer.from_pretrained("diar_msdd_telephonic")
+    diarizer = diarizer.to(device)
     # num_workers=0: NeMo dataloader workers hit a spawn-pickling failure on
     # macOS (SpeechLabelEntity is not picklable across spawn).
     annotation = diarizer(audio, num_speakers=num_speakers,

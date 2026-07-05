@@ -23,8 +23,15 @@ def main():
     if not inputs:
         print(json.dumps({"error": "no input files"}))
         return 1
+    import torch
     from clearvoice import ClearVoice
-    sys.stderr.write("[separate] loading MossFormer2_SS_16K\n")
+    # JCLAW-638: clearvoice picks CUDA itself when available but never MPS
+    # (upstream limitation) — log the effective device so silent-CPU-on-Mac
+    # is at least visible, the way serve.py logs its device.
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    sys.stderr.write("[separate] loading MossFormer2_SS_16K on %s%s\n"
+                     % (device, " (clearvoice has no MPS support)" if device == "cpu"
+                        and torch.backends.mps.is_available() else ""))
     cv = ClearVoice(task="speech_separation", model_names=["MossFormer2_SS_16K"])
     result = {}
     for path in inputs:

@@ -227,6 +227,11 @@ public final class EmotionRecognizer {
         try {
             classifier = parseClassifier(Files.readAllBytes(classifierPath));
             var env = OrtEnvironment.getEnvironment();
+            // JCLAW-638 EP decision: default CPU provider stays. CoreML EP
+            // needs per-model op-coverage validation (wav2vec2 SER uses ops
+            // CoreML historically mishandles) and the CUDA EP needs the
+            // GPU onnxruntime artifact — both are a spike, not a config
+            // flip. Revisit if this pass re-enters the JFR top hotspots.
             session = env.createSession(modelPath.toString(), new OrtSession.SessionOptions());
             inputName = session.getInputNames().iterator().next();
             Logger.info("EmotionRecognizer: emotion2vec+ loaded from %s (input=%s)",
