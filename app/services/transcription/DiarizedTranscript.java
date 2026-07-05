@@ -26,13 +26,18 @@ public final class DiarizedTranscript {
      *  evidence could not decide the speaker — the label shown is the
      *  diarizer's best guess and a reviewer should re-listen. */
     public record Entry(String speaker, double start, double end, String text, String emotion,
-                        boolean crossTalk) {
+                        boolean crossTalk, boolean underSpeech) {
         public Entry(String speaker, double start, double end, String text) {
-            this(speaker, start, end, text, null, false);
+            this(speaker, start, end, text, null, false, false);
         }
 
         public Entry(String speaker, double start, double end, String text, String emotion) {
-            this(speaker, start, end, text, emotion, false);
+            this(speaker, start, end, text, emotion, false, false);
+        }
+
+        public Entry(String speaker, double start, double end, String text, String emotion,
+                     boolean crossTalk) {
+            this(speaker, start, end, text, emotion, crossTalk, false);
         }
     }
 
@@ -129,6 +134,10 @@ public final class DiarizedTranscript {
             if (e.crossTalk()) {
                 if (qualifiers.length() > 0) qualifiers.append(", ");
                 qualifiers.append("cross-talk?");
+            }
+            if (e.underSpeech()) {
+                if (qualifiers.length() > 0) qualifiers.append(", ");
+                qualifiers.append("under-speech");
             }
             var tag = qualifiers.length() == 0
                     ? e.speaker()

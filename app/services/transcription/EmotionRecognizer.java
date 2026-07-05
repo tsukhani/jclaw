@@ -111,7 +111,8 @@ public final class EmotionRecognizer {
             }
             var emotion = classify(samples, w[0], w[1]);
             annotated.add(emotion.label() == null ? e : new DiarizedTranscript.Entry(
-                    e.speaker(), e.start(), e.end(), e.text(), emotion.label(), e.crossTalk()));
+                    e.speaker(), e.start(), e.end(), e.text(), emotion.label(), e.crossTalk(),
+                    e.underSpeech()));
         }
         return annotated;
     }

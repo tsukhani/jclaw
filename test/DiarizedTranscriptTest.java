@@ -201,4 +201,12 @@ class DiarizedTranscriptTest extends UnitTest {
         assertTrue(text.contains("Firdaus (cross-talk?): Contested turn."), text);
         assertTrue(text.contains("Firdaus (angry, cross-talk?): Contested and angry."), text);
     }
+
+    @Test
+    void toText_rendersUnderSpeechQualifier() {
+        var entries = java.util.List.of(
+                new DiarizedTranscript.Entry("Firdaus", 1, 2, "Yeah.", null, false, true));
+        assertTrue(DiarizedTranscript.toText(entries).contains("Firdaus (under-speech): Yeah."),
+                DiarizedTranscript.toText(entries));
+    }
 }

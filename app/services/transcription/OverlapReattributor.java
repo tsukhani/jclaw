@@ -38,6 +38,7 @@ public final class OverlapReattributor {
 
     public static final String ENABLED_KEY = "transcription.diarization.overlapReattribution";
     public static final String MSDD_KEY = "transcription.diarization.msddSecondOpinion";
+    public static final String UNDER_SPEECH_KEY = "transcription.diarization.underSpeechRecovery";
 
     /** Near-tie candidacy floor (JCLAW-612): turns shorter than this can
      *  never earn a decisive MSDD verdict (sustained-speech threshold), so
@@ -129,8 +130,12 @@ public final class OverlapReattributor {
                 float[] pcmForMsdd = pcm;
                 msdd = () -> msddViaSidecar(pcmForMsdd, speakers);
             }
+            UnderSpeechRecovery.Transcriber transcriber =
+                    diarization.viaPyannote()
+                            && services.ConfigService.getBoolean(UNDER_SPEECH_KEY, true)
+                    ? OverlapReattributor::transcribeSlice : null;
             return reattribute(entries, diarization.overlaps(), pcm, separator,
-                    SpeakerNamer::embedWindow, msdd);
+                    SpeakerNamer::embedWindow, msdd, transcriber);
         } catch (RuntimeException e) {
             Logger.warn("OverlapReattributor: re-attribution skipped: %s", e.getMessage());
             return entries;
@@ -145,11 +150,19 @@ public final class OverlapReattributor {
         return reattribute(entries, overlaps, pcm, separator, embedder, null);
     }
 
-    /** Throwing core with injected seams — the testable path. */
     public static List<DiarizedTranscript.Entry> reattribute(
             List<DiarizedTranscript.Entry> entries, List<double[]> overlaps,
             float[] pcm, Separator separator, Embedder embedder,
             java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> msddOpinion) {
+        return reattribute(entries, overlaps, pcm, separator, embedder, msddOpinion, null);
+    }
+
+    /** Throwing core with injected seams — the testable path. */
+    public static List<DiarizedTranscript.Entry> reattribute(
+            List<DiarizedTranscript.Entry> entries, List<double[]> overlaps,
+            float[] pcm, Separator separator, Embedder embedder,
+            java.util.function.Supplier<List<SherpaDiarizer.SpeakerSegment>> msddOpinion,
+            UnderSpeechRecovery.Transcriber transcriber) {
         var affected = new ArrayList<Integer>();
         for (int i = 0; i < entries.size(); i++) {
             if (inOverlap(entries.get(i), overlaps)) affected.add(i);
@@ -273,7 +286,10 @@ public final class OverlapReattributor {
         if (reassigned > 0) {
             Logger.info("OverlapReattributor: reassigned %d overlap turn(s)", reassigned);
         }
-        return out;
+        // JCLAW-613: backchannels under the dominant voice live in the minor
+        // stems — recover them as their own interjection turns.
+        return UnderSpeechRecovery.recover(out, overlaps, windows, regionStarts,
+                stemsPerWindow, references, embedder, transcriber);
     }
 
     /**
@@ -497,6 +513,31 @@ public final class OverlapReattributor {
             return new PyannoteDiarizationClient().msdd(wav, speakers);
         } catch (IOException e) {
             throw new TranscriptionException("failed to stage MSDD audio: " + e.getMessage(), e);
+        } finally {
+            if (tmpDir != null) deleteRecursive(tmpDir);
+        }
+    }
+
+    /** Production transcriber for recovered stem slices: temp WAV through
+     *  the resident whisper model. Best-effort — "" on any failure. */
+    private static String transcribeSlice(float[] samples) {
+        Path tmpDir = null;
+        try {
+            tmpDir = Files.createTempDirectory("jclaw-under-");
+            var wav = tmpDir.resolve("slice.wav");
+            Files.write(wav, SpeakerClipExtractor.toWavPcm16(samples));
+            var model = WhisperModel.byId(services.ConfigService.get("transcription.localModel"))
+                    .orElse(WhisperModel.DEFAULT);
+            var segments = WhisperJniTranscriber.transcribeSegments(wav, model, null);
+            var sb = new StringBuilder();
+            for (var seg : segments) {
+                if (!sb.isEmpty()) sb.append(' ');
+                sb.append(seg.text().strip());
+            }
+            return sb.toString();
+        } catch (IOException | RuntimeException e) {
+            Logger.warn("OverlapReattributor: under-speech transcription failed (%s)", e.getMessage());
+            return "";
         } finally {
             if (tmpDir != null) deleteRecursive(tmpDir);
         }
