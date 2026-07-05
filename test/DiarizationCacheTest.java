@@ -77,6 +77,28 @@ class DiarizationCacheTest extends UnitTest {
     }
 
     @Test
+    void transcriptSection_roundTrips_andKeysOnModelAndLanguage() {
+        DiarizationCache.write(audio, -1, result());
+        var segments = List.of(
+                new services.transcription.WhisperJniTranscriber.Segment(0, 2000, "Hello."),
+                new services.transcription.WhisperJniTranscriber.Segment(2500, 4000, "World."));
+        DiarizationCache.writeTranscript(audio, "large", null, segments);
+
+        var cached = DiarizationCache.readTranscript(audio, "large", null);
+        assertNotNull(cached);
+        assertEquals(2, cached.size());
+        assertEquals("Hello.", cached.get(0).text());
+        assertEquals(2500, cached.get(1).startMs());
+
+        assertNull(DiarizationCache.readTranscript(audio, "small", null),
+                "a different model must miss");
+        assertNull(DiarizationCache.readTranscript(audio, "large", "ms"),
+                "a different language must miss (null keys as auto)");
+        assertNotNull(DiarizationCache.read(audio, -1),
+                "the merge must not clobber the diarization section");
+    }
+
+    @Test
     void msddSection_roundTrips_andRequiresAnchorAndSpeakerCount() {
         assertNull(DiarizationCache.readMsdd(audio, 2), "no cache file yet");
         DiarizationCache.writeMsdd(audio, 2,

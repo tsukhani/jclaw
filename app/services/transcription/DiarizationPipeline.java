@@ -60,7 +60,14 @@ public final class DiarizationPipeline {
 
         var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                 .orElse(WhisperModel.DEFAULT);
-        var transcript = WhisperJniTranscriber.transcribeSegments(audio, model, opts.language());
+        // JCLAW-629: raw ASR is deterministic given (audio, model, language)
+        // — cache it beside the diarization so the post-enrollment second
+        // round performs no full-recording inference at all.
+        var transcript = DiarizationCache.readTranscript(audio, model.id(), opts.language());
+        if (transcript == null) {
+            transcript = WhisperJniTranscriber.transcribeSegments(audio, model, opts.language());
+            DiarizationCache.writeTranscript(audio, model.id(), opts.language(), transcript);
+        }
         // JCLAW-603: word-level split of boundary-straddling segments.
         transcript = SegmentWordSplitter.split(transcript, speakers, audio);
         var entries = DiarizedTranscript.merge(transcript, speakers, names);

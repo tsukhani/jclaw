@@ -142,6 +142,71 @@ public final class DiarizationCache {
         }
     }
 
+    /**
+     * Cached whisper transcript (JCLAW-629), or null. Deterministic given
+     * (audio, model, language) — the post-enrollment second diarize round
+     * previously re-ran ASR over the whole recording, its dominant
+     * remaining cost. Same fingerprint discipline as the other sections.
+     */
+    public static List<WhisperJniTranscriber.Segment> readTranscript(
+            Path audioFile, String model, String language) {
+        var file = cacheFile(audioFile);
+        if (!Files.isRegularFile(file)) return null;
+        try {
+            var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            if (!fingerprintMatches(root) || !root.has("transcript")) return null;
+            var t = root.getAsJsonObject("transcript");
+            if (!t.get("model").getAsString().equals(model)
+                    || !t.get("language").getAsString().equals(languageKey(language))) {
+                return null;
+            }
+            var segments = new ArrayList<WhisperJniTranscriber.Segment>();
+            for (var el : t.getAsJsonArray("segments")) {
+                var o = el.getAsJsonObject();
+                segments.add(new WhisperJniTranscriber.Segment(
+                        o.get("startMs").getAsLong(), o.get("endMs").getAsLong(),
+                        o.get("text").getAsString()));
+            }
+            Logger.info("DiarizationCache: reusing cached transcript for %s (%d segments)",
+                    audioFile.getFileName(), segments.size());
+            return segments;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Merge the transcript section into the existing cache file. */
+    public static void writeTranscript(Path audioFile, String model, String language,
+                                       List<WhisperJniTranscriber.Segment> segments) {
+        var file = cacheFile(audioFile);
+        try {
+            if (!Files.isRegularFile(file)) return; // no diarization anchor
+            var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            if (!fingerprintMatches(root)) return;
+            var arr = new JsonArray();
+            for (var seg : segments) {
+                var o = new JsonObject();
+                o.addProperty("startMs", seg.startMs());
+                o.addProperty("endMs", seg.endMs());
+                o.addProperty("text", seg.text());
+                arr.add(o);
+            }
+            var t = new JsonObject();
+            t.addProperty("model", model);
+            t.addProperty("language", languageKey(language));
+            t.add("segments", arr);
+            root.add("transcript", t);
+            Files.writeString(file, root.toString());
+        } catch (IOException | RuntimeException e) {
+            Logger.warn("DiarizationCache: could not write transcript section for %s (%s)",
+                    audioFile.getFileName(), e.getMessage());
+        }
+    }
+
+    private static String languageKey(String language) {
+        return language == null || language.isBlank() ? "auto" : language;
+    }
+
     /** Best-effort write; a failed write only costs a future recompute. */
     public static void write(Path audioFile, int numSpeakers,
                              DiarizationRouter.Result result) {
