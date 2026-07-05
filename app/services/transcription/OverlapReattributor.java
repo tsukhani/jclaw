@@ -126,7 +126,13 @@ public final class OverlapReattributor {
                 int speakers = Math.max(2, (int) entries.stream()
                         .map(DiarizedTranscript.Entry::speaker).distinct().count());
                 float[] pcmForMsdd = pcm;
-                msdd = () -> msddViaSidecar(pcmForMsdd, speakers);
+                msdd = () -> {
+                    var cached = DiarizationCache.readMsdd(audioFile, speakers);
+                    if (cached != null) return cached;
+                    var fresh = msddViaSidecar(pcmForMsdd, speakers);
+                    DiarizationCache.writeMsdd(audioFile, speakers, fresh);
+                    return fresh;
+                };
             }
             UnderSpeechRecovery.Transcriber transcriber =
                     services.ConfigService.getBoolean(UNDER_SPEECH_KEY, true)

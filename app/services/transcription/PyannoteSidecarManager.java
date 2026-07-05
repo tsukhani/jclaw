@@ -19,7 +19,7 @@ import services.UvProbe;
  */
 public final class PyannoteSidecarManager {
 
-    static final String DEFAULT_MODEL = "pyannote/speaker-diarization-community-1";
+    public static final String DEFAULT_MODEL = "pyannote/speaker-diarization-community-1";
     static final String CONFIG_PREFIX = "transcription.diarization.local";
 
     private static final LocalSidecarDaemon DAEMON = new LocalSidecarDaemon(new LocalSidecarDaemon.Config(

@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Per-attachment diarization cache (JCLAW-611). The identification-first
@@ -26,7 +27,24 @@ import java.util.ArrayList;
  */
 public final class DiarizationCache {
 
+    /** Bump when segment-shaping logic changes (exclusive-mode handling,
+     *  overlap extraction, ...) so previously cached results read as
+     *  misses (JCLAW-621). Model changes are keyed separately below. */
+    static final int PIPELINE_VERSION = 1;
+
     private DiarizationCache() {}
+
+    private static String configuredModel() {
+        return services.ConfigService.get(
+                PyannoteSidecarManager.CONFIG_PREFIX + ".model",
+                PyannoteSidecarManager.DEFAULT_MODEL);
+    }
+
+    private static boolean fingerprintMatches(com.google.gson.JsonObject root) {
+        return root.has("model") && configuredModel().equals(root.get("model").getAsString())
+                && root.has("pipelineVersion")
+                && root.get("pipelineVersion").getAsInt() == PIPELINE_VERSION;
+    }
 
     public static Path cacheFile(Path audioFile) {
         return audioFile.resolveSibling(audioFile.getFileName() + ".diarization.json");
@@ -38,7 +56,10 @@ public final class DiarizationCache {
         if (!Files.isRegularFile(file)) return null;
         try {
             var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
-            if (root.get("numSpeakers").getAsInt() != numSpeakers) {
+            // JCLAW-621: entries persist beside the attachment forever — a
+            // model upgrade or pipeline change must read as a miss, never
+            // silently serve stale segments. Pre-fingerprint files miss too.
+            if (!fingerprintMatches(root) || root.get("numSpeakers").getAsInt() != numSpeakers) {
                 return null;
             }
             var segments = new ArrayList<SpeakerSegment>();
@@ -63,10 +84,70 @@ public final class DiarizationCache {
         }
     }
 
+    /**
+     * Cached MSDD second-opinion segments (JCLAW-624), or null. The
+     * identification-first flow promises the post-enrollment diarize is
+     * fast; without this, the full NeMo pass re-ran on the second call.
+     * Same fingerprint discipline as the diarization section.
+     */
+    public static List<SpeakerSegment> readMsdd(Path audioFile, int numSpeakers) {
+        var file = cacheFile(audioFile);
+        if (!Files.isRegularFile(file)) return null;
+        try {
+            var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            if (!fingerprintMatches(root) || !root.has("msdd")) return null;
+            var msdd = root.getAsJsonObject("msdd");
+            if (msdd.get("numSpeakers").getAsInt() != numSpeakers) return null;
+            var segments = new ArrayList<SpeakerSegment>();
+            for (var el : msdd.getAsJsonArray("segments")) {
+                var o = el.getAsJsonObject();
+                segments.add(new SpeakerSegment(o.get("start").getAsDouble(),
+                        o.get("end").getAsDouble(), o.get("speaker").getAsInt()));
+            }
+            Logger.info("DiarizationCache: reusing cached MSDD opinion for %s (%d segments)",
+                    audioFile.getFileName(), segments.size());
+            return segments;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Merge the MSDD section into the existing cache file, best-effort. */
+    public static void writeMsdd(Path audioFile, int numSpeakers, List<SpeakerSegment> segments) {
+        var file = cacheFile(audioFile);
+        try {
+            JsonObject root;
+            if (Files.isRegularFile(file)) {
+                root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+                if (!fingerprintMatches(root)) return; // stale main section: don't graft onto it
+            } else {
+                return; // MSDD without a diarization section has no anchor
+            }
+            var arr = new JsonArray();
+            for (var s : segments) {
+                var o = new JsonObject();
+                o.addProperty("start", s.start());
+                o.addProperty("end", s.end());
+                o.addProperty("speaker", s.speaker());
+                arr.add(o);
+            }
+            var msdd = new JsonObject();
+            msdd.addProperty("numSpeakers", numSpeakers);
+            msdd.add("segments", arr);
+            root.add("msdd", msdd);
+            Files.writeString(file, root.toString());
+        } catch (IOException | RuntimeException e) {
+            Logger.warn("DiarizationCache: could not write MSDD section for %s (%s)",
+                    audioFile.getFileName(), e.getMessage());
+        }
+    }
+
     /** Best-effort write; a failed write only costs a future recompute. */
     public static void write(Path audioFile, int numSpeakers,
                              DiarizationRouter.Result result) {
         var root = new JsonObject();
+        root.addProperty("model", configuredModel());
+        root.addProperty("pipelineVersion", PIPELINE_VERSION);
         root.addProperty("numSpeakers", numSpeakers);
         var segments = new JsonArray();
         for (var s : result.segments()) {
