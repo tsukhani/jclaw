@@ -9,7 +9,7 @@ import java.util.Optional;
 import static utils.GsonHolder.INSTANCE;
 
 /**
- * Merges whisper transcript segments with sherpa speaker segments into a
+ * Merges whisper transcript segments with diarized speaker segments into a
  * speaker-attributed transcript, and renders it in the four JCLAW-556
  * output formats (JSON, TXT, SRT, VTT). Pure functions over the two
  * segment lists — no I/O, no native calls — so the merge and every

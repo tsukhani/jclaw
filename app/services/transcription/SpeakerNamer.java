@@ -26,7 +26,7 @@ import java.util.stream.Stream;
  *
  * <p>Matching (rewritten in JCLAW-606 on the JCLAW-605 evidence that
  * reference quality dominates): every clip of a person is decoded, chunked
- * into 5s pieces, each chunk embedded with sherpa-onnx's
+ * into 5s pieces, each chunk embedded with the sidecar's WeSpeaker
  * {@link SpeakerEmbeddingExtractor} (the same WeSpeaker model the diarizer
  * downloads), and the embeddings AVERAGED into one reference voiceprint;
  * each diarized cluster's speech gets the same chunk-averaged treatment.

@@ -20,7 +20,7 @@ import java.util.List;
  * through untouched (byte-identical output for the common case, and the
  * alignment model isn't even loaded), and any alignment failure keeps the
  * original segment rather than risking the transcript. Backend-agnostic —
- * boundaries come from whichever diarizer ran (pyannote sidecar or sherpa).
+ * boundaries come from the pyannote sidecar diarization.
  */
 public final class SegmentWordSplitter {
 

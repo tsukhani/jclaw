@@ -397,7 +397,7 @@ dependencies {
     // export, Apache-2.0) run in-process through ONNX Runtime's Java API. The
     // jar bundles native libs for mac arm64/x64, linux x64/arm64 and win x64
     // and self-extracts at load — same zero-setup, no-sidecar posture as
-    // whisper-jni and sherpa-onnx above. (sherpa links its own onnxruntime
+    // whisper-jni above.
     // copy statically; the two loads don't interact.)
     implementation("com.microsoft.onnxruntime:onnxruntime:1.26.0")
 

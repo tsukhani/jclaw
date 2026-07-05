@@ -87,7 +87,7 @@ public final class SpeakerClipExtractor {
      * Exclusive-mode diarization absorbs cross-talk into the dominant
      * speaker's span, so mid-segment cuts alone can still capture the other
      * voice bleeding through — enrollment clips must come from spans where
-     * only one person was speaking. With no overlap data (sherpa path) this
+     * only one person was speaking. With no overlap data this
      * is the identity.
      */
     public static List<SpeakerSegment> purify(

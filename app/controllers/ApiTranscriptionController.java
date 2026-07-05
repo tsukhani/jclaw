@@ -11,21 +11,14 @@ import services.ConfigService;
 import services.EventLogger;
 import services.transcription.DiarizedTranscript;
 import services.transcription.DiarizationPipeline;
-import services.transcription.DiarizationRouter;
-import services.transcription.EmotionRecognizer;
-import services.transcription.OverlapReattributor;
 import services.transcription.FfmpegProbe;
-import services.transcription.SegmentWordSplitter;
-import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
-import services.transcription.WhisperJniTranscriber;
 import services.transcription.WhisperModel;
 import services.transcription.WhisperModelManager;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -124,7 +117,7 @@ public class ApiTranscriptionController extends Controller {
     /**
      * POST /api/transcription/diarize — speaker-diarized transcription of an
      * uploaded audio file (JCLAW-556). Runs whisper (segment-level) and the
-     * sherpa-onnx diarizer over the same audio, merges by temporal overlap,
+     * pyannote sidecar diarizer over the same audio, merges by temporal overlap,
      * annotates each turn with an acoustic emotion label (JCLAW-563, unless
      * {@code transcription.emotion.enabled} is off), and renders in the
      * requested format.
@@ -136,7 +129,6 @@ public class ApiTranscriptionController extends Controller {
      * @param audio       multipart file upload (any container/codec ffmpeg reads)
      * @param format      json (default) | txt | srt | vtt
      * @param numSpeakers exact speaker count when known; omit to cluster by
-     *                    threshold ({@code transcription.diarization.threshold})
      * @param language    ISO 639-1 override for this recording; omit to follow
      *                    the model (auto-detect on multilingual, English on .en)
      */

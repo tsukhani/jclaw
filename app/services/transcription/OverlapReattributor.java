@@ -613,7 +613,7 @@ public final class OverlapReattributor {
     }
 
     /** Production transcriber for recovered stem slices: temp WAV through
-     *  the resident whisper model. Best-effort — "" on any failure. */
+     *  the sidecar ASR (JCLAW-627). Best-effort — "" on any failure. */
     private static String transcribeSlice(float[] samples) {
         Path tmpDir = null;
         try {

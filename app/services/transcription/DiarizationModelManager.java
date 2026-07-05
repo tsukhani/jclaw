@@ -1,18 +1,9 @@
 package services.transcription;
 
-import okhttp3.Request;
-import okhttp3.Response;
-import play.Logger;
-import services.EventLogger;
-import utils.HttpFactories;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 
 /**
  * NOT vestigial despite the JCLAW-614 sherpa-diarizer removal: the WeSpeaker
@@ -20,7 +11,7 @@ import java.util.HexFormat;
  * which powers voice naming, overlap re-attribution and every enrollment
  * purity gate.
  *
- * Downloader for the two ONNX models the sherpa-onnx diarization engine
+ * Downloader for the WeSpeaker embedding ONNX the sidecar serves
  * needs (JCLAW-556): the pyannote segmentation-3.0 export and the
  * WeSpeaker VoxCeleb ResNet34-LM speaker-embedding model — the same two
  * models the reference pyannote 3.1 pipeline runs.
@@ -35,7 +26,7 @@ import java.util.HexFormat;
  */
 public final class DiarizationModelManager {
 
-    /** The two model files, keyed by their role in the sherpa pipeline. */
+    /** The embedding model (the sole survivor of the JCLAW-614 sherpa removal). */
     public enum DiarizationModel {
         EMBEDDING(
                 "wespeaker_en_voxceleb_resnet34_LM.onnx",

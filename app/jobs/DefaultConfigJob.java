@@ -79,12 +79,6 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("transcription.provider", "whisper-local");
         seedIfAbsent("transcription.localModel",
                 WhisperModel.DEFAULT.id());
-        // JCLAW-556: sherpa-onnx clustering threshold. 0.3 was the value the
-        // spike found separating similar same-gender voices without
-        // oversplitting; raise toward 0.5 if distinct voices get split.
-        // JCLAW-558: minimum cosine similarity for renaming a diarized
-        // speaker to an enrolled voice. Lower if known speakers stay
-        // anonymous (far-field mics); raise if wrong names appear.
         seedIfAbsent("transcription.diarization.speakerMatchThreshold", "0.6");
         // JCLAW-563: per-turn acoustic emotion labels on diarized
         // transcripts. On by default (best-effort — failures never break a

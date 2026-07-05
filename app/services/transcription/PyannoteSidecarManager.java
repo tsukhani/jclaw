@@ -10,7 +10,7 @@ import services.UvProbe;
  * The spawn/drain/health/stop mechanism is shared with the imagegen/videogen
  * daemons via {@link LocalSidecarDaemon}; this facade adds the diarization
  * config prefix and the {@code uv} preflight. Backend selection (and the
- * sherpa fallback) lives in {@link DiarizationRouter} — this class only
+ * error, JCLAW-614) lives in {@link DiarizationRouter} — this class only
  * manages the process.
  *
  * <p>Registered for graceful shutdown via {@code jobs.ShutdownJob}. The daemon

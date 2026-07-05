@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * Speech emotion recognition (JCLAW-563, model swapped in JCLAW-564):
  * classifies how each diarized turn was spoken — the prosody/affect layer
- * on top of "what was said" (whisper) and "who said it" (sherpa). The
+ * on top of "what was said" (whisper) and "who said it" (the diarizer). The
  * emotion2vec+ base backbone runs in-process over ONNX Runtime's Java API,
  * so the whole pipeline stays sidecar-free. Self-supervised multilingual
  * pretraining is the point of the JCLAW-564 swap: labels stay coherent on

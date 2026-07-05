@@ -68,7 +68,7 @@ public class PyannoteDiarizationClient {
      * Diarize {@code audioFile}. Blocking; ensures the sidecar is running
      * first (which may pay the one-time env/model download). Throws
      * {@link TranscriptionException} on any sidecar or protocol failure —
-     * {@link DiarizationRouter} decides whether that falls back to sherpa.
+     * {@link DiarizationRouter} gates prerequisites; failures surface (no fallback, JCLAW-614).
      *
      * @param numSpeakers exact speaker count when known, or any value below 2
      *                    to let the pipeline find the count itself
