@@ -163,14 +163,26 @@ public final class EnrollmentHarvester {
             if (windows.isEmpty()) return verdicts;
 
             var stemsPerWindow = separator.separate(windows);
+            // JCLAW-634: every stem of every window in ONE batched embed
+            // call (previously two embeds per candidate window).
+            var stemWindows = new ArrayList<float[]>();
+            var stemAt = new int[windows.size()];
+            java.util.Arrays.fill(stemAt, -1);
+            for (int w = 0; w < windows.size(); w++) {
+                var stems = stemsPerWindow.get(w);
+                if (stems == null || stems.size() < 2) continue;
+                stemAt[w] = stemWindows.size();
+                stemWindows.add(stems.get(0));
+                stemWindows.add(stems.get(1));
+            }
+            var stemEmbs = embedder.embedAll(stemWindows);
             for (int w = 0; w < windows.size(); w++) {
                 int speaker = owners.get(w)[0];
                 var own = voiceprints.get(speaker);
                 if (own == null) continue;
-                var stems = stemsPerWindow.get(w);
-                if (stems == null || stems.size() < 2) continue;
-                var emb0 = embedder.embed(stems.get(0));
-                var emb1 = embedder.embed(stems.get(1));
+                if (stemAt[w] < 0) continue;
+                var emb0 = stemEmbs.get(stemAt[w]);
+                var emb1 = stemEmbs.get(stemAt[w] + 1);
                 var minor = OverlapReattributor.cosine(emb0, own)
                         >= OverlapReattributor.cosine(emb1, own) ? emb1 : emb0;
                 double bestMatch = Double.NEGATIVE_INFINITY;

@@ -229,23 +229,62 @@ public final class SpeakerClipExtractor {
         candidates.add(new double[]{lineupStart + lineupDuration, longest.end()});
         candidates.sort((a, b) -> Double.compare(b[1] - b[0], a[1] - a[0]));
 
-        outer:
+        // JCLAW-634: two-phase — cut every candidate piece first, anchor-gate
+        // them in ONE batched embed call (previously three embeds per piece),
+        // then accept in order until the budget fills. Cutting more pieces
+        // than the budget needs is cheap; the embeds were the cost.
+        var pieces = new ArrayList<float[]>();
+        var pieceAt = new ArrayList<Double>();
         for (var span : candidates) {
             for (double at = span[0]; span[1] - at >= MIN_PIECE_SECONDS; at += MAX_CLIP_SECONDS) {
-                if (total >= targetTotalSeconds) break outer;
-                double duration = Math.min(MAX_CLIP_SECONDS, span[1] - at);
-                var clip = cut(samples, at, duration);
+                var clip = cut(samples, at, Math.min(MAX_CLIP_SECONDS, span[1] - at));
                 if (clip == null) continue;
-                if (!matchesAnchor(clip, anchor, embedder)) {
-                    play.Logger.info("SpeakerClipExtractor: rejected %.1fs piece at %.1fs — "
-                            + "voiceprint does not match the anchor clip", duration, at);
-                    continue;
-                }
-                clips.add(clip);
-                total += duration;
+                pieces.add(clip);
+                pieceAt.add(at);
             }
         }
+        var verdicts = anchorVerdicts(pieces, anchor, embedder);
+        for (int i = 0; i < pieces.size(); i++) {
+            if (total >= targetTotalSeconds) break;
+            if (!verdicts.get(i)) {
+                play.Logger.info("SpeakerClipExtractor: rejected %.1fs piece at %.1fs — "
+                        + "voiceprint does not match the anchor clip",
+                        pieces.get(i).length / (double) SAMPLE_RATE, pieceAt.get(i));
+                continue;
+            }
+            clips.add(pieces.get(i));
+            total += pieces.get(i).length / (double) SAMPLE_RATE;
+        }
         return clips;
+    }
+
+    /** Anchor-gate a whole piece list with one batched embed call: each
+     *  piece contributes itself plus (when long enough) both halves. */
+    static List<Boolean> anchorVerdicts(List<float[]> pieces, float[] anchor, Embedder embedder) {
+        var windows = new ArrayList<float[]>();
+        var counts = new int[pieces.size()];
+        for (int i = 0; i < pieces.size(); i++) {
+            var clip = pieces.get(i);
+            windows.add(clip);
+            counts[i] = 1;
+            if (clip.length >= 2 * SAMPLE_RATE) {
+                windows.add(Arrays.copyOfRange(clip, 0, clip.length / 2));
+                windows.add(Arrays.copyOfRange(clip, clip.length / 2, clip.length));
+                counts[i] = 3;
+            }
+        }
+        var embs = embedder.embedAll(windows);
+        var verdicts = new ArrayList<Boolean>(pieces.size());
+        int k = 0;
+        for (int count : counts) {
+            boolean ok = true;
+            for (int j = 0; j < count; j++) {
+                if (OverlapReattributor.cosine(embs.get(k + j), anchor) < ANCHOR_GATE) ok = false;
+            }
+            verdicts.add(ok);
+            k += count;
+        }
+        return verdicts;
     }
 
     /** Anchor gate: the whole clip AND each half must match the anchor

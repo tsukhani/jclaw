@@ -91,6 +91,24 @@ class SidecarState:
         self.device = None
         self.load_error = None
         self.run_lock = threading.Lock()
+        self._embedder = None
+        self._embedder_model = None
+        self._embedder_lock = threading.Lock()
+
+    def embedder_for(self, model_path: str):
+        """JCLAW-634: resident WeSpeaker extractor, loaded once per model
+        path (reloads only if the JVM points at a different ONNX)."""
+        with self._embedder_lock:
+            if self._embedder is None or self._embedder_model != model_path:
+                import sherpa_onnx
+                t0 = time.time()
+                self._embedder = sherpa_onnx.SpeakerEmbeddingExtractor(
+                    sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+                        model=model_path, num_threads=2))
+                self._embedder_model = model_path
+                sys.stderr.write("[diarize-sidecar] embedder loaded in %.1fs (%s)\n"
+                                 % (time.time() - t0, os.path.basename(model_path)))
+            return self._embedder
 
     def touch(self):
         self.last_activity = time.monotonic()
@@ -164,6 +182,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if self.path == "/shutdown":
+            # JCLAW-637: lets a restarted JVM evict an adopted orphan whose
+            # model no longer matches config (no Process handle exists for a
+            # sidecar that survived a JVM crash). Localhost-only server.
+            sys.stderr.write("[diarize-sidecar] shutdown requested — exiting\n")
+            self._send_json(200, {"status": "bye"})
+            threading.Thread(target=lambda: (time.sleep(0.2), os._exit(0)),
+                             daemon=True).start()
+            return
         if self.path == "/transcribe":
             self._handle_transcribe()
             return
@@ -284,7 +311,10 @@ class Handler(BaseHTTPRequestHandler):
             self.state.run_lock.release()
 
     def _handle_embed(self):
-        """JCLAW-630: batched WeSpeaker embeddings via the embed.py env.
+        """Batched WeSpeaker embeddings (JCLAW-630), computed RESIDENT in the
+        daemon (JCLAW-634): sherpa-onnx is numpy>=2 compatible, so the ONNX
+        extractor loads once per process instead of paying an interpreter
+        start + model load (~1s) per call against sub-second compute.
         Deliberately NOT under run_lock: embedding batches are sub-second
         CPU work and must not queue behind minutes-long GPU inference."""
         self.state.touch()
@@ -300,25 +330,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "audio_paths/model missing or not files"})
             return
         try:
-            import subprocess, tempfile
             t0 = time.time()
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-                json.dump({"paths": paths}, f)
-                spec = f.name
-            try:
-                proc = subprocess.run(
-                    ["uv", "run", "embed.py", model, spec],
-                    cwd=script_dir, capture_output=True, text=True, timeout=600)
-            finally:
-                os.unlink(spec)
-            if proc.returncode != 0:
-                raise RuntimeError("embed.py exited %d: %s"
-                                   % (proc.returncode, proc.stderr.strip()[-300:]))
-            payload = json.loads(proc.stdout.strip().splitlines()[-1])
-            sys.stderr.write("[diarize-sidecar] embedded %d window(s) in %.1fs\n"
+            extractor = self.state.embedder_for(model)
+            out = []
+            for path in paths:
+                out.append(_embed_wav(extractor, path))
+            sys.stderr.write("[diarize-sidecar] embedded %d window(s) in %.1fs (resident)\n"
                              % (len(paths), time.time() - t0))
-            self._send_json(200, payload)
+            self._send_json(200, {"embeddings": out})
         except Exception as e:  # noqa: BLE001
             self._send_json(500, {"error": str(e)})
         finally:
@@ -403,6 +422,20 @@ class Handler(BaseHTTPRequestHandler):
             self.state.run_lock.release()
 
 
+def _embed_wav(extractor, path):
+    """16 kHz mono PCM16 WAV -> embedding, the retired embed.py's math."""
+    import wave
+    import numpy as np
+    with wave.open(path, "rb") as w:
+        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+        samples = pcm.astype(np.float32) / 32768.0
+        rate = w.getframerate()
+    stream = extractor.create_stream()
+    stream.accept_waveform(rate, samples)
+    stream.input_finished()
+    return [float(x) for x in extractor.compute(stream)]
+
+
 def _prewarm(state: SidecarState):
     """JCLAW-632: build the script envs and prefetch weights in the
     background so cold-start cliffs (multi-GB NeMo env, MossFormer2 and
@@ -416,7 +449,6 @@ def _prewarm(state: SidecarState):
         (["uv", "sync", "--script", "transcribe.py"], "transcribe env"),
         (["uv", "sync", "--script", "separate.py"], "separate env"),
         (["uv", "sync", "--script", "msdd.py"], "msdd env"),
-        (["uv", "sync", "--script", "embed.py"], "embed env"),
     ]
     for cmd, label in steps:
         while state.run_lock.locked():

@@ -211,6 +211,10 @@ public final class OverlapReattributor {
         var msdd = fetchOpinion(msddOpinion);
         var contested = new java.util.LinkedHashSet<Integer>(affected);
         contested.addAll(nearTie);
+        // JCLAW-634: precompute the mixed-support gate for every contested
+        // turn in ONE batched embed call (previously one HTTP round trip
+        // per turn inside the decision loop).
+        var mixedBacked = precomputeMixedGate(entries, contested, pcm, references, embedder);
         var mapping = msdd == null ? Map.<Integer, String>of()
                 : MsddSecondOpinion.mapSpeakers(entries, contested, msdd);
 
@@ -269,7 +273,7 @@ public final class OverlapReattributor {
         int reassigned = 0;
         for (int i : contested) {
             var entry = out.get(i);
-            if (mixedAudioBacksCurrentLabel(entry, pcm, references, embedder)) {
+            if (mixedBacked.getOrDefault(i, false)) {
                 continue; // clean, confidently-attributed speech: not ours to touch
             }
             // 1) MSDD second opinion — frame-level tracking resolves what
@@ -323,6 +327,34 @@ public final class OverlapReattributor {
      * flip is permitted. Buried voices cannot produce such support — their
      * mixed windows are near-ties by definition.
      */
+    /** JCLAW-634: the mixed-support gate for a whole contested set in one
+     *  batched embed call. Entries whose window is too short or whose label
+     *  has no reference map to false (same as the per-entry gate). */
+    static Map<Integer, Boolean> precomputeMixedGate(
+            List<DiarizedTranscript.Entry> entries, java.util.Collection<Integer> contested,
+            float[] pcm, Map<String, float[]> references, Embedder embedder) {
+        var indices = new ArrayList<Integer>();
+        var windows = new ArrayList<float[]>();
+        for (int i : contested) {
+            var e = entries.get(i);
+            if (references.get(e.speaker()) == null) continue;
+            int from = (int) Math.clamp(Math.round(e.start() * SAMPLE_RATE), 0, pcm.length);
+            int to = (int) Math.clamp(Math.round(e.end() * SAMPLE_RATE), from, pcm.length);
+            if (to - from < SAMPLE_RATE / 2) continue;
+            var window = new float[to - from];
+            System.arraycopy(pcm, from, window, 0, window.length);
+            indices.add(i);
+            windows.add(window);
+        }
+        var out = new java.util.HashMap<Integer, Boolean>();
+        var embs = embedder.embedAll(windows);
+        for (int k = 0; k < indices.size(); k++) {
+            var e = entries.get(indices.get(k));
+            out.put(indices.get(k), marginBacksLabel(embs.get(k), e.speaker(), references));
+        }
+        return out;
+    }
+
     static boolean mixedAudioBacksCurrentLabel(DiarizedTranscript.Entry entry, float[] pcm,
                                                Map<String, float[]> references, Embedder embedder) {
         var current = references.get(entry.speaker());

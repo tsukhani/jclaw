@@ -125,8 +125,8 @@ public final class UnderSpeechRecovery {
                                           double windowStart, float[] underRef,
                                           float[] ownerRef,
                                           OverlapReattributor.Embedder embedder) {
-        float[] best = null;
-        double bestMargin = 0;
+        // JCLAW-634: both stems' slices in one batched embed call.
+        var slices = new ArrayList<float[]>();
         for (var stem : stems) {
             int from = (int) Math.clamp(Math.round((region[0] - 0.2 - windowStart) * SAMPLE_RATE),
                     0, stem.length);
@@ -136,12 +136,17 @@ public final class UnderSpeechRecovery {
             var slice = new float[to - from];
             System.arraycopy(stem, from, slice, 0, slice.length);
             if (OverlapReattributor.rms(slice) < MIN_RMS) continue;
-            var emb = embedder.embed(slice);
-            double margin = OverlapReattributor.cosine(emb, underRef)
-                    - OverlapReattributor.cosine(emb, ownerRef);
+            slices.add(slice);
+        }
+        float[] best = null;
+        double bestMargin = 0;
+        var embs = embedder.embedAll(slices);
+        for (int i = 0; i < slices.size(); i++) {
+            double margin = OverlapReattributor.cosine(embs.get(i), underRef)
+                    - OverlapReattributor.cosine(embs.get(i), ownerRef);
             if (margin > bestMargin) {
                 bestMargin = margin;
-                best = slice;
+                best = slices.get(i);
             }
         }
         return best;
