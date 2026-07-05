@@ -313,15 +313,21 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             deleteRecursive(staging);
             Files.createDirectories(staging);
 
-            // JCLAW-606: stage hidden extra reference clips per speaker so
-            // the enroll action stores a multi-clip set (the JCLAW-605
-            // lesson: averaged multi-clip references beat single clips).
-            // Only the lineup clip is attached/playable — UX unchanged.
+            // JCLAW-606/609: stage hidden extra reference clips per speaker
+            // so the enroll action stores a multi-clip, PURITY-GATED set —
+            // overlap purification + anchor voiceprint gate + separation
+            // stem gate (the last one only on the sidecar path). Only the
+            // lineup clip is attached/playable — UX unchanged.
+            var refsBySpeaker = services.transcription.EnrollmentHarvester.harvest(
+                    path, speakers, clips.stream().map(SpeakerClipExtractor.Clip::speaker).toList(),
+                    ENROLLMENT_TARGET_SECONDS, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS,
+                    SpeakerNamer::embedWindow,
+                    diarization.viaPyannote()
+                            ? services.transcription.OverlapReattributor::separateViaSidecar : null);
             var lineup = new StringBuilder();
             var generated = new java.util.ArrayList<GeneratedAttachment>(clips.size());
             for (var clip : clips) {
-                var refs = SpeakerClipExtractor.referenceClips(path, speakers, clip.speaker(),
-                        ENROLLMENT_TARGET_SECONDS, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS);
+                var refs = refsBySpeaker.getOrDefault(clip.speaker(), List.of());
                 for (int r = 1; r < refs.size(); r++) {
                     Files.write(staging.resolve(clip.label() + "-ref" + (r + 1) + ".wav"),
                             SpeakerClipExtractor.toWavPcm16(refs.get(r)));

@@ -39,9 +39,32 @@ public final class SpeakerClipExtractor {
     }
 
     /** Padding subtracted around each overlap region when purifying —
-     *  detected overlap boundaries are approximate; a margin keeps the
-     *  clip clear of the other voice's onset/tail. */
-    public static final double OVERLAP_PAD_SECONDS = 0.3;
+     *  detected overlap boundaries are approximate (measured error can
+     *  exceed half a second in heated exchanges); a generous margin keeps
+     *  clips clear of the other voice's onset/tail. */
+    public static final double OVERLAP_PAD_SECONDS = 0.75;
+
+    /** Spans shorter than this never feed the reference harvest: slivers
+     *  between detected overlaps live inside rapid exchanges where the
+     *  overlap detector under-reports (echo, backchannel), so they are
+     *  contaminated more often than not (JCLAW-609 UAT round 2). 5s is the
+     *  TSE-literature standard minimum for enrollment segments. */
+    public static final double MIN_HARVEST_SPAN_SECONDS = 5.0;
+
+    /** A candidate reference clip must match the anchor voiceprint (the
+     *  lineup clip — the audio the operator verifies by ear) at least this
+     *  closely, as must each of its halves. Same-speaker WeSpeaker cosines
+     *  measure 0.7+ on this pipeline; cross-speaker 0.3-0.5; a half-bled
+     *  clip lands between and is rejected. */
+    public static final double ANCHOR_GATE = 0.60;
+
+    /** Test seam matching {@link OverlapReattributor.Embedder} — the
+     *  extractor stays free of natives; production passes the WeSpeaker
+     *  extractor. */
+    @FunctionalInterface
+    public interface Embedder {
+        float[] embed(float[] samples);
+    }
 
     private SpeakerClipExtractor() {}
 
@@ -146,15 +169,17 @@ public final class SpeakerClipExtractor {
     public static List<float[]> referenceClips(Path audioFile,
                                                List<SherpaDiarizer.SpeakerSegment> segments,
                                                int speaker, double targetTotalSeconds,
-                                               double lineupSeconds, double minSeconds) {
+                                               double lineupSeconds, double minSeconds,
+                                               Embedder embedder) {
         return referenceClips(WhisperJniTranscriber.ffmpegToPcmF32(audioFile),
-                segments, speaker, targetTotalSeconds, lineupSeconds, minSeconds);
+                segments, speaker, targetTotalSeconds, lineupSeconds, minSeconds, embedder);
     }
 
     public static List<float[]> referenceClips(float[] samples,
                                                List<SherpaDiarizer.SpeakerSegment> segments,
                                                int speaker, double targetTotalSeconds,
-                                               double lineupSeconds, double minSeconds) {
+                                               double lineupSeconds, double minSeconds,
+                                               Embedder embedder) {
         var own = segments.stream()
                 .filter(s -> s.speaker() == speaker)
                 .sorted((a, b) -> Double.compare(b.end() - b.start(), a.end() - a.start()))
@@ -172,6 +197,12 @@ public final class SpeakerClipExtractor {
         if (lineup == null) return clips;
         clips.add(lineup);
         double total = lineupDuration;
+        // The anchor voiceprint: the operator verifies this exact audio by
+        // ear, and it comes from the deepest interior of the longest pure
+        // span — every harvested clip must acoustically match it
+        // (JCLAW-609 round 2: detector-based purity alone is not enough;
+        // undetected echo/backchannel contaminated harvested slivers).
+        float[] anchor = embedder.embed(lineup);
 
         // Harvest candidates: remaining spans + the longest span's remnants
         // around the lineup window, longest first.
@@ -186,15 +217,32 @@ public final class SpeakerClipExtractor {
         for (var span : candidates) {
             if (total >= targetTotalSeconds) break;
             double spanLength = span[1] - span[0];
-            if (spanLength < minSeconds) continue;
+            if (spanLength < Math.max(minSeconds, MIN_HARVEST_SPAN_SECONDS)) continue;
             double duration = Math.min(spanLength, targetTotalSeconds - total);
             if (duration < minSeconds) break;
             var clip = cut(samples, span[0] + (spanLength - duration) / 2, duration);
             if (clip == null) continue;
+            if (!matchesAnchor(clip, anchor, embedder)) {
+                play.Logger.info("SpeakerClipExtractor: rejected %.1fs candidate at %.1fs — "
+                        + "voiceprint does not match the anchor clip", duration, span[0]);
+                continue;
+            }
             clips.add(clip);
             total += duration;
         }
         return clips;
+    }
+
+    /** Anchor gate: the whole clip AND each half must match the anchor
+     *  voiceprint — a clip whose second half is another voice scores fine
+     *  on average but fails the half check. Public for the rule-table test. */
+    public static boolean matchesAnchor(float[] clip, float[] anchor, Embedder embedder) {
+        if (OverlapReattributor.cosine(embedder.embed(clip), anchor) < ANCHOR_GATE) return false;
+        if (clip.length < 2 * SAMPLE_RATE) return true; // halves under 1s embed unreliably
+        var first = Arrays.copyOfRange(clip, 0, clip.length / 2);
+        var second = Arrays.copyOfRange(clip, clip.length / 2, clip.length);
+        return OverlapReattributor.cosine(embedder.embed(first), anchor) >= ANCHOR_GATE
+                && OverlapReattributor.cosine(embedder.embed(second), anchor) >= ANCHOR_GATE;
     }
 
     /** Centered cut with the same clock-drift clamping {@link #extract}

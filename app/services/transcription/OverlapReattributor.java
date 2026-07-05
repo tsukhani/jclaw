@@ -111,7 +111,7 @@ public final class OverlapReattributor {
         try {
             float[] pcm = WhisperJniTranscriber.ffmpegToPcmF32(audioFile);
             return reattribute(entries, overlaps, pcm,
-                    OverlapReattributor::sidecarSeparate, SpeakerNamer::embedWindow);
+                    OverlapReattributor::separateViaSidecar, SpeakerNamer::embedWindow);
         } catch (RuntimeException e) {
             Logger.warn("OverlapReattributor: re-attribution skipped: %s", e.getMessage());
             return entries;
@@ -477,8 +477,10 @@ public final class OverlapReattributor {
     }
 
     /** Production separator: windows → temp WAVs → one sidecar /separate
-     *  batch → decoded stems; the whole temp tree is removed afterwards. */
-    private static List<List<float[]>> sidecarSeparate(List<float[]> windows) {
+     *  batch → decoded stems; the whole temp tree is removed afterwards.
+     *  Public since JCLAW-609: the enrollment purity gate batches through
+     *  the same sidecar endpoint. */
+    public static List<List<float[]>> separateViaSidecar(List<float[]> windows) {
         Path tmpDir = null;
         try {
             tmpDir = Files.createTempDirectory("jclaw-sep-");

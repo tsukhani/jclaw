@@ -19,6 +19,15 @@ class SpeakerClipExtractorTest extends UnitTest {
         return new SherpaDiarizer.SpeakerSegment(start, end, speaker);
     }
 
+    /** Voice-discriminating fake embedder: loud fills (mean >= 0.05) embed
+     *  as one voice, quiet fills as another — cosine 1 within a voice,
+     *  0 across. Uniform fixtures therefore always pass the anchor gate. */
+    private static final SpeakerClipExtractor.Embedder VOICE_EMBEDDER = samples -> {
+        double sum = 0;
+        for (float v : samples) sum += v;
+        return sum / samples.length >= 0.05 ? new float[]{1, 0} : new float[]{0, 1};
+    };
+
     /** Samples where sample[i] encodes the second it belongs to (i / SR),
      *  so a clip's provenance is checkable from its first value. */
     private static float[] rampSamples(double seconds) {
@@ -104,16 +113,19 @@ class SpeakerClipExtractorTest extends UnitTest {
                 new services.transcription.SherpaDiarizer.SpeakerSegment(50, 50.4, 0), // below min
                 new services.transcription.SherpaDiarizer.SpeakerSegment(10, 18, 1)); // other speaker
 
-        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0);
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0, VOICE_EMBEDDER);
 
         assertEquals(5 * SpeakerClipExtractor.SAMPLE_RATE, refs.get(0).length,
                 "first clip is the 5s lineup cut");
         double total = refs.stream().mapToInt(r -> r.length).sum()
                 / (double) SpeakerClipExtractor.SAMPLE_RATE;
-        // Pure speech available: 8 + 6 + 3 = 17s (the 0.4s span is below min,
-        // speaker 1's audio never contributes) — everything gets harvested.
-        assertEquals(17.0, total, 0.1, "harvest takes all pure speech when under target");
-        assertTrue(refs.size() >= 3, "spans plus remnants of the longest segment");
+        // Harvestable: 5s lineup + the 6s span = 11s. The 3s span and the
+        // 8s span's 1.5s remnants fall under the 5s harvest floor (the
+        // TSE-literature minimum for enrollment segments — short spans are
+        // contamination-prone), and the 0.4s span is below min; speaker 1's
+        // audio never contributes.
+        assertEquals(11.0, total, 0.1, "sub-5s spans never feed the harvest");
+        assertEquals(2, refs.size(), "lineup plus the one span above the harvest floor");
     }
 
     @Test
@@ -123,7 +135,7 @@ class SpeakerClipExtractorTest extends UnitTest {
         var segments = java.util.List.of(
                 new services.transcription.SherpaDiarizer.SpeakerSegment(5, 45, 0)); // one 40s span
 
-        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0);
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0, VOICE_EMBEDDER);
 
         double total = refs.stream().mapToInt(r -> r.length).sum()
                 / (double) SpeakerClipExtractor.SAMPLE_RATE;
@@ -143,7 +155,7 @@ class SpeakerClipExtractorTest extends UnitTest {
                 new services.transcription.SherpaDiarizer.SpeakerSegment(20, 24, 0));
 
         var lineup = SpeakerClipExtractor.extract(samples, segments, 5.0, 1.0);
-        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0);
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0, VOICE_EMBEDDER);
 
         assertArrayEquals(lineup.get(0).samples(), refs.get(0), 0f);
     }
@@ -153,15 +165,15 @@ class SpeakerClipExtractorTest extends UnitTest {
         var segments = java.util.List.of(
                 new services.transcription.SherpaDiarizer.SpeakerSegment(0, 10, 0),
                 new services.transcription.SherpaDiarizer.SpeakerSegment(12, 14, 1));
-        // Overlap 4-6s inside speaker 0's span; pad 0.3s each side.
+        // Overlap 4-6s inside speaker 0's span; pad 0.75s each side.
         var overlaps = java.util.List.<double[]>of(new double[]{4, 6});
 
         var pure = SpeakerClipExtractor.purify(segments, overlaps);
 
         assertEquals(3, pure.size());
         assertEquals(0.0, pure.get(0).start(), 1e-9);
-        assertEquals(3.7, pure.get(0).end(), 1e-9);
-        assertEquals(6.3, pure.get(1).start(), 1e-9);
+        assertEquals(3.25, pure.get(0).end(), 1e-9);
+        assertEquals(6.75, pure.get(1).start(), 1e-9);
         assertEquals(10.0, pure.get(1).end(), 1e-9);
         assertEquals(0, pure.get(1).speaker(), "sub-spans keep their speaker id");
         assertEquals(12.0, pure.get(2).start(), 1e-9, "untouched segment passes through");
@@ -172,7 +184,7 @@ class SpeakerClipExtractorTest extends UnitTest {
         var segments = java.util.List.of(
                 new services.transcription.SherpaDiarizer.SpeakerSegment(5, 6, 0));
         assertTrue(SpeakerClipExtractor.purify(segments,
-                        java.util.List.<double[]>of(new double[]{4.8, 6.1})).isEmpty(),
+                        java.util.List.<double[]>of(new double[]{4.9, 6.0})).isEmpty(),
                 "a span living entirely inside cross-talk yields nothing");
         assertEquals(segments, SpeakerClipExtractor.purify(segments, java.util.List.of()),
                 "no overlap data (sherpa path) must be the identity");
@@ -197,5 +209,45 @@ class SpeakerClipExtractorTest extends UnitTest {
         double clipEnd = clipStart + clips.get(0).duration();
         assertTrue(clipEnd <= 2.7 + 1e-6 || clipStart >= 7.3 - 1e-6,
                 "clip lies wholly inside a pure span: " + clipStart + "-" + clipEnd);
+    }
+
+    @Test
+    void referenceClips_rejectsCandidates_whoseVoiceprintFailsTheAnchorGate() {
+        // Speaker 0's longest span (0-10s) is genuinely their voice (loud
+        // fill); the second "pure" span (20-26s) actually carries the OTHER
+        // voice (quiet fill) — undetected bleed. The gate must reject it.
+        var samples = new float[30 * SR];
+        java.util.Arrays.fill(samples, 0, 10 * SR, 0.8f);
+        java.util.Arrays.fill(samples, 20 * SR, 26 * SR, 0.001f);
+        var segments = java.util.List.of(seg(0, 10, 0), seg(20, 26, 0));
+
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0, VOICE_EMBEDDER);
+
+        double total = refs.stream().mapToInt(r -> r.length).sum() / (double) SR;
+        assertEquals(5.0, total, 0.1,
+                "only the anchor survives: the bled span is rejected and the "
+                        + "2.5s remnants fall under the 5s harvest floor");
+        for (var r : refs) {
+            double mean = 0;
+            for (float v : r) mean += v;
+            assertTrue(mean / r.length >= 0.05, "no rejected-span audio in the set");
+        }
+    }
+
+    @Test
+    void matchesAnchor_failsHalfBledClips() {
+        var anchorClip = new float[2 * SR];
+        java.util.Arrays.fill(anchorClip, 0.8f);
+        var anchor = VOICE_EMBEDDER.embed(anchorClip);
+
+        var halfBled = new float[4 * SR];
+        java.util.Arrays.fill(halfBled, 0, 2 * SR, 0.8f);   // speaker's voice
+        java.util.Arrays.fill(halfBled, 2 * SR, 4 * SR, 0.001f); // other voice
+        assertFalse(SpeakerClipExtractor.matchesAnchor(halfBled, anchor, VOICE_EMBEDDER),
+                "a clip whose second half is another voice must fail");
+
+        var clean = new float[4 * SR];
+        java.util.Arrays.fill(clean, 0.8f);
+        assertTrue(SpeakerClipExtractor.matchesAnchor(clean, anchor, VOICE_EMBEDDER));
     }
 }
