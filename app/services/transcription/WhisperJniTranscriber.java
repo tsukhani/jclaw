@@ -58,7 +58,15 @@ public final class WhisperJniTranscriber {
      * to milliseconds ({@code whisper_full_get_segment_t0/t1} report
      * centiseconds; we multiply by 10 so callers never see the odd unit).
      */
-    public record Segment(long startMs, long endMs, String text) {}
+    /** JCLAW-635: the confidence triple (whisper's standard hallucination
+     *  gates) rides on every segment; the JNI fallback and legacy callers
+     *  get neutral defaults via the compat constructor. */
+    public record Segment(long startMs, long endMs, String text,
+                          double noSpeechProb, double avgLogprob, double compressionRatio) {
+        public Segment(long startMs, long endMs, String text) {
+            this(startMs, endMs, text, 0.0, 0.0, 1.0);
+        }
+    }
 
     /**
      * Transcribe an audio file using the named whisper model. Blocks the
@@ -128,6 +136,10 @@ public final class WhisperJniTranscriber {
         synchronized (inferenceLock) {
             ensureContextLoaded(model);
             var params = new WhisperFullParams();
+            // JCLAW-635: the sidecar engines run with context conditioning
+            // OFF; the fallback must not be MORE hallucination-prone than
+            // the primary on exactly the machines least able to notice.
+            params.noContext = true;
             applyLanguage(params, language, jni.isMultilingual(activeContext));
             int rc = jni.full(activeContext, params, samples, samples.length);
             if (rc != 0) {

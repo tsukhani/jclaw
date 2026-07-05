@@ -30,7 +30,8 @@ public final class DiarizationCache {
     /** Bump when segment-shaping logic changes (exclusive-mode handling,
      *  overlap extraction, ...) so previously cached results read as
      *  misses (JCLAW-621). Model changes are keyed separately below. */
-    static final int PIPELINE_VERSION = 1;
+    /** v2: transcript segments carry the JCLAW-635 confidence triple. */
+    static final int PIPELINE_VERSION = 2;
 
     private DiarizationCache() {}
 
@@ -165,7 +166,10 @@ public final class DiarizationCache {
                 var o = el.getAsJsonObject();
                 segments.add(new WhisperJniTranscriber.Segment(
                         o.get("startMs").getAsLong(), o.get("endMs").getAsLong(),
-                        o.get("text").getAsString()));
+                        o.get("text").getAsString(),
+                        o.has("noSpeechProb") ? o.get("noSpeechProb").getAsDouble() : 0.0,
+                        o.has("avgLogprob") ? o.get("avgLogprob").getAsDouble() : 0.0,
+                        o.has("compressionRatio") ? o.get("compressionRatio").getAsDouble() : 1.0));
             }
             Logger.info("DiarizationCache: reusing cached transcript for %s (%d segments)",
                     audioFile.getFileName(), segments.size());
@@ -189,6 +193,9 @@ public final class DiarizationCache {
                 o.addProperty("startMs", seg.startMs());
                 o.addProperty("endMs", seg.endMs());
                 o.addProperty("text", seg.text());
+                o.addProperty("noSpeechProb", seg.noSpeechProb());
+                o.addProperty("avgLogprob", seg.avgLogprob());
+                o.addProperty("compressionRatio", seg.compressionRatio());
                 arr.add(o);
             }
             var t = new JsonObject();

@@ -45,7 +45,11 @@ def run_mlx(audio, size, language):
     sys.stderr.write("[transcribe] mlx-whisper %s\n" % repo)
     result = mlx_whisper.transcribe(audio, path_or_hf_repo=repo, language=language,
                                     condition_on_previous_text=False)
-    return [(s["start"], s["end"], s["text"]) for s in result["segments"]]
+    # mlx-whisper exposes the same per-segment confidence fields.
+    return [(s["start"], s["end"], s["text"],
+             s.get("no_speech_prob", 0.0), s.get("avg_logprob", 0.0),
+             s.get("compression_ratio", 1.0))
+            for s in result["segments"]]
 
 
 def run_ct2(audio, size, language):
@@ -56,9 +60,15 @@ def run_ct2(audio, size, language):
     except Exception:  # noqa: BLE001 — no CUDA: int8 CPU
         model = WhisperModel(size, device="cpu", compute_type="int8")
         sys.stderr.write("[transcribe] faster-whisper %s on cpu/int8\n" % size)
+    # JCLAW-635: VAD pre-filter suppresses hallucination on silence/music;
+    # the confidence triple (no_speech_prob / avg_logprob /
+    # compression_ratio) rides through so the JVM can gate or flag.
     segments, _ = model.transcribe(audio, language=language,
-                                   condition_on_previous_text=False)
-    return [(s.start, s.end, s.text) for s in segments]
+                                   condition_on_previous_text=False,
+                                   vad_filter=True)
+    return [(s.start, s.end, s.text,
+             s.no_speech_prob, s.avg_logprob, s.compression_ratio)
+            for s in segments]
 
 
 def main():
@@ -69,7 +79,9 @@ def main():
         else run_ct2(audio, size, language)
     print(json.dumps({"segments": [
         {"startMs": int(round(s * 1000)), "endMs": int(round(e * 1000)),
-         "text": t.strip()} for s, e, t in triples]}))
+         "text": t.strip(), "noSpeechProb": round(nsp, 4),
+         "avgLogprob": round(alp, 4), "compressionRatio": round(cr, 4)}
+        for s, e, t, nsp, alp, cr in triples]}))
     return 0
 
 
