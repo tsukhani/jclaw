@@ -21,7 +21,7 @@ segmentation are jointly tuned). ~18x realtime on Apple MPS.
 |---|---|---|
 | GET | `/health` | → `{status, device, model, loaded}` |
 | POST | `/diarize` | `{audio_path, num_speakers?}` → `{segments: [{start, end, speaker}...], overlaps: [{start, end}...], device, seconds}`; `400` bad path, `409` busy, `500` load/inference error |
-| POST | `/separate` | `{audio_path}` (ready-made 16 kHz mono WAV) → `{stems: ["..._s1.wav", "..._s2.wav"]}` — MossFormer2 2-speaker separation, stems written beside the input (JCLAW-605) |
+| POST | `/separate` | `{audio_paths: [...]}` (ready-made 16 kHz mono WAVs) → `{stems: {"<path>": ["..._s1.wav", "..._s2.wav"], ...}}` — batched MossFormer2 2-speaker separation, one model load per batch, stems written beside each input (JCLAW-605) |
 | POST | `/msdd` | `{audio_path, num_speakers}` (16 kHz mono WAV) → `{segments: [{start, end, speaker}...]}` — NeMo MSDD second opinion, overlap-aware, segments may overlap in time (JCLAW-612) |
 
 The audio file is passed **by path** (same host; attachments are already on
@@ -68,5 +68,5 @@ curl -s -X POST localhost:9529/diarize \
 
 - macOS / Apple Silicon: default PyPI torch wheel ships MPS — no extra config.
 - Linux + NVIDIA: `UV_TORCH_BACKEND=cu124 uv run serve.py ...` for the CUDA wheel.
-- CPU-only also works (~0.2x realtime) — slower but correct; the router's
-  fallback to sherpa only triggers on sidecar *failure*, not slowness.
+- CPU-only also works (~0.2x realtime) — slower but correct. There is no
+  fallback engine (JCLAW-614): a sidecar failure surfaces as an error.

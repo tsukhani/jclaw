@@ -37,7 +37,7 @@ import java.util.stream.Stream;
  * enrolled voice" collapse; clusters whose top two candidates are within
  * {@link #AMBIGUITY_GAP} stay anonymous rather than guessing.
  *
- * <p>Lifecycle mirrors {@link SherpaDiarizer}: the native extractor is cached
+ * <p>Lifecycle mirrors the diarizer: the native extractor is cached
  * for the JVM's lifetime, inference is serialized under {@link #lock}, and
  * {@link jobs.ShutdownJob} releases it. Enrollment embeddings are recomputed
  * per call — enrollment folders are a handful of short clips, and the cost is

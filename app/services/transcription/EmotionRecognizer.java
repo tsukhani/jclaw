@@ -31,7 +31,7 @@ import java.util.Map;
  * non-emotions in emotion2vec's label set ({@code other}, {@code unknown})
  * map to "no annotation" rather than a made-up label.
  *
- * <p>Lifecycle mirrors {@link SherpaDiarizer}: the ONNX session is expensive
+ * <p>Lifecycle mirrors the diarizer: the ONNX session is expensive
  * to build, so one instance is cached for the JVM's lifetime and released
  * from {@link jobs.ShutdownJob}; inference serializes under
  * {@link #inferenceLock}. Input is the pipeline-wide audio shape (PCM float
@@ -69,7 +69,7 @@ public final class EmotionRecognizer {
     public record Classifier(float[][] weights, float[] bias) {}
 
     private static final Object inferenceLock = new Object();
-    // Guarded by inferenceLock, same argument as SherpaDiarizer's fields.
+    // Guarded by inferenceLock (single native session, concurrent tool calls).
     private static OrtSession session = null;
     private static String inputName = null;
     private static Classifier classifier = null;

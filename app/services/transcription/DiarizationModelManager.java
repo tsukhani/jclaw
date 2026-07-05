@@ -15,6 +15,11 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
 /**
+ * NOT vestigial despite the JCLAW-614 sherpa-diarizer removal: the WeSpeaker
+ * embedding model downloaded here backs {@link SpeakerNamer#embedWindow},
+ * which powers voice naming, overlap re-attribution and every enrollment
+ * purity gate.
+ *
  * Downloader for the two ONNX models the sherpa-onnx diarization engine
  * needs (JCLAW-556): the pyannote segmentation-3.0 export and the
  * WeSpeaker VoxCeleb ResNet34-LM speaker-embedding model — the same two

@@ -36,10 +36,11 @@ import java.util.Set;
  * audio attachment in the current conversation. The ordinary inbound-audio
  * path stays on the fast single-speaker transcription service; this tool is
  * how "who said what in this recording?" gets answered — the model invokes
- * it, the full JCLAW-556 pipeline runs (whisper segments + sherpa-onnx
+ * it, the full pipeline runs (whisper segments + pyannote-sidecar
  * diarization + enrolled-speaker naming when {@code data/speaker-voices/}
- * has enrollment), and the speaker-attributed transcript comes back as the
- * tool result for the model to reason over.
+ * has enrollment, plus the JCLAW-605..613 correction passes), and the
+ * speaker-attributed transcript comes back as the tool result for the
+ * model to reason over.
  *
  * <p>Attachment resolution: an explicit {@code attachment_uuid} wins;
  * otherwise the newest non-deleted audio attachment in the scoped
