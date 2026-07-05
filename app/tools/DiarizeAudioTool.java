@@ -68,10 +68,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     private static final double CLIP_TARGET_SECONDS = 5.0;
     private static final double CLIP_MIN_SECONDS = 1.0;
-    /** Reference clips staged per speaker for enrollment (JCLAW-606): the
-     *  lineup clip plus up to this many minus one hidden extras from other
-     *  segments — enrolling one voice stores an averaged-quality clip set. */
-    private static final int ENROLLMENT_CLIPS_PER_SPEAKER = 3;
+    /** Total pure speech harvested per speaker for enrollment (JCLAW-609):
+     *  the lineup clip plus hidden reference clips until this many seconds
+     *  are on file (when the recording has that much pure speech) — matching
+     *  the 20s weight of the matcher's in-recording centroid references. */
+    private static final double ENROLLMENT_TARGET_SECONDS = 20.0;
 
     /** Display names become enrollment folder names — letters/digits/space
      *  and a few name punctuation marks, no separators, no leading dot. */
@@ -289,8 +290,14 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         var conversationId = ToolContext.conversationId(); // non-null: resolution required scope
         float clusterThreshold = (float) ConfigService.getDouble("transcription.diarization.threshold", 0.3);
         try {
-            var speakers = DiarizationRouter.diarize(path, clusterThreshold,
+            var diarization = DiarizationRouter.diarizeRich(path, clusterThreshold,
                     numSpeakers == null ? -1 : numSpeakers);
+            // JCLAW-609: cut clips only from PURE speech — exclusive-mode
+            // segments absorb cross-talk, so overlap regions (padded) are
+            // subtracted first. A shorter pure clip beats a contaminated 5s one.
+            var speakers = SpeakerClipExtractor.purify(diarization.segments(), diarization.overlaps());
+            play.Logger.info("DiarizeAudioTool: extracting from %d pure span(s) (%d segments, %d overlap region(s) excluded)",
+                    speakers.size(), diarization.segments().size(), diarization.overlaps().size());
             var clips = SpeakerClipExtractor.extract(path, speakers, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS);
             if (clips.isEmpty()) {
                 return ToolRegistry.ToolResult.text(
@@ -314,7 +321,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             var generated = new java.util.ArrayList<GeneratedAttachment>(clips.size());
             for (var clip : clips) {
                 var refs = SpeakerClipExtractor.referenceClips(path, speakers, clip.speaker(),
-                        ENROLLMENT_CLIPS_PER_SPEAKER, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS);
+                        ENROLLMENT_TARGET_SECONDS, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS);
                 for (int r = 1; r < refs.size(); r++) {
                     Files.write(staging.resolve(clip.label() + "-ref" + (r + 1) + ".wav"),
                             SpeakerClipExtractor.toWavPcm16(refs.get(r)));
@@ -363,14 +370,13 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
         var result = storeEnrollment(clip, conversationId + "-" + label.strip() + ".wav", name);
         if (result.startsWith("Error")) return result;
-        // JCLAW-606: also file the hidden reference clips staged alongside
-        // the lineup clip, so the person's voiceprint averages several
-        // segments instead of leaning on one. Best-effort per clip.
-        for (int r = 2; r <= ENROLLMENT_CLIPS_PER_SPEAKER; r++) {
+        // JCLAW-606/609: also file the hidden reference clips staged
+        // alongside the lineup clip (variable count — the extractor harvests
+        // until ~20s of pure speech). Sequential names, stop at first gap.
+        for (int r = 2; ; r++) {
             var ref = stagingDir(conversationId).resolve(label.strip() + "-ref" + r + ".wav");
-            if (Files.isRegularFile(ref)) {
-                storeEnrollment(ref, conversationId + "-" + label.strip() + "-ref" + r + ".wav", name);
-            }
+            if (!Files.isRegularFile(ref)) break;
+            storeEnrollment(ref, conversationId + "-" + label.strip() + "-ref" + r + ".wav", name);
         }
         return result;
     }

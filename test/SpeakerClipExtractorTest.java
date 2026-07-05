@@ -94,7 +94,7 @@ class SpeakerClipExtractorTest extends UnitTest {
     }
 
     @Test
-    void referenceClips_cutFromDistinctSegments_longestFirst() {
+    void referenceClips_harvestUntilTargetTotal_acrossSpansAndRemnants() {
         var samples = new float[60 * SpeakerClipExtractor.SAMPLE_RATE];
         for (int i = 0; i < samples.length; i++) samples[i] = (i % 100) / 100f;
         var segments = java.util.List.of(
@@ -104,13 +104,31 @@ class SpeakerClipExtractorTest extends UnitTest {
                 new services.transcription.SherpaDiarizer.SpeakerSegment(50, 50.4, 0), // below min
                 new services.transcription.SherpaDiarizer.SpeakerSegment(10, 18, 1)); // other speaker
 
-        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 3, 5.0, 1.0);
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0);
 
-        assertEquals(3, refs.size(), "one clip per qualifying segment, capped at maxClips");
         assertEquals(5 * SpeakerClipExtractor.SAMPLE_RATE, refs.get(0).length,
-                "full 5s from the 8s segment");
-        assertEquals(3 * SpeakerClipExtractor.SAMPLE_RATE, refs.get(2).length,
-                "third clip limited by its 3s segment");
+                "first clip is the 5s lineup cut");
+        double total = refs.stream().mapToInt(r -> r.length).sum()
+                / (double) SpeakerClipExtractor.SAMPLE_RATE;
+        // Pure speech available: 8 + 6 + 3 = 17s (the 0.4s span is below min,
+        // speaker 1's audio never contributes) — everything gets harvested.
+        assertEquals(17.0, total, 0.1, "harvest takes all pure speech when under target");
+        assertTrue(refs.size() >= 3, "spans plus remnants of the longest segment");
+    }
+
+    @Test
+    void referenceClips_singleLongMonologue_reachesTargetViaRemnants() {
+        var samples = new float[60 * SpeakerClipExtractor.SAMPLE_RATE];
+        java.util.Arrays.fill(samples, 0.1f);
+        var segments = java.util.List.of(
+                new services.transcription.SherpaDiarizer.SpeakerSegment(5, 45, 0)); // one 40s span
+
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0);
+
+        double total = refs.stream().mapToInt(r -> r.length).sum()
+                / (double) SpeakerClipExtractor.SAMPLE_RATE;
+        assertEquals(20.0, total, 0.1, "remnants around the lineup cut fill the 20s budget");
+        assertEquals(5 * SpeakerClipExtractor.SAMPLE_RATE, refs.get(0).length);
     }
 
     @Test
@@ -125,8 +143,59 @@ class SpeakerClipExtractorTest extends UnitTest {
                 new services.transcription.SherpaDiarizer.SpeakerSegment(20, 24, 0));
 
         var lineup = SpeakerClipExtractor.extract(samples, segments, 5.0, 1.0);
-        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 3, 5.0, 1.0);
+        var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0);
 
         assertArrayEquals(lineup.get(0).samples(), refs.get(0), 0f);
+    }
+
+    @Test
+    void purify_splitsSegmentsAroundPaddedOverlaps_andKeepsSpeaker() {
+        var segments = java.util.List.of(
+                new services.transcription.SherpaDiarizer.SpeakerSegment(0, 10, 0),
+                new services.transcription.SherpaDiarizer.SpeakerSegment(12, 14, 1));
+        // Overlap 4-6s inside speaker 0's span; pad 0.3s each side.
+        var overlaps = java.util.List.<double[]>of(new double[]{4, 6});
+
+        var pure = SpeakerClipExtractor.purify(segments, overlaps);
+
+        assertEquals(3, pure.size());
+        assertEquals(0.0, pure.get(0).start(), 1e-9);
+        assertEquals(3.7, pure.get(0).end(), 1e-9);
+        assertEquals(6.3, pure.get(1).start(), 1e-9);
+        assertEquals(10.0, pure.get(1).end(), 1e-9);
+        assertEquals(0, pure.get(1).speaker(), "sub-spans keep their speaker id");
+        assertEquals(12.0, pure.get(2).start(), 1e-9, "untouched segment passes through");
+    }
+
+    @Test
+    void purify_dropsFullyOverlappedSpans_andIsIdentityWithoutOverlaps() {
+        var segments = java.util.List.of(
+                new services.transcription.SherpaDiarizer.SpeakerSegment(5, 6, 0));
+        assertTrue(SpeakerClipExtractor.purify(segments,
+                        java.util.List.<double[]>of(new double[]{4.8, 6.1})).isEmpty(),
+                "a span living entirely inside cross-talk yields nothing");
+        assertEquals(segments, SpeakerClipExtractor.purify(segments, java.util.List.of()),
+                "no overlap data (sherpa path) must be the identity");
+    }
+
+    @Test
+    void extract_prefersShorterPureClip_overContaminatedFiveSeconds() {
+        // Speaker 0 talks 0-10s but 3-7s is cross-talk: the longest pure span
+        // is 7.3-10s (2.7s) — the clip must shrink rather than include it.
+        var samples = new float[12 * SpeakerClipExtractor.SAMPLE_RATE];
+        java.util.Arrays.fill(samples, 0.1f);
+        var segments = java.util.List.of(
+                new services.transcription.SherpaDiarizer.SpeakerSegment(0, 10, 0));
+        var pure = SpeakerClipExtractor.purify(segments,
+                java.util.List.<double[]>of(new double[]{3, 7}));
+
+        var clips = SpeakerClipExtractor.extract(samples, pure, 5.0, 1.0);
+
+        assertEquals(1, clips.size());
+        assertTrue(clips.get(0).duration() < 5.0, "clip shrinks to the pure span");
+        double clipStart = clips.get(0).start();
+        double clipEnd = clipStart + clips.get(0).duration();
+        assertTrue(clipEnd <= 2.7 + 1e-6 || clipStart >= 7.3 - 1e-6,
+                "clip lies wholly inside a pure span: " + clipStart + "-" + clipEnd);
     }
 }
