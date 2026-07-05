@@ -203,6 +203,32 @@ class DiarizedTranscriptTest extends UnitTest {
     }
 
     @Test
+    void merge_flagsSegmentsWithNoDiarizationSupport() {
+        var transcript = java.util.List.of(
+                new services.transcription.WhisperJniTranscriber.Segment(0, 2000, "Real speech."),
+                new services.transcription.WhisperJniTranscriber.Segment(10000, 12000, "Thanks for watching!"));
+        var speakers = java.util.List.of(
+                new services.transcription.SpeakerSegment(0.0, 2.5, 0));
+
+        var entries = DiarizedTranscript.merge(transcript, speakers);
+
+        assertFalse(entries.get(0).noSpeakerEvidence(), "supported speech stays unflagged");
+        assertTrue(entries.get(1).noSpeakerEvidence(),
+                "a segment overlapping no diarized speech is a nearest-neighbor guess");
+        assertTrue(DiarizedTranscript.toText(entries).contains("(no-speaker-detected?)"),
+                DiarizedTranscript.toText(entries));
+    }
+
+    @Test
+    void merge_emptySpeakerList_neverFlags() {
+        var transcript = java.util.List.of(
+                new services.transcription.WhisperJniTranscriber.Segment(0, 2000, "Solo voice note."));
+        var entries = DiarizedTranscript.merge(transcript, java.util.List.of());
+        assertFalse(entries.get(0).noSpeakerEvidence(),
+                "no diarization at all means the single-voice reading, not a warning");
+    }
+
+    @Test
     void toText_rendersUnderSpeechQualifier() {
         var entries = java.util.List.of(
                 new DiarizedTranscript.Entry("Firdaus", 1, 2, "Yeah.", null, false, true));

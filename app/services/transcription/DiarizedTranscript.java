@@ -26,18 +26,29 @@ public final class DiarizedTranscript {
      *  evidence could not decide the speaker — the label shown is the
      *  diarizer's best guess and a reviewer should re-listen. */
     public record Entry(String speaker, double start, double end, String text, String emotion,
-                        boolean crossTalk, boolean underSpeech) {
+                        boolean crossTalk, boolean underSpeech, boolean noSpeakerEvidence) {
         public Entry(String speaker, double start, double end, String text) {
-            this(speaker, start, end, text, null, false, false);
+            this(speaker, start, end, text, null, false, false, false);
         }
 
         public Entry(String speaker, double start, double end, String text, String emotion) {
-            this(speaker, start, end, text, emotion, false, false);
+            this(speaker, start, end, text, emotion, false, false, false);
         }
 
         public Entry(String speaker, double start, double end, String text, String emotion,
                      boolean crossTalk) {
-            this(speaker, start, end, text, emotion, crossTalk, false);
+            this(speaker, start, end, text, emotion, crossTalk, false, false);
+        }
+
+        public Entry(String speaker, double start, double end, String text, String emotion,
+                     boolean crossTalk, boolean underSpeech) {
+            this(speaker, start, end, text, emotion, crossTalk, underSpeech, false);
+        }
+
+        /** Copy with a different speaker label, all flags preserved. */
+        public Entry withSpeaker(String newSpeaker) {
+            return new Entry(newSpeaker, start, end, text, emotion, crossTalk,
+                    underSpeech, noSpeakerEvidence);
         }
     }
 
@@ -68,10 +79,22 @@ public final class DiarizedTranscript {
             double start = seg.startMs() / 1000.0;
             double end = seg.endMs() / 1000.0;
             int speaker = speakerFor(start, end, speakers);
+            // JCLAW-622: a segment overlapping NO diarized speech is either
+            // real speech the diarizer trimmed or a whisper hallucination on
+            // silence/music — the nearest-speaker label is a guess and says
+            // so instead of feigning confidence.
+            boolean unsupported = !speakers.isEmpty() && !overlapsAny(start, end, speakers);
             entries.add(new Entry(names.getOrDefault(speaker, speakerLabel(speaker)),
-                    start, end, seg.text().strip()));
+                    start, end, seg.text().strip(), null, false, false, unsupported));
         }
         return entries;
+    }
+
+    private static boolean overlapsAny(double start, double end, List<SpeakerSegment> speakers) {
+        for (var s : speakers) {
+            if (Math.min(end, s.end()) - Math.max(start, s.start()) > 0) return true;
+        }
+        return false;
     }
 
     private static int speakerFor(double start, double end, List<SpeakerSegment> speakers) {
@@ -138,6 +161,10 @@ public final class DiarizedTranscript {
             if (e.underSpeech()) {
                 if (qualifiers.length() > 0) qualifiers.append(", ");
                 qualifiers.append("under-speech");
+            }
+            if (e.noSpeakerEvidence()) {
+                if (qualifiers.length() > 0) qualifiers.append(", ");
+                qualifiers.append("no-speaker-detected?");
             }
             var tag = qualifiers.length() == 0
                     ? e.speaker()
