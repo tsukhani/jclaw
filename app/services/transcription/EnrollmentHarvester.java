@@ -41,8 +41,13 @@ public final class EnrollmentHarvester {
 
     /** A candidate is bled when its minor separation stem matches ANY
      *  speaker voiceprint at least this closely. Calibrated on the debate
-     *  benchmark: pure windows' minor stems max 0.39, bled 0.61+. */
-    static final double BLEED_THRESHOLD = 0.5;
+     *  benchmark with 5s-capped windows: pure minor stems measure at most
+     *  0.31; gross bleed 0.61-0.75; sparse backchannel (a short affirmation
+     *  under the dominant voice) lands between and slid under the original
+     *  0.5 gate by dilution in long windows (a 10.7s clip scored 0.391 and
+     *  the operator heard the bleed). With clips capped at 5s the fraction
+     *  concentrates, and 0.40 keeps clear margin over the pure band. */
+    static final double BLEED_THRESHOLD = 0.40;
 
     /** Harvest overshoot factor: candidates gathered beyond the budget so
      *  gate rejections can be replaced. */

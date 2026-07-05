@@ -44,12 +44,19 @@ public final class SpeakerClipExtractor {
      *  clips clear of the other voice's onset/tail. */
     public static final double OVERLAP_PAD_SECONDS = 0.75;
 
-    /** Spans shorter than this never feed the reference harvest: slivers
-     *  between detected overlaps live inside rapid exchanges where the
-     *  overlap detector under-reports (echo, backchannel), so they are
-     *  contaminated more often than not (JCLAW-609 UAT round 2). 5s is the
-     *  TSE-literature standard minimum for enrollment segments. */
-    public static final double MIN_HARVEST_SPAN_SECONDS = 5.0;
+    /** Reference clips are capped at this length (JCLAW-609 round 4,
+     *  operator-specified): short windows deny bleed the cover of dilution
+     *  — a 0.5s affirmation is ~10% of a 5s window but only ~5% of a 10s
+     *  one, and the stem gate's signal scales with that fraction. Each
+     *  piece gets its own verdict, so one backchannel rejects one piece,
+     *  not a whole span. */
+    public static final double MAX_CLIP_SECONDS = 5.0;
+
+    /** Pieces shorter than this never become reference clips — speaker
+     *  embeddings are unreliable below ~2s. Short-span risk (round 2's
+     *  sliver lesson) is now carried by the per-piece stem gate rather
+     *  than a coarse span floor. */
+    public static final double MIN_PIECE_SECONDS = 2.0;
 
     /** A candidate reference clip must match the anchor voiceprint (the
      *  lineup clip — the audio the operator verifies by ear) at least this
@@ -205,7 +212,9 @@ public final class SpeakerClipExtractor {
         float[] anchor = embedder.embed(lineup);
 
         // Harvest candidates: remaining spans + the longest span's remnants
-        // around the lineup window, longest first.
+        // around the lineup window, longest first — each SLICED into
+        // consecutive pieces of at most MAX_CLIP_SECONDS (round 4: purity
+        // over length; every piece stands or falls on its own gates).
         var candidates = new ArrayList<double[]>();
         for (int i = 1; i < own.size(); i++) {
             candidates.add(new double[]{own.get(i).start(), own.get(i).end()});
@@ -214,21 +223,21 @@ public final class SpeakerClipExtractor {
         candidates.add(new double[]{lineupStart + lineupDuration, longest.end()});
         candidates.sort((a, b) -> Double.compare(b[1] - b[0], a[1] - a[0]));
 
+        outer:
         for (var span : candidates) {
-            if (total >= targetTotalSeconds) break;
-            double spanLength = span[1] - span[0];
-            if (spanLength < Math.max(minSeconds, MIN_HARVEST_SPAN_SECONDS)) continue;
-            double duration = Math.min(spanLength, targetTotalSeconds - total);
-            if (duration < minSeconds) break;
-            var clip = cut(samples, span[0] + (spanLength - duration) / 2, duration);
-            if (clip == null) continue;
-            if (!matchesAnchor(clip, anchor, embedder)) {
-                play.Logger.info("SpeakerClipExtractor: rejected %.1fs candidate at %.1fs — "
-                        + "voiceprint does not match the anchor clip", duration, span[0]);
-                continue;
+            for (double at = span[0]; span[1] - at >= MIN_PIECE_SECONDS; at += MAX_CLIP_SECONDS) {
+                if (total >= targetTotalSeconds) break outer;
+                double duration = Math.min(MAX_CLIP_SECONDS, span[1] - at);
+                var clip = cut(samples, at, duration);
+                if (clip == null) continue;
+                if (!matchesAnchor(clip, anchor, embedder)) {
+                    play.Logger.info("SpeakerClipExtractor: rejected %.1fs piece at %.1fs — "
+                            + "voiceprint does not match the anchor clip", duration, at);
+                    continue;
+                }
+                clips.add(clip);
+                total += duration;
             }
-            clips.add(clip);
-            total += duration;
         }
         return clips;
     }

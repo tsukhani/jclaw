@@ -119,13 +119,16 @@ class SpeakerClipExtractorTest extends UnitTest {
                 "first clip is the 5s lineup cut");
         double total = refs.stream().mapToInt(r -> r.length).sum()
                 / (double) SpeakerClipExtractor.SAMPLE_RATE;
-        // Harvestable: 5s lineup + the 6s span = 11s. The 3s span and the
-        // 8s span's 1.5s remnants fall under the 5s harvest floor (the
-        // TSE-literature minimum for enrollment segments — short spans are
-        // contamination-prone), and the 0.4s span is below min; speaker 1's
-        // audio never contributes.
-        assertEquals(11.0, total, 0.1, "sub-5s spans never feed the harvest");
-        assertEquals(2, refs.size(), "lineup plus the one span above the harvest floor");
+        // Harvestable (5s pieces, 2s piece floor): 5s lineup + the 6s span
+        // (5s + a dropped 1s tail) + the 3s span = 13s. The 8s span's 1.5s
+        // remnants and the 0.4s span fall under the 2s piece floor;
+        // speaker 1's audio never contributes.
+        assertEquals(13.0, total, 0.1, "pieces cap at 5s; sub-2s pieces dropped");
+        assertEquals(3, refs.size());
+        for (var r : refs) {
+            assertTrue(r.length <= 5 * SpeakerClipExtractor.SAMPLE_RATE + 1,
+                    "no reference clip may exceed the 5s cap");
+        }
     }
 
     @Test
@@ -139,8 +142,12 @@ class SpeakerClipExtractorTest extends UnitTest {
 
         double total = refs.stream().mapToInt(r -> r.length).sum()
                 / (double) SpeakerClipExtractor.SAMPLE_RATE;
-        assertEquals(20.0, total, 0.1, "remnants around the lineup cut fill the 20s budget");
+        assertEquals(20.0, total, 0.3, "remnants around the lineup cut fill the 20s budget");
         assertEquals(5 * SpeakerClipExtractor.SAMPLE_RATE, refs.get(0).length);
+        for (var r : refs) {
+            assertTrue(r.length <= 5 * SpeakerClipExtractor.SAMPLE_RATE + 1,
+                    "budget reached through multiple 5s-capped pieces, never one long clip");
+        }
     }
 
     @Test
@@ -224,9 +231,9 @@ class SpeakerClipExtractorTest extends UnitTest {
         var refs = SpeakerClipExtractor.referenceClips(samples, segments, 0, 20.0, 5.0, 1.0, VOICE_EMBEDDER);
 
         double total = refs.stream().mapToInt(r -> r.length).sum() / (double) SR;
-        assertEquals(5.0, total, 0.1,
-                "only the anchor survives: the bled span is rejected and the "
-                        + "2.5s remnants fall under the 5s harvest floor");
+        assertEquals(10.0, total, 0.1,
+                "anchor plus the two 2.5s pure remnants survive; every piece of "
+                        + "the bled span is rejected by the anchor gate");
         for (var r : refs) {
             double mean = 0;
             for (float v : r) mean += v;
