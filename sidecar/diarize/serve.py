@@ -355,6 +355,34 @@ class Handler(BaseHTTPRequestHandler):
             self.state.run_lock.release()
 
 
+def _prewarm(state: SidecarState):
+    """JCLAW-632: build the script envs and prefetch weights in the
+    background so cold-start cliffs (multi-GB NeMo env, MossFormer2 and
+    whisper weights) never land inside a user's first request. Never runs
+    while an inference holds the run lock; failures are logged and the
+    lazy in-request path remains the fallback."""
+    import subprocess
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    steps = [
+        # Env resolution only — no model load, cheap after first run.
+        (["uv", "sync", "--script", "transcribe.py"], "transcribe env"),
+        (["uv", "sync", "--script", "separate.py"], "separate env"),
+        (["uv", "sync", "--script", "msdd.py"], "msdd env"),
+    ]
+    for cmd, label in steps:
+        while state.run_lock.locked():
+            time.sleep(15)  # a real request owns the machine — wait
+        try:
+            t0 = time.time()
+            proc = subprocess.run(cmd, cwd=script_dir, capture_output=True,
+                                  text=True, timeout=1740)
+            sys.stderr.write("[diarize-sidecar] prewarm %s: rc=%d in %.0fs\n"
+                             % (label, proc.returncode, time.time() - t0))
+        except Exception as e:  # noqa: BLE001 — prewarm must never hurt
+            sys.stderr.write("[diarize-sidecar] prewarm %s failed: %s\n" % (label, e))
+    state.touch()  # don't let prewarm time count as idle
+
+
 def _idle_watcher(state: SidecarState):
     """Self-evict after the idle timeout so the daemon releases device memory
     when unused. 0 disables eviction."""
@@ -389,6 +417,7 @@ def main():
     Handler.state = SidecarState(args.model, args.idle_timeout_min * 60.0)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()
+    threading.Thread(target=_prewarm, args=(Handler.state,), daemon=True).start()
     sys.stderr.write("[diarize-sidecar] listening on http://%s:%d (model=%s)\n"
                      % (args.host, args.port, args.model))
     try:
