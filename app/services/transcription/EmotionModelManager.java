@@ -100,72 +100,7 @@ public final class EmotionModelManager {
      * {@link DiarizationModelManager#doDownload}.
      */
     public static Path doDownload(EmotionModel model, String url) throws IOException {
-        Files.createDirectories(root);
-
-        var client = HttpFactories.general();
-        var noFollow = client.newBuilder()
-                .followRedirects(false)
-                .followSslRedirects(false)
-                .build();
-        String expectedSha256;
-        try (Response head = noFollow.newCall(new Request.Builder().url(url).head().build()).execute()) {
-            if (head.code() >= 400) {
-                throw new IOException("HEAD %s failed: %d %s".formatted(url, head.code(), head.message()));
-            }
-            var etag = head.header("X-Linked-Etag");
-            if (etag == null) {
-                throw new IOException("HEAD %s missing X-Linked-Etag header".formatted(url));
-            }
-            expectedSha256 = etag.replace("\"", "").toLowerCase();
-        }
-
-        var tmp = root.resolve(model.filename() + ".part");
-        var digest = newSha256();
-        // ~356 MB: too big for general()'s default 60s call deadline on slow
-        // links — clear the per-call timeout like the whisper downloads do
-        // (read/connect timeouts still bound each socket operation).
-        var download = client.newBuilder()
-                .callTimeout(java.time.Duration.ZERO)
-                .build();
-        try (Response resp = download.newCall(new Request.Builder().url(url).build()).execute();
-             var sink = Files.newOutputStream(tmp)) {
-            if (!resp.isSuccessful()) {
-                throw new IOException("GET %s failed: %d %s".formatted(url, resp.code(), resp.message()));
-            }
-            var src = resp.body().source();
-            byte[] buf = new byte[64 * 1024];
-            while (true) {
-                int n = src.read(buf);
-                if (n == -1) break;
-                sink.write(buf, 0, n);
-                digest.update(buf, 0, n);
-            }
-        } catch (IOException e) {
-            Files.deleteIfExists(tmp);
-            throw e;
-        }
-
-        var actual = HexFormat.of().formatHex(digest.digest());
-        if (!actual.equals(expectedSha256)) {
-            Files.deleteIfExists(tmp);
-            throw new IOException("SHA256 mismatch for %s: expected %s, got %s"
-                    .formatted(model.filename(), expectedSha256, actual));
-        }
-
-        var finalPath = localPath(model);
-        Files.move(tmp, finalPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        EventLogger.info("transcription",
-                "Emotion recognition model %s downloaded and verified".formatted(model.filename()));
-        Logger.info("EmotionModelManager: %s ready at %s", model.filename(), finalPath);
-        return finalPath;
-    }
-
-    private static MessageDigest newSha256() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable on this JVM", e);
-        }
+        return ModelDownloader.download(url, root, model.filename(), "Emotion model");
     }
 
     /** Test-only: redirect the storage root so tests don't pollute {@code data/emotion-models/}. */

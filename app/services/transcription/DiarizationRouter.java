@@ -6,24 +6,13 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * Entry point for speaker diarization: the pyannote community-1 sidecar,
- * full stop (JCLAW-614). The in-process sherpa fallback was scrapped — the
- * JCLAW-565 bake-off already showed it strictly inferior (knife-edge
- * threshold clustering, F1 0.799 ceiling vs community-1's 0.864 / DER
- * 7.9%), and every capability since (overlap regions, MossFormer
- * re-attribution, the MSDD second opinion, under-speech recovery) exists
- * only on the sidecar path, so a silent fallback delivered a strictly
- * worse transcript. Like the image and video generation stacks,
- * diarization relies on its sidecar and reports an actionable error
- * instead of degrading.
- *
- * <p>Prerequisites are checked up front so a missing setup fails in
- * milliseconds with instructions, not after a doomed sidecar spawn:
- * {@code uv} on PATH and a Hugging Face token (the diarization key, or the
- * image-generation sidecar's as fallback) with the gated community-1
- * model's conditions accepted. Token gating reads config keys only — never
- * ambient ~/.cache/huggingface state — so behavior is deterministic and
- * visible in Settings.
+ * The prerequisite gate in front of {@link PyannoteDiarizationClient}
+ * (JCLAW-614/631): validates uv + Hugging Face token with actionable
+ * errors BEFORE any sidecar contact, then delegates. Not a router since
+ * the sherpa fallback was scrapped — there is exactly one engine; the
+ * name survives because {@code DiarizationRouter.Result} is load-bearing
+ * vocabulary across the pipeline, cache and tests, and a rename would be
+ * churn without behavior.
  */
 public final class DiarizationRouter {
 

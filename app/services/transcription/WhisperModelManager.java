@@ -171,94 +171,10 @@ public final class WhisperModelManager {
     }
 
     public static Path doDownload(WhisperModel model, String url, Consumer<DownloadProgress> onProgress) throws IOException {
-        Files.createDirectories(root);
-
-        var client = HttpFactories.general();
-        // HEAD with redirects disabled: HF's resolve endpoint replies 302 and
-        // the X-Linked-Etag / X-Linked-Size headers are set on the 302 itself,
-        // not on the CDN it redirects to. Following the redirect (the OkHttp
-        // default) lands at cas-bridge.xethub.hf.co with a bare 200 that
-        // carries neither header — exactly the symptom that read as "HF
-        // stopped exposing the SHA256."
-        var noFollow = client.newBuilder()
-                .followRedirects(false)
-                .followSslRedirects(false)
-                .build();
-        String expectedSha256;
-        long expectedSize;
-        try (Response head = noFollow.newCall(new Request.Builder().url(url).head().build()).execute()) {
-            // Accept 200 (small non-LFS files served direct from HF) AND any
-            // 3xx redirect (LFS-managed files that bounce to a CDN); both
-            // shapes carry the X-Linked-* headers we need. Reject only 4xx/5xx.
-            if (head.code() >= 400) {
-                throw new IOException("HEAD %s failed: %d %s".formatted(url, head.code(), head.message()));
-            }
-            var etag = head.header("X-Linked-Etag");
-            var size = head.header("X-Linked-Size");
-            if (etag == null || size == null) {
-                throw new IOException("HEAD %s missing X-Linked-Etag / X-Linked-Size headers".formatted(url));
-            }
-            expectedSha256 = etag.replace("\"", "").toLowerCase();
-            expectedSize = Long.parseLong(size);
-        }
-
-        statuses.put(model.id(), new ModelStatus(State.DOWNLOADING, 0, expectedSize, null));
-
-        var tmp = root.resolve(model.filename() + ".part");
-        var digest = newSha256();
-        long downloaded = 0;
-        // Model files run ~75 MB–1 GB; general()'s 60s callTimeout bounds the
-        // ENTIRE call including the body read, so a large stream would abort
-        // mid-download (and delete the .part). Clear the per-call deadline and
-        // let readTimeout bound forward progress instead — the same callTimeout(0)
-        // posture llmStreaming() uses for unbounded streams. The HEAD keeps 60s.
-        var getCall = client.newCall(new Request.Builder().url(url).build());
-        getCall.timeout().clearTimeout();
-        try (Response resp = getCall.execute();
-             var sink = Files.newOutputStream(tmp)) {
-            if (!resp.isSuccessful()) {
-                throw new IOException("GET %s failed: %d %s".formatted(url, resp.code(), resp.message()));
-            }
-            BufferedSource src = resp.body().source();
-            byte[] buf = new byte[64 * 1024];
-            while (true) {
-                int n = src.read(buf);
-                if (n == -1) break;
-                sink.write(buf, 0, n);
-                digest.update(buf, 0, n);
-                downloaded += n;
-                statuses.put(model.id(), new ModelStatus(State.DOWNLOADING, downloaded, expectedSize, null));
-                if (onProgress != null) {
-                    onProgress.accept(new DownloadProgress(model.id(), downloaded, expectedSize));
-                }
-            }
-        } catch (IOException e) {
-            Files.deleteIfExists(tmp);
-            throw e;
-        }
-
-        statuses.put(model.id(), new ModelStatus(State.VERIFYING, downloaded, expectedSize, null));
-        var actual = HexFormat.of().formatHex(digest.digest());
-        if (!actual.equals(expectedSha256)) {
-            Files.deleteIfExists(tmp);
-            throw new IOException(
-                    "SHA256 mismatch for %s: expected %s, got %s".formatted(model.id(), expectedSha256, actual));
-        }
-
-        var finalPath = localPath(model);
-        Files.move(tmp, finalPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        statuses.put(model.id(), new ModelStatus(State.AVAILABLE, downloaded, expectedSize, null));
-        EventLogger.info("transcription",
-                "Whisper model %s downloaded and verified (%d bytes)".formatted(model.id(), downloaded));
-        return finalPath;
-    }
-
-    private static MessageDigest newSha256() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable on this JVM", e);
-        }
+        return ModelDownloader.download(url, root, model.filename(), "Whisper model",
+                onProgress == null ? null
+                        : (downloaded, total) -> onProgress.accept(
+                                new DownloadProgress(model.id(), downloaded, total)));
     }
 
     /** Test-only: drop in-memory state so tests don't bleed into each other. */

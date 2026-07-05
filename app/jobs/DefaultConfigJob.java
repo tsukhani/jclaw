@@ -91,13 +91,10 @@ public class DefaultConfigJob extends Job<Void> {
         // transcript); set false to skip the ~95 MB model download and the
         // extra per-turn inference.
         seedIfAbsent("transcription.emotion.enabled", "true");
-        // JCLAW-565: diarization backend. auto = the pyannote community-1
-        // sidecar when uv is on PATH and the hfToken below is set (the model
-        // is HF-gated), falling back to the in-process sherpa engine on any
-        // sidecar failure; 'pyannote-local' / 'sherpa' pin one engine.
-        // Hugging Face token for the gated community-1 weights, passed to the
-        // sidecar process as HF_TOKEN. Blank = reuse imagegen.local.hfToken;
-        // with neither set the sidecar is ineligible in auto mode. Masked in
+        // JCLAW-565/614: Hugging Face token for the gated community-1
+        // weights, passed to the sidecar process as HF_TOKEN. Blank = reuse
+        // imagegen.local.hfToken; with neither set diarization fails fast
+        // with setup instructions (sidecar-or-error). Masked in
         // Settings (key name contains "token").
         seedIfAbsent("transcription.diarization.local.hfToken", "");
         // JCLAW-605: cross-talk turns re-attributed via MossFormer2 source
