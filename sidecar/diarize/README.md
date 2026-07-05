@@ -80,6 +80,24 @@ pipeline's correction passes recover most of the confusion downstream).
 `eval/fetch-ami.sh` adds AMI ES2004a (4 speakers, close-talk + far-field,
 CC-BY-4.0). A dedicated non-English recording remains a documented gap.
 
+End-to-end transcript metric (JCLAW-643): `eval.py cpwer` scores the FINAL
+diarized transcript — the word-splitter, overlap re-attribution and
+under-speech stages that DER cannot see — against the committed gold
+transcript (`eval/gold/haram-debate-transcript.json`, 35 turns / 633 words,
+independent frontier-model transcription, operator-verified):
+
+```bash
+uv run eval.py cpwer /path/to/diarize-output.json eval/gold/haram-debate-transcript.json
+```
+
+Baseline full pipeline against this gold: **cpWER 25.91%** with the speaker
+mapping resolving to identity (attribution is right; the number blends real
+word errors with transcription-style disagreement between two independent
+ASRs — treat it as a RELATIVE regression bound, like the DER baseline).
+Alignment model: wav2vec2-base-960h stays (JCLAW-643 decision — Malay is
+Latin-script, char-CTC degrades gracefully; see CtcForcedAligner javadoc;
+swap to an MMS-style checkpoint and re-measure cpWER if it drifts).
+
 ## Running by hand (debugging)
 
 ```bash
