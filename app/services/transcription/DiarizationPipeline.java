@@ -98,15 +98,18 @@ public final class DiarizationPipeline {
             }
         }
         // JCLAW-603: word-level split of boundary-straddling segments.
-        // (JCLAW-651 r2 note: a full WORD-level merge exists —
-        // CtcForcedAligner.stampTranscript + DiarizedTranscript.mergeWords —
-        // and was benchmarked: it fixes two echo-zone residuals but breaks
-        // two stable turns, net cpWER 28.24 vs this path's 24.02, because
-        // hard per-word midpoint assignment has no hysteresis against
-        // exclusive-timeline micro-fragmentation. Round 3 = Viterbi
-        // smoothing over word-speaker posteriors; the machinery stays
-        // dormant and tested until then. Engine word stamps were also
-        // ruled out: enabling them perturbs mlx's decode itself.)
+        // (JCLAW-651 r2/r3 verdict: full word-level attribution exists
+        // dormant — stampTranscript + mergeWords (hard, 28.24 cpWER) +
+        // mergeWordsViterbi (smoothed, 28.71) — and is measurably NET
+        // NEGATIVE against this path's 24.02, but not for the naive
+        // reason: word-shaped entries silently invalidate every
+        // downstream calibration (MSDD sustained-speech thresholds, the
+        // mixed gates, carver windows were all bench-tuned on
+        // segment-merge entry shapes; the flagship MSDD flip stops firing
+        // on word-shaped entries). Adopting word-level attribution means
+        // recalibrating the whole correction stack through the harnesses
+        // — a campaign, not a merge swap. Engine word stamps are
+        // separately disqualified: enabling them perturbs the decode.)
         transcript = SegmentWordSplitter.split(transcript, speakers, pcm);
         var entries = DiarizedTranscript.merge(transcript, speakers, names);
         // JCLAW-605/612/613: overlap re-attribution, MSDD second opinion,

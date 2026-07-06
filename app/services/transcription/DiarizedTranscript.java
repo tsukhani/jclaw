@@ -90,6 +90,127 @@ public final class DiarizedTranscript {
         return entries;
     }
 
+    /** Switch penalty for {@link #mergeWordsViterbi}: staying with the same
+     *  speaker is free; switching costs this much log-evidence. An INTERIOR
+     *  interjection pays it TWICE (entry + exit), so the single-word flip
+     *  threshold is 2x this value against the evidence ceiling of
+     *  -ln(EMISSION_FLOOR) = ~3.9: a word fully inside another speaker's
+     *  span (3.9 > 3.0) flips; a timeline micro-sliver covering most of one
+     *  word (~1.4 max) stays suppressed. */
+    static final double SWITCH_PENALTY = 1.5;
+    /** Emission floor: a speaker with zero overlap on a word still gets
+     *  this fraction, so transitions (context) can carry ambiguous words. */
+    static final double EMISSION_FLOOR = 0.02;
+
+    /**
+     * Viterbi-smoothed word-level merge (JCLAW-651 round 3). Round 2's hard
+     * per-word midpoint assignment faithfully reproduced every exclusive-
+     * timeline micro-fragment (fixed two echo-zone residuals, broke two
+     * stable turns). This keeps the word fidelity but decodes the speaker
+     * sequence jointly: per-word emissions are each speaker's overlap
+     * fraction of the word, and speaker SWITCHES pay a penalty — so runs
+     * survive weak contrary slivers, while genuinely-attributed
+     * interjections (full-overlap emissions) still flip. Words with no
+     * overlap anywhere keep the JCLAW-622 noSpeakerEvidence marker.
+     * Returns null when any segment lacks word stamps.
+     */
+    public static List<Entry> mergeWordsViterbi(List<WhisperJniTranscriber.Segment> transcript,
+                                                List<SpeakerSegment> speakers,
+                                                Map<Integer, String> names) {
+        var words = new java.util.ArrayList<WhisperJniTranscriber.Word>();
+        for (var seg : transcript) {
+            if (seg.words().isEmpty() && !seg.text().isBlank()) return null;
+            for (var w : seg.words()) {
+                if (!w.text().isBlank()) words.add(w);
+            }
+        }
+        if (words.isEmpty()) return List.of();
+
+        var clusterIds = speakers.stream().map(SpeakerSegment::speaker).distinct().sorted().toList();
+        if (clusterIds.isEmpty()) {
+            // No diarization at all: single-voice reading, like merge().
+            var text = new StringBuilder();
+            for (var w : words) {
+                if (!text.isEmpty()) text.append(' ');
+                text.append(w.text().strip());
+            }
+            return List.of(new Entry(names.getOrDefault(0, speakerLabel(0)),
+                    words.get(0).startMs() / 1000.0,
+                    words.get(words.size() - 1).endMs() / 1000.0, text.toString()));
+        }
+
+        int n = words.size();
+        int k = clusterIds.size();
+        var emissions = new double[n][k];
+        var unsupported = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            double ws = words.get(i).startMs() / 1000.0;
+            double we = Math.max(words.get(i).endMs() / 1000.0, ws + 1e-3);
+            double total = 0;
+            for (int c = 0; c < k; c++) {
+                double ov = 0;
+                for (var span : speakers) {
+                    if (span.speaker() != clusterIds.get(c)) continue;
+                    ov += Math.max(0, Math.min(we, span.end()) - Math.max(ws, span.start()));
+                }
+                double frac = Math.max(ov / (we - ws), EMISSION_FLOOR);
+                emissions[i][c] = Math.log(Math.min(frac, 1.0));
+                total += ov;
+            }
+            unsupported[i] = total <= 0;
+        }
+
+        // Viterbi decode over speakers with a constant switch penalty.
+        var score = new double[k];
+        var back = new int[n][k];
+        System.arraycopy(emissions[0], 0, score, 0, k);
+        for (int i = 1; i < n; i++) {
+            var next = new double[k];
+            for (int c = 0; c < k; c++) {
+                int bestPrev = 0;
+                double best = Double.NEGATIVE_INFINITY;
+                for (int p = 0; p < k; p++) {
+                    double cand = score[p] - (p == c ? 0 : SWITCH_PENALTY);
+                    if (cand > best) {
+                        best = cand;
+                        bestPrev = p;
+                    }
+                }
+                next[c] = best + emissions[i][c];
+                back[i][c] = bestPrev;
+            }
+            score = next;
+        }
+        int state = 0;
+        for (int c = 1; c < k; c++) {
+            if (score[c] > score[state]) state = c;
+        }
+        var path = new int[n];
+        for (int i = n - 1; i >= 0; i--) {
+            path[i] = state;
+            state = back[i][state];
+        }
+
+        // Fold the decoded sequence into entries (same shape as mergeWords).
+        var entries = new java.util.ArrayList<Entry>();
+        int runStart = 0;
+        for (int i = 1; i <= n; i++) {
+            if (i < n && path[i] == path[i - 1] && unsupported[i] == unsupported[i - 1]) continue;
+            int cluster = clusterIds.get(path[runStart]);
+            var label = names.getOrDefault(cluster, speakerLabel(cluster));
+            var text = new StringBuilder();
+            for (int j = runStart; j < i; j++) {
+                if (!text.isEmpty()) text.append(' ');
+                text.append(words.get(j).text().strip());
+            }
+            entries.add(new Entry(label, words.get(runStart).startMs() / 1000.0,
+                    words.get(i - 1).endMs() / 1000.0, text.toString(),
+                    null, false, false, unsupported[runStart]));
+            runStart = i;
+        }
+        return entries;
+    }
+
     /**
      * Word-level merge (JCLAW-651 round 2): each WORD is attributed by its
      * own clock — max-overlap against the diarized spans, nearest-span

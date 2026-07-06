@@ -203,6 +203,54 @@ class DiarizedTranscriptTest extends UnitTest {
     }
 
     @Test
+    void mergeWordsViterbi_suppressesMicroFragmentPingPong() {
+        // A 0.25s foreign sliver barely clips one word mid-run: emissions
+        // are weak, the switch penalty holds the run together.
+        var words = new java.util.ArrayList<services.transcription.WhisperJniTranscriber.Word>();
+        for (int i = 0; i < 8; i++) {
+            words.add(new services.transcription.WhisperJniTranscriber.Word(
+                    i * 500L, i * 500L + 450L, "w" + i));
+        }
+        var seg = new services.transcription.WhisperJniTranscriber.Segment(
+                0, 4000, "w0 w1 w2 w3 w4 w5 w6 w7", 0, 0, 1, words);
+        var speakers = java.util.List.of(
+                new services.transcription.SpeakerSegment(0.0, 1.5, 0),
+                new services.transcription.SpeakerSegment(1.5, 1.75, 1),  // sliver
+                new services.transcription.SpeakerSegment(1.75, 4.0, 0));
+
+        var entries = DiarizedTranscript.mergeWordsViterbi(java.util.List.of(seg), speakers,
+                java.util.Map.of(0, "A", 1, "B"));
+
+        assertEquals(1, entries.size(), "the sliver must not fragment the run: " + entries);
+        assertEquals("A", entries.get(0).speaker());
+    }
+
+    @Test
+    void mergeWordsViterbi_preservesGenuineInterjections() {
+        // One word FULLY inside the other speaker's span: full-overlap
+        // emission beats the switch penalty (the 'Exactly.' case).
+        var words = java.util.List.of(
+                new services.transcription.WhisperJniTranscriber.Word(0, 900, "context"),
+                new services.transcription.WhisperJniTranscriber.Word(1000, 1900, "matters"),
+                new services.transcription.WhisperJniTranscriber.Word(2100, 2900, "exactly"),
+                new services.transcription.WhisperJniTranscriber.Word(3100, 3900, "so"),
+                new services.transcription.WhisperJniTranscriber.Word(4000, 4900, "then"));
+        var seg = new services.transcription.WhisperJniTranscriber.Segment(
+                0, 5000, "context matters exactly so then", 0, 0, 1, words);
+        var speakers = java.util.List.of(
+                new services.transcription.SpeakerSegment(0.0, 2.0, 0),
+                new services.transcription.SpeakerSegment(2.0, 3.0, 1),
+                new services.transcription.SpeakerSegment(3.0, 5.0, 0));
+
+        var entries = DiarizedTranscript.mergeWordsViterbi(java.util.List.of(seg), speakers,
+                java.util.Map.of(0, "Podcaster", 1, "Firdaus"));
+
+        assertEquals(3, entries.size(), entries.toString());
+        assertEquals("Firdaus", entries.get(1).speaker());
+        assertEquals("exactly", entries.get(1).text());
+    }
+
+    @Test
     void mergeWords_attributesEachWordByItsOwnClock() {
         // JCLAW-651 round 2: a segment whose CLOCK says 0-4s but whose last
         // two words were actually spoken at 4.2-5.4s (the echo-zone lie) —
