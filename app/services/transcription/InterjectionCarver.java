@@ -56,29 +56,70 @@ public final class InterjectionCarver {
     private InterjectionCarver() {}
 
     /** Production entry point: raw activations from the diarization, labels
-     *  via the naming map, CTC alignment, MossFormer stems for the guard
-     *  and the sidecar embedder. */
+     *  via the naming map, word alignment (the ASR's OWN word stamps when
+     *  available — exact; CTC fallback otherwise), MossFormer stems for the
+     *  guard and the sidecar embedder. */
     public static List<DiarizedTranscript.Entry> carve(
             List<DiarizedTranscript.Entry> entries,
             DiarizationRouter.Result diarization,
             Map<Integer, String> names,
             float[] pcm) {
+        return carve(entries, diarization, names, pcm, List.of());
+    }
+
+    /** As above with the raw transcript for exact word-stamp alignment
+     *  (JCLAW-651 round 2 — CTC boundaries wobble in echo; the engine's
+     *  word clock does not). */
+    public static List<DiarizedTranscript.Entry> carve(
+            List<DiarizedTranscript.Entry> entries,
+            DiarizationRouter.Result diarization,
+            Map<Integer, String> names,
+            float[] pcm,
+            List<WhisperJniTranscriber.Segment> transcript) {
         if (diarization.rawSegments().isEmpty()) return entries;
         try {
             var references = OverlapReattributor.references(
                     entries, diarization.overlaps(), pcm, SidecarEmbedder.INSTANCE);
-            return carve(entries, diarization.rawSegments(), names, pcm,
-                    (start, end, words) -> CtcForcedAligner.alignWords(
-                            pcm,
-                            (int) Math.clamp(Math.round(start * SAMPLE_RATE), 0, pcm.length),
-                            (int) Math.clamp(Math.round(end * SAMPLE_RATE), 0, pcm.length),
-                            words),
+            var stamps = new ArrayList<WhisperJniTranscriber.Word>();
+            for (var seg : transcript) stamps.addAll(seg.words());
+            Aligner ctc = (start, end, words) -> CtcForcedAligner.alignWords(
+                    pcm,
+                    (int) Math.clamp(Math.round(start * SAMPLE_RATE), 0, pcm.length),
+                    (int) Math.clamp(Math.round(end * SAMPLE_RATE), 0, pcm.length),
+                    words);
+            Aligner aligner = stamps.isEmpty() ? ctc
+                    : (start, end, words) -> stampAlign(stamps, start, end, words, ctc);
+            return carve(entries, diarization.rawSegments(), names, pcm, aligner,
                     OverlapReattributor::separateViaSidecar,
                     SidecarEmbedder.INSTANCE, references);
         } catch (RuntimeException e) {
             Logger.warn("InterjectionCarver: carving skipped: %s", e.getMessage());
             return entries;
         }
+    }
+
+    /** Exact alignment from the engine's word stamps: the entry's words map
+     *  1:1 onto the stamps inside its window (same normalization filter);
+     *  any mismatch falls back to CTC. */
+    static List<double[]> stampAlign(List<WhisperJniTranscriber.Word> stamps,
+                                     double start, double end, List<String> normalizedWords,
+                                     Aligner ctcFallback) {
+        var inWindow = new ArrayList<WhisperJniTranscriber.Word>();
+        for (var w : stamps) {
+            double mid = (w.startMs() + w.endMs()) / 2000.0;
+            if (mid >= start - 0.05 && mid <= end + 0.05
+                    && !CtcForcedAligner.normalizeWord(w.text()).isEmpty()) {
+                inWindow.add(w);
+            }
+        }
+        if (inWindow.size() != normalizedWords.size()) {
+            return ctcFallback.alignWords(start, end, normalizedWords);
+        }
+        var out = new ArrayList<double[]>(inWindow.size());
+        for (var w : inWindow) {
+            out.add(new double[]{w.startMs() / 1000.0, w.endMs() / 1000.0});
+        }
+        return out;
     }
 
     /** Seam-based core. */

@@ -90,6 +90,62 @@ public final class DiarizedTranscript {
         return entries;
     }
 
+    /**
+     * Word-level merge (JCLAW-651 round 2): each WORD is attributed by its
+     * own clock — max-overlap against the diarized spans, nearest-span
+     * fallback — and consecutive same-speaker words fold into entries. This
+     * replaces segment-level attribution + CTC re-splitting wherever the
+     * ASR provides word timestamps: whisper's per-segment clock misplaced
+     * interjection words in echo (the four human-verified residuals), and
+     * no downstream correction can re-attribute words it cannot locate.
+     * Returns null when any segment lacks words (legacy cache, engine
+     * quirk) so the caller takes the legacy path.
+     */
+    public static List<Entry> mergeWords(List<WhisperJniTranscriber.Segment> transcript,
+                                         List<SpeakerSegment> speakers,
+                                         Map<Integer, String> names) {
+        var words = new java.util.ArrayList<WhisperJniTranscriber.Word>();
+        for (var seg : transcript) {
+            if (seg.words().isEmpty() && !seg.text().isBlank()) return null;
+            words.addAll(seg.words());
+        }
+        if (words.isEmpty()) return List.of();
+
+        var entries = new java.util.ArrayList<Entry>();
+        String curSpeaker = null;
+        boolean curUnsupported = false;
+        double curStart = 0;
+        double curEnd = 0;
+        var curText = new StringBuilder();
+        for (var w : words) {
+            if (w.text().isBlank()) continue;
+            double ws = w.startMs() / 1000.0;
+            double we = w.endMs() / 1000.0;
+            int speaker = speakerFor(ws, we, speakers);
+            var label = names.getOrDefault(speaker, speakerLabel(speaker));
+            boolean unsupported = !speakers.isEmpty() && !overlapsAny(ws, we, speakers);
+            if (curSpeaker != null && curSpeaker.equals(label) && curUnsupported == unsupported) {
+                curText.append(' ').append(w.text().strip());
+                curEnd = we;
+            } else {
+                if (curSpeaker != null) {
+                    entries.add(new Entry(curSpeaker, curStart, curEnd, curText.toString(),
+                            null, false, false, curUnsupported));
+                }
+                curSpeaker = label;
+                curUnsupported = unsupported;
+                curStart = ws;
+                curEnd = we;
+                curText = new StringBuilder(w.text().strip());
+            }
+        }
+        if (curSpeaker != null) {
+            entries.add(new Entry(curSpeaker, curStart, curEnd, curText.toString(),
+                    null, false, false, curUnsupported));
+        }
+        return entries;
+    }
+
     private static boolean overlapsAny(double start, double end, List<SpeakerSegment> speakers) {
         for (var s : speakers) {
             if (Math.min(end, s.end()) - Math.max(start, s.start()) > 0) return true;

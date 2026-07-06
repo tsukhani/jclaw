@@ -51,12 +51,15 @@ def run_mlx(audio, size, language):
     import mlx_whisper
     repo = MLX_REPOS.get(size, MLX_REPOS["large-v3"])
     sys.stderr.write("[transcribe] mlx-whisper %s\n" % repo)
+    # NO word_timestamps: enabling it perturbs mlx's decode (measured: text
+    # changes + 31s stamp drift on the debate benchmark) and its attention-
+    # derived stamps are imprecise — word TIMES come from the JVM's CTC
+    # aligner (wav2vec2 Viterbi), the WhisperX principle (JCLAW-651 r2).
     result = mlx_whisper.transcribe(audio, path_or_hf_repo=repo, language=language,
                                     condition_on_previous_text=False)
-    # mlx-whisper exposes the same per-segment confidence fields.
     return [(s["start"], s["end"], s["text"],
              s.get("no_speech_prob", 0.0), s.get("avg_logprob", 0.0),
-             s.get("compression_ratio", 1.0))
+             s.get("compression_ratio", 1.0), [])
             for s in result["segments"]]
 
 
@@ -75,7 +78,7 @@ def run_ct2(audio, size, language):
                                    condition_on_previous_text=False,
                                    vad_filter=True)
     return [(s.start, s.end, s.text,
-             s.no_speech_prob, s.avg_logprob, s.compression_ratio)
+             s.no_speech_prob, s.avg_logprob, s.compression_ratio, [])
             for s in segments]
 
 
@@ -103,7 +106,7 @@ def run_ct2_cached(audio, size, language):
                                    condition_on_previous_text=False,
                                    vad_filter=True)
     return [(s.start, s.end, s.text,
-             s.no_speech_prob, s.avg_logprob, s.compression_ratio)
+             s.no_speech_prob, s.avg_logprob, s.compression_ratio, [])
             for s in segments]
 
 
@@ -111,8 +114,11 @@ def _payload(triples):
     return {"segments": [
         {"startMs": int(round(s * 1000)), "endMs": int(round(e * 1000)),
          "text": t.strip(), "noSpeechProb": round(nsp, 4),
-         "avgLogprob": round(alp, 4), "compressionRatio": round(cr, 4)}
-        for s, e, t, nsp, alp, cr in triples]}
+         "avgLogprob": round(alp, 4), "compressionRatio": round(cr, 4),
+         "words": [{"startMs": int(round(ws * 1000)),
+                    "endMs": int(round(we * 1000)), "text": wt.strip()}
+                   for ws, we, wt in words if wt.strip()]}
+        for s, e, t, nsp, alp, cr, words in triples]}
 
 
 def _engine_repo(size):
@@ -190,11 +196,7 @@ def main():
     language = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "-" else None
     triples = run_mlx(audio, size, language) if is_apple_silicon() \
         else run_ct2(audio, size, language)
-    print(json.dumps({"segments": [
-        {"startMs": int(round(s * 1000)), "endMs": int(round(e * 1000)),
-         "text": t.strip(), "noSpeechProb": round(nsp, 4),
-         "avgLogprob": round(alp, 4), "compressionRatio": round(cr, 4)}
-        for s, e, t, nsp, alp, cr in triples]}))
+    print(json.dumps(_payload(triples)))
     return 0
 
 

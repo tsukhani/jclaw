@@ -42,13 +42,24 @@ public final class WhisperJniTranscriber {
      * to milliseconds ({@code whisper_full_get_segment_t0/t1} report
      * centiseconds; we multiply by 10 so callers never see the odd unit).
      */
+    /** One transcribed word with its own clock (JCLAW-651 round 2): the
+     *  engines' word timestamps replace the fragile per-segment clock that
+     *  misplaced interjection words in echo. */
+    public record Word(long startMs, long endMs, String text) {}
+
     /** JCLAW-635: the confidence triple (whisper's standard hallucination
-     *  gates) rides on every segment; the JNI fallback and legacy callers
-     *  get neutral defaults via the compat constructor. */
+     *  gates) rides on every segment; legacy callers get neutral defaults
+     *  and no words via the compat constructors. */
     public record Segment(long startMs, long endMs, String text,
-                          double noSpeechProb, double avgLogprob, double compressionRatio) {
+                          double noSpeechProb, double avgLogprob, double compressionRatio,
+                          List<Word> words) {
         public Segment(long startMs, long endMs, String text) {
-            this(startMs, endMs, text, 0.0, 0.0, 1.0);
+            this(startMs, endMs, text, 0.0, 0.0, 1.0, List.of());
+        }
+
+        public Segment(long startMs, long endMs, String text,
+                       double noSpeechProb, double avgLogprob, double compressionRatio) {
+            this(startMs, endMs, text, noSpeechProb, avgLogprob, compressionRatio, List.of());
         }
     }
 

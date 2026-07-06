@@ -348,12 +348,22 @@ public class PyannoteDiarizationClient {
             var segments = new ArrayList<WhisperJniTranscriber.Segment>();
             for (var el : root.getAsJsonArray("segments")) {
                 var o = el.getAsJsonObject();
+                var words = new ArrayList<WhisperJniTranscriber.Word>();
+                if (o.has("words")) {
+                    for (var wl : o.getAsJsonArray("words")) {
+                        var w = wl.getAsJsonObject();
+                        words.add(new WhisperJniTranscriber.Word(
+                                w.get("startMs").getAsLong(), w.get("endMs").getAsLong(),
+                                w.get("text").getAsString()));
+                    }
+                }
                 segments.add(new WhisperJniTranscriber.Segment(
                         o.get("startMs").getAsLong(), o.get("endMs").getAsLong(),
                         o.get("text").getAsString(),
                         o.has("noSpeechProb") ? o.get("noSpeechProb").getAsDouble() : 0.0,
                         o.has("avgLogprob") ? o.get("avgLogprob").getAsDouble() : 0.0,
-                        o.has("compressionRatio") ? o.get("compressionRatio").getAsDouble() : 1.0));
+                        o.has("compressionRatio") ? o.get("compressionRatio").getAsDouble() : 1.0,
+                        words));
             }
             return segments;
         } catch (IOException e) {

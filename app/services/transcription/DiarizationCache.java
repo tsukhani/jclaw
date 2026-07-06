@@ -30,8 +30,8 @@ public final class DiarizationCache {
     /** Bump when segment-shaping logic changes (exclusive-mode handling,
      *  overlap extraction, ...) so previously cached results read as
      *  misses (JCLAW-621). Model changes are keyed separately below. */
-    /** v3: diarization section carries rawSegments (JCLAW-651). */
-    static final int PIPELINE_VERSION = 3;
+    /** v4: transcript segments carry word timestamps (JCLAW-651 round 2). */
+    static final int PIPELINE_VERSION = 4;
 
     private DiarizationCache() {}
 
@@ -172,12 +172,22 @@ public final class DiarizationCache {
             var segments = new ArrayList<WhisperJniTranscriber.Segment>();
             for (var el : t.getAsJsonArray("segments")) {
                 var o = el.getAsJsonObject();
+                var words = new ArrayList<WhisperJniTranscriber.Word>();
+                if (o.has("words")) {
+                    for (var wl : o.getAsJsonArray("words")) {
+                        var w = wl.getAsJsonObject();
+                        words.add(new WhisperJniTranscriber.Word(
+                                w.get("startMs").getAsLong(), w.get("endMs").getAsLong(),
+                                w.get("text").getAsString()));
+                    }
+                }
                 segments.add(new WhisperJniTranscriber.Segment(
                         o.get("startMs").getAsLong(), o.get("endMs").getAsLong(),
                         o.get("text").getAsString(),
                         o.has("noSpeechProb") ? o.get("noSpeechProb").getAsDouble() : 0.0,
                         o.has("avgLogprob") ? o.get("avgLogprob").getAsDouble() : 0.0,
-                        o.has("compressionRatio") ? o.get("compressionRatio").getAsDouble() : 1.0));
+                        o.has("compressionRatio") ? o.get("compressionRatio").getAsDouble() : 1.0,
+                        words));
             }
             Logger.info("DiarizationCache: reusing cached transcript for %s (%d segments)",
                     audioFile.getFileName(), segments.size());
@@ -204,6 +214,15 @@ public final class DiarizationCache {
                 o.addProperty("noSpeechProb", seg.noSpeechProb());
                 o.addProperty("avgLogprob", seg.avgLogprob());
                 o.addProperty("compressionRatio", seg.compressionRatio());
+                var wordsArr = new JsonArray();
+                for (var w : seg.words()) {
+                    var wo = new JsonObject();
+                    wo.addProperty("startMs", w.startMs());
+                    wo.addProperty("endMs", w.endMs());
+                    wo.addProperty("text", w.text());
+                    wordsArr.add(wo);
+                }
+                o.add("words", wordsArr);
                 arr.add(o);
             }
             var t = new JsonObject();

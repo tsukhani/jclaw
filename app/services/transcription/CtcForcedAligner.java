@@ -67,6 +67,53 @@ public final class CtcForcedAligner {
      * Returns one {@code [startSeconds, endSeconds]} pair per word, absolute
      * (window offset included).
      */
+    /**
+     * Stamp every segment's words with CTC-aligned times (JCLAW-651 r2):
+     * whisper's text within a modestly padded window of its own segment —
+     * the pad lets words escape the segment-clock lie in echo, while the
+     * acoustic Viterbi anchor keeps them honest. Returns null on any
+     * alignment failure so the caller takes the legacy path.
+     */
+    public static List<WhisperJniTranscriber.Segment> stampTranscript(
+            List<WhisperJniTranscriber.Segment> transcript, float[] pcm) {
+        try {
+            var out = new java.util.ArrayList<WhisperJniTranscriber.Segment>(transcript.size());
+            for (var seg : transcript) {
+                var originals = new java.util.ArrayList<String>();
+                var normalized = new java.util.ArrayList<String>();
+                for (var w : seg.text().split("\\s+")) {
+                    var n = normalizeWord(w);
+                    if (!n.isEmpty()) {
+                        originals.add(w);
+                        normalized.add(n);
+                    }
+                }
+                if (normalized.isEmpty()) {
+                    out.add(seg);
+                    continue;
+                }
+                int from = (int) Math.clamp(
+                        Math.round((seg.startMs() / 1000.0 - 0.3) * 16_000), 0, pcm.length);
+                int to = (int) Math.clamp(
+                        Math.round((seg.endMs() / 1000.0 + 1.2) * 16_000), from, pcm.length);
+                var times = alignWords(pcm, from, to, normalized);
+                var words = new java.util.ArrayList<WhisperJniTranscriber.Word>(originals.size());
+                for (int i = 0; i < originals.size(); i++) {
+                    words.add(new WhisperJniTranscriber.Word(
+                            Math.round(times.get(i)[0] * 1000),
+                            Math.round(times.get(i)[1] * 1000), originals.get(i)));
+                }
+                out.add(new WhisperJniTranscriber.Segment(seg.startMs(), seg.endMs(), seg.text(),
+                        seg.noSpeechProb(), seg.avgLogprob(), seg.compressionRatio(), words));
+            }
+            return out;
+        } catch (RuntimeException e) {
+            play.Logger.warn("CtcForcedAligner: transcript stamping failed (%s) — legacy path",
+                    e.getMessage());
+            return null;
+        }
+    }
+
     public static List<double[]> alignWords(float[] samples, int from, int to,
                                             List<String> normalizedWords) {
         if (normalizedWords.isEmpty()) {

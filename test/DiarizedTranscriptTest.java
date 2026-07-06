@@ -203,6 +203,40 @@ class DiarizedTranscriptTest extends UnitTest {
     }
 
     @Test
+    void mergeWords_attributesEachWordByItsOwnClock() {
+        // JCLAW-651 round 2: a segment whose CLOCK says 0-4s but whose last
+        // two words were actually spoken at 4.2-5.4s (the echo-zone lie) —
+        // word-level merge places them on the second speaker; segment-level
+        // merge could not.
+        var words = java.util.List.of(
+                new services.transcription.WhisperJniTranscriber.Word(0, 1800, "hello there"),
+                new services.transcription.WhisperJniTranscriber.Word(4200, 5400, "still young"));
+        var seg = new services.transcription.WhisperJniTranscriber.Segment(
+                0, 4000, "hello there still young", 0, 0, 1, words);
+        var speakers = java.util.List.of(
+                new services.transcription.SpeakerSegment(0.0, 4.0, 0),
+                new services.transcription.SpeakerSegment(4.0, 6.0, 1));
+
+        var entries = DiarizedTranscript.mergeWords(java.util.List.of(seg), speakers,
+                java.util.Map.of(0, "Podcaster", 1, "Firdaus"));
+
+        assertEquals(2, entries.size());
+        assertEquals("Podcaster", entries.get(0).speaker());
+        assertEquals("hello there", entries.get(0).text());
+        assertEquals("Firdaus", entries.get(1).speaker());
+        assertEquals("still young", entries.get(1).text());
+        assertEquals(4.2, entries.get(1).start(), 1e-9, "the WORD clock wins");
+    }
+
+    @Test
+    void mergeWords_returnsNull_whenAnySegmentLacksWords() {
+        var seg = new services.transcription.WhisperJniTranscriber.Segment(0, 2000, "no words here");
+        assertNull(DiarizedTranscript.mergeWords(java.util.List.of(seg),
+                java.util.List.of(new services.transcription.SpeakerSegment(0, 2, 0)),
+                java.util.Map.of()), "legacy transcripts take the legacy path");
+    }
+
+    @Test
     void merge_flagsSegmentsWithNoDiarizationSupport() {
         var transcript = java.util.List.of(
                 new services.transcription.WhisperJniTranscriber.Segment(0, 2000, "Real speech."),

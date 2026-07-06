@@ -414,18 +414,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(409, {"error": "another inference is already in progress"})
             return
         try:
-            import subprocess
             t0 = time.time()
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            proc = subprocess.run(
-                ["uv", "run", "transcribe.py", audio_path, model, language],
-                cwd=script_dir, capture_output=True, text=True, timeout=REQUEST_TIMEOUT_SEC)
-            for line in proc.stderr.splitlines()[-10:]:
-                sys.stderr.write("[diarize-sidecar] %s\n" % line)
-            if proc.returncode != 0:
-                raise RuntimeError("transcribe.py exited %d: %s"
-                                   % (proc.returncode, proc.stderr.strip()[-300:]))
-            payload = json.loads(proc.stdout.strip().splitlines()[-1])
+            with self.state.asr_io_lock:
+                w = self.state.asr_worker()
+                w.stdin.write(json.dumps({"audio": audio_path, "model": model,
+                                          "language": None if language == "-" else language}) + "\n")
+                w.stdin.flush()
+                line = w.stdout.readline()
+            if not line:
+                self.state._asr_worker = None
+                raise RuntimeError("asr worker died mid-request")
+            payload = json.loads(line)
+            if "error" in payload:
+                raise RuntimeError(payload["error"])
             sys.stderr.write("[diarize-sidecar] transcribed %s: %d segment(s) in %.1fs\n"
                              % (os.path.basename(audio_path),
                                 len(payload.get("segments", [])), time.time() - t0))

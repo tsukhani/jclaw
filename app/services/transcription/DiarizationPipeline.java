@@ -98,6 +98,15 @@ public final class DiarizationPipeline {
             }
         }
         // JCLAW-603: word-level split of boundary-straddling segments.
+        // (JCLAW-651 r2 note: a full WORD-level merge exists —
+        // CtcForcedAligner.stampTranscript + DiarizedTranscript.mergeWords —
+        // and was benchmarked: it fixes two echo-zone residuals but breaks
+        // two stable turns, net cpWER 28.24 vs this path's 24.02, because
+        // hard per-word midpoint assignment has no hysteresis against
+        // exclusive-timeline micro-fragmentation. Round 3 = Viterbi
+        // smoothing over word-speaker posteriors; the machinery stays
+        // dormant and tested until then. Engine word stamps were also
+        // ruled out: enabling them perturbs mlx's decode itself.)
         transcript = SegmentWordSplitter.split(transcript, speakers, pcm);
         var entries = DiarizedTranscript.merge(transcript, speakers, names);
         // JCLAW-605/612/613: overlap re-attribution, MSDD second opinion,
