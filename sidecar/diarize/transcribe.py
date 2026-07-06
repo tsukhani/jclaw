@@ -16,8 +16,15 @@ unchanged while wall clock drops 5-20x:
 Runs in its OWN uv script env, shelled from serve.py per /transcribe call
 (the msdd.py/separate.py pattern).
 
-usage: uv run transcribe.py <audio> <model-size> [language]
-stdout (last line): {"segments": [{"startMs": i, "endMs": i, "text": s}, ...]}
+usage (one-shot): uv run transcribe.py <audio> <model-size> [language]
+usage (worker):   uv run transcribe.py --worker
+  worker protocol: one request per line on stdin:
+    {"audio": path, "model": size, "language": code-or-null}
+  one response per line on stdout: {"segments": [...]} or {"error": ...}
+  JCLAW-649: mlx_whisper caches its model in-process (ModelHolder) and
+  faster-whisper's WhisperModel is held per size — a persistent worker
+  amortizes the ~5s model load that every one-shot call paid (the
+  under-speech pass transcribes several sub-second slices per run).
 """
 import json
 import platform
@@ -71,7 +78,62 @@ def run_ct2(audio, size, language):
             for s in segments]
 
 
+_CT2_CACHE = {}
+
+
+def _transcribe(audio, size, language):
+    if is_apple_silicon():
+        return run_mlx(audio, size, language)
+    return run_ct2_cached(audio, size, language)
+
+
+def run_ct2_cached(audio, size, language):
+    from faster_whisper import WhisperModel
+    model = _CT2_CACHE.get(size)
+    if model is None:
+        try:
+            model = WhisperModel(size, device="cuda", compute_type="float16")
+            sys.stderr.write("[transcribe] faster-whisper %s on cuda\n" % size)
+        except Exception:  # noqa: BLE001 — no CUDA: int8 CPU
+            model = WhisperModel(size, device="cpu", compute_type="int8")
+            sys.stderr.write("[transcribe] faster-whisper %s on cpu/int8\n" % size)
+        _CT2_CACHE[size] = model
+    segments, _ = model.transcribe(audio, language=language,
+                                   condition_on_previous_text=False,
+                                   vad_filter=True)
+    return [(s.start, s.end, s.text,
+             s.no_speech_prob, s.avg_logprob, s.compression_ratio)
+            for s in segments]
+
+
+def _payload(triples):
+    return {"segments": [
+        {"startMs": int(round(s * 1000)), "endMs": int(round(e * 1000)),
+         "text": t.strip(), "noSpeechProb": round(nsp, 4),
+         "avgLogprob": round(alp, 4), "compressionRatio": round(cr, 4)}
+        for s, e, t, nsp, alp, cr in triples]}
+
+
+def worker():
+    sys.stderr.write("[transcribe] worker ready\n")
+    print(json.dumps({"ready": True}), flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+            size = SIZES.get(req.get("model") or "large", req.get("model") or "large")
+            triples = _transcribe(req["audio"], size, req.get("language") or None)
+            print(json.dumps(_payload(triples)), flush=True)
+        except Exception as e:  # noqa: BLE001 — reported per-request
+            print(json.dumps({"error": str(e)}), flush=True)
+    return 0
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
+        return worker()
     audio = sys.argv[1]
     size = SIZES.get(sys.argv[2], sys.argv[2])
     language = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "-" else None

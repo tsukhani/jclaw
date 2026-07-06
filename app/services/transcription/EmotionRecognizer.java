@@ -227,12 +227,19 @@ public final class EmotionRecognizer {
         try {
             classifier = parseClassifier(Files.readAllBytes(classifierPath));
             var env = OrtEnvironment.getEnvironment();
-            // JCLAW-638 EP decision: default CPU provider stays. CoreML EP
-            // needs per-model op-coverage validation (wav2vec2 SER uses ops
-            // CoreML historically mishandles) and the CUDA EP needs the
-            // GPU onnxruntime artifact — both are a spike, not a config
-            // flip. Revisit if this pass re-enters the JFR top hotspots.
-            session = env.createSession(modelPath.toString(), new OrtSession.SessionOptions());
+            // JCLAW-649 (revising the 638 decision): attempt the CoreML EP —
+            // ONNX Runtime partitions the graph and falls back per-node, so
+            // unsupported wav2vec2 ops degrade to CPU nodes instead of
+            // failing. A refused registration falls back to the pure-CPU
+            // session with a log line.
+            var opts = new OrtSession.SessionOptions();
+            try {
+                opts.addCoreML();
+                Logger.info("EmotionRecognizer: CoreML execution provider registered");
+            } catch (OrtException | UnsatisfiedLinkError e) {
+                Logger.info("EmotionRecognizer: CoreML EP unavailable (%s) — CPU provider", e.getMessage());
+            }
+            session = env.createSession(modelPath.toString(), opts);
             inputName = session.getInputNames().iterator().next();
             Logger.info("EmotionRecognizer: emotion2vec+ loaded from %s (input=%s)",
                     modelPath, inputName);

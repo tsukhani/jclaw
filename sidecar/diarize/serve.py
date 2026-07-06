@@ -105,6 +105,28 @@ class SidecarState:
         self._embedder_lock = threading.Lock()
         self._msdd_worker = None
         self.msdd_lock = threading.Lock()
+        self._asr_worker = None
+
+    def asr_worker(self):
+        """JCLAW-649: persistent ASR worker — one-shot calls paid a python
+        start + engine import + model load (~5s) per request, and the
+        under-speech pass makes several slice requests per run. Caller
+        must hold run_lock."""
+        import subprocess
+        w = self._asr_worker
+        if w is not None and w.poll() is None:
+            return w
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.stderr.write("[diarize-sidecar] spawning persistent asr worker\n")
+        w = subprocess.Popen(["uv", "run", "transcribe.py", "--worker"],
+                             cwd=script_dir, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             text=True, bufsize=1)
+        ready = w.stdout.readline()
+        if not ready or not json.loads(ready).get("ready"):
+            raise RuntimeError("asr worker failed to start: %r" % ready)
+        self._asr_worker = w
+        return w
 
     def msdd_worker(self):
         """JCLAW-646: persistent MSDD worker subprocess — the per-call NeMo
@@ -133,9 +155,16 @@ class SidecarState:
             if self._embedder is None or self._embedder_model != model_path:
                 import sherpa_onnx
                 t0 = time.time()
+                provider = "cpu"
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        provider = "cuda"  # JCLAW-649: free win on NVIDIA
+                except Exception:  # noqa: BLE001
+                    pass
                 self._embedder = sherpa_onnx.SpeakerEmbeddingExtractor(
                     sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-                        model=model_path, num_threads=2))
+                        model=model_path, num_threads=2, provider=provider))
                 self._embedder_model = model_path
                 sys.stderr.write("[diarize-sidecar] embedder loaded in %.1fs (%s)\n"
                                  % (time.time() - t0, os.path.basename(model_path)))
