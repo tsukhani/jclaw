@@ -118,6 +118,21 @@ public final class DiarizedTranscript {
      *  (flagship 0.98, still-young 1.0, permissible-lah 1.0) exactly
      *  where the exclusive projection is wrong. */
     static final double MSDD_WEIGHT = 4.3;
+    /** JCLAW-652 E4-A: weight on separated-stem cosine margins for
+     *  CONTESTED words (emission gap below the band). Measured stem
+     *  margins run +0.10..+0.27 for true claims, negative for echo — 6.0
+     *  turns a +0.15 margin into ~0.9 emission units, enough to tip
+     *  near-ties without overruling confident instruments. */
+    static final double STEM_WEIGHT = 6.0;
+    /** Words whose top-two emission gap is below this are contested and
+     *  get stem evidence. */
+    static final double CONTESTED_GAP = 2.5;
+
+    /** Word-span stem evidence: per-cluster bonus for [start,end], or null
+     *  when no evidence is available there. */
+    public interface StemScorer {
+        double[] scores(double start, double end);
+    }
 
     /**
      * Align MSDD's arbitrary per-run speaker indices to the exclusive
@@ -165,8 +180,19 @@ public final class DiarizedTranscript {
             List<SpeakerSegment> rawSegments,
             List<SpeakerSegment> msddSegments,
             Map<Integer, String> names) {
+        return mergeWordsViterbiFused(transcript, speakers, rawSegments, msddSegments, names, null);
+    }
+
+    /** As above with word-span stem evidence for contested words (E4-A). */
+    public static List<Entry> mergeWordsViterbiFused(
+            List<WhisperJniTranscriber.Segment> transcript,
+            List<SpeakerSegment> speakers,
+            List<SpeakerSegment> rawSegments,
+            List<SpeakerSegment> msddSegments,
+            Map<Integer, String> names,
+            StemScorer stemScorer) {
         return decodeWords(transcript, speakers, rawSegments,
-                alignMsddClusters(msddSegments, speakers), names);
+                alignMsddClusters(msddSegments, speakers), names, stemScorer);
     }
 
     /**
@@ -184,14 +210,15 @@ public final class DiarizedTranscript {
     public static List<Entry> mergeWordsViterbi(List<WhisperJniTranscriber.Segment> transcript,
                                                 List<SpeakerSegment> speakers,
                                                 Map<Integer, String> names) {
-        return decodeWords(transcript, speakers, List.of(), List.of(), names);
+        return decodeWords(transcript, speakers, List.of(), List.of(), names, null);
     }
 
     private static List<Entry> decodeWords(List<WhisperJniTranscriber.Segment> transcript,
                                            List<SpeakerSegment> speakers,
                                            List<SpeakerSegment> rawSegments,
                                            List<SpeakerSegment> msddSegments,
-                                           Map<Integer, String> names) {
+                                           Map<Integer, String> names,
+                                           StemScorer stemScorer) {
         var words = new java.util.ArrayList<WhisperJniTranscriber.Word>();
         for (var seg : transcript) {
             if (seg.words().isEmpty() && !seg.text().isBlank()) return null;
@@ -247,6 +274,19 @@ public final class DiarizedTranscript {
                 total += ov;
             }
             unsupported[i] = total <= 0;
+            // E4-A: stem evidence for contested words only — the emission
+            // gap decides, so confident words never pay the stem cost.
+            if (stemScorer != null && k == 2) {
+                double gap = Math.abs(emissions[i][0] - emissions[i][1]);
+                if (gap < CONTESTED_GAP) {
+                    var stem = stemScorer.scores(ws, we);
+                    if (stem != null) {
+                        for (int c = 0; c < k; c++) {
+                            emissions[i][c] += STEM_WEIGHT * stem[c];
+                        }
+                    }
+                }
+            }
         }
 
         // Viterbi decode over speakers with a constant switch penalty.

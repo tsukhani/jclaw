@@ -631,6 +631,170 @@ public final class OverlapReattributor {
     /** Stage the pipeline's 16kHz mono PCM as a temp WAV for /msdd —
      *  NeMo's VAD collate crashes on the original stereo/44.1kHz upload
      *  (torch.cat dimension mismatch on 2-D signals). */
+    /** Separated overlap-region windows: the E2b-safe shape (regions padded
+     *  and coalesced, never expanded to cover entries). */
+    public record RegionStems(List<Double> starts, List<float[]> windows,
+                              List<List<float[]>> stems) {}
+
+    /**
+     * JCLAW-652 E4-A: separate the overlap regions once and hand back the
+     * stems, for word-span evidence inside the fused decode.
+     */
+    public static RegionStems separatedOverlapWindows(List<double[]> overlaps, float[] pcm) {
+        var intervals = new ArrayList<double[]>();
+        for (var region : overlaps) {
+            double winStart = Math.max(0, region[0] - PAD_SECONDS);
+            double winEnd = Math.min(pcm.length / (double) SAMPLE_RATE, region[1] + PAD_SECONDS);
+            if (winEnd - winStart < MIN_WINDOW_SECONDS) {
+                double extend = (MIN_WINDOW_SECONDS - (winEnd - winStart)) / 2;
+                winStart = Math.max(0, winStart - extend);
+                winEnd = Math.min(pcm.length / (double) SAMPLE_RATE, winEnd + extend);
+            }
+            intervals.add(new double[]{winStart, winEnd});
+        }
+        intervals.sort(java.util.Comparator.comparingDouble(a -> a[0]));
+        var merged = new ArrayList<double[]>();
+        for (var iv : intervals) {
+            if (!merged.isEmpty() && iv[0] <= merged.get(merged.size() - 1)[1]) {
+                merged.get(merged.size() - 1)[1] = Math.max(merged.get(merged.size() - 1)[1], iv[1]);
+            } else {
+                merged.add(iv);
+            }
+        }
+        var windows = new ArrayList<float[]>();
+        var starts = new ArrayList<Double>();
+        for (var iv : merged) {
+            int from = (int) (iv[0] * SAMPLE_RATE);
+            int to = (int) (iv[1] * SAMPLE_RATE);
+            if (to - from < SAMPLE_RATE) continue;
+            var window = new float[to - from];
+            System.arraycopy(pcm, from, window, 0, window.length);
+            windows.add(window);
+            starts.add(iv[0]);
+        }
+        return new RegionStems(starts, windows,
+                windows.isEmpty() ? List.of() : separateViaSidecar(windows));
+    }
+
+    /**
+     * JCLAW-652 E4-A: per-CLUSTER voiceprints from the exclusive timeline's
+     * longest non-overlap spans — the decode-time analogue of references()
+     * (no entries exist yet).
+     */
+    public static Map<Integer, float[]> clusterReferences(List<SpeakerSegment> exclusive,
+                                                          List<double[]> overlaps, float[] pcm) {
+        var bySpeaker = new java.util.HashMap<Integer, List<SpeakerSegment>>();
+        for (var seg : exclusive) {
+            if (inAnyOverlap(seg.start(), seg.end(), overlaps)) continue;
+            bySpeaker.computeIfAbsent(seg.speaker(), k -> new ArrayList<>()).add(seg);
+        }
+        var refs = new java.util.HashMap<Integer, float[]>();
+        for (var e : bySpeaker.entrySet()) {
+            var spans = e.getValue().stream()
+                    .sorted((a, b) -> Double.compare(b.end() - b.start(), a.end() - a.start()))
+                    .limit(2).toList();
+            var slices = new ArrayList<float[]>();
+            for (var span : spans) {
+                int from = (int) (span.start() * SAMPLE_RATE);
+                int to = (int) Math.min(span.end() * SAMPLE_RATE, pcm.length);
+                if (to - from < SAMPLE_RATE * 2) continue;
+                var slice = new float[Math.min(to - from, SAMPLE_RATE * 12)];
+                System.arraycopy(pcm, from, slice, 0, slice.length);
+                slices.add(slice);
+            }
+            if (slices.isEmpty()) continue;
+            var embs = SidecarEmbedder.INSTANCE.embedAll(slices);
+            refs.put(e.getKey(), meanNormalized(embs));
+        }
+        return refs;
+    }
+
+    private static boolean inAnyOverlap(double start, double end, List<double[]> overlaps) {
+        for (var r : overlaps) {
+            if (Math.min(end, r[1]) - Math.max(start, r[0]) > (end - start) * 0.3) return true;
+        }
+        return false;
+    }
+
+    private static float[] meanNormalized(List<float[]> embs) {
+        var mean = new float[embs.get(0).length];
+        for (var e : embs) {
+            for (int i = 0; i < mean.length; i++) mean[i] += e[i];
+        }
+        double norm = 0;
+        for (float v : mean) norm += v * v;
+        norm = Math.sqrt(norm);
+        for (int i = 0; i < mean.length; i++) mean[i] /= (float) (norm == 0 ? 1 : norm);
+        return mean;
+    }
+
+    /**
+     * JCLAW-652 E4: under-speech recovery ONLY, for the word-native decode
+     * path — the full reattribute() is both redundant there (the joint
+     * decode subsumes its decision loop) and pathological on decode-shaped
+     * entries (windows expand to cover claimed entries; 13 giant entries
+     * made every window huge and the E2b run killed the JVM). Windows here
+     * are sized to the OVERLAP REGIONS alone, padded and coalesced; the
+     * recovery scan inserts turns for word-free stem speech exactly as in
+     * the segment path. Best-effort: any failure returns the input.
+     */
+    public static List<DiarizedTranscript.Entry> recoverUnderSpeech(
+            List<DiarizedTranscript.Entry> entries,
+            DiarizationRouter.Result diarization, float[] pcm) {
+        try {
+            var overlaps = diarization.overlaps();
+            if (overlaps.isEmpty()) return entries;
+            long distinctLabels = entries.stream()
+                    .map(DiarizedTranscript.Entry::speaker).distinct().count();
+            if (distinctLabels != 2) return entries; // 2-speaker instrument (JCLAW-618)
+            var embedder = SidecarEmbedder.INSTANCE;
+            var references = references(entries, overlaps, pcm, embedder);
+            if (references.size() != 2) return entries;
+
+            // Region-sized windows: pad, enforce the separator minimum,
+            // coalesce overlapping intervals so adjacent regions don't
+            // re-separate the same audio.
+            var intervals = new ArrayList<double[]>();
+            for (var region : overlaps) {
+                double winStart = Math.max(0, region[0] - PAD_SECONDS);
+                double winEnd = Math.min(pcm.length / (double) SAMPLE_RATE, region[1] + PAD_SECONDS);
+                if (winEnd - winStart < MIN_WINDOW_SECONDS) {
+                    double extend = (MIN_WINDOW_SECONDS - (winEnd - winStart)) / 2;
+                    winStart = Math.max(0, winStart - extend);
+                    winEnd = Math.min(pcm.length / (double) SAMPLE_RATE, winEnd + extend);
+                }
+                intervals.add(new double[]{winStart, winEnd});
+            }
+            intervals.sort(java.util.Comparator.comparingDouble(a -> a[0]));
+            var merged = new ArrayList<double[]>();
+            for (var iv : intervals) {
+                if (!merged.isEmpty() && iv[0] <= merged.get(merged.size() - 1)[1]) {
+                    merged.get(merged.size() - 1)[1] = Math.max(merged.get(merged.size() - 1)[1], iv[1]);
+                } else {
+                    merged.add(iv);
+                }
+            }
+            var windows = new ArrayList<float[]>();
+            var regionStarts = new ArrayList<Double>();
+            for (var iv : merged) {
+                int from = (int) (iv[0] * SAMPLE_RATE);
+                int to = (int) (iv[1] * SAMPLE_RATE);
+                if (to - from < SAMPLE_RATE) continue;
+                var window = new float[to - from];
+                System.arraycopy(pcm, from, window, 0, window.length);
+                windows.add(window);
+                regionStarts.add(iv[0]);
+            }
+            if (windows.isEmpty()) return entries;
+            var stems = separateViaSidecar(windows);
+            return UnderSpeechRecovery.recover(entries, overlaps, windows, regionStarts,
+                    stems, references, embedder, OverlapReattributor::transcribeSlice);
+        } catch (RuntimeException e) {
+            Logger.warn("OverlapReattributor: recovery-only pass skipped: %s", e.getMessage());
+            return entries;
+        }
+    }
+
     private static List<SpeakerSegment> msddViaSidecar(float[] pcm, int speakers) {
         Path tmpDir = null;
         try {

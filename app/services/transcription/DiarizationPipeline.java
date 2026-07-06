@@ -122,9 +122,15 @@ public final class DiarizationPipeline {
                 // the second-opinion future (usually already done; its
                 // CPU work ran under the GPU stages).
                 var msddSegments = msdd == null ? null : msdd.get();
+                // E4-A (measured, then unwired): word-span stem evidence
+                // scored 25.43 vs E3's 24.80 — stems win at whole-turn
+                // windows but are noise at 0.7s word slices (cross-stem
+                // bleed swamps the voice signal). buildStemScorer stays as
+                // the seam if a longer-slice variant is ever tried.
                 entries = DiarizedTranscript.mergeWordsViterbiFused(
                         stamped, speakers, diarization.rawSegments(),
-                        msddSegments == null ? java.util.List.of() : msddSegments, names);
+                        msddSegments == null ? java.util.List.of() : msddSegments, names,
+                        null);
                 if (entries != null) {
                     play.Logger.info("DiarizationPipeline: word-native joint decode (%d entries)",
                             entries.size());
@@ -134,6 +140,15 @@ public final class DiarizationPipeline {
                     // ~100 typical) and the run killed the JVM mid
                     // under-speech pass. Long-span voice evidence belongs in
                     // the EMISSIONS (ticket stages E3/E4), not post-hoc.
+                    // E4-B (measured, then removed): under-speech recovery
+                    // composes mechanically (recoverUnderSpeech: region-sized
+                    // windows, no decision loop) but is NET NEGATIVE here —
+                    // 24.96 vs 24.80. Its embedding-based speaker pick fails
+                    // in the echo zone the decode already attributes
+                    // correctly, inserting wrong-speaker duplicate words
+                    // ("No, no, no." -> Firdaus at 76.5s, human-verified
+                    // Podcaster). A guarded revival needs stem-text
+                    // agreement with the decode, not embeddings alone.
                 }
             }
         }
@@ -159,6 +174,67 @@ public final class DiarizationPipeline {
             entries = EmotionRecognizer.annotateBestEffort(pcm.get(), entries);
         }
         return new Transcript(entries, diarization);
+    }
+
+    /**
+     * JCLAW-652 E4-A: word-span stem evidence for the fused decode.
+     * Separates the overlap regions once (E2b-safe shape), builds
+     * per-cluster voiceprints from exclusive-confident spans, and scores a
+     * contested word by the best stem's cosine margin toward each cluster.
+     * Null (feature off) when the setup cannot produce two references.
+     */
+    private static DiarizedTranscript.StemScorer buildStemScorer(
+            DiarizationRouter.Result diarization, float[] pcm) {
+        try {
+            if (diarization.overlaps().isEmpty()) return null;
+            var refs = OverlapReattributor.clusterReferences(
+                    diarization.segments(), diarization.overlaps(), pcm);
+            if (refs.size() != 2) return null;
+            var ctx = OverlapReattributor.separatedOverlapWindows(diarization.overlaps(), pcm);
+            if (ctx.windows().isEmpty()) return null;
+            var clusters = refs.keySet().stream().sorted().toList();
+            return (start, end) -> {
+                // Find the window containing this word; pad the slice to a
+                // usable embed length around the word's center.
+                for (int w = 0; w < ctx.windows().size(); w++) {
+                    double ws = ctx.starts().get(w);
+                    double weEnd = ws + ctx.windows().get(w).length / 16_000.0;
+                    if (start < ws || end > weEnd) continue;
+                    double mid = (start + end) / 2;
+                    double half = Math.max((end - start) / 2 + 0.1, 0.35);
+                    int from = (int) Math.clamp(Math.round((mid - half - ws) * 16_000), 0,
+                            ctx.windows().get(w).length);
+                    int to = (int) Math.clamp(Math.round((mid + half - ws) * 16_000), from,
+                            ctx.windows().get(w).length);
+                    if (to - from < 8_000) return null;
+                    var slices = new java.util.ArrayList<float[]>();
+                    for (var stem : ctx.stems().get(w)) {
+                        if (stem.length < to) continue;
+                        var slice = new float[to - from];
+                        System.arraycopy(stem, from, slice, 0, slice.length);
+                        slices.add(slice);
+                    }
+                    if (slices.isEmpty()) return null;
+                    var embs = SidecarEmbedder.INSTANCE.embedAll(slices);
+                    var out = new double[clusters.size()];
+                    for (int c = 0; c < clusters.size(); c++) {
+                        var own = refs.get(clusters.get(c));
+                        var other = refs.get(clusters.get(1 - c));
+                        double best = 0;
+                        for (var emb : embs) {
+                            best = Math.max(best, OverlapReattributor.cosine(emb, own)
+                                    - OverlapReattributor.cosine(emb, other));
+                        }
+                        out[c] = best;
+                    }
+                    return out;
+                }
+                return null;
+            };
+        } catch (RuntimeException e) {
+            play.Logger.warn("DiarizationPipeline: stem scorer unavailable: %s", e.getMessage());
+            return null;
+        }
     }
 
     /** Cache-through diarization (JCLAW-611/621): repeated visits to the
