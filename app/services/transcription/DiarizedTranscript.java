@@ -102,6 +102,32 @@ public final class DiarizedTranscript {
      *  this fraction, so transitions (context) can carry ambiguous words. */
     static final double EMISSION_FLOOR = 0.02;
 
+    /** JCLAW-652 E2: weight on the SUPPRESSED-activation feature —
+     *  max(0, rawFrac - exclusiveFrac) per word/speaker. The raw
+     *  overlap-aware annotation registers speakers the exclusive
+     *  projection collapses (measured 4/4 at the human-verified error
+     *  sites), so this is the differential instrument for reclaiming
+     *  them. Calibration: a ~6-word suppressed run flips when this
+     *  exceeds ~4.4 (evidence deficit 3.9/word vs 2x switch penalty);
+     *  bench-tuned on the debate gold. */
+    static final double SUPPRESSED_WEIGHT = 4.5;
+
+    /**
+     * JCLAW-652: evidence-fusion Viterbi — the word-native joint decode.
+     * Same decoder as {@link #mergeWordsViterbi} with a log-linear
+     * emission model over the calibrated instruments instead of the
+     * single exclusive-overlap feature. Stage E2 fuses the raw
+     * overlap-aware activations; MSDD frame posteriors and stem cosines
+     * are later stages on the ticket.
+     */
+    public static List<Entry> mergeWordsViterbiFused(
+            List<WhisperJniTranscriber.Segment> transcript,
+            List<SpeakerSegment> speakers,
+            List<SpeakerSegment> rawSegments,
+            Map<Integer, String> names) {
+        return decodeWords(transcript, speakers, rawSegments, names);
+    }
+
     /**
      * Viterbi-smoothed word-level merge (JCLAW-651 round 3). Round 2's hard
      * per-word midpoint assignment faithfully reproduced every exclusive-
@@ -117,6 +143,13 @@ public final class DiarizedTranscript {
     public static List<Entry> mergeWordsViterbi(List<WhisperJniTranscriber.Segment> transcript,
                                                 List<SpeakerSegment> speakers,
                                                 Map<Integer, String> names) {
+        return decodeWords(transcript, speakers, List.of(), names);
+    }
+
+    private static List<Entry> decodeWords(List<WhisperJniTranscriber.Segment> transcript,
+                                           List<SpeakerSegment> speakers,
+                                           List<SpeakerSegment> rawSegments,
+                                           Map<Integer, String> names) {
         var words = new java.util.ArrayList<WhisperJniTranscriber.Word>();
         for (var seg : transcript) {
             if (seg.words().isEmpty() && !seg.text().isBlank()) return null;
@@ -149,12 +182,20 @@ public final class DiarizedTranscript {
             double total = 0;
             for (int c = 0; c < k; c++) {
                 double ov = 0;
+                double raw = 0;
                 for (var span : speakers) {
                     if (span.speaker() != clusterIds.get(c)) continue;
                     ov += Math.max(0, Math.min(we, span.end()) - Math.max(ws, span.start()));
                 }
-                double frac = Math.max(ov / (we - ws), EMISSION_FLOOR);
-                emissions[i][c] = Math.log(Math.min(frac, 1.0));
+                for (var span : rawSegments) {
+                    if (span.speaker() != clusterIds.get(c)) continue;
+                    raw += Math.max(0, Math.min(we, span.end()) - Math.max(ws, span.start()));
+                }
+                double exclusiveFrac = Math.min(ov / (we - ws), 1.0);
+                double rawFrac = Math.min(raw / (we - ws), 1.0);
+                double suppressed = Math.max(0, rawFrac - exclusiveFrac);
+                emissions[i][c] = Math.log(Math.max(exclusiveFrac, EMISSION_FLOOR))
+                        + SUPPRESSED_WEIGHT * suppressed;
                 total += ov;
             }
             unsupported[i] = total <= 0;

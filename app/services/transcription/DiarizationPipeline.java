@@ -110,20 +110,44 @@ public final class DiarizationPipeline {
         // recalibrating the whole correction stack through the harnesses
         // — a campaign, not a merge swap. Engine word stamps are
         // separately disqualified: enabling them perturbs the decode.)
-        transcript = SegmentWordSplitter.split(transcript, speakers, pcm);
-        var entries = DiarizedTranscript.merge(transcript, speakers, names);
-        // JCLAW-605/612/613: overlap re-attribution, MSDD second opinion,
-        // under-speech recovery. Best-effort inside reattribute().
-        if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
-            entries = OverlapReattributor.reattribute(entries, diarization, audio, pcm.get(), msdd);
+        // JCLAW-652: word-native joint decode — one evidence-fusion Viterbi
+        // pass replaces merge + the entry-level correction stack. Off by
+        // default; flips only when it beats the segment path on the gold
+        // benchmark with zero stable-turn regressions (criteria on ticket).
+        List<DiarizedTranscript.Entry> entries = null;
+        if (ConfigService.getBoolean("transcription.diarization.wordNative", false)) {
+            var stamped = CtcForcedAligner.stampTranscript(transcript, pcm.get());
+            if (stamped != null) {
+                entries = DiarizedTranscript.mergeWordsViterbiFused(
+                        stamped, speakers, diarization.rawSegments(), names);
+                if (entries != null) {
+                    play.Logger.info("DiarizationPipeline: word-native joint decode (%d entries)",
+                            entries.size());
+                    // NOTE (E2b, measured): do NOT compose the entry-level
+                    // correction stack onto decode-shaped entries — 13 giant
+                    // entries made every one contested (969 embed calls vs
+                    // ~100 typical) and the run killed the JVM mid
+                    // under-speech pass. Long-span voice evidence belongs in
+                    // the EMISSIONS (ticket stages E3/E4), not post-hoc.
+                }
+            }
         }
-        // JCLAW-651: word-granular interjection carving — brief secondary
-        // activations from the raw annotation reclaim words the exclusive
-        // projection handed to the dominant voice, voiceprint-guarded.
-        // After the turn-level corrections (their flips settle the parent
-        // labels), before emotion (fragments get their own labels).
-        if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
-            entries = InterjectionCarver.carve(entries, diarization, names, pcm.get());
+        if (entries == null) {
+            transcript = SegmentWordSplitter.split(transcript, speakers, pcm);
+            entries = DiarizedTranscript.merge(transcript, speakers, names);
+            // JCLAW-605/612/613: overlap re-attribution, MSDD second opinion,
+            // under-speech recovery. Best-effort inside reattribute().
+            if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
+                entries = OverlapReattributor.reattribute(entries, diarization, audio, pcm.get(), msdd);
+            }
+            // JCLAW-651: word-granular interjection carving — brief secondary
+            // activations from the raw annotation reclaim words the exclusive
+            // projection handed to the dominant voice, voiceprint-guarded.
+            // After the turn-level corrections (their flips settle the parent
+            // labels), before emotion (fragments get their own labels).
+            if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
+                entries = InterjectionCarver.carve(entries, diarization, names, pcm.get());
+            }
         }
         // JCLAW-563: per-turn acoustic emotion labels. Best-effort.
         if (ConfigService.getBoolean("transcription.emotion.enabled", true)) {
