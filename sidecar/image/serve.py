@@ -28,7 +28,7 @@ cuda->bfloat16, cpu->float32 (slow; logged as a warning). The JVM cannot see
 CUDA/MPS, so the chosen device is reported here via /health.
 
 Weights live under the --cache-dir (jclaw passes data/image-models) via HF_HOME,
-matching jclaw's data/ runtime-artifact convention (whisper-models, lucene).
+matching jclaw's data/ runtime-artifact convention (asr-models, lucene).
 """
 
 import argparse
