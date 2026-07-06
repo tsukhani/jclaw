@@ -103,25 +103,6 @@ class PyannoteDiarizationClientTest extends UnitTest {
         assertTrue(client().diarizeRich(audio, -1).overlaps().isEmpty());
     }
 
-    @Test
-    void separate_returnsStemPairsPerInput_andValidatesShape() throws Exception {
-        var key = audio.toAbsolutePath().toString();
-        server.enqueue(new MockResponse.Builder().code(200)
-                .body("{\"stems\": {\"" + key + "\": [\"/tmp/x_s1.wav\", \"/tmp/x_s2.wav\"]}}").build());
-        var stems = client().separate(java.util.List.of(audio));
-        assertEquals(1, stems.size());
-        assertEquals(2, stems.get(0).size());
-        assertTrue(stems.get(0).get(0).toString().endsWith("x_s1.wav"));
-        var body = server.takeRequest().getBody().utf8();
-        assertTrue(body.contains(key), body);
-
-        // Missing pair for a requested input must be rejected.
-        server.enqueue(new MockResponse.Builder().code(200)
-                .body("{\"stems\": {}}").build());
-        var e = assertThrows(services.transcription.TranscriptionException.class,
-                () -> client().separate(java.util.List.of(audio)));
-        assertTrue(e.getMessage().contains("no stem pair"), e.getMessage());
-    }
 
     @Test
     void parseSegments_rejectsGarbage() {

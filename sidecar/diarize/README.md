@@ -21,10 +21,8 @@ segmentation are jointly tuned). ~18x realtime on Apple MPS.
 |---|---|---|
 | GET | `/health` | → `{status, device, model, loaded}` |
 | POST | `/diarize` | `{audio_path, num_speakers?}` → `{segments: [{start, end, speaker}...], overlaps: [{start, end}...], device, seconds}`; `400` bad path, `409` busy, `500` load/inference error |
-| POST | `/separate` | `{audio_paths: [...]}` (ready-made 16 kHz mono WAVs) → `{stems: {"<path>": ["..._s1.wav", "..._s2.wav"], ...}}` — batched MossFormer2 2-speaker separation, one model load per batch, stems written beside each input (JCLAW-605) |
 | POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — GPU ASR: mlx-whisper (Apple silicon) / faster-whisper (CUDA, CPU int8), own uv script env (JCLAW-627) |
 | POST | `/embed` | `{audio_paths: [...], model}` → `{embeddings: [[...], ...]}` — batched WeSpeaker embeddings, same ONNX + feature pipeline as the retired JVM JNI stack (JCLAW-630) |
-| POST | `/msdd` | `{audio_path, num_speakers}` (16 kHz mono WAV) → `{segments: [{start, end, speaker}...]}` — NeMo MSDD second opinion, overlap-aware, segments may overlap in time (JCLAW-612) |
 
 The audio file is passed **by path** (same host; attachments are already on
 disk). One diarization at a time; concurrent callers get `409` and queue in
@@ -53,14 +51,12 @@ attribution.
   © pyannoteAI, **CC-BY-4.0** — this attribution satisfies the license's
   requirement; the operator downloads the weights directly from Hugging Face.
 - Library: [pyannote.audio](https://github.com/pyannote/pyannote-audio), MIT.
-- Separator: [MossFormer2 via ClearerVoice-Studio](https://github.com/modelscope/ClearerVoice-Studio), Apache-2.0 (JCLAW-605); weights download on first `/separate`.
 - ASR: [mlx-whisper](https://github.com/ml-explore/mlx-examples) (MIT) on Apple silicon; [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) elsewhere — OpenAI Whisper weights (MIT), same as whisper.cpp (JCLAW-627).
-- Second opinion: [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) MSDD (`diar_msdd_telephonic` + `titanet_large`), Apache-2.0 toolkit / CC-BY-4.0 weights (JCLAW-612); runs in its own uv script env (`msdd.py`), first `/msdd` builds it.
 
 ## Evaluation (JCLAW-617)
 
 Run the DER/JER harness whenever a calibrated threshold changes (the
-constants in OverlapReattributor, MsddSecondOpinion, EnrollmentHarvester,
+constants in EnrollmentHarvester,
 SpeakerClipExtractor, SpeakerNamer) or the model/pipeline is upgraded:
 
 ```bash
@@ -96,7 +92,6 @@ heavy stage runs on Metal: pyannote diarization, mlx-whisper, MossFormer2
 separation (JCLAW-645) and MSDD itself (JCLAW-648: 19.6s on MPS vs 225s
 CPU — PYTORCH_ENABLE_MPS_FALLBACK plus a one-line stride patch on NeMo's
 decoder), launched concurrently on a persistent worker so its wall-clock
-hides entirely. `transcription.diarization.msddSecondOpinion=false`
 still exists as a speed dial (144.7s at cpWER 27.33%) but no longer buys
 meaningful time.
 
@@ -105,7 +100,6 @@ mapping resolving to identity (attribution is right; the number blends real
 word errors with transcription-style disagreement between two independent
 ASRs — treat it as a RELATIVE regression bound, like the DER baseline).
 Alignment model: wav2vec2-base-960h stays (JCLAW-643 decision — Malay is
-Latin-script, char-CTC degrades gracefully; see CtcForcedAligner javadoc;
 swap to an MMS-style checkpoint and re-measure cpWER if it drifts).
 
 ## Running by hand (debugging)

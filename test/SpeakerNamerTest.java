@@ -89,8 +89,8 @@ class SpeakerNamerTest extends UnitTest {
         // JCLAW-623: one loud chunk (10x magnitude) must not own the
         // centroid. Unit-scaled, direction [1,0] and [0,1] average to 45°;
         // unnormalized, the loud [10,0] chunk would pin it near [1,0].
-        var loud = services.transcription.OverlapReattributor.l2normalize(new float[]{10, 0});
-        var quiet = services.transcription.OverlapReattributor.l2normalize(new float[]{0, 1});
+        var loud = services.transcription.VoiceMath.l2normalize(new float[]{10, 0});
+        var quiet = services.transcription.VoiceMath.l2normalize(new float[]{0, 1});
         assertEquals(1.0, loud[0], 1e-6);
         assertEquals(1.0, quiet[1], 1e-6);
         var centroid = new float[]{(loud[0] + quiet[0]) / 2, (loud[1] + quiet[1]) / 2};

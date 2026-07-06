@@ -4,8 +4,8 @@
 # ///
 """DER/JER evaluation harness for the diarization pipeline (JCLAW-617).
 
-Run this whenever a calibrated threshold changes (OverlapReattributor,
-MsddSecondOpinion, EnrollmentHarvester, SpeakerClipExtractor, SpeakerNamer
+Run this whenever the pipeline changes (model swap, merge logic,
+EnrollmentHarvester, SpeakerClipExtractor, SpeakerNamer
 constants — see each class's javadoc) or the diarization model/pipeline is
 upgraded. The gold corpus lives in eval/gold/; eval/fetch-ami.sh downloads
 the additional AMI recordings.

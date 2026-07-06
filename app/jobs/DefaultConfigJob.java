@@ -95,13 +95,10 @@ public class DefaultConfigJob extends Job<Void> {
         // separation in the sidecar + WeSpeaker stem voiceprints. Only
         // activates on the pyannote path when overlap regions exist; every
         // failure degrades to the merge's attribution.
-        seedIfAbsent("transcription.diarization.overlapReattribution", "true");
         // JCLAW-612: NeMo MSDD consulted as a second opinion on contested
         // turns (pyannote path only). First use builds a separate uv env.
-        seedIfAbsent("transcription.diarization.msddSecondOpinion", "true");
         // JCLAW-613: transcribe backchannel interjections from minor
         // separation stems so under-speech appears as its own turn.
-        seedIfAbsent("transcription.diarization.underSpeechRecovery", "true");
     }
 
     /**

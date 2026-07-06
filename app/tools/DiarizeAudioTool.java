@@ -13,7 +13,6 @@ import services.Tx;
 import services.transcription.DiarizationPipeline;
 import services.transcription.DiarizationRouter;
 import services.transcription.DiarizedTranscript;
-import services.transcription.OverlapReattributor;
 import services.transcription.SpeakerClipExtractor;
 import services.transcription.SpeakerNamer;
 import services.transcription.TranscriptionException;
@@ -389,14 +388,13 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
             // JCLAW-606/609: stage hidden extra reference clips per speaker
             // so the enroll action stores a multi-clip, PURITY-GATED set —
-            // overlap purification + anchor voiceprint gate + separation
-            // stem gate (the last one only on the sidecar path). Only the
-            // lineup clip is attached/playable — UX unchanged.
+            // overlap purification + anchor voiceprint gate (JCLAW-653:
+            // the separation stem gate retired with the correction stack).
+            // Only the lineup clip is attached/playable — UX unchanged.
             var refsBySpeaker = services.transcription.EnrollmentHarvester.harvest(
                     path, speakers, clips.stream().map(SpeakerClipExtractor.Clip::speaker).toList(),
                     ENROLLMENT_TARGET_SECONDS, CLIP_TARGET_SECONDS, CLIP_MIN_SECONDS,
-                    services.transcription.SidecarEmbedder.INSTANCE,
-                    services.transcription.OverlapReattributor::separateViaSidecar);
+                    services.transcription.SidecarEmbedder.INSTANCE);
             var lineup = new StringBuilder();
             var generated = new java.util.ArrayList<GeneratedAttachment>(clips.size());
             for (var clip : clips) {

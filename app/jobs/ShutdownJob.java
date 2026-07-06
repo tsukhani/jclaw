@@ -12,7 +12,6 @@ import services.TailscaleFunnel;
 import services.imagegen.LocalImageSidecarManager;
 import services.videogen.LocalVideoSidecarManager;
 import services.search.LuceneIndexer;
-import services.transcription.CtcForcedAligner;
 import services.transcription.EmotionRecognizer;
 import services.transcription.PyannoteSidecarManager;
 import services.transcription.SpeakerNamer;
@@ -71,7 +70,6 @@ public class ShutdownJob extends Job<Void> {
                 new Component("whatsapp-cobalt", WhatsAppCobaltRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("emotion-recognizer", EmotionRecognizer::shutdown),
-                new Component("ctc-aligner", CtcForcedAligner::shutdown),
                 new Component("diarize-sidecar", PyannoteSidecarManager::stop),
                 new Component("imagegen-sidecar", LocalImageSidecarManager::stop),
                 new Component("videogen-sidecar", LocalVideoSidecarManager::stop),

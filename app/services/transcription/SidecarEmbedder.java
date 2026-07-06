@@ -21,7 +21,7 @@ import java.util.List;
  * needed.
  */
 public final class SidecarEmbedder
-        implements OverlapReattributor.Embedder, SpeakerClipExtractor.Embedder {
+        implements VoiceMath.Embedder, SpeakerClipExtractor.Embedder {
 
     public static final SidecarEmbedder INSTANCE = new SidecarEmbedder();
 

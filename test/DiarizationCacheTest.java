@@ -98,25 +98,4 @@ class DiarizationCacheTest extends UnitTest {
                 "the merge must not clobber the diarization section");
     }
 
-    @Test
-    void msddSection_roundTrips_andRequiresAnchorAndSpeakerCount() {
-        assertNull(DiarizationCache.readMsdd(audio, 2), "no cache file yet");
-        DiarizationCache.writeMsdd(audio, 2,
-                List.of(new SpeakerSegment(1, 2, 0)));
-        assertNull(DiarizationCache.readMsdd(audio, 2),
-                "MSDD without a diarization anchor section is never written");
-
-        DiarizationCache.write(audio, -1, result());
-        DiarizationCache.writeMsdd(audio, 2, List.of(new SpeakerSegment(1.5, 3.5, 1)));
-
-        var cached = DiarizationCache.readMsdd(audio, 2);
-        assertNotNull(cached);
-        assertEquals(1, cached.size());
-        assertEquals(1.5, cached.get(0).start(), 1e-9);
-        assertEquals(1, cached.get(0).speaker());
-        assertNull(DiarizationCache.readMsdd(audio, 3),
-                "a different speaker count must miss");
-        assertNotNull(DiarizationCache.read(audio, -1),
-                "the merge must not clobber the diarization section");
-    }
 }

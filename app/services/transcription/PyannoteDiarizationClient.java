@@ -26,16 +26,9 @@ import java.util.concurrent.TimeUnit;
  */
 public class PyannoteDiarizationClient {
 
-    /** Full /diarize output: segments plus the overlap regions the
-     *  overlap-aware annotation detected (JCLAW-605 re-attribution gate). */
+    /** Diarization result: the exclusive timeline plus overlap regions. */
     public record DiarizationOutput(List<SpeakerSegment> segments,
-                                    List<SpeakerSegment> rawSegments,
-                                    List<double[]> overlaps) {
-        /** Compat for tests and older callers: no raw annotation. */
-        public DiarizationOutput(List<SpeakerSegment> segments, List<double[]> overlaps) {
-            this(segments, List.of(), overlaps);
-        }
-    }
+                                    List<double[]> overlaps) {}
 
     private static final MediaType JSON = MediaType.get("application/json");
 
@@ -138,7 +131,7 @@ public class PyannoteDiarizationClient {
                         "pyannote sidecar diarize failed: HTTP %d — %s".formatted(
                                 resp.code(), truncate(text)));
             }
-            return new DiarizationOutput(parseSegments(text), parseRawSegments(text), parseOverlaps(text));
+            return new DiarizationOutput(parseSegments(text), parseOverlaps(text));
         } catch (IOException e) {
             throw new TranscriptionException(
                     "pyannote sidecar unreachable: " + e.getMessage(), e);
@@ -170,27 +163,6 @@ public class PyannoteDiarizationClient {
         }
     }
 
-    /** Parse {@code raw_segments} — the overlap-aware annotation with
-     *  speaker indices shared with the exclusive output (JCLAW-651: brief
-     *  secondary activations locate interjections the exclusive projection
-     *  collapses). Tolerant of absence: degrades to "no carving". */
-    public static List<SpeakerSegment> parseRawSegments(String json) {
-        try {
-            var root = JsonParser.parseString(json).getAsJsonObject();
-            if (!root.has("raw_segments")) return List.of();
-            var segments = new ArrayList<SpeakerSegment>();
-            for (var el : root.getAsJsonArray("raw_segments")) {
-                var o = el.getAsJsonObject();
-                segments.add(new SpeakerSegment(
-                        o.get("start").getAsDouble(),
-                        o.get("end").getAsDouble(),
-                        o.get("speaker").getAsInt()));
-            }
-            return segments;
-        } catch (RuntimeException e) {
-            return List.of();
-        }
-    }
 
     /** Parse {@code overlaps:[{start,end}...]}; tolerant of absence (older
      *  sidecar builds) so a version skew degrades to "no re-attribution". */
@@ -209,105 +181,9 @@ public class PyannoteDiarizationClient {
         }
     }
 
-    /**
-     * Separate prepared 16 kHz mono WAVs into two stems each via the
-     * sidecar's MossFormer2 endpoint (JCLAW-605). Batched: the sidecar
-     * shells one separator process for the whole list, so the model loads
-     * once per diarization, not once per overlap region. Returns stem-path
-     * pairs aligned with the inputs; the caller owns temp-dir cleanup.
-     */
-    public List<List<Path>> separate(List<Path> windowWavs) {
-        SIDECAR_LOCK.lock();
-        try {
-            return separateLocked(windowWavs);
-        } finally {
-            SIDECAR_LOCK.unlock();
-        }
-    }
 
-    private List<List<Path>> separateLocked(List<Path> windowWavs) {
-        var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
-        var body = new JsonObject();
-        var arr = new com.google.gson.JsonArray();
-        windowWavs.forEach(w -> arr.add(w.toAbsolutePath().toString()));
-        body.add("audio_paths", arr);
-        var call = client.newCall(new Request.Builder()
-                .url(baseUrl + "/separate")
-                .post(RequestBody.create(body.toString(), JSON))
-                .build());
-        // First call downloads + loads MossFormer2; generous deadline.
-        call.timeout().timeout(ConfigService.getInt(
-                PyannoteSidecarManager.CONFIG_PREFIX + ".timeoutSeconds", 1800), TimeUnit.SECONDS);
-        try (var resp = call.execute()) {
-            var text = resp.body().string();
-            if (!resp.isSuccessful()) {
-                throw new TranscriptionException(
-                        "pyannote sidecar separate failed: HTTP %d — %s".formatted(
-                                resp.code(), truncate(text)));
-            }
-            var root = JsonParser.parseString(text).getAsJsonObject();
-            var byInput = root.getAsJsonObject("stems");
-            var out = new ArrayList<List<Path>>(windowWavs.size());
-            for (var wav : windowWavs) {
-                var key = wav.toAbsolutePath().toString();
-                if (!byInput.has(key) || byInput.getAsJsonArray(key).size() != 2) {
-                    throw new TranscriptionException(
-                            "sidecar returned no stem pair for " + key);
-                }
-                var pair = new ArrayList<Path>(2);
-                byInput.getAsJsonArray(key).forEach(el -> pair.add(Path.of(el.getAsString())));
-                out.add(pair);
-            }
-            return out;
-        } catch (IOException e) {
-            throw new TranscriptionException(
-                    "pyannote sidecar unreachable: " + e.getMessage(), e);
-        } catch (RuntimeException e) {
-            if (e instanceof TranscriptionException te) throw te;
-            throw new TranscriptionException(
-                    "pyannote sidecar returned an unparseable separate response: " + e.getMessage(), e);
-        }
-    }
 
-    /**
-     * MSDD second opinion for contested turns (JCLAW-612): overlap-aware
-     * segments from NeMo's profile-conditioned decoder, run by the sidecar
-     * in its own script env. First call may build that env and download the
-     * model — the generous shared deadline applies.
-     */
-    public List<SpeakerSegment> msdd(Path audioFile, int numSpeakers) {
-        SIDECAR_LOCK.lock();
-        try {
-            return msddLocked(audioFile, numSpeakers);
-        } finally {
-            SIDECAR_LOCK.unlock();
-        }
-    }
 
-    private List<SpeakerSegment> msddLocked(Path audioFile, int numSpeakers) {
-        var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
-        var body = new JsonObject();
-        body.addProperty("audio_path", audioFile.toAbsolutePath().toString());
-        body.addProperty("num_speakers", numSpeakers);
-        var call = client.newCall(new Request.Builder()
-                .url(baseUrl + "/msdd")
-                .post(RequestBody.create(body.toString(), JSON))
-                .build());
-        call.timeout().timeout(ConfigService.getInt(
-                PyannoteSidecarManager.CONFIG_PREFIX + ".timeoutSeconds", 1800), TimeUnit.SECONDS);
-        try (var resp = call.execute()) {
-            var text = resp.body().string();
-            if (!resp.isSuccessful()) {
-                throw new TranscriptionException(
-                        "pyannote sidecar msdd failed: HTTP %d — %s".formatted(
-                                resp.code(), truncate(text)));
-            }
-            return parseSegments(text);
-        } catch (IOException e) {
-            throw new TranscriptionException(
-                    "pyannote sidecar unreachable: " + e.getMessage(), e);
-        }
-    }
 
     /**
      * GPU ASR via the sidecar (JCLAW-627): mlx-whisper on Apple silicon,
@@ -348,22 +224,12 @@ public class PyannoteDiarizationClient {
             var segments = new ArrayList<WhisperJniTranscriber.Segment>();
             for (var el : root.getAsJsonArray("segments")) {
                 var o = el.getAsJsonObject();
-                var words = new ArrayList<WhisperJniTranscriber.Word>();
-                if (o.has("words")) {
-                    for (var wl : o.getAsJsonArray("words")) {
-                        var w = wl.getAsJsonObject();
-                        words.add(new WhisperJniTranscriber.Word(
-                                w.get("startMs").getAsLong(), w.get("endMs").getAsLong(),
-                                w.get("text").getAsString()));
-                    }
-                }
                 segments.add(new WhisperJniTranscriber.Segment(
                         o.get("startMs").getAsLong(), o.get("endMs").getAsLong(),
                         o.get("text").getAsString(),
                         o.has("noSpeechProb") ? o.get("noSpeechProb").getAsDouble() : 0.0,
                         o.has("avgLogprob") ? o.get("avgLogprob").getAsDouble() : 0.0,
-                        o.has("compressionRatio") ? o.get("compressionRatio").getAsDouble() : 1.0,
-                        words));
+                        o.has("compressionRatio") ? o.get("compressionRatio").getAsDouble() : 1.0));
             }
             return segments;
         } catch (IOException e) {

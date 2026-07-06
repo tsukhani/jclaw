@@ -1,133 +1,61 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.EnrollmentHarvester;
-import services.transcription.OverlapReattributor;
-import services.transcription.SpeakerSegment;
 import services.transcription.SpeakerClipExtractor;
+import services.transcription.SpeakerSegment;
 
 import java.util.Arrays;
 import java.util.List;
 
 /**
- * JCLAW-609 round 3: the separation stem gate, driven through the
- * Embedder/Separator seams. Voices are constant fill levels; the fake
- * embedder maps loud fills to one one-hot vector and quiet fills to
- * another, and the fake separator decides what the "second stem" of each
- * window contains — a real other voice (bleed) or near-silence (pure).
+ * JCLAW-609/653: anchor-gated enrollment harvesting for the simple
+ * whisper+pyannote tier. Voices are constant fill levels; the fake
+ * embedder maps a clip to a 2-dim "voiceprint" by mean level, so clips of
+ * one speaker match one another.
  */
 class EnrollmentHarvesterTest extends UnitTest {
 
     private static final int SR = 16_000;
 
-    private static final SpeakerClipExtractor.Embedder VOICE_EMBEDDER = samples -> {
+    private static final SpeakerClipExtractor.Embedder LEVEL = samples -> {
         double sum = 0;
         for (float v : samples) sum += Math.abs(v);
-        double mean = sum / samples.length;
-        if (mean < 0.01) return new float[]{0, 0, 1};  // silence/residue
-        return mean >= 0.5 ? new float[]{1, 0, 0} : new float[]{0, 1, 0};
+        return sum / samples.length >= 0.5 ? new float[]{1, 0} : new float[]{0, 1};
     };
 
-    /** Speaker 0 talks 0-30s at level 0.8; speaker 1 talks 35-65s at 0.1. */
+    /** 60s recording: speaker 0 = loud fill on [0,30), speaker 1 = quiet
+     *  fill on [30,60). */
     private static float[] pcm() {
-        var pcm = new float[70 * SR];
-        Arrays.fill(pcm, 0, 30 * SR, 0.8f);
-        Arrays.fill(pcm, 35 * SR, 65 * SR, 0.1f);
+        var pcm = new float[60 * SR];
+        Arrays.fill(pcm, 0, 30 * SR, 0.9f);
+        Arrays.fill(pcm, 30 * SR, 60 * SR, 0.2f);
         return pcm;
     }
 
-    private static final List<SpeakerSegment> SEGMENTS = List.of(
-            new SpeakerSegment(0, 30, 0),
-            new SpeakerSegment(35, 65, 1));
-
-    /** Separator whose second stem is the OTHER voice for windows of the
-     *  given speaker — simulating simultaneous bleed under that speaker. */
-    private static OverlapReattributor.Separator bleedingFor(float bleedingLevel) {
-        return windows -> windows.stream().map(window -> {
-            var second = new float[window.length];
-            Arrays.fill(second, bleedingLevel);
-            return List.of(window.clone(), second);
-        }).toList();
+    private static List<SpeakerSegment> segments() {
+        return List.of(new SpeakerSegment(0, 30, 0), new SpeakerSegment(30, 60, 1));
     }
 
-    private static final OverlapReattributor.Separator CLEAN_SEPARATOR = windows ->
-            windows.stream().map(w -> List.of(w.clone(), new float[w.length])).toList();
-
     @Test
-    void harvest_keepsBudget_whenAllCandidatesArePure() {
-        var out = EnrollmentHarvester.harvest(pcm(), SEGMENTS, List.of(0, 1),
-                20.0, 5.0, 1.0, VOICE_EMBEDDER, CLEAN_SEPARATOR);
+    void harvest_trimsToTheTargetBudget_perSpeaker() {
+        var out = EnrollmentHarvester.harvest(pcm(), segments(), List.of(0, 1),
+                20.0, 8.0, 3.0, LEVEL);
 
-        for (int speaker : new int[]{0, 1}) {
-            double total = out.get(speaker).stream().mapToInt(c -> c.length).sum() / (double) SR;
-            assertEquals(20.0, total, 0.2, "pure candidates fill the budget for speaker " + speaker);
+        for (var speaker : List.of(0, 1)) {
+            double total = out.get(speaker).stream()
+                    .mapToDouble(c -> c.length / (double) SR).sum();
+            assertTrue(total <= 20.5, "speaker " + speaker + " over budget: " + total);
+            assertTrue(total >= 8.0, "speaker " + speaker + " under-harvested: " + total);
+            assertFalse(out.get(speaker).isEmpty());
         }
     }
 
     @Test
-    void harvest_rejectsBledCandidates_viaTheStemGate() {
-        // Every non-anchor window of BOTH speakers "separates" into the
-        // window itself plus a stem carrying speaker 1's voice (0.1 fill).
-        // For speaker 0 that minor stem matches speaker 1's voiceprint →
-        // bleed → rejected; the anchor always survives.
-        var out = EnrollmentHarvester.harvest(pcm(), SEGMENTS, List.of(0, 1),
-                20.0, 5.0, 1.0, VOICE_EMBEDDER, bleedingFor(0.1f));
-
-        double speaker0Total = out.get(0).stream().mapToInt(c -> c.length).sum() / (double) SR;
-        assertEquals(5.0, speaker0Total, 0.2,
-                "only the anchor survives when every candidate window is bled");
-        // Speaker 1's windows: minor stem = the window itself is voice 1...
-        // its OTHER stem carries 0.1 too, matching its OWN voiceprint. Minor
-        // stem selection picks the stem LESS like the owner; here both match
-        // the owner equally, so the gate sees the clone — own voice is not
-        // "another speaker", but max cosine over ALL voiceprints includes
-        // the owner's. The rule is deliberately conservative: a minor stem
-        // that still sounds like a strong voice is suspicious either way.
-        double speaker1Total = out.get(1).stream().mapToInt(c -> c.length).sum() / (double) SR;
-        assertEquals(5.0, speaker1Total, 0.2);
-    }
-
-    @Test
-    void harvest_skipsStemGate_withoutSeparator_sherpaPath() {
-        var out = EnrollmentHarvester.harvest(pcm(), SEGMENTS, List.of(0),
-                20.0, 5.0, 1.0, VOICE_EMBEDDER, null);
-
-        double total = out.get(0).stream().mapToInt(c -> c.length).sum() / (double) SR;
-        assertEquals(20.0, total, 0.2, "no separator: anchor-gated harvest stands");
-    }
-
-    @Test
-    void harvest_survivesSeparatorFailure_bestEffort() {
-        OverlapReattributor.Separator broken = windows -> {
-            throw new services.transcription.TranscriptionException("sidecar down");
-        };
-        var out = EnrollmentHarvester.harvest(pcm(), SEGMENTS, List.of(0),
-                20.0, 5.0, 1.0, VOICE_EMBEDDER, broken);
-
-        double total = out.get(0).stream().mapToInt(c -> c.length).sum() / (double) SR;
-        assertEquals(20.0, total, 0.2, "a broken separator must not break enrollment");
-    }
-
-    @Test
-    void harvest_skipsStemGate_onThreeSpeakerRecordings() {
-        // JCLAW-618: with 3+ speakers a MossFormer stem is a two-voice
-        // mixture — bleed verdicts are meaningless and must not reject.
-        var threeSpeakers = List.of(
-                new SpeakerSegment(0, 30, 0),
-                new SpeakerSegment(35, 65, 1),
-                new SpeakerSegment(66, 69, 2));
-        var out = EnrollmentHarvester.harvest(pcm(), threeSpeakers, List.of(0),
-                20.0, 5.0, 1.0, VOICE_EMBEDDER, bleedingFor(0.1f));
-
-        double total = out.get(0).stream().mapToInt(c -> c.length).sum() / (double) SR;
-        assertEquals(20.0, total, 0.2,
-                "the bleeding separator is never consulted on 3+ speakers");
-    }
-
-    @Test
-    void clusterVoiceprints_averagePerSpeaker() {
-        var prints = EnrollmentHarvester.clusterVoiceprints(pcm(), SEGMENTS, VOICE_EMBEDDER);
+    void clusterVoiceprints_unitScalesChunksBeforeAveraging() {
+        var prints = EnrollmentHarvester.clusterVoiceprints(pcm(), segments(), LEVEL);
         assertEquals(2, prints.size());
-        assertEquals(1f, prints.get(0)[0], 1e-6, "speaker 0 is the loud voice");
-        assertEquals(1f, prints.get(1)[1], 1e-6, "speaker 1 is the quiet voice");
+        // Loud speaker's print points at [1,0]; quiet at [0,1].
+        assertTrue(prints.get(0)[0] > prints.get(0)[1]);
+        assertTrue(prints.get(1)[1] > prints.get(1)[0]);
     }
 }

@@ -65,7 +65,7 @@ public final class SpeakerClipExtractor {
      *  clip lands between and is rejected. */
     public static final double ANCHOR_GATE = 0.60;
 
-    /** Test seam matching {@link OverlapReattributor.Embedder} — the
+    /** Test seam matching {@link VoiceMath.Embedder} — the
      *  extractor stays free of natives; production passes the WeSpeaker
      *  extractor. */
     @FunctionalInterface
@@ -279,7 +279,7 @@ public final class SpeakerClipExtractor {
         for (int count : counts) {
             boolean ok = true;
             for (int j = 0; j < count; j++) {
-                if (OverlapReattributor.cosine(embs.get(k + j), anchor) < ANCHOR_GATE) ok = false;
+                if (VoiceMath.cosine(embs.get(k + j), anchor) < ANCHOR_GATE) ok = false;
             }
             verdicts.add(ok);
             k += count;
@@ -291,12 +291,12 @@ public final class SpeakerClipExtractor {
      *  voiceprint — a clip whose second half is another voice scores fine
      *  on average but fails the half check. Public for the rule-table test. */
     public static boolean matchesAnchor(float[] clip, float[] anchor, Embedder embedder) {
-        if (OverlapReattributor.cosine(embedder.embed(clip), anchor) < ANCHOR_GATE) return false;
+        if (VoiceMath.cosine(embedder.embed(clip), anchor) < ANCHOR_GATE) return false;
         if (clip.length < 2 * SAMPLE_RATE) return true; // halves under 1s embed unreliably
         var first = Arrays.copyOfRange(clip, 0, clip.length / 2);
         var second = Arrays.copyOfRange(clip, clip.length / 2, clip.length);
-        return OverlapReattributor.cosine(embedder.embed(first), anchor) >= ANCHOR_GATE
-                && OverlapReattributor.cosine(embedder.embed(second), anchor) >= ANCHOR_GATE;
+        return VoiceMath.cosine(embedder.embed(first), anchor) >= ANCHOR_GATE
+                && VoiceMath.cosine(embedder.embed(second), anchor) >= ANCHOR_GATE;
     }
 
     /** Centered cut with the same clock-drift clamping {@link #extract}

@@ -1,7 +1,5 @@
 package services.transcription;
 
-import play.Logger;
-
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -10,48 +8,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Gated enrollment-clip harvesting (JCLAW-609, round 3). Composes every
- * purity instrument the pipeline has, because each one alone has a blind
- * spot the UAT found the hard way:
- *
- * <ul>
- *   <li><b>Overlap purification</b> (caller passes purified segments) —
- *       removes <i>detected</i> cross-talk, but the detector cannot mark a
- *       voice it cannot hear (quiet backchannel under the dominant
- *       speaker).</li>
- *   <li><b>Anchor voiceprint gate</b> (inside
- *       {@link SpeakerClipExtractor#referenceClips}) — rejects candidates
- *       whose embedding does not match the operator-verified lineup clip;
- *       catches sequential turn-mixing but scores the dominant voice, so
- *       simultaneous bleed passes.</li>
- *   <li><b>Separation stem gate</b> (this class) — MossFormer2 splits each
- *       candidate window into two stems; on a pure window the second stem
- *       is incoherent residue (measured cosine ≤ 0.39 against every
- *       speaker), on a bled window it IS the other voice (measured
- *       0.61-0.75). Rejects candidates whose minor stem matches any
- *       speaker voiceprint at {@link #BLEED_THRESHOLD} or above.</li>
- * </ul>
- *
- * The harvest over-provisions candidates, gates them, and trims to the
- * per-speaker duration budget. Best-effort: with no separator (sherpa
- * path, sidecar down) the stem gate is skipped and the anchor-gated
- * harvest stands.
+ * Anchor-gated enrollment-clip harvesting (JCLAW-609; simplified for the
+ * whisper+pyannote tier in JCLAW-653). Candidates come from the purified
+ * exclusive segments and pass the anchor voiceprint gate inside
+ * {@link SpeakerClipExtractor#referenceClips} — candidates whose embedding
+ * does not match the operator-verified lineup clip are rejected there. The
+ * retired separation stem gate (MossFormer bleed detection) went with the
+ * correction stack; quality-critical transcription now lives on the
+ * audio-native LLM tier instead.
  */
 public final class EnrollmentHarvester {
-
-    /** A candidate is bled when its minor separation stem matches ANY
-     *  speaker voiceprint at least this closely. Calibrated on the debate
-     *  benchmark with 5s-capped windows: pure minor stems measure at most
-     *  0.31; gross bleed 0.61-0.75; sparse backchannel (a short affirmation
-     *  under the dominant voice) lands between and slid under the original
-     *  0.5 gate by dilution in long windows (a 10.7s clip scored 0.391 and
-     *  the operator heard the bleed). With clips capped at 5s the fraction
-     *  concentrates, and 0.40 keeps clear margin over the pure band. */
-    static final double BLEED_THRESHOLD = 0.40;
-
-    /** Harvest overshoot factor: candidates gathered beyond the budget so
-     *  gate rejections can be replaced. */
-    static final double OVERPROVISION = 1.5;
 
     private static final int SAMPLE_RATE = 16_000;
     private static final int CHUNK_SAMPLES = 5 * SAMPLE_RATE;
@@ -59,60 +25,34 @@ public final class EnrollmentHarvester {
     private EnrollmentHarvester() {}
 
     /**
-     * Harvest gated reference clips for every speaker in {@code speakerIds}.
-     * The first clip per speaker is the anchor/lineup cut (never gated away
-     * — it is the audio the operator verifies by ear). Returns clips in
+     * Harvest anchor-gated reference clips for every speaker in
+     * {@code speakerIds}. The first clip per speaker is the anchor/lineup
+     * cut (the audio the operator verifies by ear). Returns clips in
      * harvest order, trimmed to {@code targetSeconds} total per speaker.
-     *
-     * @param separator batch separator ({@link OverlapReattributor.Separator})
-     *                  or null to skip the stem gate (no sidecar available)
      */
     public static Map<Integer, List<float[]>> harvest(
             Path audioFile, List<SpeakerSegment> purifiedSegments,
             List<Integer> speakerIds, double targetSeconds, double lineupSeconds,
-            double minSeconds, SpeakerClipExtractor.Embedder embedder,
-            OverlapReattributor.Separator separator) {
+            double minSeconds, SpeakerClipExtractor.Embedder embedder) {
         float[] pcm = WhisperJniTranscriber.ffmpegToPcmF32(audioFile);
         return harvest(pcm, purifiedSegments, speakerIds, targetSeconds, lineupSeconds,
-                minSeconds, embedder, separator);
+                minSeconds, embedder);
     }
 
     /** Decoded-samples core — the testable path. */
     public static Map<Integer, List<float[]>> harvest(
             float[] pcm, List<SpeakerSegment> purifiedSegments,
             List<Integer> speakerIds, double targetSeconds, double lineupSeconds,
-            double minSeconds, SpeakerClipExtractor.Embedder embedder,
-            OverlapReattributor.Separator separator) {
-        // Over-provisioned, anchor-gated candidates per speaker.
-        var candidates = new LinkedHashMap<Integer, List<float[]>>();
-        for (var speaker : speakerIds) {
-            candidates.put(speaker, SpeakerClipExtractor.referenceClips(
-                    pcm, purifiedSegments, speaker, targetSeconds * OVERPROVISION,
-                    lineupSeconds, minSeconds, embedder));
-        }
-
-        // JCLAW-618: MossFormer2 emits exactly two stems; with 3+ speakers a
-        // stem is a two-voice mixture and the bleed verdicts are meaningless.
-        long distinctSpeakers = purifiedSegments.stream()
-                .map(SpeakerSegment::speaker).distinct().count();
-        var verdicts = separator == null || distinctSpeakers != 2
-                ? null
-                : stemGateVerdicts(pcm, purifiedSegments, candidates, embedder, separator);
-
+            double minSeconds, SpeakerClipExtractor.Embedder embedder) {
         var out = new LinkedHashMap<Integer, List<float[]>>();
-        for (var e : candidates.entrySet()) {
+        for (var speaker : speakerIds) {
+            var candidates = SpeakerClipExtractor.referenceClips(
+                    pcm, purifiedSegments, speaker, targetSeconds,
+                    lineupSeconds, minSeconds, embedder);
             var kept = new ArrayList<float[]>();
             double total = 0;
-            int rejected = 0;
-            var speakerVerdicts = verdicts == null ? null : verdicts.get(e.getKey());
-            for (int i = 0; i < e.getValue().size(); i++) {
-                var clip = e.getValue().get(i);
-                // The anchor (i == 0) is never gated away — it is the
-                // operator-verified audio and the deepest-interior cut.
-                if (i > 0 && speakerVerdicts != null && !speakerVerdicts.get(i)) {
-                    rejected++;
-                    continue;
-                }
+            for (int i = 0; i < candidates.size(); i++) {
+                var clip = candidates.get(i);
                 if (total >= targetSeconds) break;
                 double remaining = targetSeconds - total;
                 if (clip.length / (double) SAMPLE_RATE > remaining && i > 0) {
@@ -124,83 +64,9 @@ public final class EnrollmentHarvester {
                 kept.add(clip);
                 total += clip.length / (double) SAMPLE_RATE;
             }
-            if (rejected > 0) {
-                Logger.info("EnrollmentHarvester: speaker %d — %d candidate(s) rejected by the "
-                        + "stem gate, %.1fs kept", e.getKey(), rejected, total);
-            }
-            out.put(e.getKey(), kept);
+            out.put(speaker, kept);
         }
         return out;
-    }
-
-    /**
-     * Batch-separate every non-anchor candidate and judge each: pure when
-     * the minor stem (the one less like the clip's own speaker) matches no
-     * speaker voiceprint at {@link #BLEED_THRESHOLD}. Returns per-speaker
-     * verdict lists aligned with the candidate lists (index 0 = anchor,
-     * always true). Best-effort: any failure passes everything.
-     */
-    private static Map<Integer, List<Boolean>> stemGateVerdicts(
-            float[] pcm, List<SpeakerSegment> purifiedSegments,
-            Map<Integer, List<float[]>> candidates,
-            SpeakerClipExtractor.Embedder embedder, OverlapReattributor.Separator separator) {
-        try {
-            var voiceprints = clusterVoiceprints(pcm, purifiedSegments, embedder);
-            var windows = new ArrayList<float[]>();
-            var owners = new ArrayList<int[]>(); // {speakerId, candidateIndex}
-            for (var e : candidates.entrySet()) {
-                for (int i = 1; i < e.getValue().size(); i++) {
-                    windows.add(e.getValue().get(i));
-                    owners.add(new int[]{e.getKey(), i});
-                }
-            }
-            var verdicts = new LinkedHashMap<Integer, List<Boolean>>();
-            for (var e : candidates.entrySet()) {
-                var list = new ArrayList<Boolean>();
-                for (int i = 0; i < e.getValue().size(); i++) list.add(true);
-                verdicts.put(e.getKey(), list);
-            }
-            if (windows.isEmpty()) return verdicts;
-
-            var stemsPerWindow = separator.separate(windows);
-            // JCLAW-634: every stem of every window in ONE batched embed
-            // call (previously two embeds per candidate window).
-            var stemWindows = new ArrayList<float[]>();
-            var stemAt = new int[windows.size()];
-            java.util.Arrays.fill(stemAt, -1);
-            for (int w = 0; w < windows.size(); w++) {
-                var stems = stemsPerWindow.get(w);
-                if (stems == null || stems.size() < 2) continue;
-                stemAt[w] = stemWindows.size();
-                stemWindows.add(stems.get(0));
-                stemWindows.add(stems.get(1));
-            }
-            var stemEmbs = embedder.embedAll(stemWindows);
-            for (int w = 0; w < windows.size(); w++) {
-                int speaker = owners.get(w)[0];
-                var own = voiceprints.get(speaker);
-                if (own == null) continue;
-                if (stemAt[w] < 0) continue;
-                var emb0 = stemEmbs.get(stemAt[w]);
-                var emb1 = stemEmbs.get(stemAt[w] + 1);
-                var minor = OverlapReattributor.cosine(emb0, own)
-                        >= OverlapReattributor.cosine(emb1, own) ? emb1 : emb0;
-                double bestMatch = Double.NEGATIVE_INFINITY;
-                for (var ref : voiceprints.values()) {
-                    bestMatch = Math.max(bestMatch, OverlapReattributor.cosine(minor, ref));
-                }
-                if (bestMatch >= BLEED_THRESHOLD) {
-                    verdicts.get(speaker).set(owners.get(w)[1], false);
-                    Logger.info("EnrollmentHarvester: candidate %d of speaker %d is bled — "
-                                    + "minor stem matches a voice at %.2f",
-                            owners.get(w)[1], speaker, bestMatch);
-                }
-            }
-            return verdicts;
-        } catch (RuntimeException e) {
-            Logger.warn("EnrollmentHarvester: stem gate skipped (%s)", e.getMessage());
-            return null;
-        }
     }
 
     /** Chunk-averaged voiceprint per speaker from the purified segments —
@@ -231,7 +97,7 @@ public final class EnrollmentHarvester {
             // JCLAW-630: one batched embed call per speaker; JCLAW-623:
             // unit-scale each chunk before averaging.
             for (var emb : embedder.embedAll(e.getValue())) {
-                emb = OverlapReattributor.l2normalize(emb);
+                emb = VoiceMath.l2normalize(emb);
                 if (avg == null) avg = new float[emb.length];
                 for (int i = 0; i < emb.length; i++) avg[i] += emb[i];
             }

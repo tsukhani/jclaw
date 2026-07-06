@@ -124,7 +124,7 @@ public final class SpeakerNamer {
                 if (voiceprint == null) continue;
                 var scores = new HashMap<String, Double>();
                 for (var ref : references.entrySet()) {
-                    scores.put(ref.getKey(), OverlapReattributor.cosine(voiceprint, ref.getValue()));
+                    scores.put(ref.getKey(), VoiceMath.cosine(voiceprint, ref.getValue()));
                 }
                 scoresByCluster.put(e.getKey(), scores);
             }
@@ -192,7 +192,7 @@ public final class SpeakerNamer {
         float[] avg = null;
         for (var emb : SidecarEmbedder.INSTANCE.embedAll(chunks)) {
             // JCLAW-623: unit-scale each chunk so loud chunks don't dominate.
-            emb = OverlapReattributor.l2normalize(emb);
+            emb = VoiceMath.l2normalize(emb);
             if (avg == null) avg = new float[emb.length];
             for (int i = 0; i < emb.length; i++) avg[i] += emb[i];
         }
