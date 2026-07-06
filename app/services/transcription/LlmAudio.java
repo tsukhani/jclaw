@@ -47,8 +47,10 @@ public final class LlmAudio {
     public static Prepared prepare(Path path, String mimeType) throws IOException {
         var format = MimeExtensions.forMime(mimeType, FORMAT_CANDIDATES);
         long size = Files.size(path);
-        boolean lossless = "wav".equals(format) || "flac".equals(format) || format.isEmpty();
-        if (size <= TRANSCODE_THRESHOLD_BYTES && !lossless) {
+        // Size is the only thing providers reject on — a short voice-note
+        // WAV rides fine raw; only multi-minute/lossless recordings balloon
+        // past request limits under base64.
+        if (size <= TRANSCODE_THRESHOLD_BYTES) {
             return new Prepared(Base64.getEncoder().encodeToString(Files.readAllBytes(path)), format);
         }
         var cached = path.resolveSibling(path.getFileName() + ".llm.mp3");
