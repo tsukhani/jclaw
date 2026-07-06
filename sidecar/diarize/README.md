@@ -90,6 +90,14 @@ independent frontier-model transcription, operator-verified):
 uv run eval.py cpwer /path/to/diarize-output.json eval/gold/haram-debate-transcript.json
 ```
 
+Timing on the M4 (3-minute recording, fresh attachment, JCLAW-644 epic):
+serial pre-epic 454s → concurrent pipeline **336-338s at exact parity**
+(MSDD runs on a persistent worker, concurrently with the GPU stages —
+its 221-229s CPU inference is the platform bound; NeMo has no MPS).
+`transcription.diarization.msddSecondOpinion=false` trades accuracy for
+speed: 144.7s at cpWER 27.33% / 56 of 65 turn probes. CUDA hosts run
+MSDD on GPU and should meet ~150s at parity outright.
+
 Baseline full pipeline against this gold: **cpWER 25.91%** with the speaker
 mapping resolving to identity (attribution is right; the number blends real
 word errors with transcription-style disagreement between two independent
