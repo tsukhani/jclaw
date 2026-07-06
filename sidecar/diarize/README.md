@@ -91,12 +91,14 @@ uv run eval.py cpwer /path/to/diarize-output.json eval/gold/haram-debate-transcr
 ```
 
 Timing on the M4 (3-minute recording, fresh attachment, JCLAW-644 epic):
-serial pre-epic 454s → concurrent pipeline **336-338s at exact parity**
-(MSDD runs on a persistent worker, concurrently with the GPU stages —
-its 221-229s CPU inference is the platform bound; NeMo has no MPS).
-`transcription.diarization.msddSecondOpinion=false` trades accuracy for
-speed: 144.7s at cpWER 27.33% / 56 of 65 turn probes. CUDA hosts run
-MSDD on GPU and should meet ~150s at parity outright.
+serial pre-epic 454s → **145.5s at exact parity** (cpWER 25.91). Every
+heavy stage runs on Metal: pyannote diarization, mlx-whisper, MossFormer2
+separation (JCLAW-645) and MSDD itself (JCLAW-648: 19.6s on MPS vs 225s
+CPU — PYTORCH_ENABLE_MPS_FALLBACK plus a one-line stride patch on NeMo's
+decoder), launched concurrently on a persistent worker so its wall-clock
+hides entirely. `transcription.diarization.msddSecondOpinion=false`
+still exists as a speed dial (144.7s at cpWER 27.33%) but no longer buys
+meaningful time.
 
 Baseline full pipeline against this gold: **cpWER 25.91%** with the speaker
 mapping resolving to identity (attribution is right; the number blends real

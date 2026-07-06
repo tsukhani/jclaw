@@ -20,16 +20,56 @@ usage (worker):    uv run msdd.py --worker
   load cost ~80s of the measured 300s); serve.py keeps the worker alive.
 """
 import json
+import os
 import sys
+
+# JCLAW-648: MSDD runs on Metal. Two ingredients: per-op CPU fallback for
+# the handful of ops MPS lacks, and a one-line upstream patch below.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+
+def _patch_mps_stride_quirk():
+    """NeMo's MSDD decoder calls .view() on a conv output that is
+    non-contiguous on MPS (contiguous on CUDA by coincidence of op
+    implementations). reshape() is semantically identical and copies only
+    when required. Measured on the debate benchmark: MPS output is
+    numerically equivalent to CPU (identical per-turn activity to 2dp);
+    inference 9.2s vs 225s CPU on an M4."""
+    import torch
+    import torch.nn.functional as F
+    from nemo.collections.asr.modules import msdd_diarizer as _md
+
+    def conv_scale_weights(self, ms_avg_embs_perm, ms_emb_seq_single):
+        ms_cnn_input_seq = torch.cat([ms_avg_embs_perm, ms_emb_seq_single], dim=2)
+        ms_cnn_input_seq = ms_cnn_input_seq.unsqueeze(2).flatten(0, 1)
+        conv_out = self.conv_forward(
+            ms_cnn_input_seq, conv_module=self.conv[0], bn_module=self.conv_bn[0],
+            first_layer=True)
+        for conv_idx in range(1, self.conv_repeat + 1):
+            conv_out = self.conv_forward(
+                conv_input=conv_out, conv_module=self.conv[conv_idx],
+                bn_module=self.conv_bn[conv_idx], first_layer=False)
+        lin_input_seq = conv_out.reshape(
+            self.batch_size, self.length, self.cnn_output_ch * self.emb_dim)
+        hidden_seq = self.conv_to_linear(lin_input_seq)
+        hidden_seq = self.dropout(F.leaky_relu(hidden_seq))
+        scale_weights = self.softmax(self.linear_to_weights(hidden_seq))
+        return scale_weights.unsqueeze(3).expand(-1, -1, -1, self.num_spks)
+
+    _md.MSDD_module.conv_scale_weights = conv_scale_weights
 
 
 def _load():
     import torch
     from nemo.collections.asr.models.msdd_models import NeuralDiarizer
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    sys.stderr.write("[msdd] loading diar_msdd_telephonic on %s%s\n"
-                     % (device, " (NeMo has no MPS support)" if device == "cpu"
-                        and torch.backends.mps.is_available() else ""))
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+        _patch_mps_stride_quirk()
+    else:
+        device = "cpu"
+    sys.stderr.write("[msdd] loading diar_msdd_telephonic on %s\n" % device)
     diarizer = NeuralDiarizer.from_pretrained("diar_msdd_telephonic")
     return diarizer.to(device)
 
@@ -64,27 +104,8 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
         return worker()
     audio, num_speakers = sys.argv[1], int(sys.argv[2])
-    import torch
-    from nemo.collections.asr.models.msdd_models import NeuralDiarizer
-    # JCLAW-638: NeMo supports CUDA but not MPS — pick CUDA when present,
-    # otherwise CPU, and SAY so (the silent-CPU-on-Mac behavior hid a 5x
-    # cost). serve.py logs devices the same way.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    sys.stderr.write("[msdd] loading diar_msdd_telephonic on %s%s\n"
-                     % (device, " (NeMo has no MPS support)" if device == "cpu"
-                        and torch.backends.mps.is_available() else ""))
-    diarizer = NeuralDiarizer.from_pretrained("diar_msdd_telephonic")
-    diarizer = diarizer.to(device)
-    # num_workers=0: NeMo dataloader workers hit a spawn-pickling failure on
-    # macOS (SpeechLabelEntity is not picklable across spawn).
-    annotation = diarizer(audio, num_speakers=num_speakers,
-                          max_speakers=max(2, num_speakers), num_workers=0)
-    segments = []
-    for segment, _, label in annotation.itertracks(yield_label=True):
-        segments.append({"start": round(segment.start, 3),
-                         "end": round(segment.end, 3),
-                         "speaker": int(label.split("_")[-1])})
-    print(json.dumps({"segments": segments}))
+    diarizer = _load()
+    print(json.dumps({"segments": _infer(diarizer, audio, num_speakers)}))
     return 0
 
 
