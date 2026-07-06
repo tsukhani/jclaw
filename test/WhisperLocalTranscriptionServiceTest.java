@@ -11,7 +11,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.transcription.FfmpegProbe;
 import services.transcription.TranscriptionException;
-import services.transcription.WhisperJniTranscriber;
+import services.transcription.WhisperTranscriber;
 import services.transcription.WhisperLocalTranscriptionService;
 
 import java.util.UUID;
@@ -19,11 +19,11 @@ import java.util.UUID;
 /**
  * JCLAW-315: cover the local-transcription adapter that bridges
  * {@link services.transcription.TranscriptionService} to the static
- * {@link WhisperJniTranscriber} engine.
+ * {@link WhisperTranscriber} engine.
  *
  * <p>The happy path (whisper.cpp inference) needs the native lib and a
  * downloaded model; that's already covered by the integration test in
- * {@code WhisperJniTranscriberTest}. Here we only verify the adapter
+ * {@code WhisperTranscriberTest}. Here we only verify the adapter
  * layer: null guard, attachment-path resolution wiring, and the
  * fail-fast envelope when ffmpeg is missing.
  */

@@ -377,32 +377,56 @@ async function toggleTranscriptionEnabled() {
   finally { saving.value = false }
 }
 
-// JCLAW-565: diarization sidecar HF token. Masked at rest, so the editor
-// starts blank (same pattern as imagegen.local.hfToken). When blank, the
-// backend reuses the image-generation token — hfTokenConfigured (imagegen)
-// drives the "using the image-generation token" hint.
-const diarizeHfTokenConfigured = computed(() => {
-  const v = configData.value?.entries?.find(e => e.key === 'transcription.diarization.local.hfToken')?.value
-  return !!v && v.trim().length > 0
-})
-function startEditDiarizeHfToken() {
-  editingKey.value = 'transcription.diarization.local.hfToken'
-  editValue.value = ''
-}
-
-// JCLAW-563: per-turn emotion labels on diarized transcripts. Independent of
-// the master toggle above — the diarize_audio tool always runs the local
-// pipeline, whatever the inbound-transcription provider. Default-on mirrors
-// the backend's ConfigService.getBoolean(key, true): anything but an
-// explicit 'false' counts as enabled.
-const emotionEnabled = computed(() =>
-  (configData.value?.entries?.find(e => e.key === 'transcription.emotion.enabled')?.value ?? 'true') !== 'false',
+// JCLAW-654: diarization runs through an audio-capable CLOUD chat model —
+// local diarization was removed after the measured tier comparison. The
+// operator picks provider + model here; the diarize_audio tool errors
+// clearly when unset. Mirrors the Image Captioning provider/model pattern.
+const diarizationProvider = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'transcription.diarization.provider')?.value ?? '',
 )
-async function toggleEmotionEnabled() {
+const diarizationModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'transcription.diarization.model')?.value ?? '',
+)
+const diarizationEnabled = computed(() => diarizationProvider.value.trim().length > 0)
+// Audio-capable models the operator configured for the chosen provider — the picker
+// filters provider.{name}.models to the audio-tagged ones, so the operator selects
+// rather than free-types (a non-audio model would just fail on every recording).
+const diarizationAudioModels = computed<ProviderModelDef[]>(() => {
+  if (!diarizationEnabled.value) return []
+  return getProviderModels(diarizationProvider.value).filter(m => m.supportsAudio === true)
+})
+const diarizationAudioModelOptions = computed(() =>
+  diarizationAudioModels.value.map(m => ({ id: m.id, label: m.name || m.id })),
+)
+const diarizationModelOrphaned = computed(() =>
+  diarizationModel.value !== '' && !diarizationAudioModelOptions.value.some(o => o.id === diarizationModel.value),
+)
+const diarizationModelSelectValue = computed(() => (diarizationModelOrphaned.value ? '' : diarizationModel.value))
+async function toggleDiarizationEnabled() {
   saving.value = true
   try {
-    const next = emotionEnabled.value ? 'false' : 'true'
-    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.emotion.enabled', value: next } })
+    const next = diarizationEnabled.value ? '' : (openrouterApiKeyConfigured.value ? 'openrouter' : 'openai')
+    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.provider', value: next } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function setDiarizationProvider(value: string) {
+  saving.value = true
+  try {
+    // Reset the model on a provider switch — independent keys, fire in parallel.
+    await Promise.all([
+      $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.provider', value } }),
+      $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value: '' } }),
+    ])
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function setDiarizationModel(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value } })
     refresh()
   }
   finally { saving.value = false }
@@ -4262,104 +4286,134 @@ async function deleteLoggerLevel(logger: string) {
         </div>
       </template>
 
-      <!-- JCLAW-565: Diarization subsection. Deliberately outside the
-           master-toggle template — the diarize_audio tool runs the local
-           pipeline even when inbound transcription is off, so everything
-           here must stay reachable. -->
+      <!-- JCLAW-654: Diarization = audio-capable cloud chat model. Outside the
+           master-toggle template — the diarize_audio tool works whatever the
+           inbound-transcription provider is. -->
       <div class="bg-surface-elevated border border-border">
-        <div class="px-4 py-2.5 border-b border-border">
-          <span class="text-sm font-medium text-fg-strong">Diarization</span>
-        </div>
-        <div class="px-4 pt-2.5 text-[11px] text-fg-muted">
-          Who-spoke-when for the diarize-audio tool and the REST diarize endpoint. Two engines:
-          the built-in one (zero setup), and a higher-accuracy
-          <span class="font-mono">pyannote community-1</span> sidecar (managed automatically via
-          <span class="font-mono">uv</span>) that finds the number of speakers by itself. The
-          sidecar activates once a Hugging Face token is set — the model is gated, so first accept
-          its conditions on the
-          <a
-            href="https://huggingface.co/pyannote/speaker-diarization-community-1"
-            target="_blank"
-            rel="noopener"
-            class="text-fg-primary hover:text-fg-strong underline"
-          >model page</a>. If a token is already set under Image Generation it is reused here;
-          any sidecar failure falls back to the built-in engine.
-        </div>
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Hugging Face token (optional)</span>
-          <template v-if="editingKey === 'transcription.diarization.local.hfToken'">
-            <input
-              v-model="editValue"
-              type="password"
-              aria-label="Diarization Hugging Face token"
-              placeholder="hf_… — leave blank to reuse the Image Generation token"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            >
-            <button
-              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-              title="Save"
-              @click="updateEntry('transcription.diarization.local.hfToken')"
-            >
-              <CheckIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Cancel"
-              @click="editingKey = null"
-            >
-              <XMarkIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-          <template v-else>
-            <span class="flex-1 text-sm text-fg-primary font-mono truncate">
-              {{ diarizeHfTokenConfigured ? '••••••••' : (hfTokenConfigured ? 'using the Image Generation token' : '(not set)') }}
-            </span>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              :title="diarizeHfTokenConfigured ? 'Change token' : 'Set token'"
-              aria-label="Edit diarization Hugging Face token"
-              @click="startEditDiarizeHfToken()"
-            >
-              <PencilIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-        </div>
-        <!-- JCLAW-563: emotion labels ride the diarized transcript, so the
-             toggle lives in this subsection. -->
-        <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer border-t border-border">
+        <div class="px-4 py-2.5 border-b border-border flex items-center gap-3">
+          <span class="text-sm font-medium text-fg-strong flex-1">Diarization</span>
           <button
             type="button"
-            :aria-pressed="emotionEnabled"
-            aria-label="Enable emotion labels on diarized transcripts"
-            :class="emotionEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            :aria-pressed="diarizationEnabled"
+            aria-label="Enable speaker diarization via a cloud audio model"
+            :class="diarizationEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
             class="relative w-9 h-5 rounded-full transition-colors"
-            @click="toggleEmotionEnabled"
+            @click="toggleDiarizationEnabled"
           >
             <span
-              :class="emotionEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              :class="diarizationEnabled ? 'translate-x-4' : 'translate-x-0.5'"
               class="block w-4 h-4 bg-white rounded-full transition-transform"
             />
           </button>
-          <span class="text-sm font-medium text-fg-strong">Emotion labels on diarized transcripts</span>
-          <span class="ml-auto text-[11px] text-fg-muted">
-            {{ emotionEnabled ? 'on' : 'off' }}
-          </span>
+          <span class="text-[11px] text-fg-muted">{{ diarizationEnabled ? 'on' : 'off' }}</span>
         </div>
-        <div class="px-4 pb-2.5 text-[11px] text-fg-muted">
-          Each diarized turn is tagged with how it was said — happy, sad, angry, disgust,
-          fear, surprised or neutral — classified locally from the voice's tone by a multilingual
-          model (~360 MB, downloads from Hugging Face on first use). Ordinary voice-note
-          transcription is unaffected.
+        <div class="px-4 pt-2.5 text-[11px] text-fg-muted">
+          Who-said-what transcripts (the diarize-audio tool) are produced by an
+          <span class="font-medium">audio-capable</span> chat model — the recording is sent to it
+          with a verbatim-diarization prompt. Pick a provider and one of its audio-capable models
+          below (API keys come from <span class="text-fg-muted">LLM Providers</span> above).
+          Ordinary voice-note transcription stays local and is unaffected.
         </div>
+        <template v-if="diarizationEnabled">
+          <fieldset class="border-t border-border mt-2.5">
+            <legend class="sr-only">
+              Diarization provider
+            </legend>
+            <div class="divide-y divide-border">
+              <label
+                for="diarization-provider-openrouter"
+                class="px-4 py-2.5 flex items-center gap-3"
+                :class="openrouterApiKeyConfigured
+                  ? 'cursor-pointer'
+                  : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+                :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
+              >
+                <input
+                  id="diarization-provider-openrouter"
+                  type="radio"
+                  name="diarization-provider"
+                  value="openrouter"
+                  :checked="diarizationProvider === 'openrouter'"
+                  :disabled="!openrouterApiKeyConfigured"
+                  class="accent-emerald-600"
+                  @change="setDiarizationProvider('openrouter')"
+                >
+                <span
+                  class="flex-1 text-sm"
+                  :class="openrouterApiKeyConfigured ? 'text-fg-primary' : 'text-amber-800 dark:text-amber-300 opacity-80'"
+                >OpenRouter</span>
+                <span
+                  v-if="!openrouterApiKeyConfigured"
+                  class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+                >no API key — configure in LLM Providers</span>
+              </label>
+              <label
+                for="diarization-provider-openai"
+                class="px-4 py-2.5 flex items-center gap-3"
+                :class="openaiApiKeyConfigured
+                  ? 'cursor-pointer'
+                  : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+                :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
+              >
+                <input
+                  id="diarization-provider-openai"
+                  type="radio"
+                  name="diarization-provider"
+                  value="openai"
+                  :checked="diarizationProvider === 'openai'"
+                  :disabled="!openaiApiKeyConfigured"
+                  class="accent-emerald-600"
+                  @change="setDiarizationProvider('openai')"
+                >
+                <span
+                  class="flex-1 text-sm"
+                  :class="openaiApiKeyConfigured ? 'text-fg-primary' : 'text-amber-800 dark:text-amber-300 opacity-80'"
+                >OpenAI</span>
+                <span
+                  v-if="!openaiApiKeyConfigured"
+                  class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+                >no API key — configure in LLM Providers</span>
+              </label>
+            </div>
+          </fieldset>
+          <div class="border-t border-border">
+            <div class="px-4 py-2.5 flex items-center gap-3">
+              <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Audio model</span>
+              <select
+                :value="diarizationModelSelectValue"
+                aria-label="Diarization audio model"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                @change="setDiarizationModel(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">
+                  (select an audio-capable model)
+                </option>
+                <option
+                  v-for="m in diarizationAudioModelOptions"
+                  :key="m.id"
+                  :value="m.id"
+                >
+                  {{ m.label }}
+                </option>
+              </select>
+            </div>
+            <p
+              v-if="diarizationAudioModels.length === 0"
+              class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+            >
+              No audio-capable models are configured for this provider. Add one under
+              <span class="text-fg-muted">LLM Providers</span> above (models with audio input
+              show an “Audio” badge in the chat model picker), then select it here.
+            </p>
+            <p
+              v-if="diarizationModelOrphaned"
+              class="px-4 pb-2.5 -mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+            >
+              The saved model “{{ diarizationModel }}” is not marked audio-capable — pick one
+              from the list so recordings can actually be heard.
+            </p>
+          </div>
+        </template>
       </div>
     </div>
 

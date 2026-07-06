@@ -77,20 +77,22 @@ public class DefaultConfigJob extends Job<Void> {
         // via Settings → Transcription once an OpenRouter / OpenAI API key
         // is configured.
         seedIfAbsent("transcription.provider", "whisper-local");
+        // JCLAW-654: diarization is cloud-only — an audio-capable chat model
+        // chosen in Settings; empty means "not configured" and the diarize
+        // tool explains what to set up.
+        seedIfAbsent("transcription.diarization.provider", "");
+        seedIfAbsent("transcription.diarization.model", "");
         seedIfAbsent("transcription.localModel",
                 WhisperModel.DEFAULT.id());
-        seedIfAbsent("transcription.diarization.speakerMatchThreshold", "0.6");
         // JCLAW-563: per-turn acoustic emotion labels on diarized
         // transcripts. On by default (best-effort — failures never break a
         // transcript); set false to skip the ~95 MB model download and the
         // extra per-turn inference.
-        seedIfAbsent("transcription.emotion.enabled", "true");
         // JCLAW-565/614: Hugging Face token for the gated community-1
         // weights, passed to the sidecar process as HF_TOKEN. Blank = reuse
         // imagegen.local.hfToken; with neither set diarization fails fast
         // with setup instructions (sidecar-or-error). Masked in
         // Settings (key name contains "token").
-        seedIfAbsent("transcription.diarization.local.hfToken", "");
         // JCLAW-605: cross-talk turns re-attributed via MossFormer2 source
         // separation in the sidecar + WeSpeaker stem voiceprints. Only
         // activates on the pyannote path when overlap regions exist; every

@@ -5,7 +5,7 @@ import services.AgentService;
 import services.ConfigService;
 
 /**
- * Adapts the static {@link WhisperJniTranscriber} engine to the
+ * Adapts the static {@link WhisperTranscriber} engine to the
  * {@link TranscriptionService} contract. Resolves the configured
  * {@code transcription.localModel} on every call (so model swaps
  * via Settings take effect immediately) and routes the on-disk
@@ -28,6 +28,6 @@ public final class WhisperLocalTranscriptionService implements TranscriptionServ
         // Language follows the model selection (JCLAW-556): multilingual
         // models auto-detect per clip, .en models decode English. Before,
         // multilingual models were silently forced to "en".
-        return WhisperJniTranscriber.transcribe(path, model);
+        return WhisperTranscriber.transcribe(path, model);
     }
 }

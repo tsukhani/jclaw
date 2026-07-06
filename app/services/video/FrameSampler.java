@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  * Sample evenly-spaced JPEG frames from a video attachment for the JCLAW-208
  * video-understanding pipeline. Shells out to {@code ffmpeg} (frame extraction)
  * and {@code ffprobe} (duration) exactly as
- * {@link services.transcription.WhisperJniTranscriber} does for audio — same
+ * {@link services.transcription.WhisperTranscriber} does for audio — same
  * process hygiene: stderr captured to a temp file, stdout drained <em>before</em>
  * {@code waitFor} so a full pipe can't deadlock the child, a bounded timeout, and
  * {@code destroyForcibly} on a hang.
@@ -170,7 +170,7 @@ public final class FrameSampler {
                 var proc = pb.start();
 
                 // Drain stdout fully BEFORE waitFor so a large frame can't backpressure
-                // ffmpeg into hanging on a full stdout pipe (mirrors WhisperJniTranscriber).
+                // ffmpeg into hanging on a full stdout pipe (mirrors WhisperTranscriber).
                 byte[] jpeg;
                 try (InputStream stdout = proc.getInputStream()) {
                     jpeg = stdout.readAllBytes();

@@ -1,13 +1,11 @@
 # jclaw diarization sidecar (JCLAW-565)
 
-Speaker diarization via the **pyannote community-1** pipeline. Launched +
-lifecycle-owned by `services.transcription.PyannoteSidecarManager`. This
+lifecycle-owned by `services.transcription.AsrSidecarManager`. This
 sidecar is jclaw's ONLY diarization engine (JCLAW-614 scrapped the inferior
 in-process sherpa fallback, matching the image/video sidecar architecture):
 missing prerequisites or sidecar failures surface as actionable errors —
 nothing silently degrades.
 
-    uv run serve.py --port 9529 --cache-dir ../../data/pyannote-models --idle-timeout-min 15
 
 Why: the JCLAW-565 bake-off on real 2-speaker podcast audio — community-1
 DER 12.5% / pairwise F1 0.864 with the speaker count found automatically vs
@@ -20,15 +18,12 @@ segmentation are jointly tuned). ~18x realtime on Apple MPS.
 | Method | Path | Body → Response |
 |---|---|---|
 | GET | `/health` | → `{status, device, model, loaded}` |
-| POST | `/diarize` | `{audio_path, num_speakers?}` → `{segments: [{start, end, speaker}...], overlaps: [{start, end}...], device, seconds}`; `400` bad path, `409` busy, `500` load/inference error |
 | POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — GPU ASR: mlx-whisper (Apple silicon) / faster-whisper (CUDA, CPU int8), own uv script env (JCLAW-627) |
-| POST | `/embed` | `{audio_paths: [...], model}` → `{embeddings: [[...], ...]}` — batched WeSpeaker embeddings, same ONNX + feature pipeline as the retired JVM JNI stack (JCLAW-630) |
 
 The audio file is passed **by path** (same host; attachments are already on
 disk). One diarization at a time; concurrent callers get `409` and queue in
 the JVM.
 
-Segments come from pyannote 4's **exclusive** diarization (one speaker at a
 time — the model resolves overlapping speech to the dominant/transcribable
 voice). jclaw's only consumer is a mono ASR transcript, so exclusive output
 beats handing overlap-aware segments to a naive max-overlap merge: on the
@@ -40,24 +35,19 @@ attribution.
 - `uv` on PATH (shared prerequisite with the image/video sidecars).
 - A Hugging Face token with the **gated** community-1 model's conditions
   accepted (visit the model page, click "Agree and access repository").
-  Configure it in jclaw Settings (`transcription.diarization.local.hfToken`);
   the JVM passes it to this process as `HF_TOKEN`.
 - First launch resolves the Python env (torch, ~2 GB) and downloads the
   pipeline weights (~30 MB) into `--cache-dir`.
 
 ## Licenses / attribution
 
-- Model: [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1),
-  © pyannoteAI, **CC-BY-4.0** — this attribution satisfies the license's
   requirement; the operator downloads the weights directly from Hugging Face.
-- Library: [pyannote.audio](https://github.com/pyannote/pyannote-audio), MIT.
 - ASR: [mlx-whisper](https://github.com/ml-explore/mlx-examples) (MIT) on Apple silicon; [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) elsewhere — OpenAI Whisper weights (MIT), same as whisper.cpp (JCLAW-627).
 
 ## Evaluation (JCLAW-617)
 
 Run the DER/JER harness whenever a calibrated threshold changes (the
 constants in EnrollmentHarvester,
-SpeakerClipExtractor, SpeakerNamer) or the model/pipeline is upgraded:
 
 ```bash
 # Score a cached production diarization against the committed gold:
@@ -88,7 +78,6 @@ uv run eval.py cpwer /path/to/diarize-output.json eval/gold/haram-debate-transcr
 
 Timing on the M4 (3-minute recording, fresh attachment, JCLAW-644 epic):
 serial pre-epic 454s → **145.5s at exact parity** (cpWER 25.91). Every
-heavy stage runs on Metal: pyannote diarization, mlx-whisper, MossFormer2
 separation (JCLAW-645) and MSDD itself (JCLAW-648: 19.6s on MPS vs 225s
 CPU — PYTORCH_ENABLE_MPS_FALLBACK plus a one-line stride patch on NeMo's
 decoder), launched concurrently on a persistent worker so its wall-clock
@@ -105,7 +94,6 @@ swap to an MMS-style checkpoint and re-measure cpWER if it drifts).
 ## Running by hand (debugging)
 
 ```bash
-HF_TOKEN=hf_... uv run serve.py --port 9529 --cache-dir /tmp/pyannote-cache
 curl -s localhost:9529/health
 curl -s -X POST localhost:9529/diarize \
   -H 'Content-Type: application/json' \

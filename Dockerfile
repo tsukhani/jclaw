@@ -200,7 +200,7 @@ RUN java -cp "$(echo /tmp/lib/playwright-*.jar /tmp/lib/driver-*.jar | tr ' ' ':
 #   - zulu25-jre-headless         JRE for the Play JVM (the only HARD requirement)
 #   - openssl                     entrypoint self-signs PEM cert + key
 #   - tesseract-ocr               DocumentsTool's OCR path
-#   - ffmpeg                      WhisperJniTranscriber audio→PCM coercion
+#   - ffmpeg                      WhisperTranscriber audio→PCM coercion
 #                                 (local Whisper only; cloud transcription
 #                                 clients ship raw bytes to the API)
 #   - lib(asound|atk|...)t64+ etc Playwright/Chromium shared libs

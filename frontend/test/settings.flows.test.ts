@@ -1273,7 +1273,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(hit!.value).toBe('whisper-local')
   })
 
-  it('emotion toggle defaults ON and POSTs transcription.emotion.enabled="false" when flipped (JCLAW-563)', async () => {
+  it('diarization toggle ON POSTs transcription.diarization.provider (JCLAW-654)', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerEndpoint('/api/agents', () => [])
     registerEndpoint('/api/channels', () => [])
@@ -1296,20 +1296,21 @@ describe('Settings page — Transcription enable + provider switch', () => {
     const component = await mountSuspended(Settings)
     await flushPromises()
 
-    // No transcription.emotion.enabled entry in the default fixture → the
-    // toggle renders ON, mirroring the backend's getBoolean(key, true).
-    const emotionBtn = component.find('button[aria-label="Enable emotion labels on diarized transcripts"]')
-    expect(emotionBtn.exists()).toBe(true)
-    expect(emotionBtn.attributes('aria-pressed')).toBe('true')
-    await emotionBtn.trigger('click')
+    // No transcription.diarization.provider entry in the default fixture →
+    // diarization renders OFF; flipping the toggle enables it with a
+    // provider default.
+    const toggle = component.find('button[aria-label="Enable speaker diarization via a cloud audio model"]')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.attributes('aria-pressed')).toBe('false')
+    await toggle.trigger('click')
     await flushPromises()
 
-    const hit = captured.find(b => b.key === 'transcription.emotion.enabled')
+    const hit = captured.find(b => b.key === 'transcription.diarization.provider')
     expect(hit).toBeTruthy()
-    expect(hit!.value).toBe('false')
+    expect(['openrouter', 'openai']).toContain(hit!.value)
   })
 
-  it('diarization HF token save POSTs transcription.diarization.local.hfToken (JCLAW-565)', async () => {
+  it('diarization audio-model select POSTs transcription.diarization.model (JCLAW-654)', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerEndpoint('/api/agents', () => [])
     registerEndpoint('/api/channels', () => [])
@@ -1318,7 +1319,19 @@ describe('Settings page — Transcription enable + provider switch', () => {
     registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
     registerEndpoint('/api/config', {
       method: 'GET',
-      handler: () => ({ entries: defaultConfigEntries() }),
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries(),
+          { key: 'transcription.diarization.provider', value: 'openrouter' },
+          {
+            key: 'provider.openrouter.models',
+            value: JSON.stringify([
+              { id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash', supportsAudio: true },
+              { id: 'deepseek/deepseek-v4-pro', name: 'DeepSeek V4 Pro', supportsAudio: false },
+            ]),
+          },
+        ],
+      }),
     })
     registerEndpoint('/api/config', {
       method: 'POST',
@@ -1332,20 +1345,21 @@ describe('Settings page — Transcription enable + provider switch', () => {
     const component = await mountSuspended(Settings)
     await flushPromises()
 
-    await component.find('button[aria-label="Edit diarization Hugging Face token"]').trigger('click')
-    const input = component.find('input[aria-label="Diarization Hugging Face token"]')
-    expect(input.exists()).toBe(true)
-    await input.setValue('hf_new-token')
-    // The save (check) button renders directly after the input while editing.
-    const save = component.findAll('button[title="Save"]').at(0)
-    expect(save).toBeTruthy()
-    await save!.trigger('click')
+    // The picker lists ONLY audio-capable models.
+    const select = component.find('select[aria-label="Diarization audio model"]')
+    expect(select.exists()).toBe(true)
+    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    expect(optionValues).toContain('google/gemini-3-flash-preview')
+    expect(optionValues).not.toContain('deepseek/deepseek-v4-pro')
+
+    await select.setValue('google/gemini-3-flash-preview')
     await flushPromises()
 
-    const hit = captured.find(b => b.key === 'transcription.diarization.local.hfToken')
+    const hit = captured.find(b => b.key === 'transcription.diarization.model')
     expect(hit).toBeTruthy()
-    expect(hit!.value).toBe('hf_new-token')
+    expect(hit!.value).toBe('google/gemini-3-flash-preview')
   })
+
 
   it('POSTs transcription.provider on @change of an enabled cloud-provider radio', async () => {
     const captured: Array<{ key?: string, value?: string }> = []

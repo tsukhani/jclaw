@@ -1,5 +1,5 @@
 [project]
-name = "jclaw-diarize-sidecar"
+name = "jclaw-asr-sidecar"
 version = "0.1.0"
 description = "Local speaker-diarization sidecar for jclaw — pyannote community-1 (JCLAW-565)"
 requires-python = ">=3.11"

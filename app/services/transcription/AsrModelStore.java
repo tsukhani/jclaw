@@ -56,7 +56,7 @@ public final class AsrModelStore {
             ids.append(m.id());
         }
         try {
-            var body = new PyannoteDiarizationClient().asrModels(ids.toString());
+            var body = new AsrSidecarClient().asrModels(ids.toString());
             var status = JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("status");
             for (var m : WhisperModel.values()) {
                 var s = status.getAsJsonObject(m.id());
@@ -94,7 +94,7 @@ public final class AsrModelStore {
             if (existing != null && !existing.isDone()) return existing;
             return CompletableFuture.runAsync(() -> {
                 try {
-                    new PyannoteDiarizationClient().asrPrefetch(id);
+                    new AsrSidecarClient().asrPrefetch(id);
                     EventLogger.info("transcription",
                             "ASR model %s prefetched for the host engine".formatted(id));
                 } catch (RuntimeException e) {

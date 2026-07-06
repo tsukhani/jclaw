@@ -5,7 +5,7 @@
 """DER/JER evaluation harness for the diarization pipeline (JCLAW-617).
 
 Run this whenever the pipeline changes (model swap, merge logic,
-EnrollmentHarvester, SpeakerClipExtractor, SpeakerNamer
+a diarization engine under evaluation
 constants — see each class's javadoc) or the diarization model/pipeline is
 upgraded. The gold corpus lives in eval/gold/; eval/fetch-ami.sh downloads
 the additional AMI recordings.

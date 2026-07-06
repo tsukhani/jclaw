@@ -12,7 +12,7 @@ import services.ProbeCache;
  * <p>Probe lazily on first call and cache the result; the binary doesn't
  * appear or disappear at runtime in any realistic single-process scenario.
  * The Settings UI (separate story) reads {@link #lastResult} to surface a
- * "ffmpeg missing" banner; {@link WhisperJniTranscriber} reads it to throw
+ * "ffmpeg missing" banner; {@link WhisperTranscriber} reads it to throw
  * a clear error before attempting to spawn the process.
  */
 public final class FfmpegProbe {

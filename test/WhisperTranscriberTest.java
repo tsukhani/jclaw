@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.FfmpegProbe;
 import services.transcription.TranscriptionException;
-import services.transcription.WhisperJniTranscriber;
+import services.transcription.WhisperTranscriber;
 import services.transcription.WhisperModel;
 
 import java.io.IOException;
@@ -17,7 +17,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * Integration test for {@link WhisperJniTranscriber}. Requires both
+ * Integration test for {@link WhisperTranscriber}. Requires both
  * {@code ffmpeg} on PATH and the default whisper model file on disk —
  * skips via {@link org.junit.jupiter.api.Assumptions} when either is
  * absent so a fresh clone with no setup still passes {@code play autotest}.
@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * implementation-defined (typically the empty string or a hallucinated
  * filler word) and not a stable contract.
  */
-class WhisperJniTranscriberTest extends UnitTest {
+class WhisperTranscriberTest extends UnitTest {
 
     private Path tempWav;
 
@@ -50,7 +50,7 @@ class WhisperJniTranscriberTest extends UnitTest {
         services.UvProbe.setForTest(new services.UvProbe.ProbeResult(false, "forced off"));
         try {
             var ex = assertThrows(TranscriptionException.class,
-                    () -> WhisperJniTranscriber.transcribeSegments(tempWav, WhisperModel.DEFAULT, null));
+                    () -> WhisperTranscriber.transcribeSegments(tempWav, WhisperModel.DEFAULT, null));
             assertTrue(ex.getMessage().contains("uv"), ex.getMessage());
             assertTrue(ex.getMessage().contains("setup"), ex.getMessage());
         } finally {

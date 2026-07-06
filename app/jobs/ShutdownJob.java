@@ -12,10 +12,7 @@ import services.TailscaleFunnel;
 import services.imagegen.LocalImageSidecarManager;
 import services.videogen.LocalVideoSidecarManager;
 import services.search.LuceneIndexer;
-import services.transcription.EmotionRecognizer;
-import services.transcription.PyannoteSidecarManager;
-import services.transcription.SpeakerNamer;
-import services.transcription.WhisperJniTranscriber;
+import services.transcription.AsrSidecarManager;
 import tools.PlaywrightBrowserTool;
 
 import java.util.List;
@@ -69,8 +66,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("slack-socket-mode", SlackSocketModeRunner::stop),
                 new Component("whatsapp-cobalt", WhatsAppCobaltRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
-                new Component("emotion-recognizer", EmotionRecognizer::shutdown),
-                new Component("diarize-sidecar", PyannoteSidecarManager::stop),
+                new Component("asr-sidecar", AsrSidecarManager::stop),
                 new Component("imagegen-sidecar", LocalImageSidecarManager::stop),
                 new Component("videogen-sidecar", LocalVideoSidecarManager::stop),
                 new Component("mcp-connections", McpConnectionManager::shutdown),

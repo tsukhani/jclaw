@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
  * 16 kHz mono ({@link #ffmpegToPcmF32}); the ASR sidecar reads the audio
  * file directly and needs no ffmpeg.
  */
-public final class WhisperJniTranscriber {
+public final class WhisperTranscriber {
 
     /** Hard ceiling on ffmpeg conversion. PCM float32 16 kHz mono is roughly
      *  64 KB/sec; ten minutes of audio takes a fraction of a second to
@@ -35,7 +35,7 @@ public final class WhisperJniTranscriber {
      *  for the pathological case where ffmpeg hangs on a malformed input. */
     private static final long FFMPEG_TIMEOUT_SECONDS = 300;
 
-    private WhisperJniTranscriber() {}
+    private WhisperTranscriber() {}
 
     /**
      * One recognised segment with whisper.cpp's native timestamps converted
@@ -69,7 +69,7 @@ public final class WhisperJniTranscriber {
     }
 
     /**
-     * Segment-level transcription for the diarization pipeline (JCLAW-556).
+     * Segment-level transcription (JCLAW-556).
      * Same blocking/preconditions contract as {@link #transcribe}; returns
      * one {@link Segment} per whisper.cpp segment, in order.
      *
@@ -88,74 +88,9 @@ public final class WhisperJniTranscriber {
                     "transcription requires the 'uv' launcher on PATH (it runs the GPU ASR sidecar; "
                             + "./jclaw.sh setup installs it): " + services.UvProbe.lastResult().reason());
         }
-        return new PyannoteDiarizationClient().transcribe(audioFile, model.id(), language);
+        return new AsrSidecarClient().transcribe(audioFile, model.id(), language);
     }
 
-    /** Decode ceiling: 2 hours of 16kHz mono floats is ~440MB alone, and
-     *  the overlap pipeline multiplies that several-fold. */
-    static final int MAX_DECODE_SECONDS = 2 * 60 * 60;
 
-    static float[] ffmpegToPcmF32(Path audioFile) {
-        try {
-            var stderrFile = Files.createTempFile("ffmpeg-stderr", ".log");
-            try {
-                var pb = new ProcessBuilder(
-                        "ffmpeg",
-                        "-hide_banner",
-                        "-loglevel", "error",
-                        "-i", audioFile.toString(),
-                        "-f", "f32le",
-                        "-acodec", "pcm_f32le",
-                        "-ar", "16000",
-                        "-ac", "1",
-                        "-");
-                pb.redirectError(stderrFile.toFile());
-                var proc = pb.start();
-
-                // Drain stdout fully BEFORE waitFor so a large output can't
-                // backpressure ffmpeg into hanging on a full stdout pipe.
-                byte[] pcm;
-                try (InputStream stdout = proc.getInputStream()) {
-                    pcm = stdout.readAllBytes();
-                }
-
-                boolean exited = proc.waitFor(FFMPEG_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                if (!exited) {
-                    proc.destroyForcibly();
-                    throw new TranscriptionException(
-                            "ffmpeg did not finish within %d seconds".formatted(FFMPEG_TIMEOUT_SECONDS));
-                }
-                int rc = proc.exitValue();
-                if (rc != 0) {
-                    var stderr = Files.readString(stderrFile).trim();
-                    throw new TranscriptionException(
-                            "ffmpeg exited %d: %s".formatted(rc, stderr.isEmpty() ? "(no stderr)" : stderr));
-                }
-
-                int sampleCount = pcm.length / 4;
-                // JCLAW-626: the diarization pipeline holds several copies of
-                // this array at once (mixed PCM, separation windows, stems, a
-                // staged WAV for MSDD) — a multi-hour upload would OOM the
-                // JVM opaquely. A clear ceiling beats a heap dump.
-                if (sampleCount > MAX_DECODE_SECONDS * 16_000) {
-                    throw new TranscriptionException(
-                            "Audio is longer than the %d-minute processing ceiling (%.0f minutes) — "
-                                    + "split the recording and process the parts separately."
-                                    .formatted(MAX_DECODE_SECONDS / 60,
-                                            sampleCount / 16_000.0 / 60.0));
-                }
-                var samples = new float[sampleCount];
-                ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer().get(samples);
-                return samples;
-            } finally {
-                Files.deleteIfExists(stderrFile);
-            }
-        } catch (IOException e) {
-            throw new TranscriptionException("ffmpeg invocation failed", e);
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-            throw new TranscriptionException("interrupted while running ffmpeg");
-        }
-    }
 
 }
