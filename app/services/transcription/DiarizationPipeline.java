@@ -116,6 +116,7 @@ public final class DiarizationPipeline {
         // benchmark with zero stable-turn regressions (criteria on ticket).
         List<DiarizedTranscript.Entry> entries = null;
         if (ConfigService.getBoolean("transcription.diarization.wordNative", false)) {
+            try {
             var stamped = CtcForcedAligner.stampTranscript(transcript, pcm.get());
             if (stamped != null) {
                 // E3: MSDD frame coverage joins the emission model — join
@@ -150,6 +151,15 @@ public final class DiarizationPipeline {
                     // Podcaster). A guarded revival needs stem-text
                     // agreement with the decode, not embeddings alone.
                 }
+            }
+            } catch (RuntimeException e) {
+                // Word-native is an OPTIMIZED path, never a new failure
+                // mode: any error (undecodable audio before the lazy pcm
+                // decode, aligner faults, ...) falls back to the segment
+                // path, which stays lazy about pcm.
+                play.Logger.warn("DiarizationPipeline: word-native decode failed (%s) — segment path",
+                        e.getMessage());
+                entries = null;
             }
         }
         if (entries == null) {
