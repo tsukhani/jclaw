@@ -27,6 +27,7 @@ usage (worker):   uv run transcribe.py --worker
   under-speech pass transcribes several sub-second slices per run).
 """
 import json
+import os
 import platform
 import sys
 
@@ -114,6 +115,47 @@ def _payload(triples):
         for s, e, t, nsp, alp, cr in triples]}
 
 
+def _engine_repo(size):
+    """The HF repo the HOST engine actually loads for this model size."""
+    if is_apple_silicon():
+        return "mlx-whisper", MLX_REPOS.get(size, MLX_REPOS["large-v3"])
+    return "faster-whisper", "Systran/faster-whisper-" + size
+
+
+def _cache_dir_bytes(repo):
+    from huggingface_hub.constants import HF_HUB_CACHE
+    d = os.path.join(HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
+    total = 0
+    for root, _, files in os.walk(d):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def _status(size):
+    """JCLAW-650: is the HOST engine's artifact for this size cached?"""
+    from huggingface_hub import snapshot_download
+    engine, repo = _engine_repo(size)
+    try:
+        snapshot_download(repo, local_files_only=True)
+        cached = True
+    except Exception:  # noqa: BLE001 — any miss means not fully cached
+        cached = False
+    return {"engine": engine, "repo": repo, "cached": cached,
+            "bytesOnDisk": _cache_dir_bytes(repo)}
+
+
+def _prefetch(size):
+    from huggingface_hub import snapshot_download
+    engine, repo = _engine_repo(size)
+    sys.stderr.write("[transcribe] prefetching %s (%s)\n" % (repo, engine))
+    snapshot_download(repo)
+    return _status(size)
+
+
 def worker():
     sys.stderr.write("[transcribe] worker ready\n")
     print(json.dumps({"ready": True}), flush=True)
@@ -123,9 +165,18 @@ def worker():
             continue
         try:
             req = json.loads(line)
-            size = SIZES.get(req.get("model") or "large", req.get("model") or "large")
-            triples = _transcribe(req["audio"], size, req.get("language") or None)
-            print(json.dumps(_payload(triples)), flush=True)
+            op = req.get("op", "transcribe")
+            if op == "status":
+                sizes = [SIZES.get(m, m) for m in req.get("models", [])]
+                print(json.dumps({"status": {m: _status(SIZES.get(m, m))
+                                             for m in req.get("models", [])}}), flush=True)
+            elif op == "prefetch":
+                size = SIZES.get(req.get("model") or "large", req.get("model") or "large")
+                print(json.dumps({"prefetched": _prefetch(size)}), flush=True)
+            else:
+                size = SIZES.get(req.get("model") or "large", req.get("model") or "large")
+                triples = _transcribe(req["audio"], size, req.get("language") or None)
+                print(json.dumps(_payload(triples)), flush=True)
         except Exception as e:  # noqa: BLE001 — reported per-request
             print(json.dumps({"error": str(e)}), flush=True)
     return 0

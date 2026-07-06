@@ -225,7 +225,18 @@ public final class CtcForcedAligner {
         var modelPath = AlignmentModelManager.ensureAvailable();
         try {
             var env = OrtEnvironment.getEnvironment();
-            session = env.createSession(modelPath.toString(), new OrtSession.SessionOptions());
+            // JCLAW-650 GPU sweep: CoreML EP with per-node CPU fallback.
+            // Alignment consumes frame ARGMAX over logits (Viterbi), so
+            // fp16 drift moves boundaries at most one 20ms frame — unlike
+            // the cosine thresholds that keep embeddings on CPU.
+            var opts = new OrtSession.SessionOptions();
+            try {
+                opts.addCoreML();
+                Logger.info("CtcForcedAligner: CoreML execution provider registered");
+            } catch (OrtException | UnsatisfiedLinkError e) {
+                Logger.info("CtcForcedAligner: CoreML EP unavailable (%s) — CPU provider", e.getMessage());
+            }
+            session = env.createSession(modelPath.toString(), opts);
             inputName = session.getInputNames().iterator().next();
             Logger.info("CtcForcedAligner: alignment model loaded from %s", modelPath);
         } catch (OrtException | RuntimeException e) {

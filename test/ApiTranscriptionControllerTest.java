@@ -4,14 +4,14 @@ import services.ConfigService;
 import services.Tx;
 import services.transcription.FfmpegProbe;
 import services.transcription.WhisperModel;
-import services.transcription.WhisperModelManager;
+import services.transcription.AsrModelStore;
 
 /**
  * JCLAW-164: smoke coverage for the transcription Settings backend.
  * State endpoint shape, ffmpeg probe surfacing, model status enumeration,
- * and the download trigger. The actual download path is exercised in
- * {@link WhisperModelManagerTest} — here we just verify the controller
- * routes to it.
+ * and the download trigger. uv is forced OFF so AsrModelStore takes its
+ * deterministic UNAVAILABLE path — no sidecar is spawned in tests
+ * (JCLAW-650: status/downloads are host-engine artifacts via the sidecar).
  */
 class ApiTranscriptionControllerTest extends FunctionalTest {
 
@@ -20,7 +20,8 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
     @BeforeEach
     void seedAndLogin() {
         AuthFixture.seedAdminPassword(TEST_PASSWORD);
-        WhisperModelManager.resetForTest();
+        AsrModelStore.resetForTest();
+        services.UvProbe.setForTest(new services.UvProbe.ProbeResult(false, "forced off in test"));
         FfmpegProbe.setForTest(new FfmpegProbe.ProbeResult(true, "available"));
         var loginBody = """
                 {"username":"admin","password":"%s"}
@@ -32,7 +33,8 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
     @AfterEach
     void cleanup() {
         AuthFixture.clearAdminPassword();
-        WhisperModelManager.resetForTest();
+        AsrModelStore.resetForTest();
+        services.UvProbe.setForTest(null);
         FfmpegProbe.setForTest(null);
     }
 
@@ -92,11 +94,11 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
 
     @Test
     void downloadAcceptsKnownModelId() {
-        // Real download would hit Hugging Face — we just verify the endpoint
-        // accepts the request and returns the expected ack shape. The
-        // single-flight CompletableFuture in WhisperModelManager swallows
-        // the actual network attempt; failures land in the in-memory status
-        // map, never on this thread.
+        // Real prefetch would need the sidecar — with uv forced off, the
+        // async single-flight in AsrModelStore fails fast into its in-memory
+        // error map (ensureRunning throws before any spawn); the endpoint
+        // still acks with the expected shape, matching production behavior
+        // where downloads are fire-and-poll.
         var response = POST("/api/transcription/models/" + WhisperModel.DEFAULT.id() + "/download",
                 "application/json", "{}");
         assertIsOk(response);

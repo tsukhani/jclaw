@@ -106,6 +106,10 @@ class SidecarState:
         self._msdd_worker = None
         self.msdd_lock = threading.Lock()
         self._asr_worker = None
+        # One lock for ALL asr-worker I/O (transcribe, status, prefetch):
+        # the stdin/stdout line protocol is one-request-one-response and a
+        # concurrent Settings poll during an ASR request would interleave.
+        self.asr_io_lock = threading.Lock()
 
     def asr_worker(self):
         """JCLAW-649: persistent ASR worker — one-shot calls paid a python
@@ -138,9 +142,12 @@ class SidecarState:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
         sys.stderr.write("[diarize-sidecar] spawning persistent msdd worker\n")
+        # stderr flows to OUR stderr (the JVM drains it): PYTORCH MPS
+        # fallback warnings name each op that runs CPU — the JCLAW-650
+        # GPU audit needs that visibility, DEVNULL hid it.
         w = subprocess.Popen(["uv", "run", "msdd.py", "--worker"],
                              cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=sys.stderr,
                              text=True, bufsize=1)
         ready = w.stdout.readline()  # blocks until model loaded
         if not ready or not json.loads(ready).get("ready"):
@@ -231,6 +238,27 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- endpoints ------------------------------------------------------
     def do_GET(self):
+        if self.path.startswith("/asr/models"):
+            # JCLAW-650: host-relevant ASR artifact status for the Settings
+            # UI — which engine will run each model and whether its weights
+            # are cached. Query: ?ids=comma,separated,model,ids
+            self.state.touch()
+            try:
+                from urllib.parse import urlparse, parse_qs
+                ids = parse_qs(urlparse(self.path).query).get("ids", [""])[0]
+                models = [m for m in ids.split(",") if m]
+                with self.state.asr_io_lock:
+                    w = self.state.asr_worker()
+                    w.stdin.write(json.dumps({"op": "status", "models": models}) + "\n")
+                    w.stdin.flush()
+                    line = w.stdout.readline()
+                if not line:
+                    self.state._asr_worker = None
+                    raise RuntimeError("asr worker died mid-request")
+                self._send_json(200, json.loads(line))
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"error": str(e)})
+            return
         if self.path == "/health":
             # JCLAW-641: a health probe signals imminent use — touching the
             # idle clock closes the evict race between the JVM's check and
@@ -247,6 +275,28 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if self.path == "/asr/prefetch":
+            # JCLAW-650: download the host engine's weights for a model.
+            # Synchronous (the JVM tracks async state and polls /asr/models);
+            # shares the worker, so an in-flight ASR request queues behind it.
+            self.state.touch()
+            try:
+                req = self._read_json()
+                with self.state.asr_io_lock:
+                    w = self.state.asr_worker()
+                    w.stdin.write(json.dumps({"op": "prefetch",
+                                              "model": req.get("model")}) + "\n")
+                    w.stdin.flush()
+                    line = w.stdout.readline()
+                if not line:
+                    self.state._asr_worker = None
+                    raise RuntimeError("asr worker died mid-request")
+                self._send_json(200, json.loads(line))
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"error": str(e)})
+            finally:
+                self.state.touch()
+            return
         if self.path == "/shutdown":
             # JCLAW-637: lets a restarted JVM evict an adopted orphan whose
             # model no longer matches config (no Process handle exists for a

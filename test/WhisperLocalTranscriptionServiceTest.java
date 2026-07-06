@@ -58,7 +58,6 @@ class WhisperLocalTranscriptionServiceTest extends UnitTest {
     @AfterEach
     void tearDown() {
         FfmpegProbe.setForTest(null);
-        WhisperJniTranscriber.resetForTest();
     }
 
     @Test
@@ -70,16 +69,23 @@ class WhisperLocalTranscriptionServiceTest extends UnitTest {
     }
 
     @Test
-    void transcribeSurfacesFfmpegMissingAsTranscriptionException() {
-        // Force the probe to report ffmpeg missing — the engine throws
-        // BEFORE the model check, so the model file doesn't matter here.
-        FfmpegProbe.setForTest(new FfmpegProbe.ProbeResult(false, "forced-for-test"));
-
-        var att = persistAudio();
-        var svc = new WhisperLocalTranscriptionService();
-        var ex = assertThrows(TranscriptionException.class, () -> svc.transcribe(att));
-        assertTrue(ex.getMessage().toLowerCase().contains("ffmpeg"),
-                "model-load failure must surface as transcription-failed envelope: " + ex.getMessage());
+    void transcribeSurfacesMissingUvAsTranscriptionException() {
+        // JCLAW-650: ffmpeg is no longer an ASR precondition (the sidecar
+        // reads the audio file directly; ffmpeg matters only for the
+        // diarization pipeline's PCM decode). The plain path's single
+        // prerequisite is uv — force it off and pin the actionable error.
+        services.UvProbe.setForTest(new services.UvProbe.ProbeResult(false, "forced-for-test"));
+        try {
+            var att = persistAudio();
+            var svc = new WhisperLocalTranscriptionService();
+            var ex = assertThrows(TranscriptionException.class, () -> svc.transcribe(att));
+            assertTrue(ex.getMessage().contains("uv"),
+                    "the error must name the missing prerequisite: " + ex.getMessage());
+            assertTrue(ex.getMessage().contains("setup"),
+                    "the error must point at the fix: " + ex.getMessage());
+        } finally {
+            services.UvProbe.setForTest(null);
+        }
     }
 
     /**

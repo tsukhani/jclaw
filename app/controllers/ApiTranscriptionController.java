@@ -10,11 +10,11 @@ import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 import services.transcription.DiarizedTranscript;
+import services.transcription.AsrModelStore;
 import services.transcription.DiarizationPipeline;
 import services.transcription.FfmpegProbe;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperModel;
-import services.transcription.WhisperModelManager;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -46,9 +46,7 @@ public class ApiTranscriptionController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
-    public record WhisperModelEntry(String id, String displayName, int approxSizeMb,
-                                    String status, long bytesDownloaded, Long totalBytes,
-                                    String error) {}
+    public record WhisperModelEntry(String id, String displayName, int approxSizeMb, String status, long bytesDownloaded, long totalBytes, String engine, String error) {}
 
     public record TranscriptionStateResponse(String provider, String localModel,
                                              boolean ffmpegAvailable, String ffmpegReason,
@@ -70,9 +68,13 @@ public class ApiTranscriptionController extends Controller {
             ffmpeg = FfmpegProbe.probe();
         }
 
+        // JCLAW-650: status comes from the sidecar's HOST engine (mlx on
+        // Apple silicon, faster-whisper CT2 elsewhere) — the artifact the
+        // Download button provisions is the one that actually runs.
+        var statuses = AsrModelStore.statusAll();
         var models = new ArrayList<WhisperModelEntry>();
         for (var m : WhisperModel.values()) {
-            var status = WhisperModelManager.status(m);
+            var status = statuses.get(m.id());
             models.add(new WhisperModelEntry(
                     m.id(),
                     m.displayName(),
@@ -80,6 +82,7 @@ public class ApiTranscriptionController extends Controller {
                     status.state().name(),
                     status.bytesDownloaded(),
                     status.totalBytes(),
+                    status.engine(),
                     status.error()));
         }
 
@@ -106,11 +109,12 @@ public class ApiTranscriptionController extends Controller {
     public static void download(String id) {
         var model = WhisperModel.byId(id);
         if (model.isEmpty()) error(400, "Unknown whisper model id: " + id);
-        // ensureAvailable is single-flight; concurrent calls from the
-        // polling UI all attach to the same in-flight future, no harm done.
-        WhisperModelManager.ensureAvailable(model.get(), null);
+        // Single-flight per model id; concurrent calls from the polling UI
+        // attach to the same in-flight prefetch, no harm done (JCLAW-650:
+        // downloads the HOST engine's weights via the sidecar).
+        AsrModelStore.prefetch(model.get());
         EventLogger.info("transcription",
-                "Whisper model download requested: %s".formatted(id));
+                "ASR model download requested: %s".formatted(id));
         renderJSON(gson.toJson(new DownloadStartedResponse("downloading", id)));
     }
 

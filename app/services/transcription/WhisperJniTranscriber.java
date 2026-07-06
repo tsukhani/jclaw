@@ -1,8 +1,5 @@
 package services.transcription;
 
-import io.github.givimad.whisperjni.WhisperContext;
-import io.github.givimad.whisperjni.WhisperFullParams;
-import io.github.givimad.whisperjni.WhisperJNI;
 import play.Logger;
 
 import java.io.IOException;
@@ -16,23 +13,19 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Whisper.cpp JNI wrapper for offline audio transcription. The
- * {@link WhisperJNI} runtime and its native libs are loaded once per JVM,
- * and a single {@link WhisperContext} is held for the active model — both
- * are expensive to construct and stable across requests, so reusing them
- * is the difference between sub-second and multi-second per-call latency.
+ * The ASR facade (JCLAW-650): every transcription goes through the sidecar's
+ * host-relevant GPU engine — mlx-whisper on Apple silicon, faster-whisper on
+ * CUDA/CPU hosts — same Whisper weights everywhere. The in-process
+ * whisper.cpp JNI engine this class was named for is retired (614 pattern:
+ * one best implementation, actionable error when its prerequisite — just
+ * {@code uv}; whisper weights are ungated — is missing). The name survives
+ * because {@link Segment} and {@link #ffmpegToPcmF32} are load-bearing
+ * vocabulary across the pipeline and tests, the same call as
+ * {@link DiarizationRouter}.
  *
- * <p>Threading: whisper.cpp's {@code whisper_full} mutates the context, so
- * {@link #transcribe} serializes inference under {@link #inferenceLock}.
- * Concurrent callers queue. Acceptable because the typical jclaw
- * transcription workload is one voice message at a time per user.
- *
- * <p>ffmpeg integration: whisper.cpp wants raw PCM float32 little-endian at
- * 16 kHz mono. We shell out to ffmpeg to coerce arbitrary container/codec
- * input into that exact shape and pipe stdout straight into a {@code float[]}.
- * If ffmpeg isn't on PATH we throw {@link TranscriptionException} with a
- * clear "install ffmpeg" message; {@link FfmpegProbe} caches that state
- * for the Settings UI to read.
+ * <p>ffmpeg integration: the DIARIZATION pipeline wants raw PCM float32 at
+ * 16 kHz mono ({@link #ffmpegToPcmF32}); the ASR sidecar reads the audio
+ * file directly and needs no ffmpeg.
  */
 public final class WhisperJniTranscriber {
 
@@ -41,15 +34,6 @@ public final class WhisperJniTranscriber {
      *  convert on any modern CPU. Five-minute timeout is a defensive ceiling
      *  for the pathological case where ffmpeg hangs on a malformed input. */
     private static final long FFMPEG_TIMEOUT_SECONDS = 300;
-
-    private static final Object inferenceLock = new Object();
-    // All access to these fields is guarded by inferenceLock — the
-    // synchronized blocks already provide the happens-before ordering
-    // volatile would give, plus mutual exclusion, so volatile would be
-    // redundant.
-    private static WhisperJNI jni = null;
-    private static WhisperContext activeContext = null;
-    private static WhisperModel activeModel = null;
 
     private WhisperJniTranscriber() {}
 
@@ -73,10 +57,8 @@ public final class WhisperJniTranscriber {
      * caller; long-running and CPU-bound. Caller is responsible for running
      * this off the request thread (via a virtual thread or job).
      *
-     * <p>Model file must already be on disk — the writer (JCLAW-165) is
-     * expected to call {@link WhisperModelManager#ensureAvailable} first.
-     * If not present, throws so the caller can surface a clear "model not
-     * downloaded" error.
+     * <p>Weights download on first use in the sidecar (or ahead of time via
+     * the Settings page, which provisions the host engine's artifact).
      */
     public static String transcribe(Path audioFile, WhisperModel model) {
         var sb = new StringBuilder();
@@ -97,146 +79,18 @@ public final class WhisperJniTranscriber {
      * (whisper.cpp rejects detection on {@code .en} models).
      */
     public static List<Segment> transcribeSegments(Path audioFile, WhisperModel model, String language) {
-        // JCLAW-627: prefer the sidecar's GPU engines (mlx-whisper on Apple
-        // silicon, faster-whisper elsewhere) — same Whisper weights, 5-20x
-        // faster. Fallback to in-process whisper.cpp is quality-EQUAL (unlike
-        // the scrapped sherpa fallback), only slower, so degrading here is
-        // legitimate: plain voice notes keep working without the sidecar
-        // prerequisites, and a sidecar hiccup costs latency, not accuracy.
-        if (sidecarAsrEligible()) {
-            try {
-                return new PyannoteDiarizationClient().transcribe(audioFile, model.id(), language);
-            } catch (TranscriptionException e) {
-                Logger.warn("WhisperJniTranscriber: sidecar ASR failed (%s) — "
-                        + "falling back to in-process whisper.cpp", e.getMessage());
-            }
-        }
-        return transcribeSegmentsJni(audioFile, model, language);
-    }
-
-    private static boolean sidecarAsrEligible() {
-        if (!services.ConfigService.getBoolean("transcription.asr.sidecar", true)) return false;
-        var token = PyannoteSidecarManager.effectiveHfToken();
-        return token != null && !token.isBlank() && services.UvProbe.isAvailable();
-    }
-
-    private static List<Segment> transcribeSegmentsJni(Path audioFile, WhisperModel model, String language) {
-        if (!FfmpegProbe.isAvailable()) {
+        // JCLAW-650: sidecar-or-error, the JCLAW-614 pattern. The engine is
+        // host-relevant (mlx-whisper on Apple silicon, faster-whisper on
+        // CUDA/CPU) and its only prerequisite is uv — whisper weights are
+        // NOT gated, unlike the diarization model.
+        if (!services.UvProbe.isAvailable()) {
             throw new TranscriptionException(
-                    "ffmpeg is not available on PATH — install ffmpeg to enable local transcription");
+                    "transcription requires the 'uv' launcher on PATH (it runs the GPU ASR sidecar; "
+                            + "./jclaw.sh setup installs it): " + services.UvProbe.lastResult().reason());
         }
-        if (!WhisperModelManager.availableLocally(model)) {
-            throw new TranscriptionException(
-                    "Whisper model %s is not downloaded — call WhisperModelManager.ensureAvailable first"
-                            .formatted(model.id()));
-        }
-
-        float[] samples = ffmpegToPcmF32(audioFile);
-
-        synchronized (inferenceLock) {
-            ensureContextLoaded(model);
-            var params = new WhisperFullParams();
-            // JCLAW-635: the sidecar engines run with context conditioning
-            // OFF; the fallback must not be MORE hallucination-prone than
-            // the primary on exactly the machines least able to notice.
-            params.noContext = true;
-            applyLanguage(params, language, jni.isMultilingual(activeContext));
-            int rc = jni.full(activeContext, params, samples, samples.length);
-            if (rc != 0) {
-                throw new TranscriptionException("whisper_full returned non-zero status %d".formatted(rc));
-            }
-            int segCount = jni.fullNSegments(activeContext);
-            var segments = new ArrayList<Segment>(segCount);
-            for (int i = 0; i < segCount; i++) {
-                segments.add(new Segment(
-                        jni.fullGetSegmentTimestamp0(activeContext, i) * 10L,
-                        jni.fullGetSegmentTimestamp1(activeContext, i) * 10L,
-                        jni.fullGetSegmentText(activeContext, i)));
-            }
-            return segments;
-        }
+        return new PyannoteDiarizationClient().transcribe(audioFile, model.id(), language);
     }
 
-    /**
-     * Language selection on the raw params. Public only so tests (default
-     * package) can reach it — not part of the caller contract.
-     * Blank language on a multilingual model sets the {@code "auto"}
-     * sentinel, which makes whisper.cpp detect the language AND transcribe.
-     * {@code detectLanguage} must stay false: that flag means "detect the
-     * language, then return with zero segments" (whisper.cpp's
-     * --detect-language mode) — setting it silently empties every
-     * transcript (JCLAW-559 UAT finding). Blank on an English-only model
-     * leaves the {@code "en"} default untouched: detection on {@code .en}
-     * models is rejected by whisper.cpp.
-     */
-    public static void applyLanguage(WhisperFullParams params, String language, boolean multilingual) {
-        if (language == null || language.isBlank()) {
-            if (multilingual) {
-                params.language = "auto";
-            }
-            return;
-        }
-        params.language = language;
-    }
-
-    /** Free the active native context on JVM shutdown. Wired from {@link jobs.ShutdownJob}. */
-    public static void shutdown() {
-        synchronized (inferenceLock) {
-            if (activeContext != null) {
-                try {
-                    activeContext.close();
-                } catch (@SuppressWarnings("java:S1181") Throwable t) {
-                    // JNI close() can surface native errors (Throwable, not just Exception); shutdown must continue
-                    Logger.warn(t, "WhisperJniTranscriber: error closing active context");
-                }
-                activeContext = null;
-                activeModel = null;
-            }
-        }
-    }
-
-    /**
-     * Lazy-load the JNI runtime, then ensure the active context matches the
-     * requested model. Caller must hold {@link #inferenceLock}.
-     */
-    private static void ensureContextLoaded(WhisperModel model) {
-        if (jni == null) {
-            try {
-                WhisperJNI.loadLibrary();
-            } catch (IOException e) {
-                throw new TranscriptionException("failed to load whisper-jni native libraries", e);
-            }
-            jni = new WhisperJNI();
-        }
-        if (activeModel == model && activeContext != null) return;
-
-        // Model swap — close the old context first to free native memory
-        // before allocating the new one. whisper.cpp keeps the model weights
-        // in the context's RAM, so without this we'd hold both during the
-        // swap (potentially 1+ GB on medium models).
-        if (activeContext != null) {
-            // JNI close on model swap — native error must not abort the swap
-            try { activeContext.close(); } catch (@SuppressWarnings("java:S1181") Throwable _) {}
-            activeContext = null;
-            activeModel = null;
-        }
-
-        var modelPath = WhisperModelManager.localPath(model);
-        try {
-            activeContext = jni.init(modelPath);
-            activeModel = model;
-            Logger.info("WhisperJniTranscriber: loaded model %s from %s", model.id(), modelPath);
-        } catch (IOException e) {
-            throw new TranscriptionException(
-                    "failed to load whisper model %s from %s".formatted(model.id(), modelPath), e);
-        }
-    }
-
-    /**
-     * Spawn ffmpeg, decode the input to PCM float32 little-endian at 16 kHz
-     * mono, return the samples. Stderr is captured separately so it can be
-     * surfaced in error messages without polluting the sample stream.
-     */
     /** Decode ceiling: 2 hours of 16kHz mono floats is ~440MB alone, and
      *  the overlap pipeline multiplies that several-fold. */
     static final int MAX_DECODE_SECONDS = 2 * 60 * 60;
@@ -304,16 +158,4 @@ public final class WhisperJniTranscriber {
         }
     }
 
-    /** Test-only: drop static state so tests don't bleed. */
-    public static void resetForTest() {
-        synchronized (inferenceLock) {
-            if (activeContext != null) {
-                // Test reset — swallow native close errors to keep tests independent
-                try { activeContext.close(); } catch (@SuppressWarnings("java:S1181") Throwable _) {}
-            }
-            jni = null;
-            activeContext = null;
-            activeModel = null;
-        }
-    }
 }

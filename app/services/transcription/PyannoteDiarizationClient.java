@@ -382,6 +382,48 @@ public class PyannoteDiarizationClient {
         }
     }
 
+    /** JCLAW-650: host-relevant ASR artifact status (raw JSON body). */
+    public String asrModels(String commaSeparatedIds) {
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
+        var call = client.newCall(new Request.Builder()
+                .url(baseUrl + "/asr/models?ids=" + commaSeparatedIds).get().build());
+        call.timeout().timeout(30, TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            var text = resp.body().string();
+            if (!resp.isSuccessful()) {
+                throw new TranscriptionException("asr status failed: HTTP %d — %s"
+                        .formatted(resp.code(), truncate(text)));
+            }
+            return text;
+        } catch (IOException e) {
+            throw new TranscriptionException("pyannote sidecar unreachable: " + e.getMessage(), e);
+        }
+    }
+
+    /** JCLAW-650: download the host engine's weights for a model id.
+     *  Synchronous; AsrModelStore wraps it in an async single-flight. */
+    public String asrPrefetch(String modelId) {
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : PyannoteSidecarManager.ensureRunning();
+        var body = new JsonObject();
+        body.addProperty("model", modelId);
+        var call = client.newCall(new Request.Builder()
+                .url(baseUrl + "/asr/prefetch")
+                .post(RequestBody.create(body.toString(), JSON))
+                .build());
+        call.timeout().timeout(ConfigService.getInt(
+                PyannoteSidecarManager.CONFIG_PREFIX + ".timeoutSeconds", 1800), TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            var text = resp.body().string();
+            if (!resp.isSuccessful()) {
+                throw new TranscriptionException("asr prefetch failed: HTTP %d — %s"
+                        .formatted(resp.code(), truncate(text)));
+            }
+            return text;
+        } catch (IOException e) {
+            throw new TranscriptionException("pyannote sidecar unreachable: " + e.getMessage(), e);
+        }
+    }
+
     private static String truncate(String s) {
         if (s == null) return "";
         var oneLine = s.replaceAll("\\s+", " ").strip();

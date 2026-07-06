@@ -6,7 +6,6 @@ import services.transcription.FfmpegProbe;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
 import services.transcription.WhisperModel;
-import services.transcription.WhisperModelManager;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -43,81 +42,20 @@ class WhisperJniTranscriberTest extends UnitTest {
     @AfterEach
     void tearDown() throws Exception {
         Files.deleteIfExists(tempWav);
-        WhisperJniTranscriber.resetForTest();
     }
 
     @Test
-    void transcribe_returnsString_whenModelAndFfmpegPresent() {
-        assumeTrue(FfmpegProbe.probe().available(),
-                "ffmpeg not on PATH — skipping integration test");
-        var model = WhisperModel.DEFAULT;
-        assumeTrue(WhisperModelManager.availableLocally(model),
-                "Whisper model %s not downloaded — skipping integration test"
-                        .formatted(model.id()));
-
-        // Returns whatever whisper.cpp says about a second of silence —
-        // typically empty or a single short token. Either way, the call
-        // must complete without throwing and must not return null.
-        var result = WhisperJniTranscriber.transcribe(tempWav, model);
-        assertNotNull(result, "transcribe must return a non-null string even on silent input");
-    }
-
-    @Test
-    void transcribe_throws_whenFfmpegMissing() {
-        FfmpegProbe.setForTest(new FfmpegProbe.ProbeResult(false, "forced-missing-for-test"));
+    void transcribeSegments_failsFastWithSetupInstructions_withoutUv() {
+        // JCLAW-650: sidecar-or-error — no whisper.cpp fallback exists.
+        services.UvProbe.setForTest(new services.UvProbe.ProbeResult(false, "forced off"));
         try {
             var ex = assertThrows(TranscriptionException.class,
-                    () -> WhisperJniTranscriber.transcribe(tempWav, WhisperModel.DEFAULT));
-            assertTrue(ex.getMessage().toLowerCase().contains("ffmpeg"),
-                    "error must explicitly mention ffmpeg: " + ex.getMessage());
+                    () -> WhisperJniTranscriber.transcribeSegments(tempWav, WhisperModel.DEFAULT, null));
+            assertTrue(ex.getMessage().contains("uv"), ex.getMessage());
+            assertTrue(ex.getMessage().contains("setup"), ex.getMessage());
         } finally {
-            FfmpegProbe.setForTest(null); // restore the un-probed sentinel
+            services.UvProbe.setForTest(null);
         }
-    }
-
-    @Test
-    void transcribe_throws_whenModelNotDownloaded() {
-        assumeTrue(FfmpegProbe.probe().available(),
-                "ffmpeg not on PATH — skipping (this branch needs FfmpegProbe to pass first)");
-        // Pick a model that almost certainly isn't downloaded in dev — the
-        // multilingual medium variant, ~514 MB. The "downloaded" check uses
-        // file existence under WhisperModelManager.localPath, so we don't
-        // need to clear the manager state.
-        var unlikelyDownloaded = WhisperModel.MEDIUM_MULTILINGUAL;
-        assumeTrue(!WhisperModelManager.availableLocally(unlikelyDownloaded),
-                "MEDIUM_MULTILINGUAL is downloaded — skipping the not-downloaded branch test");
-        var ex = assertThrows(TranscriptionException.class,
-                () -> WhisperJniTranscriber.transcribe(tempWav, unlikelyDownloaded));
-        assertTrue(ex.getMessage().toLowerCase().contains("not downloaded"),
-                "error must explain the model is not downloaded: " + ex.getMessage());
-    }
-
-    @Test
-    void applyLanguage_blankOnMultilingual_enablesAutoDetect() {
-        var params = new io.github.givimad.whisperjni.WhisperFullParams();
-        WhisperJniTranscriber.applyLanguage(params, null, true);
-        assertEquals("auto", params.language,
-                "blank language on a multilingual model must auto-detect via the 'auto' sentinel");
-        assertFalse(params.detectLanguage,
-                "detectLanguage means detect-then-RETURN (zero segments) in whisper.cpp — "
-                        + "it must never be set on the transcription path (JCLAW-559 UAT)");
-    }
-
-    @Test
-    void applyLanguage_blankOnEnglishOnly_keepsEnDefault() {
-        var params = new io.github.givimad.whisperjni.WhisperFullParams();
-        WhisperJniTranscriber.applyLanguage(params, "  ", false);
-        assertFalse(params.detectLanguage,
-                "detection must stay off for .en models — whisper.cpp rejects it");
-        assertEquals("en", params.language, "whisper-jni's en default must survive untouched");
-    }
-
-    @Test
-    void applyLanguage_explicitCode_isPassedThrough() {
-        var params = new io.github.givimad.whisperjni.WhisperFullParams();
-        WhisperJniTranscriber.applyLanguage(params, "ms", true);
-        assertEquals("ms", params.language);
-        assertFalse(params.detectLanguage, "an explicit language must not trigger detection");
     }
 
     /**

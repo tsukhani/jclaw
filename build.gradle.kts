@@ -384,10 +384,9 @@ dependencies {
     // Java-WebSocket impl so SocketModeClient.Backend.JavaWebSocket has a transport.
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
 
-    // JCLAW-163: whisper.cpp via JNI for offline transcription. The artifact
-    // bundles native libs for every developer-laptop platform (mac arm64/x64,
-    // linux x64, win x64) so there's no per-platform install dance.
-    implementation("io.github.givimad:whisper-jni:1.7.1")
+    // JCLAW-650: whisper.cpp JNI retired — ASR runs in the diarize sidecar
+    // on the host-relevant GPU engine (mlx-whisper / faster-whisper), and
+    // the Settings page provisions THAT engine's weights.
 
     // JCLAW-630: WeSpeaker embeddings moved into the diarize sidecar
     // (batched /embed, sherpa-onnx Python — same ONNX + feature pipeline).
