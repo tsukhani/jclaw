@@ -12,15 +12,57 @@ temporal continuity, which resolves soft overlapped speech that isolated
 window embeddings misjudge (JCLAW-610 spike: DER 5.97% vs community-1's
 7.88% on the debate benchmark, natively correct on its residual turns).
 
-usage: uv run msdd.py <audio.wav> <num_speakers>
-stdout (last line): {"segments": [{"start": s, "end": e, "speaker": n}, ...]}
-Segments may overlap in time (the output is overlap-aware). Logs to stderr.
+usage (one-shot):  uv run msdd.py <audio.wav> <num_speakers>
+usage (worker):    uv run msdd.py --worker
+  worker protocol: one request per line on stdin: {"audio": path, "num_speakers": n}
+  one response per line on stdout: {"segments": [...]} or {"error": "..."}
+  The model loads ONCE (JCLAW-646: the per-call NeMo import + checkpoint
+  load cost ~80s of the measured 300s); serve.py keeps the worker alive.
 """
 import json
 import sys
 
 
+def _load():
+    import torch
+    from nemo.collections.asr.models.msdd_models import NeuralDiarizer
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    sys.stderr.write("[msdd] loading diar_msdd_telephonic on %s%s\n"
+                     % (device, " (NeMo has no MPS support)" if device == "cpu"
+                        and torch.backends.mps.is_available() else ""))
+    diarizer = NeuralDiarizer.from_pretrained("diar_msdd_telephonic")
+    return diarizer.to(device)
+
+
+def _infer(diarizer, audio, num_speakers):
+    annotation = diarizer(audio, num_speakers=num_speakers,
+                          max_speakers=max(2, num_speakers), num_workers=0)
+    return [{"start": round(seg.start, 3), "end": round(seg.end, 3),
+             "speaker": int(label.split("_")[-1])}
+            for seg, _, label in annotation.itertracks(yield_label=True)]
+
+
+def worker():
+    diarizer = _load()
+    sys.stderr.write("[msdd] worker ready\n")
+    sys.stderr.flush()
+    print(json.dumps({"ready": True}), flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+            segments = _infer(diarizer, req["audio"], int(req["num_speakers"]))
+            print(json.dumps({"segments": segments}), flush=True)
+        except Exception as e:  # noqa: BLE001 — reported per-request
+            print(json.dumps({"error": str(e)}), flush=True)
+    return 0
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
+        return worker()
     audio, num_speakers = sys.argv[1], int(sys.argv[2])
     import torch
     from nemo.collections.asr.models.msdd_models import NeuralDiarizer

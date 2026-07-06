@@ -77,6 +77,13 @@ public final class DiarizationPipeline {
             }
         }
 
+        // JCLAW-646: launch the MSDD second opinion NOW — its minutes of
+        // CPU-only work run concurrently with every GPU stage below and are
+        // usually fully hidden by them.
+        var msdd = ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)
+                ? OverlapReattributor.startMsdd(audio, pcm.get(), diarization)
+                : null;
+
         var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                 .orElse(WhisperModel.DEFAULT);
         // JCLAW-629: raw ASR is deterministic given (audio, model, language)
@@ -96,7 +103,7 @@ public final class DiarizationPipeline {
         // JCLAW-605/612/613: overlap re-attribution, MSDD second opinion,
         // under-speech recovery. Best-effort inside reattribute().
         if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
-            entries = OverlapReattributor.reattribute(entries, diarization, audio, pcm.get());
+            entries = OverlapReattributor.reattribute(entries, diarization, audio, pcm.get(), msdd);
         }
         // JCLAW-563: per-turn acoustic emotion labels. Best-effort.
         if (ConfigService.getBoolean("transcription.emotion.enabled", true)) {

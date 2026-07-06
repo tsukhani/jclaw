@@ -135,21 +135,50 @@ public final class OverlapReattributor {
     public static List<DiarizedTranscript.Entry> reattribute(
             List<DiarizedTranscript.Entry> entries, DiarizationRouter.Result diarization,
             Path audioFile, float[] pcm) {
+        return reattribute(entries, diarization, audioFile, pcm,
+                startMsdd(audioFile, pcm, diarization));
+    }
+
+    /**
+     * Launch the MSDD second opinion NOW, concurrently (JCLAW-646): MSDD is
+     * CPU work that only needs the audio, and it costs minutes on hosts
+     * without CUDA — starting it before transcription hides its wall-clock
+     * under the GPU stages (whisper, separation, embeddings). The sidecar
+     * serves /msdd on its own lock for the same reason. Returns null when
+     * the gate is off or the recording has no overlaps to correct.
+     */
+    public static java.util.function.Supplier<List<SpeakerSegment>> startMsdd(
+            Path audioFile, float[] pcm, DiarizationRouter.Result diarization) {
+        if (!services.ConfigService.getBoolean(MSDD_KEY, true)) return null;
+        if (diarization.overlaps().isEmpty()) return null;
+        long distinct = diarization.segments().stream()
+                .map(SpeakerSegment::speaker).distinct().count();
+        if (distinct != 2) return null; // the 2-speaker stack (JCLAW-618)
+        int speakers = (int) distinct;
+        var cached = DiarizationCache.readMsdd(audioFile, speakers);
+        if (cached != null) return () -> cached;
+        var future = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            var fresh = msddViaSidecar(pcm, speakers);
+            DiarizationCache.writeMsdd(audioFile, speakers, fresh);
+            return fresh;
+        });
+        return () -> {
+            try {
+                return future.join();
+            } catch (java.util.concurrent.CompletionException e) {
+                throw e.getCause() instanceof RuntimeException re ? re
+                        : new TranscriptionException("MSDD failed: " + e.getCause(), e.getCause());
+            }
+        };
+    }
+
+    /** As above with a pre-launched (or null) MSDD supplier. */
+    public static List<DiarizedTranscript.Entry> reattribute(
+            List<DiarizedTranscript.Entry> entries, DiarizationRouter.Result diarization,
+            Path audioFile, float[] pcm,
+            java.util.function.Supplier<List<SpeakerSegment>> msdd) {
         try {
             Separator separator = OverlapReattributor::separateViaSidecar;
-            java.util.function.Supplier<List<SpeakerSegment>> msdd = null;
-            if (services.ConfigService.getBoolean(MSDD_KEY, true)) {
-                int speakers = Math.max(2, (int) entries.stream()
-                        .map(DiarizedTranscript.Entry::speaker).distinct().count());
-                float[] pcmForMsdd = pcm;
-                msdd = () -> {
-                    var cached = DiarizationCache.readMsdd(audioFile, speakers);
-                    if (cached != null) return cached;
-                    var fresh = msddViaSidecar(pcmForMsdd, speakers);
-                    DiarizationCache.writeMsdd(audioFile, speakers, fresh);
-                    return fresh;
-                };
-            }
             UnderSpeechRecovery.Transcriber transcriber =
                     services.ConfigService.getBoolean(UNDER_SPEECH_KEY, true)
                     ? OverlapReattributor::transcribeSlice : null;

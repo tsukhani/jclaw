@@ -22,9 +22,12 @@ Protocol (bound to 127.0.0.1 only):
   GET  /health  -> 200 {status, device, model, loaded}
   POST /diarize {audio_path, num_speakers?}
         -> 200 {segments: [{start, end, speaker}, ...],
+                raw_segments: [{start, end, speaker}, ...],
                 overlaps: [{start, end}, ...], device, seconds}
            (overlaps = regions where the overlap-aware annotation has 2+
-            active speakers — the JCLAW-605 re-attribution gate)
+            active speakers — the JCLAW-605 re-attribution gate;
+            raw_segments = that overlap-aware annotation itself, same
+            speaker indices as segments — trajectory evidence, JCLAW-646)
   POST /msdd {audio_path, num_speakers}
         -> 200 {segments: [{start, end, speaker}, ...]}
            (NeMo MSDD second opinion, TS-VAD lineage — overlap-aware,
@@ -100,6 +103,28 @@ class SidecarState:
         self._embedder = None
         self._embedder_model = None
         self._embedder_lock = threading.Lock()
+        self._msdd_worker = None
+        self.msdd_lock = threading.Lock()
+
+    def msdd_worker(self):
+        """JCLAW-646: persistent MSDD worker subprocess — the per-call NeMo
+        import + checkpoint load cost ~80s of the measured 300s. Lazily
+        spawned, restarted on death. Caller must hold msdd_lock."""
+        import subprocess
+        w = self._msdd_worker
+        if w is not None and w.poll() is None:
+            return w
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.stderr.write("[diarize-sidecar] spawning persistent msdd worker\n")
+        w = subprocess.Popen(["uv", "run", "msdd.py", "--worker"],
+                             cwd=script_dir, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             text=True, bufsize=1)
+        ready = w.stdout.readline()  # blocks until model loaded
+        if not ready or not json.loads(ready).get("ready"):
+            raise RuntimeError("msdd worker failed to start: %r" % ready)
+        self._msdd_worker = w
+        return w
 
     def embedder_for(self, model_path: str):
         """JCLAW-634: resident WeSpeaker extractor, loaded once per model
@@ -261,6 +286,16 @@ class Handler(BaseHTTPRequestHandler):
             # where re-attribution is even possible. The exclusive annotation
             # above intentionally has no overlaps.
             plain = getattr(result, "speaker_diarization", None)
+            # JCLAW-646: the overlap-aware annotation itself, with speaker
+            # indices SHARED with the exclusive output — per-speaker activity
+            # trajectories for the second-opinion pass, at zero extra compute.
+            raw_segments = []
+            if plain is not None:
+                for turn, _, speaker in plain.itertracks(yield_label=True):
+                    idx = labels.setdefault(speaker, len(labels))
+                    raw_segments.append({"start": round(turn.start, 3),
+                                         "end": round(turn.end, 3),
+                                         "speaker": idx})
             overlaps = []
             if plain is not None and hasattr(plain, "get_overlap"):
                 for seg in plain.get_overlap():
@@ -271,6 +306,7 @@ class Handler(BaseHTTPRequestHandler):
                              % (os.path.basename(audio_path), len(segments), len(labels),
                                 len(overlaps), seconds))
             self._send_json(200, {"segments": segments,
+                                  "raw_segments": raw_segments,
                                   "overlaps": overlaps,
                                   "device": self.state.device,
                                   "seconds": round(seconds, 1)})
@@ -367,30 +403,33 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "audio_path missing or not a file: %r" % audio_path})
             return
         num_speakers = int(req.get("num_speakers") or 2)
-        if not self.state.run_lock.acquire(blocking=False):
-            self._send_json(409, {"error": "another inference is already in progress"})
+        # JCLAW-646: msdd_lock, NOT run_lock — MSDD is CPU work and runs
+        # CONCURRENTLY with GPU inference (the JVM launches it in parallel
+        # with transcription/separation so its cost hides under theirs).
+        if not self.state.msdd_lock.acquire(blocking=False):
+            self._send_json(409, {"error": "an MSDD pass is already in progress"})
             return
         try:
-            import subprocess
             t0 = time.time()
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            proc = subprocess.run(
-                ["uv", "run", "msdd.py", audio_path, str(num_speakers)],
-                cwd=script_dir, capture_output=True, text=True, timeout=REQUEST_TIMEOUT_SEC)
-            for line in proc.stderr.splitlines()[-20:]:
-                sys.stderr.write("[diarize-sidecar] %s\n" % line)
-            if proc.returncode != 0:
-                raise RuntimeError("msdd.py exited %d: %s"
-                                   % (proc.returncode, proc.stderr.strip()[-300:]))
-            payload = json.loads(proc.stdout.strip().splitlines()[-1])
-            sys.stderr.write("[diarize-sidecar] msdd: %d segment(s) in %.1fs\n"
+            w = self.state.msdd_worker()
+            w.stdin.write(json.dumps({"audio": audio_path,
+                                      "num_speakers": num_speakers}) + "\n")
+            w.stdin.flush()
+            line = w.stdout.readline()
+            if not line:
+                self.state._msdd_worker = None
+                raise RuntimeError("msdd worker died mid-request")
+            payload = json.loads(line)
+            if "error" in payload:
+                raise RuntimeError(payload["error"])
+            sys.stderr.write("[diarize-sidecar] msdd: %d segment(s) in %.1fs (worker)\n"
                              % (len(payload.get("segments", [])), time.time() - t0))
             self._send_json(200, payload)
         except Exception as e:  # noqa: BLE001 — reported to the client verbatim
             self._send_json(500, {"error": str(e)})
         finally:
             self.state.touch()
-            self.state.run_lock.release()
+            self.state.msdd_lock.release()
 
     def _handle_separate(self):
         """JCLAW-605: batch MossFormer2 separation via the separate.py
