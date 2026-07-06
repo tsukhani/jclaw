@@ -458,8 +458,6 @@ def _idle_watcher(state: SidecarState):
 
 
 
-if __name__ == "__main__":
-    main()
 def main():
     ap = argparse.ArgumentParser(description="jclaw diarization sidecar")
     ap.add_argument("--host", default="127.0.0.1")
