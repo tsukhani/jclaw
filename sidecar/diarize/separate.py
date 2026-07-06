@@ -1,6 +1,12 @@
 # /// script
 # requires-python = ">=3.10,<3.13"
-# dependencies = ["clearvoice"]
+# dependencies = [
+#   "clearvoice",
+#   # JCLAW-645: torch>=2.4 is what makes clearvoice's device auto-detect
+#   # pick MPS on Apple silicon — the numpy<2-era lock chose an older torch
+#   # and silently ran MossFormer2 on CPU (87.6s vs 14.7s for a 50s window).
+#   "torch>=2.4",
+# ]
 # ///
 """MossFormer2 batch separation worker (JCLAW-605).
 
@@ -23,16 +29,13 @@ def main():
     if not inputs:
         print(json.dumps({"error": "no input files"}))
         return 1
-    import torch
     from clearvoice import ClearVoice
-    # JCLAW-638: clearvoice picks CUDA itself when available but never MPS
-    # (upstream limitation) — log the effective device so silent-CPU-on-Mac
-    # is at least visible, the way serve.py logs its device.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    sys.stderr.write("[separate] loading MossFormer2_SS_16K on %s%s\n"
-                     % (device, " (clearvoice has no MPS support)" if device == "cpu"
-                        and torch.backends.mps.is_available() else ""))
     cv = ClearVoice(task="speech_separation", model_names=["MossFormer2_SS_16K"])
+    # JCLAW-638/645: report the device clearvoice ACTUALLY selected — with
+    # torch>=2.4 in this env its auto-detect picks MPS on Apple silicon
+    # (measured 16.7s vs 87.6s CPU for a 50s window).
+    sys.stderr.write("[separate] loading MossFormer2_SS_16K on %s\n"
+                     % getattr(cv.models[0], "device", "unknown"))
     result = {}
     for path in inputs:
         out_dir = os.path.dirname(os.path.abspath(path))
