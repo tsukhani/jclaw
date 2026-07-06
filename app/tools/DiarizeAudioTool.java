@@ -133,6 +133,16 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         if (baseUrl.isBlank()) {
             return "Error: provider '%s' has no base URL configured.".formatted(provider);
         }
+        // Guard: a non-audio model fails upstream with a cryptic 400
+        // ("content blocks must be text or image_url"). When the provider's
+        // model registry knows the model and does NOT tag it audio-capable,
+        // say so actionably instead of making the call.
+        var capability = audioCapability(provider, model);
+        if (Boolean.FALSE.equals(capability)) {
+            return ("Error: the configured diarization model '%s' (%s) is not audio-capable — "
+                    + "it cannot listen to recordings. The operator must pick an audio-capable "
+                    + "model under Settings → Transcription → Diarization.").formatted(model, provider);
+        }
 
         var attachment = Tx.run(() -> resolveAttachment(optString(args, ARG_UUID)));
         if (attachment.error() != null) return attachment.error();
@@ -237,6 +247,26 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                         + "pick a plain audio-capable instruct model in Settings)");
             }
             return transcript.strip();
+        }
+    }
+
+    /** TRUE/FALSE when the provider's configured model list knows the
+     *  model's audio capability; null when the model isn't listed (an
+     *  unlisted model gets the benefit of the doubt — the call decides). */
+    static Boolean audioCapability(String provider, String model) {
+        try {
+            var raw = ConfigService.get("provider." + provider + ".models", "");
+            if (raw.isBlank()) return null;
+            for (var el : JsonParser.parseString(raw).getAsJsonArray()) {
+                var o = el.getAsJsonObject();
+                if (o.has("id") && model.equals(o.get("id").getAsString())) {
+                    return o.has("supportsAudio") && !o.get("supportsAudio").isJsonNull()
+                            && o.get("supportsAudio").getAsBoolean();
+                }
+            }
+            return null;
+        } catch (RuntimeException _) {
+            return null;
         }
     }
 
