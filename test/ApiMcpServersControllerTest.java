@@ -336,7 +336,10 @@ class ApiMcpServersControllerTest extends FunctionalTest {
      *  TestEngine (a fresh-VT commit not yet visible to a later request's
      *  connection). Normally returns on the first read with no sleep. */
     private static void awaitCommitted(java.util.concurrent.Callable<Boolean> cond, String msg) {
-        var deadline = System.nanoTime() + java.time.Duration.ofSeconds(2).toNanos();
+        // 10s, not 2s (JCLAW-615 follow-up): the barrier polls every 10ms and
+        // returns on the first success, so a generous deadline costs nothing
+        // when timing is healthy — but 2s expired on a heavily loaded box.
+        var deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
         while (System.nanoTime() < deadline) {
             if (Boolean.TRUE.equals(commitInFreshTx(cond))) return;
             try { Thread.sleep(10); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
