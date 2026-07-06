@@ -100,7 +100,7 @@ hides entirely. `transcription.diarization.msddSecondOpinion=false`
 still exists as a speed dial (144.7s at cpWER 27.33%) but no longer buys
 meaningful time.
 
-Baseline full pipeline against this gold: **cpWER 25.91%** with the speaker
+Baseline full pipeline against this gold: **cpWER 24.65%** (was 25.91% against the superseded machine reference) with the speaker
 mapping resolving to identity (attribution is right; the number blends real
 word errors with transcription-style disagreement between two independent
 ASRs — treat it as a RELATIVE regression bound, like the DER baseline).

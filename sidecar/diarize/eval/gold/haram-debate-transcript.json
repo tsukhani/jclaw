@@ -1,10 +1,10 @@
 {
  "recording": "haram-debate-snippet-3m.wav",
- "source": "independent frontier-model transcription, operator-verified (JCLAW-643)",
+ "source": "human-arbitrated gold v4 (operator listened to all five disputed turns, 2026-07-06); supersedes both machine references",
  "turns": [
   {
    "speaker": "Podcaster",
-   "text": "when I am growing up I I'm I'm 41 so for me is Bahasa Malaysia lah."
+   "text": "When I am growing up, I I'm I'm I'm 41, so for me it's Bahasa Malaysia lah."
   },
   {
    "speaker": "Firdaus",
@@ -12,15 +12,7 @@
   },
   {
    "speaker": "Podcaster",
-   "text": "Still young, yeah."
-  },
-  {
-   "speaker": "Firdaus",
-   "text": "Still young."
-  },
-  {
-   "speaker": "Podcaster",
-   "text": "Okay. Thank you you're the first one to say that. but okay so the idea is that when you use language what also matters are two things. context as well as how the person perceives what you're saying. It's not just about what I'm saying. In fact I would I would argue that in communication what I say is less important than how you perceive it. For instance if I use the N-word which is which is right? If I use it towards you who who you are an African-American you would be very offended."
+   "text": "Still young, yeah. Still young. Okay. Thank you, you're the first one to say that. Uh but but okay, so the idea is that when you use language, what also matters are two things: context, as well as how the person perceives what you're saying. It's not just about what I'm saying. In fact, I would I would argue that in communication, what I say is less important than how you perceive it. For instance, if I use the N-word... if I use it towards you who who you are an African-American, you would be very offended."
   },
   {
    "speaker": "Firdaus",
@@ -44,23 +36,7 @@
   },
   {
    "speaker": "Podcaster",
-   "text": "In when you're talking about religion the context changes the perception and meaning of a word."
-  },
-  {
-   "speaker": "Firdaus",
-   "text": "Mm."
-  },
-  {
-   "speaker": "Podcaster",
-   "text": "You cannot just say oh in the in the if it's allowed in in the in the dictionary then it's okay. No it doesn't work like that. You have to have context. Another thing and why the word Haram I'm against this because... when you use language, the word you use, for example, say a temple does not have the proper right to be on that land, right?"
-  },
-  {
-   "speaker": "Firdaus",
-   "text": "Mm."
-  },
-  {
-   "speaker": "Podcaster",
-   "text": "The other word, some people have used the word putihkan, that means you basically correct that wrong."
+   "text": "In when you're talking about religion, the context changes the perception and meaning of a word. You cannot just say \"oh in the in the if if it's allowed in in the in the dictionary then it's okay.\" No, it doesn't work like that. You have to have context. Another thing and why the word Haram I am against this because when you use language, the word you use, for example, say a temple does not have the proper right to be on that land, right? The other word, some people have used the word putihkan, that means you you you basically correct that wrong."
   },
   {
    "speaker": "Firdaus",
@@ -68,7 +44,7 @@
   },
   {
    "speaker": "Podcaster",
-   "text": "Can you call that temple kuil haram?"
+   "text": "Can you call that temple Kuil Haram?"
   },
   {
    "speaker": "Firdaus",
@@ -76,71 +52,59 @@
   },
   {
    "speaker": "Podcaster",
-   "text": "Can you call it kuil haram?"
+   "text": "Can you call it Kuil Haram?"
   },
   {
    "speaker": "Firdaus",
-   "text": "Do you have the terms in in Bahasa Melayu? No no, what does halal mean to you?"
+   "text": "Do you have the terms in in Bahasa Melayu..."
   },
   {
    "speaker": "Podcaster",
-   "text": "Halal means, kosher, something that's accepted. Can you as a Muslim ambassador use..."
+   "text": "No no, in in in in religion, you cannot you cannot fall back to the dictionary..."
   },
   {
    "speaker": "Firdaus",
-   "text": "Now, is it permissible? Now, halal, when you understand, because a lot of people they understand halal based on kosher, food, etc, right?"
+   "text": "What what does Halal mean to you?"
   },
   {
    "speaker": "Podcaster",
-   "text": "Yeah, yeah."
+   "text": "Halal means Kosher, something that's accepted. Can you as a Muslim ambassador use the word..."
   },
   {
    "speaker": "Firdaus",
-   "text": "Now, halal also means dibenarkan, allowed, permissible."
+   "text": "Now, is it permissible? Now, Halal, when you understand, because a lot of people they understand Halal based on Kosher, food, etc, right? Now, Halal also means dibenarkan. Allowed, permissible."
   },
   {
    "speaker": "Podcaster",
-   "text": "Permissible, yeah."
+   "text": "Permissible lah."
   },
   {
    "speaker": "Firdaus",
-   "text": "So... would you in a proper in a proper usage of a word, do you have like you know dibenarkan? Halal? To halalize it? You don't have that in English."
-  },
-  {
-   "speaker": "Podcaster",
-   "text": "So then in that way you can't use the word halal."
+   "text": "Yeah, permissible. Now, would you would you in a proper in a proper usage of a word, do you have like, you know, dibenarkan? Halal? To halal-ise it? You don't have have that in English. So then in that way, you can't use the word Haram."
   },
   {
    "speaker": "Firdaus",
-   "text": "You you can... Now, but the word haram..."
+   "text": "Now, but the word Haram Of course, of course, we are talking about Malay. If we are talking about Malay, now, pendatang haram."
   },
   {
    "speaker": "Podcaster",
-   "text": "Yeah we're talking about Malay yeah we're not talking about English."
+   "text": "True. Which we have no longer used in fact now we use pendatang tanpa izin. In respect of them."
   },
   {
    "speaker": "Firdaus",
-   "text": "Of course, of course, we're talking about Malay. If we're talking about Malay now, pendatang haram."
+   "text": "Okay, they use pendatang tanpa izin, fine. But perlumba haram. How do you call them? Perlumba tanpa izin? Is that how you're gonna coin it?"
   },
   {
    "speaker": "Podcaster",
-   "text": "True. Which we have no longer used, in fact now we use pendatang tanpa izin in respect of them."
+   "text": "But those you you you are using an apple orange comparison because you are talking about religion."
   },
   {
    "speaker": "Firdaus",
-   "text": "Okay, they they use pendatang tanpa izin, fine. But pelumba haram. How do you call them? Pelumba tanpa izin? Is that how you're going to coin it? No that that is what we call..."
+   "text": "No no, we not we not that is what happen. In religion you cannot use that. Since just now you are using uh talking about communications. You know what what happens right now is that exact things that you are doing right now is that what we call as semantic infiltrations. You try to change things which supposedly to be negative to become more positive so it become less offensive."
   },
   {
    "speaker": "Podcaster",
-   "text": "But those you are using an apple orange comparison because I'm talking about religion."
-  },
-  {
-   "speaker": "Firdaus",
-   "text": "No no we're not we're not. That is what happens... since just now you are using talking about communications. You know what happens right now is that exact exact things that you are doing right now is that what we call as semantic infiltrations. You try to change things which is supposed to be negative to become more positive so it become less offending."
-  },
-  {
-   "speaker": "Podcaster",
-   "text": "I I disagree with you 100% because you again you you are you are you are you are pointing out something that doesn't exist. I am not saying I am not talking about the validity of your allegation. I am not saying that what you're saying uh cannot be true or cannot be false. It can go either way. I'm talking about human dignity. which I'll get to because it's mentioned in your pamphlet as well. I want to talk about human compassion, human understanding and human decency. When we communicate I would..."
+   "text": "I I disagree with you 100% because you you are again you are you are you are pointing out something that doesn't exist. I am not saying I'm not talking about the validity of your allegation. I am not saying that what you're saying uh cannot be true or cannot be false. It can go either way. I'm talking about human dignity. Which I will get to because it's mentioned in your pamphlet as well. I want to talk about human compassion, human understanding and human decency. When we communicate, I would..."
   }
  ]
 }
