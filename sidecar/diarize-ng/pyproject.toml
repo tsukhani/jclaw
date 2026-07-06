@@ -1,0 +1,45 @@
+[project]
+name = "diarng"
+version = "0.1.0"
+description = "diarize-ng: cascade+LLM hybrid speaker diarization stack"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+# Heavy backends are opt-in; `import diarng` must work with base deps only.
+# Each extra maps to exactly one stage's lazily-imported backend.
+seg = ["pyannote.audio>=4.0"]       # segmentation.PowersetSegmenter (pulls torch)
+embed = ["sherpa-onnx>=1.10"]        # embeddings.SherpaWeSpeakerEmbedder
+asr = ["faster-whisper>=1.0"]        # asr.FasterWhisperTranscriber
+eval = ["pyannote.metrics>=3.2"]     # evalkit.crosscheck_der (optional cross-check)
+full = [
+    "diarng[seg]",
+    "diarng[embed]",
+    "diarng[asr]",
+    "diarng[eval]",
+]
+dev = ["pytest>=8.0"]
+
+# Backends deliberately NOT packaged as extras:
+#   * asr.ParakeetTranscriber needs `nemo_toolkit[asr]`, a multi-GB dependency
+#     tree that would dominate resolution for an optional, English-only second
+#     ASR backend. Install it by hand when wanted:
+#         uv pip install 'nemo_toolkit[asr]'
+#   * audio.load_pcm shells out to the `ffmpeg` system binary (not a pip
+#     package); it must be on PATH.
+#   * refine.LlmRefiner uses only the stdlib (urllib) against an
+#     OpenAI-compatible endpoint — no client library required.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["diarng"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

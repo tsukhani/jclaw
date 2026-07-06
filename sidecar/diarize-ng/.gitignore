@@ -1,0 +1,10 @@
+# Per-machine resolution (per-platform torch) — repo convention, do not track.
+uv.lock
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Model weights and caches
+models/
+checkpoints/
+.cache/
