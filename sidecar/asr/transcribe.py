@@ -114,10 +114,7 @@ def _payload(triples):
     return {"segments": [
         {"startMs": int(round(s * 1000)), "endMs": int(round(e * 1000)),
          "text": t.strip(), "noSpeechProb": round(nsp, 4),
-         "avgLogprob": round(alp, 4), "compressionRatio": round(cr, 4),
-         "words": [{"startMs": int(round(ws * 1000)),
-                    "endMs": int(round(we * 1000)), "text": wt.strip()}
-                   for ws, we, wt in words if wt.strip()]}
+         "avgLogprob": round(alp, 4), "compressionRatio": round(cr, 4)}
         for s, e, t, nsp, alp, cr, words in triples]}
 
 
