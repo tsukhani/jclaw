@@ -64,7 +64,10 @@ def _separate_chunked(cv, path, out_dir):
         with wave.open(cpath, "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
             w.writeframes(piece.tobytes())
+        import time as _t2
+        _tc = _t2.time()
         cv(input_path=cpath, online_write=True, output_path=out_dir)
+        sys.stderr.write("[separate] chunk %d inference %.1fs\n" % (i, _t2.time() - _tc))
         cbase = os.path.splitext(os.path.basename(cpath))[0]
         pair = []
         for k in (1, 2):
@@ -112,8 +115,14 @@ def main():
     if not inputs:
         print(json.dumps({"error": "no input files"}))
         return 1
+    import time as _t
+    _t0 = _t.time()
     from clearvoice import ClearVoice
+    sys.stderr.write("[separate] imports %.1fs\n" % (_t.time() - _t0))
+    _t0 = _t.time()
     cv = ClearVoice(task="speech_separation", model_names=["MossFormer2_SS_16K"])
+    sys.stderr.write("[separate] model load %.1fs\n" % (_t.time() - _t0))
+    sys.stderr.write("[separate] model load %.1fs\n" % (_t.time() - _t0))
     # JCLAW-638/645: report the device clearvoice ACTUALLY selected — with
     # torch>=2.4 in this env its auto-detect picks MPS on Apple silicon
     # (measured 16.7s vs 87.6s CPU for a 50s window).
