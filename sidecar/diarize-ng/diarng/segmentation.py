@@ -128,7 +128,7 @@ class PowersetSegmenter:
 
         kwargs = {}
         if self.hf_token:
-            kwargs["use_auth_token"] = self.hf_token
+            kwargs["token"] = self.hf_token
         pipeline = Pipeline.from_pretrained(self.model, **kwargs)
         if pipeline is None:
             raise RuntimeError(

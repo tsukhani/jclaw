@@ -12,7 +12,14 @@ dependencies = [
 # Heavy backends are opt-in; `import diarng` must work with base deps only.
 # Each extra maps to exactly one stage's lazily-imported backend.
 seg = ["pyannote.audio>=4.0"]       # segmentation.PowersetSegmenter (pulls torch)
-embed = ["sherpa-onnx>=1.10"]        # embeddings.SherpaWeSpeakerEmbedder
+embed = [
+    # sherpa-onnx>=1.13 splits its native dylibs into sherpa-onnx-core, and
+    # uv's universal project resolution DROPS core from the lock (script
+    # envs resolve it fine) — without the explicit dep, dlopen fails on
+    # libonnxruntime. Same trap as the production sidecar (JCLAW-634).
+    "sherpa-onnx>=1.10",
+    "sherpa-onnx-core>=1.13",
+]        # embeddings.SherpaWeSpeakerEmbedder
 asr = ["faster-whisper>=1.0"]        # asr.FasterWhisperTranscriber
 eval = ["pyannote.metrics>=3.2"]     # evalkit.crosscheck_der (optional cross-check)
 full = [
