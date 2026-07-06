@@ -145,7 +145,17 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         try {
             var audio = services.transcription.LlmAudio.prepare(path, att.mimeType);
             var prompt = buildPrompt(optString(args, ARG_SPEAKER_NAMES), optString(args, ARG_LANGUAGE));
-            var transcript = chatWithAudio(baseUrl, provider, model, prompt, audio.base64(), audio.format());
+            String transcript;
+            try {
+                transcript = chatWithAudio(baseUrl, provider, model, prompt, audio.base64(), audio.format());
+            } catch (IOException first) {
+                // Routers load-balance a model id across upstream hosts and
+                // not all of them accept input_audio — a 4xx here is often a
+                // per-request routing blip (measured: 4/4 immediate retries
+                // succeeded after one such 400). One retry before giving up.
+                play.Logger.info("DiarizeAudioTool: retrying after %s", first.getMessage());
+                transcript = chatWithAudio(baseUrl, provider, model, prompt, audio.base64(), audio.format());
+            }
             return "Diarized transcript of %s (via %s %s):\n\n%s"
                     .formatted(att.originalFilename, provider, model, transcript);
         } catch (IOException | RuntimeException e) {
