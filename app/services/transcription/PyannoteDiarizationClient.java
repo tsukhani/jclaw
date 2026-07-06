@@ -29,7 +29,13 @@ public class PyannoteDiarizationClient {
     /** Full /diarize output: segments plus the overlap regions the
      *  overlap-aware annotation detected (JCLAW-605 re-attribution gate). */
     public record DiarizationOutput(List<SpeakerSegment> segments,
-                                    List<double[]> overlaps) {}
+                                    List<SpeakerSegment> rawSegments,
+                                    List<double[]> overlaps) {
+        /** Compat for tests and older callers: no raw annotation. */
+        public DiarizationOutput(List<SpeakerSegment> segments, List<double[]> overlaps) {
+            this(segments, List.of(), overlaps);
+        }
+    }
 
     private static final MediaType JSON = MediaType.get("application/json");
 
@@ -132,7 +138,7 @@ public class PyannoteDiarizationClient {
                         "pyannote sidecar diarize failed: HTTP %d — %s".formatted(
                                 resp.code(), truncate(text)));
             }
-            return new DiarizationOutput(parseSegments(text), parseOverlaps(text));
+            return new DiarizationOutput(parseSegments(text), parseRawSegments(text), parseOverlaps(text));
         } catch (IOException e) {
             throw new TranscriptionException(
                     "pyannote sidecar unreachable: " + e.getMessage(), e);
@@ -161,6 +167,28 @@ public class PyannoteDiarizationClient {
         } catch (RuntimeException e) {
             throw new TranscriptionException(
                     "pyannote sidecar returned an unparseable response: " + truncate(json), e);
+        }
+    }
+
+    /** Parse {@code raw_segments} — the overlap-aware annotation with
+     *  speaker indices shared with the exclusive output (JCLAW-651: brief
+     *  secondary activations locate interjections the exclusive projection
+     *  collapses). Tolerant of absence: degrades to "no carving". */
+    public static List<SpeakerSegment> parseRawSegments(String json) {
+        try {
+            var root = JsonParser.parseString(json).getAsJsonObject();
+            if (!root.has("raw_segments")) return List.of();
+            var segments = new ArrayList<SpeakerSegment>();
+            for (var el : root.getAsJsonArray("raw_segments")) {
+                var o = el.getAsJsonObject();
+                segments.add(new SpeakerSegment(
+                        o.get("start").getAsDouble(),
+                        o.get("end").getAsDouble(),
+                        o.get("speaker").getAsInt()));
+            }
+            return segments;
+        } catch (RuntimeException e) {
+            return List.of();
         }
     }
 

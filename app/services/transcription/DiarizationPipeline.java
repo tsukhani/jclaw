@@ -105,6 +105,14 @@ public final class DiarizationPipeline {
         if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
             entries = OverlapReattributor.reattribute(entries, diarization, audio, pcm.get(), msdd);
         }
+        // JCLAW-651: word-granular interjection carving — brief secondary
+        // activations from the raw annotation reclaim words the exclusive
+        // projection handed to the dominant voice, voiceprint-guarded.
+        // After the turn-level corrections (their flips settle the parent
+        // labels), before emotion (fragments get their own labels).
+        if (ConfigService.getBoolean(OverlapReattributor.ENABLED_KEY, true)) {
+            entries = InterjectionCarver.carve(entries, diarization, names, pcm.get());
+        }
         // JCLAW-563: per-turn acoustic emotion labels. Best-effort.
         if (ConfigService.getBoolean("transcription.emotion.enabled", true)) {
             entries = EmotionRecognizer.annotateBestEffort(pcm.get(), entries);

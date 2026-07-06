@@ -18,7 +18,12 @@ public final class DiarizationRouter {
 
     /** Diarization plus the overlap regions the overlap-aware annotation
      *  detected (the JCLAW-605 re-attribution gate). */
-    public record Result(List<SpeakerSegment> segments, List<double[]> overlaps) {}
+    public record Result(List<SpeakerSegment> segments, List<SpeakerSegment> rawSegments,
+                         List<double[]> overlaps) {
+        public Result(List<SpeakerSegment> segments, List<double[]> overlaps) {
+            this(segments, List.of(), overlaps);
+        }
+    }
 
     // Test seam: lets router tests run without a sidecar. Production never
     // writes this field.
@@ -38,7 +43,7 @@ public final class DiarizationRouter {
     public static Result diarizeRich(Path audioFile, int numSpeakers) {
         requirePrerequisites();
         var output = client().diarizeRich(audioFile, numSpeakers);
-        return new Result(output.segments(), output.overlaps());
+        return new Result(output.segments(), output.rawSegments(), output.overlaps());
     }
 
     /** As {@link #diarizeRich} but segments only. */

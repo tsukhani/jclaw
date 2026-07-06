@@ -30,8 +30,8 @@ public final class DiarizationCache {
     /** Bump when segment-shaping logic changes (exclusive-mode handling,
      *  overlap extraction, ...) so previously cached results read as
      *  misses (JCLAW-621). Model changes are keyed separately below. */
-    /** v2: transcript segments carry the JCLAW-635 confidence triple. */
-    static final int PIPELINE_VERSION = 2;
+    /** v3: diarization section carries rawSegments (JCLAW-651). */
+    static final int PIPELINE_VERSION = 3;
 
     private DiarizationCache() {}
 
@@ -77,7 +77,15 @@ public final class DiarizationCache {
             }
             Logger.info("DiarizationCache: reusing cached diarization for %s (%d segments)",
                     audioFile.getFileName(), segments.size());
-            return new DiarizationRouter.Result(segments, overlaps);
+            var rawSegments = new ArrayList<SpeakerSegment>();
+            if (root.has("rawSegments")) {
+                for (var el : root.getAsJsonArray("rawSegments")) {
+                    var o = el.getAsJsonObject();
+                    rawSegments.add(new SpeakerSegment(o.get("start").getAsDouble(),
+                            o.get("end").getAsDouble(), o.get("speaker").getAsInt()));
+                }
+            }
+            return new DiarizationRouter.Result(segments, rawSegments, overlaps);
         } catch (IOException | RuntimeException e) {
             Logger.warn("DiarizationCache: unreadable cache for %s (%s) — recomputing",
                     audioFile.getFileName(), e.getMessage());
@@ -230,6 +238,15 @@ public final class DiarizationCache {
             segments.add(o);
         }
         root.add("segments", segments);
+        var rawSegments = new JsonArray();
+        for (var s : result.rawSegments()) {
+            var o = new JsonObject();
+            o.addProperty("start", s.start());
+            o.addProperty("end", s.end());
+            o.addProperty("speaker", s.speaker());
+            rawSegments.add(o);
+        }
+        root.add("rawSegments", rawSegments);
         var overlaps = new JsonArray();
         for (var region : result.overlaps()) {
             var a = new JsonArray();
