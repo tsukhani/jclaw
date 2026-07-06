@@ -118,8 +118,13 @@ public final class DiarizationPipeline {
         if (ConfigService.getBoolean("transcription.diarization.wordNative", false)) {
             var stamped = CtcForcedAligner.stampTranscript(transcript, pcm.get());
             if (stamped != null) {
+                // E3: MSDD frame coverage joins the emission model — join
+                // the second-opinion future (usually already done; its
+                // CPU work ran under the GPU stages).
+                var msddSegments = msdd == null ? null : msdd.get();
                 entries = DiarizedTranscript.mergeWordsViterbiFused(
-                        stamped, speakers, diarization.rawSegments(), names);
+                        stamped, speakers, diarization.rawSegments(),
+                        msddSegments == null ? java.util.List.of() : msddSegments, names);
                 if (entries != null) {
                     play.Logger.info("DiarizationPipeline: word-native joint decode (%d entries)",
                             entries.size());

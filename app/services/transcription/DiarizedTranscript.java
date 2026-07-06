@@ -111,6 +111,45 @@ public final class DiarizedTranscript {
      *  exceeds ~4.4 (evidence deficit 3.9/word vs 2x switch penalty);
      *  bench-tuned on the debate gold. */
     static final double SUPPRESSED_WEIGHT = 4.5;
+    /** JCLAW-652 E3: weight on MSDD frame-coverage. From the measured
+     *  instrument table at the five decision sites: the flagship flip
+     *  needs > 4.15, apple-orange's suppressed-feature fix survives below
+     *  5.4 — and MSDD is RIGHT at three of the four gap turns
+     *  (flagship 0.98, still-young 1.0, permissible-lah 1.0) exactly
+     *  where the exclusive projection is wrong. */
+    static final double MSDD_WEIGHT = 4.3;
+
+    /**
+     * Align MSDD's arbitrary per-run speaker indices to the exclusive
+     * timeline's cluster ids by majority time-overlap (the emission-model
+     * analogue of MsddSecondOpinion.mapSpeakers — at decode time no
+     * entries exist yet to vote with). MSDD ids with no overlap are
+     * dropped. Without this, a run where MSDD flips its 0/1 inverts the
+     * whole decode (measured: global label swap, parity 3/17).
+     */
+    static List<SpeakerSegment> alignMsddClusters(List<SpeakerSegment> msdd,
+                                                  List<SpeakerSegment> exclusive) {
+        var votes = new java.util.HashMap<Integer, java.util.Map<Integer, Double>>();
+        for (var m : msdd) {
+            for (var e : exclusive) {
+                double ov = Math.min(m.end(), e.end()) - Math.max(m.start(), e.start());
+                if (ov <= 0) continue;
+                votes.computeIfAbsent(m.speaker(), k -> new java.util.HashMap<>())
+                        .merge(e.speaker(), ov, Double::sum);
+            }
+        }
+        var mapping = new java.util.HashMap<Integer, Integer>();
+        for (var v : votes.entrySet()) {
+            mapping.put(v.getKey(), v.getValue().entrySet().stream()
+                    .max(java.util.Map.Entry.comparingByValue()).orElseThrow().getKey());
+        }
+        var out = new java.util.ArrayList<SpeakerSegment>(msdd.size());
+        for (var m : msdd) {
+            var mapped = mapping.get(m.speaker());
+            if (mapped != null) out.add(new SpeakerSegment(m.start(), m.end(), mapped));
+        }
+        return out;
+    }
 
     /**
      * JCLAW-652: evidence-fusion Viterbi — the word-native joint decode.
@@ -124,8 +163,10 @@ public final class DiarizedTranscript {
             List<WhisperJniTranscriber.Segment> transcript,
             List<SpeakerSegment> speakers,
             List<SpeakerSegment> rawSegments,
+            List<SpeakerSegment> msddSegments,
             Map<Integer, String> names) {
-        return decodeWords(transcript, speakers, rawSegments, names);
+        return decodeWords(transcript, speakers, rawSegments,
+                alignMsddClusters(msddSegments, speakers), names);
     }
 
     /**
@@ -143,12 +184,13 @@ public final class DiarizedTranscript {
     public static List<Entry> mergeWordsViterbi(List<WhisperJniTranscriber.Segment> transcript,
                                                 List<SpeakerSegment> speakers,
                                                 Map<Integer, String> names) {
-        return decodeWords(transcript, speakers, List.of(), names);
+        return decodeWords(transcript, speakers, List.of(), List.of(), names);
     }
 
     private static List<Entry> decodeWords(List<WhisperJniTranscriber.Segment> transcript,
                                            List<SpeakerSegment> speakers,
                                            List<SpeakerSegment> rawSegments,
+                                           List<SpeakerSegment> msddSegments,
                                            Map<Integer, String> names) {
         var words = new java.util.ArrayList<WhisperJniTranscriber.Word>();
         for (var seg : transcript) {
@@ -191,11 +233,17 @@ public final class DiarizedTranscript {
                     if (span.speaker() != clusterIds.get(c)) continue;
                     raw += Math.max(0, Math.min(we, span.end()) - Math.max(ws, span.start()));
                 }
+                double msdd = 0;
+                for (var span : msddSegments) {
+                    if (span.speaker() != clusterIds.get(c)) continue;
+                    msdd += Math.max(0, Math.min(we, span.end()) - Math.max(ws, span.start()));
+                }
                 double exclusiveFrac = Math.min(ov / (we - ws), 1.0);
                 double rawFrac = Math.min(raw / (we - ws), 1.0);
                 double suppressed = Math.max(0, rawFrac - exclusiveFrac);
                 emissions[i][c] = Math.log(Math.max(exclusiveFrac, EMISSION_FLOOR))
-                        + SUPPRESSED_WEIGHT * suppressed;
+                        + SUPPRESSED_WEIGHT * suppressed
+                        + MSDD_WEIGHT * Math.min(msdd / (we - ws), 1.0);
                 total += ov;
             }
             unsupported[i] = total <= 0;
