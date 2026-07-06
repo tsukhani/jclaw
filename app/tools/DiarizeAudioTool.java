@@ -59,17 +59,6 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final String ARG_SPEAKER_NAMES = "speaker_names";
     private static final String ARG_LANGUAGE = "language";
 
-    /** Formats the OpenAI {@code input_audio.format} hint understands; a
-     *  recording in anything else gets transcoded to MP3 first. */
-    private static final String[] AUDIO_FORMAT_CANDIDATES = {
-            "mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "opus", "weba"
-    };
-
-    /** Above this size the attachment is transcoded to MP3 regardless of
-     *  container — base64 inflates payloads 4/3× and audio models cap
-     *  request sizes long before quality needs lossless input. */
-    private static final long TRANSCODE_THRESHOLD_BYTES = 6L * 1024 * 1024;
-
     private static final Gson GSON = new Gson();
 
     @Override public String name() { return TOOL_NAME; }
@@ -154,9 +143,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
 
         try {
-            var audio = prepareAudio(path, att.mimeType);
+            var audio = services.transcription.LlmAudio.prepare(path, att.mimeType);
             var prompt = buildPrompt(optString(args, ARG_SPEAKER_NAMES), optString(args, ARG_LANGUAGE));
-            var transcript = chatWithAudio(baseUrl, provider, model, prompt, audio.base64, audio.format);
+            var transcript = chatWithAudio(baseUrl, provider, model, prompt, audio.base64(), audio.format());
             return "Diarized transcript of %s (via %s %s):\n\n%s"
                     .formatted(att.originalFilename, provider, model, transcript);
         } catch (IOException | RuntimeException e) {
@@ -166,40 +155,6 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     }
 
     // ------------------------------------------------------------------ //
-
-    private record PreparedAudio(String base64, String format) {}
-
-    /** Base64 + format hint for the request; big or exotic inputs are
-     *  transcoded to mono 128k MP3 first. */
-    private static PreparedAudio prepareAudio(Path path, String mimeType) throws IOException {
-        var format = MimeExtensions.forMime(mimeType, AUDIO_FORMAT_CANDIDATES);
-        long size = Files.size(path);
-        boolean pcmContainer = "wav".equals(format) || "flac".equals(format) || format.isEmpty();
-        if (size <= TRANSCODE_THRESHOLD_BYTES && !pcmContainer) {
-            return new PreparedAudio(Base64.getEncoder().encodeToString(Files.readAllBytes(path)), format);
-        }
-        var tmp = Files.createTempFile("jclaw-diarize-", ".mp3");
-        try {
-            var proc = new ProcessBuilder("ffmpeg", "-y", "-i", path.toString(),
-                    "-ac", "1", "-b:a", "128k", tmp.toString())
-                    .redirectErrorStream(true).start();
-            String output = new String(proc.getInputStream().readAllBytes());
-            int exit;
-            try {
-                exit = proc.waitFor();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("interrupted while transcoding audio");
-            }
-            if (exit != 0) {
-                throw new IOException("ffmpeg exited %d: %s".formatted(exit,
-                        output.substring(Math.max(0, output.length() - 300))));
-            }
-            return new PreparedAudio(Base64.getEncoder().encodeToString(Files.readAllBytes(tmp)), "mp3");
-        } finally {
-            Files.deleteIfExists(tmp);
-        }
-    }
 
     private static String buildPrompt(String speakerNames, String language) {
         var sb = new StringBuilder("""

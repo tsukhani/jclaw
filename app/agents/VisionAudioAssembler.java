@@ -328,11 +328,20 @@ public final class VisionAudioAssembler {
                         "type", "image_url",
                         "image_url", Map.of("url", AttachmentService.readAsDataUrl(a))));
             } else if (a.isAudio() && supportsAudio) {
-                var format = MimeExtensions.forMime(a.mimeType, AUDIO_FORMAT_CANDIDATES);
-                var inner = new LinkedHashMap<String, Object>();
-                inner.put("data", AttachmentService.readAsBase64(a));
-                if (!format.isEmpty()) inner.put("format", format);
-                parts.add(Map.of("type", "input_audio", "input_audio", inner));
+                // JCLAW-654 follow-up: NEVER ship raw PCM — a multi-minute
+                // WAV as base64 exceeds provider request limits and the
+                // call just retries out. LlmAudio transcodes once to mono
+                // MP3 and caches beside the attachment.
+                try {
+                    var prepared = services.transcription.LlmAudio.prepare(a);
+                    var inner = new LinkedHashMap<String, Object>();
+                    inner.put("data", prepared.base64());
+                    if (!prepared.format().isEmpty()) inner.put("format", prepared.format());
+                    parts.add(Map.of("type", "input_audio", "input_audio", inner));
+                } catch (java.io.IOException e) {
+                    play.Logger.warn("VisionAudioAssembler: audio part skipped for %s (%s)",
+                            a.uuid, e.getMessage());
+                }
             }
         }
     }
