@@ -58,6 +58,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final String ARG_UUID = "attachment_uuid";
     private static final String ARG_SPEAKER_NAMES = "speaker_names";
     private static final String ARG_LANGUAGE = "language";
+    private static final String ARG_EMOTIONS = "emotions";
 
     private static final Gson GSON = new Gson();
 
@@ -76,8 +77,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 attachment in this conversation; pass 'attachment_uuid' to pick a specific one. \
                 Pass 'speaker_names' when the user has said who is in the recording (e.g. "the \
                 host is Anthony, the guest is Firdaus") so turns carry real names instead of \
-                Speaker 1/Speaker 2. 'language' (ISO 639-1) hints the recording's language when \
-                known. Requires a configured diarization model; if none is set the tool says so — \
+                Speaker 1/Speaker 2. Set 'emotions' true when the user asks for emotions or tone \
+                — each turn gets a perceived-emotion tag judged from the voice. 'language' \
+                (ISO 639-1) hints the recording's language when known. Requires a configured diarization model; if none is set the tool says so — \
                 relay that to the user rather than retrying.""";
     }
 
@@ -103,7 +105,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                         ARG_LANGUAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
                                 "Optional ISO 639-1 language hint (e.g. 'en', 'ms') when the "
-                                        + "recording's language is known.")
+                                        + "recording's language is known."),
+                        ARG_EMOTIONS, Map.of(SchemaKeys.TYPE, "boolean",
+                                SchemaKeys.DESCRIPTION,
+                                "Tag each turn with the speaker's perceived emotion (from tone of "
+                                        + "voice, not word choice). Set when the user asks for "
+                                        + "emotions.")
                 ),
                 SchemaKeys.REQUIRED, List.of()
         );
@@ -154,7 +161,10 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
         try {
             var audio = services.transcription.LlmAudio.prepare(path, att.mimeType);
-            var prompt = buildPrompt(optString(args, ARG_SPEAKER_NAMES), optString(args, ARG_LANGUAGE));
+            boolean emotions = args.has(ARG_EMOTIONS) && !args.get(ARG_EMOTIONS).isJsonNull()
+                    && args.get(ARG_EMOTIONS).getAsBoolean();
+            var prompt = buildPrompt(optString(args, ARG_SPEAKER_NAMES),
+                    optString(args, ARG_LANGUAGE), emotions);
             String transcript;
             try {
                 transcript = chatWithAudio(baseUrl, provider, model, prompt, audio.base64(), audio.format());
@@ -176,7 +186,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     // ------------------------------------------------------------------ //
 
-    private static String buildPrompt(String speakerNames, String language) {
+    private static String buildPrompt(String speakerNames, String language, boolean emotions) {
         var sb = new StringBuilder("""
                 Listen to the attached audio and produce a complete diarized transcript. \
                 One line per speaker turn, formatted exactly as "SpeakerName: text". \
@@ -191,6 +201,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
         if (language != null && !language.isBlank()) {
             sb.append("\nThe recording is primarily in '").append(language.strip()).append("'.");
+        }
+        if (emotions) {
+            sb.append("\nAfter each speaker name, add the speaker's perceived emotion for that "
+                    + "turn in parentheses — judge it from the tone of voice, not the words: "
+                    + "one of happy, sad, angry, disgust, fear, surprised, neutral. "
+                    + "Format: \"SpeakerName (emotion): text\".");
         }
         return sb.toString();
     }
