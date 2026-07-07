@@ -2,7 +2,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.transcription.FfmpegProbe;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperTranscriber;
 import services.transcription.WhisperModel;
@@ -14,7 +13,6 @@ import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Integration test for {@link WhisperTranscriber}. Requires both

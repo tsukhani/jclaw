@@ -1,16 +1,8 @@
 package services.transcription;
 
-import play.Logger;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * The ASR facade (JCLAW-650): every transcription goes through the sidecar's

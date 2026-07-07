@@ -11,10 +11,8 @@ import services.ConfigService;
 import services.EventLogger;
 import services.transcription.AsrModelStore;
 import services.transcription.FfmpegProbe;
-import services.transcription.TranscriptionException;
 import services.transcription.WhisperModel;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 

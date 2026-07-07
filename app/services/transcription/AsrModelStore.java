@@ -61,21 +61,7 @@ public final class AsrModelStore {
             for (var m : WhisperModel.values()) {
                 var s = status.getAsJsonObject(m.id());
                 if (s == null) continue;
-                boolean cached = s.get("cached").getAsBoolean();
-                long onDisk = s.get("bytesOnDisk").getAsLong();
-                var engine = s.get("engine").getAsString();
-                var inflight = PREFETCHES.get(m.id());
-                State state;
-                String error = PREFETCH_ERRORS.get(m.id());
-                if (inflight != null && !inflight.isDone()) {
-                    state = State.DOWNLOADING;
-                } else if (error != null && !cached) {
-                    state = State.ERROR;
-                } else {
-                    state = cached ? State.DOWNLOADED : State.NOT_DOWNLOADED;
-                }
-                out.put(m.id(), new Status(state, onDisk,
-                        (long) m.approxSizeMb() * 1024 * 1024, engine, error));
+                out.put(m.id(), rowFor(m, s));
             }
         } catch (RuntimeException e) {
             for (var m : WhisperModel.values()) {
@@ -84,6 +70,25 @@ public final class AsrModelStore {
             }
         }
         return out;
+    }
+
+    /** One Settings row from the sidecar's per-model status object, folding
+     *  in the in-JVM prefetch/error state (S3776: lifted out of statusAll). */
+    private static Status rowFor(WhisperModel m, com.google.gson.JsonObject s) {
+        boolean cached = s.get("cached").getAsBoolean();
+        long onDisk = s.get("bytesOnDisk").getAsLong();
+        var engine = s.get("engine").getAsString();
+        var inflight = PREFETCHES.get(m.id());
+        String error = PREFETCH_ERRORS.get(m.id());
+        State state;
+        if (inflight != null && !inflight.isDone()) {
+            state = State.DOWNLOADING;
+        } else if (error != null && !cached) {
+            state = State.ERROR;
+        } else {
+            state = cached ? State.DOWNLOADED : State.NOT_DOWNLOADED;
+        }
+        return new Status(state, onDisk, (long) m.approxSizeMb() * 1024 * 1024, engine, error);
     }
 
     /** Kick a background prefetch of the HOST engine's weights; single-flight

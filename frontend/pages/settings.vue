@@ -405,7 +405,8 @@ const diarizationModelSelectValue = computed(() => (diarizationModelOrphaned.val
 async function toggleDiarizationEnabled() {
   saving.value = true
   try {
-    const next = diarizationEnabled.value ? '' : (openrouterApiKeyConfigured.value ? 'openrouter' : 'openai')
+    const defaultProvider = openrouterApiKeyConfigured.value ? 'openrouter' : 'openai'
+    const next = diarizationEnabled.value ? '' : defaultProvider
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.provider', value: next } })
     refresh()
   }

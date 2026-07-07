@@ -302,11 +302,12 @@ public class Memory extends Model {
      * path when the search backend is uninitialized or unavailable. Substring
      * matching carries no relevance signal, so every hit scores 1.0 and recall
      * effectively degrades to importance ordering.
+     *
+     * <p>JCLAW-615: public for JpaMemoryStore's PG degradation chain — its
+     * terminal fallback must be THIS deterministic SQL scan, never a hop
+     * back into the Lucene-preferring search abstraction (whose JVM-global
+     * index any concurrent caller can open with different contents).
      */
-    /** JCLAW-615: public for JpaMemoryStore's PG degradation chain — its
-     *  terminal fallback must be THIS deterministic SQL scan, never a hop
-     *  back into the Lucene-preferring search abstraction (whose JVM-global
-     *  index any concurrent caller can open with different contents). */
     public static List<ScoredMemory> likeFallback(Long pk, String query, int limit) {
         List<Memory> rows = Memory.find(
                 "agent.id = ?1 AND LOWER(text) LIKE ?2 AND supersededAt IS NULL",

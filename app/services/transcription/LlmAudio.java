@@ -28,7 +28,7 @@ public final class LlmAudio {
     public record Prepared(String base64, String format) {}
 
     /** Formats the OpenAI {@code input_audio.format} hint understands. */
-    public static final String[] FORMAT_CANDIDATES = {
+    private static final String[] FORMAT_CANDIDATES = {
             "mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "opus", "weba"
     };
 
@@ -71,7 +71,7 @@ public final class LlmAudio {
             int exit;
             try {
                 exit = proc.waitFor();
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 throw new IOException("interrupted while transcoding audio for the LLM");
             }

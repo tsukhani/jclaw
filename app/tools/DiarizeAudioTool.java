@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,6 +73,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
 
     private static final Gson GSON = new Gson();
+
+    /** S1192 constants — config-key prefix and OpenAI wire-format literals. */
+    private static final String PROVIDER_PREFIX = "provider.";
+    private static final String INPUT_AUDIO = "input_audio";
+    private static final String SUPPORTS_AUDIO = "supportsAudio";
 
     @Override public String name() { return TOOL_NAME; }
     @Override public String category() { return "Utilities"; }
@@ -170,7 +174,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     + "audio-capable model under Settings → Transcription → Diarization "
                     + "before recordings can be speaker-labeled.";
         }
-        var baseUrl = ConfigService.get("provider." + provider + ".baseUrl", "");
+        var baseUrl = ConfigService.get(PROVIDER_PREFIX + provider + ".baseUrl", "");
         if (baseUrl.isBlank()) {
             return "Error: provider '%s' has no base URL configured.".formatted(provider);
         }
@@ -206,17 +210,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             var references = loadReferences();
             var prompt = buildPrompt(optString(args, ARG_SPEAKER_NAMES),
                     optString(args, ARG_LANGUAGE), emotions, references.keySet());
-            String transcript;
-            try {
-                transcript = chatWithAudio(baseUrl, provider, model, prompt,
-                        audio.base64(), audio.format(), references);
-            } catch (IOException first) {
-                // One retry: routers occasionally land a request on an
-                // upstream host without input_audio support.
-                play.Logger.info("DiarizeAudioTool: retrying after %s", first.getMessage());
-                transcript = chatWithAudio(baseUrl, provider, model, prompt,
-                        audio.base64(), audio.format(), references);
-            }
+            var transcript = chatWithAudioRetrying(baseUrl, provider, model, prompt,
+                    audio.base64(), audio.format(), references);
             return "Diarized transcript of %s (via %s %s):\n\n%s"
                     .formatted(att.originalFilename, provider, model, transcript);
         } catch (IOException | RuntimeException e) {
@@ -265,6 +260,19 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     /** One OpenAI-compatible /chat/completions call with an input_audio
      *  content part — the same wire shape VisionAudioAssembler emits for
      *  audio-capable chat models (JCLAW-132). */
+    /** One retry: routers occasionally land a request on an upstream host
+     *  without input_audio support (S1141: lifted out of the caller's try). */
+    private static String chatWithAudioRetrying(String baseUrl, String provider, String model,
+                                                String prompt, String base64, String format,
+                                                Map<String, String> references) throws IOException {
+        try {
+            return chatWithAudio(baseUrl, provider, model, prompt, base64, format, references);
+        } catch (IOException first) {
+            Logger.info("DiarizeAudioTool: retrying after %s", first.getMessage());
+            return chatWithAudio(baseUrl, provider, model, prompt, base64, format, references);
+        }
+    }
+
     private static String chatWithAudio(String baseUrl, String provider, String model,
                                         String prompt, String base64, String format,
                                         Map<String, String> references)
@@ -273,14 +281,14 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         for (var ref : references.entrySet()) {
             content.add(Map.of("type", "text", "text",
                     "Voice reference — this is %s speaking:".formatted(ref.getKey())));
-            content.add(Map.of("type", "input_audio",
-                    "input_audio", Map.of("data", ref.getValue(), "format", "mp3")));
+            content.add(Map.of("type", INPUT_AUDIO,
+                    INPUT_AUDIO, Map.of("data", ref.getValue(), "format", "mp3")));
         }
         content.add(Map.of("type", "text", "text", prompt));
         var inner = new LinkedHashMap<String, Object>();
         inner.put("data", base64);
         if (!format.isEmpty()) inner.put("format", format);
-        content.add(Map.of("type", "input_audio", "input_audio", inner));
+        content.add(Map.of("type", INPUT_AUDIO, INPUT_AUDIO, inner));
         var body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("temperature", 0);
@@ -292,7 +300,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         messages.add(user);
         body.add("messages", messages);
 
-        var apiKey = ConfigService.get("provider." + provider + ".apiKey", "");
+        var apiKey = ConfigService.get(PROVIDER_PREFIX + provider + ".apiKey", "");
         var request = new Request.Builder()
                 .url(baseUrl.replaceAll("/+$", "") + "/chat/completions")
                 .post(RequestBody.create(body.toString(), MediaType.get("application/json")));
@@ -324,23 +332,26 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
     }
 
-    /** TRUE/FALSE when the provider's configured model list knows the
-     *  model's audio capability; null when the model isn't listed (an
-     *  unlisted model gets the benefit of the doubt — the call decides). */
-    static Boolean audioCapability(String provider, String model) {
+    /** What the provider's configured model registry says about a model's
+     *  ability to hear audio. UNKNOWN (unlisted/unparseable registry) gets
+     *  the benefit of the doubt — the call decides. */
+    enum AudioCapability { AUDIO, NOT_AUDIO, UNKNOWN }
+
+    static AudioCapability audioCapability(String provider, String model) {
         try {
-            var raw = ConfigService.get("provider." + provider + ".models", "");
-            if (raw.isBlank()) return null;
+            var raw = ConfigService.get(PROVIDER_PREFIX + provider + ".models", "");
+            if (raw.isBlank()) return AudioCapability.UNKNOWN;
             for (var el : JsonParser.parseString(raw).getAsJsonArray()) {
                 var o = el.getAsJsonObject();
                 if (o.has("id") && model.equals(o.get("id").getAsString())) {
-                    return o.has("supportsAudio") && !o.get("supportsAudio").isJsonNull()
-                            && o.get("supportsAudio").getAsBoolean();
+                    boolean supports = o.has(SUPPORTS_AUDIO) && !o.get(SUPPORTS_AUDIO).isJsonNull()
+                            && o.get(SUPPORTS_AUDIO).getAsBoolean();
+                    return supports ? AudioCapability.AUDIO : AudioCapability.NOT_AUDIO;
                 }
             }
-            return null;
+            return AudioCapability.UNKNOWN;
         } catch (RuntimeException _) {
-            return null;
+            return AudioCapability.UNKNOWN;
         }
     }
 
@@ -376,7 +387,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return ("Enrolled %s's voice (first %d seconds of the recording). Future diarized "
                     + "transcripts will label this voice by name. Note: the sample is sent to the "
                     + "configured cloud model with each diarization.").formatted(clean, REFERENCE_SECONDS);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return "Error: interrupted while extracting the voice sample.";
         } catch (IOException e) {

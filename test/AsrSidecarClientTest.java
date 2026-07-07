@@ -1,6 +1,7 @@
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
 import okhttp3.OkHttpClient;
+import okio.Buffer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,9 +13,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * JCLAW-565: the pyannote sidecar HTTP protocol — request shape (path-based
- * audio handoff, optional num_speakers), response parsing into
- * error mapping. MockWebServer + the
+ * JCLAW-650: the ASR sidecar HTTP protocol — request shape (path-based
+ * audio handoff), segment parsing, and error mapping. MockWebServer + the
  * base-URL test ctor, mirroring {@link LocalVideoGenerationClientTest}; the
  * manager/daemon layer is never touched.
  */
@@ -27,7 +27,7 @@ class AsrSidecarClientTest extends UnitTest {
     void setUp() throws Exception {
         server = new MockWebServer();
         server.start();
-        audio = Files.createTempFile("diarize-client-test-", ".wav");
+        audio = Files.createTempFile("asr-client-test-", ".wav");
     }
 
     @AfterEach
@@ -41,9 +41,54 @@ class AsrSidecarClientTest extends UnitTest {
                 server.url("/").toString().replaceAll("/$", ""), new OkHttpClient());
     }
 
+    @Test
+    void transcribe_parsesSegmentsInOrder() throws Exception {
+        server.enqueue(json(200, """
+                {"segments": [
+                  {"startMs": 0, "endMs": 1200, "text": "hello there"},
+                  {"startMs": 1200, "endMs": 2400, "text": "general"}
+                ]}"""));
 
+        var segments = client().transcribe(audio, "base.en", null);
 
+        assertEquals(2, segments.size());
+        assertEquals("hello there", segments.get(0).text());
+        assertEquals(0, segments.get(0).startMs());
+        assertEquals(1200, segments.get(0).endMs());
+        assertEquals("general", segments.get(1).text());
 
+        var recorded = server.takeRequest();
+        assertEquals("/transcribe", recorded.getUrl().encodedPath());
+        var body = recorded.getBody().utf8();
+        assertTrue(body.contains(audio.toAbsolutePath().toString()),
+                "request carries the audio path: " + body);
+        assertTrue(body.contains("base.en"), "request carries the model id: " + body);
+    }
 
+    @Test
+    void transcribe_httpErrorMapsToTranscriptionException() {
+        server.enqueue(json(500, "{\"error\": \"engine exploded\"}"));
 
+        var e = assertThrows(TranscriptionException.class,
+                () -> client().transcribe(audio, "base.en", null));
+        assertTrue(e.getMessage().contains("ASR sidecar transcribe failed: HTTP 500"),
+                "names the sidecar and status: " + e.getMessage());
+    }
+
+    @Test
+    void transcribe_unparseableBodyMapsToTranscriptionException() {
+        server.enqueue(json(200, "not json at all"));
+
+        var e = assertThrows(TranscriptionException.class,
+                () -> client().transcribe(audio, "base.en", null));
+        assertTrue(e.getMessage().contains("unparseable"),
+                "names the parse failure: " + e.getMessage());
+    }
+
+    private static MockResponse json(int code, String body) {
+        var buf = new Buffer();
+        buf.writeUtf8(body);
+        return new MockResponse.Builder().code(code)
+                .addHeader("Content-Type", "application/json").body(buf).build();
+    }
 }
