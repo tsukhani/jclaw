@@ -1,5 +1,6 @@
 package channels;
 
+import org.telegram.telegrambots.longpolling.BotSession;
 import play.Play;
 import services.EventLogger;
 
@@ -12,7 +13,7 @@ import java.nio.file.Path;
  * Durable per-bot last-consumed {@code update_id} store (JCLAW-361).
  *
  * <p>The telegrambots SDK tracks the long-poll offset only in an in-memory
- * {@code AtomicInteger} on {@link org.telegram.telegrambots.longpolling.BotSession}
+ * {@code AtomicInteger} on {@link BotSession}
  * ({@code lastReceivedUpdate}, starts at 0). On JVM restart that resets, so the
  * next {@code getUpdates} re-fetches every update Telegram still buffers (up to
  * its 24 h retention) and {@code dispatch} re-processes them — {@code

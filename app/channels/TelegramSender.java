@@ -5,13 +5,17 @@ import models.Agent;
 import models.TelegramBinding;
 import okhttp3.OkHttpClient;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
+import org.telegram.telegrambots.meta.TelegramUrl;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
+import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.UnpinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.polls.SendPoll;
 import org.telegram.telegrambots.meta.api.methods.reactions.SetMessageReaction;
 import org.telegram.telegrambots.meta.api.methods.send.SendAudio;
+import org.telegram.telegrambots.meta.api.methods.send.SendChatAction;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
+import org.telegram.telegrambots.meta.api.methods.send.SendMediaGroup;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
@@ -21,7 +25,12 @@ import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
+import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
+import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
+import org.telegram.telegrambots.meta.api.objects.media.InputMedia;
+import org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto;
+import org.telegram.telegrambots.meta.api.objects.media.InputMediaVideo;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.polls.input.InputPollOption;
 import org.telegram.telegrambots.meta.api.objects.reactions.ReactionType;
@@ -133,7 +142,7 @@ class TelegramSender {
         this(botToken, null);
     }
 
-    TelegramSender(String botToken, org.telegram.telegrambots.meta.TelegramUrl urlOverride) {
+    TelegramSender(String botToken, TelegramUrl urlOverride) {
         this.botToken = botToken;
         // Fast client for text paths: sendMessage, editMessageText, typing,
         // callback answers, etc. Tight timeouts fail fast into the
@@ -239,7 +248,7 @@ class TelegramSender {
      */
     public void editMessageText(String chatId,
                                        Integer messageId, String text) throws TelegramApiException {
-        var builder = org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText.builder()
+        var builder = EditMessageText.builder()
                 .chatId(chatId)
                 .messageId(messageId)
                 .text(text);
@@ -259,11 +268,11 @@ class TelegramSender {
      * not abort the caller's binding-activation loop.
      */
     public void setMyCommands(
-            List<org.telegram.telegrambots.meta.api.objects.commands.BotCommand> commands) {
+            List<BotCommand> commands) {
         if (botToken == null || commands == null || commands.isEmpty()) return;
         try {
             client.execute(
-                    org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands.builder()
+                    SetMyCommands.builder()
                             .commands(commands)
                             .build());
         } catch (Exception e) {
@@ -539,14 +548,14 @@ class TelegramSender {
     }
 
     /**
-     * JCLAW-359: the {@link org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions}
+     * JCLAW-359: the {@link LinkPreviewOptions}
      * to attach to a text send, or null to leave Telegram's default preview-on
      * behavior. Returns a disabled-preview options object only when
      * {@link #suppressLinkPreview()} is true.
      */
-    private static org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions linkPreviewOptions() {
+    private static LinkPreviewOptions linkPreviewOptions() {
         if (!suppressLinkPreview()) return null;
-        return org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions.builder()
+        return LinkPreviewOptions.builder()
                 .isDisabled(true)
                 .build();
     }
@@ -657,7 +666,7 @@ class TelegramSender {
     public TelegramChannel.TypingActionOutcome sendTypingAction(String chatId, Integer messageThreadId) {
         if (botToken == null || chatId == null) return TelegramChannel.TypingActionOutcome.SKIPPED;
         try {
-            var builder = org.telegram.telegrambots.meta.api.methods.send.SendChatAction.builder()
+            var builder = SendChatAction.builder()
                     .chatId(chatId)
                     .action("typing");
             if (messageThreadId != null) builder.messageThreadId(messageThreadId);
@@ -1199,9 +1208,9 @@ class TelegramSender {
     /**
      * JCLAW-365: bundle 2–10 photos/videos into a single Telegram album via
      * {@code sendMediaGroup}. Each item in {@code items} becomes an
-     * {@link org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto}
+     * {@link InputMediaPhoto}
      * (for {@link TelegramOutboundPlanner.MediaKind#PHOTO}) or
-     * {@link org.telegram.telegrambots.meta.api.objects.media.InputMediaVideo}
+     * {@link InputMediaVideo}
      * (everything else the caller passes — the planner only ever groups PHOTO
      * and VIDEO). The {@code caption} (null/blank to omit) rides on the FIRST
      * item only, matching Telegram's album-caption convention. {@code replyParams}
@@ -1222,7 +1231,7 @@ class TelegramSender {
             return false;
         }
         var medias = new ArrayList<
-                org.telegram.telegrambots.meta.api.objects.media.InputMedia>(items.size());
+                InputMedia>(items.size());
         for (int i = 0; i < items.size(); i++) {
             var fs = items.get(i);
             var file = fs.file();
@@ -1232,7 +1241,7 @@ class TelegramSender {
             String itemCaption = i == 0 && caption != null && !caption.isBlank() ? caption : null;
             medias.add(buildInputMedia(fs.kind(), file, name, itemCaption));
         }
-        var builder = org.telegram.telegrambots.meta.api.methods.send.SendMediaGroup.builder()
+        var builder = SendMediaGroup.builder()
                 .chatId(peerId)
                 .medias(medias);
         if (replyParams != null) builder.replyParameters(replyParams);
@@ -1262,21 +1271,21 @@ class TelegramSender {
     }
 
     /**
-     * Build the {@link org.telegram.telegrambots.meta.api.objects.media.InputMedia}
+     * Build the {@link InputMedia}
      * for one album item: a photo for {@link TelegramOutboundPlanner.MediaKind#PHOTO},
      * otherwise a video (the planner only groups photos + videos). The local file
      * is attached via {@code media(File, name)} so the SDK streams it in the
      * multipart body. {@code caption} null to omit.
      */
-    private static org.telegram.telegrambots.meta.api.objects.media.InputMedia buildInputMedia(
+    private static InputMedia buildInputMedia(
             TelegramOutboundPlanner.MediaKind kind, File file, String name, String caption) {
         if (kind == TelegramOutboundPlanner.MediaKind.PHOTO) {
-            var b = org.telegram.telegrambots.meta.api.objects.media.InputMediaPhoto.builder()
+            var b = InputMediaPhoto.builder()
                     .media(file, name);
             if (caption != null) b.caption(caption);
             return b.build();
         }
-        var b = org.telegram.telegrambots.meta.api.objects.media.InputMediaVideo.builder()
+        var b = InputMediaVideo.builder()
                 .media(file, name);
         if (caption != null) b.caption(caption);
         return b.build();

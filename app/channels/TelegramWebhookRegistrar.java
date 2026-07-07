@@ -1,6 +1,12 @@
 package channels;
 
 import models.TelegramBinding;
+import org.telegram.telegrambots.meta.api.methods.GetMe;
+import org.telegram.telegrambots.meta.api.methods.updates.GetWebhookInfo;
+import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
+import org.telegram.telegrambots.meta.api.objects.User;
+import org.telegram.telegrambots.meta.api.objects.WebhookInfo;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import services.EventLogger;
 
 import java.util.ArrayList;
@@ -50,7 +56,7 @@ public final class TelegramWebhookRegistrar {
     private static final WebhookApi TELEGRAM = new WebhookApi() {
         @Override public boolean setWebhook(String token, String url, String secretToken) {
             if (token == null || url == null) return false;
-            var builder = org.telegram.telegrambots.meta.api.methods.updates.SetWebhook.builder()
+            var builder = SetWebhook.builder()
                     .url(url)
                     .allowedUpdates(new ArrayList<>(ALLOWED_UPDATES));
             if (secretToken != null) builder.secretToken(secretToken);
@@ -59,7 +65,7 @@ public final class TelegramWebhookRegistrar {
                 EventLogger.info(CATEGORY, null, CHANNEL,
                         "Webhook registered: %s".formatted(url));
                 return true;
-            } catch (org.telegram.telegrambots.meta.exceptions.TelegramApiException e) {
+            } catch (TelegramApiException e) {
                 EventLogger.error(CATEGORY, null, CHANNEL,
                         "Webhook registration failed: %s".formatted(e.getMessage()));
                 return false;
@@ -177,22 +183,22 @@ public final class TelegramWebhookRegistrar {
      * {@link TelegramChannel#forToken(String)}; tests inject a stub.
      */
     public interface ProbeApi {
-        org.telegram.telegrambots.meta.api.objects.User getMe(String botToken)
-                throws org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-        org.telegram.telegrambots.meta.api.objects.WebhookInfo getWebhookInfo(String botToken)
-                throws org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+        User getMe(String botToken)
+                throws TelegramApiException;
+        WebhookInfo getWebhookInfo(String botToken)
+                throws TelegramApiException;
     }
 
     private static final ProbeApi TELEGRAM_PROBE = new ProbeApi() {
-        @Override public org.telegram.telegrambots.meta.api.objects.User getMe(String token)
-                throws org.telegram.telegrambots.meta.exceptions.TelegramApiException {
+        @Override public User getMe(String token)
+                throws TelegramApiException {
             return TelegramChannel.forToken(token).client()
-                    .execute(org.telegram.telegrambots.meta.api.methods.GetMe.builder().build());
+                    .execute(GetMe.builder().build());
         }
-        @Override public org.telegram.telegrambots.meta.api.objects.WebhookInfo getWebhookInfo(String token)
-                throws org.telegram.telegrambots.meta.exceptions.TelegramApiException {
+        @Override public WebhookInfo getWebhookInfo(String token)
+                throws TelegramApiException {
             return TelegramChannel.forToken(token).client()
-                    .execute(org.telegram.telegrambots.meta.api.methods.updates.GetWebhookInfo.builder().build());
+                    .execute(GetWebhookInfo.builder().build());
         }
     };
 
@@ -209,7 +215,7 @@ public final class TelegramWebhookRegistrar {
      */
     public static ProbeResult probe(String botToken, ChannelTransport transport, ProbeApi api) {
         var t = transport != null ? transport.name() : ChannelTransport.POLLING.name();
-        org.telegram.telegrambots.meta.api.objects.User me;
+        User me;
         try {
             me = api.getMe(botToken);
         } catch (Exception e) {
@@ -241,7 +247,7 @@ public final class TelegramWebhookRegistrar {
      * (redacted) and replaced with a generic message.
      */
     private static String safeReason(String op, Exception e, String botToken) {
-        if (e instanceof org.telegram.telegrambots.meta.exceptions.TelegramApiException) {
+        if (e instanceof TelegramApiException) {
             return op + " failed: " + redact(e.getMessage(), botToken);
         }
         EventLogger.warn(CATEGORY, null, CHANNEL,

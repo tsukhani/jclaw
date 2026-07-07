@@ -7,8 +7,14 @@ import org.telegram.telegrambots.longpolling.BotSession;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.TelegramUrl;
+import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.User;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.reactions.ReactionType;
+import org.telegram.telegrambots.meta.api.objects.reactions.ReactionTypeEmoji;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import play.Play;
 import services.EventLogger;
 import services.Tx;
@@ -356,7 +362,7 @@ public final class TelegramPollingRunner {
         if (token == null) return false;
         try {
             TelegramChannel.forToken(token).client()
-                    .execute(org.telegram.telegrambots.meta.api.methods.GetMe.builder().build());
+                    .execute(GetMe.builder().build());
             return false; // Telegram accepted the token
         } catch (Exception e) {
             return ERR_NON_RECOVERABLE.equals(classifyPollingError(e));
@@ -694,11 +700,11 @@ public final class TelegramPollingRunner {
     }
 
     private static LinkedHashSet<String> emojiSet(
-            List<org.telegram.telegrambots.meta.api.objects.reactions.ReactionType> reactions) {
+            List<ReactionType> reactions) {
         var out = new LinkedHashSet<String>();
         if (reactions == null) return out;
         for (var r : reactions) {
-            if (r instanceof org.telegram.telegrambots.meta.api.objects.reactions.ReactionTypeEmoji emoji
+            if (r instanceof ReactionTypeEmoji emoji
                     && emoji.getEmoji() != null && !emoji.getEmoji().isBlank()) {
                 out.add(emoji.getEmoji());
             }
@@ -706,7 +712,7 @@ public final class TelegramPollingRunner {
         return out;
     }
 
-    private static String displayLabel(org.telegram.telegrambots.meta.api.objects.User u) {
+    private static String displayLabel(User u) {
         if (u.getUserName() != null && !u.getUserName().isBlank()) return "@" + u.getUserName();
         if (u.getFirstName() != null && !u.getFirstName().isBlank()) return u.getFirstName();
         return u.getId() != null ? String.valueOf(u.getId()) : "someone";
@@ -716,7 +722,7 @@ public final class TelegramPollingRunner {
 
     /**
      * True when {@code update} carries a forwarded message. Detection reads the
-     * RAW SDK {@link org.telegram.telegrambots.meta.api.objects.message.Message}
+     * RAW SDK {@link Message}
      * because the parsed {@link InboundMessage} does NOT retain
      * the forward fields. Both dispatch sites
      * ({@link controllers.WebhookTelegramController} and {@link #dispatch}) call
@@ -891,7 +897,7 @@ public final class TelegramPollingRunner {
      */
     private static Integer telegramErrorCode(Throwable t) {
         for (Throwable c = t; c != null; c = c.getCause()) {
-            if (c instanceof org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException req) {
+            if (c instanceof TelegramApiRequestException req) {
                 return req.getErrorCode();
             }
             if (c.getCause() == c) break; // self-referential chain guard

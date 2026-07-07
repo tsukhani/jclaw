@@ -1,11 +1,13 @@
 package channels;
 
+import org.telegram.telegrambots.meta.api.objects.Update;
+
 import java.util.List;
 
 /**
  * Generic inbound shape consumed by {@link controllers.WebhookTelegramController}
  * and {@link TelegramPollingRunner}. Extracted from {@code TelegramChannel} in
- * JCLAW-151; produced by {@link TelegramInboundParser#parseUpdate(org.telegram.telegrambots.meta.api.objects.Update)}.
+ * JCLAW-151; produced by {@link TelegramInboundParser#parseUpdate(Update)}.
  *
  * @param chatId       Telegram chat id (used as the conversation peer key)
  * @param chatType     Telegram Bot API chat.type string ({@code "private"}
@@ -31,7 +33,7 @@ import java.util.List;
  *                        group-gating story consumes this; parsing here does
  *                        NOT itself gate or drop anything. Best-effort when
  *                        the bot identity is unknown (see
- *                        {@link TelegramInboundParser#parseUpdate(org.telegram.telegrambots.meta.api.objects.Update)}).
+ *                        {@link TelegramInboundParser#parseUpdate(Update)}).
  * @param attachments     inbound file attachments (resolved lazily by the
  *                        webhook handler)
  * @param mediaGroupId    Telegram media-group identifier when multiple

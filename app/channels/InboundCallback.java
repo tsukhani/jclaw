@@ -1,8 +1,9 @@
 package channels;
+import org.telegram.telegrambots.meta.api.objects.Update;
 
 /**
  * Inbound callback_query payload (JCLAW-109). Emitted by
- * {@link TelegramInboundParser#parseCallback(org.telegram.telegrambots.meta.api.objects.Update)}
+ * {@link TelegramInboundParser#parseCallback(Update)}
  * when the update is a tap on an inline keyboard button. Extracted from
  * {@code TelegramChannel} in JCLAW-151.
  *

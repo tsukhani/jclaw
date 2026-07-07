@@ -1,6 +1,7 @@
 package channels;
 
 import org.telegram.telegrambots.meta.api.methods.GetMe;
+import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import services.EventLogger;
 
@@ -8,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Resolves a Telegram bot's own identity — numeric user id and {@code @}-handle
- * — so the inbound parse path ({@link TelegramChannel#parseUpdate(org.telegram.telegrambots.meta.api.objects.Update, String, Long)})
+ * — so the inbound parse path ({@link TelegramChannel#parseUpdate(Update, String, Long)})
  * can decide whether a {@code mention} / {@code text_mention} / {@code /cmd@botname}
  * addresses <i>this</i> bot (JCLAW-371, activating JCLAW-367's identity-aware parse).
  *

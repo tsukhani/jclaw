@@ -8,7 +8,10 @@ import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.MessageEntity;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
+import org.telegram.telegrambots.meta.api.objects.Venue;
+import org.telegram.telegrambots.meta.api.objects.location.Location;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.stickers.Sticker;
 import play.Play;
 import services.AttachmentService;
 import services.EventLogger;
@@ -507,7 +510,7 @@ public final class TelegramInboundParser {
      * {@code getFile} download path as photos. Animated (TGS) and video (WEBM)
      * stickers are NOT staged — they aren't a still image the vision path can
      * consume, and we deliberately don't convert them — the
-     * {@link #stickerNote(org.telegram.telegrambots.meta.api.objects.stickers.Sticker)}
+     * {@link #stickerNote(Sticker)}
      * placeholder is the only surfacing for those. Telegram's WEBP is sniffed
      * to {@code image/webp} on disk by {@code finalizeAttachment}; the reported
      * MIME here is a best-effort hint.
@@ -552,7 +555,7 @@ public final class TelegramInboundParser {
      * optional on the Bot API object, so each is omitted when absent. A sticker
      * with neither degrades to a bare {@code [sticker]}.
      */
-    private static String stickerNote(org.telegram.telegrambots.meta.api.objects.stickers.Sticker s) {
+    private static String stickerNote(Sticker s) {
         var sb = new StringBuilder("[sticker");
         boolean hasEmoji = s.getEmoji() != null && !s.getEmoji().isBlank();
         if (hasEmoji) sb.append(": ").append(s.getEmoji().strip());
@@ -563,7 +566,7 @@ public final class TelegramInboundParser {
     }
 
     /** {@code [location: <lat>, <long>]} from the location's coordinates. */
-    private static String locationNote(org.telegram.telegrambots.meta.api.objects.location.Location loc) {
+    private static String locationNote(Location loc) {
         return "[location: %s, %s]".formatted(loc.getLatitude(), loc.getLongitude());
     }
 
@@ -572,7 +575,7 @@ public final class TelegramInboundParser {
      * appended when present; the embedded location's coordinates ride in
      * parentheses when the venue carries a location (it always should).
      */
-    private static String venueNote(org.telegram.telegrambots.meta.api.objects.Venue v) {
+    private static String venueNote(Venue v) {
         var sb = new StringBuilder("[venue");
         if (v.getTitle() != null && !v.getTitle().isBlank()) sb.append(": ").append(v.getTitle().strip());
         if (v.getAddress() != null && !v.getAddress().isBlank()) sb.append(" — ").append(v.getAddress().strip());

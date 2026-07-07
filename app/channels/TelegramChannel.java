@@ -2,8 +2,10 @@ package channels;
 
 import com.google.gson.JsonObject;
 import models.Agent;
+import org.telegram.telegrambots.meta.TelegramUrl;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
@@ -50,7 +52,7 @@ public class TelegramChannel implements Channel {
      * in the {@code channels} package can reach it; other test packages
      * use {@link #installForTest}.
      */
-    TelegramChannel(String botToken, org.telegram.telegrambots.meta.TelegramUrl urlOverride) {
+    TelegramChannel(String botToken, TelegramUrl urlOverride) {
         this.sender = new TelegramSender(botToken, urlOverride);
     }
 
@@ -63,7 +65,7 @@ public class TelegramChannel implements Channel {
     /** Test-only: pre-install a mock-targeted instance. Delegates to
      *  {@link TelegramClientCache#installForTest} (JCLAW-151). */
     public static void installForTest(String botToken,
-                                       org.telegram.telegrambots.meta.TelegramUrl urlOverride) {
+                                       TelegramUrl urlOverride) {
         TelegramClientCache.installForTest(botToken, urlOverride);
     }
 
@@ -173,7 +175,7 @@ public class TelegramChannel implements Channel {
      * not abort the caller's binding-activation loop.
      */
     public static void setMyCommands(String botToken,
-            List<org.telegram.telegrambots.meta.api.objects.commands.BotCommand> commands) {
+            List<BotCommand> commands) {
         if (botToken == null || commands == null || commands.isEmpty()) return;
         forToken(botToken).sender.setMyCommands(commands);
     }
