@@ -40,13 +40,13 @@ Reject anything else with a clear message; do not guess. If no matching renovate
 
 **Phase 3 — Merge & validate (backend first, then frontend)**
 
-Process **BACKEND** branches first (independent bumps; per-branch validation pinpoints any culprit and is cleanly reversible), then **FRONTEND** (whose lockfile branches must be batch-validated after one regen).
+Process **BACKEND** branches first, then **FRONTEND** — each ecosystem is batch-merged and validated with **one suite run** (dependency bumps within an ecosystem rarely interact; one suite per ecosystem is the cost/confidence sweet spot).
 
-7. **Backend, one at a time** — for each backend branch:
-   - `/usr/bin/git merge --no-edit origin/renovate/<b>`. On a `build.gradle.kts` version-pin conflict, resolve toward the renovate bump (take the higher/incoming version) and note it; on a non-trivial code conflict, stop and surface it.
-   - Run `play autotest`. **Pass** → keep the merge, continue. **Fail** → `/usr/bin/git reset --hard HEAD~1` to undo just that merge, mark the branch **FAILED/skipped**, and continue with the rest (a reset only ever rewinds the immediately-preceding merge, so earlier good merges are untouched).
+7. **Backend: merge all, then one suite** —
+   - Merge every backend branch in sequence: `/usr/bin/git merge --no-edit origin/renovate/<b>`. On a `build.gradle.kts` version-pin conflict, resolve toward the renovate bump (take the higher/incoming version) and note it; on a non-trivial code conflict, stop and surface it.
+   - After the last backend merge, run `play autotest` **once**. **Pass** → all backend bumps are in. **Fail** → bisect by peeling merges off the top (`/usr/bin/git reset --hard HEAD~1`, re-run the suite) until it passes, marking each peeled branch **FAILED/skipped**; with ≤3 branches, peeling newest-first converges in at most N−1 extra runs and only pays that cost on the rare failure. Never guess the culprit without a passing baseline.
 
-8. **Frontend, one at a time, then batch-validate** — Renovate frontend branches are usually **lockfile-only** (`^x.y.z` ranges in `package.json` already cover minor/patch), so they conflict with each other in sequence:
+8. **Frontend: merge all, regen, then one gate** — Renovate frontend branches are usually **lockfile-only** (`^x.y.z` ranges in `package.json` already cover minor/patch), so they conflict with each other in sequence:
    - Merge each: `/usr/bin/git merge --no-edit origin/renovate/<b>`, falling back to `/usr/bin/git merge --no-edit -X theirs origin/renovate/<b>` on a `pnpm-lock.yaml` conflict.
    - **After all frontend branches are merged, fully regenerate the lockfile — do NOT trust plain `pnpm install` to repair it.** `-X theirs` can leave inner snapshot refs pointing at versions absent from the lockfile body, and pnpm's surface-hash check happily skips re-resolution ("Already up to date" in ~110ms). The only reliable regen:
      ```bash
@@ -61,7 +61,7 @@ Process **BACKEND** branches first (independent bumps; per-branch validation pin
      pnpm typecheck
      pnpm stylelint
      ```
-   - **Commit the regenerated lockfile** once the gate is green: `/usr/bin/git add frontend/pnpm-lock.yaml && /usr/bin/git commit -m "chore(deps): regenerate pnpm-lock.yaml after renovate frontend merges"` (signed via the global config). If the gate fails, report it and let the user decide which bump to drop — don't guess which branch broke the batch.
+   - **Commit the regenerated lockfile** once the gate is green (one suite run for the whole frontend batch, mirroring the backend phase): `/usr/bin/git add frontend/pnpm-lock.yaml && /usr/bin/git commit -m "chore(deps): regenerate pnpm-lock.yaml after renovate frontend merges"` (signed via the global config). If the gate fails, report it and let the user decide which bump to drop — don't guess which branch broke the batch.
 
    Note: the full regen may pick up patches slightly newer than each branch targeted (e.g. a transitive `17.10.0 → 17.11.0`), all within the existing `^x.y.z` ranges — that's the same "latest within range" intent Renovate had, done in one pass. Fine.
 
