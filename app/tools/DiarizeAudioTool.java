@@ -182,8 +182,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         // ("content blocks must be text or image_url"). When the provider's
         // model registry knows the model and does NOT tag it audio-capable,
         // say so actionably instead of making the call.
-        var capability = audioCapability(provider, model);
-        if (Boolean.FALSE.equals(capability)) {
+        if (audioCapability(provider, model) == AudioCapability.NOT_AUDIO) {
             return ("Error: the configured diarization model '%s' (%s) is not audio-capable — "
                     + "it cannot listen to recordings. The operator must pick an audio-capable "
                     + "model under Settings → Transcription → Diarization.").formatted(model, provider);
@@ -257,9 +256,6 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         return sb.toString();
     }
 
-    /** One OpenAI-compatible /chat/completions call with an input_audio
-     *  content part — the same wire shape VisionAudioAssembler emits for
-     *  audio-capable chat models (JCLAW-132). */
     /** One retry: routers occasionally land a request on an upstream host
      *  without input_audio support (S1141: lifted out of the caller's try). */
     private static String chatWithAudioRetrying(String baseUrl, String provider, String model,
@@ -273,6 +269,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
     }
 
+    /** One OpenAI-compatible /chat/completions call with an input_audio
+     *  content part — the same wire shape VisionAudioAssembler emits for
+     *  audio-capable chat models (JCLAW-132). */
     private static String chatWithAudio(String baseUrl, String provider, String model,
                                         String prompt, String base64, String format,
                                         Map<String, String> references)
@@ -311,7 +310,10 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         var client = HttpFactories.llmSingleShot().newBuilder()
                 .callTimeout(Duration.ofSeconds(600)).build();
         try (var response = client.newCall(request.build()).execute()) {
-            var text = response.body() != null ? response.body().string() : "";
+            // OkHttp 5 guarantees a non-null body on a synchronously executed
+            // call (may be empty, never null) — same contract note as
+            // OpenAiCompatibleTranscriptionClient.
+            var text = response.body().string();
             if (!response.isSuccessful()) {
                 throw new IOException("model call failed (HTTP %d): %s".formatted(
                         response.code(), text.substring(0, Math.min(300, text.length()))));
@@ -335,9 +337,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     /** What the provider's configured model registry says about a model's
      *  ability to hear audio. UNKNOWN (unlisted/unparseable registry) gets
      *  the benefit of the doubt — the call decides. */
-    enum AudioCapability { AUDIO, NOT_AUDIO, UNKNOWN }
+    public enum AudioCapability { AUDIO, NOT_AUDIO, UNKNOWN }
 
-    static AudioCapability audioCapability(String provider, String model) {
+    public static AudioCapability audioCapability(String provider, String model) {
         try {
             var raw = ConfigService.get(PROVIDER_PREFIX + provider + ".models", "");
             if (raw.isBlank()) return AudioCapability.UNKNOWN;

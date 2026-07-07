@@ -69,8 +69,9 @@ class AsrSidecarClientTest extends UnitTest {
     void transcribe_httpErrorMapsToTranscriptionException() {
         server.enqueue(json(500, "{\"error\": \"engine exploded\"}"));
 
+        var client = client();
         var e = assertThrows(TranscriptionException.class,
-                () -> client().transcribe(audio, "base.en", null));
+                () -> client.transcribe(audio, "base.en", null));
         assertTrue(e.getMessage().contains("ASR sidecar transcribe failed: HTTP 500"),
                 "names the sidecar and status: " + e.getMessage());
     }
@@ -79,8 +80,9 @@ class AsrSidecarClientTest extends UnitTest {
     void transcribe_unparseableBodyMapsToTranscriptionException() {
         server.enqueue(json(200, "not json at all"));
 
+        var client = client();
         var e = assertThrows(TranscriptionException.class,
-                () -> client().transcribe(audio, "base.en", null));
+                () -> client.transcribe(audio, "base.en", null));
         assertTrue(e.getMessage().contains("unparseable"),
                 "names the parse failure: " + e.getMessage());
     }
