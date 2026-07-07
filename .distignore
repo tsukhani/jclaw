@@ -6,6 +6,9 @@ openspec/
 # docs/user-guide/ is intentionally NOT excluded: it ships in the bundle so the
 # in-app user-guide lookup can read it at runtime (Play.applicationPath/docs/user-guide/).
 docs/architecture/
+# Internal spike/investigation notes — dev docs, not runtime reading
+# (docs/user-guide/ stays: the in-app guide reads it at runtime).
+docs/spikes/
 # The ASR sidecar ships (runtime scripts), but its offline measurement
 # harness does not: golden-reference transcripts + scorers are dev
 # tooling (prefix match covers eval/ and eval.py).
