@@ -65,15 +65,17 @@ diarized-transcript regressions.
 ## Running by hand (debugging)
 
 ```bash
+uv run serve.py --port 9529   # standalone launch
 curl -s localhost:9529/health
-curl -s -X POST localhost:9529/diarize \
+curl -s -X POST localhost:9529/transcribe \
   -H 'Content-Type: application/json' \
-  -d '{"audio_path": "/absolute/path/to/recording.wav"}'
+  -d '{"audio_path": "/absolute/path/to/recording.wav", "model": "large"}'
 ```
 
 ## Platform notes
 
-- macOS / Apple Silicon: default PyPI torch wheel ships MPS — no extra config.
-- Linux + NVIDIA: `UV_TORCH_BACKEND=cu124 uv run serve.py ...` for the CUDA wheel.
-- CPU-only also works (~0.2x realtime) — slower but correct. There is no
-  fallback engine (JCLAW-614): a sidecar failure surfaces as an error.
+- macOS / Apple Silicon: mlx-whisper on Metal — no extra config.
+- Linux + NVIDIA: faster-whisper picks up CUDA automatically
+  (`UV_TORCH_BACKEND=cu124 uv run serve.py ...` to force the CUDA wheel).
+- CPU-only also works (faster-whisper int8) — slower but correct. There is
+  no fallback engine (JCLAW-614): a sidecar failure surfaces as an error.
