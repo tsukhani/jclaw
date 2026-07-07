@@ -226,7 +226,7 @@ dependencies {
     // Playwright's POM declares slf4j-simple as a runtime dep, which races
     // log4j-slf4j2-impl for the SLF4JServiceProvider ServiceLoader slot
     // (see JCLAW-88).
-    implementation("com.microsoft.playwright:playwright:1.60.0") {
+    implementation("com.microsoft.playwright:playwright:1.61.0") {
         exclude(group = "org.slf4j", module = "slf4j-simple")
     }
 
