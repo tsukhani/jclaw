@@ -411,13 +411,29 @@ async function toggleDiarizationEnabled() {
   }
   finally { saving.value = false }
 }
+// JCLAW-656: local Qwen2-Audio status (installed / size / backend) for the
+// Local option's status line. Fetched lazily when the section renders.
+const localAudioStatus = ref<{ installed?: boolean, model?: string, sizeGb?: number, backend?: string, error?: string } | null>(null)
+async function refreshLocalAudioStatus() {
+  try {
+    localAudioStatus.value = await $fetch('/api/transcription/local-audio-model')
+  }
+  catch {
+    localAudioStatus.value = { installed: false, error: 'status unavailable' }
+  }
+}
+watch(diarizationProvider, (p) => {
+  if (p === 'local' && localAudioStatus.value === null) refreshLocalAudioStatus()
+}, { immediate: true })
+
 async function setDiarizationProvider(value: string) {
   saving.value = true
   try {
-    // Reset the model on a provider switch — independent keys, fire in parallel.
+    // Reset the model on a provider switch — independent keys, fire in
+    // parallel. The local backend has a fixed model id (JCLAW-656).
     await Promise.all([
       $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.provider', value } }),
-      $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value: '' } }),
+      $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value: value === 'local' ? 'qwen2-audio' : '' } }),
     ])
     refresh()
   }
@@ -4348,6 +4364,27 @@ async function deleteLoggerLevel(logger: string) {
                 >no API key — configure in LLM Providers</span>
               </label>
               <label
+                for="diarization-provider-local"
+                class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+              >
+                <input
+                  id="diarization-provider-local"
+                  type="radio"
+                  name="diarization-provider"
+                  value="local"
+                  :checked="diarizationProvider === 'local'"
+                  class="accent-emerald-600"
+                  @change="setDiarizationProvider('local')"
+                >
+                <span class="flex-1 text-sm text-fg-primary">Local Qwen2-Audio (on-device)</span>
+                <span
+                  class="text-[10px] px-1 border"
+                  :class="diarizationProvider === 'local'
+                    ? 'text-green-400 border-green-400/30'
+                    : 'text-fg-muted border-input'"
+                >local</span>
+              </label>
+              <label
                 for="diarization-provider-openai"
                 class="px-4 py-2.5 flex items-center gap-3"
                 :class="openaiApiKeyConfigured
@@ -4376,7 +4413,38 @@ async function deleteLoggerLevel(logger: string) {
               </label>
             </div>
           </fieldset>
-          <div class="border-t border-border">
+          <div
+            v-if="diarizationProvider === 'local'"
+            class="border-t border-border px-4 py-2.5 text-[11px] text-fg-muted space-y-1"
+          >
+            <div v-if="localAudioStatus">
+              <span
+                :class="localAudioStatus.installed
+                  ? 'text-emerald-700 dark:text-emerald-400'
+                  : 'text-amber-700 dark:text-amber-400'"
+                class="font-medium"
+              >
+                {{ localAudioStatus.installed ? 'Installed' : 'Not installed' }}
+              </span>
+              <span v-if="localAudioStatus.model"> — {{ localAudioStatus.model }}</span>
+              <span v-if="localAudioStatus.sizeGb"> ({{ localAudioStatus.sizeGb }} GB, 4-bit, {{ localAudioStatus.backend }})</span>
+            </div>
+            <div v-else>
+              Checking model status…
+            </div>
+            <p>
+              Fully offline speaker diarization and emotion tagging on this machine. Recordings are
+              processed in ~25-second chunks with enrolled voice references re-sent per chunk for
+              consistent naming; the model loads on first use (~5 s) and stays resident. Expect
+              lower transcription accuracy than the cloud models — this is the privacy-first
+              option. Hardware is auto-detected (Apple Silicon → MLX 4-bit, NVIDIA → CUDA, else CPU);
+              the model downloads on first use if missing.
+            </p>
+          </div>
+          <div
+            v-if="diarizationProvider !== 'local'"
+            class="border-t border-border"
+          >
             <div class="px-4 py-2.5 flex items-center gap-3">
               <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Audio model</span>
               <select

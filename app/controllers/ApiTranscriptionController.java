@@ -116,4 +116,15 @@ public class ApiTranscriptionController extends Controller {
         renderJSON(gson.toJson(new DownloadStartedResponse("downloading", id)));
     }
 
+
+    /** JCLAW-656: local audio-LLM (Qwen2-Audio) install status for the
+     *  Settings page. Filesystem-only on the sidecar side — no model load. */
+    @Operation(summary = "Local audio-LLM (Qwen2-Audio) install status")
+    public static void localAudioModel() {
+        try {
+            renderJSON(new services.transcription.AsrSidecarClient().qwenStatus().toString());
+        } catch (RuntimeException e) {
+            renderJSON("{\"installed\":false,\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}");
+        }
+    }
 }

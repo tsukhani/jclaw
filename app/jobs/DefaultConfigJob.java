@@ -82,6 +82,10 @@ public class DefaultConfigJob extends Job<Void> {
         // tool explains what to set up.
         seedIfAbsent("transcription.diarization.provider", "");
         seedIfAbsent("transcription.diarization.model", "");
+        // JCLAW-656: when the LOCAL audio model is the provider, a failing
+        // load falls back to this cloud pair (blank = no fallback).
+        seedIfAbsent("transcription.diarization.provider.fallback", "");
+        seedIfAbsent("transcription.diarization.model.fallback", "");
         seedIfAbsent("transcription.localModel",
                 WhisperModel.DEFAULT.id());
         // JCLAW-563: per-turn acoustic emotion labels on diarized
