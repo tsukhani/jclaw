@@ -4365,24 +4365,19 @@ async function deleteLoggerLevel(logger: string) {
               </label>
               <label
                 for="diarization-provider-local"
-                class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+                class="px-4 py-2.5 flex items-center gap-3 cursor-not-allowed opacity-50"
+                title="Awaiting a working on-device audio model — the MLX runtime's omni-model audio support is not ready yet (JCLAW-656)"
               >
                 <input
                   id="diarization-provider-local"
                   type="radio"
                   name="diarization-provider"
                   value="local"
-                  :checked="diarizationProvider === 'local'"
+                  disabled
                   class="accent-emerald-600"
-                  @change="setDiarizationProvider('local')"
                 >
-                <span class="flex-1 text-sm text-fg-primary">Local Qwen2-Audio (on-device)</span>
-                <span
-                  class="text-[10px] px-1 border"
-                  :class="diarizationProvider === 'local'
-                    ? 'text-green-400 border-green-400/30'
-                    : 'text-fg-muted border-input'"
-                >local</span>
+                <span class="flex-1 text-sm text-fg-primary">Local audio model (on-device)</span>
+                <span class="text-[10px] px-1 border text-fg-muted border-input">unavailable</span>
               </label>
               <label
                 for="diarization-provider-openai"
