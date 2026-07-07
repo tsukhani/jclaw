@@ -102,7 +102,7 @@ public class AsrSidecarClient {
             var text = resp.body().string();
             if (!resp.isSuccessful()) {
                 throw new TranscriptionException(
-                        "pyannote sidecar transcribe failed: HTTP %d — %s".formatted(
+                        "ASR sidecar transcribe failed: HTTP %d — %s".formatted(
                                 resp.code(), truncate(text)));
             }
             var root = JsonParser.parseString(text).getAsJsonObject();
@@ -111,74 +111,16 @@ public class AsrSidecarClient {
                 var o = el.getAsJsonObject();
                 segments.add(new WhisperTranscriber.Segment(
                         o.get("startMs").getAsLong(), o.get("endMs").getAsLong(),
-                        o.get("text").getAsString(),
-                        o.has("noSpeechProb") ? o.get("noSpeechProb").getAsDouble() : 0.0,
-                        o.has("avgLogprob") ? o.get("avgLogprob").getAsDouble() : 0.0,
-                        o.has("compressionRatio") ? o.get("compressionRatio").getAsDouble() : 1.0));
+                        o.get("text").getAsString()));
             }
             return segments;
         } catch (IOException e) {
             throw new TranscriptionException(
-                    "pyannote sidecar unreachable: " + e.getMessage(), e);
+                    "ASR sidecar unreachable: " + e.getMessage(), e);
         } catch (RuntimeException e) {
             if (e instanceof TranscriptionException te) throw te;
             throw new TranscriptionException(
-                    "pyannote sidecar returned an unparseable transcribe response: " + e.getMessage(), e);
-        }
-    }
-
-
-    /**
-     * JCLAW-656: local audio-LLM generation — audio paths + prompt to the
-     * sidecar's Qwen2-Audio worker, text back. Serialized on the JVM-wide
-     * sidecar lock like every other inference.
-     */
-    public String qwenGenerate(java.util.List<Path> audios, String prompt, int maxTokens) {
-        SIDECAR_LOCK.lock();
-        try {
-            var baseUrl = baseUrlOverride != null ? baseUrlOverride : AsrSidecarManager.ensureRunning();
-            var body = new com.google.gson.JsonObject();
-            var arr = new com.google.gson.JsonArray();
-            for (var a : audios) arr.add(a.toAbsolutePath().toString());
-            body.add("audios", arr);
-            body.addProperty("prompt", prompt);
-            body.addProperty("max_tokens", maxTokens);
-            var call = client.newCall(new okhttp3.Request.Builder()
-                    .url(baseUrl + "/qwen")
-                    .post(okhttp3.RequestBody.create(body.toString(), JSON))
-                    .build());
-            try (var response = call.execute()) {
-                var text = response.body() != null ? response.body().string() : "";
-                if (!response.isSuccessful()) {
-                    throw new TranscriptionException("local audio model failed (HTTP %d): %s"
-                            .formatted(response.code(), text.substring(0, Math.min(300, text.length()))));
-                }
-                return com.google.gson.JsonParser.parseString(text).getAsJsonObject()
-                        .get("text").getAsString();
-            }
-        } catch (java.io.IOException e) {
-            throw new TranscriptionException("local audio model unreachable: " + e.getMessage(), e);
-        } finally {
-            SIDECAR_LOCK.unlock();
-        }
-    }
-
-    /** JCLAW-656: local audio-LLM install status for the Settings page —
-     *  filesystem-only on the sidecar side, no model load. */
-    public com.google.gson.JsonObject qwenStatus() {
-        try {
-            var baseUrl = baseUrlOverride != null ? baseUrlOverride : AsrSidecarManager.ensureRunning();
-            var call = client.newCall(new okhttp3.Request.Builder()
-                    .url(baseUrl + "/qwen/status").get().build());
-            try (var response = call.execute()) {
-                var text = response.body() != null ? response.body().string() : "{}";
-                return com.google.gson.JsonParser.parseString(text).getAsJsonObject();
-            }
-        } catch (java.io.IOException | RuntimeException e) {
-            var o = new com.google.gson.JsonObject();
-            o.addProperty("installed", false);
-            o.addProperty("error", e.getMessage());
-            return o;
+                    "ASR sidecar returned an unparseable transcribe response: " + e.getMessage(), e);
         }
     }
 
@@ -196,7 +138,7 @@ public class AsrSidecarClient {
             }
             return text;
         } catch (IOException e) {
-            throw new TranscriptionException("pyannote sidecar unreachable: " + e.getMessage(), e);
+            throw new TranscriptionException("ASR sidecar unreachable: " + e.getMessage(), e);
         }
     }
 
@@ -220,7 +162,7 @@ public class AsrSidecarClient {
             }
             return text;
         } catch (IOException e) {
-            throw new TranscriptionException("pyannote sidecar unreachable: " + e.getMessage(), e);
+            throw new TranscriptionException("ASR sidecar unreachable: " + e.getMessage(), e);
         }
     }
 

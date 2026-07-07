@@ -14,7 +14,6 @@ import okhttp3.RequestBody;
 import play.Logger;
 import services.AgentService;
 import services.ConfigService;
-import services.MimeExtensions;
 import services.Tx;
 import utils.HttpFactories;
 
@@ -73,13 +72,6 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final int MAX_REFERENCE_CLIPS = 8;
     private static final int REFERENCE_SECONDS = 8;
 
-    /** JCLAW-656: the local Qwen2-Audio backend selects on this provider
-     *  value. Its diarization structure collapses beyond ~30s of audio
-     *  (measured), so recordings are processed in chunks with the voice
-     *  references re-sent per chunk for naming continuity. */
-    public static final String LOCAL_PROVIDER = "local";
-    private static final int LOCAL_CHUNK_SECONDS = 25;
-    private static final int LOCAL_MAX_CHUNKS = 24;
 
     private static final Gson GSON = new Gson();
 
@@ -178,16 +170,15 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     + "audio-capable model under Settings → Transcription → Diarization "
                     + "before recordings can be speaker-labeled.";
         }
-        var baseUrl = LOCAL_PROVIDER.equals(provider) ? ""
-                : ConfigService.get("provider." + provider + ".baseUrl", "");
-        if (!LOCAL_PROVIDER.equals(provider) && baseUrl.isBlank()) {
+        var baseUrl = ConfigService.get("provider." + provider + ".baseUrl", "");
+        if (baseUrl.isBlank()) {
             return "Error: provider '%s' has no base URL configured.".formatted(provider);
         }
         // Guard: a non-audio model fails upstream with a cryptic 400
         // ("content blocks must be text or image_url"). When the provider's
         // model registry knows the model and does NOT tag it audio-capable,
         // say so actionably instead of making the call.
-        var capability = LOCAL_PROVIDER.equals(provider) ? null : audioCapability(provider, model);
+        var capability = audioCapability(provider, model);
         if (Boolean.FALSE.equals(capability)) {
             return ("Error: the configured diarization model '%s' (%s) is not audio-capable — "
                     + "it cannot listen to recordings. The operator must pick an audio-capable "
@@ -208,31 +199,6 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
         boolean emotionsArg = args.has(ARG_EMOTIONS) && !args.get(ARG_EMOTIONS).isJsonNull()
                 && args.get(ARG_EMOTIONS).getAsBoolean();
-        if (LOCAL_PROVIDER.equals(provider)) {
-            try {
-                return diarizeLocally(path, att.originalFilename,
-                        optString(args, ARG_SPEAKER_NAMES), optString(args, ARG_LANGUAGE), emotionsArg);
-            } catch (RuntimeException e) {
-                // JCLAW-656 fallback contract: a failing local model must not
-                // strand the user — fall back to the cloud path when one is
-                // configured, and say which engine actually ran.
-                var cloudProvider = ConfigService.get(PROVIDER_KEY + ".fallback", "");
-                play.Logger.warn("DiarizeAudioTool: local model failed (%s)%s", e.getMessage(),
-                        cloudProvider.isBlank() ? "" : " — falling back to " + cloudProvider);
-                if (cloudProvider.isBlank()) {
-                    return "Local audio model failed: " + e.getMessage()
-                            + " (no cloud fallback configured under "
-                            + PROVIDER_KEY + ".fallback)";
-                }
-                provider = cloudProvider;
-                model = ConfigService.get(MODEL_KEY + ".fallback", "");
-                baseUrl = ConfigService.get("provider." + provider + ".baseUrl", "");
-                if (model.isBlank() || baseUrl.isBlank()) {
-                    return "Local audio model failed: " + e.getMessage()
-                            + " (cloud fallback is incompletely configured)";
-                }
-            }
-        }
 
         try {
             var audio = services.transcription.LlmAudio.prepare(path, att.mimeType);
@@ -375,113 +341,6 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return null;
         } catch (RuntimeException _) {
             return null;
-        }
-    }
-
-    /**
-     * JCLAW-656: fully local diarization via the sidecar's Qwen2-Audio
-     * worker. The recording is split into short chunks (structure collapses
-     * beyond ~30s — measured), each chunk is sent with EVERY stored voice
-     * reference so names stay consistent across chunks, and the per-chunk
-     * transcripts are stitched in order.
-     */
-    private static String diarizeLocally(Path audio, String fileName,
-                                         String speakerNames, String language, boolean emotions) {
-        Path tmpDir = null;
-        try {
-            tmpDir = Files.createTempFile("jclaw-local-diarize-", "").getParent()
-                    .resolve("jclaw-local-diarize-" + System.nanoTime());
-            Files.createDirectories(tmpDir);
-            var pattern = tmpDir.resolve("chunk-%03d.wav");
-            var proc = new ProcessBuilder("ffmpeg", "-y", "-i", audio.toString(),
-                    "-f", "segment", "-segment_time", String.valueOf(LOCAL_CHUNK_SECONDS),
-                    "-ar", "16000", "-ac", "1", pattern.toString())
-                    .redirectErrorStream(true).start();
-            String out = new String(proc.getInputStream().readAllBytes());
-            if (proc.waitFor() != 0) {
-                throw new services.transcription.TranscriptionException(
-                        "chunking failed: " + out.substring(Math.max(0, out.length() - 200)));
-            }
-            java.util.List<Path> chunks;
-            try (var files = Files.list(tmpDir)) {
-                chunks = files.sorted().toList();
-            }
-            if (chunks.isEmpty()) {
-                throw new services.transcription.TranscriptionException("no audio chunks produced");
-            }
-            if (chunks.size() > LOCAL_MAX_CHUNKS) {
-                throw new services.transcription.TranscriptionException(
-                        "recording too long for the local model (%d chunks > %d) — use the cloud model"
-                                .formatted(chunks.size(), LOCAL_MAX_CHUNKS));
-            }
-
-            var refs = new java.util.LinkedHashMap<String, Path>();
-            var dir = voiceRefsDir();
-            if (Files.isDirectory(dir)) {
-                try (var files = Files.list(dir)) {
-                    files.filter(f -> f.getFileName().toString().endsWith(".mp3"))
-                            .sorted().limit(MAX_REFERENCE_CLIPS)
-                            .forEach(f -> refs.put(
-                                    f.getFileName().toString().replaceFirst("[.]mp3$", ""), f));
-                }
-            }
-
-            var client = new services.transcription.AsrSidecarClient();
-            var sb = new StringBuilder();
-            int n = 0;
-            for (var chunk : chunks) {
-                n++;
-                var prompt = new StringBuilder();
-                var audios = new java.util.ArrayList<Path>();
-                int idx = 1;
-                for (var ref : refs.entrySet()) {
-                    prompt.append("Clip %d is a voice reference: %s speaking. "
-                            .formatted(idx++, ref.getKey()));
-                    audios.add(ref.getValue());
-                }
-                prompt.append(("Clip %d is part %d of a longer conversation. Transcribe ONLY "
-                        + "clip %d verbatim as a diarized transcript, one line per speaker turn, "
-                        + "formatted 'Name%s: text'. ").formatted(idx, n, idx,
-                        emotions ? " (delivery)" : ""));
-                if (!refs.isEmpty()) {
-                    prompt.append("Match voices against the references and use those names; "
-                            + "unmatched voices are Speaker 1, Speaker 2 consistently. ");
-                }
-                if (emotions) {
-                    prompt.append("The (delivery) tag is one to three words describing how the "
-                            + "turn is spoken, judged from the voice. ");
-                }
-                if (speakerNames != null && !speakerNames.isBlank()) {
-                    prompt.append("Speaker context: ").append(speakerNames.strip()).append(". ");
-                }
-                if (language != null && !language.isBlank()) {
-                    // Small models read a bare language hint as a translation
-                    // instruction (UAT: 'ms' hint -> Malay output for English
-                    // speech). Spell out that it is context only.
-                    prompt.append("The speakers may use '").append(language.strip())
-                            .append("' — transcribe in the ORIGINAL language actually "
-                                    + "spoken; never translate. ");
-                }
-                prompt.append("Return only the transcript lines.");
-                audios.add(chunk);
-                var text = client.qwenGenerate(audios, prompt.toString(), 2048);
-                sb.append(text.strip()).append('\n');
-            }
-            return "Diarized transcript of %s (local Qwen2-Audio, %d chunk(s)):\n\n%s"
-                    .formatted(fileName, chunks.size(), sb.toString().strip());
-        } catch (IOException e) {
-            throw new services.transcription.TranscriptionException(
-                    "local diarization failed: " + e.getMessage(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new services.transcription.TranscriptionException("interrupted", e);
-        } finally {
-            if (tmpDir != null) {
-                try (var files = Files.list(tmpDir)) {
-                    files.forEach(f -> f.toFile().delete());
-                } catch (IOException _) { /* best-effort */ }
-                tmpDir.toFile().delete();
-            }
         }
     }
 

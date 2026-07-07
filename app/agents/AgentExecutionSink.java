@@ -88,7 +88,7 @@ public interface AgentExecutionSink {
 
     /**
      * JCLAW-228/562: persist a tool-call assistant turn AND inline the tool-produced attachments onto
-     * it ({@code generate_image}'s image, {@code diarize_audio}'s per-speaker voice clips). The default
+     * it ({@code generate_image}'s image). The default
      * ignores the attachments — sinks with no chat surface (e.g. {@code TaskRunSink}) fall back to the
      * plain overload; {@link ConversationSink} overrides to attach them via
      * {@code AttachmentService.persistGeneratedAttachment} so they render in chat.

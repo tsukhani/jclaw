@@ -136,10 +136,10 @@ public final class AttachmentService {
     }
 
     /**
-     * As {@link #persistGeneratedImage} for any tool-produced content (JCLAW-562: the diarize_audio
-     * per-speaker voice clips). {@code displayFilename} overrides the default
-     * {@code generated-<timestamp>} chip name — clip lineups name their clips {@code voice-N.wav} so
-     * the operator can tell them apart; the on-disk leaf stays uuid-keyed either way.
+     * As {@link #persistGeneratedImage} for any tool-produced content
+     * (JCLAW-562). {@code displayFilename} overrides the default
+     * {@code generated-<timestamp>} chip name when a tool wants stable,
+     * meaningful attachment names.
      */
     public static MessageAttachment persistGeneratedAttachment(Agent agent, Message message, byte[] bytes,
             String mimeType, String generationMetadata, String displayFilename) {
@@ -232,9 +232,6 @@ public final class AttachmentService {
             case "image/jpeg" -> "jpg";
             case "image/webp" -> "webp";
             case "image/gif" -> "gif";
-            // JCLAW-562: the diarize_audio voice-lineup result rides the same
-            // generated-attachment path as images.
-            case "audio/wav" -> "wav";
             default -> "png";
         };
     }

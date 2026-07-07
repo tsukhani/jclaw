@@ -4,7 +4,7 @@ import models.MessageAttachment;
 
 /**
  * Single contract for any transcription backend in jclaw — the local
- * whisper-jni engine and the cloud OpenAI / OpenRouter clients all
+ * GPU-sidecar whisper engine and the cloud OpenAI / OpenRouter clients all
  * implement this so the message-pipeline orchestrator (JCLAW-165) can
  * switch between them via the {@code transcription.provider} config key
  * without caring about the underlying transport.

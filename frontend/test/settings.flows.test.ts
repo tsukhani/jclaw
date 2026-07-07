@@ -1360,7 +1360,6 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(hit!.value).toBe('google/gemini-3-flash-preview')
   })
 
-
   it('POSTs transcription.provider on @change of an enabled cloud-provider radio', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerEndpoint('/api/agents', () => [])

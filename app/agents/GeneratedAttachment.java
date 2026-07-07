@@ -14,7 +14,6 @@ package agents;
  * @param metadata small JSON blob (prompt, model, labels) stored on the attachment row
  * @param filename display filename for the chat chip, or {@code null} for the
  *                 default {@code generated-<timestamp>} name — the
- *                 diarize_audio clip lineup names its clips {@code voice-N.wav}
  *                 so the user can tell them apart
  */
 public record GeneratedAttachment(byte[] bytes, String mimeType, String metadata, String filename) {

@@ -51,10 +51,6 @@ class SidecarState:
         # JCLAW-650: serializes ALL worker line-protocol I/O — status and
         # prefetch share the worker with transcription.
         self.asr_io_lock = threading.Lock()
-        # JCLAW-656: the local audio-LLM (Qwen2-Audio) worker, own protocol
-        # lock; inference itself still serializes on run_lock (one GPU).
-        self._qwen_worker = None
-        self.qwen_io_lock = threading.Lock()
 
     def asr_worker(self):
         """JCLAW-649: persistent ASR worker — one-shot calls paid a python
@@ -74,25 +70,6 @@ class SidecarState:
         if not ready or not json.loads(ready).get("ready"):
             raise RuntimeError("asr worker failed to start: %r" % ready)
         self._asr_worker = w
-        return w
-
-    def qwen_worker(self):
-        """JCLAW-656: persistent Qwen2-Audio worker (model load ~5-10s,
-        kept resident). Caller must hold qwen_io_lock."""
-        import subprocess
-        w = self._qwen_worker
-        if w is not None and w.poll() is None:
-            return w
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        sys.stderr.write("[asr-sidecar] spawning qwen-audio worker\n")
-        w = subprocess.Popen(["uv", "run", "qwen_audio.py"],
-                             cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             text=True, bufsize=1)
-        ready = w.stdout.readline()
-        if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("qwen-audio worker failed to start: %r" % ready)
-        self._qwen_worker = w
         return w
 
     def touch(self):
@@ -147,28 +124,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"error": str(e)})
             return
-        if self.path == "/qwen/status":
-            # JCLAW-656: Settings-page status — pure filesystem check, no
-            # worker spawn (the first uv env resolution takes minutes).
-            self.state.touch()
-            import platform as _pf
-            apple = sys.platform == "darwin" and _pf.machine() == "arm64"
-            repo = ("mlx-community/Qwen2-Audio-7B-Instruct-4bit" if apple
-                    else "Qwen/Qwen2-Audio-7B-Instruct")
-            root = os.path.join(os.path.expanduser("~/.cache/huggingface"), "hub",
-                                "models--" + repo.replace("/", "--"), "blobs")
-            total = 0
-            if os.path.isdir(root):
-                for f in os.listdir(root):
-                    try:
-                        total += os.path.getsize(os.path.join(root, f))
-                    except OSError:
-                        pass
-            self._send_json(200, {"installed": total > 5e8,
-                                  "backend": "mlx" if apple else "transformers",
-                                  "model": repo,
-                                  "sizeGb": round(total / 1e9, 2)})
-            return
         if self.path == "/health":
             # JCLAW-641: a health probe signals imminent use — touching the
             # idle clock closes the evict race between the JVM's check and
@@ -218,47 +173,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/transcribe":
             self._handle_transcribe()
             return
-        if self.path == "/qwen":
-            self._handle_qwen()
-            return
         self._send_json(404, {"error": "unknown path %s" % self.path})
-
-    def _handle_qwen(self):
-        """JCLAW-656: local audio-LLM generation — multi-audio + prompt in,
-        text out. One inference at a time (run_lock: one GPU)."""
-        self.state.touch()
-        try:
-            req = self._read_json()
-        except (ValueError, UnicodeDecodeError) as e:
-            self._send_json(400, {"error": "invalid JSON body: %s" % e})
-            return
-        audios = req.get("audios") or []
-        if not audios or not all(os.path.isfile(a) for a in audios):
-            self._send_json(400, {"error": "audios must be existing files: %r" % audios})
-            return
-        if not self.state.run_lock.acquire(blocking=False):
-            self._send_json(409, {"error": "another inference is already in progress"})
-            return
-        try:
-            with self.state.qwen_io_lock:
-                w = self.state.qwen_worker()
-                w.stdin.write(json.dumps({"audios": audios,
-                                          "prompt": req.get("prompt"),
-                                          "max_tokens": req.get("max_tokens")}) + "\n")
-                w.stdin.flush()
-                line = w.stdout.readline()
-            if not line:
-                self.state._qwen_worker = None
-                raise RuntimeError("qwen-audio worker died mid-request")
-            payload = json.loads(line)
-            if "error" in payload:
-                raise RuntimeError(payload["error"])
-            self._send_json(200, payload)
-        except Exception as e:  # noqa: BLE001
-            self._send_json(500, {"error": str(e)})
-        finally:
-            self.state.touch()
-            self.state.run_lock.release()
 
     def _handle_transcribe(self):
         """JCLAW-627: GPU ASR via the transcribe.py script env."""

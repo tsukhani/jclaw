@@ -7,7 +7,6 @@ import models.MessageAttachment;
 import models.MessageRole;
 import services.AttachmentService;
 import services.EventLogger;
-import services.MimeExtensions;
 import services.Tx;
 import services.caption.CaptionRouter;
 import services.caption.ImageCaptionService;
@@ -60,18 +59,6 @@ import java.util.concurrent.TimeoutException;
  * is the orchestrator that does both phases together.
  */
 public final class VisionAudioAssembler {
-
-    /**
-     * OpenAI {@code input_audio.format} values we know the shared
-     * adapter can emit. JCLAW-132: {@link MimeExtensions} reverse-looks
-     * a MIME against this list to derive the format hint; the underlying
-     * data lives in Play's {@code mime-types.properties} +
-     * {@code mimetype.*} application config, so adding a new audio
-     * format is a config change, not a code edit.
-     */
-    private static final String[] AUDIO_FORMAT_CANDIDATES = {
-            "mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "opus", "weba"
-    };
 
     /**
      * Bounded ceiling for awaiting a Whisper future during message

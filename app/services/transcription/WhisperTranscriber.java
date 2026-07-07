@@ -19,38 +19,17 @@ import java.util.concurrent.TimeUnit;
  * whisper.cpp JNI engine this class was named for is retired (614 pattern:
  * one best implementation, actionable error when its prerequisite — just
  * {@code uv}; whisper weights are ungated — is missing). The name survives
- * because {@link Segment} and {@link #ffmpegToPcmF32} are load-bearing
- * vocabulary across the pipeline and tests, the same call as
- * {@link DiarizationRouter}.
- *
- * <p>ffmpeg integration: the DIARIZATION pipeline wants raw PCM float32 at
- * 16 kHz mono ({@link #ffmpegToPcmF32}); the ASR sidecar reads the audio
- * file directly and needs no ffmpeg.
+ * because {@link Segment} is load-bearing vocabulary across the pipeline
+ * and tests. The sidecar reads audio files directly — no ffmpeg step.
  */
 public final class WhisperTranscriber {
 
-    /** Hard ceiling on ffmpeg conversion. PCM float32 16 kHz mono is roughly
-     *  64 KB/sec; ten minutes of audio takes a fraction of a second to
-     *  convert on any modern CPU. Five-minute timeout is a defensive ceiling
-     *  for the pathological case where ffmpeg hangs on a malformed input. */
-    private static final long FFMPEG_TIMEOUT_SECONDS = 300;
-
     private WhisperTranscriber() {}
 
-    /**
-     * One recognised segment with whisper.cpp's native timestamps converted
-     * to milliseconds ({@code whisper_full_get_segment_t0/t1} report
-     * centiseconds; we multiply by 10 so callers never see the odd unit).
-     */
-    /** JCLAW-635: the confidence triple (whisper's standard hallucination
-     *  gates) rides on every segment; legacy callers get neutral defaults
-     *  via the compat constructor. */
-    public record Segment(long startMs, long endMs, String text,
-                          double noSpeechProb, double avgLogprob, double compressionRatio) {
-        public Segment(long startMs, long endMs, String text) {
-            this(startMs, endMs, text, 0.0, 0.0, 1.0);
-        }
-    }
+    /** One recognised segment, timestamps in milliseconds. (The JCLAW-635
+     *  confidence triple was removed with the local diarization pipeline —
+     *  its hallucination gates were the only reader.) */
+    public record Segment(long startMs, long endMs, String text) {}
 
     /**
      * Transcribe an audio file using the named whisper model. Blocks the

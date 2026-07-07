@@ -99,9 +99,8 @@ public final class LocalSidecarDaemon {
     /**
      * Spawn the sidecar serving {@code model}, passing {@code hfToken} (when
      * non-blank) to the child as {@code HF_TOKEN}. The token parameter exists
-     * so a facade can resolve the token from more than one config key — the
-     * diarization sidecar reuses the image-generation token when its own is
-     * blank (JCLAW-565 follow-up). The caller must hold {@link #lock()}.
+     * so a facade can pass an explicit value (or null to force no token —
+     * the ASR sidecar's weights are ungated and need none). The caller must hold {@link #lock()}.
      */
     public void spawn(String model, String hfToken) {
         if (System.currentTimeMillis() < spawnFailedUntil) {

@@ -14,7 +14,7 @@ unchanged while wall clock drops 5-20x:
   - plain CPU:     faster-whisper int8 (still beats whisper.cpp)
 
 Runs in its OWN uv script env, shelled from serve.py per /transcribe call
-(the msdd.py/separate.py pattern).
+(one uv-managed script per model family).
 
 usage (one-shot): uv run transcribe.py <audio> <model-size> [language]
 usage (worker):   uv run transcribe.py --worker
@@ -57,9 +57,7 @@ def run_mlx(audio, size, language):
     # aligner (wav2vec2 Viterbi), the WhisperX principle (JCLAW-651 r2).
     result = mlx_whisper.transcribe(audio, path_or_hf_repo=repo, language=language,
                                     condition_on_previous_text=False)
-    return [(s["start"], s["end"], s["text"],
-             s.get("no_speech_prob", 0.0), s.get("avg_logprob", 0.0),
-             s.get("compression_ratio", 1.0), [])
+    return [(s["start"], s["end"], s["text"])
             for s in result["segments"]]
 
 
@@ -72,13 +70,10 @@ def run_ct2(audio, size, language):
         model = WhisperModel(size, device="cpu", compute_type="int8")
         sys.stderr.write("[transcribe] faster-whisper %s on cpu/int8\n" % size)
     # JCLAW-635: VAD pre-filter suppresses hallucination on silence/music;
-    # the confidence triple (no_speech_prob / avg_logprob /
-    # compression_ratio) rides through so the JVM can gate or flag.
     segments, _ = model.transcribe(audio, language=language,
                                    condition_on_previous_text=False,
                                    vad_filter=True)
-    return [(s.start, s.end, s.text,
-             s.no_speech_prob, s.avg_logprob, s.compression_ratio, [])
+    return [(s.start, s.end, s.text)
             for s in segments]
 
 
@@ -105,17 +100,15 @@ def run_ct2_cached(audio, size, language):
     segments, _ = model.transcribe(audio, language=language,
                                    condition_on_previous_text=False,
                                    vad_filter=True)
-    return [(s.start, s.end, s.text,
-             s.no_speech_prob, s.avg_logprob, s.compression_ratio, [])
+    return [(s.start, s.end, s.text)
             for s in segments]
 
 
 def _payload(triples):
     return {"segments": [
         {"startMs": int(round(s * 1000)), "endMs": int(round(e * 1000)),
-         "text": t.strip(), "noSpeechProb": round(nsp, 4),
-         "avgLogprob": round(alp, 4), "compressionRatio": round(cr, 4)}
-        for s, e, t, nsp, alp, cr, words in triples]}
+         "text": t.strip()}
+        for s, e, t in triples]}
 
 
 def _engine_repo(size):
