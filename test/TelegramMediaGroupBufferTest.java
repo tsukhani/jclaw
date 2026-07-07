@@ -2,7 +2,7 @@ import channels.InboundMessage;
 import channels.PendingAttachment;
 import channels.TelegramMediaGroupBuffer;
 import models.MessageAttachment;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
 import java.util.List;

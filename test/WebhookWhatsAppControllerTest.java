@@ -3,8 +3,10 @@ import models.EventLog;
 import models.WhatsAppBinding;
 import models.WhatsAppConversationWindow;
 import models.WhatsAppTransport;
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.test.Fixtures;
+import play.test.FunctionalTest;
 import services.EventLogger;
 import services.Tx;
 

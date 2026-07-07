@@ -2,8 +2,10 @@ import channels.ChannelTransport;
 import models.Agent;
 import models.ChannelConfig;
 import models.TelegramBinding;
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.test.Fixtures;
+import play.test.UnitTest;
 import services.ChannelStatusService;
 import services.Tx;
 

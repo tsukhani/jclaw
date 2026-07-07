@@ -1,6 +1,13 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
-import channels.*;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
+import channels.Channel;
+import channels.ChannelRegistry;
+import channels.ChannelTransport;
+import channels.SlackChannel;
+import channels.TelegramChannel;
+import channels.WebChannel;
+import channels.WhatsAppChannel;
 import com.google.gson.JsonParser;
 
 import javax.crypto.Mac;

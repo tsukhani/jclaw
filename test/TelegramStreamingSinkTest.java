@@ -1,9 +1,10 @@
 import channels.TelegramChannel;
 import channels.TelegramStreamingSink;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import play.test.*;
+import play.test.UnitTest;
 
 /**
  * Unit tests for {@link TelegramStreamingSink}. We exercise the pure-logic

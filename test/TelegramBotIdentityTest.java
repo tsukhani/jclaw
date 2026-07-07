@@ -1,8 +1,10 @@
 import channels.TelegramBotIdentity;
 import channels.TelegramBotIdentityTestHooks;
 import channels.TelegramChannel;
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.test.FunctionalTest;
 
 /**
  * Coverage for {@link TelegramBotIdentity} (JCLAW-371). The bot user id is

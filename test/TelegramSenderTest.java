@@ -1,7 +1,9 @@
 import channels.TelegramChannel;
 import channels.TelegramOutboundPlanner;
 import com.google.gson.JsonParser;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import play.test.UnitTest;
 

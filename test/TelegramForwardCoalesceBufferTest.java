@@ -1,7 +1,8 @@
 import channels.InboundMessage;
 import channels.PendingAttachment;
 import channels.TelegramForwardCoalesceBuffer;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
 import java.util.List;

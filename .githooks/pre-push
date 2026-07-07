@@ -71,7 +71,7 @@ fi
 # Import-hygiene gate (code-audit follow-up): production code must have no wildcard
 # imports, and import order must be canonical (Spotless). Both are fast — run them
 # before the slower test suite so a hygiene slip fails the push immediately.
-wildcards=$(cd "$repo_root" && grep -rlE '^import [a-z][[:alnum:]_.]*\.\*;' app/ 2>/dev/null || true)
+wildcards=$(cd "$repo_root" && grep -rlE '^import (static )?[a-z][[:alnum:]_.]*\.\*;' app/ test/ 2>/dev/null || true)
 if [[ -n "$wildcards" ]]; then
     echo "[jclaw pre-push] Wildcard imports are banned in app/ — found in:" >&2
     echo "$wildcards" >&2

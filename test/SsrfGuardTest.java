@@ -1,5 +1,5 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 import utils.SsrfGuard;
 
 import java.net.InetAddress;

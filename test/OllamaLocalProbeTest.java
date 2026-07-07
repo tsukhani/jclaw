@@ -1,5 +1,6 @@
 import com.sun.net.httpserver.HttpServer;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.OllamaLocalProbe;
 

@@ -1,7 +1,8 @@
 import channels.TelegramAccessPolicy;
 import channels.TelegramChannel;
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 
 /**
  * Unit coverage for the JCLAW-371 access matrix in {@link TelegramAccessPolicy}.

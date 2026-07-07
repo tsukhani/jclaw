@@ -1,6 +1,12 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
-import models.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.test.Fixtures;
+import play.test.UnitTest;
+import models.Agent;
+import models.Conversation;
+import models.Message;
+import models.MessageAttachment;
+import models.MessageRole;
 import services.AgentService;
 
 import java.nio.file.Files;

@@ -1,5 +1,7 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 import services.NotificationBus;
 
 import java.util.ArrayList;

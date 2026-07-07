@@ -1,5 +1,6 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.Test;
+import play.test.Fixtures;
+import play.test.UnitTest;
 import agents.SkillLoader;
 import services.AgentService;
 

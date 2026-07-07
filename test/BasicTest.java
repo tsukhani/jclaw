@@ -1,6 +1,7 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
-import models.*;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
+import models.ChannelType;
+import models.MessageRole;
 import utils.GsonHolder;
 
 class BasicTest extends UnitTest {

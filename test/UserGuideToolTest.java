@@ -1,5 +1,8 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 import tools.UserGuideTool;
 
 import java.nio.file.Files;

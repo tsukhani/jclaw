@@ -1,5 +1,7 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import play.test.FunctionalTest;
+import play.test.UnitTest;
 import tools.JClawApiTool;
 
 /**

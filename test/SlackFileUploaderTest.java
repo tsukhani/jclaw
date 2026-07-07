@@ -1,7 +1,9 @@
 import channels.SlackFileUploader;
 import channels.SlackFileUploader.UploadUrl;
 import channels.SlackFileUploader.Uploader;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
 import java.io.File;

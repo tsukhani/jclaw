@@ -1,5 +1,6 @@
-import okhttp3.*;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import tools.WebFetchTool;
 import models.Agent;
@@ -9,6 +10,12 @@ import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.TimeUnit;
+import okhttp3.Interceptor;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 
 /**
@@ -86,7 +93,7 @@ class WebFetchToolTest extends UnitTest {
                 .code(200)
                 .message("OK")
                 .body(ResponseBody.create(body,
-                        okhttp3.MediaType.parse(contentType)));
+                        MediaType.parse(contentType)));
     }
 
     private static Response.Builder redirect(String location) {

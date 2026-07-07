@@ -5,10 +5,13 @@ import channels.TelegramPollingRunnerTestHooks;
 import jobs.TelegramCommandsRegistrationJob;
 import models.Agent;
 import models.TelegramBinding;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import play.test.*;
+import play.test.Fixtures;
+import play.test.FunctionalTest;
 import services.Tx;
 
 import java.util.function.Supplier;

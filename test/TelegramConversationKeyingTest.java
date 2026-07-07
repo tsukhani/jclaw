@@ -1,6 +1,6 @@
 import agents.AgentRunner;
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 
 /**
  * JCLAW-370: unit coverage for the two pure helpers that both Telegram

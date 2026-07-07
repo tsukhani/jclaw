@@ -7,7 +7,9 @@ import channels.TelegramPollingRunnerTestHooks;
 import models.Agent;
 import models.EventLog;
 import models.TelegramBinding;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.telegram.telegrambots.longpolling.BotSession;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.interfaces.LongPollingUpdateConsumer;
@@ -15,7 +17,8 @@ import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateC
 import org.telegram.telegrambots.meta.TelegramUrl;
 import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
 import org.telegram.telegrambots.meta.api.objects.Update;
-import play.test.*;
+import play.test.Fixtures;
+import play.test.FunctionalTest;
 import services.EventLogger;
 import services.Tx;
 

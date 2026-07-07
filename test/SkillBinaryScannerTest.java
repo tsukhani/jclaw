@@ -1,5 +1,8 @@
-import org.junit.jupiter.api.*;
-import play.test.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 import services.ConfigService;
 import services.SkillBinaryScanner;
 import services.scanners.MalwareBazaarScanner;
