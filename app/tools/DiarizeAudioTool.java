@@ -55,10 +55,23 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     public static final String PROVIDER_KEY = "transcription.diarization.provider";
     public static final String MODEL_KEY = "transcription.diarization.model";
 
+    private static final String ARG_ACTION = "action";
     private static final String ARG_UUID = "attachment_uuid";
     private static final String ARG_SPEAKER_NAMES = "speaker_names";
     private static final String ARG_LANGUAGE = "language";
     private static final String ARG_EMOTIONS = "emotions";
+    private static final String ARG_SPEAKER_NAME = "speaker_name";
+
+    private static final String ACTION_DIARIZE = "diarize";
+    private static final String ACTION_ENROLL = "enroll_voice";
+
+    /** Speaker names become file names — path traversal is rejected here. */
+    private static final java.util.regex.Pattern NAME_PATTERN =
+            java.util.regex.Pattern.compile("^[\\p{L}\\p{N} ._-]{1,60}$");
+
+    /** Reference clips capped to keep the multi-audio request bounded. */
+    private static final int MAX_REFERENCE_CLIPS = 8;
+    private static final int REFERENCE_SECONDS = 8;
 
     private static final Gson GSON = new Gson();
 
@@ -79,8 +92,13 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 host is Anthony, the guest is Firdaus") so turns carry real names instead of \
                 Speaker 1/Speaker 2. Set 'emotions' true when the user asks for emotions or tone \
                 — each turn gets a perceived-emotion tag judged from the voice. 'language' \
-                (ISO 639-1) hints the recording's language when known. Requires a configured diarization model; if none is set the tool says so — \
-                relay that to the user rather than retrying.""";
+                (ISO 639-1) hints the recording's language when known. Known voices are matched \
+                automatically: action 'enroll_voice' with 'speaker_name' saves a short reference \
+                sample of the attachment's voice (use it when the user asks to remember/enroll a \
+                voice — the attachment should contain ONLY that person speaking), and every later \
+                diarization sends the stored samples along so the model labels matching voices by \
+                name without guessing. Requires a configured diarization model; if none is set the \
+                tool says so — relay that to the user rather than retrying.""";
     }
 
     @Override
@@ -93,6 +111,15 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
+                        ARG_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of(ACTION_DIARIZE, ACTION_ENROLL),
+                                SchemaKeys.DESCRIPTION,
+                                "Defaults to 'diarize'. 'enroll_voice' saves the attachment as a "
+                                        + "voice reference for 'speaker_name'."),
+                        ARG_SPEAKER_NAME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION,
+                                "enroll_voice only: the person's name — future diarized "
+                                        + "transcripts label this voice with it."),
                         ARG_UUID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
                                 "UUID of the audio attachment to use. Omit to use the most recent "
@@ -129,6 +156,13 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return "Error: invalid arguments for " + TOOL_NAME + ".";
         }
 
+        var action = optString(args, ARG_ACTION);
+        if (action != null && !action.isBlank()
+                && !ACTION_DIARIZE.equals(action) && !ACTION_ENROLL.equals(action)) {
+            return "Error: unknown action '%s' (expected %s or %s).".formatted(
+                    action, ACTION_DIARIZE, ACTION_ENROLL);
+        }
+
         var provider = ConfigService.get(PROVIDER_KEY, "");
         var model = ConfigService.get(MODEL_KEY, "");
         if (provider.isBlank() || model.isBlank()) {
@@ -159,22 +193,27 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return "Error: the audio file for attachment %s is missing from storage.".formatted(att.uuid);
         }
 
+        if (ACTION_ENROLL.equals(action)) {
+            return enrollVoice(path, optString(args, ARG_SPEAKER_NAME));
+        }
+
         try {
             var audio = services.transcription.LlmAudio.prepare(path, att.mimeType);
             boolean emotions = args.has(ARG_EMOTIONS) && !args.get(ARG_EMOTIONS).isJsonNull()
                     && args.get(ARG_EMOTIONS).getAsBoolean();
+            var references = loadReferences();
             var prompt = buildPrompt(optString(args, ARG_SPEAKER_NAMES),
-                    optString(args, ARG_LANGUAGE), emotions);
+                    optString(args, ARG_LANGUAGE), emotions, references.keySet());
             String transcript;
             try {
-                transcript = chatWithAudio(baseUrl, provider, model, prompt, audio.base64(), audio.format());
+                transcript = chatWithAudio(baseUrl, provider, model, prompt,
+                        audio.base64(), audio.format(), references);
             } catch (IOException first) {
-                // Routers load-balance a model id across upstream hosts and
-                // not all of them accept input_audio — a 4xx here is often a
-                // per-request routing blip (measured: 4/4 immediate retries
-                // succeeded after one such 400). One retry before giving up.
+                // One retry: routers occasionally land a request on an
+                // upstream host without input_audio support.
                 play.Logger.info("DiarizeAudioTool: retrying after %s", first.getMessage());
-                transcript = chatWithAudio(baseUrl, provider, model, prompt, audio.base64(), audio.format());
+                transcript = chatWithAudio(baseUrl, provider, model, prompt,
+                        audio.base64(), audio.format(), references);
             }
             return "Diarized transcript of %s (via %s %s):\n\n%s"
                     .formatted(att.originalFilename, provider, model, transcript);
@@ -186,17 +225,24 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     // ------------------------------------------------------------------ //
 
-    private static String buildPrompt(String speakerNames, String language, boolean emotions) {
+    private static String buildPrompt(String speakerNames, String language, boolean emotions,
+                                      java.util.Set<String> referenceNames) {
         var sb = new StringBuilder("""
                 Listen to the attached audio and produce a complete diarized transcript. \
                 One line per speaker turn, formatted exactly as "SpeakerName: text". \
                 Preserve every interjection as its own turn (even single words), and \
                 transcribe verbatim — keep stutters, fillers and code-switching as spoken. \
                 Return ONLY the transcript lines, no preamble or commentary.""");
+        if (!referenceNames.isEmpty()) {
+            sb.append("\nVoice reference clips precede the recording, each announced with its "
+                    + "person's name. Match the recording's voices against them ACOUSTICALLY and "
+                    + "label matching turns with those names; label any voice that matches no "
+                    + "reference Speaker 1, Speaker 2, ... consistently.");
+        }
         if (speakerNames != null && !speakerNames.isBlank()) {
-            sb.append("\nThe speakers are known: ").append(speakerNames.strip())
-                    .append(". Label every turn with these names.");
-        } else {
+            sb.append("\nAdditional speaker context: ").append(speakerNames.strip())
+                    .append(". Label turns with these names where it applies.");
+        } else if (referenceNames.isEmpty()) {
             sb.append("\nLabel the voices Speaker 1, Speaker 2, ... consistently throughout.");
         }
         if (language != null && !language.isBlank()) {
@@ -215,14 +261,21 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      *  content part — the same wire shape VisionAudioAssembler emits for
      *  audio-capable chat models (JCLAW-132). */
     private static String chatWithAudio(String baseUrl, String provider, String model,
-                                        String prompt, String base64, String format)
+                                        String prompt, String base64, String format,
+                                        Map<String, String> references)
             throws IOException {
+        var content = new java.util.ArrayList<Map<String, Object>>();
+        for (var ref : references.entrySet()) {
+            content.add(Map.of("type", "text", "text",
+                    "Voice reference — this is %s speaking:".formatted(ref.getKey())));
+            content.add(Map.of("type", "input_audio",
+                    "input_audio", Map.of("data", ref.getValue(), "format", "mp3")));
+        }
+        content.add(Map.of("type", "text", "text", prompt));
         var inner = new LinkedHashMap<String, Object>();
         inner.put("data", base64);
         if (!format.isEmpty()) inner.put("format", format);
-        var content = List.of(
-                Map.of("type", "text", "text", prompt),
-                Map.of("type", "input_audio", "input_audio", inner));
+        content.add(Map.of("type", "input_audio", "input_audio", inner));
         var body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("temperature", 0);
@@ -284,6 +337,64 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         } catch (RuntimeException _) {
             return null;
         }
+    }
+
+    /** Where the named reference clips live: data/voice-refs/<Name>.mp3. */
+    static Path voiceRefsDir() {
+        return Path.of("data", "voice-refs");
+    }
+
+    /** Save a short mono MP3 sample of the attachment as <name>'s voice. */
+    private static String enrollVoice(Path audio, String name) {
+        if (name == null || name.isBlank() || !NAME_PATTERN.matcher(name.strip()).matches()) {
+            return "Error: enroll_voice needs a plain 'speaker_name' (letters, digits, spaces, "
+                    + "dots, dashes; up to 60 characters).";
+        }
+        var clean = name.strip();
+        try {
+            Files.createDirectories(voiceRefsDir());
+            var dest = voiceRefsDir().resolve(clean + ".mp3");
+            var tmp = Files.createTempFile("jclaw-voice-ref-", ".mp3");
+            try {
+                var proc = new ProcessBuilder("ffmpeg", "-y", "-i", audio.toString(),
+                        "-t", String.valueOf(REFERENCE_SECONDS), "-ac", "1", "-b:a", "96k",
+                        tmp.toString()).redirectErrorStream(true).start();
+                String output = new String(proc.getInputStream().readAllBytes());
+                if (proc.waitFor() != 0) {
+                    return "Error: could not extract a voice sample (%s).".formatted(
+                            output.substring(Math.max(0, output.length() - 200)));
+                }
+                Files.move(tmp, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            } finally {
+                Files.deleteIfExists(tmp);
+            }
+            return ("Enrolled %s's voice (first %d seconds of the recording). Future diarized "
+                    + "transcripts will label this voice by name. Note: the sample is sent to the "
+                    + "configured cloud model with each diarization.").formatted(clean, REFERENCE_SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "Error: interrupted while extracting the voice sample.";
+        } catch (IOException e) {
+            return "Error: could not save the voice reference: " + e.getMessage();
+        }
+    }
+
+    /** Stored reference clips as name -> base64 MP3, oldest first, capped. */
+    private static Map<String, String> loadReferences() {
+        var out = new java.util.LinkedHashMap<String, String>();
+        var dir = voiceRefsDir();
+        if (!Files.isDirectory(dir)) return out;
+        try (var files = Files.list(dir)) {
+            var clips = files.filter(f -> f.getFileName().toString().endsWith(".mp3"))
+                    .sorted().limit(MAX_REFERENCE_CLIPS).toList();
+            for (var clip : clips) {
+                var name = clip.getFileName().toString().replaceFirst("[.]mp3$", "");
+                out.put(name, java.util.Base64.getEncoder().encodeToString(Files.readAllBytes(clip)));
+            }
+        } catch (IOException e) {
+            play.Logger.warn("DiarizeAudioTool: voice references unavailable: %s", e.getMessage());
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ //
