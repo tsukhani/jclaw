@@ -249,10 +249,13 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             sb.append("\nThe recording is primarily in '").append(language.strip()).append("'.");
         }
         if (emotions) {
-            sb.append("\nAfter each speaker name, add the speaker's perceived emotion for that "
-                    + "turn in parentheses — judge it from the tone of voice, not the words: "
-                    + "one of happy, sad, angry, disgust, fear, surprised, neutral. "
-                    + "Format: \"SpeakerName (emotion): text\".");
+            sb.append("\nAfter each speaker name, add in parentheses a rich one-to-three-word "
+                    + "description of HOW that turn is delivered — judge it from the voice's "
+                    + "prosody (tone, pace, energy, attitude), not just the words. Be specific "
+                    + "and varied, e.g. reflective, amused, emphatic, playful and dismissive, "
+                    + "challenging, sarcastic, frustrated, interrupting and resolute, defiant "
+                    + "and deeply passionate, calm. Avoid defaulting to 'neutral' — every turn "
+                    + "is delivered SOME way. Format: \"SpeakerName (delivery): text\".");
         }
         return sb.toString();
     }
