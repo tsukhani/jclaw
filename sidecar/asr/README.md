@@ -1,43 +1,36 @@
-# jclaw diarization sidecar (JCLAW-565)
+# jclaw ASR sidecar (JCLAW-565 lineage; ASR-only since JCLAW-654)
 
-lifecycle-owned by `services.transcription.AsrSidecarManager`. This
-sidecar is jclaw's ONLY diarization engine (JCLAW-614 scrapped the inferior
-in-process sherpa fallback, matching the image/video sidecar architecture):
-missing prerequisites or sidecar failures surface as actionable errors —
-nothing silently degrades.
-
-
-Why: the JCLAW-565 bake-off on real 2-speaker podcast audio — community-1
-DER 12.5% / pairwise F1 0.864 with the speaker count found automatically vs
-sherpa's best-tuned F1 0.799 with knife-edge threshold behavior (sherpa's
-agglomerative clustering is the ceiling; community-1's pipeline clustering and
-segmentation are jointly tuned). ~18x realtime on Apple MPS.
+Lifecycle-owned by `services.transcription.AsrSidecarManager`. GPU speech
+recognition for jclaw — the ingest transcript behind every uploaded audio
+attachment (search, previews, and the text a non-audio chat model sees).
+Local speaker diarization was removed in JCLAW-654 after the measured tier
+comparison; speaker attribution now runs through an audio-capable cloud
+chat model (the `diarize_audio` tool). Missing prerequisites surface as
+actionable errors — nothing silently degrades (the JCLAW-614 pattern,
+matching the image/video sidecar architecture).
 
 ## Protocol
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/health` | → `{status, device, model, loaded}` |
-| POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — GPU ASR: mlx-whisper (Apple silicon) / faster-whisper (CUDA, CPU int8), own uv script env (JCLAW-627) |
+| GET | `/health` | → `{status, model, loaded}` |
+| POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — mlx-whisper (Apple silicon) / faster-whisper (CUDA, CPU int8), persistent worker in its own uv script env (JCLAW-627/650) |
+| GET | `/asr/models?ids=a,b` | → per-model cached/bytesOnDisk/engine status for the Settings page |
+| POST | `/asr/prefetch` | `{model}` → downloads the host engine's weights ahead of use |
+| POST | `/shutdown` | graceful exit (JVM shutdown hook) |
 
 The audio file is passed **by path** (same host; attachments are already on
-disk). One diarization at a time; concurrent callers get `409` and queue in
-the JVM.
-
-time — the model resolves overlapping speech to the dominant/transcribable
-voice). jclaw's only consumer is a mono ASR transcript, so exclusive output
-beats handing overlap-aware segments to a naive max-overlap merge: on the
-JCLAW-565 debate benchmark it cut DER 12.5% → 7.9% with identical turn
-attribution.
+disk). One inference at a time; concurrent callers get `409` and queue on
+the JVM-wide fair lock.
 
 ## Requirements
 
-- `uv` on PATH (shared prerequisite with the image/video sidecars).
-- A Hugging Face token with the **gated** community-1 model's conditions
-  accepted (visit the model page, click "Agree and access repository").
-  the JVM passes it to this process as `HF_TOKEN`.
-- First launch resolves the Python env (torch, ~2 GB) and downloads the
-  pipeline weights (~30 MB) into `--cache-dir`.
+- `uv` on PATH (shared prerequisite with the image/video sidecars). That is
+  the ONLY prerequisite — whisper weights are ungated, no Hugging Face
+  token needed.
+- First launch resolves the Python env (mlx-whisper or faster-whisper) and
+  downloads the selected model's weights into `data/asr-models` on first
+  use (or ahead of time via the Settings page).
 
 ## Licenses / attribution
 
