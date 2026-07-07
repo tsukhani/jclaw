@@ -427,26 +427,10 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             }
 
             var client = new services.transcription.AsrSidecarClient();
-            var whisperModel = ConfigService.get("transcription.localModel", "large");
             var sb = new StringBuilder();
             int n = 0;
             for (var chunk : chunks) {
                 n++;
-                // Hybrid pass (operator decision, 2026-07-07): whisper drafts
-                // the words — its ASR is far stronger than Qwen2-Audio's —
-                // and the audio LLM only corrects by ear, attributes turns
-                // against the voice references, and tags delivery.
-                String draft;
-                try {
-                    var segments = client.transcribe(chunk, whisperModel, language);
-                    var joined = new StringBuilder();
-                    for (var seg : segments) joined.append(seg.text()).append(' ');
-                    draft = joined.toString().strip();
-                } catch (RuntimeException e) {
-                    play.Logger.warn("DiarizeAudioTool: whisper draft failed for chunk %d (%s) — "
-                            + "the audio model transcribes alone", n, e.getMessage());
-                    draft = "";
-                }
                 var prompt = new StringBuilder();
                 var audios = new java.util.ArrayList<Path>();
                 int idx = 1;
@@ -455,19 +439,10 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                             .formatted(idx++, ref.getKey()));
                     audios.add(ref.getValue());
                 }
-                prompt.append("Clip %d is part %d of a longer conversation. ".formatted(idx, n));
-                if (!draft.isEmpty()) {
-                    prompt.append("A speech recognizer produced this draft transcript of clip %d: \"%s\" "
-                            .formatted(idx, draft));
-                    prompt.append(("Listen to clip %d and produce the final diarized transcript: use "
-                            + "the draft's wording unless you clearly hear otherwise, and attribute "
-                            + "each turn to its speaker. ").formatted(idx));
-                } else {
-                    prompt.append("Transcribe ONLY clip %d verbatim as a diarized transcript. "
-                            .formatted(idx));
-                }
-                prompt.append("One line per speaker turn, formatted 'Name%s: text'. "
-                        .formatted(emotions ? " (delivery)" : ""));
+                prompt.append(("Clip %d is part %d of a longer conversation. Transcribe ONLY "
+                        + "clip %d verbatim as a diarized transcript, one line per speaker turn, "
+                        + "formatted 'Name%s: text'. ").formatted(idx, n, idx,
+                        emotions ? " (delivery)" : ""));
                 if (!refs.isEmpty()) {
                     prompt.append("Match voices against the references and use those names; "
                             + "unmatched voices are Speaker 1, Speaker 2 consistently. ");
