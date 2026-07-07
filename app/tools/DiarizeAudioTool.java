@@ -480,7 +480,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     prompt.append("Speaker context: ").append(speakerNames.strip()).append(". ");
                 }
                 if (language != null && !language.isBlank()) {
-                    prompt.append("The language is '").append(language.strip()).append("'. ");
+                    // Small models read a bare language hint as a translation
+                    // instruction (UAT: 'ms' hint -> Malay output for English
+                    // speech). Spell out that it is context only.
+                    prompt.append("The speakers may use '").append(language.strip())
+                            .append("' — transcribe in the ORIGINAL language actually "
+                                    + "spoken; never translate. ");
                 }
                 prompt.append("Return only the transcript lines.");
                 audios.add(chunk);
