@@ -26,6 +26,8 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiVideogenController extends Controller {
 
+    private static final String FIELD_STATE = "state";
+
     private static final Gson gson = INSTANCE;
 
     /** Per-request id cap — the chat only ever polls a handful of visible placeholders; this just bounds
@@ -58,7 +60,7 @@ public class ApiVideogenController extends Controller {
     private static LinkedHashMap<String, Object> toStatusRow(VideoGenerationJob job) {
         var m = new LinkedHashMap<String, Object>();
         m.put("id", job.id);
-        m.put("state", job.state.name());
+        m.put(FIELD_STATE, job.state.name());
         m.put("percent", job.percent); // real 0..100 for the local engine (JCLAW-232); null for cloud (SV-1)
         m.put("errorMessage", job.errorMessage);
         // The placeholder is filled in-place, so until a reload the chat still holds sizeBytes=0;
@@ -90,7 +92,7 @@ public class ApiVideogenController extends Controller {
     @ChatHidden("runs a GPU capability subprocess -- resource action")
     public static void probeCapability() {
         VideoCapabilityProbe.probe();
-        ApiResponses.ok("state", "probing");
+        ApiResponses.ok(FIELD_STATE, "probing");
     }
 
     /** GET /api/videogen/jobs/recent — most-recent jobs for the dashboard Recent Activity (video view). */
@@ -101,7 +103,7 @@ public class ApiVideogenController extends Controller {
         for (var job : jobs) {
             var m = new LinkedHashMap<String, Object>();
             m.put("id", job.id);
-            m.put("state", job.state.name());
+            m.put(FIELD_STATE, job.state.name());
             m.put("prompt", job.prompt);
             m.put("percent", job.percent); // real 0..100 for the local engine (JCLAW-232); null for cloud (SV-1)
             m.put("errorMessage", job.errorMessage);

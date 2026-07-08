@@ -7,8 +7,6 @@ import utils.ApiResponses;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * JCLAW-155: locks the canonical JSON envelope {@link ApiResponses} emits —
@@ -72,9 +70,9 @@ class ApiResponsesTest extends UnitTest {
         Http.Response response = new Http.Response();
         Http.Response.current.set(response);
         try {
+            var boom = new RuntimeException("boom");
             RenderJson r = assertThrows(RenderJson.class,
-                    () -> ApiResponses.errorAndLog(new RuntimeException("boom"),
-                            500, "internal_error", "kaboom"));
+                    () -> ApiResponses.errorAndLog(boom, 500, "internal_error", "kaboom"));
             Map<String, Object> b = body(r);
             assertEquals("error", b.get("type"));
             assertEquals("internal_error", b.get("code"));
