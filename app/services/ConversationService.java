@@ -7,6 +7,7 @@ import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
 import play.db.jpa.JPA;
+import services.search.LuceneIndexer;
 import services.transcription.PendingTranscripts;
 import services.transcription.TranscriptionRouter;
 import utils.JpqlFilter;
@@ -558,17 +559,26 @@ public class ConversationService {
         for (var row : agentDirs) {
             AttachmentService.deleteConversationAttachments((String) row[1], (Long) row[0]);
         }
-        // 3b. MessageAttachment first — FK from chat_message_attachment.message_id to
-        // message.id has no ON DELETE CASCADE, so the bulk Message delete below
-        // would otherwise fail with a referential-integrity violation.
-        em.createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation.id IN :ids")
+        // 3b. JCLAW-135: collect the message ids so their CONVERSATION_MESSAGE
+        // Lucene docs can be evicted after the delete. The DB cascades
+        // chat_message_attachment / message / session_compaction off the
+        // Conversation delete below (ON DELETE CASCADE, JCLAW-542), so the old
+        // hand-ordered JPQL sweep of those three tables is gone — but a bulk /
+        // cascade delete never fires Message.@PostRemove, so the full-text docs
+        // would orphan without this explicit cleanup. (Child-conversation
+        // messages are handled by the recursive call in step 1.)
+        List<Long> messageIds = em.createQuery(
+                "SELECT m.id FROM Message m WHERE m.conversation.id IN :ids", Long.class)
+                .setParameter("ids", ids).getResultList();
+        int deleted = em.createQuery("DELETE FROM Conversation c WHERE c.id IN :ids")
                 .setParameter("ids", ids).executeUpdate();
-        em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN :ids")
-                .setParameter("ids", ids).executeUpdate();
-        em.createQuery("DELETE FROM SessionCompaction sc WHERE sc.conversation.id IN :ids")
-                .setParameter("ids", ids).executeUpdate();
-        return em.createQuery("DELETE FROM Conversation c WHERE c.id IN :ids")
-                .setParameter("ids", ids).executeUpdate();
+        for (Long messageId : messageIds) {
+            LuceneIndexer.remove(LuceneIndexer.Scope.CONVERSATION_MESSAGE, messageId);
+        }
+        if (!messageIds.isEmpty()) {
+            LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
+        }
+        return deleted;
     }
 
     /**

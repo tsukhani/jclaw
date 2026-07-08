@@ -23,7 +23,7 @@ class AgentSystemTest extends UnitTest {
             "test-agent", "ws-agent", "missing-agent", "enabled-1", "disabled-1",
             "skill-agent", "xml-agent", "convo-agent", "msg-agent", "prompt-agent",
             "minimal-agent", "no-skills", "main", "window-agent", "delete-agent",
-            "soul-boot-agent", "breakdown-agent"
+            "soul-boot-agent", "breakdown-agent", "cascade-raw-parent", "cascade-raw-child"
     };
 
     @BeforeEach
@@ -737,6 +737,164 @@ class AgentSystemTest extends UnitTest {
         assertNull(ConfigService.get("agent.subtree-child.shell.bypassAllowlist"),
                 "descendant config keys must be purged");
         assertFalse(Files.exists(childWorkspace), "descendant workspace must be removed");
+    }
+
+    @Test
+    void rawAgentDeleteCascadesEveryFkLinkedTable() {
+        // JCLAW-135 AC: prove the DB-level ON DELETE CASCADE (JCLAW-542) end to
+        // end — a raw native "DELETE FROM agent" (NOT AgentService.delete, and
+        // NOT an entity remove) must clear every FK-linked descendant, including
+        // chat_message_attachment (whose FK once carried the now-false "no ON
+        // DELETE CASCADE" comment) and the subagent-run / self-agent subtree.
+        var parent = AgentService.create("cascade-raw-parent", "openrouter", "gpt-4.1");
+        var child = AgentService.create("cascade-raw-child", "openrouter", "gpt-4.1");
+        child.parentAgent = parent;
+        child.save();
+
+        var skillConfig = new models.AgentSkillConfig();
+        skillConfig.agent = parent;
+        skillConfig.skillName = "test-skill";
+        skillConfig.enabled = true;
+        skillConfig.save();
+
+        var binding = new models.AgentBinding();
+        binding.agent = parent;
+        binding.channelType = "web";
+        binding.peerId = "raw-peer";
+        binding.save();
+
+        var slack = new models.SlackBinding();
+        slack.agent = parent;
+        slack.botToken = "xoxb-cascade-raw";
+        slack.signingSecret = "sec";
+        slack.save();
+
+        var wa = new models.WhatsAppBinding();
+        wa.agent = parent;
+        wa.transport = models.WhatsAppTransport.CLOUD_API;
+        wa.phoneNumberId = "pn-cascade-raw";
+        wa.accessToken = "tok";
+        wa.enabled = true;
+        wa.save();
+
+        var grant = new models.ToolApprovalGrant();
+        grant.agent = parent;
+        grant.toolName = "shell";
+        grant.save();
+
+        var convo = new models.Conversation();
+        convo.agent = parent;
+        convo.channelType = "web";
+        convo.peerId = "raw-peer";
+        convo.save();
+
+        var childConvo = new models.Conversation();
+        childConvo.agent = child;
+        childConvo.channelType = "subagent";
+        childConvo.peerId = "raw-child-peer";
+        childConvo.parentConversation = convo;
+        childConvo.save();
+
+        var msg = new models.Message();
+        msg.conversation = convo;
+        msg.role = "user";
+        msg.content = "hello";
+        msg.save();
+
+        // The headline addition: a chat_message_attachment row hanging off the message.
+        var attachment = new models.MessageAttachment();
+        attachment.message = msg;
+        attachment.uuid = java.util.UUID.randomUUID().toString();
+        attachment.originalFilename = "note.txt";
+        attachment.storagePath = "workspace/x/attachments/1/note.txt";
+        attachment.mimeType = "text/plain";
+        attachment.sizeBytes = 12L;
+        attachment.kind = models.MessageAttachment.KIND_FILE;
+        attachment.save();
+
+        var compaction = new models.SessionCompaction();
+        compaction.conversation = convo;
+        compaction.turnCount = 2;
+        compaction.summaryTokens = 10;
+        compaction.model = "openrouter/gpt-4.1";
+        compaction.summary = "test compaction";
+        compaction.compactedAt = java.time.Instant.now();
+        compaction.save();
+
+        var task = new models.Task();
+        task.agent = parent;
+        task.name = "raw-task";
+        task.type = models.Task.Type.IMMEDIATE;
+        task.save();
+
+        var run = new models.TaskRun();
+        run.task = task;
+        run.startedAt = java.time.Instant.now();
+        run.status = models.TaskRun.Status.COMPLETED;
+        run.save();
+
+        var runMsg = new models.TaskRunMessage();
+        runMsg.taskRun = run;
+        runMsg.turnIndex = 0;
+        runMsg.role = models.MessageRole.ASSISTANT;
+        runMsg.content = "run output";
+        runMsg.save();
+
+        var subrun = new models.SubagentRun();
+        subrun.parentAgent = parent;
+        subrun.childAgent = child;
+        subrun.parentConversation = convo;
+        subrun.childConversation = childConvo;
+        subrun.startedAt = java.time.Instant.now();
+        subrun.status = models.SubagentRun.Status.RUNNING;
+        subrun.save();
+
+        var mem = new models.Memory();
+        mem.agent = parent;
+        mem.text = "remember this";
+        mem.save();
+
+        var parentId = parent.id;
+        var childId = child.id;
+        var convoId = convo.id;
+        var childConvoId = childConvo.id;
+        var msgId = msg.id;
+        var taskId = task.id;
+        var runId = run.id;
+        var subrunId = subrun.id;
+
+        // Flush seeded rows to the DB, then a RAW NATIVE SQL delete of the root
+        // agent — no JPQL, no entity remove, so no @PostRemove / JPA cascade
+        // fires; only the database's ON DELETE CASCADE does the work. Clear the
+        // stale first-level cache so the count assertions re-read from the DB.
+        var em = play.db.jpa.JPA.em();
+        em.flush();
+        em.createNativeQuery("DELETE FROM agent WHERE id = ?1")
+                .setParameter(1, parentId).executeUpdate();
+        em.clear();
+
+        // Root agent and its self-FK subtree child are both gone.
+        assertNull(Agent.findByName("cascade-raw-parent"));
+        assertNull(Agent.findByName("cascade-raw-child"), "self-FK subtree child must cascade");
+        // Every FK-linked table is empty for the deleted subtree.
+        assertEquals(0L, models.AgentToolConfig.count("agent.id = ?1", parentId));
+        assertEquals(0L, models.AgentSkillConfig.count("agent.id = ?1", parentId));
+        assertEquals(0L, models.AgentBinding.count("agent.id = ?1", parentId));
+        assertEquals(0L, models.SlackBinding.count("agent.id = ?1", parentId));
+        assertEquals(0L, models.WhatsAppBinding.count("agent.id = ?1", parentId));
+        assertEquals(0L, models.ToolApprovalGrant.count("agent.id = ?1", parentId));
+        assertEquals(0L, models.Conversation.count("agent.id = ?1", parentId));
+        assertEquals(0L, models.Conversation.count("agent.id = ?1", childId));
+        assertEquals(0L, models.Message.count("conversation.id = ?1", convoId));
+        assertEquals(0L, models.MessageAttachment.count("message.id = ?1", msgId),
+                "chat_message_attachment must cascade off the message delete");
+        assertEquals(0L, models.SessionCompaction.count("conversation.id = ?1", convoId));
+        assertEquals(0L, models.SessionCompaction.count("conversation.id = ?1", childConvoId));
+        assertEquals(0L, models.Task.count("agent.id = ?1", parentId));
+        assertEquals(0L, models.TaskRun.count("task.id = ?1", taskId));
+        assertEquals(0L, models.TaskRunMessage.count("taskRun.id = ?1", runId));
+        assertEquals(0L, models.SubagentRun.count("id = ?1", subrunId));
+        assertEquals(0L, models.Memory.count("agent.id = ?1", parentId));
     }
 
     // --- SystemPromptAssembler tests ---

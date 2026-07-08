@@ -14,6 +14,7 @@ import play.db.jpa.JPA;
 import play.libs.Crypto;
 import play.libs.F;
 import play.mvc.CookieDataCodec;
+import services.search.LuceneIndexer;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.LatencyStats;
@@ -953,21 +954,28 @@ public final class LoadTestRunner {
             JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Void>) () -> {
                 var agent = Agent.findByName(LOADTEST_AGENT_NAME);
                 if (agent != null) {
-                    // MessageAttachment first — FK has no ON DELETE CASCADE (see ConversationService.deleteByIds).
-                    JPA.em().createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation IN " +
-                            "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
+                    // JCLAW-135: collect message ids so their CONVERSATION_MESSAGE Lucene
+                    // docs can be evicted after the delete — a bulk / cascade delete never
+                    // fires Message.@PostRemove. The Conversation delete cascades
+                    // chat_message_attachment + message at the DB (ON DELETE CASCADE,
+                    // JCLAW-542), so the old explicit MessageAttachment/Message sweep is gone.
+                    List<Long> messageIds = JPA.em().createQuery(
+                            "SELECT m.id FROM Message m WHERE m.conversation IN " +
+                            "(SELECT c FROM Conversation c WHERE c.agent = :agent)", Long.class)
                             .setParameter(PARAM_AGENT, agent)
-                            .executeUpdate();
-                    JPA.em().createQuery("DELETE FROM Message m WHERE m.conversation IN " +
-                            "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
-                            .setParameter(PARAM_AGENT, agent)
-                            .executeUpdate();
+                            .getResultList();
                     JPA.em().createQuery("DELETE FROM Conversation c WHERE c.agent = :agent")
                             .setParameter(PARAM_AGENT, agent)
                             .executeUpdate();
                     JPA.em().createQuery("DELETE FROM EventLog e WHERE e.agentId = :name")
                             .setParameter("name", LOADTEST_AGENT_NAME)
                             .executeUpdate();
+                    for (Long messageId : messageIds) {
+                        LuceneIndexer.remove(LuceneIndexer.Scope.CONVERSATION_MESSAGE, messageId);
+                    }
+                    if (!messageIds.isEmpty()) {
+                        LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
+                    }
                 }
                 return null;
             });
