@@ -130,6 +130,16 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
 
         SchedulerBuilder builder = Scheduler.create(datasource, List.of(jclawTask))
                 .pollingInterval(Duration.ofSeconds(2))
+                // Bound Scheduler.stop()'s internal wait BELOW ShutdownJob's
+                // 15s parallel-shutdown cap. Without this, stop() waits
+                // db-scheduler's 30s default, the ShutdownJob latch abandons
+                // the await (which does NOT kill the poll threads), Play dev
+                // reload swaps classloaders, and the orphaned scheduler polls
+                // the closed Hikari pool every 2s forever — the "HikariDataSource
+                // has been closed / Will keep running" ERROR spam (14k+
+                // occurrences in one dev morning). At 5s, stop() completes and
+                // the executor is force-terminated inside the shutdown window.
+                .shutdownMaxWait(Duration.ofSeconds(5))
                 // JCLAW-258: shorten heartbeat from db-scheduler's default to
                 // 30 s so a crash-interrupted fire surfaces faster. 30 s × 4
                 // missed = 120 s before db-scheduler declares an execution
