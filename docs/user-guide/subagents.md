@@ -222,3 +222,17 @@ Subagents fan out work *now*, in this turn. The next two sections cover fanning 
 - [Tasks](/guide#tasks) — scheduled work the agent figures out at fire time.
 - [Reminders](/guide#reminders) — scheduled pre-written nudges that skip the LLM entirely.
 - [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.
+
+
+## Where coding output lands
+
+Every `runtime=acp` coding session runs inside its own directory under the
+child agent's workspace: `workspace/<agent>/coding/<session>/`, where
+`<session>` is derived from the task (the task "create fibonacci program"
+runs in `coding/create-fibonacci-program/`). A repeated task never reuses a
+previous session's directory — collisions get `-2`, `-3`, … suffixes.
+The run's directory is recorded on the run itself (visible in the run
+monitor), and because artifacts live in the workspace, the agent's
+filesystem and documents tools can read them directly in later turns.
+Setting `subagent.acp.workdir` overrides this entirely and confines every
+session to the configured directory.

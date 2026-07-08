@@ -2009,7 +2009,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (acpCommand != null) {
             // JCLAW-657 (finding A): confine the harness to a configured workdir, or
             // the child agent's own workspace, instead of the backend's CWD.
-            var workdir = resolveAcpWorkdir(childAgent);
+            var workdir = resolveAcpWorkdir(childAgent, task);
+            recordWorkdir(runId, workdir);
             // JCLAW-660: batch stays one-shot; json/rpc stream the harness output
             // line-by-line through the selected adapter.
             var mode = resolveAcpMode();
@@ -2049,13 +2050,23 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * CWD. Returns {@code null} — inherit the server CWD — only when neither is
      * resolvable or the directory can't be created.
      */
-    private static File resolveAcpWorkdir(Agent childAgent) {
+    private static File resolveAcpWorkdir(Agent childAgent, String task) {
         var configured = ConfigService.get(ACP_WORKDIR_KEY, null);
         Path dir;
         if (configured != null && !configured.isBlank()) {
             dir = Path.of(configured.strip());
         } else if (childAgent != null && childAgent.name != null) {
-            dir = AgentService.workspacePath(childAgent.name);
+            // JCLAW-666: each coding session gets its own directory under the
+            // agent workspace's coding/ parent, named from the task ("create
+            // fibonacci program" -> coding/create-fibonacci-program/). An
+            // existing directory is never reused — collisions get -2, -3, …
+            // so consecutive sessions' artifacts don't interleave.
+            var base = AgentService.workspacePath(childAgent.name).resolve("coding");
+            var slug = codingSlug(task);
+            dir = base.resolve(slug);
+            for (int n = 2; Files.exists(dir); n++) {
+                dir = base.resolve(slug + "-" + n);
+            }
         } else {
             return null;
         }
@@ -2068,6 +2079,40 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             return null;
         }
         return dir.toFile();
+    }
+
+    /** JCLAW-666: deterministic filename-safe session slug from the task text —
+     *  lowercased, non-alphanumerics collapsed to single dashes, bounded, with
+     *  a fixed fallback for tasks that normalise to nothing. */
+    public static String codingSlug(String task) {
+        if (task == null) return "session";
+        var slug = task.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-+|-+$)", "");
+        if (slug.length() > 40) {
+            slug = slug.substring(0, 40).replaceAll("-+$", "");
+        }
+        return slug.isEmpty() ? "session" : slug;
+    }
+
+    /** JCLAW-666: persist the resolved session directory on the run row so the
+     *  operator and the CodingRunMonitor can find the coding artifacts (they
+     *  live in the workspace, not in MessageAttachment). Best-effort. */
+    private static void recordWorkdir(Long runId, File workdir) {
+        if (runId == null || workdir == null) return;
+        try {
+            Tx.run(() -> {
+                SubagentRun run = SubagentRun.findById(runId);
+                if (run != null) {
+                    run.workdir = workdir.getAbsolutePath();
+                    run.save();
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            EventLogger.warn("subagent", null, null,
+                    "could not record acp workdir on run %d: %s".formatted(runId, e.getMessage()));
+        }
     }
 
     /**

@@ -62,7 +62,7 @@ public class ApiSubagentRunsController extends Controller {
                                   Long childAgentId, String childAgentName,
                                   Long parentConversationId, Long childConversationId,
                                   String mode, String status, String startedAt,
-                                  String endedAt, String outcome) {}
+                                  String endedAt, String outcome, String workdir) {}
 
     public record KillRequest(String reason) {}
 
@@ -249,7 +249,8 @@ public class ApiSubagentRunsController extends Controller {
                 r.status != null ? r.status.name() : null,
                 r.startedAt != null ? r.startedAt.toString() : null,
                 r.endedAt != null ? r.endedAt.toString() : null,
-                r.outcome
+                r.outcome,
+                r.workdir
         );
     }
 

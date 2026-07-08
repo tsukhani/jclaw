@@ -96,6 +96,15 @@ public class SubagentRun extends Model {
     @Column(columnDefinition = "TEXT")
     public String outcome;
 
+    /** JCLAW-666: the harness working directory for a runtime=acp coding
+     *  session — workspace/<agent>/coding/<slug>/ by default, or the
+     *  explicit subagent.acp.workdir override. Null for non-acp runs.
+     *  Coding artifacts live HERE (the agent's workspace), not in
+     *  MessageAttachment — this path is how the operator and the
+     *  CodingRunMonitor find them. */
+    @Column(length = 512)
+    public String workdir;
+
     /**
      * JCLAW-273: yield-resume flag for async spawns. When the parent agent
      * invokes {@code subagent_yield} mid-turn with this run id, the tool

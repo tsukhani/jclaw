@@ -80,6 +80,35 @@ class AcpWorkdirTest extends UnitTest {
         assertTrue(reply.contains(File.separator + rootLeaf + File.separator),
                 "the harness pwd (%s) must sit under the agent workspace tree (…/%s/…)"
                         .formatted(reply, rootLeaf));
+        // JCLAW-666: sessions land in a per-task directory under coding/.
+        assertTrue(reply.contains(File.separator + "coding" + File.separator + "where-are-you"),
+                "the harness pwd (%s) must be the per-session coding/<slug> directory"
+                        .formatted(reply));
+    }
+
+    @Test
+    void codingSlugIsDeterministicFilenameSafeAndBounded() {
+        assertEquals("create-fibonacci-program",
+                SubagentSpawnTool.codingSlug("Create Fibonacci program!"));
+        assertEquals("session", SubagentSpawnTool.codingSlug("!!!"));
+        assertEquals("session", SubagentSpawnTool.codingSlug(null));
+        var longSlug = SubagentSpawnTool.codingSlug("a".repeat(80) + " tail");
+        assertTrue(longSlug.length() <= 40, "bounded: " + longSlug);
+        assertEquals(SubagentSpawnTool.codingSlug("same  task"),
+                SubagentSpawnTool.codingSlug("same-task"));
+    }
+
+    @Test
+    void collidingSessionsGetSuffixedDirectories() throws Exception {
+        // Two runs with the same task must NOT share a directory: the second
+        // resolves to <slug>-2 (an existing session dir is never reused).
+        var first = spawnAcp("workdir-collide-a");
+        var second = spawnAcp("workdir-collide-b");
+        assertTrue(first.contains("where-are-you"), "first run in the slug dir: " + first);
+        assertTrue(second.contains("where-are-you"),
+                "second run still under the slug family: " + second);
+        assertNotEquals(first.strip(), second.strip(),
+                "colliding sessions must get distinct directories");
     }
 
     /** Spawn a synchronous acp run and return the child reply (the harness pwd). */
