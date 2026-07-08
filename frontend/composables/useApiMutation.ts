@@ -22,7 +22,12 @@ export function useApiMutation() {
       return result
     }
     catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Request failed'
+      // JCLAW-155: the backend returns a canonical { type: 'error', code, message }
+      // body on failures; $fetch surfaces the parsed body as error.data. Prefer its
+      // message over the generic HTTP status text, falling back when it's absent.
+      const data = (e as { data?: { message?: string } }).data
+      const message = data?.message
+        ?? (e instanceof Error ? e.message : 'Request failed')
       error.value = message
       console.error(`API mutation failed [${opts.method ?? 'GET'} ${url}]:`, message)
       return null
