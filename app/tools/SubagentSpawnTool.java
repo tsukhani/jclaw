@@ -1952,6 +1952,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  model-supplied — runtime=acp runs this configured command, so a subagent
      *  can't be steered into executing arbitrary shell. */
     public static final String ACP_COMMAND_KEY = "subagent.acp.command";
+    /** JCLAW-670: operator override for the adapter's default permission flags
+     *  (whitespace-split; literal "none" = no flags at all). */
+    public static final String ACP_PERMISSION_ARGS_KEY = "subagent.acp.permissionArgs";
     private static final int ACP_MAX_OUTPUT_BYTES = 400_000;
 
     /** JCLAW-659: which harness adapter drives the acp runtime — {@code pi},
@@ -2007,6 +2010,30 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                                                          Conversation childConv, String task, boolean inlineMode) {
         var acpCommand = ACP_RUNS.remove(runId);
         if (acpCommand != null) {
+            // JCLAW-669: a coding-harness run whose ORIGIN is an unsafe channel
+            // (anything but the operator's web chat) must be operator-approved
+            // before the process launches — an inbound Telegram/Slack message
+            // can prompt-inject an agent into spawning arbitrary code
+            // execution. Web spawns pass untouched (the pi -p / claude -p
+            // uninterrupted contract); Telegram/Slack route through the
+            // existing DangerousActionGate approval prompt; other channels
+            // follow tool.approval.offChannelPolicy.
+            var originChannel = parentChannelType(runId);
+            if (originChannel != null && !"web".equals(originChannel)) {
+                var decision = agents.DangerousActionGate.guardHarnessPermission(
+                        childAgent, parentConversationId(runId), "coding_harness_run", task);
+                var approved = decision == agents.DangerousActionGate.Decision.PROCEED;
+                dispatchHarnessEvent(runId, new HarnessEvent(
+                        approved ? HarnessEvent.STEP : HarnessEvent.ERROR,
+                        "channel approval (%s): coding run %s".formatted(
+                                originChannel, approved ? "approved" : "denied"),
+                        null), 0);
+                if (!approved) {
+                    throw new IllegalStateException(
+                            "coding harness run denied: origin channel '%s' requires operator "
+                                    + "approval and it was not granted".formatted(originChannel));
+                }
+            }
             // JCLAW-657 (finding A): scope the harness's cwd to a configured
             // workdir or the child agent's workspace instead of the backend's
             // CWD. This ORGANIZES output; it does not confine the process —
@@ -2082,6 +2109,28 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             return null;
         }
         return dir.toFile();
+    }
+
+    /**
+     * JCLAW-670: append the permission flags — the operator's
+     * {@link #ACP_PERMISSION_ARGS_KEY} when set ({@code none} = none at all),
+     * the adapter's conservative {@code defaultPermissionArgs()} otherwise.
+     */
+    public static List<String> withPermissionArgs(HarnessAdapter adapter, List<String> argv) {
+        var configured = ConfigService.get(ACP_PERMISSION_ARGS_KEY, null);
+        List<String> extra;
+        if (configured != null && !configured.isBlank()) {
+            extra = "none".equalsIgnoreCase(configured.strip())
+                    ? List.of()
+                    : List.of(configured.strip().split("\\s+"));
+        } else {
+            extra = adapter.defaultPermissionArgs();
+        }
+        if (extra.isEmpty()) return argv;
+        var out = new java.util.ArrayList<String>(argv.size() + extra.size());
+        out.addAll(argv);
+        out.addAll(extra);
+        return List.copyOf(out);
     }
 
     /** JCLAW-666: deterministic filename-safe session slug from the task text —
@@ -2197,7 +2246,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      */
     private static AgentRunner.RunResult runAcpStreaming(List<String> command, String task,
                                                          Long runId, HarnessAdapter adapter, File workdir) {
-        var argv = adapter.launchArgs(command, task);
+        var argv = withPermissionArgs(adapter, adapter.launchArgs(command, task));
         // The adapter delivers the task on stdin unless it placed it in the argv.
         boolean taskOnStdin = !argv.contains(task);
         Process proc = null;
@@ -2268,7 +2317,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      */
     private static AgentRunner.RunResult runAcpRpc(Long runId, List<String> command, String task,
                                                    HarnessAdapter adapter, Agent childAgent, File workdir) {
-        var argv = adapter.launchArgs(command, task);
+        var argv = withPermissionArgs(adapter, adapter.launchArgs(command, task));
         boolean taskOnStdin = !argv.contains(task);
         // Route approval prompts to the PARENT conversation — the child's own
         // conversation is channelType="subagent" with no approval surface, so a
@@ -2331,6 +2380,17 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     /** JCLAW-665: the operator-facing (parent) conversation id for a run, used to
      *  route a harness permission prompt to a channel the operator is watching.
      *  Null when the run or its parent conversation can't be resolved. */
+    /** JCLAW-669: the channelType of the run's operator-facing conversation,
+     *  or null when the run has no parent-conversation context. */
+    private static String parentChannelType(Long runId) {
+        if (runId == null) return null;
+        return Tx.run(() -> {
+            SubagentRun run = SubagentRun.findById(runId);
+            return run != null && run.parentConversation != null
+                    ? run.parentConversation.channelType : null;
+        });
+    }
+
     private static Long parentConversationId(Long runId) {
         if (runId == null) return null;
         return Tx.run(() -> {
@@ -2497,7 +2557,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             var steps = new StringBuilder();
             String resultText = null;
             long bytes = 0;
-            int seq = 0;
+            int seq = 1;   // seq 0 is the JCLAW-669 channel-approval step (when gated)
             try (var reader = proc.inputReader(StandardCharsets.UTF_8)) {
                 String line;
                 while ((line = reader.readLine()) != null) {

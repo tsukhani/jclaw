@@ -4,6 +4,7 @@ import tools.ClaudeAdapter;
 import tools.GenericAdapter;
 import tools.HarnessEvent;
 import tools.PiAdapter;
+import tools.SubagentSpawnTool;
 
 /**
  * JCLAW-657: pure-parser unit tests for the coding-harness {@code
@@ -207,5 +208,45 @@ class HarnessAdapterParseTest extends UnitTest {
         var caps = new GenericAdapter().capabilities();
         assertFalse(caps.streaming(), "generic has no incremental protocol");
         assertFalse(caps.bidirectional(), "generic accepts no follow-up input");
+    }
+
+    // ─── JCLAW-670: permission-flag composition ──────────────────────────────
+
+    @org.junit.jupiter.api.Test
+    void claudeDefaultPermissionArgsAppendWhenUnconfigured() {
+        services.ConfigService.set(SubagentSpawnTool.ACP_PERMISSION_ARGS_KEY, "");
+        var argv = SubagentSpawnTool.withPermissionArgs(new ClaudeAdapter(),
+                java.util.List.of("claude", "-p"));
+        assertTrue(argv.contains("--allowedTools"), "conservative default present: " + argv);
+        assertFalse(String.join(" ", argv).contains("Bash"),
+                "shell stays outside the default grant: " + argv);
+    }
+
+    @org.junit.jupiter.api.Test
+    void configuredPermissionArgsOverrideAdapterDefaults() {
+        services.ConfigService.set(SubagentSpawnTool.ACP_PERMISSION_ARGS_KEY,
+                "--allowedTools Read,Bash");
+        var argv = SubagentSpawnTool.withPermissionArgs(new ClaudeAdapter(),
+                java.util.List.of("claude", "-p"));
+        assertTrue(String.join(" ", argv).endsWith("--allowedTools Read,Bash"),
+                "operator override wins verbatim: " + argv);
+        services.ConfigService.set(SubagentSpawnTool.ACP_PERMISSION_ARGS_KEY, "");
+    }
+
+    @org.junit.jupiter.api.Test
+    void noneDisablesPermissionArgsEntirely() {
+        services.ConfigService.set(SubagentSpawnTool.ACP_PERMISSION_ARGS_KEY, "none");
+        var argv = SubagentSpawnTool.withPermissionArgs(new ClaudeAdapter(),
+                java.util.List.of("claude", "-p"));
+        assertEquals(java.util.List.of("claude", "-p"), argv);
+        services.ConfigService.set(SubagentSpawnTool.ACP_PERMISSION_ARGS_KEY, "");
+    }
+
+    @org.junit.jupiter.api.Test
+    void adaptersWithoutRestrictionSurfaceAddNothing() {
+        services.ConfigService.set(SubagentSpawnTool.ACP_PERMISSION_ARGS_KEY, "");
+        assertEquals(java.util.List.of("pi", "-p", "--mode", "json"),
+                SubagentSpawnTool.withPermissionArgs(new PiAdapter(),
+                        new PiAdapter().launchArgs(java.util.List.of("pi", "-p"), "t")));
     }
 }

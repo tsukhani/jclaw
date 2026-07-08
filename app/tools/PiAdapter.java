@@ -86,6 +86,14 @@ public final class PiAdapter implements HarnessAdapter {
         };
     }
 
+    /**
+     * JCLAW-670: pi exposes no per-tool restriction flags on its CLI today, so
+     * there is no conservative default to bake — containment for pi rests on
+     * the channel gate (JCLAW-669) and the sandbox track (JCLAW-671). The
+     * {@code subagent.acp.permissionArgs} hatch still appends whatever the
+     * operator configures.
+     */
+
     /** Pi streams tokens/tool-calls and holds an interactive session. */
     @Override
     public Capabilities capabilities() {

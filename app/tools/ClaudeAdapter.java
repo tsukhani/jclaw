@@ -59,6 +59,18 @@ public final class ClaudeAdapter implements HarnessAdapter {
     }
 
     /**
+     * JCLAW-670: conservative default — file editing and search stay available
+     * (a coding run needs them) but arbitrary shell does not. Headless claude
+     * denies un-granted tools rather than prompting, so an ungranted Bash call
+     * fails that action cleanly instead of hanging the run. Override or relax
+     * via {@code subagent.acp.permissionArgs}.
+     */
+    @Override
+    public List<String> defaultPermissionArgs() {
+        return List.of("--allowedTools", "Read,Edit,Write,Glob,Grep");
+    }
+
+    /**
      * Map one Claude NDJSON line onto a {@link HarnessEvent}. Tolerant by the
      * {@link HarnessAdapter#parse} contract: a non-JSON line, or a JSON object
      * with an absent/unrecognized {@code type}, degrades to a {@link

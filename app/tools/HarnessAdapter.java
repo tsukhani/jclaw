@@ -58,4 +58,15 @@ public interface HarnessAdapter {
      *                      output-out
      */
     record Capabilities(boolean streaming, boolean bidirectional) {}
+
+    /**
+     * JCLAW-670: the adapter's conservative default permission flags, appended
+     * after {@link #launchArgs} unless the operator overrides them via
+     * {@code subagent.acp.permissionArgs} (whitespace-split; the literal
+     * {@code none} disables defaults without adding flags). Adapters whose CLI
+     * exposes no restriction surface return an empty list and document that.
+     */
+    default java.util.List<String> defaultPermissionArgs() {
+        return java.util.List.of();
+    }
 }
