@@ -20,6 +20,7 @@ import utils.JpqlFilter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -91,8 +92,9 @@ public class ApiMemoryController extends Controller {
                 .eq("m.category", normalizeCategory(category));
         applyImportance(filter, importance);
 
-        List<Long> ftsIds = resolveFtsIds(filter, q);
-        if (ftsIds != null && ftsIds.isEmpty()) return List.of();
+        var ftsResult = resolveFtsIds(filter, q);
+        if (ftsResult.isPresent() && ftsResult.get().isEmpty()) return List.of();
+        List<Long> ftsIds = ftsResult.orElse(null);
 
         String jpql = buildSelectJpql(filter, ftsIds != null, status);
         var jpaQ = JPA.em().createQuery(jpql, Memory.class);
@@ -106,21 +108,21 @@ public class ApiMemoryController extends Controller {
 
     /**
      * Free-text q resolution: adds a LIKE to {@code filter} in the no-search-
-     * backend path (returns null = no id constraint), or returns the Lucene hit
-     * ids (an empty list = ran-but-matched-nothing, so the caller returns empty).
+     * backend path (Optional.empty() = no id constraint), or the Lucene hit ids
+     * (present-but-empty = ran-but-matched-nothing, so the caller returns empty).
      */
-    private static List<Long> resolveFtsIds(JpqlFilter filter, String q) {
-        if (q == null || q.isBlank()) return null;
+    private static Optional<List<Long>> resolveFtsIds(JpqlFilter filter, String q) {
+        if (q == null || q.isBlank()) return Optional.empty();
         if ("none".equals(MessageSearch.activeDialect())) {
             filter.like("LOWER(m.text)", "%" + q.strip().toLowerCase() + "%");
-            return null;
+            return Optional.empty();
         }
         try {
-            return MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), 500);
+            return Optional.of(MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), 500));
         } catch (IOException e) {
             EventLogger.warn("search", null, null,
                     "Memory FTS failed for q='%s': %s".formatted(q, e.getMessage()));
-            return null;
+            return Optional.empty();
         }
     }
 

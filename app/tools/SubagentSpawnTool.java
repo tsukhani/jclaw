@@ -106,6 +106,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     public static final String TOOL_NAME = "subagent_spawn";
 
     static final String DEFAULT_MODE = "session";
+    /** JCLAW-666: codingSlug's fallback when a task normalises to nothing —
+     *  a distinct concept from DEFAULT_MODE despite the shared string. */
+    private static final String SLUG_FALLBACK = "session";
     static final String MODE_SESSION = "session";
     static final String MODE_INLINE = "inline";
     private static final Set<String> ALLOWED_MODES = Set.of(MODE_SESSION, MODE_INLINE);
@@ -143,6 +146,32 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     private static final String GOT_LITERAL = " (got '";
     private static final String FIELD_TRUNCATED = "truncated";
     private static final String FIELD_ERROR = "error";
+
+    /** JCLAW-660: folds a harness event stream into a single reply — a RESULT
+     *  frame wins, else concatenated TOKEN output, else the STEP log. */
+    private static final class ReplyAccumulator {
+        private final StringBuilder tokens = new StringBuilder();
+        private final StringBuilder steps = new StringBuilder();
+        private String resultText;
+
+        void fold(HarnessEvent ev) {
+            switch (ev.kind()) {
+                case HarnessEvent.TOKEN -> tokens.append(ev.text());
+                case HarnessEvent.RESULT -> resultText = ev.text();
+                case HarnessEvent.STEP -> {
+                    if (!steps.isEmpty()) steps.append('\n');
+                    steps.append(ev.text());
+                }
+                default -> { /* tool_call / error dispatched but not part of the reply */ }
+            }
+        }
+
+        String reply() {
+            if (resultText != null && !resultText.isBlank()) return resultText;
+            if (!tokens.isEmpty()) return tokens.toString();
+            return steps.toString();
+        }
+    }
 
     /**
      * Default value for the per-spawn {@code runTimeoutSeconds} arg.
@@ -2002,7 +2031,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static {
         registerAdapter("pi", new PiAdapter());
         registerAdapter("claude", new ClaudeAdapter());
-        registerAdapter("generic", new GenericAdapter());
+        registerAdapter(DEFAULT_ACP_HARNESS, new GenericAdapter());
     }
 
     /** JCLAW-659: register a harness adapter under a harness id (see
@@ -2011,12 +2040,6 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         HARNESS_ADAPTERS.put(id, adapter);
     }
 
-    /**
-     * JCLAW-499: run the child body — the configured external harness
-     * ({@code runtime:"acp"}) when an ACP command was registered for this run,
-     * otherwise the native {@link AgentRunner}. Shared by the sync and detached
-     * dispatch paths so ACP composes with sync, async, and batch fan-out.
-     */
     /**
      * JCLAW-669: a coding-harness run whose ORIGIN is an unsafe channel (anything
      * but web chat) must be operator-approved before the process launches — an
@@ -2043,6 +2066,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
     }
 
+    /**
+     * JCLAW-499: run the child body — the configured external harness
+     * ({@code runtime:"acp"}) when an ACP command was registered for this run,
+     * otherwise the native {@link AgentRunner}. Shared by the sync and detached
+     * dispatch paths so ACP composes with sync, async, and batch fan-out.
+     */
     private static AgentRunner.RunResult executeChildRun(Long runId, Agent childAgent,
                                                          Conversation childConv, String task, boolean inlineMode) {
         var acpCommand = ACP_RUNS.remove(runId);
@@ -2066,7 +2095,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             // JCLAW-660: batch stays one-shot; json/rpc stream the harness output
             // line-by-line through the selected adapter.
             var mode = resolveAcpMode();
-            if ("batch".equals(mode)) {
+            if (DEFAULT_ACP_MODE.equals(mode)) {
                 return runAcpBatch(runId, acpCommand, task, workdir);
             }
             var adapter = resolveAdapter();
@@ -2159,14 +2188,23 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  lowercased, non-alphanumerics collapsed to single dashes, bounded, with
      *  a fixed fallback for tasks that normalise to nothing. */
     public static String codingSlug(String task) {
-        if (task == null) return "session";
-        var slug = task.toLowerCase(java.util.Locale.ROOT)
-                .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("(?:^-++|-++$)", "");
+        if (task == null) return SLUG_FALLBACK;
+        var normalized = task.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-");
+        var slug = trimDashes(normalized);
         if (slug.length() > 40) {
-            slug = slug.substring(0, 40).replaceAll("-++$", "");
+            slug = trimDashes(slug.substring(0, 40));
         }
-        return slug.isEmpty() ? "session" : slug;
+        return slug.isEmpty() ? SLUG_FALLBACK : slug;
+    }
+
+    /** Strip leading/trailing '-' — a linear char-index trim (no regex, so no
+     *  ReDoS surface). */
+    private static String trimDashes(String s) {
+        int start = 0;
+        int end = s.length();
+        while (start < end && s.charAt(start) == '-') start++;
+        while (end > start && s.charAt(end - 1) == '-') end--;
+        return s.substring(start, end);
     }
 
     /** JCLAW-666: persist the resolved session directory on the run row so the
@@ -2184,7 +2222,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 return null;
             });
         } catch (RuntimeException e) {
-            EventLogger.warn("subagent", null, null,
+            EventLogger.warn(SUBAGENT_CHANNEL, null, null,
                     "could not record acp workdir on run %d: %s".formatted(runId, e.getMessage()));
         }
     }
@@ -2575,32 +2613,6 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * event, else concatenated {@code token} text, else newline-joined {@code
      * step} lines (the generic line-tail case).
      */
-    /** JCLAW-660: folds a harness event stream into a single reply — a RESULT
-     *  frame wins, else concatenated TOKEN output, else the STEP log. */
-    private static final class ReplyAccumulator {
-        private final StringBuilder tokens = new StringBuilder();
-        private final StringBuilder steps = new StringBuilder();
-        private String resultText;
-
-        void fold(HarnessEvent ev) {
-            switch (ev.kind()) {
-                case HarnessEvent.TOKEN -> tokens.append(ev.text());
-                case HarnessEvent.RESULT -> resultText = ev.text();
-                case HarnessEvent.STEP -> {
-                    if (!steps.isEmpty()) steps.append('\n');
-                    steps.append(ev.text());
-                }
-                default -> { /* tool_call / error dispatched but not part of the reply */ }
-            }
-        }
-
-        String reply() {
-            if (resultText != null && !resultText.isBlank()) return resultText;
-            if (!tokens.isEmpty()) return tokens.toString();
-            return steps.toString();
-        }
-    }
-
     private static CompletableFuture<String> streamStdout(Process proc, Long runId,
                                                           HarnessAdapter adapter,
                                                           Consumer<HarnessEvent> permissionArbiter) {
@@ -2776,7 +2788,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (harness != null && !harness.isBlank()
                 && !ACP_HARNESS_IDS.contains(harness.strip().toLowerCase())) {
             return "Error: '" + ACP_HARNESS_KEY + "' must be one of " + ACP_HARNESS_IDS
-                    + " (got '" + harness.strip() + "').";
+                    + GOT_LITERAL + harness.strip() + "').";
         }
         var mode = ConfigService.get(ACP_MODE_KEY, DEFAULT_ACP_MODE);
         if (mode != null && !mode.isBlank()

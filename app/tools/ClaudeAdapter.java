@@ -216,7 +216,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
 
     /** The terminal {@code result} frame — the final answer text. */
     private static HarnessEvent fromResult(JsonObject obj) {
-        var text = firstString(obj, "result", "text", "message");
+        var text = firstString(obj, "result", "text", FIELD_MESSAGE);
         return new HarnessEvent(HarnessEvent.RESULT, text == null ? "" : text, obj);
     }
 
