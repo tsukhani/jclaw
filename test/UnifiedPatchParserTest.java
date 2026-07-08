@@ -1,4 +1,5 @@
 import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 import tools.UnifiedPatchParser;
 import tools.UnifiedPatchParser.FileOp;
 import tools.UnifiedPatchParser.PatchParseException;
@@ -18,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * same grammar end-to-end through {@code applyPatch} plus the transactional apply phase
  * that stayed behind in {@code FileSystemTools}.
  */
-class UnifiedPatchParserTest {
+class UnifiedPatchParserTest extends UnitTest {
 
     // (a) Add File
     @Test
