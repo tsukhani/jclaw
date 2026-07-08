@@ -2179,7 +2179,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                                                      File workdir) {
         Process proc = null;
         try {
-            var pb = new ProcessBuilder(command);
+            // JCLAW-672: batch mode has no streaming adapter; sandbox with the
+            // generic (no HOME allowances) profile when enabled.
+            var launched = HarnessSandbox.wrap(command, workdir, new GenericAdapter());
+            var pb = new ProcessBuilder(launched);
             if (workdir != null) pb.directory(workdir);
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill (and the
@@ -2251,7 +2254,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         boolean taskOnStdin = !argv.contains(task);
         Process proc = null;
         try {
-            var pb = new ProcessBuilder(argv);
+            var pb = new ProcessBuilder(HarnessSandbox.wrap(argv, workdir, adapter));
             if (workdir != null) pb.directory(workdir);
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill and the
@@ -2326,7 +2329,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         Process proc = null;
         OutputStream stdin = null;
         try {
-            var pb = new ProcessBuilder(argv);
+            var pb = new ProcessBuilder(HarnessSandbox.wrap(argv, workdir, adapter));
             if (workdir != null) pb.directory(workdir);
             proc = pb.start();
             // JCLAW-664: track the live process so the kill / idle-timeout paths can

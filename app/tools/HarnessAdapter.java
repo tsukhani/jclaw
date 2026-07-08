@@ -69,4 +69,14 @@ public interface HarnessAdapter {
     default java.util.List<String> defaultPermissionArgs() {
         return java.util.List.of();
     }
+
+    /**
+     * JCLAW-672: the $HOME-relative (or absolute) paths this harness must read
+     * to run — its own config/state/credentials — bound read-only back into an
+     * otherwise-sealed home when the sandbox is enabled. Everything not listed
+     * stays inaccessible. Empty by default (a harness needing nothing from HOME).
+     */
+    default java.util.List<String> sandboxAllowances() {
+        return java.util.List.of();
+    }
 }

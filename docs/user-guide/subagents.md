@@ -236,3 +236,27 @@ monitor), and because artifacts live in the workspace, the agent's
 filesystem and documents tools can read them directly in later turns.
 Setting `subagent.acp.workdir` overrides this entirely and confines every
 session to the configured directory.
+
+
+## Sandboxing coding runs (opt-in)
+
+By default a coding harness runs with the operator's own account permissions,
+scoped only by its `coding/<slug>/` working directory (which organizes output
+but confines nothing) and by the harness's permission flags. For a real OS
+boundary, set `subagent.acp.sandbox=true`:
+
+* **macOS** wraps the harness in `sandbox-exec` — writes are confined to the
+  session directory, and reads of `~/.ssh`, cloud credentials, and other
+  secrets are blocked (the harness's own config, e.g. `~/.claude`, is the only
+  home path it can still read).
+* **Linux** wraps it in `bwrap` — the visible filesystem is built from nothing,
+  so secrets are absent rather than merely denied; only the session directory
+  is writable and only the harness's declared state paths are bound back.
+* **Windows** is supported via **WSL2** (it uses the Linux path). Native
+  Windows and WSL1 have no sandbox.
+
+The sandbox **fails closed**: if enabled where no mechanism is available (native
+Windows, WSL1, or a WSL2 kernel with unprivileged user namespaces disabled),
+the run is aborted with an actionable error rather than launched unsandboxed.
+Network egress stays open — the harness needs its API. Off by default; see the
+JCLAW-671 spike for the measured confinement results and limitations.

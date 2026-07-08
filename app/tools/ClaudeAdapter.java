@@ -70,6 +70,12 @@ public final class ClaudeAdapter implements HarnessAdapter {
         return List.of("--allowedTools", "Read,Edit,Write,Glob,Grep");
     }
 
+    /** JCLAW-672: claude -p reads its own state dir and credentials. */
+    @Override
+    public List<String> sandboxAllowances() {
+        return List.of(".claude", ".claude.json");
+    }
+
     /**
      * Map one Claude NDJSON line onto a {@link HarnessEvent}. Tolerant by the
      * {@link HarnessAdapter#parse} contract: a non-JSON line, or a JSON object

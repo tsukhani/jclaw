@@ -100,6 +100,12 @@ public final class PiAdapter implements HarnessAdapter {
         return new Capabilities(true, true);
     }
 
+    /** JCLAW-672: pi reads its own config/state dir under $HOME. */
+    @Override
+    public List<String> sandboxAllowances() {
+        return List.of(".pi", ".config/pi");
+    }
+
     /**
      * A {@code message_update} wraps one streaming sub-event in {@code
      * assistantMessageEvent}. Only a {@code text_delta} carries live output —
