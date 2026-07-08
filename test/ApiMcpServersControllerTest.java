@@ -172,7 +172,9 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         var id = createHttpServer("doomed", "http://127.0.0.1:1/mcp", false);
         var resp = DELETE("/api/mcp-servers/" + id);
         assertIsOk(resp);
-        assertTrue(getContent(resp).contains("\"deleted\":true"));
+        var deleteBody = getContent(resp);
+        assertTrue(deleteBody.contains("\"status\":\"ok\""), "canonical ack: " + deleteBody);
+        assertTrue(deleteBody.contains("\"deleted\":true"), "delete flag: " + deleteBody);
         // Verify the row really is gone via the list endpoint.
         var listing = getContent(GET("/api/mcp-servers"));
         assertFalse(listing.contains("\"name\":\"doomed\""),

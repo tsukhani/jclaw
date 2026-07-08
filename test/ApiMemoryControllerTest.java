@@ -210,7 +210,9 @@ class ApiMemoryControllerTest extends FunctionalTest {
         var memId = seedMemory("alice", "Delete me", "fact", 0.5);
         login();
 
-        assertIsOk(DELETE("/api/memories/" + memId));
+        var resp = DELETE("/api/memories/" + memId);
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"status\":\"ok\""), "canonical ack: " + getContent(resp));
         var remaining = fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(memId)));
         assertNull(remaining);
     }

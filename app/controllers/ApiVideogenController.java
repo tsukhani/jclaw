@@ -8,6 +8,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.videogen.ReplicateVideoModelCatalog;
 import services.videogen.VideoCapabilityProbe;
+import utils.ApiResponses;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -89,9 +90,7 @@ public class ApiVideogenController extends Controller {
     @ChatHidden("runs a GPU capability subprocess -- resource action")
     public static void probeCapability() {
         VideoCapabilityProbe.probe();
-        var m = new LinkedHashMap<String, Object>();
-        m.put("status", "probing");
-        renderJSON(gson.toJson(m));
+        ApiResponses.ok("state", "probing");
     }
 
     /** GET /api/videogen/jobs/recent — most-recent jobs for the dashboard Recent Activity (video view). */

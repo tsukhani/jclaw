@@ -16,6 +16,7 @@ import play.mvc.With;
 import services.EventLogger;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
+import utils.ApiResponses;
 import utils.JpqlFilter;
 
 import java.io.IOException;
@@ -189,7 +190,7 @@ public class ApiMemoryController extends Controller {
             throw new AssertionError("unreachable: notFound() throws");
         }
         memory.delete();
-        renderJSON("{\"status\":\"deleted\"}");
+        ApiResponses.ok();
     }
 
     public record DeletedCountResponse(int deleted) {}

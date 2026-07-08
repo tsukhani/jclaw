@@ -13,6 +13,7 @@ import models.McpServer;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.McpServerService;
+import utils.ApiResponses;
 
 import java.util.List;
 import java.util.Map;
@@ -174,7 +175,7 @@ public class ApiMcpServersController extends Controller {
         // row.delete() leaves the runtime clean.
         McpConnectionManager.stop(row.name);
         row.delete();
-        renderJSON("{\"deleted\":true}");
+        ApiResponses.ok("deleted", true);
     }
 
     @SuppressWarnings("java:S2259")
