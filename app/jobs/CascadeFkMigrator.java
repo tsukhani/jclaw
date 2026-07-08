@@ -57,32 +57,37 @@ public final class CascadeFkMigrator {
      * parent PK column is {@code ID}. Scoped deliberately: the migration touches
      * only these constraints and never any unrelated FK.
      */
+    private static final String AGENT = "AGENT";
+    private static final String AGENT_ID = "AGENT_ID";
+    private static final String CONVERSATION = "CONVERSATION";
+    private static final String SUBAGENT_RUN = "SUBAGENT_RUN";
+
     static final List<ForeignKey> OWNERSHIP_FKS = List.of(
-            new ForeignKey("AGENT", "PARENT_AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("AGENT_BINDING", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("AGENT_SKILL_ALLOWED_TOOL", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("AGENT_SKILL_CONFIG", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("AGENT_TOOL_CONFIG", "AGENT_ID", "AGENT", "ID"),
+            new ForeignKey(AGENT, "PARENT_AGENT_ID", AGENT, "ID"),
+            new ForeignKey("AGENT_BINDING", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("AGENT_SKILL_ALLOWED_TOOL", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("AGENT_SKILL_CONFIG", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("AGENT_TOOL_CONFIG", AGENT_ID, AGENT, "ID"),
             new ForeignKey("CHAT_MESSAGE_ATTACHMENT", "MESSAGE_ID", "MESSAGE", "ID"),
-            new ForeignKey("CONVERSATION", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("CONVERSATION", "PARENT_CONVERSATION_ID", "CONVERSATION", "ID"),
-            new ForeignKey("MEMORY", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("MESSAGE", "CONVERSATION_ID", "CONVERSATION", "ID"),
-            new ForeignKey("NOTIFICATION", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("SESSION_COMPACTION", "CONVERSATION_ID", "CONVERSATION", "ID"),
-            new ForeignKey("SLACK_BINDING", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("SUBAGENT_RUN", "CHILD_AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("SUBAGENT_RUN", "CHILD_CONVERSATION_ID", "CONVERSATION", "ID"),
-            new ForeignKey("SUBAGENT_RUN", "PARENT_AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("SUBAGENT_RUN", "PARENT_CONVERSATION_ID", "CONVERSATION", "ID"),
-            new ForeignKey("TASK", "AGENT_ID", "AGENT", "ID"),
+            new ForeignKey(CONVERSATION, AGENT_ID, AGENT, "ID"),
+            new ForeignKey(CONVERSATION, "PARENT_CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey("MEMORY", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("MESSAGE", "CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey("NOTIFICATION", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("SESSION_COMPACTION", "CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey("SLACK_BINDING", AGENT_ID, AGENT, "ID"),
+            new ForeignKey(SUBAGENT_RUN, "CHILD_AGENT_ID", AGENT, "ID"),
+            new ForeignKey(SUBAGENT_RUN, "CHILD_CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey(SUBAGENT_RUN, "PARENT_AGENT_ID", AGENT, "ID"),
+            new ForeignKey(SUBAGENT_RUN, "PARENT_CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey("TASK", AGENT_ID, AGENT, "ID"),
             new ForeignKey("TASK_RUN", "TASK_ID", "TASK", "ID"),
             new ForeignKey("TASK_RUN_MESSAGE", "TASK_RUN_ID", "TASK_RUN", "ID"),
-            new ForeignKey("TELEGRAM_BINDING", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("TELEGRAM_TOPIC_BINDING", "AGENT_ID", "AGENT", "ID"),
+            new ForeignKey("TELEGRAM_BINDING", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("TELEGRAM_TOPIC_BINDING", AGENT_ID, AGENT, "ID"),
             new ForeignKey("TELEGRAM_TOPIC_BINDING", "BINDING_ID", "TELEGRAM_BINDING", "ID"),
-            new ForeignKey("TOOL_APPROVAL_GRANT", "AGENT_ID", "AGENT", "ID"),
-            new ForeignKey("WHATSAPP_BINDING", "AGENT_ID", "AGENT", "ID"));
+            new ForeignKey("TOOL_APPROVAL_GRANT", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("WHATSAPP_BINDING", AGENT_ID, AGENT, "ID"));
 
     /**
      * Resolve the FK's constraint name and current {@code delete_rule} by its

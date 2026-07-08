@@ -6,10 +6,6 @@ import tools.UnifiedPatchParser.PatchParseException;
 
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pure grammar coverage for {@link UnifiedPatchParser}: the OpenClaw patch envelope

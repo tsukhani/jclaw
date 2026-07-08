@@ -55,21 +55,18 @@ public final class UnifiedPatchParser {
         while (i < lines.length) {
             var trimmed = lines[i].strip();
             if (trimmed.equals(END_PATCH)) return ops;
-            if (trimmed.isEmpty()) { i++; continue; }
-            if (trimmed.startsWith(ADD_FILE_PREFIX)) {
+            if (trimmed.isEmpty()) {
+                i++;
+            } else if (trimmed.startsWith(ADD_FILE_PREFIX)) {
                 i = parseAddFile(lines, i, trimmed, ops);
-                continue;
-            }
-            if (trimmed.startsWith(DELETE_FILE_PREFIX)) {
+            } else if (trimmed.startsWith(DELETE_FILE_PREFIX)) {
                 ops.add(new FileOp.Delete(trimmed.substring(DELETE_FILE_PREFIX.length()).strip()));
                 i++;
-                continue;
-            }
-            if (trimmed.startsWith(UPDATE_FILE_PREFIX)) {
+            } else if (trimmed.startsWith(UPDATE_FILE_PREFIX)) {
                 i = parseUpdateFile(lines, i, trimmed, ops);
-                continue;
+            } else {
+                throw new PatchParseException("Unexpected directive: '" + trimmed + "'", i + 1);
             }
-            throw new PatchParseException("Unexpected directive: '" + trimmed + "'", i + 1);
         }
         throw new PatchParseException("missing '*** End Patch' footer", i);
     }
