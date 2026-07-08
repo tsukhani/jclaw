@@ -96,6 +96,7 @@ PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspac
 # Agent memories API (JCLAW-40) — cross-agent admin, addressed by memory id
 GET     /api/memories                           ApiMemoryController.list
 PUT     /api/memories/{memoryId}                ApiMemoryController.update
+DELETE  /api/memories                           ApiMemoryController.bulkDelete
 DELETE  /api/memories/{memoryId}                ApiMemoryController.delete
 
 # MCP Servers API

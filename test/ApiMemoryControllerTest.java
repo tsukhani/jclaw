@@ -214,4 +214,66 @@ class ApiMemoryControllerTest extends FunctionalTest {
         var remaining = fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(memId)));
         assertNull(remaining);
     }
+
+    // ─── Bulk delete (Memories-page Delete / Delete all) ─────────────────────
+
+    @Test
+    void bulkDeletesByIds() {
+        var keep = seedMemory("alice", "keep me", "fact", 0.5);
+        var goOne = seedMemory("alice", "bulk one", "fact", 0.5);
+        var goTwo = seedMemory("bob", "bulk two", "core", 0.9);
+        login();
+
+        var resp = deleteWithJsonBody("/api/memories",
+                "{\"ids\": [" + goOne + ", " + goTwo + "]}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":2"));
+        assertNull(fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(goOne))));
+        assertNull(fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(goTwo))));
+        assertNotNull(fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(keep))));
+    }
+
+    @Test
+    void bulkDeletesByFilterRespectingPredicates() {
+        seedMemory("alice", "alice fact", "fact", 0.5);
+        seedMemory("bob", "bob core", "core", 0.9);
+        login();
+
+        var resp = deleteWithJsonBody("/api/memories",
+                "{\"filter\": {\"agent\": \"alice\"}}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":1"));
+        var left = fetchInFreshTx(() -> models.Memory.count());
+        assertEquals(1L, left.longValue());
+    }
+
+    @Test
+    void bulkDeleteEmptyBodyIs400() {
+        login();
+        var resp = deleteWithJsonBody("/api/memories", "{}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    /** DELETE-with-body helper — same makeRequest workaround as
+     *  ApiConversationsControllerTest (Play's DELETE helper drops the body). */
+    private static play.mvc.Http.Response deleteWithJsonBody(String url, String json) {
+        var req = newRequest();
+        req.method = "DELETE";
+        req.contentType = "application/json";
+        req.url = url;
+        req.path = url;
+        req.querystring = "";
+        req.body = new java.io.ByteArrayInputStream(
+                json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try {
+            var f = play.test.FunctionalTest.class.getDeclaredField("savedCookies");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var cookies = (java.util.Map<String, play.mvc.Http.Cookie>) f.get(null);
+            if (cookies != null) req.cookies = cookies;
+        } catch (Exception _) {
+            // fall through — an unauthenticated DELETE surfaces as 401
+        }
+        return makeRequest(req);
+    }
 }

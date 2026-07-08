@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { TrashIcon } from '@heroicons/vue/24/outline'
-
 /**
  * JCLAW-40: agent memory admin. A cross-agent view of every agent's captured
  * memories — owning agent, text, category, importance, and created date —
@@ -78,7 +76,7 @@ function supersededTitle(mem: MemoryDto): string {
 
 // Top-level await + reactive URL: re-fetches whenever a filter changes, and
 // mountSuspended resolves with data in tests.
-const { data: memoriesData, error: fetchError } = await useFetch<MemoryDto[]>(url)
+const { data: memoriesData, error: fetchError, refresh } = await useFetch<MemoryDto[]>(url)
 const memories = computed(() => memoriesData.value ?? [])
 
 const { mutate } = useApiMutation()
@@ -95,16 +93,96 @@ async function updateImportance(mem: MemoryDto, raw: string) {
   if (res !== null) mem.importance = value
 }
 
-async function remove(mem: MemoryDto) {
+// ── Bulk deletion (mirrors the Conversations page: selection-driven Delete
+// plus a separate Delete-all-matching surface; no per-row trash icons) ──────
+const selectedIds = ref<Set<string>>(new Set())
+
+const allSelected = computed(() =>
+  memories.value.length > 0 && memories.value.every(m => selectedIds.value.has(m.id)))
+const someSelected = computed(() => selectedIds.value.size > 0 && !allSelected.value)
+
+function toggleSelection(id: string) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+function toggleSelectAll() {
+  selectedIds.value = allSelected.value ? new Set() : new Set(memories.value.map(m => m.id))
+}
+
+const deletingBulk = ref(false)
+
+async function deleteSelected() {
+  if (!selectedIds.value.size) return
+  const count = selectedIds.value.size
   const ok = await confirm({
-    title: 'Delete memory',
-    message: `Delete this memory?\n\n"${mem.text}"`,
-    variant: 'danger',
+    title: 'Delete memories',
+    message: `Delete ${count} memor${count === 1 ? 'y' : 'ies'}? This cannot be undone.`,
     confirmText: 'Delete',
+    variant: 'danger',
   })
   if (!ok) return
-  const res = await mutate(`/api/memories/${mem.id}`, { method: 'DELETE' })
-  if (res !== null) memoriesData.value = memories.value.filter(m => m.id !== mem.id)
+  deletingBulk.value = true
+  try {
+    await $fetch('/api/memories', {
+      method: 'DELETE',
+      body: { ids: Array.from(selectedIds.value).map(Number) },
+    })
+    selectedIds.value = new Set()
+    await refresh()
+  }
+  catch (e) {
+    console.error('Failed to delete memories:', e)
+  }
+  finally {
+    deletingBulk.value = false
+  }
+}
+
+const deletingAll = ref(false)
+const activeFilterCount = computed(() =>
+  [qFilter, agentFilter, categoryFilter, importanceFilter, statusFilter]
+    .filter(f => f.value).length)
+
+/** The current filter set as the DELETE body — same predicates the list uses. */
+function activeFilterPayload() {
+  const out: Record<string, string> = {}
+  if (qFilter.value) out.q = qFilter.value
+  if (agentFilter.value) out.agent = agentFilter.value
+  if (categoryFilter.value) out.category = categoryFilter.value
+  if (importanceFilter.value) out.importance = importanceFilter.value
+  if (statusFilter.value) out.status = statusFilter.value
+  return out
+}
+
+async function deleteAll() {
+  if (deletingAll.value || memories.value.length === 0) return
+  const scope = activeFilterCount.value ? ' matching the active filters' : ''
+  const ok = await confirm({
+    title: 'Delete all memories',
+    message: `Delete all memories${scope}? This cannot be undone.`,
+    confirmText: 'Delete all',
+    variant: 'danger',
+    requireText: 'delete',
+  })
+  if (!ok) return
+  deletingAll.value = true
+  try {
+    await $fetch('/api/memories', {
+      method: 'DELETE',
+      body: { filter: activeFilterPayload() },
+    })
+    selectedIds.value = new Set()
+    await refresh()
+  }
+  catch (e) {
+    console.error('Failed to delete all memories:', e)
+  }
+  finally {
+    deletingAll.value = false
+  }
 }
 
 function fileStamp(): string {
@@ -135,14 +213,37 @@ function exportMemories() {
 
 <template>
   <div>
-    <div class="mb-6">
-      <h1 class="text-lg font-semibold text-fg-strong">
-        Memories
-      </h1>
-      <p class="mt-1 text-sm text-fg-muted">
-        Durable facts your agents have captured. Search the text or filter by agent, category, or importance;
-        adjust importance inline (it drives recall ranking and core-memory auto-load), or delete entries.
-      </p>
+    <div class="mb-6 flex items-start justify-between">
+      <div>
+        <h1 class="text-lg font-semibold text-fg-strong">
+          Memories
+        </h1>
+        <p class="mt-1 text-sm text-fg-muted">
+          Durable facts your agents have captured. Search the text or filter by agent, category, or importance;
+          adjust importance inline (it drives recall ranking and core-memory auto-load), or select rows to delete.
+        </p>
+      </div>
+      <div
+        v-if="memories.length > 0"
+        class="flex shrink-0 items-center gap-2 pt-1"
+      >
+        <button
+          data-testid="delete-selected"
+          :disabled="!selectedIds.size || deletingBulk"
+          class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          @click="deleteSelected"
+        >
+          {{ deletingBulk ? 'Deleting...' : `Delete${selectedIds.size ? ' ' + selectedIds.size : ''}` }}
+        </button>
+        <button
+          data-testid="delete-all"
+          :disabled="deletingAll"
+          class="px-3 py-1.5 border border-red-700 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          @click="deleteAll"
+        >
+          {{ deletingAll ? 'Deleting...' : `Delete all${activeFilterCount ? ' matching' : ''}` }}
+        </button>
+      </div>
     </div>
 
     <FilterBar
@@ -179,6 +280,18 @@ function exportMemories() {
       >
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
+            <th class="w-10 px-4 py-2.5">
+              <input
+                type="checkbox"
+                data-testid="select-all"
+                aria-label="Select all memories"
+                :checked="allSelected"
+                :indeterminate="someSelected"
+                class="accent-red-500 align-middle"
+                title="Select all"
+                @change="toggleSelectAll"
+              >
+            </th>
             <th class="px-4 py-2.5 font-medium">
               Agent
             </th>
@@ -194,7 +307,6 @@ function exportMemories() {
             <th class="px-4 py-2.5 font-medium">
               Created
             </th>
-            <th class="w-12 px-4 py-2.5 text-right font-medium" />
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -205,6 +317,16 @@ function exportMemories() {
             class="align-top"
             :class="{ 'opacity-50': mem.supersededAt }"
           >
+            <td class="px-4 py-2.5">
+              <input
+                type="checkbox"
+                data-testid="select-memory"
+                aria-label="Select memory"
+                :checked="selectedIds.has(mem.id)"
+                class="accent-red-500 align-middle"
+                @change="toggleSelection(mem.id)"
+              >
+            </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-fg-muted">
               {{ mem.agentName }}
             </td>
@@ -239,17 +361,6 @@ function exportMemories() {
             </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-fg-muted">
               {{ mem.createdAt ? formatDateTime(mem.createdAt) : '—' }}
-            </td>
-            <td class="px-4 py-2.5 text-right">
-              <button
-                type="button"
-                title="Delete memory"
-                data-testid="delete-memory"
-                class="text-fg-muted transition-colors hover:text-red-400"
-                @click="remove(mem)"
-              >
-                <TrashIcon class="h-5 w-5" />
-              </button>
             </td>
           </tr>
         </tbody>

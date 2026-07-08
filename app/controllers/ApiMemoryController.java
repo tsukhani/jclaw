@@ -68,27 +68,29 @@ public class ApiMemoryController extends Controller {
                             String status, Integer limit, Integer offset) {
         int effLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         int effOffset = (offset != null && offset >= 0) ? offset : 0;
-
-        // Memories are partitioned on the immutable agent id (JCLAW-531). The
-        // `agent` filter arrives as a human-readable name; resolve it to that id.
-        // An unknown name matches nothing.
         var agentNames = agentNamesById();
+        List<Memory> rows = selectMemories(q, agent, category, importance, status, effLimit, effOffset);
+        renderJSON(gson.toJson(rows.stream().map(m -> toDto(m, agentNames)).toList()));
+    }
+
+    /**
+     * The list()/bulkDelete(filter) query core: memories matching the filter
+     * set, newest first. Returns an empty list where list() used to
+     * short-circuit (unknown agent name, empty FTS hit set).
+     */
+    private static List<Memory> selectMemories(String q, String agent, String category,
+                                               String importance, String status,
+                                               int limit, int offset) {
         Long agentIdFilter = null;
         if (agent != null && !agent.isBlank()) {
             agentIdFilter = agentIdForName(agent.strip());
-            if (agentIdFilter == null) {
-                renderJSON("[]");
-                return;
-            }
+            if (agentIdFilter == null) return List.of();
         }
         var filter = new JpqlFilter()
                 .eq("m.agent.id", agentIdFilter)
                 .eq("m.category", normalizeCategory(category));
         applyImportance(filter, importance);
 
-        // Free-text q: the MEMORY Lucene scope (unscoped — across all agents)
-        // when the backend is initialized; a LIKE fallback otherwise (test mode,
-        // where the index is closed / dialect is "none").
         List<Long> ftsIds = null;
         if (q != null && !q.isBlank()) {
             if ("none".equals(MessageSearch.activeDialect())) {
@@ -96,10 +98,7 @@ public class ApiMemoryController extends Controller {
             } else {
                 try {
                     var ids = MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), 500);
-                    if (ids.isEmpty()) {
-                        renderJSON("[]");
-                        return;
-                    }
+                    if (ids.isEmpty()) return List.of();
                     ftsIds = ids;
                 } catch (IOException e) {
                     EventLogger.warn("search", null, null,
@@ -125,9 +124,7 @@ public class ApiMemoryController extends Controller {
             jpaQ.setParameter(i + 1, params.get(i));
         }
         if (ftsIds != null) jpaQ.setParameter("fts", ftsIds);
-        List<Memory> rows = jpaQ.setFirstResult(effOffset).setMaxResults(effLimit).getResultList();
-
-        renderJSON(gson.toJson(rows.stream().map(m -> toDto(m, agentNames)).toList()));
+        return jpaQ.setFirstResult(offset).setMaxResults(limit).getResultList();
     }
 
     /**
@@ -178,6 +175,69 @@ public class ApiMemoryController extends Controller {
         }
         memory.delete();
         renderJSON("{\"status\":\"deleted\"}");
+    }
+
+    public record DeletedCountResponse(int deleted) {}
+
+    /**
+     * DELETE /api/memories — bulk removal, mirroring the Conversations page
+     * contract (JCLAW-40 follow-up). Body is either {@code {"ids": [..]}}
+     * (selection-driven Delete) or {@code {"filter": {q, agent, category,
+     * importance, status}}} (Delete-all-matching; the same predicates as
+     * {@link #list}). Rejects an empty body with 400 so an accidental bare
+     * DELETE can't wipe the table. Deletions run through the entity
+     * lifecycle — Memory's {@code @PostRemove} keeps the Lucene index in
+     * sync — never bulk JPQL.
+     */
+    @SuppressWarnings("java:S2259")
+    @RequestBody(required = true)
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
+    @ChatHidden("destructive bulk memory deletion")
+    @Operation(summary = "Bulk-delete memories by ids or by the list filter set")
+    public static void bulkDelete() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) badRequest();
+
+        int deleted = 0;
+        if (body.has("ids")) {
+            for (var elem : body.getAsJsonArray("ids")) {
+                Memory m = Memory.findById(elem.getAsLong());
+                if (m != null) {
+                    m.delete();
+                    deleted++;
+                }
+            }
+            renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
+            return;
+        }
+
+        if (body.has("filter")) {
+            var f = body.getAsJsonObject("filter");
+            String q = stringField(f, "q");
+            String agent = stringField(f, "agent");
+            String category = stringField(f, "category");
+            String importance = stringField(f, "importance");
+            String status = stringField(f, "status");
+            // Page-and-delete until the filter matches nothing: deleting
+            // shrinks the result set, so offset stays 0 each round.
+            List<Memory> batch;
+            while (!(batch = selectMemories(q, agent, category, importance, status, 500, 0)).isEmpty()) {
+                for (Memory m : batch) {
+                    m.delete();
+                    deleted++;
+                }
+            }
+            renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
+            return;
+        }
+
+        badRequest();
+    }
+
+    private static String stringField(com.google.gson.JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
+        var v = obj.get(key).getAsString();
+        return (v == null || v.isBlank()) ? null : v;
     }
 
     // ─── helpers ──────────────────────────────────────────────────────────────

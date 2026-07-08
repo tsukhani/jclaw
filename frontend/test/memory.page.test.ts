@@ -24,19 +24,28 @@ function mem(overrides: Record<string, unknown> = {}) {
 
 let memoriesResponse: unknown[] = []
 let putBody: Record<string, unknown> | null = null
-let deleted = false
+let bulkDeleteBody: Record<string, unknown> | null = null
 
 // GET is stable across tests (the page fetches /api/memories?...; the path
-// matches regardless of query string). PUT/DELETE on the row are registered
-// per-test (the 2-arg shorthand only matches GET).
+// matches regardless of query string). PUT on the row is registered
+// per-test (the 2-arg shorthand only matches GET). The bulk DELETE
+// endpoint captures its body for the selection/filter assertions.
 registerEndpoint('/api/memories', () => memoriesResponse)
+registerEndpoint('/api/memories', {
+  method: 'DELETE',
+  handler: async (event) => {
+    const { readBody } = await import('h3')
+    bulkDeleteBody = await readBody(event) as Record<string, unknown>
+    return { deleted: 1 }
+  },
+})
 
 beforeEach(() => {
   // useFetch caches by URL across mounts; clear so each test re-fetches.
   clearNuxtData()
   memoriesResponse = []
   putBody = null
-  deleted = false
+  bulkDeleteBody = null
 })
 
 describe('memories admin page (JCLAW-40)', () => {
@@ -106,26 +115,50 @@ describe('memories admin page (JCLAW-40)', () => {
     expect(badge.attributes('title')).toContain('by memory #12')
   })
 
-  it('deletes a memory after the operator confirms', async () => {
-    memoriesResponse = [mem()]
-    registerEndpoint('/api/memories/10', {
-      method: 'DELETE',
-      handler: () => {
-        deleted = true
-        return { status: 'deleted' }
-      },
-    })
+  it('deletes the selected memories after the operator confirms (no per-row trash)', async () => {
+    memoriesResponse = [mem(), mem({ id: '11', text: 'Second memory' })]
     const c = await mountSuspended(Memory)
     await flushPromises()
-    expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(1)
+    expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(2)
+    // The per-row trash icon is gone — deletion is selection-driven.
+    expect(c.find('[data-testid="delete-memory"]').exists()).toBe(false)
 
-    await c.find('[data-testid="delete-memory"]').trigger('click')
-    await flushPromises() // let remove() reach `await confirm(...)` and open the dialog
-    // Resolve the shared confirm dialog as "yes" (no ConfirmDialog mounted here).
+    // Delete is disabled until a row is selected.
+    expect(c.find('[data-testid="delete-selected"]').attributes('disabled')).toBeDefined()
+    await c.findAll('[data-testid="select-memory"]')[1]!.setValue(true)
+    expect(c.find('[data-testid="delete-selected"]').attributes('disabled')).toBeUndefined()
+    expect(c.find('[data-testid="delete-selected"]').text()).toContain('Delete 1')
+
+    memoriesResponse = [mem()]
+    await c.find('[data-testid="delete-selected"]').trigger('click')
+    await flushPromises()
     useConfirm()._resolve(true)
-    await vi.waitFor(() => expect(deleted).toBe(true))
+    await vi.waitFor(() => expect(bulkDeleteBody).not.toBeNull())
+    expect(bulkDeleteBody).toEqual({ ids: [11] })
+    await flushPromises()
+    expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(1)
+  })
+
+  it('select-all drives the header checkbox and the Delete count', async () => {
+    memoriesResponse = [mem(), mem({ id: '11' }), mem({ id: '12' })]
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+    await c.find('[data-testid="select-all"]').setValue(true)
+    expect(c.find('[data-testid="delete-selected"]').text()).toContain('Delete 3')
+  })
+
+  it('Delete all sends the active filter set and requires the typed confirm', async () => {
+    memoriesResponse = [mem()]
+    const c = await mountSuspended(Memory)
     await flushPromises()
 
-    expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(0)
+    memoriesResponse = []
+    await c.find('[data-testid="delete-all"]').trigger('click')
+    await flushPromises()
+    useConfirm()._resolve(true)
+    await vi.waitFor(() => expect(bulkDeleteBody).not.toBeNull())
+    expect(bulkDeleteBody).toEqual({ filter: {} })
+    await flushPromises()
+    expect(c.find('[data-testid="memory-empty"]').exists()).toBe(true)
   })
 })
