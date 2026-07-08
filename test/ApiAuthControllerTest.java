@@ -95,6 +95,8 @@ class ApiAuthControllerTest extends FunctionalTest {
         var resp = POST("/api/auth/login", "application/json",
                 "{\"username\":\"admin\",\"password\":\"wrongpass\"}");
         assertEquals(401, resp.status.intValue());
+        // Canonical error envelope (JCLAW-155): {"type":"error","code":...,"message":...}.
+        assertTrue(getContent(resp).contains("invalid_credentials"), getContent(resp));
     }
 
     @Test
@@ -118,6 +120,8 @@ class ApiAuthControllerTest extends FunctionalTest {
         // No login() first → 401.
         var resp = POST("/api/auth/reset-password", "application/json", "{}");
         assertEquals(401, resp.status.intValue());
+        // Canonical error envelope (JCLAW-155): {"type":"error","code":...,"message":...}.
+        assertTrue(getContent(resp).contains("authentication_required"), getContent(resp));
     }
 
     @Test

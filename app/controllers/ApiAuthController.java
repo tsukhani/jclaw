@@ -11,6 +11,7 @@ import play.mvc.Controller;
 import play.mvc.Http;
 import services.ConfigService;
 import services.EventLogger;
+import utils.ApiResponses;
 import utils.PasswordHasher;
 
 import java.io.InputStreamReader;
@@ -39,8 +40,6 @@ public class ApiAuthController extends Controller {
     public record AuthStatusResponse(boolean passwordSet) {}
 
     public record SetupRequest(String password) {}
-
-    public record SetupErrorResponse(String type, String code, String message) {}
 
     public record SetupOkResponse(String status) {}
 
@@ -72,19 +71,13 @@ public class ApiAuthController extends Controller {
         try {
             var existing = ConfigService.get(PASSWORD_HASH_KEY);
             if (existing != null && !existing.isBlank()) {
-                response.status = 409;
-                renderJSON(gson.toJson(new SetupErrorResponse(
-                        "error", "already_set", "Password is already set")));
-                return;
+                ApiResponses.error(409, "already_set", "Password is already set");
             }
             var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
             var body = JsonParser.parseReader(reader).getAsJsonObject();
             var password = body.get("password").getAsString();
             if (password.length() < 8) {
-                response.status = 400;
-                renderJSON(gson.toJson(new SetupErrorResponse(
-                        "error", "password_too_short", "Password must be at least 8 characters")));
-                return;
+                ApiResponses.error(400, "password_too_short", "Password must be at least 8 characters");
             }
             ConfigService.set(PASSWORD_HASH_KEY, PasswordHasher.hash(password));
             EventLogger.info("auth", "Admin password set for the first time");
@@ -114,9 +107,7 @@ public class ApiAuthController extends Controller {
                 // /setup-password via /api/auth/status. Surface the same
                 // 401 as an invalid login so a curler can't tell whether
                 // any account exists.
-                response.status = 401;
-                renderJSON("{\"error\":\"Invalid credentials\"}");
-                return;
+                ApiResponses.error(401, "invalid_credentials", "Invalid credentials");
             }
 
             if (constantTimeEquals(expectedUser, username)
@@ -128,8 +119,7 @@ public class ApiAuthController extends Controller {
             }
             else {
                 EventLogger.warn("auth", "Admin login failed for username: %s".formatted(username));
-                response.status = 401;
-                renderJSON("{\"error\":\"Invalid credentials\"}");
+                ApiResponses.error(401, "invalid_credentials", "Invalid credentials");
             }
         }
         catch (Exception _) {
@@ -160,9 +150,7 @@ public class ApiAuthController extends Controller {
     public static void resetPassword() {
         var authed = session.get("authenticated");
         if (!"true".equals(authed)) {
-            response.status = 401;
-            renderJSON("{\"error\":\"Authentication required\"}");
-            return;
+            ApiResponses.error(401, "authentication_required", "Authentication required");
         }
         ConfigService.delete(PASSWORD_HASH_KEY);
         session.clear();

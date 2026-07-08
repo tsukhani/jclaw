@@ -35,6 +35,8 @@ class AuthTest extends FunctionalTest {
                 """;
         var response = POST("/api/auth/login", "application/json", body);
         assertEquals(401, response.status.intValue());
+        // Canonical error envelope (JCLAW-155): {"type":"error","code":...,"message":...}.
+        assertTrue(getContent(response).contains("invalid_credentials"), getContent(response));
     }
 
     @Test
@@ -122,6 +124,8 @@ class AuthTest extends FunctionalTest {
     void resetPasswordRequiresAuth() {
         var response = POST("/api/auth/reset-password", "application/json", "{}");
         assertEquals(401, response.status.intValue());
+        // Canonical error envelope (JCLAW-155): {"type":"error","code":...,"message":...}.
+        assertTrue(getContent(response).contains("authentication_required"), getContent(response));
     }
 
     @Test
