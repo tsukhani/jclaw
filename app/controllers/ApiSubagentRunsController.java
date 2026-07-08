@@ -51,6 +51,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiSubagentRunsController extends Controller {
 
+    private static final String MISSING_RUN_ID = "Missing run id.";
     private static final Gson gson = INSTANCE;
 
     private static final String KEY_REASON = "reason";
@@ -275,7 +276,7 @@ public class ApiSubagentRunsController extends Controller {
     public static void delete(Long id) {
         if (id == null) {
             response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse("Missing run id.")));
+            renderJSON(gson.toJson(new ErrorResponse(MISSING_RUN_ID)));
             return;
         }
         var run = (SubagentRun) SubagentRun.findById(id);
@@ -319,7 +320,7 @@ public class ApiSubagentRunsController extends Controller {
     public static void kill(Long id) {
         if (id == null) {
             response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse("Missing run id.")));
+            renderJSON(gson.toJson(new ErrorResponse(MISSING_RUN_ID)));
             return;
         }
         String reason = "Killed by operator via admin page";
@@ -356,7 +357,7 @@ public class ApiSubagentRunsController extends Controller {
     public static void steps(Long id) {
         if (id == null) {
             response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse("Missing run id.")));
+            renderJSON(gson.toJson(new ErrorResponse(MISSING_RUN_ID)));
             return;
         }
         var run = (SubagentRun) SubagentRun.findById(id);

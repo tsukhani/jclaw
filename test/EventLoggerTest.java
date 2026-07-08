@@ -1,7 +1,6 @@
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
-import play.test.TestEngine;
 import play.test.UnitTest;
 import models.EventLog;
 import services.EventLogger;

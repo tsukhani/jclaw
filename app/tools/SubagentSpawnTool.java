@@ -130,6 +130,17 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     private static final String FIELD_RUN_ID = "run_id";
     private static final String FIELD_CONVERSATION_ID = "conversation_id";
     private static final String FIELD_REPLY = "reply";
+    /** JCLAW-662 bus-event key — camelCase, consumed by the frontend
+     *  (chat.vue d.runId / CodingRunMonitor envelope.runId). NOT the
+     *  snake_case FIELD_RUN_ID of the spawn-response payload. */
+    private static final String BUS_RUN_ID = "runId";
+    /** JCLAW-665/S2445: per-run lock guarding decision-frame writes to the
+     *  harness stdin — a dedicated, stable lock rather than the passed-in
+     *  stream ref. Evicted when the run ends (runAcpRpc finally). */
+    private static final ConcurrentHashMap<Long, Object> STDIN_WRITE_LOCKS = new ConcurrentHashMap<>();
+    private static final String NO_OUTPUT = "(no output)";
+    private static final String ACP_EXIT_MSG = "ACP harness exited %d: %s";
+    private static final String GOT_LITERAL = " (got '";
     private static final String FIELD_TRUNCATED = "truncated";
     private static final String FIELD_ERROR = "error";
 
@@ -633,7 +644,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 ? DEFAULT_MODE
                 : requestedMode.toLowerCase();
         if (!ALLOWED_MODES.contains(mode)) {
-            return SpawnArgs.fail("Error: 'mode' must be one of " + ALLOWED_MODES + " (got '" + requestedMode + "').");
+            return SpawnArgs.fail("Error: 'mode' must be one of " + ALLOWED_MODES + GOT_LITERAL + requestedMode + "').");
         }
         // JCLAW-268: context parameter — "fresh" (default) is the JCLAW-265
         // behavior; "inherit" summarizes the parent's recent turns and unions
@@ -644,7 +655,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 ? DEFAULT_CONTEXT
                 : requestedContext.toLowerCase();
         if (!ALLOWED_CONTEXTS.contains(context)) {
-            return SpawnArgs.fail("Error: 'context' must be one of " + ALLOWED_CONTEXTS + " (got '" + requestedContext + "').");
+            return SpawnArgs.fail("Error: 'context' must be one of " + ALLOWED_CONTEXTS + GOT_LITERAL + requestedContext + "').");
         }
 
         // JCLAW-270: async parameter — false (default) preserves the synchronous
@@ -1979,8 +1990,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  (the repo root). */
     public static final String ACP_WORKDIR_KEY = "subagent.acp.workdir";
 
-    private static final Set<String> ACP_HARNESS_IDS = Set.of("pi", "claude", "codex", "generic");
-    private static final Set<String> ACP_MODES = Set.of("batch", "json", "rpc");
+    private static final Set<String> ACP_HARNESS_IDS = Set.of("pi", "claude", "codex", DEFAULT_ACP_HARNESS);
+    private static final Set<String> ACP_MODES = Set.of(DEFAULT_ACP_MODE, "json", "rpc");
 
     /** JCLAW-659: harness-id → adapter registry. JCLAW-660 seeds the {@code pi}
      *  (streaming JSONL) and {@code generic} (line-tail) adapters; JCLAW-667 adds
@@ -2006,6 +2017,32 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * otherwise the native {@link AgentRunner}. Shared by the sync and detached
      * dispatch paths so ACP composes with sync, async, and batch fan-out.
      */
+    /**
+     * JCLAW-669: a coding-harness run whose ORIGIN is an unsafe channel (anything
+     * but web chat) must be operator-approved before the process launches — an
+     * inbound Telegram/Slack message can prompt-inject an agent into spawning
+     * arbitrary code execution. Web spawns pass untouched (the pi -p / claude -p
+     * uninterrupted contract); Telegram/Slack route through DangerousActionGate;
+     * other channels follow tool.approval.offChannelPolicy. Throws on denial.
+     */
+    private static void enforceChannelApproval(Long runId, Agent childAgent, String task) {
+        var originChannel = parentChannelType(runId);
+        if (originChannel == null || "web".equals(originChannel)) return;
+        var decision = agents.DangerousActionGate.guardHarnessPermission(
+                childAgent, parentConversationId(runId), "coding_harness_run", task);
+        var approved = decision == agents.DangerousActionGate.Decision.PROCEED;
+        dispatchHarnessEvent(runId, new HarnessEvent(
+                approved ? HarnessEvent.STEP : HarnessEvent.ERROR,
+                "channel approval (%s): coding run %s".formatted(
+                        originChannel, approved ? "approved" : "denied"),
+                null), 0);
+        if (!approved) {
+            throw new IllegalStateException(
+                    "coding harness run denied: origin channel '%s' requires operator "
+                            + "approval and it was not granted".formatted(originChannel));
+        }
+    }
+
     private static AgentRunner.RunResult executeChildRun(Long runId, Agent childAgent,
                                                          Conversation childConv, String task, boolean inlineMode) {
         var acpCommand = ACP_RUNS.remove(runId);
@@ -2018,22 +2055,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             // uninterrupted contract); Telegram/Slack route through the
             // existing DangerousActionGate approval prompt; other channels
             // follow tool.approval.offChannelPolicy.
-            var originChannel = parentChannelType(runId);
-            if (originChannel != null && !"web".equals(originChannel)) {
-                var decision = agents.DangerousActionGate.guardHarnessPermission(
-                        childAgent, parentConversationId(runId), "coding_harness_run", task);
-                var approved = decision == agents.DangerousActionGate.Decision.PROCEED;
-                dispatchHarnessEvent(runId, new HarnessEvent(
-                        approved ? HarnessEvent.STEP : HarnessEvent.ERROR,
-                        "channel approval (%s): coding run %s".formatted(
-                                originChannel, approved ? "approved" : "denied"),
-                        null), 0);
-                if (!approved) {
-                    throw new IllegalStateException(
-                            "coding harness run denied: origin channel '%s' requires operator "
-                                    + "approval and it was not granted".formatted(originChannel));
-                }
-            }
+            enforceChannelApproval(runId, childAgent, task);
             // JCLAW-657 (finding A): scope the harness's cwd to a configured
             // workdir or the child agent's workspace instead of the backend's
             // CWD. This ORGANIZES output; it does not confine the process —
@@ -2103,7 +2125,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         try {
             Files.createDirectories(dir);
         } catch (IOException e) {
-            EventLogger.warn("subagent", null, null,
+            EventLogger.warn(SUBAGENT_CHANNEL, null, null,
                     "acp workdir '%s' could not be created (%s); harness inherits the server CWD"
                             .formatted(dir, e.getMessage()));
             return null;
@@ -2140,9 +2162,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (task == null) return "session";
         var slug = task.toLowerCase(java.util.Locale.ROOT)
                 .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("(^-+|-+$)", "");
+                .replaceAll("(?:^-++|-++$)", "");
         if (slug.length() > 40) {
-            slug = slug.substring(0, 40).replaceAll("-+$", "");
+            slug = slug.substring(0, 40).replaceAll("-++$", "");
         }
         return slug.isEmpty() ? "session" : slug;
     }
@@ -2217,9 +2239,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 } else if (!stdout.isBlank()) {
                     detail = stdout.strip();
                 } else {
-                    detail = "(no output)";
+                    detail = NO_OUTPUT;
                 }
-                throw new IllegalStateException("ACP harness exited %d: %s".formatted(exit, detail));
+                throw new IllegalStateException(ACP_EXIT_MSG.formatted(exit, detail));
             }
             return new AgentRunner.RunResult(stdout.strip(), null);
         } catch (InterruptedException e) {
@@ -2232,6 +2254,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             if (proc != null) proc.destroyForcibly();
             throw new IllegalStateException("ACP harness failed: " + e.getMessage(), e);
         } finally {
+            STDIN_WRITE_LOCKS.remove(runId);
             SubagentRegistry.unregisterProcess(runId);
         }
     }
@@ -2286,9 +2309,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 } else if (!stdout.isBlank()) {
                     detail = stdout.strip();
                 } else {
-                    detail = "(no output)";
+                    detail = NO_OUTPUT;
                 }
-                throw new IllegalStateException("ACP harness exited %d: %s".formatted(exit, detail));
+                throw new IllegalStateException(ACP_EXIT_MSG.formatted(exit, detail));
             }
             return new AgentRunner.RunResult(stdout.strip(), null);
         } catch (InterruptedException e) {
@@ -2360,9 +2383,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 } else if (!stdout.isBlank()) {
                     detail = stdout.strip();
                 } else {
-                    detail = "(no output)";
+                    detail = NO_OUTPUT;
                 }
-                throw new IllegalStateException("ACP harness exited %d: %s".formatted(exit, detail));
+                throw new IllegalStateException(ACP_EXIT_MSG.formatted(exit, detail));
             }
             return new AgentRunner.RunResult(stdout.strip(), null);
         } catch (InterruptedException e) {
@@ -2382,8 +2405,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** JCLAW-665: the operator-facing (parent) conversation id for a run, used to
      *  route a harness permission prompt to a channel the operator is watching.
-     *  Null when the run or its parent conversation can't be resolved. */
-    /** JCLAW-669: the channelType of the run's operator-facing conversation,
+     *  Null when the run or its parent conversation can't be resolved.
+     *
+     *  <p>JCLAW-669: the channelType of the run's operator-facing conversation,
      *  or null when the run has no parent-conversation context. */
     private static String parentChannelType(Long runId) {
         if (runId == null) return null;
@@ -2486,7 +2510,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * one-line JSON frame. A denial lets the harness abort just that action and keep
      * running (we never kill the process here). Best-effort: a write failure (harness
      * gone / stdin closed) is logged and swallowed — the reader VT must not be
-     * interrupted. Writes are synchronized on {@code stdin} so a decision frame is
+     * interrupted. Writes are serialized on a per-run lock so a decision frame is
      * never interleaved with another writer.
      */
     private static void writePermissionDecision(OutputStream stdin, HarnessPermission perm,
@@ -2498,7 +2522,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         resp.put("approved", approved);
         var line = GsonHolder.INSTANCE.toJson(resp, Map.class) + "\n";
         try {
-            synchronized (stdin) {
+            synchronized (STDIN_WRITE_LOCKS.computeIfAbsent(runId, _ -> new Object())) {
                 stdin.write(line.getBytes(StandardCharsets.UTF_8));
                 stdin.flush();
             }
@@ -2551,42 +2575,53 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * event, else concatenated {@code token} text, else newline-joined {@code
      * step} lines (the generic line-tail case).
      */
+    /** JCLAW-660: folds a harness event stream into a single reply — a RESULT
+     *  frame wins, else concatenated TOKEN output, else the STEP log. */
+    private static final class ReplyAccumulator {
+        private final StringBuilder tokens = new StringBuilder();
+        private final StringBuilder steps = new StringBuilder();
+        private String resultText;
+
+        void fold(HarnessEvent ev) {
+            switch (ev.kind()) {
+                case HarnessEvent.TOKEN -> tokens.append(ev.text());
+                case HarnessEvent.RESULT -> resultText = ev.text();
+                case HarnessEvent.STEP -> {
+                    if (!steps.isEmpty()) steps.append('\n');
+                    steps.append(ev.text());
+                }
+                default -> { /* tool_call / error dispatched but not part of the reply */ }
+            }
+        }
+
+        String reply() {
+            if (resultText != null && !resultText.isBlank()) return resultText;
+            if (!tokens.isEmpty()) return tokens.toString();
+            return steps.toString();
+        }
+    }
+
     private static CompletableFuture<String> streamStdout(Process proc, Long runId,
                                                           HarnessAdapter adapter,
                                                           Consumer<HarnessEvent> permissionArbiter) {
         var f = new CompletableFuture<String>();
         Thread.ofVirtual().start(() -> {
-            var tokens = new StringBuilder();
-            var steps = new StringBuilder();
-            String resultText = null;
+            var acc = new ReplyAccumulator();
             long bytes = 0;
             int seq = 1;   // seq 0 is the JCLAW-669 channel-approval step (when gated)
             try (var reader = proc.inputReader(StandardCharsets.UTF_8)) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    // JCLAW-664: each streamed line is activity — reset the idle clock
-                    // so an actively-working harness never trips the inactivity budget.
+                    // JCLAW-664: each streamed line is activity — reset the idle clock.
                     SubagentRegistry.touch(runId);
                     bytes += line.getBytes(StandardCharsets.UTF_8).length + 1L;
                     var ev = adapter.parse(line);
-                    // JCLAW-657 (finding B): a null event is the adapter dropping a
-                    // noise/duplicate line (e.g. Claude's session/hook/SSE frames) — do
-                    // not surface, persist, arbitrate, or fold it into the reply.
+                    // A null event is the adapter dropping a noise/duplicate line.
                     if (ev != null) {
-                        // JCLAW-665: in bidirectional rpc mode, route a permission request
-                        // (decision written back on stdin) before the event folds into the
-                        // reply/rails. Null arbiter on the one-way json path — no-op there.
+                        // JCLAW-665: rpc permission requests route to the gate first.
                         if (permissionArbiter != null) permissionArbiter.accept(ev);
                         dispatchHarnessEvent(runId, ev, seq++);
-                        switch (ev.kind()) {
-                            case HarnessEvent.TOKEN -> tokens.append(ev.text());
-                            case HarnessEvent.RESULT -> resultText = ev.text();
-                            case HarnessEvent.STEP -> {
-                                if (!steps.isEmpty()) steps.append('\n');
-                                steps.append(ev.text());
-                            }
-                            default -> { /* tool_call / error dispatched but not part of the reply */ }
-                        }
+                        acc.fold(ev);
                     }
                     if (bytes >= ACP_MAX_OUTPUT_BYTES) {
                         proc.destroyForcibly();
@@ -2596,21 +2631,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             } catch (IOException _) {
                 // EOF, force-kill, or overrun closed the stream — complete with what we have.
             }
-            String reply;
-            if (resultText != null && !resultText.isBlank()) {
-                reply = resultText;
-            } else if (!tokens.isEmpty()) {
-                reply = tokens.toString();
-            } else {
-                reply = steps.toString();
-            }
+            String reply = acc.reply();
             // JCLAW-662: the harness output stream has ended — signal terminal once
             // per run (every adapter) so a live monitor stops tailing and, on
             // reconnect, falls back to the persisted transcript.
             var done = new LinkedHashMap<String, Object>();
-            done.put("runId", runId);
+            done.put(BUS_RUN_ID, runId);
             done.put("seq", seq);
-            done.put("reply", reply);
+            done.put(FIELD_REPLY, reply);
             NotificationBus.publish(NotificationBus.BUS_CODINGRUN_DONE, done);
             f.complete(reply);
         });
@@ -2626,7 +2654,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      */
     private static void dispatchHarnessEvent(Long runId, HarnessEvent ev, int seq) {
         var payload = new LinkedHashMap<String, Object>();
-        payload.put("runId", runId);
+        payload.put(BUS_RUN_ID, runId);
         payload.put("seq", seq);
         payload.put("kind", ev.kind());
         payload.put("text", ev.text());
@@ -2730,7 +2758,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             return null;
         }
         if (!"acp".equalsIgnoreCase(runtime)) {
-            return "Error: 'runtime' must be \"native\" (default) or \"acp\" (got '" + runtime + "').";
+            return "Error: 'runtime' must be \"native\" (default) or \"acp\"" + GOT_LITERAL + runtime + "').";
         }
         if (spawningAgent != null && !spawningAgent.isMain() && !spawningAgent.acpAllowed) {
             return "Error: runtime=\"acp\" is not permitted for agent '" + spawningAgent.name
@@ -2973,7 +3001,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (parentConv == null) return;
 
         var payload = new LinkedHashMap<String, Object>();
-        payload.put("runId", runId);
+        payload.put(BUS_RUN_ID, runId);
         payload.put(FIELD_LABEL, label != null ? label : "");
         payload.put(FIELD_STATUS, status.name());
         payload.put(FIELD_REPLY, truncatedReply != null ? truncatedReply : "");

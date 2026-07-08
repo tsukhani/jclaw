@@ -43,6 +43,8 @@ public final class HarnessSandbox {
     public static final String ACP_SANDBOX_KEY = "subagent.acp.sandbox";
 
     /** Secret paths a coding run never needs to read (relative to $HOME). */
+    private static final String BWRAP = "bwrap";
+
     private static final List<String> DENY_READ_HOME = List.of(
             ".ssh", ".aws", ".gnupg", ".config/gcloud", ".kube", ".netrc");
 
@@ -72,7 +74,7 @@ public final class HarnessSandbox {
             return macos(argv, session, allowances);
         }
         if (os.contains("linux")) {
-            requireBinary("bwrap");
+            requireBinary(BWRAP);
             return linux(argv, session, allowances);
         }
         throw new SandboxUnavailableException(
@@ -84,7 +86,7 @@ public final class HarnessSandbox {
 
     private static void requireBinary(String binary) {
         var probe = ExecutableProbeSupport.probeOnPath(
-                binary, binary.equals("bwrap") ? "--version" : "-p", "harness-sandbox", "");
+                binary, binary.equals(BWRAP) ? "--version" : "-p", "harness-sandbox", "");
         // sandbox-exec has no --version and exits non-zero on a bare -p; treat a
         // clean "not found on PATH" as the only fatal signal for it.
         if (!probe.available() && probe.reason().contains("not found on PATH")) {
@@ -121,7 +123,7 @@ public final class HarnessSandbox {
     private static List<String> linux(List<String> argv, File session, List<String> allowances) {
         var home = System.getProperty("user.home", "");
         var out = new ArrayList<String>(List.of(
-                "bwrap",
+                BWRAP,
                 "--ro-bind", "/", "/",
                 "--dev", "/dev",
                 "--tmpfs", "/tmp",

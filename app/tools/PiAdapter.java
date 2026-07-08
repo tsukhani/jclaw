@@ -36,6 +36,8 @@ import java.util.List;
  */
 public final class PiAdapter implements HarnessAdapter {
 
+    private static final String FIELD_IS_ERROR = "isError";
+
     /** Launch the base command in Pi's line-streamed JSON mode; task on stdin. */
     @Override
     public List<String> launchArgs(List<String> baseCommand, String task) {
@@ -92,9 +94,10 @@ public final class PiAdapter implements HarnessAdapter {
      * the channel gate (JCLAW-669) and the sandbox track (JCLAW-671). The
      * {@code subagent.acp.permissionArgs} hatch still appends whatever the
      * operator configures.
+     *
+     * <p>Pi streams tokens/tool-calls and holds an interactive session, so it
+     * advertises both streaming and bidirectional.
      */
-
-    /** Pi streams tokens/tool-calls and holds an interactive session. */
     @Override
     public Capabilities capabilities() {
         return new Capabilities(true, true);
@@ -128,8 +131,8 @@ public final class PiAdapter implements HarnessAdapter {
      * isError}), e.g. "Successfully wrote 2 bytes to hello.txt".
      */
     private static HarnessEvent fromToolExecutionEnd(JsonObject obj, String line) {
-        boolean isError = obj.has("isError") && obj.get("isError").isJsonPrimitive()
-                && obj.get("isError").getAsBoolean();
+        boolean isError = obj.has(FIELD_IS_ERROR) && obj.get(FIELD_IS_ERROR).isJsonPrimitive()
+                && obj.get(FIELD_IS_ERROR).getAsBoolean();
         var text = toolResultText(obj.get("result"));
         if (text == null) text = firstString(obj, "toolName");
         return new HarnessEvent(isError ? HarnessEvent.ERROR : HarnessEvent.STEP,
@@ -163,11 +166,10 @@ public final class PiAdapter implements HarnessAdapter {
         var arr = messages.getAsJsonArray();
         for (int i = arr.size() - 1; i >= 0; i--) {
             JsonElement m = arr.get(i);
-            if (!m.isJsonObject()) continue;
-            var msg = m.getAsJsonObject();
-            if (!"assistant".equals(firstString(msg, "role"))) continue;
-            var text = assistantText(msg.get("content"));
-            if (text != null) return new HarnessEvent(HarnessEvent.RESULT, text, obj);
+            if (m.isJsonObject() && "assistant".equals(firstString(m.getAsJsonObject(), "role"))) {
+                var text = assistantText(m.getAsJsonObject().get("content"));
+                if (text != null) return new HarnessEvent(HarnessEvent.RESULT, text, obj);
+            }
         }
         return null;
     }

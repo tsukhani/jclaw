@@ -1650,7 +1650,7 @@ const subagentRunSlices = computed<Array<SubagentRunSlice | null>>(() => {
 const codingRunByConversation = ref<Record<number, number>>({})
 const activeCodingRunId = computed<number | null>(() => {
   const cid = selectedConvoId.value
-  return cid != null ? (codingRunByConversation.value[cid] ?? null) : null
+  return cid == null ? null : (codingRunByConversation.value[cid] ?? null)
 })
 useEventBus().onEvent('codingrun.step', (data) => {
   const d = data as { runId?: number, conversationId?: number }

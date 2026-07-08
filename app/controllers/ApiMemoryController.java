@@ -91,33 +91,10 @@ public class ApiMemoryController extends Controller {
                 .eq("m.category", normalizeCategory(category));
         applyImportance(filter, importance);
 
-        List<Long> ftsIds = null;
-        if (q != null && !q.isBlank()) {
-            if ("none".equals(MessageSearch.activeDialect())) {
-                filter.like("LOWER(m.text)", "%" + q.strip().toLowerCase() + "%");
-            } else {
-                try {
-                    var ids = MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), 500);
-                    if (ids.isEmpty()) return List.of();
-                    ftsIds = ids;
-                } catch (IOException e) {
-                    EventLogger.warn("search", null, null,
-                            "Memory FTS failed for q='%s': %s".formatted(q, e.getMessage()));
-                }
-            }
-        }
+        List<Long> ftsIds = resolveFtsIds(filter, q);
+        if (ftsIds != null && ftsIds.isEmpty()) return List.of();
 
-        var where = filter.toWhereClause();
-        if (ftsIds != null) {
-            where = where.isEmpty() ? "m.id IN (:fts)" : where + " AND m.id IN (:fts)";
-        }
-        var statusCondition = statusCondition(status);
-        if (statusCondition != null) {
-            where = where.isEmpty() ? statusCondition : where + " AND " + statusCondition;
-        }
-        String jpql = where.isEmpty()
-                ? "SELECT m FROM Memory m ORDER BY m.updatedAt DESC"
-                : "SELECT m FROM Memory m WHERE " + where + " ORDER BY m.updatedAt DESC";
+        String jpql = buildSelectJpql(filter, ftsIds != null, status);
         var jpaQ = JPA.em().createQuery(jpql, Memory.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
@@ -125,6 +102,42 @@ public class ApiMemoryController extends Controller {
         }
         if (ftsIds != null) jpaQ.setParameter("fts", ftsIds);
         return jpaQ.setFirstResult(offset).setMaxResults(limit).getResultList();
+    }
+
+    /**
+     * Free-text q resolution: adds a LIKE to {@code filter} in the no-search-
+     * backend path (returns null = no id constraint), or returns the Lucene hit
+     * ids (an empty list = ran-but-matched-nothing, so the caller returns empty).
+     */
+    private static List<Long> resolveFtsIds(JpqlFilter filter, String q) {
+        if (q == null || q.isBlank()) return null;
+        if ("none".equals(MessageSearch.activeDialect())) {
+            filter.like("LOWER(m.text)", "%" + q.strip().toLowerCase() + "%");
+            return null;
+        }
+        try {
+            return MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), 500);
+        } catch (IOException e) {
+            EventLogger.warn("search", null, null,
+                    "Memory FTS failed for q='%s': %s".formatted(q, e.getMessage()));
+            return null;
+        }
+    }
+
+    /** Assemble the ORDER-BY-newest SELECT, folding in the filter where-clause,
+     *  the optional FTS id constraint, and the status condition. */
+    private static String buildSelectJpql(JpqlFilter filter, boolean hasFts, String status) {
+        var where = filter.toWhereClause();
+        if (hasFts) {
+            where = where.isEmpty() ? "m.id IN (:fts)" : where + " AND m.id IN (:fts)";
+        }
+        var statusCondition = statusCondition(status);
+        if (statusCondition != null) {
+            where = where.isEmpty() ? statusCondition : where + " AND " + statusCondition;
+        }
+        return where.isEmpty()
+                ? "SELECT m FROM Memory m ORDER BY m.updatedAt DESC"
+                : "SELECT m FROM Memory m WHERE " + where + " ORDER BY m.updatedAt DESC";
     }
 
     /**
@@ -215,8 +228,8 @@ public class ApiMemoryController extends Controller {
             var f = body.getAsJsonObject("filter");
             String q = stringField(f, "q");
             String agent = stringField(f, "agent");
-            String category = stringField(f, "category");
-            String importance = stringField(f, "importance");
+            String category = stringField(f, KEY_CATEGORY);
+            String importance = stringField(f, KEY_IMPORTANCE);
             String status = stringField(f, "status");
             // Page-and-delete until the filter matches nothing: deleting
             // shrinks the result set, so offset stays 0 each round.

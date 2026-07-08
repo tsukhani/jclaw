@@ -1,6 +1,5 @@
 package tools;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -39,6 +38,9 @@ import java.util.List;
  * </ul>
  */
 public final class ClaudeAdapter implements HarnessAdapter {
+
+    private static final String FIELD_MESSAGE = "message";
+    private static final String FIELD_CONTENT = "content";
 
     /**
      * Append Claude's streaming-NDJSON flags to the operator-configured base
@@ -134,9 +136,9 @@ public final class ClaudeAdapter implements HarnessAdapter {
      * carries no structured content.
      */
     private static HarnessEvent fromAssistant(JsonObject obj, String line) {
-        var message = obj.has("message") && obj.get("message").isJsonObject()
-                ? obj.getAsJsonObject("message") : obj;
-        JsonElement content = message.get("content");
+        var message = obj.has(FIELD_MESSAGE) && obj.get(FIELD_MESSAGE).isJsonObject()
+                ? obj.getAsJsonObject(FIELD_MESSAGE) : obj;
+        JsonElement content = message.get(FIELD_CONTENT);
         if (content != null && content.isJsonArray()) {
             for (JsonElement el : content.getAsJsonArray()) {
                 if (!el.isJsonObject()) continue;
@@ -182,28 +184,34 @@ public final class ClaudeAdapter implements HarnessAdapter {
      * it ({@code null}) when it carries no readable content.
      */
     private static HarnessEvent fromUser(JsonObject obj) {
-        var message = obj.has("message") && obj.get("message").isJsonObject()
-                ? obj.getAsJsonObject("message") : obj;
-        JsonElement content = message.get("content");
+        var message = obj.has(FIELD_MESSAGE) && obj.get(FIELD_MESSAGE).isJsonObject()
+                ? obj.getAsJsonObject(FIELD_MESSAGE) : obj;
+        JsonElement content = message.get(FIELD_CONTENT);
         if (content == null || !content.isJsonArray()) return null;
         var text = new StringBuilder();
         for (JsonElement el : content.getAsJsonArray()) {
-            if (!el.isJsonObject()) continue;
-            var block = el.getAsJsonObject();
-            if (!"tool_result".equals(firstString(block, "type"))) continue;
-            JsonElement c = block.get("content");
-            if (c != null && c.isJsonPrimitive()) {
-                text.append(c.getAsString());
-            } else if (c != null && c.isJsonArray()) {
-                for (JsonElement part : c.getAsJsonArray()) {
-                    if (part.isJsonObject()) {
-                        var t = firstString(part.getAsJsonObject(), "text");
-                        if (t != null) text.append(t);
-                    }
-                }
+            if (el.isJsonObject() && "tool_result".equals(firstString(el.getAsJsonObject(), "type"))) {
+                appendResultContent(el.getAsJsonObject().get(FIELD_CONTENT), text);
             }
         }
         return text.isEmpty() ? null : new HarnessEvent(HarnessEvent.STEP, text.toString(), obj);
+    }
+
+    /** A tool_result's {@code content} is either a bare string or an array of
+     *  {@code {text}} blocks — append whichever into {@code text}. */
+    private static void appendResultContent(JsonElement c, StringBuilder text) {
+        if (c == null) return;
+        if (c.isJsonPrimitive()) {
+            text.append(c.getAsString());
+            return;
+        }
+        if (!c.isJsonArray()) return;
+        for (JsonElement part : c.getAsJsonArray()) {
+            if (part.isJsonObject()) {
+                var t = firstString(part.getAsJsonObject(), "text");
+                if (t != null) text.append(t);
+            }
+        }
     }
 
     /** The terminal {@code result} frame — the final answer text. */
@@ -220,7 +228,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
 
     /** Human-readable message from an {@code error} frame, or the raw line. */
     private static String errorText(JsonObject obj, String line) {
-        var msg = firstString(obj, "message", "error", "text");
+        var msg = firstString(obj, FIELD_MESSAGE, "error", "text");
         return msg == null ? line : msg;
     }
 

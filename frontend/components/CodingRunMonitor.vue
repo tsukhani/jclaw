@@ -31,8 +31,10 @@ const props = defineProps<{
  * {@link MessageAttachmentSchema} rows (JCLAW-666). `.loose()` lets the wire
  * carry extras (runId, conversationId, timestamp) without failing validation.
  *
- * TODO(JCLAW-666): the backend does not attach artifacts to coding steps yet —
- * the per-step `attachments` array is a forward-declared, optional contract so
+ * NOTE (JCLAW-666, redesigned): coding artifacts are NOT attached to steps —
+ * they live in the harness's workspace/<agent>/coding/<slug>/ session directory
+ * (the agent's own filesystem tools read them). The per-step `attachments`
+ * array is a dormant, optional contract kept for forward compatibility so
  * this monitor renders them the moment the harness→transcript path emits
  * MessageAttachment rows. Until then `attachments` is absent and the artifact
  * row below renders nothing.
@@ -301,9 +303,9 @@ function attachmentIcon(kind: MessageAttachment['kind']): typeof DocumentIcon {
             {{ step.text }}
           </p>
 
-          <!-- JCLAW-666: harness-generated artifacts (patch/diff files, generated
-               files) as downloadable chips. Absent today (see the TODO on
-               CodingStepSchema); renders nothing until the backend attaches
+          <!-- JCLAW-666 (redesigned): artifacts live in the workspace, not on
+               steps — this optional per-step attachments contract is dormant and
+               renders nothing unless a future backend ever attaches
                MessageAttachment rows to a coding step. -->
           <div
             v-if="step.attachments?.length"

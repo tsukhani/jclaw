@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import models.Agent;
-import models.Config;
 import models.Conversation;
 import models.Message;
 import models.MessageRole;
