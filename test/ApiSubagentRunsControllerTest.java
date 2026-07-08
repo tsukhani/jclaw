@@ -291,7 +291,7 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
 
         var resp = DELETE("/api/subagent-runs/" + runId);
         assertIsOk(resp);
-        assertContentMatch("\"status\":\"deleted\"", resp);
+        assertContentMatch("\"status\":\"ok\"", resp);
 
         // Clear L1 cache so the next finder hits the DB rather than
         // returning the stale pre-delete entity reference.

@@ -26,6 +26,7 @@ import services.EventLogger;
 import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
+import utils.ApiResponses;
 import utils.JpqlFilter;
 
 import java.io.IOException;
@@ -127,8 +128,6 @@ public class ApiConversationsController extends Controller {
     public record ModelOverrideRequest(String modelProvider, String modelId) {}
 
     public record ModelOverrideResponse(String modelProvider, String modelId) {}
-
-    public record ErrorResponse(String error) {}
 
     /**
      * GET /api/conversations — List conversations with optional filters.
@@ -545,17 +544,15 @@ public class ApiConversationsController extends Controller {
         // Validate against ProviderRegistry — same checks as /model NAME.
         var provider = ProviderRegistry.get(newProvider);
         if (provider == null) {
-            response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse(
-                    "Provider '" + newProvider + "' is not configured.")));
+            ApiResponses.error(400, "invalid_request",
+                    "Provider '" + newProvider + "' is not configured.");
             return;
         }
         var modelExists = provider.config().models().stream()
                 .anyMatch(m -> newModelId.equals(m.id()));
         if (!modelExists) {
-            response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse(
-                    "Provider '" + newProvider + "' has no model with id '" + newModelId + "'.")));
+            ApiResponses.error(400, "invalid_request",
+                    "Provider '" + newProvider + "' has no model with id '" + newModelId + "'.");
             return;
         }
 

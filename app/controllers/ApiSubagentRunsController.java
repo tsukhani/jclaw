@@ -20,6 +20,7 @@ import services.SubagentRegistry;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import tools.SubagentSpawnTool;
+import utils.ApiResponses;
 import utils.JpqlFilter;
 
 import java.io.IOException;
@@ -68,8 +69,6 @@ public class ApiSubagentRunsController extends Controller {
     public record KillRequest(String reason) {}
 
     public record KillResponse(boolean killed, String status, String message) {}
-
-    public record ErrorResponse(String error) {}
 
     /** JCLAW-662: one persisted coding-harness step in the replay transcript. */
     public record StepView(int seq, String kind, String text, String createdAt) {}
@@ -217,9 +216,8 @@ public class ApiSubagentRunsController extends Controller {
         try {
             return Instant.parse(since);
         } catch (Exception _) {
-            response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse(
-                    "Invalid 'since' value '" + since + "' — expected ISO-8601 instant.")));
+            ApiResponses.error(400, "invalid_request",
+                    "Invalid 'since' value '" + since + "' — expected ISO-8601 instant.");
             return null;
         }
     }
@@ -229,10 +227,9 @@ public class ApiSubagentRunsController extends Controller {
         try {
             return SubagentRun.Status.valueOf(status.toUpperCase());
         } catch (IllegalArgumentException _) {
-            response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse(
+            ApiResponses.error(400, "invalid_request",
                     "Invalid 'status' value '" + status
-                            + "' — expected one of RUNNING / COMPLETED / FAILED / KILLED / TIMEOUT.")));
+                            + "' — expected one of RUNNING / COMPLETED / FAILED / KILLED / TIMEOUT.");
             return null;
         }
     }
@@ -275,23 +272,20 @@ public class ApiSubagentRunsController extends Controller {
     @Operation(summary = "Delete a terminal subagent run and its child agent")
     public static void delete(Long id) {
         if (id == null) {
-            response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse(MISSING_RUN_ID)));
+            ApiResponses.error(400, "invalid_request", MISSING_RUN_ID);
             return;
         }
         var run = (SubagentRun) SubagentRun.findById(id);
         if (run == null) {
-            response.status = 404;
-            renderJSON(gson.toJson(new ErrorResponse("Run " + id + " not found.")));
+            ApiResponses.error(404, "not_found", "Run " + id + " not found.");
             return;
         }
         // Reject mid-flight rows — the stream owner still holds a reference
         // and would NPE on the next persist. Kill-then-delete is the
         // two-step path for live runs.
         if (run.status == SubagentRun.Status.RUNNING) {
-            response.status = 409;
-            renderJSON(gson.toJson(new ErrorResponse(
-                    "Run " + id + " is still RUNNING. Kill it first, then delete.")));
+            ApiResponses.error(409, "conflict",
+                    "Run " + id + " is still RUNNING. Kill it first, then delete.");
             return;
         }
         var childAgent = run.childAgent;
@@ -300,11 +294,11 @@ public class ApiSubagentRunsController extends Controller {
             // pre-FK-tightening might exist. Drop just the run row in
             // that case so the operator isn't stuck with an orphan.
             run.delete();
-            renderJSON("{\"status\":\"deleted\",\"id\":" + id + "}");
+            ApiResponses.ok("id", id);
             return;
         }
         AgentService.delete(childAgent);
-        renderJSON("{\"status\":\"deleted\",\"id\":" + id + "}");
+        ApiResponses.ok("id", id);
     }
 
     /**
@@ -319,8 +313,7 @@ public class ApiSubagentRunsController extends Controller {
     @Operation(summary = "Kill a running subagent")
     public static void kill(Long id) {
         if (id == null) {
-            response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse(MISSING_RUN_ID)));
+            ApiResponses.error(400, "invalid_request", MISSING_RUN_ID);
             return;
         }
         String reason = "Killed by operator via admin page";
@@ -333,8 +326,7 @@ public class ApiSubagentRunsController extends Controller {
         if (!result.killed() && result.finalStatus() == null) {
             // Row not found — surface as 404 so the admin page can present
             // it as a stale-cache hint rather than a generic failure.
-            response.status = 404;
-            renderJSON(gson.toJson(new ErrorResponse(result.message())));
+            ApiResponses.error(404, "not_found", result.message());
             return;
         }
         renderJSON(gson.toJson(new KillResponse(
@@ -356,14 +348,12 @@ public class ApiSubagentRunsController extends Controller {
     @Operation(summary = "Ordered persisted step transcript for a subagent coding run")
     public static void steps(Long id) {
         if (id == null) {
-            response.status = 400;
-            renderJSON(gson.toJson(new ErrorResponse(MISSING_RUN_ID)));
+            ApiResponses.error(400, "invalid_request", MISSING_RUN_ID);
             return;
         }
         var run = (SubagentRun) SubagentRun.findById(id);
         if (run == null) {
-            response.status = 404;
-            renderJSON(gson.toJson(new ErrorResponse("Run " + id + " not found.")));
+            ApiResponses.error(404, "not_found", "Run " + id + " not found.");
             return;
         }
         if (run.childConversation == null) {
