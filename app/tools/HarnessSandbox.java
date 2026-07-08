@@ -42,9 +42,9 @@ public final class HarnessSandbox {
     /** {@code subagent.acp.sandbox} — off by default. */
     public static final String ACP_SANDBOX_KEY = "subagent.acp.sandbox";
 
-    /** Secret paths a coding run never needs to read (relative to $HOME). */
     private static final String BWRAP = "bwrap";
 
+    /** Secret paths a coding run never needs to read (relative to $HOME). */
     private static final List<String> DENY_READ_HOME = List.of(
             ".ssh", ".aws", ".gnupg", ".config/gcloud", ".kube", ".netrc");
 
