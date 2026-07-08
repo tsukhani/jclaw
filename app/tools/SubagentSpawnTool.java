@@ -2496,7 +2496,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                     == DangerousActionGate.Decision.PROCEED;
         } catch (RuntimeException e) {
             approved = false;
-            EventLogger.warn("subagent", childAgent == null ? null : childAgent.name, null,
+            EventLogger.warn(SUBAGENT_CHANNEL, childAgent == null ? null : childAgent.name, null,
                     "Harness permission routing failed for run %s — denying: %s"
                             .formatted(runId, e.getMessage()));
         }
@@ -2794,7 +2794,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (mode != null && !mode.isBlank()
                 && !ACP_MODES.contains(mode.strip().toLowerCase())) {
             return "Error: '" + ACP_MODE_KEY + "' must be one of " + ACP_MODES
-                    + " (got '" + mode.strip() + "').";
+                    + GOT_LITERAL + mode.strip() + "').";
         }
         return null;
     }
