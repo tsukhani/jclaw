@@ -2565,7 +2565,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 stdin.flush();
             }
         } catch (IOException e) {
-            EventLogger.warn("subagent", null, null,
+            EventLogger.warn(SUBAGENT_CHANNEL, null, null,
                     "Failed to write permission decision for run %s: %s"
                             .formatted(runId, e.getMessage()));
         }
@@ -2730,7 +2730,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 msg.save();
             });
         } catch (RuntimeException e) {
-            EventLogger.warn("subagent", null, null,
+            EventLogger.warn(SUBAGENT_CHANNEL, null, null,
                     "Failed to persist coding-run step seq=%d for run %s: %s"
                             .formatted(seq, runId, e.getMessage()));
         }
