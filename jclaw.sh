@@ -2437,10 +2437,37 @@ do_start_prod() {
     echo "Stop with:      $0 stop"
 }
 
+# JCLAW zombie-JVM sweep (2026-07-08 incident): a Play JVM whose server.pid
+# was removed (play stop deletes it immediately) but whose shutdown wedged
+# becomes invisible to the pidfile path AND to port checks once its HTTP
+# listener dies — it survived 11.5h of restarts, leaking a db-scheduler
+# generation per dev reload. Sweep by process signature instead: every Play
+# JVM carries -Dapplication.path=<project dir> on its command line.
+kill_orphan_jvms() {
+    local orphans
+    orphans=$(pgrep -f "application.path=${SCRIPT_DIR}" 2>/dev/null || true)
+    [[ -z "$orphans" ]] && return 0
+    local pid
+    for pid in $orphans; do
+        echo "Warning: orphan JClaw JVM (pid $pid) found by process signature — terminating."
+        kill "$pid" 2>/dev/null || true
+    done
+    sleep 3
+    for pid in $orphans; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "         pid $pid ignored SIGTERM — escalating to kill -9."
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    done
+}
+
 do_stop_prod() {
     cd "$SCRIPT_DIR"
 
     if [[ ! -f "server.pid" ]]; then
+        # No pidfile — but sweep for signature-matched orphans before
+        # declaring victory (the pidfile-less wedged-JVM incident).
+        kill_orphan_jvms
         echo "Nothing to stop — JClaw does not appear to be running in $SCRIPT_DIR"
         return
     fi
@@ -2505,6 +2532,9 @@ do_stop_prod() {
     fi
     # Clean up the pid file regardless of graceful vs forced exit.
     [[ -f server.pid ]] && rm -f server.pid
+    # Belt-and-braces: reap any signature-matched orphan from a prior
+    # generation the pidfile path couldn't see.
+    kill_orphan_jvms
     echo ""
     echo "JClaw stopped."
 }
@@ -2727,6 +2757,8 @@ do_stop_dev() {
         echo ""
         echo "Nothing to stop — JClaw does not appear to be running in $SCRIPT_DIR"
     fi
+    # Same zombie-JVM sweep as prod stop.
+    kill_orphan_jvms
 }
 
 # ─── Status ───
