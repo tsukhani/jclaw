@@ -540,7 +540,14 @@ public class ConversationService {
         // 2. SubagentRun rows referencing any of these conversations on
         //    either side. Done after the child cascade so a recursive call
         //    doesn't try to double-delete a SubagentRun the parent's
-        //    cleanup would have removed.
+        //    cleanup would have removed. JCLAW-673: collect the ids first so
+        //    their SUBAGENT_RUN full-text docs can be evicted after the bulk
+        //    JPQL DELETE, which never fires SubagentRun.@PostRemove.
+        List<Long> subagentRunIds = em.createQuery(
+                "SELECT sr.id FROM SubagentRun sr "
+                        + "WHERE sr.parentConversation.id IN :ids "
+                        + "   OR sr.childConversation.id IN :ids", Long.class)
+                .setParameter("ids", ids).getResultList();
         em.createQuery(
                 "DELETE FROM SubagentRun sr "
                         + "WHERE sr.parentConversation.id IN :ids "
@@ -577,6 +584,13 @@ public class ConversationService {
         }
         if (!messageIds.isEmpty()) {
             LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
+        }
+        // JCLAW-673: evict the SUBAGENT_RUN docs for the rows swept in step 2.
+        for (Long subagentRunId : subagentRunIds) {
+            LuceneIndexer.remove(LuceneIndexer.Scope.SUBAGENT_RUN, subagentRunId);
+        }
+        if (!subagentRunIds.isEmpty()) {
+            LuceneIndexer.commit(LuceneIndexer.Scope.SUBAGENT_RUN);
         }
         return deleted;
     }

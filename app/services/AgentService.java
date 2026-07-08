@@ -1,5 +1,6 @@
 package services;
 
+import jakarta.persistence.EntityManager;
 import llm.LlmTypes;
 import llm.ProviderRegistry;
 import mcp.McpAllowlist;
@@ -12,6 +13,7 @@ import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.JPA;
+import services.search.LuceneIndexer;
 import tools.JClawApiTool;
 
 import java.io.IOException;
@@ -443,6 +445,11 @@ public class AgentService {
                     .setParameter(1, AGENT_CONFIG_PREFIX + node.name + ".%").executeUpdate();
         }
         ConfigService.clearCache();
+        // JCLAW-673: evict the subtree's SUBAGENT_RUN + TASK full-text docs while
+        // the rows still exist. The DB cascade removes the rows but never fires
+        // SubagentRun/Task @PostRemove, so their Lucene docs would orphan — the
+        // same problem MEMORY avoids above by routing through MemoryStoreFactory.
+        evictSubtreeLuceneDocs(em, subtree);
         em.flush();
         em.clear();
         // Re-fetch the root as a managed entity; its delete cascades the whole
@@ -455,6 +462,51 @@ public class AgentService {
         for (var name : names) {
             deleteWorkspaceDirectory(name);
             EventLogger.info(LOG_CATEGORY, name, null, "Agent deleted");
+        }
+    }
+
+    /**
+     * JCLAW-673: remove the SUBAGENT_RUN, TASK, and TASK_RUN_MESSAGE Lucene docs
+     * for an entire agent subtree before its rows cascade-delete. A cascade /
+     * bulk delete never fires the entities' {@code @PostRemove} hooks, so their
+     * full-text docs would linger after the rows are gone. Collects the doc ids
+     * by querying the still-present rows (SubagentRun on either agent end of the
+     * subtree; Task owned by any subtree agent; TaskRunMessage under those
+     * tasks' runs, which cascade-delete transitively when the agent is removed),
+     * removes each doc, and commits each scope once. No-op scopes (empty result,
+     * or a closed index) cost nothing.
+     */
+    private static void evictSubtreeLuceneDocs(EntityManager em, List<Agent> subtree) {
+        var subtreeIds = subtree.stream().map(a -> a.id).toList();
+        List<Long> subagentRunIds = em.createQuery(
+                "SELECT sr.id FROM SubagentRun sr "
+                        + "WHERE sr.parentAgent.id IN :ids OR sr.childAgent.id IN :ids", Long.class)
+                .setParameter("ids", subtreeIds).getResultList();
+        List<Long> taskIds = em.createQuery(
+                "SELECT t.id FROM Task t WHERE t.agent.id IN :ids", Long.class)
+                .setParameter("ids", subtreeIds).getResultList();
+        List<Long> taskRunMessageIds = em.createQuery(
+                "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.agent.id IN :ids", Long.class)
+                .setParameter("ids", subtreeIds).getResultList();
+        for (Long runId : subagentRunIds) {
+            LuceneIndexer.remove(LuceneIndexer.Scope.SUBAGENT_RUN, runId);
+        }
+        if (!subagentRunIds.isEmpty()) {
+            LuceneIndexer.commit(LuceneIndexer.Scope.SUBAGENT_RUN);
+        }
+        for (Long taskId : taskIds) {
+            LuceneIndexer.remove(LuceneIndexer.Scope.TASK, taskId);
+        }
+        if (!taskIds.isEmpty()) {
+            LuceneIndexer.commit(LuceneIndexer.Scope.TASK);
+        }
+        // TASK_RUN_MESSAGE docs orphan too: an agent delete cascades
+        // Task -> TaskRun -> TaskRunMessage, and none of those fire @PostRemove.
+        for (Long messageId : taskRunMessageIds) {
+            LuceneIndexer.remove(messageId);
+        }
+        if (!taskRunMessageIds.isEmpty()) {
+            LuceneIndexer.commit(LuceneIndexer.Scope.TASK_RUN_MESSAGE);
         }
     }
 

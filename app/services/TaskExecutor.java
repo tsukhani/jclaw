@@ -7,6 +7,7 @@ import models.Agent;
 import models.Task;
 import models.TaskRun;
 import play.db.jpa.JPA;
+import services.search.LuceneIndexer;
 import tools.MessageTool;
 
 import java.time.Instant;
@@ -257,6 +258,16 @@ public final class TaskExecutor {
                         .getResultList();
                 // Fewer rows than the cap means there is nothing to prune.
                 if (keepIds.size() < MAX_RUNS_PER_TASK) return null;
+                // JCLAW-673: collect the pruned transcript ids first so their
+                // TASK_RUN_MESSAGE full-text docs can be evicted — the bulk JPQL
+                // DELETE below never fires TaskRunMessage.@PostRemove.
+                List<Long> prunedMessageIds = em.createQuery(
+                        "SELECT m.id FROM TaskRunMessage m "
+                                + "WHERE m.taskRun.task.id = :tid AND m.taskRun.id NOT IN :keep",
+                        Long.class)
+                        .setParameter("tid", taskId)
+                        .setParameter("keep", keepIds)
+                        .getResultList();
                 em.createQuery("DELETE FROM TaskRunMessage m "
                                 + "WHERE m.taskRun.task.id = :tid AND m.taskRun.id NOT IN :keep")
                         .setParameter("tid", taskId)
@@ -267,6 +278,12 @@ public final class TaskExecutor {
                         .setParameter("tid", taskId)
                         .setParameter("keep", keepIds)
                         .executeUpdate();
+                for (Long messageId : prunedMessageIds) {
+                    LuceneIndexer.remove(messageId);
+                }
+                if (!prunedMessageIds.isEmpty()) {
+                    LuceneIndexer.commit(LuceneIndexer.Scope.TASK_RUN_MESSAGE);
+                }
                 return null;
             });
         } catch (Exception e) {
@@ -536,6 +553,14 @@ public final class TaskExecutor {
         try {
             Tx.run(() -> {
                 var em = JPA.em();
+                // JCLAW-673: collect the transcript ids before the bulk DELETE so
+                // their TASK_RUN_MESSAGE full-text docs can be evicted — bulk JPQL
+                // deletes never fire TaskRunMessage.@PostRemove, nor does the Task
+                // delete fire Task.@PostRemove for its TASK doc.
+                List<Long> messageIds = em.createQuery(
+                        "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.id = :tid",
+                        Long.class)
+                        .setParameter("tid", task.id).getResultList();
                 em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :tid")
                         .setParameter("tid", task.id).executeUpdate();
                 em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :tid")
@@ -543,6 +568,14 @@ public final class TaskExecutor {
                 em.createQuery("DELETE FROM Task t WHERE t.id = :tid")
                         .setParameter("tid", task.id).executeUpdate();
                 em.flush();
+                for (Long messageId : messageIds) {
+                    LuceneIndexer.remove(messageId);
+                }
+                if (!messageIds.isEmpty()) {
+                    LuceneIndexer.commit(LuceneIndexer.Scope.TASK_RUN_MESSAGE);
+                }
+                LuceneIndexer.remove(LuceneIndexer.Scope.TASK, task.id);
+                LuceneIndexer.commit(LuceneIndexer.Scope.TASK);
                 return null;
             });
             // One-shots are reaped by db-scheduler's OnCompleteRemove, but cancel
