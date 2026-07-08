@@ -33,6 +33,14 @@ import java.util.List;
  * an in-process Future to resume). The sweep is a one-shot at boot, not a
  * recurring job — there is no in-flight detection during steady state, only
  * "leftovers from the prior JVM."
+ *
+ * <p>JCLAW-664: external coding-harness runs ({@code runtime:"acp"}) are the
+ * same {@link SubagentRun} rows in the same RUNNING state, so this sweep
+ * reconciles them too. Their in-memory {@code Process} handle
+ * ({@link services.SubagentRegistry}) does not survive a restart any more than
+ * a VT does — the row is stamped FAILED here so the audit log reflects truth.
+ * (Reaping a harness OS process that outlived the JVM is out of scope: no PID
+ * is persisted, and a normal shutdown already tears its process down.)
  */
 @OnApplicationStart
 public class SubagentOrphanRecoveryJob extends Job<Void> {
@@ -69,7 +77,7 @@ public class SubagentOrphanRecoveryJob extends Job<Void> {
                     if (fresh == null || fresh.status != SubagentRun.Status.RUNNING) return;
                     fresh.status = SubagentRun.Status.FAILED;
                     fresh.endedAt = Instant.now();
-                    fresh.outcome = "Subagent VT did not survive JVM restart";
+                    fresh.outcome = "Subagent run did not survive JVM restart (VT / harness process gone)";
                     fresh.save();
                 });
                 EventLogger.warn(EVENT_CATEGORY_SUBAGENT,

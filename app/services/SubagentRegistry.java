@@ -69,6 +69,21 @@ public final class SubagentRegistry {
 
     private static final Map<Long, Entry> ACTIVE = new ConcurrentHashMap<>();
 
+    /**
+     * JCLAW-664: the live external-harness {@link Process} per runId (the acp
+     * runtime). Populated by {@link tools.SubagentSpawnTool} right after it
+     * launches a coding harness so {@link #kill} and {@link #requestStop} can
+     * force-terminate the OS process (and its descendants). A harness has no
+     * cooperative-cancel checkpoint like the native {@link agents.AgentRunner}
+     * does — flipping the flag alone would leave the process orphaned — so the
+     * kill/timeout path must destroy it directly. Kept separate from
+     * {@link #ACTIVE} because the process is created AFTER the run's Future is
+     * registered. Force-destroy only (never {@link Thread#interrupt}): the
+     * harness reader VT touches the DB, and an interrupt there could close H2's
+     * FileChannel (see the class comment).
+     */
+    private static final Map<Long, Process> HARNESS_PROCS = new ConcurrentHashMap<>();
+
     /** Register the VT-bearing Future under {@code runId}. Called by the
      *  spawn path right after dispatching the VT. The cancellation flag is
      *  allocated here so {@link #isCancelled} works the instant the entry
@@ -115,6 +130,10 @@ public final class SubagentRegistry {
         if (runId == null) return;
         var entry = ACTIVE.get(runId);
         if (entry != null) entry.cancelRequested().set(true);
+        // JCLAW-664: a harness run has no cooperative checkpoint to observe the
+        // flag, so the idle/ceiling timeout must force-terminate its process here
+        // too (no-op for a native run — nothing registered).
+        destroyHarnessProcess(runId);
     }
 
     /** Unregister the entry for {@code runId}. Called from a {@code finally}
@@ -125,10 +144,45 @@ public final class SubagentRegistry {
         ACTIVE.remove(runId);
     }
 
+    /**
+     * JCLAW-664: record the live external-harness process for {@code runId} so a
+     * later {@link #kill} / {@link #requestStop} can force-terminate it. Called
+     * by the acp spawn path right after {@code ProcessBuilder.start()}.
+     */
+    public static void registerProcess(Long runId, Process proc) {
+        if (runId == null || proc == null) return;
+        HARNESS_PROCS.put(runId, proc);
+    }
+
+    /** JCLAW-664: drop the harness-process handle for {@code runId} once the run
+     *  ends. Called from a {@code finally} in the acp spawn path; idempotent with
+     *  {@link #destroyHarnessProcess}, which already removes on kill/timeout. */
+    public static void unregisterProcess(Long runId) {
+        if (runId == null) return;
+        HARNESS_PROCS.remove(runId);
+    }
+
+    /**
+     * JCLAW-664: force-terminate the external-harness process for {@code runId},
+     * if any — descendants first (snapshotted before the parent dies so the whole
+     * tree is reaped), then the process itself. A no-op for a native run (no
+     * process registered). Uses only {@link Process#destroyForcibly()} /
+     * {@link ProcessHandle#destroyForcibly()} — never {@link Thread#interrupt} —
+     * because the harness reader VT touches the DB.
+     */
+    private static void destroyHarnessProcess(Long runId) {
+        var proc = HARNESS_PROCS.remove(runId);
+        if (proc == null) return;
+        var descendants = proc.descendants().toList();
+        proc.destroyForcibly();
+        descendants.forEach(ProcessHandle::destroyForcibly);
+    }
+
     /** Test-only: clear the entire registry. Production code must never
      *  call this — concurrent kills would race. */
     public static void clear() {
         ACTIVE.clear();
+        HARNESS_PROCS.clear();
     }
 
     /**
@@ -233,6 +287,11 @@ public final class SubagentRegistry {
         // → the round continues to LLM call).
         flipCancelFlag(runId);
 
+        // JCLAW-664: after the cooperative flag, force-terminate the external
+        // harness process (and descendants) if this run is an acp run — the
+        // harness has no checkpoint to observe the flag. No-op for native runs.
+        destroyHarnessProcess(runId);
+
         var updatedStatus = transitionToKilled(runId, reason);
 
         if (updatedStatus == SubagentRun.Status.KILLED) {
@@ -262,6 +321,9 @@ public final class SubagentRegistry {
             // thread (see class comment for the H2 corruption story).
             stale.future().cancel(false);
         }
+        // JCLAW-664: reap any harness process still registered for a run that
+        // already went terminal (e.g. a timeout raced this kill) so it can't leak.
+        destroyHarnessProcess(runId);
         return new KillResult(false, status,
                 "Run " + runId + " is already " + status.name().toLowerCase() + ".");
     }

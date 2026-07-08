@@ -133,6 +133,14 @@ Two hard caps that govern [Subagents](/guide#subagents):
 
 Violations emit `SUBAGENT_LIMIT_EXCEEDED` on the [Logs](/logs) page and return a plain-text refusal to the model. Changes apply live; no restart needed.
 
+To delegate a subagent to an **external coding harness** (Pi / Claude Code / Codex CLI) instead of JClaw's native loop, set:
+
+| Key                    | Default    | Meaning                                                                                             |
+|------------------------|------------|-----------------------------------------------------------------------------------------------------|
+| `subagent.acp.command` | *(unset)*  | Absolute path to the harness command run for `subagent_spawn { runtime:"acp" }` (e.g. `/usr/local/bin/pi`). Read from config only, never the model. |
+
+The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](/agents) page; the main agent always may), and each run is bounded by `subagent.maxWallClockSeconds` (default 1800). See [External coding harness](/guide#acp-harness) for the full setup.
+
 ## Tasks
 
 Two knobs for the [Tasks](/guide#tasks) subsystem:

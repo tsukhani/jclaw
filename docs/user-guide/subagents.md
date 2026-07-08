@@ -89,6 +89,42 @@ For long-running async work where the parent eventually needs the child's reply,
 Without `yield_to_subagent`, the parent never gets to use the child's reply — the announce card surfaces it to *you*, not back into the parent. Use yield when you want the parent to keep working with the result.
 :::
 
+## External coding harness (`runtime=acp`) {#acp-harness}
+
+By default a child runs on JClaw's own native agent loop. You can instead delegate the child to an **external coding harness** — a standalone CLI agent such as [Pi](https://github.com/pi-labs/pi), Claude Code, or the Codex CLI — by passing `runtime:"acp"`. JClaw launches the operator-configured harness command as a subprocess, hands it the `task` on stdin, and captures the harness's stdout as the child's reply. This is the Tier 1 integration: a one-shot request/response, no interactive protocol.
+
+**Use when:** the child's job is better handled by a purpose-built coding agent with its own tools and sandbox than by JClaw's native loop — for example, a large refactor or a repo-wide edit you'd rather run through Pi.
+
+### Operator setup
+
+1. **Point JClaw at the harness binary.** Set `subagent.acp.command` (Settings → **Subagents**, or a config key) to the harness command. Use an **absolute path** so it resolves regardless of the server's working directory:
+
+   ```text
+   subagent.acp.command = /usr/local/bin/pi
+   ```
+
+   The command is whitespace-split into an argv, so fixed flags are fine (`/usr/local/bin/pi --headless`). It is read from config **only** — never from the model — so a subagent can't steer JClaw into running arbitrary shell.
+
+2. **Grant the spawning agent the `acp` capability.** The harness runs as an external process *outside* JClaw's tool gating and workspace confinement, so it's a privileged capability. The **main agent** may always request it; a **custom agent** must have `acpAllowed = true` set on its [Agents](/agents) page. Without the grant, an `acp` spawn is refused on permission. The gate is on the *spawning* agent, so a confined custom agent can't break out by delegating to `acp`.
+
+3. **Spawn with `runtime:"acp"`.** From chat, just ask the agent to delegate to the harness — it emits, for a background run:
+
+   ```json
+   subagent_spawn { "runtime": "acp", "async": true, "task": "..." }
+   ```
+
+   `async:true` returns a `runId` immediately and lands an announce card when the harness finishes; drop it for a blocking run.
+
+### Bounds and failure
+
+- **Wall-clock ceiling.** The harness is bounded by `subagent.maxWallClockSeconds` (default **1800** = 30 min). A harness that overruns is force-killed (`destroyForcibly`) and the run records `TIMEOUT`/`FAILED`. Set it to `0` to wait indefinitely (not recommended for an unattended instance).
+- **Output cap.** Captured stdout is bounded; a harness that floods stdout is truncated rather than allowed to exhaust memory.
+- **Non-zero exit.** If the harness exits non-zero, the spawn is `FAILED` and the harness's stderr is surfaced as the failure reason on the [Subagents](/subagents) page.
+
+:::gotcha
+`runtime:"acp"` needs `subagent.acp.command` configured *and* the spawning agent to hold the `acp` grant. A spawn that clears the permission gate but finds no configured command is refused with a message telling the operator to set the key.
+:::
+
 ## Recursion limits
 
 To stop a subagent from spawning grandchildren that spawn great-grandchildren, JClaw enforces two caps. Both are runtime-configurable in the **Subagents** section of the [Settings](/settings) page, and both fail closed: a spawn that would breach the cap is refused with a clear error before anything is created.

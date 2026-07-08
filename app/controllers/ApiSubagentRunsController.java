@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.EventLog;
+import models.Message;
 import models.SubagentRun;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
@@ -18,6 +19,7 @@ import services.EventLogger;
 import services.SubagentRegistry;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
+import tools.SubagentSpawnTool;
 import utils.JpqlFilter;
 
 import java.io.IOException;
@@ -67,6 +69,9 @@ public class ApiSubagentRunsController extends Controller {
     public record KillResponse(boolean killed, String status, String message) {}
 
     public record ErrorResponse(String error) {}
+
+    /** JCLAW-662: one persisted coding-harness step in the replay transcript. */
+    public record StepView(int seq, String kind, String text, String createdAt) {}
 
     /**
      * GET /api/subagent-runs — list runs with optional filters.
@@ -336,7 +341,59 @@ public class ApiSubagentRunsController extends Controller {
                 result.message())));
     }
 
+    /**
+     * JCLAW-662: GET /api/subagent-runs/{id}/steps — the ordered, persisted step
+     * transcript for a coding-harness run. Returns the child-Conversation
+     * {@code codingrun_step} rows (stamped by
+     * {@link SubagentSpawnTool#dispatchHarnessEvent}) oldest-first — insertion
+     * order equals {@code seq} order since each step is persisted as it streams
+     * in — so a client that reconnects mid-run can replay what it missed and then
+     * resume tailing the live {@link services.NotificationBus} rail.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = StepView.class))))
+    @Operation(summary = "Ordered persisted step transcript for a subagent coding run")
+    public static void steps(Long id) {
+        if (id == null) {
+            response.status = 400;
+            renderJSON(gson.toJson(new ErrorResponse("Missing run id.")));
+            return;
+        }
+        var run = (SubagentRun) SubagentRun.findById(id);
+        if (run == null) {
+            response.status = 404;
+            renderJSON(gson.toJson(new ErrorResponse("Run " + id + " not found.")));
+            return;
+        }
+        if (run.childConversation == null) {
+            renderJSON("[]");
+            return;
+        }
+        List<Message> rows = Message.find(
+                "conversation = ?1 AND messageKind = ?2 ORDER BY id ASC",
+                run.childConversation, SubagentSpawnTool.MESSAGE_KIND_CODINGRUN_STEP).fetch();
+        var result = rows.stream().map(ApiSubagentRunsController::toStepView).toList();
+        renderJSON(gson.toJson(result));
+    }
+
     // ----- internals -----
+
+    /** Project a persisted step row into its view — seq/kind live in the JSON metadata, text in content. */
+    private static StepView toStepView(Message m) {
+        int seq = 0;
+        String kind = null;
+        if (m.metadata != null) {
+            try {
+                var obj = JsonParser.parseString(m.metadata).getAsJsonObject();
+                if (obj.has("seq") && !obj.get("seq").isJsonNull()) seq = obj.get("seq").getAsInt();
+                if (obj.has("kind") && !obj.get("kind").isJsonNull()) kind = obj.get("kind").getAsString();
+            } catch (Exception _) {
+                // Malformed metadata — fall through with defaults; the row still
+                // renders its content in transcript order.
+            }
+        }
+        return new StepView(seq, kind, m.content,
+                m.createdAt != null ? m.createdAt.toString() : null);
+    }
 
     private static Map<Long, String> collectModesForRuns(List<SubagentRun> runs) {
         if (runs.isEmpty()) return Map.of();

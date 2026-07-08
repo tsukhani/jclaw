@@ -1640,6 +1640,29 @@ const subagentRunSlices = computed<Array<SubagentRunSlice | null>>(() => {
 })
 
 /**
+ * JCLAW-663: track the active external coding-harness ("acp" runtime) run per
+ * conversation. A `codingrun.step` event carries the parent {@code
+ * conversationId} and the {@code runId}; the first step for a conversation
+ * mounts the {@link CodingRunMonitor} docked above the composer. Keyed by
+ * conversation so switching chats shows the right run (or none), and so a run
+ * left visible on one conversation doesn't leak into another.
+ */
+const codingRunByConversation = ref<Record<number, number>>({})
+const activeCodingRunId = computed<number | null>(() => {
+  const cid = selectedConvoId.value
+  return cid != null ? (codingRunByConversation.value[cid] ?? null) : null
+})
+useEventBus().onEvent('codingrun.step', (data) => {
+  const d = data as { runId?: number, conversationId?: number }
+  if (!d.runId) return
+  // conversationId is the parent (chat) conversation; fall back to the open
+  // conversation when the harness omits it (run triggered in this chat).
+  const cid = d.conversationId ?? selectedConvoId.value
+  if (cid == null || codingRunByConversation.value[cid] === d.runId) return
+  codingRunByConversation.value = { ...codingRunByConversation.value, [cid]: d.runId }
+})
+
+/**
  * Initialize the collapsed state: every run in {@link displayMessages} starts
  * collapsed UNLESS its boundary-end marker indicates a non-completed terminal
  * status (failed / timed out) — operators want failed runs expanded by
@@ -4024,6 +4047,18 @@ function exportConversation() {
             </div>
           </div>
         </div>
+
+        <!--
+          JCLAW-663: live external coding-harness monitor. Docked above the
+          composer (not inside the message scroller) so its step stream and
+          Kill control stay in view while the harness runs. Only mounts when a
+          coding run is active for the open conversation.
+        -->
+        <CodingRunMonitor
+          v-if="activeCodingRunId"
+          :key="activeCodingRunId"
+          :run-id="activeCodingRunId"
+        />
 
         <!-- Input -->
         <div

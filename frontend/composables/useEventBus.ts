@@ -7,7 +7,10 @@
  *   on('skill.promoted', (data) => { ... })
  */
 
-type EventHandler = (data: unknown) => void
+// Handlers receive the event payload plus the concrete event type. The type
+// arg lets a single wildcard subscriber (e.g. `codingrun.*`) branch on which
+// member fired; exact-match subscribers can ignore it.
+type EventHandler = (data: unknown, type: string) => void
 
 const handlers = new Map<string, Set<EventHandler>>()
 let eventSource: EventSource | null = null
@@ -31,15 +34,7 @@ function connect() {
     reconnectAttempts = 0
     try {
       const event = JSON.parse(e.data)
-      const typeHandlers = handlers.get(event.type)
-      if (typeHandlers) {
-        for (const handler of typeHandlers) {
-          try {
-            handler(event.data)
-          }
-          catch { /* ignore handler errors */ }
-        }
-      }
+      dispatch(event.type, event.data)
     }
     catch { /* ignore parse errors */ }
   }
@@ -57,6 +52,30 @@ function connect() {
     reconnectAttempts++
     setTimeout(connect, delay)
   }
+}
+
+function callHandlers(set: Set<EventHandler> | undefined, data: unknown, type: string) {
+  if (!set) return
+  for (const handler of set) {
+    try {
+      handler(data, type)
+    }
+    catch { /* ignore handler errors */ }
+  }
+}
+
+/**
+ * Deliver one event to its exact-match subscribers plus any single-level
+ * wildcard subscribers. A handler registered under `"<ns>.*"` receives every
+ * event whose type is `"<ns>.<member>"` — the coding-run monitor (JCLAW-663)
+ * relies on this to take both `codingrun.step` and `codingrun.done` through a
+ * single subscription, branching on the type passed as the handler's 2nd arg.
+ */
+function dispatch(type: string, data: unknown) {
+  if (typeof type !== 'string') return
+  callHandlers(handlers.get(type), data, type)
+  const dot = type.indexOf('.')
+  if (dot > 0) callHandlers(handlers.get(type.slice(0, dot) + '.*'), data, type)
 }
 
 function on(type: string, handler: EventHandler) {

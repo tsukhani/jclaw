@@ -22,6 +22,7 @@ import services.EventLogger;
 import services.MimeExtensions;
 import services.Tx;
 import services.UploadLimits;
+import tools.SubagentSpawnTool;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
 
@@ -40,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static utils.GsonHolder.INSTANCE;
 import static utils.TikaHolder.TIKA;
@@ -533,8 +535,20 @@ public class ApiChatController extends Controller {
                 s -> sendChunkFrame(sse, SSE_TOKEN_PREFIX, s));
         var reasoningCoalescer = new TokenCoalescer(coalesceChars,
                 s -> sendChunkFrame(sse, SSE_REASONING_PREFIX, s));
-        return new AgentRunner.StreamingCallbacks(
-                conversation -> sendInitFrame(sse, agent, conversation),
+
+        // JCLAW-661: bridge this SSE to any acp coding run spawned during the turn.
+        // Register the callbacks under the resolved conversation id (known only once
+        // onInit fires) so SubagentSpawnTool can promote them onto the run's id, and
+        // unregister on completion/error. convIdRef also gates the unregister; cbRef
+        // threads the record's self-reference into its own onInit handler.
+        var convIdRef = new AtomicReference<Long>();
+        var cbRef = new AtomicReference<AgentRunner.StreamingCallbacks>();
+        var callbacks = new AgentRunner.StreamingCallbacks(
+                conversation -> {
+                    sendInitFrame(sse, agent, conversation);
+                    convIdRef.set(conversation.id);
+                    SubagentSpawnTool.registerChatCallbacks(conversation.id, cbRef.get());
+                },
                 token -> {
                     if (firstToken.compareAndSet(true, false)) {
                         // First-token path keeps the timestamp field for TTFT
@@ -556,12 +570,14 @@ public class ApiChatController extends Controller {
                     // coalescing is disabled (buffers stay empty).
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
+                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
                     sse.send(Map.of("type", "complete", KEY_CONTENT, content));
                     sse.close();
                 },
                 error -> {
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
+                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
                     sse.send(Map.of("type", "error", KEY_CONTENT, "An error occurred: " + error.getMessage()));
                     sse.close();
                     EventLogger.error("channel", agent.name, "web",
@@ -569,11 +585,14 @@ public class ApiChatController extends Controller {
                 },
                 // onCancel: web cancellation is signalled via SSE close, not via
                 // ConversationQueue.cancellationFlag (the only flag /stop flips),
-                // so the runner-level onCancel hook has no transport-side state
-                // to quiesce here. Kept as an explicit no-op so the Telegram path
-                // (typing-heartbeat cleanup) can rely on the callback firing.
-                () -> {}
+                // so the runner-level onCancel hook has no transport frame to send.
+                // It still fires on the SSE-close path (where onComplete/onError do
+                // not), so JCLAW-661 uses it to drop the coding-run bridge for a
+                // tab that closed mid-turn.
+                () -> SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get())
         );
+        cbRef.set(callbacks);
+        return callbacks;
     }
 
     private static void sendInitFrame(SseStream sse, Agent agent, Conversation conversation) {

@@ -120,7 +120,43 @@ public final class DangerousActionGate {
         if (agent == null || !ToolRegistry.isDangerous(toolName)) {
             return Decision.PROCEED;
         }
+        return arbitrate(agent, conversationId, toolName, argsJson);
+    }
 
+    /**
+     * JCLAW-665: gate a permission request raised by an external coding harness
+     * (the {@code runtime="acp"} runtime in its bidirectional {@code rpc} mode).
+     * Unlike {@link #guard}, there is no {@link ToolRegistry#isDangerous}
+     * pre-filter — the harness itself has already classified the action as needing
+     * approval, so its request <em>is</em> the trigger. Everything downstream
+     * (standing grants, Telegram/Slack routing, the off-channel policy) is shared
+     * with {@link #guard}. Returns {@link Decision#PROCEED} to approve the action
+     * or {@link Decision#ABORT} to deny it; the caller relays that decision back to
+     * the harness so a denial cleanly aborts just that action.
+     *
+     * @param agent          the agent running the harness (sub-agents resolve their
+     *                        binding via the parent chain)
+     * @param conversationId the operator-facing conversation whose channel decides
+     *                        whether an interactive prompt can reach the operator
+     * @param toolName        the action the harness wants to run
+     * @param argsJson        the harness's request payload, surfaced in the prompt
+     */
+    public static Decision guardHarnessPermission(Agent agent, Long conversationId,
+                                                  String toolName, String argsJson) {
+        if (agent == null) {
+            return Decision.PROCEED;
+        }
+        return arbitrate(agent, conversationId, toolName, argsJson);
+    }
+
+    /**
+     * Shared arbitration: honor a standing grant, else route an interactive
+     * approve/deny prompt to the conversation's channel when it has an approval
+     * surface (Telegram/Slack) with a usable binding, else apply the off-channel
+     * policy. Callers decide <em>whether</em> an action reaches this point;
+     * arbitration decides how it is resolved.
+     */
+    private static Decision arbitrate(Agent agent, Long conversationId, String toolName, String argsJson) {
         // A standing grant (in-process session set or the JCLAW-385 persisted
         // always-store) is an explicit operator approval for this (agent, tool)
         // — honor it on ANY channel without prompting.

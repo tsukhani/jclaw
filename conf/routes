@@ -225,6 +225,7 @@ GET     /api/logs                               ApiLogsController.list
 
 # Subagent Runs API (JCLAW-271)
 GET     /api/subagent-runs                      ApiSubagentRunsController.list
+GET     /api/subagent-runs/{id}/steps           ApiSubagentRunsController.steps
 POST    /api/subagent-runs/{id}/kill            ApiSubagentRunsController.kill
 DELETE  /api/subagent-runs/{id}                 ApiSubagentRunsController.delete
 
