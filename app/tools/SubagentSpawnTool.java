@@ -2007,8 +2007,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                                                          Conversation childConv, String task, boolean inlineMode) {
         var acpCommand = ACP_RUNS.remove(runId);
         if (acpCommand != null) {
-            // JCLAW-657 (finding A): confine the harness to a configured workdir, or
-            // the child agent's own workspace, instead of the backend's CWD.
+            // JCLAW-657 (finding A): scope the harness's cwd to a configured
+            // workdir or the child agent's workspace instead of the backend's
+            // CWD. This ORGANIZES output; it does not confine the process —
+            // containment is JCLAW-669/670/671 (channel gating, permission
+            // flags, sandboxing). acpAllowed is the security boundary today.
             var workdir = resolveAcpWorkdir(childAgent, task);
             recordWorkdir(runId, workdir);
             // JCLAW-660: batch stays one-shot; json/rpc stream the harness output
