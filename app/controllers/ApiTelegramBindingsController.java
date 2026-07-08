@@ -17,10 +17,10 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 import services.EventLogger;
+import utils.ApiResponses;
 
 import java.security.SecureRandom;
 import java.util.Base64;
-import java.util.Map;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -366,7 +366,7 @@ public class ApiTelegramBindingsController extends Controller {
         // that 401s (and logs an error) when the bot token was revoked alongside.
         TelegramWebhookRegistrar.onBindingDeleted(botToken, transport);
         TelegramPollingRunner.reconcile();
-        renderJSON(gson.toJson(Map.of("status", "ok")));
+        ApiResponses.ok();
     }
 
     // ── helpers ──

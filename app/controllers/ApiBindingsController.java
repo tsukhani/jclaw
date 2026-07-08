@@ -11,9 +11,9 @@ import models.AgentBinding;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
+import utils.ApiResponses;
 
 import java.util.List;
-import java.util.Map;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -115,7 +115,7 @@ public class ApiBindingsController extends Controller {
             throw new AssertionError("unreachable: notFound() throws");
         }
         binding.delete();
-        renderJSON(gson.toJson(Map.of("status", "ok")));
+        ApiResponses.ok();
     }
 
 }

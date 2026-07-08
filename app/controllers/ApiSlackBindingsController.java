@@ -16,8 +16,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 import services.EventLogger;
-
-import java.util.Map;
+import utils.ApiResponses;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -254,7 +253,7 @@ public class ApiSlackBindingsController extends Controller {
                 "Binding %d deleted".formatted(id));
         // JCLAW-351: close the Socket Mode connection if the deleted binding had one.
         SlackSocketModeRunner.reconcile();
-        renderJSON(gson.toJson(Map.of("status", "ok")));
+        ApiResponses.ok();
     }
 
     // ── update helpers ──

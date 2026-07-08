@@ -16,8 +16,8 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 import services.EventLogger;
+import utils.ApiResponses;
 
-import java.util.Map;
 import java.util.Objects;
 
 import static utils.GsonHolder.INSTANCE;
@@ -219,7 +219,7 @@ public class ApiWhatsAppBindingsController extends Controller {
                 "Binding %d deleted".formatted(id));
         // JCLAW-449: close the WhatsApp-Web connection if the deleted binding had one.
         WhatsAppCobaltRunner.reconcile();
-        renderJSON(gson.toJson(Map.of("status", "ok")));
+        ApiResponses.ok();
     }
 
     // ── credential verification (JCLAW-445) ──
