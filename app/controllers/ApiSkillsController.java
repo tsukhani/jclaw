@@ -33,6 +33,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import utils.ApiResponses;
+
 import static utils.GsonHolder.INSTANCE;
 
 @With(AuthCheck.class)
@@ -48,7 +50,6 @@ public class ApiSkillsController extends Controller {
     private static final String TOOL_FILESYSTEM = "filesystem";
 
     // JSON request/response payload keys.
-    private static final String KEY_STATUS = "status";
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_NEW_NAME = "newName";
     private static final String KEY_DESCRIPTION = "description";
@@ -89,6 +90,10 @@ public class ApiSkillsController extends Controller {
     public record SkillPromoteRequest(Long agentId, String skillName) {}
 
     public record SkillImportRequest(String source, String skillId, String provider, String owner) {}
+
+    public record SkillImportResponse(String status, String skillName, String message) {}
+
+    public record CatalogRefreshResponse(String catalog, String type, boolean refreshed) {}
 
     public record SkillPromoteResponse(String status, String skillName) {}
 
@@ -157,8 +162,8 @@ public class ApiSkillsController extends Controller {
         var catalogId = body != null && body.has(KEY_CATALOG) ? body.get(KEY_CATALOG).getAsString() : null;
         var c = CatalogRegistry.byId(catalogId);
         var refreshed = c.refresh();
-        renderJSON(gson.toJson(Map.of(KEY_CATALOG, c.id(),
-                "type", c.type().name().toLowerCase(), "refreshed", refreshed)));
+        renderJSON(gson.toJson(new CatalogRefreshResponse(c.id(),
+                c.type().name().toLowerCase(), refreshed)));
     }
 
     /**
@@ -183,9 +188,9 @@ public class ApiSkillsController extends Controller {
 
         var result = RegistrySkillImporter.importToGlobal(provider, source, skillId, owner);
         if (!result.ok()) {
-            renderJSON(gson.toJson(Map.of(KEY_STATUS, "failed", "message", result.message())));
+            renderJSON(gson.toJson(new SkillImportResponse("failed", null, result.message())));
         }
-        renderJSON(gson.toJson(Map.of(KEY_STATUS, "imported", KEY_SKILL_NAME, result.skillName())));
+        renderJSON(gson.toJson(new SkillImportResponse("imported", result.skillName(), null)));
     }
 
     /** GET /api/skills/{name} — Get a global skill with full content. */
@@ -418,7 +423,7 @@ public class ApiSkillsController extends Controller {
         config.enabled = enabled;
         config.save();
 
-        renderJSON(gson.toJson(Map.of("name", name, KEY_ENABLED, enabled, KEY_STATUS, "ok")));
+        renderJSON(gson.toJson(new SkillToggleResponse(name, enabled, "ok")));
     }
 
     /** POST /api/agents/{id}/skills/{name}/copy — Copy a global skill into the agent's workspace. */
@@ -463,11 +468,7 @@ public class ApiSkillsController extends Controller {
                 config.save();
             }
 
-            renderJSON(gson.toJson(Map.of(
-                    "name", name,
-                    KEY_STATUS, "ok",
-                    "replaced", replacing
-            )));
+            renderJSON(gson.toJson(new SkillCopyResponse(name, "ok", replacing)));
         } catch (IOException e) {
             // renderText (not error()) so the frontend's drag-and-drop banner
             // can surface the actual cause — Play's error() returns an HTML
@@ -556,7 +557,7 @@ public class ApiSkillsController extends Controller {
             }
         });
 
-        renderJSON(gson.toJson(Map.of(KEY_STATUS, "promoting", KEY_SKILL_NAME, skillName)));
+        renderJSON(gson.toJson(new SkillPromoteResponse("promoting", skillName)));
     }
 
     /** PUT /api/skills/{name}/rename — Rename a global skill folder. */
@@ -583,7 +584,7 @@ public class ApiSkillsController extends Controller {
         try {
             Files.move(sourceDir, targetDir);
             SkillLoader.clearCache();
-            renderJSON(gson.toJson(Map.of("oldName", name, KEY_NEW_NAME, newName, KEY_STATUS, "ok")));
+            renderJSON(gson.toJson(new SkillRenameResponse(name, newName, "ok")));
         } catch (IOException e) {
             error(500, "Failed to rename skill: " + e.getMessage());
         }
@@ -671,10 +672,7 @@ public class ApiSkillsController extends Controller {
         if (!Files.exists(target)) notFound();
 
         try {
-            renderJSON(gson.toJson(Map.of(
-                    "path", filePath,
-                    "content", Files.readString(target)
-            )));
+            renderJSON(gson.toJson(new SkillFileContentResponse(filePath, Files.readString(target))));
         } catch (IOException e) {
             error(500, "Failed to read file: " + e.getMessage());
         }
@@ -686,7 +684,7 @@ public class ApiSkillsController extends Controller {
         try {
             SkillPromotionService.deleteRecursive(dir);
             SkillLoader.clearCache();
-            renderJSON(gson.toJson(Map.of(KEY_STATUS, "ok")));
+            ApiResponses.ok();
         } catch (IOException e) {
             error(500, "Failed to delete skill: " + e.getMessage());
         }

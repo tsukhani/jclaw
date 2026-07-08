@@ -21,6 +21,7 @@ import services.ConfigService;
 import services.LoadTestRunner;
 import services.compression.TextCompressor;
 import tools.ShellExecTool;
+import utils.ApiResponses;
 import utils.HttpKeys;
 
 import java.nio.file.Path;
@@ -108,6 +109,11 @@ public class ApiAgentsController extends Controller {
                                String thinkingMode, String description, Boolean enabled) {}
 
     public record WorkspaceFileRequest(String content) {}
+
+    private record EffectiveAllowlistResponse(List<String> global,
+                                              Map<String, List<String>> bySkill) {}
+
+    private record WorkspaceFileResponse(String filename, String content) {}
 
     private record AgentView(Long id, String name, String description,
                              String modelProvider, String modelId,
@@ -252,10 +258,7 @@ public class ApiAgentsController extends Controller {
             entry.getValue().sort(String::compareTo);
         }
 
-        renderJSON(gson.toJson(Map.of(
-                "global", global,
-                "bySkill", bySkill
-        )));
+        renderJSON(gson.toJson(new EffectiveAllowlistResponse(global, bySkill)));
     }
 
     @SuppressWarnings("java:S2259")
@@ -469,7 +472,7 @@ public class ApiAgentsController extends Controller {
             error(409, "The built-in 'main' agent cannot be deleted");
         }
         AgentService.delete(agent);
-        renderJSON(gson.toJson(Map.of("status", "ok")));
+        ApiResponses.ok();
     }
 
     // --- Workspace file endpoints ---
@@ -522,7 +525,7 @@ public class ApiAgentsController extends Controller {
         var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
         if (content == null) notFound();
-        renderJSON(gson.toJson(Map.of("filename", filename, KEY_CONTENT, content)));
+        renderJSON(gson.toJson(new WorkspaceFileResponse(filename, content)));
     }
 
     @SuppressWarnings("java:S2259")
@@ -536,7 +539,7 @@ public class ApiAgentsController extends Controller {
             throw new AssertionError("unreachable: badRequest() throws");
         }
         AgentService.writeWorkspaceFile(agent.name, filename, body.get(KEY_CONTENT).getAsString());
-        renderJSON(gson.toJson(Map.of("status", "ok", "filename", filename)));
+        ApiResponses.ok("filename", filename);
     }
 
 }
