@@ -343,7 +343,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
     @Operation(summary = "List an agent's installed skills and their enabled state")
     public static void listForAgent(Long id) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 
         var agentDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
@@ -384,7 +384,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillToggleResponse.class)))
     @Operation(summary = "Enable or disable an already-installed skill on an agent")
     public static void updateForAgent(Long id, String name) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
@@ -431,7 +431,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCopyResponse.class)))
     @Operation(summary = "Install (copy) a global skill into an agent's workspace and enable it (use this to add a skill an agent lacks)")
     public static void copyToAgent(Long id, String name) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 
         var globalDir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
@@ -483,7 +483,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
     @Operation(summary = "List files in an agent workspace skill folder with metadata and detected tool dependencies")
     public static void listAgentSkillFiles(Long id, String name) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
@@ -495,7 +495,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFileContentResponse.class)))
     @Operation(summary = "Read a text file from an agent workspace skill")
     public static void readAgentSkillFile(Long id, String name, String filePath) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         readSkillFileFrom(dir, filePath);
@@ -506,7 +506,7 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
     @Operation(summary = "Delete a skill from an agent's workspace and revoke its shell-allowlist grants")
     public static void deleteAgentSkill(Long id, String name) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
@@ -534,7 +534,7 @@ public class ApiSkillsController extends Controller {
         var agentId = body.get("agentId").getAsLong();
         var skillName = body.get(KEY_SKILL_NAME).getAsString();
 
-        Agent agent = Agent.findById(agentId);
+        Agent agent = AgentService.findById(agentId);
         if (agent == null) notFound();
 
         var agentName = agent.name;

@@ -14,6 +14,7 @@ import models.Agent;
 import models.AgentToolConfig;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AgentService;
 
 import java.util.HashMap;
 import java.util.List;
@@ -88,7 +89,7 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentToolEntry.class))))
     @Operation(summary = "List an agent's tools and their enabled state")
     public static void listForAgent(Long id) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 
         var allTools = ToolRegistry.listTools();
@@ -127,7 +128,7 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolToggleResponse.class)))
     @Operation(summary = "Enable or disable a tool for an agent")
     public static void updateForAgent(Long id, String name) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");
@@ -197,7 +198,7 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolGroupToggleResponse.class)))
     @Operation(summary = "Enable or disable a tool group (e.g. an MCP server) for an agent")
     public static void updateGroupForAgent(Long id, String group) {
-        Agent agent = Agent.findById(id);
+        Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();

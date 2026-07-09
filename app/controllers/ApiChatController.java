@@ -130,7 +130,7 @@ public class ApiChatController extends Controller {
         // request in a JPA tx; explicit short Tx.run for the lookup. Agent has
         // no lazy fields used downstream, so reading String columns on the
         // detached entity after the tx closes is safe.
-        Agent agent = Tx.run(() -> Agent.findById(agentId));
+        Agent agent = Tx.run(() -> AgentService.findById(agentId));
         if (agent == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");
@@ -244,7 +244,7 @@ public class ApiChatController extends Controller {
     @SuppressWarnings("java:S2259")
     public static void uploadChatFiles(Long agentId, Upload[] files) {
         if (agentId == null) badRequest();
-        Agent agent = Agent.findById(agentId);
+        Agent agent = AgentService.findById(agentId);
         if (agent == null) notFound();
 
         validateUploads(files);
