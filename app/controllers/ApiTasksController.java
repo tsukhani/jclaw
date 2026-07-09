@@ -884,8 +884,9 @@ public class ApiTasksController extends Controller {
         List<Task> conflicts = TaskService.findRecurringConflicts(name, agent);
         if (!conflicts.isEmpty()) {
             var conflictId = conflicts.getFirst().id;
-            ApiResponses.error(409, "conflict", "A recurring task named '%s' already exists for this agent (id=%d)"
-                    .formatted(name, conflictId));
+            ApiResponses.error(409, "conflict",
+                    "A recurring task named '%s' already exists for this agent (id=%d)".formatted(name, conflictId),
+                    "conflictingTaskId", conflictId);
         }
     }
 
@@ -905,8 +906,9 @@ public class ApiTasksController extends Controller {
                 .stream().filter(t -> !t.id.equals(task.id)).toList();
         if (!conflicts.isEmpty()) {
             var conflictId = conflicts.getFirst().id;
-            ApiResponses.error(409, "conflict", "A recurring task named '%s' already exists for this agent (id=%d)"
-                    .formatted(name, conflictId));
+            ApiResponses.error(409, "conflict",
+                    "A recurring task named '%s' already exists for this agent (id=%d)".formatted(name, conflictId),
+                    "conflictingTaskId", conflictId);
         }
     }
 

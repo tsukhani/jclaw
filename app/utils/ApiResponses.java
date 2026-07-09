@@ -76,6 +76,27 @@ public final class ApiResponses {
     }
 
     /**
+     * JCLAW-685: canonical error body plus extra machine-readable fields appended
+     * after {@code message} — keys at even indices, values at the following odd
+     * index (mirrors {@link #ok(Object...)}). Lets a controller surface a
+     * structured hint (e.g. {@code error(409, "conflict", msg, "conflictingTaskId", id)})
+     * that operators can target programmatically instead of regexing the message.
+     *
+     * @param kv alternating key/value pairs (even length required)
+     */
+    public static void error(int httpStatus, String code, String message, Object... kv) {
+        if (kv.length % 2 != 0) {
+            throw new IllegalArgumentException("ApiResponses.error(kv) requires an even number of extra arguments");
+        }
+        Http.Response.current().status = httpStatus;
+        var body = errorBody(code, message);
+        for (int i = 0; i < kv.length; i += 2) {
+            body.put(String.valueOf(kv[i]), kv[i + 1]);
+        }
+        throw new RenderJson(GSON.toJson(body));
+    }
+
+    /**
      * Log {@code t} through {@link EventLogger} then render the canonical error
      * body with {@code httpStatus} — collapses the repeated
      * {@code catch (Exception e) { Logger.error(...); renderJSON(...); }} blocks

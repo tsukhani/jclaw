@@ -3046,11 +3046,23 @@ do_test() {
 
     echo "==> Running backend tests (play autotest)..."
     t0=$(_now)
+    # JCLAW-684: clear this run's per-class result sentinels first so the
+    # post-run check below can't trip on stale *.class.failed.html from an
+    # earlier run (play does not purge them).
+    rm -f "$SCRIPT_DIR"/test-result/*.class.failed.html 2>/dev/null || true
     set +e
     play autotest 2>&1 | tee "$backend_log"
     backend_rc=${PIPESTATUS[0]}
     set -e
     if ! grep -q "^~ All tests passed" "$backend_log" 2>/dev/null; then
+        backend_rc=1
+    fi
+    # JCLAW-684: belt-and-braces #3 — a per-class failed sentinel means a real
+    # failure even if the exit code and summary line were spuriously green (the
+    # "FirePhoque exit=0 but tests failed" / concurrent-collision class). This
+    # bakes the manual sentinel-truth-check into the gate itself.
+    if ls "$SCRIPT_DIR"/test-result/*.class.failed.html >/dev/null 2>&1; then
+        echo "[jclaw test] Failed per-class result sentinels present — backend FAILED." >&2
         backend_rc=1
     fi
     backend_elapsed=$(_elapsed "$t0")

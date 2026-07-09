@@ -32,6 +32,11 @@ import java.time.Instant;
 public final class GsonHolder {
 
     public static final Gson INSTANCE = new GsonBuilder()
+            // JCLAW-686: this is a JSON API consumed via JSON.parse (which un-escapes
+            // transparently), never embedded raw into an HTML <script> context — so
+            // Gson's default HTML-escaping of '=' (\u003d), apostrophes (\u0027), and
+            // < > & only makes raw bodies unreadable and error messages fragile.
+            .disableHtmlEscaping()
             .serializeNulls()
             .registerTypeAdapter(Instant.class, new InstantTypeAdapter())
             .create();
