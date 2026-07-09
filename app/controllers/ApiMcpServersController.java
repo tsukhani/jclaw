@@ -190,7 +190,7 @@ public class ApiMcpServersController extends Controller {
 
     @SuppressWarnings("java:S2259")
     private static McpServer requireServer(Long id) {
-        var row = (McpServer) McpServer.findById(id);
+        var row = (McpServer) McpServerService.findById(id);
         if (row != null) return row;
         notFound();
         throw new AssertionError("notFound() did not throw");

@@ -6,6 +6,7 @@ import models.Notification;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
+import services.NotificationService;
 
 import java.time.Instant;
 import java.util.List;
@@ -86,7 +87,7 @@ public class ApiNotificationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Mark a notification acknowledged (idempotent), without deleting it")
     public static void ack(Long id) {
-        var n = (Notification) Notification.findById(id);
+        var n = (Notification) NotificationService.findById(id);
         if (n == null) notFound();
         if (n.acknowledgedAt == null) {
             n.acknowledgedAt = Instant.now();
@@ -108,7 +109,7 @@ public class ApiNotificationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Hard-delete a notification by id")
     public static void delete(Long id) {
-        var n = (Notification) Notification.findById(id);
+        var n = (Notification) NotificationService.findById(id);
         if (n == null) notFound();
         var agentName = n.agent != null ? n.agent.name : null;
         n.delete();

@@ -6,8 +6,10 @@ import models.MessageAttachment;
 import models.VideoGenerationJob;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AttachmentService;
 import services.videogen.ReplicateVideoModelCatalog;
 import services.videogen.VideoCapabilityProbe;
+import services.videogen.VideoGenerationJobService;
 import utils.ApiResponses;
 
 import java.util.ArrayList;
@@ -49,7 +51,7 @@ public class ApiVideogenController extends Controller {
             for (int i = 0; i < limit; i++) {
                 var id = parseId(parts[i]);
                 if (id == null) continue;
-                VideoGenerationJob job = VideoGenerationJob.findById(id);
+                VideoGenerationJob job = VideoGenerationJobService.findById(id);
                 if (job != null) out.add(toStatusRow(job));
             }
         }
@@ -66,7 +68,7 @@ public class ApiVideogenController extends Controller {
         // The placeholder is filled in-place, so until a reload the chat still holds sizeBytes=0;
         // hand it the result's uuid + size so the video chip can show the size live (JCLAW-234).
         MessageAttachment result = job.resultAttachmentId != null
-                ? MessageAttachment.findById(job.resultAttachmentId) : null;
+                ? AttachmentService.findById(job.resultAttachmentId) : null;
         m.put("resultAttachmentUuid", result == null ? null : result.uuid);
         m.put("resultSizeBytes", result == null ? null : result.sizeBytes);
         return m;
