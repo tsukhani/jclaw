@@ -21,6 +21,7 @@ import services.ModelDiscoveryService.DiscoveryResult;
 import services.PricingRefreshService;
 import services.video.VideoInterpretationClient;
 import services.video.VideoInterpretationRouter;
+import utils.ApiResponses;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -99,10 +100,10 @@ public class ApiProvidersController extends Controller {
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
 
         if (baseUrl == null || baseUrl.isBlank()) {
-            error(400, "Provider '%s' has no base URL configured".formatted(name));
+            ApiResponses.error(400, "invalid_request", "Provider '%s' has no base URL configured".formatted(name));
         }
         if (apiKey == null || apiKey.isBlank()) {
-            error(400, "Provider '%s' has no API key configured".formatted(name));
+            ApiResponses.error(400, "invalid_request", "Provider '%s' has no API key configured".formatted(name));
         }
 
         var result = ModelDiscoveryService.discover(name, baseUrl, apiKey);
@@ -110,7 +111,7 @@ public class ApiProvidersController extends Controller {
             case DiscoveryResult.Ok(var models) ->
                     renderJSON(gson.toJson(new DiscoverModelsResponse(models, models.size())));
             case DiscoveryResult.Error(var statusCode, var message) ->
-                    error(statusCode, message);
+                    ApiResponses.error(statusCode, "upstream_error", message);
         }
     }
 
@@ -157,7 +158,7 @@ public class ApiProvidersController extends Controller {
     public static void videoModels(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
-            error(400, "Provider '%s' has no base URL configured".formatted(name));
+            ApiResponses.error(400, "invalid_request", "Provider '%s' has no base URL configured".formatted(name));
         }
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
         // Page-load read (Settings video-model dropdown) — cached; the explicit
@@ -185,7 +186,7 @@ public class ApiProvidersController extends Controller {
                 }
                 renderJSON(gson.toJson(new ProviderModelsResponse(name, refs, refs.size())));
             }
-            case DiscoveryResult.Error(var statusCode, var message) -> error(statusCode, message);
+            case DiscoveryResult.Error(var statusCode, var message) -> ApiResponses.error(statusCode, "upstream_error", message);
         }
     }
 
@@ -235,7 +236,7 @@ public class ApiProvidersController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("id") || body.get("id").isJsonNull()
                 || body.get("id").getAsString().isBlank()) {
-            error(400, "Field 'id' is required");
+            ApiResponses.error(400, "invalid_request", "Field 'id' is required");
         }
         var id = body.get("id").getAsString().trim();
 
@@ -243,7 +244,7 @@ public class ApiProvidersController extends Controller {
         var models = parseModelsArray(ConfigService.get(key));
         for (var el : models) {
             if (el.isJsonObject() && id.equals(str(el.getAsJsonObject(), "id"))) {
-                error(409, "Model '%s' already exists for provider '%s'".formatted(id, name));
+                ApiResponses.error(409, "conflict", "Model '%s' already exists for provider '%s'".formatted(id, name));
             }
         }
 
@@ -281,7 +282,7 @@ public class ApiProvidersController extends Controller {
     private static void requireConfiguredProvider(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
-            error(404, "Provider '%s' is not configured".formatted(name));
+            ApiResponses.error(404, "not_found", "Provider '%s' is not configured".formatted(name));
         }
     }
 
