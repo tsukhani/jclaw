@@ -206,7 +206,7 @@ public class ApiSkillsController extends Controller {
             map.put("content", Files.readString(path));
             renderJSON(gson.toJson(map));
         } catch (IOException e) {
-            error(500, "Failed to read skill: " + e.getMessage());
+            ApiResponses.error(500, "internal_error", "Failed to read skill: " + e.getMessage());
         }
     }
 
@@ -331,7 +331,7 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Delete a global skill (rejects the built-in skill-creator)")
     public static void delete(String name) {
         if ("skill-creator".equals(name)) {
-            error(403, "The skill-creator skill is a built-in skill and cannot be deleted.");
+            ApiResponses.error(403, "forbidden", "The skill-creator skill is a built-in skill and cannot be deleted.");
         }
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
@@ -436,7 +436,7 @@ public class ApiSkillsController extends Controller {
 
         var globalDir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(globalDir)) {
-            error(404, "Global skill '%s' not found".formatted(name));
+            ApiResponses.error(404, "not_found", "Global skill '%s' not found".formatted(name));
         }
 
         // Verify the agent has every tool this skill declares it needs
@@ -540,7 +540,7 @@ public class ApiSkillsController extends Controller {
         var agentName = agent.name;
         var skillDir = AgentService.workspacePath(agentName).resolve(SKILLS_DIR).resolve(skillName);
         if (!Files.isDirectory(skillDir) || !Files.exists(skillDir.resolve(SKILL_MD))) {
-            error(404, "Skill '%s' not found in agent workspace".formatted(skillName));
+            ApiResponses.error(404, "not_found", "Skill '%s' not found in agent workspace".formatted(skillName));
         }
 
         // Return immediately — run sanitization in the background. Pass the
@@ -578,7 +578,7 @@ public class ApiSkillsController extends Controller {
 
         var targetDir = resolveSkillName(globalDir, newName);
         if (Files.exists(targetDir)) {
-            error(409, "A skill with folder name '%s' already exists".formatted(newName));
+            ApiResponses.error(409, "conflict", "A skill with folder name '%s' already exists".formatted(newName));
         }
 
         try {
@@ -586,7 +586,7 @@ public class ApiSkillsController extends Controller {
             SkillLoader.clearCache();
             renderJSON(gson.toJson(new SkillRenameResponse(name, newName, "ok")));
         } catch (IOException e) {
-            error(500, "Failed to rename skill: " + e.getMessage());
+            ApiResponses.error(500, "internal_error", "Failed to rename skill: " + e.getMessage());
         }
     }
 
@@ -615,7 +615,7 @@ public class ApiSkillsController extends Controller {
             result.put("author", meta.author());
             renderJSON(gson.toJson(result));
         } catch (IOException e) {
-            error(500, "Failed to list skill files: " + e.getMessage());
+            ApiResponses.error(500, "internal_error", "Failed to list skill files: " + e.getMessage());
         }
     }
 
@@ -666,7 +666,7 @@ public class ApiSkillsController extends Controller {
         try {
             target = AgentService.acquireContained(dir, filePath);
         } catch (SecurityException _) {
-            error(403, "Path escapes skill directory");
+            ApiResponses.error(403, "forbidden", "Path escapes skill directory");
             return;  // javac definite-assignment: target is unassigned on this catch path
         }
         if (!Files.exists(target)) notFound();
@@ -674,7 +674,7 @@ public class ApiSkillsController extends Controller {
         try {
             renderJSON(gson.toJson(new SkillFileContentResponse(filePath, Files.readString(target))));
         } catch (IOException e) {
-            error(500, "Failed to read file: " + e.getMessage());
+            ApiResponses.error(500, "internal_error", "Failed to read file: " + e.getMessage());
         }
     }
 
@@ -686,7 +686,7 @@ public class ApiSkillsController extends Controller {
             SkillLoader.clearCache();
             ApiResponses.ok();
         } catch (IOException e) {
-            error(500, "Failed to delete skill: " + e.getMessage());
+            ApiResponses.error(500, "internal_error", "Failed to delete skill: " + e.getMessage());
         }
     }
 
