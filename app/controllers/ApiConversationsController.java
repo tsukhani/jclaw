@@ -23,7 +23,6 @@ import play.mvc.With;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
-import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import utils.ApiResponses;
@@ -287,7 +286,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConversationView.class)))
     @Operation(summary = "Get a single conversation by id, in the same shape as one list row")
     public static void getConversation(Long id) {
-        Conversation conversation = Conversation.findById(id);
+        Conversation conversation = ConversationService.findById(id);
         if (conversation == null) notFound();
         renderJSON(gson.toJson(conversationToMap(conversation,
                 SessionCompaction.count("conversation = ?1", conversation))));
@@ -300,7 +299,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageView.class))))
     @Operation(summary = "List a conversation's messages in ascending order, paginated")
     public static void getMessages(Long id, Integer limit, Integer offset) {
-        Conversation conversation = Conversation.findById(id);
+        Conversation conversation = ConversationService.findById(id);
         if (conversation == null) notFound();
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
@@ -414,14 +413,14 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @ChatHidden("destructive history deletion")
     public static void deleteMessage(Long id, Long mid) {
-        Conversation conversation = Conversation.findById(id);
+        Conversation conversation = ConversationService.findById(id);
         if (conversation == null) notFound();
-        Message message = Message.findById(mid);
+        Message message = ConversationService.findMessageById(mid);
         if (message == null) notFound();
         if (message.conversation == null || !message.conversation.id.equals(id)) {
             badRequest();
         }
-        Tx.run((Runnable) message::delete);
+        ConversationService.deleteMessage(mid);
         renderJSON(gson.toJson(new StatusResponse("deleted")));
     }
 
@@ -432,7 +431,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @ChatHidden("destructive history deletion")
     public static void deleteConversation(Long id) {
-        Conversation conversation = Conversation.findById(id);
+        Conversation conversation = ConversationService.findById(id);
         if (conversation == null) notFound();
         ConversationService.deleteByIds(List.of(id));
         renderJSON(gson.toJson(new StatusResponse("deleted")));
@@ -531,7 +530,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ModelOverrideResponse.class)))
     @Operation(summary = "Set a conversation-scoped model provider/model override, validated against the provider registry")
     public static void setModelOverride(Long id) {
-        Conversation conversation = Conversation.findById(id);
+        Conversation conversation = ConversationService.findById(id);
         if (conversation == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
@@ -570,7 +569,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Clear a conversation's model override, reverting to the agent default (idempotent)")
     public static void clearModelOverride(Long id) {
-        Conversation conversation = Conversation.findById(id);
+        Conversation conversation = ConversationService.findById(id);
         if (conversation == null) notFound();
         ConversationService.clearModelOverride(conversation);
         renderJSON(gson.toJson(new StatusResponse("cleared")));

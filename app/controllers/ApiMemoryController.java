@@ -14,6 +14,7 @@ import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
+import services.MemoryService;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import utils.ApiResponses;
@@ -152,7 +153,7 @@ public class ApiMemoryController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryDto.class)))
     @Operation(summary = "Adjust a memory's importance and/or category")
     public static void update(Long memoryId) {
-        Memory memory = Memory.findById(memoryId);
+        Memory memory = MemoryService.findById(memoryId);
         if (memory == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");
@@ -184,7 +185,7 @@ public class ApiMemoryController extends Controller {
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Delete a memory")
     public static void delete(Long memoryId) {
-        Memory memory = Memory.findById(memoryId);
+        Memory memory = MemoryService.findById(memoryId);
         if (memory == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");
@@ -217,7 +218,7 @@ public class ApiMemoryController extends Controller {
         int deleted = 0;
         if (body.has("ids")) {
             for (var elem : body.getAsJsonArray("ids")) {
-                Memory m = Memory.findById(elem.getAsLong());
+                Memory m = MemoryService.findById(elem.getAsLong());
                 if (m != null) {
                     m.delete();
                     deleted++;

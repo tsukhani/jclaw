@@ -277,7 +277,7 @@ public class ApiSubagentRunsController extends Controller {
             ApiResponses.error(400, CODE_INVALID_REQUEST, MISSING_RUN_ID);
             return;
         }
-        var run = (SubagentRun) SubagentRun.findById(id);
+        var run = SubagentRegistry.findRunById(id);
         if (run == null) {
             ApiResponses.error(404, CODE_NOT_FOUND, "Run " + id + " not found.");
             return;
@@ -353,7 +353,7 @@ public class ApiSubagentRunsController extends Controller {
             ApiResponses.error(400, CODE_INVALID_REQUEST, MISSING_RUN_ID);
             return;
         }
-        var run = (SubagentRun) SubagentRun.findById(id);
+        var run = SubagentRegistry.findRunById(id);
         if (run == null) {
             ApiResponses.error(404, CODE_NOT_FOUND, "Run " + id + " not found.");
             return;
