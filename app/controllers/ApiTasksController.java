@@ -18,6 +18,7 @@ import play.Logger;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AgentService;
 import services.DeliveryAdvisor;
 import services.DeliverySpec;
 import services.EventLogger;
@@ -25,6 +26,7 @@ import services.JClawCronUtils;
 import services.ScheduleShorthandParser;
 import services.TaskRunRegistry;
 import services.TaskSchedulingService;
+import services.TaskService;
 import services.TimezoneResolver;
 import services.Tx;
 import services.search.LuceneIndexer;
@@ -386,7 +388,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunView.class))))
     @Operation(summary = "Paginated TaskRun history for one task (startedAt DESC), 404 if task missing")
     public static void runs(Long id, Integer limit, Integer offset) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
@@ -412,7 +414,7 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Preflight Slack delivery reachability advisory for one task (null when reachable / N/A)")
     public static void deliveryAdvisory(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
         var advisory = DeliveryAdvisor.advisoryFor(task.agent, task.delivery);
         var payload = new LinkedHashMap<String, Object>();
@@ -431,7 +433,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunMessageView.class))))
     @Operation(summary = "Turn-by-turn message trace for one TaskRun (turnIndex order), 404 if run missing")
     public static void runMessages(Long id) {
-        TaskRun run = TaskRun.findById(id);
+        TaskRun run = TaskService.findRunById(id);
         if (run == null) notFound();
 
         @SuppressWarnings("unchecked")
@@ -820,7 +822,7 @@ public class ApiTasksController extends Controller {
             error(400, "agentId is required");
             throw new AssertionError("unreachable: error() throws");
         }
-        var agent = (Agent) Agent.findById(body.get(KEY_AGENT_ID).getAsLong());
+        var agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null) {
             error(400, "agentId does not resolve to an existing agent");
             throw new AssertionError("unreachable: error() throws");
@@ -879,13 +881,9 @@ public class ApiTasksController extends Controller {
     private static void rejectDuplicateRecurringTask(String name, Agent agent,
                                                       ScheduleShorthandParser.ScheduleSpec spec) {
         if (spec.type() != Task.Type.CRON && spec.type() != Task.Type.INTERVAL) return;
-        @SuppressWarnings("unchecked")
-        var conflicts = (List<Object>) (List<?>) Tx.run(() -> Task.find(
-                "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5",
-                name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED
-        ).fetch());
+        List<Task> conflicts = TaskService.findRecurringConflicts(name, agent);
         if (!conflicts.isEmpty()) {
-            var conflictId = ((Task) conflicts.getFirst()).id;
+            var conflictId = conflicts.getFirst().id;
             error(409, "A recurring task named '%s' already exists for this agent (id=%d)"
                     .formatted(name, conflictId));
         }
@@ -894,7 +892,8 @@ public class ApiTasksController extends Controller {
     /**
      * Rename variant of {@link #rejectDuplicateRecurringTask}: re-checks the
      * duplicate-name rule against the task's current agent + type, excluding the
-     * task itself ({@code id != ?6}) so renaming to its own name is a no-op.
+     * task itself (filtered out by id in the controller) so renaming to its own
+     * name is a no-op.
      * Only CRON / INTERVAL are checked — one-shot names are inert (parity with
      * create). 409 with the conflicting Task id. Relies on {@code update}'s
      * ambient action transaction (no {@code Tx.run} wrap — it runs alongside the
@@ -902,13 +901,10 @@ public class ApiTasksController extends Controller {
      */
     private static void rejectDuplicateRecurringRename(String name, Task task) {
         if (task.type != Task.Type.CRON && task.type != Task.Type.INTERVAL) return;
-        @SuppressWarnings("unchecked")
-        var conflicts = (List<Object>) (List<?>) Task.find(
-                "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5 AND id != ?6",
-                name, task.agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED, task.id
-        ).fetch();
+        List<Task> conflicts = TaskService.findRecurringConflicts(name, task.agent)
+                .stream().filter(t -> !t.id.equals(task.id)).toList();
         if (!conflicts.isEmpty()) {
-            var conflictId = ((Task) conflicts.getFirst()).id;
+            var conflictId = conflicts.getFirst().id;
             error(409, "A recurring task named '%s' already exists for this agent (id=%d)"
                     .formatted(name, conflictId));
         }
@@ -997,7 +993,7 @@ public class ApiTasksController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TaskRequest.class)))
     @Operation(summary = "Patch a task by id from a JSON body of changed fields, re-registering the scheduler when the schedule changes")
     public static void update(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
@@ -1154,7 +1150,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Cancel a PENDING or ACTIVE task by id (sets status CANCELLED and unschedules)")
     public static void cancel(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
         // Both PENDING (one-shot waiting) and ACTIVE (recurring ongoing)
         // are cancellable; other states (RUNNING, terminal) are not.
@@ -1190,7 +1186,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Hard-delete a task by id along with its runs, messages, notifications, and scheduler row")
     public static void delete(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
 
         var agentName = task.agent != null ? task.agent.name : null;
@@ -1258,7 +1254,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Pause a PENDING or ACTIVE task by id so it won't fire until resumed")
     public static void pause(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
         // Pause only applies to live tasks (PENDING one-shot waiting / ACTIVE
         // recurring ongoing); pausing a terminal Task has no effect since the
@@ -1271,14 +1267,14 @@ public class ApiTasksController extends Controller {
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) paused via API".formatted(task.name, task.id));
         // Re-read so the response reflects the flipped flag.
-        renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
+        renderJSON(gson.toJson(TaskView.of(TaskService.findById(task.id))));
     }
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Resume a paused PENDING or ACTIVE task by id so it fires on schedule again")
     public static void resume(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
         // Resume mirrors pause — accept PENDING or ACTIVE alive states.
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
@@ -1288,7 +1284,7 @@ public class ApiTasksController extends Controller {
         EventLogger.info("TASK_MGMT_RESUME",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) resumed via API".formatted(task.name, task.id));
-        renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
+        renderJSON(gson.toJson(TaskView.of(TaskService.findById(task.id))));
     }
 
     /**
@@ -1308,7 +1304,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Re-arm a CANCELLED task's schedule at its next natural fire without firing immediately")
     public static void reenable(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
         // Re-enable only applies to a CANCELLED task: reviving a live Task
         // would double-schedule, and reviving a COMPLETED/FAILED one would
@@ -1323,7 +1319,7 @@ public class ApiTasksController extends Controller {
         EventLogger.info("TASK_MGMT_REENABLE",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) re-enabled via API".formatted(task.name, task.id));
-        renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
+        renderJSON(gson.toJson(TaskView.of(TaskService.findById(task.id))));
     }
 
     /**
@@ -1340,7 +1336,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Fire a task immediately by id, reviving a CANCELLED task first so the run isn't skipped")
     public static void run(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
 
         boolean revivedFromCancel = false;
@@ -1374,7 +1370,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskRunView.class)))
     @Operation(summary = "Cancel an in-progress task run by runId (cooperative flag + stamp CANCELLED), 400 if not RUNNING")
     public static void cancelRun(Long runId) {
-        TaskRun run = TaskRun.findById(runId);
+        TaskRun run = TaskService.findRunById(runId);
         if (run == null) notFound();
         if (run.status != TaskRun.Status.RUNNING) {
             // Only an in-flight run can be cancelled; a terminal run has nothing
@@ -1405,7 +1401,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     @Operation(summary = "Retry a FAILED or LOST task by id (reset retryCount/lastError and re-register to fire now)")
     public static void retry(Long id) {
-        Task task = Task.findById(id);
+        Task task = TaskService.findById(id);
         if (task == null) notFound();
         // JCLAW-258 extends retry to accept LOST in addition to FAILED.
         // FAILED: no scheduled_tasks row (it was removed when the failure
