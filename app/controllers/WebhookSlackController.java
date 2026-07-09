@@ -8,6 +8,7 @@ import play.mvc.Controller;
 import play.mvc.Http;
 import services.BindingService;
 import services.EventLogger;
+import utils.ApiResponses;
 import utils.WebhookUtil;
 
 import java.net.URLDecoder;
@@ -59,7 +60,7 @@ public class WebhookSlackController extends Controller {
         // Interactivity bodies are form-encoded with a single `payload` field. The
         // signature (already verified) covers this raw form string, not the JSON.
         if (!rawBody.startsWith("payload=")) {
-            badRequest("Missing payload");
+            ApiResponses.error(400, "invalid_request", "Missing payload");
         }
         var payloadJson = URLDecoder.decode(rawBody.substring("payload=".length()), StandardCharsets.UTF_8);
         var payload = JsonParser.parseString(payloadJson).getAsJsonObject();
@@ -74,18 +75,18 @@ public class WebhookSlackController extends Controller {
      * the Slack request signature against this binding's secret. Returns only on
      * success; every rejection path halts via a Play {@code Result} exception.
      */
-    @SuppressWarnings("java:S2259") // Play's notFound/forbidden/unauthorized halt; binding is non-null past each guard
+    @SuppressWarnings("java:S2259") // ApiResponses.error / unauthorized halt; binding is non-null past each guard
     private static Verified resolveAndVerify(Long bindingId) {
         SlackBinding binding = BindingService.findSlackBindingById(bindingId);
         if (binding == null) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Webhook rejected: unknown Slack binding %s".formatted(bindingId));
-            notFound("Unknown Slack binding");
+            ApiResponses.error(404, "not_found", "Unknown Slack binding");
         }
         if (!binding.enabled) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Webhook rejected: Slack binding %s is disabled".formatted(bindingId));
-            forbidden("Binding disabled");
+            ApiResponses.error(403, "forbidden", "Binding disabled");
         }
         if (binding.signingSecret == null || binding.signingSecret.isBlank()) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
