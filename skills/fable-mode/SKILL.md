@@ -47,6 +47,10 @@ Good delegation: "research X while I do Y", "process these 3 files", "verify thi
 
 Use `conversation_send` to push status updates from subagents back to the main conversation.
 
+**Collect before you respond — this is not optional.** A subagent's work only reaches your reply if you wait for it. Whenever you fan out — a `tasks[]` batch or several `async=true` spawns — end that stage with **one** `subagent_yield` call that awaits every child: pass `all=true` (collects all pending children) or the explicit `runIds` list the spawn returned. `subagent_yield` *suspends* your turn; you resume automatically once the children finish, with their results delivered back to you, and only **then** do you synthesize your response from them.
+
+Do **not** write your final answer while children are still running. If you do, their output arrives later as separate announcements you can no longer fold in, and your reply silently omits the very work you delegated — which is worse than not delegating at all. The sequence is always: spawn the independent stages → `subagent_yield` (await all) → synthesize → respond. If you also did your own work alongside them, you still yield for the children before responding, then combine everything.
+
 ### 3. Verify with a Check That Can Fail
 
 Each stage must define a pass condition that an external artifact satisfies. Acceptable checks:
@@ -115,7 +119,7 @@ See the skill repository at https://github.com/mrtooher/fable-mode for worked ex
 
 ## Edge Cases
 
-- **All stages independent:** Use `subagent_spawn` with `async=true` for each and `subagent_yield` to collect results
+- **All stages independent:** fan out with `subagent_spawn` (`tasks[]` batch or `async=true` each), then **one** `subagent_yield` with `all=true` (or the returned `runIds`) to await ALL children before synthesizing — never respond while children still run (see §2)
 - **Sequential dependency:** Run stages in order, using outputs from prior stages as context for the next
 - **Stage verification fails:** Diagnose and fix before proceeding. If the fix invalidates prior stages, re-run their checks too
 - **Long-running task:** Write a work log file to `fable-mode/worklog.md` at the root of the workspace using `filesystem`. Re-read it at the start of each continuation session via `datetime` to confirm session boundaries
