@@ -89,7 +89,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
     }
 
     /**
-     * Run a JPA mutation on a fresh virtual thread so the write commits before
+     * Run a JPA mutation on a fresh platform thread (JCLAW-688: not a VT — carrier-pool starvation under load) so the write commits before
      * the FunctionalTest carrier thread proceeds. Mirrors
      * {@code ApiAgentsControllerTest.createMainAgent}. Required whenever the
      * row needs to be visible to a subsequent HTTP request — the carrier
@@ -98,7 +98,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
      */
     private static void commitInFreshTx(Runnable block) {
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var t = Thread.ofVirtual().start(() -> {
+        var t = Thread.ofPlatform().start(() -> {
             try {
                 services.Tx.run(block);
             } catch (Throwable ex) {

@@ -133,7 +133,7 @@ class ApiTasksControllerListSearchTest extends FunctionalTest {
     private static long[] commitInFreshTx(Supplier<long[]> block) {
         var ref = new java.util.concurrent.atomic.AtomicReference<long[]>();
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var t = Thread.ofVirtual().start(() -> {
+        var t = Thread.ofPlatform().start(() -> {
             try {
                 ref.set(Tx.run(block::get));
             } catch (Throwable ex) {

@@ -360,7 +360,7 @@ class DangerousActionGateTest extends UnitTest {
     private static <T> T commitInFreshTx(java.util.function.Supplier<T> block) {
         var ref = new java.util.concurrent.atomic.AtomicReference<T>();
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var t = Thread.ofVirtual().start(() -> {
+        var t = Thread.ofPlatform().start(() -> {
             try { ref.set(Tx.run(block::get)); }
             catch (Throwable ex) { err.set(ex); }
         });

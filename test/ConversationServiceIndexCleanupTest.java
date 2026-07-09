@@ -48,7 +48,7 @@ class ConversationServiceIndexCleanupTest extends UnitTest {
     private static long commitInFreshTx(java.util.function.Supplier<Long> block) {
         var ref = new java.util.concurrent.atomic.AtomicLong(0);
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var t = Thread.ofVirtual().start(() -> {
+        var t = Thread.ofPlatform().start(() -> {
             try {
                 ref.set(Tx.run(block::get));
             } catch (Throwable ex) {

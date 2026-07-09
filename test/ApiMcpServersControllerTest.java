@@ -314,13 +314,16 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         return matcher.find() ? matcher.group(1) : null;
     }
 
-    /** Run {@code block} in a fresh virtual thread + Tx so the commit lands
+    /** Run {@code block} in a fresh platform thread + Tx (JCLAW-688:
+     *  a platform thread, NOT a virtual thread — under heavy suite load the VT
+     *  carrier pool starves (JDK-8373224) and the fresh-VT commit is delayed past
+     *  awaitCommitted's deadline, flaking the barrier) so the commit lands
      *  before the calling thread proceeds. Required for HTTP-visible seed
      *  data per the FunctionalTest Tx isolation memory. */
     private static <T> T commitInFreshTx(java.util.concurrent.Callable<T> block) {
         var holder = new java.util.concurrent.atomic.AtomicReference<T>();
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var t = Thread.ofVirtual().start(() -> {
+        var t = Thread.ofPlatform().start(() -> {
             try { holder.set(services.Tx.run(() -> {
                 try { return block.call(); }
                 catch (Exception e) { throw new RuntimeException(e); }

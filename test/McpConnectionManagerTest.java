@@ -550,7 +550,7 @@ class McpConnectionManagerTest extends UnitTest {
         return a;
     }
 
-    /** Run {@code block} in a fresh virtual thread + Tx so the commit lands
+    /** Run {@code block} in a fresh platform thread + Tx (JCLAW-688: platform, not VT — the VT carrier pool starves under suite load, JDK-8373224) so the commit lands
      *  before the calling thread proceeds — needed when seed data must be
      *  visible to a subsequent connector VT (mirrors WebhookControllerTest's
      *  pattern, since UnitTest's outer carrier tx otherwise holds writes
@@ -558,7 +558,7 @@ class McpConnectionManagerTest extends UnitTest {
     private static <T> T commitInFreshTx(java.util.concurrent.Callable<T> block) {
         var holder = new java.util.concurrent.atomic.AtomicReference<T>();
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var t = Thread.ofVirtual().start(() -> {
+        var t = Thread.ofPlatform().start(() -> {
             try { holder.set(Tx.run(() -> {
                 try { return block.call(); }
                 catch (Exception e) { throw new RuntimeException(e); }

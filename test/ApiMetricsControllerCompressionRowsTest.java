@@ -41,7 +41,7 @@ class ApiMetricsControllerCompressionRowsTest extends FunctionalTest {
      *  thread is already inside an uncommitted JPA transaction. */
     private static void commitInFreshTx(Runnable block) {
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var t = Thread.ofVirtual().start(() -> {
+        var t = Thread.ofPlatform().start(() -> {
             try { services.Tx.run(block); } catch (Throwable ex) { err.set(ex); }
         });
         try { t.join(); }
