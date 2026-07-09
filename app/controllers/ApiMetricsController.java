@@ -393,7 +393,7 @@ public class ApiMetricsController extends Controller {
                 LoadTestHarness.stop();
                 LoadTestRunner.disable();
             }
-            ApiResponses.error(500, "internal_error", "Load test failed: " + e.getMessage());
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Load test failed: " + e.getMessage());
         } finally {
             if (dispatcherBumped) {
                 HttpFactories.setLlmDispatcherCapTransient(origPerHost, origMax);
@@ -423,7 +423,7 @@ public class ApiMetricsController extends Controller {
         boolean providerSet = provider != null && !provider.isBlank();
         boolean modelSet = model != null && !model.isBlank();
         if (providerSet != modelSet) {
-            ApiResponses.error(400, "invalid_request", "provider and model must be set together (or both omitted for mock mode)");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "provider and model must be set together (or both omitted for mock mode)");
         }
         boolean real = providerSet;  // both set ⇔ real-provider run
         // Optional per-run user message override. Default lives in
@@ -454,11 +454,11 @@ public class ApiMetricsController extends Controller {
             prompts = new ArrayList<>(arr.size());
             for (var el : arr) prompts.add(el.getAsString());
         } catch (Exception _) {
-            ApiResponses.error(400, "invalid_request", "Invalid 'prompts' — must be an array of strings");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid 'prompts' — must be an array of strings");
             return List.of(); // unreachable — error() throws
         }
         if (userMessage != null && !userMessage.isBlank()) {
-            ApiResponses.error(400, "invalid_request", "userMessage and prompts are mutually exclusive");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "userMessage and prompts are mutually exclusive");
         }
         return prompts;
     }
@@ -468,10 +468,10 @@ public class ApiMetricsController extends Controller {
         int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
         int maxTurns = ConfigService.getInt("provider.loadtest-mock.maxTurns", 50);
         if (input.concurrency() < 1 || input.concurrency() > maxConcurrency) {
-            ApiResponses.error(400, "invalid_request", "concurrency must be between 1 and " + maxConcurrency);
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "concurrency must be between 1 and " + maxConcurrency);
         }
         if (input.turns() < 1 || input.turns() > maxTurns) {
-            ApiResponses.error(400, "invalid_request", "turns must be between 1 and " + maxTurns);
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "turns must be between 1 and " + maxTurns);
         }
         // Empty means "no varied-prompts mode" (parsePromptsField normalizes an
         // absent field to List.of(), not null) — only a non-empty array must
@@ -479,7 +479,7 @@ public class ApiMetricsController extends Controller {
         // promptless run with a bogus 400 (regression from the S2259 cleanup).
         if (input.prompts() != null && !input.prompts().isEmpty()
                 && input.prompts().size() < input.turns()) {
-            ApiResponses.error(400, "invalid_request", "prompts array has " + input.prompts().size() + " entries but turns=" + input.turns()
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "prompts array has " + input.prompts().size() + " entries but turns=" + input.turns()
                     + "; provide at least one prompt per turn");
         }
     }
@@ -500,7 +500,7 @@ public class ApiMetricsController extends Controller {
                         return null;
                     });
         } catch (Throwable t) {
-            ApiResponses.error(500, "internal_error", "Failed to enable mock provider: " + t.getMessage());
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to enable mock provider: " + t.getMessage());
         }
     }
 
@@ -569,7 +569,7 @@ public class ApiMetricsController extends Controller {
         try {
             return body.get(key).getAsInt();
         } catch (Exception _) {
-            ApiResponses.error(400, "invalid_request", "Invalid integer for '" + key + "'");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid integer for '" + key + "'");
             return defaultValue; // unreachable
         }
     }
@@ -580,7 +580,7 @@ public class ApiMetricsController extends Controller {
         try {
             return body.get(key).getAsBoolean();
         } catch (Exception _) {
-            ApiResponses.error(400, "invalid_request", "Invalid boolean for '" + key + "'");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid boolean for '" + key + "'");
             return defaultValue; // unreachable
         }
     }
@@ -591,7 +591,7 @@ public class ApiMetricsController extends Controller {
         try {
             return body.get(key).getAsString();
         } catch (Exception _) {
-            ApiResponses.error(400, "invalid_request", "Invalid string for '" + key + "'");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid string for '" + key + "'");
             return defaultValue; // unreachable
         }
     }
@@ -609,7 +609,7 @@ public class ApiMetricsController extends Controller {
         try {
             return Instant.parse(sinceParam);
         } catch (DateTimeParseException _) {
-            ApiResponses.error(400, "invalid_request", "Invalid 'since' — must be ISO-8601 instant (e.g. 2026-04-10T00:00:00Z)");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid 'since' — must be ISO-8601 instant (e.g. 2026-04-10T00:00:00Z)");
             throw new AssertionError("unreachable: error() throws");
         }
     }
@@ -620,7 +620,7 @@ public class ApiMetricsController extends Controller {
         try {
             return Long.parseLong(agentIdParam);
         } catch (NumberFormatException _) {
-            ApiResponses.error(400, "invalid_request", "Invalid 'agentId' — must be numeric");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid 'agentId' — must be numeric");
             return null; // unreachable — error() throws
         }
     }

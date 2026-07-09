@@ -148,7 +148,7 @@ public class ApiToolsController extends Controller {
         // direct per-action enable/disable is no longer a supported path.
         var tool = ToolRegistry.lookupTool(name);
         if (tool != null && tool.group() != null && !tool.isServerLevel()) {
-            ApiResponses.error(400, "invalid_request", "Per-action MCP tools are no longer toggleable individually. "
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Per-action MCP tools are no longer toggleable individually. "
                     + "Use PUT /api/agents/" + id + "/tool-groups/" + tool.group()
                     + " to enable or disable the entire '" + tool.group() + "' server.");
         }

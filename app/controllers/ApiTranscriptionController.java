@@ -105,7 +105,7 @@ public class ApiTranscriptionController extends Controller {
     @ChatHidden("triggers a Whisper model download -- disk/network resource action")
     public static void download(String id) {
         var model = WhisperModel.byId(id);
-        if (model.isEmpty()) ApiResponses.error(400, "invalid_request", "Unknown whisper model id: " + id);
+        if (model.isEmpty()) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown whisper model id: " + id);
         // Single-flight per model id; concurrent calls from the polling UI
         // attach to the same in-flight prefetch, no harm done (JCLAW-650:
         // downloads the HOST engine's weights via the sidecar).

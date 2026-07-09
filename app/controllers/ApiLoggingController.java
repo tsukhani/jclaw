@@ -65,7 +65,7 @@ public class ApiLoggingController extends Controller {
 
         var rejection = LoggerLevelService.validate(logger, level);
         if (rejection != null) {
-            ApiResponses.error(400, "invalid_request", rejection);
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, rejection);
         }
 
         ConfigService.setWithSideEffects(LoggerLevelService.PREFIX + logger, level);

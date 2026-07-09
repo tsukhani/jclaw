@@ -640,7 +640,7 @@ public class ApiTasksController extends Controller {
                 var until = (to != null && !to.isBlank()) ? Instant.parse(to) : Instant.now();
                 return new RunWindow(since, until);
             } catch (DateTimeException _) {
-                ApiResponses.error(400, "invalid_request", "from/to must be ISO-8601 instants");
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "from/to must be ISO-8601 instants");
                 throw new AssertionError("unreachable: error() throws");
             }
         }
@@ -819,12 +819,12 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     private static Agent requireAgentFromBody(JsonObject body) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) {
-            ApiResponses.error(400, "invalid_request", "agentId is required");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
             throw new AssertionError("unreachable: error() throws");
         }
         var agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null) {
-            ApiResponses.error(400, "invalid_request", "agentId does not resolve to an existing agent");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId does not resolve to an existing agent");
             throw new AssertionError("unreachable: error() throws");
         }
         return agent;
@@ -833,12 +833,12 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     private static String requireTaskName(JsonObject body) {
         if (!body.has(KEY_NAME) || body.get(KEY_NAME).isJsonNull()) {
-            ApiResponses.error(400, "invalid_request", "name is required");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "name is required");
             throw new AssertionError("unreachable: error() throws");
         }
         var name = body.get(KEY_NAME).getAsString();
         if (name == null || name.isBlank()) {
-            ApiResponses.error(400, "invalid_request", "name must be non-blank");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "name must be non-blank");
             throw new AssertionError("unreachable: error() throws");
         }
         return name;
@@ -854,20 +854,20 @@ public class ApiTasksController extends Controller {
         var delivery = readOptionalString(body, KEY_DELIVERY);
         if (delivery == null) return;
         var err = DeliverySpec.validate(delivery);
-        if (err != null) ApiResponses.error(400, "invalid_request", err);
+        if (err != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, err);
     }
 
     @SuppressWarnings("java:S2259")
     private static ScheduleShorthandParser.ScheduleSpec requireScheduleSpec(JsonObject body) {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) {
-            ApiResponses.error(400, "invalid_request", "schedule is required");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "schedule is required");
             throw new AssertionError("unreachable: error() throws");
         }
         try {
             var zone = TimezoneResolver.resolve(readOptionalString(body, KEY_TIMEZONE));
             return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
-            ApiResponses.error(400, "invalid_request", "Invalid schedule: " + e.getMessage());
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid schedule: " + e.getMessage());
             throw new AssertionError("unreachable: error() throws");
         }
     }
@@ -884,7 +884,7 @@ public class ApiTasksController extends Controller {
         List<Task> conflicts = TaskService.findRecurringConflicts(name, agent);
         if (!conflicts.isEmpty()) {
             var conflictId = conflicts.getFirst().id;
-            ApiResponses.error(409, "conflict",
+            ApiResponses.error(409, ApiResponses.CONFLICT,
                     "A recurring task named '%s' already exists for this agent (id=%d)".formatted(name, conflictId),
                     "conflictingTaskId", conflictId);
         }
@@ -906,7 +906,7 @@ public class ApiTasksController extends Controller {
                 .stream().filter(t -> !t.id.equals(task.id)).toList();
         if (!conflicts.isEmpty()) {
             var conflictId = conflicts.getFirst().id;
-            ApiResponses.error(409, "conflict",
+            ApiResponses.error(409, ApiResponses.CONFLICT,
                     "A recurring task named '%s' already exists for this agent (id=%d)".formatted(name, conflictId),
                     "conflictingTaskId", conflictId);
         }
@@ -1009,7 +1009,7 @@ public class ApiTasksController extends Controller {
         boolean anyChange = scheduleChanged || nameChanged || fieldsChanged;
 
         if (!anyChange) {
-            ApiResponses.error(400, "invalid_request", "No patchable fields in body");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "No patchable fields in body");
         }
 
         task.save();
@@ -1042,7 +1042,7 @@ public class ApiTasksController extends Controller {
         try {
             spec = ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString());
         } catch (IllegalArgumentException e) {
-            ApiResponses.error(400, "invalid_request", "Invalid schedule: " + e.getMessage());
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid schedule: " + e.getMessage());
             return false; // unreachable — error() throws
         }
         task.type = spec.type();
@@ -1072,7 +1072,7 @@ public class ApiTasksController extends Controller {
         var el = body.get(KEY_NAME);
         var name = el.isJsonNull() ? null : el.getAsString();
         if (name == null || name.isBlank()) {
-            ApiResponses.error(400, "invalid_request", "name must be non-blank");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "name must be non-blank");
             return false; // unreachable — error() throws
         }
         rejectDuplicateRecurringRename(name, task);

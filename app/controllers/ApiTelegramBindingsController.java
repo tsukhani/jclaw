@@ -119,16 +119,16 @@ public class ApiTelegramBindingsController extends Controller {
         String telegramUserId = readRequiredString(body, KEY_TELEGRAM_USER_ID);
 
         if (botToken == null || agentId == null || telegramUserId == null) {
-            ApiResponses.error(400, "invalid_request", "botToken, agentId, and telegramUserId are required");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "botToken, agentId, and telegramUserId are required");
             throw new AssertionError("unreachable: error() throws");
         }
         if (!telegramUserId.matches("\\d+")) {
-            ApiResponses.error(400, "invalid_request", "telegramUserId must be numeric");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "telegramUserId must be numeric");
         }
 
         Agent agent = AgentService.findById(agentId);
         if (agent == null || !agent.enabled) {
-            ApiResponses.error(400, "invalid_request", "agentId must reference an enabled agent");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
             throw new AssertionError("unreachable: error() throws");
         }
         if (TelegramBinding.findByBotToken(botToken) != null) {
@@ -205,7 +205,7 @@ public class ApiTelegramBindingsController extends Controller {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
         Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
-            ApiResponses.error(400, "invalid_request", "agentId must reference an enabled agent");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
         }
         if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
             var other = TelegramBinding.findByAgent(agent);
@@ -221,7 +221,7 @@ public class ApiTelegramBindingsController extends Controller {
         if (!body.has(KEY_TELEGRAM_USER_ID)) return;
         String uid = body.get(KEY_TELEGRAM_USER_ID).getAsString();
         if (uid == null || !uid.matches("\\d+")) {
-            ApiResponses.error(400, "invalid_request", "telegramUserId must be numeric");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "telegramUserId must be numeric");
         }
         binding.telegramUserId = uid;
     }
@@ -255,14 +255,14 @@ public class ApiTelegramBindingsController extends Controller {
         if (body.has(KEY_REPLY_TO_MODE)) {
             String v = readOptionalString(body, KEY_REPLY_TO_MODE);
             if (v != null && !v.matches("off|first|all")) {
-                ApiResponses.error(400, "invalid_request", "replyToMode must be one of: off, first, all");
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "replyToMode must be one of: off, first, all");
             }
             binding.replyToMode = v;
         }
         if (body.has(KEY_ERROR_REPLY_POLICY)) {
             String v = readOptionalString(body, KEY_ERROR_REPLY_POLICY);
             if (v != null && !v.matches("reply|silent")) {
-                ApiResponses.error(400, "invalid_request", "errorReplyPolicy must be one of: reply, silent");
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "errorReplyPolicy must be one of: reply, silent");
             }
             binding.errorReplyPolicy = v;
         }
@@ -273,7 +273,7 @@ public class ApiTelegramBindingsController extends Controller {
             } else {
                 long ms = el.getAsLong();
                 if (ms <= 0) {
-                    ApiResponses.error(400, "invalid_request", "notifierCooldownMs must be a positive number of milliseconds");
+                    ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "notifierCooldownMs must be a positive number of milliseconds");
                 }
                 binding.notifierCooldownMs = ms;
             }

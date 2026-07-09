@@ -109,7 +109,7 @@ public class ApiWhatsAppBindingsController extends Controller {
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
                 ? body.get(KEY_AGENT_ID).getAsLong() : null;
         if (agentId == null) {
-            ApiResponses.error(400, "invalid_request", "agentId is required");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
             throw new AssertionError("unreachable: error() throws");
         }
 
@@ -121,13 +121,13 @@ public class ApiWhatsAppBindingsController extends Controller {
         // no credentials here — it's QR-paired in JCLAW-448.
         if (transport == WhatsAppTransport.CLOUD_API
                 && (phoneNumberId == null || accessToken == null)) {
-            ApiResponses.error(400, "invalid_request", "The Cloud API transport requires a phone number id and an access token");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "The Cloud API transport requires a phone number id and an access token");
             throw new AssertionError("unreachable: error() throws");
         }
 
         Agent agent = AgentService.findById(agentId);
         if (agent == null || !agent.enabled) {
-            ApiResponses.error(400, "invalid_request", "agentId must reference an enabled agent");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
             throw new AssertionError("unreachable: error() throws");
         }
         if (phoneNumberId != null && WhatsAppBinding.findByPhoneNumberId(phoneNumberId) != null) {
@@ -282,7 +282,7 @@ public class ApiWhatsAppBindingsController extends Controller {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
         Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
-            ApiResponses.error(400, "invalid_request", "agentId must reference an enabled agent");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
         }
         if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
             var other = WhatsAppBinding.findByAgent(agent);

@@ -543,14 +543,14 @@ public class ApiConversationsController extends Controller {
         // Validate against ProviderRegistry — same checks as /model NAME.
         var provider = ProviderRegistry.get(newProvider);
         if (provider == null) {
-            ApiResponses.error(400, "invalid_request",
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Provider '" + newProvider + "' is not configured.");
             return;
         }
         var modelExists = provider.config().models().stream()
                 .anyMatch(m -> newModelId.equals(m.id()));
         if (!modelExists) {
-            ApiResponses.error(400, "invalid_request",
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Provider '" + newProvider + "' has no model with id '" + newModelId + "'.");
             return;
         }

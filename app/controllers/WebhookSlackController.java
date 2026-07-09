@@ -60,7 +60,7 @@ public class WebhookSlackController extends Controller {
         // Interactivity bodies are form-encoded with a single `payload` field. The
         // signature (already verified) covers this raw form string, not the JSON.
         if (!rawBody.startsWith("payload=")) {
-            ApiResponses.error(400, "invalid_request", "Missing payload");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Missing payload");
         }
         var payloadJson = URLDecoder.decode(rawBody.substring("payload=".length()), StandardCharsets.UTF_8);
         var payload = JsonParser.parseString(payloadJson).getAsJsonObject();
@@ -81,7 +81,7 @@ public class WebhookSlackController extends Controller {
         if (binding == null) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Webhook rejected: unknown Slack binding %s".formatted(bindingId));
-            ApiResponses.error(404, "not_found", "Unknown Slack binding");
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "Unknown Slack binding");
         }
         if (!binding.enabled) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,

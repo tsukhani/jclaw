@@ -33,6 +33,20 @@ import java.util.Map;
  */
 public final class ApiResponses {
 
+    /**
+     * Canonical machine-readable error codes for {@link #error}/{@link #errorAndLog}.
+     * Centralised here — the wire-contract source of truth — so controllers reference
+     * one spelling instead of repeating the literal, which stops the codes from
+     * drifting or being typo'd per controller (JCLAW: SonarQube java:S1192).
+     */
+    public static final String INVALID_REQUEST = "invalid_request";
+    /** 500 — an unexpected server-side failure. */
+    public static final String INTERNAL_ERROR = "internal_error";
+    /** 409 — the request conflicts with existing state (duplicate name, already bound, …). */
+    public static final String CONFLICT = "conflict";
+    /** 404 — the addressed resource does not exist. */
+    public static final String NOT_FOUND = "not_found";
+
     private static final Gson GSON = GsonHolder.INSTANCE;
     private static final String LOG_CATEGORY = "api";
 

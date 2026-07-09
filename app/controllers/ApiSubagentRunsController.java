@@ -53,8 +53,6 @@ import static utils.GsonHolder.INSTANCE;
 public class ApiSubagentRunsController extends Controller {
 
     private static final String MISSING_RUN_ID = "Missing run id.";
-    private static final String CODE_INVALID_REQUEST = "invalid_request";
-    private static final String CODE_NOT_FOUND = "not_found";
     private static final Gson gson = INSTANCE;
 
     private static final String KEY_REASON = "reason";
@@ -218,7 +216,7 @@ public class ApiSubagentRunsController extends Controller {
         try {
             return Instant.parse(since);
         } catch (Exception _) {
-            ApiResponses.error(400, CODE_INVALID_REQUEST,
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Invalid 'since' value '" + since + "' — expected ISO-8601 instant.");
             return null;
         }
@@ -229,7 +227,7 @@ public class ApiSubagentRunsController extends Controller {
         try {
             return SubagentRun.Status.valueOf(status.toUpperCase());
         } catch (IllegalArgumentException _) {
-            ApiResponses.error(400, CODE_INVALID_REQUEST,
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Invalid 'status' value '" + status
                             + "' — expected one of RUNNING / COMPLETED / FAILED / KILLED / TIMEOUT.");
             return null;
@@ -274,19 +272,19 @@ public class ApiSubagentRunsController extends Controller {
     @Operation(summary = "Delete a terminal subagent run and its child agent")
     public static void delete(Long id) {
         if (id == null) {
-            ApiResponses.error(400, CODE_INVALID_REQUEST, MISSING_RUN_ID);
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
             return;
         }
         var run = SubagentRegistry.findRunById(id);
         if (run == null) {
-            ApiResponses.error(404, CODE_NOT_FOUND, "Run " + id + " not found.");
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "Run " + id + " not found.");
             return;
         }
         // Reject mid-flight rows — the stream owner still holds a reference
         // and would NPE on the next persist. Kill-then-delete is the
         // two-step path for live runs.
         if (run.status == SubagentRun.Status.RUNNING) {
-            ApiResponses.error(409, "conflict",
+            ApiResponses.error(409, ApiResponses.CONFLICT,
                     "Run " + id + " is still RUNNING. Kill it first, then delete.");
             return;
         }
@@ -315,7 +313,7 @@ public class ApiSubagentRunsController extends Controller {
     @Operation(summary = "Kill a running subagent")
     public static void kill(Long id) {
         if (id == null) {
-            ApiResponses.error(400, CODE_INVALID_REQUEST, MISSING_RUN_ID);
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
             return;
         }
         String reason = "Killed by operator via admin page";
@@ -328,7 +326,7 @@ public class ApiSubagentRunsController extends Controller {
         if (!result.killed() && result.finalStatus() == null) {
             // Row not found — surface as 404 so the admin page can present
             // it as a stale-cache hint rather than a generic failure.
-            ApiResponses.error(404, CODE_NOT_FOUND, result.message());
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, result.message());
             return;
         }
         renderJSON(gson.toJson(new KillResponse(
@@ -350,12 +348,12 @@ public class ApiSubagentRunsController extends Controller {
     @Operation(summary = "Ordered persisted step transcript for a subagent coding run")
     public static void steps(Long id) {
         if (id == null) {
-            ApiResponses.error(400, CODE_INVALID_REQUEST, MISSING_RUN_ID);
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
             return;
         }
         var run = SubagentRegistry.findRunById(id);
         if (run == null) {
-            ApiResponses.error(404, CODE_NOT_FOUND, "Run " + id + " not found.");
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "Run " + id + " not found.");
             return;
         }
         if (run.childConversation == null) {

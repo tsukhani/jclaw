@@ -100,10 +100,10 @@ public class ApiProvidersController extends Controller {
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
 
         if (baseUrl == null || baseUrl.isBlank()) {
-            ApiResponses.error(400, "invalid_request", "Provider '%s' has no base URL configured".formatted(name));
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
         }
         if (apiKey == null || apiKey.isBlank()) {
-            ApiResponses.error(400, "invalid_request", "Provider '%s' has no API key configured".formatted(name));
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no API key configured".formatted(name));
         }
 
         var result = ModelDiscoveryService.discover(name, baseUrl, apiKey);
@@ -158,7 +158,7 @@ public class ApiProvidersController extends Controller {
     public static void videoModels(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
-            ApiResponses.error(400, "invalid_request", "Provider '%s' has no base URL configured".formatted(name));
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
         }
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
         // Page-load read (Settings video-model dropdown) — cached; the explicit
@@ -236,7 +236,7 @@ public class ApiProvidersController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("id") || body.get("id").isJsonNull()
                 || body.get("id").getAsString().isBlank()) {
-            ApiResponses.error(400, "invalid_request", "Field 'id' is required");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field 'id' is required");
         }
         var id = body.get("id").getAsString().trim();
 
@@ -244,7 +244,7 @@ public class ApiProvidersController extends Controller {
         var models = parseModelsArray(ConfigService.get(key));
         for (var el : models) {
             if (el.isJsonObject() && id.equals(str(el.getAsJsonObject(), "id"))) {
-                ApiResponses.error(409, "conflict", "Model '%s' already exists for provider '%s'".formatted(id, name));
+                ApiResponses.error(409, ApiResponses.CONFLICT, "Model '%s' already exists for provider '%s'".formatted(id, name));
             }
         }
 
@@ -282,7 +282,7 @@ public class ApiProvidersController extends Controller {
     private static void requireConfiguredProvider(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
-            ApiResponses.error(404, "not_found", "Provider '%s' is not configured".formatted(name));
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "Provider '%s' is not configured".formatted(name));
         }
     }
 
