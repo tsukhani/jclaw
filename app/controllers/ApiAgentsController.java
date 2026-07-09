@@ -41,6 +41,10 @@ public class ApiAgentsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // JCLAW-682: canonical error codes for the ApiResponses envelope.
+    private static final String CODE_INVALID_REQUEST = "invalid_request";
+    private static final String CODE_CONFLICT = "conflict";
+
     // JSON body keys reused across create/update/serve paths.
     private static final String KEY_MODEL_PROVIDER = "modelProvider";
     private static final String KEY_MODEL_ID = "modelId";
@@ -79,7 +83,7 @@ public class ApiAgentsController extends Controller {
      */
     private static void validateAgentName(String name) {
         if (name == null || !AGENT_NAME_RE.matcher(name).matches()) {
-            error(400, "Agent name must match " + AGENT_NAME_RE.pattern()
+            ApiResponses.error(400, CODE_INVALID_REQUEST, "Agent name must match " + AGENT_NAME_RE.pattern()
                     + " (letters, digits, hyphen, underscore; 1-64 chars; starts with alphanumeric)");
         }
     }
@@ -272,10 +276,10 @@ public class ApiAgentsController extends Controller {
         var name = requireString(body, "name");
         validateAgentName(name);
         if (Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
-            error(409, "The agent name 'main' is reserved for the built-in agent");
+            ApiResponses.error(409, CODE_CONFLICT, "The agent name 'main' is reserved for the built-in agent");
         }
         if (isReservedName(name)) {
-            error(409, "The agent name '%s' is reserved for internal use"
+            ApiResponses.error(409, CODE_CONFLICT, "The agent name '%s' is reserved for internal use"
                     .formatted(LoadTestRunner.LOADTEST_AGENT_NAME));
         }
         // Agent.name carries a unique constraint at the DB level. Without this
@@ -284,7 +288,7 @@ public class ApiAgentsController extends Controller {
         // which the operator sees as an opaque error toast. 409 with the
         // taken name makes the conflict actionable.
         if (Agent.findByName(name) != null) {
-            error(409, "An agent named '" + name + "' already exists");
+            ApiResponses.error(409, CODE_CONFLICT, "An agent named '" + name + "' already exists");
         }
         var modelProvider = requireString(body, KEY_MODEL_PROVIDER);
         var modelId = requireString(body, KEY_MODEL_ID);
@@ -317,7 +321,7 @@ public class ApiAgentsController extends Controller {
     private static String requireString(JsonObject body, String key) {
         var v = readOptionalString(body, key);
         if (v == null) {
-            error(400, "'" + key + "' is required");
+            ApiResponses.error(400, CODE_INVALID_REQUEST, "'" + key + "' is required");
             throw new AssertionError("unreachable: error() throws");
         }
         return v;
@@ -350,7 +354,7 @@ public class ApiAgentsController extends Controller {
         // catch this, but we reject at the API boundary so the operator sees an
         // explicit error instead of a silently-ignored toggle.
         if (agent.isMain() && !enabled) {
-            error(409, "The main agent cannot be disabled");
+            ApiResponses.error(409, CODE_CONFLICT, "The main agent cannot be disabled");
         }
 
         // thinkingMode is optional on update: absent key leaves the stored value
@@ -443,13 +447,13 @@ public class ApiAgentsController extends Controller {
         // The reserved name "main" is a singleton: no other agent may take the name,
         // and the main agent may not be renamed away from it.
         if (!agent.isMain() && Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
-            error(409, "The agent name 'main' is reserved for the built-in agent");
+            ApiResponses.error(409, CODE_CONFLICT, "The agent name 'main' is reserved for the built-in agent");
         }
         if (agent.isMain() && !Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
-            error(409, "The main agent cannot be renamed");
+            ApiResponses.error(409, CODE_CONFLICT, "The main agent cannot be renamed");
         }
         if (isReservedName(name)) {
-            error(409, "The agent name '%s' is reserved for internal use"
+            ApiResponses.error(409, CODE_CONFLICT, "The agent name '%s' is reserved for internal use"
                     .formatted(LoadTestRunner.LOADTEST_AGENT_NAME));
         }
         // Rename collision: another agent already owns this name. Skip the
@@ -459,7 +463,7 @@ public class ApiAgentsController extends Controller {
         if (!name.equals(agent.name)) {
             var conflicting = Agent.findByName(name);
             if (conflicting != null && !conflicting.id.equals(agent.id)) {
-                error(409, "An agent named '" + name + "' already exists");
+                ApiResponses.error(409, CODE_CONFLICT, "An agent named '" + name + "' already exists");
             }
         }
     }
@@ -469,7 +473,7 @@ public class ApiAgentsController extends Controller {
     public static void delete(Long id) {
         var agent = requireAgent(id);
         if (agent.isMain()) {
-            error(409, "The built-in 'main' agent cannot be deleted");
+            ApiResponses.error(409, CODE_CONFLICT, "The built-in 'main' agent cannot be deleted");
         }
         AgentService.delete(agent);
         ApiResponses.ok();

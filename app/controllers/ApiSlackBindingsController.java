@@ -54,6 +54,10 @@ public class ApiSlackBindingsController extends Controller {
     /** The fixed Slack Events API contract path; the per-binding id is appended. */
     private static final String WEBHOOK_PATH = "/api/webhooks/slack/";
 
+    // JCLAW-682: canonical error codes for the ApiResponses envelope.
+    private static final String CODE_INVALID_REQUEST = "invalid_request";
+    private static final String CODE_CONFLICT = "conflict";
+
     /** Flat projection the frontend consumes. The secrets ({@code botToken},
      *  {@code signingSecret}, {@code appToken}) are elided; only presence flags
      *  are surfaced. {@code effectiveRequestUrl} is the full Events API Request
@@ -127,7 +131,7 @@ public class ApiSlackBindingsController extends Controller {
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
                 ? body.get(KEY_AGENT_ID).getAsLong() : null;
         if (botToken == null || agentId == null) {
-            error(400, "botToken and agentId are required");
+            ApiResponses.error(400, CODE_INVALID_REQUEST, "botToken and agentId are required");
             throw new AssertionError("unreachable: error() throws");
         }
         // JCLAW-351: transport-specific inbound credential. The Events API (HTTP) verifies
@@ -135,26 +139,26 @@ public class ApiSlackBindingsController extends Controller {
         // with the app-level token (xapp-) instead, and needs no public URL.
         if (transport == ChannelTransport.SOCKET) {
             if (appToken == null || appToken.isBlank()) {
-                error(400, "Socket Mode requires an app-level token (xapp-)");
+                ApiResponses.error(400, CODE_INVALID_REQUEST, "Socket Mode requires an app-level token (xapp-)");
                 throw new AssertionError("unreachable: error() throws");
             }
         } else if (signingSecret == null || signingSecret.isBlank()) {
-            error(400, "The Events API transport requires a signing secret");
+            ApiResponses.error(400, CODE_INVALID_REQUEST, "The Events API transport requires a signing secret");
             throw new AssertionError("unreachable: error() throws");
         }
 
         Agent agent = AgentService.findById(agentId);
         if (agent == null || !agent.enabled) {
-            error(400, "agentId must reference an enabled agent");
+            ApiResponses.error(400, CODE_INVALID_REQUEST, "agentId must reference an enabled agent");
             throw new AssertionError("unreachable: error() throws");
         }
         if (SlackBinding.findByBotToken(botToken) != null) {
-            error(409, "A binding with this bot token already exists");
+            ApiResponses.error(409, CODE_CONFLICT, "A binding with this bot token already exists");
         }
         // Agent uniqueness mirrors Telegram: agent memory is scoped per agent, so
         // binding one agent to a second Slack workspace would share memory.
         if (SlackBinding.findByAgent(agent) != null) {
-            error(409, "Agent '%s' is already bound to another Slack binding".formatted(agent.name));
+            ApiResponses.error(409, CODE_CONFLICT, "Agent '%s' is already bound to another Slack binding".formatted(agent.name));
         }
 
         var binding = new SlackBinding();
@@ -216,7 +220,7 @@ public class ApiSlackBindingsController extends Controller {
      */
     private static void requireOwnerForMain(Agent agent, String ownerUserId) {
         if (agent != null && agent.isMain() && (ownerUserId == null || ownerUserId.isBlank())) {
-            error(400, "The main agent has full system access — set an owner user id so only you can reach it");
+            ApiResponses.error(400, CODE_INVALID_REQUEST, "The main agent has full system access — set an owner user id so only you can reach it");
         }
     }
 
@@ -265,7 +269,7 @@ public class ApiSlackBindingsController extends Controller {
         if (newToken == null || newToken.isBlank() || newToken.equals(binding.botToken)) return false;
         var existing = SlackBinding.findByBotToken(newToken);
         if (existing != null && !existing.id.equals(binding.id)) {
-            error(409, "A binding with this bot token already exists");
+            ApiResponses.error(409, CODE_CONFLICT, "A binding with this bot token already exists");
         }
         binding.botToken = newToken;
         return true;
@@ -276,12 +280,12 @@ public class ApiSlackBindingsController extends Controller {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
         Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
-            error(400, "agentId must reference an enabled agent");
+            ApiResponses.error(400, CODE_INVALID_REQUEST, "agentId must reference an enabled agent");
         }
         if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
             var other = SlackBinding.findByAgent(agent);
             if (other != null && !other.id.equals(binding.id)) {
-                error(409, "Agent '%s' is already bound to another Slack binding".formatted(agent.name));
+                ApiResponses.error(409, CODE_CONFLICT, "Agent '%s' is already bound to another Slack binding".formatted(agent.name));
             }
         }
         binding.agent = agent;
