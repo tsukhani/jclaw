@@ -22,6 +22,7 @@ import play.Play;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.results.Result;
+import services.BindingService;
 import services.EventLogger;
 import services.Tx;
 import utils.PlayConfig;
@@ -188,7 +189,7 @@ public class WebhookTelegramController extends Controller {
 
     private static BindingCtx loadBindingCtx(Long bindingId) {
         return Tx.run(() -> {
-            TelegramBinding b = TelegramBinding.findById(bindingId);
+            TelegramBinding b = BindingService.findTelegramBindingById(bindingId);
             if (b == null) return null;
             if (b.agent != null) {
                 var _ = b.agent.name; // touch inside tx to avoid detached-proxy access later

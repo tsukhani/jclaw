@@ -6,11 +6,12 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import models.Agent;
 import models.AgentBinding;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AgentService;
+import services.BindingService;
 import utils.ApiResponses;
 
 import java.util.List;
@@ -58,7 +59,7 @@ public class ApiBindingsController extends Controller {
         }
 
         var agentId = body.get(KEY_AGENT_ID).getAsLong();
-        var agent = (Agent) Agent.findById(agentId);
+        var agent = AgentService.findById(agentId);
         if (agent == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");
@@ -79,7 +80,7 @@ public class ApiBindingsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
     public static void update(Long id) {
-        var binding = (AgentBinding) AgentBinding.findById(id);
+        var binding = BindingService.findAgentBindingById(id);
         if (binding == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");
@@ -92,7 +93,7 @@ public class ApiBindingsController extends Controller {
         }
 
         if (body.has(KEY_AGENT_ID)) {
-            var agent = (Agent) Agent.findById(body.get(KEY_AGENT_ID).getAsLong());
+            var agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
             if (agent == null) {
                 notFound();
                 throw new AssertionError("unreachable: notFound() throws");
@@ -109,7 +110,7 @@ public class ApiBindingsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     public static void delete(Long id) {
-        var binding = (AgentBinding) AgentBinding.findById(id);
+        var binding = BindingService.findAgentBindingById(id);
         if (binding == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");

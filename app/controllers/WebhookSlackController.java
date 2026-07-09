@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import models.SlackBinding;
 import play.mvc.Controller;
 import play.mvc.Http;
+import services.BindingService;
 import services.EventLogger;
 import utils.WebhookUtil;
 
@@ -75,7 +76,7 @@ public class WebhookSlackController extends Controller {
      */
     @SuppressWarnings("java:S2259") // Play's notFound/forbidden/unauthorized halt; binding is non-null past each guard
     private static Verified resolveAndVerify(Long bindingId) {
-        SlackBinding binding = SlackBinding.findById(bindingId);
+        SlackBinding binding = BindingService.findSlackBindingById(bindingId);
         if (binding == null) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Webhook rejected: unknown Slack binding %s".formatted(bindingId));

@@ -5,6 +5,7 @@ import models.WhatsAppBinding;
 import models.WhatsAppTransport;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.BindingService;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -34,7 +35,7 @@ public class WhatsAppQrController extends Controller {
      * pairs via QR) so the UI can distinguish "wrong transport" cheaply.
      */
     public static void status(Long id) {
-        WhatsAppBinding binding = WhatsAppBinding.findById(id);
+        WhatsAppBinding binding = BindingService.findWhatsAppBindingById(id);
         notFoundIfNull(binding);
 
         boolean isWeb = binding.transport == WhatsAppTransport.WHATSAPP_WEB;
