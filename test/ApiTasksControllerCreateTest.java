@@ -228,8 +228,14 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
         // findRecurringConflicts' ORDER BY id) rather than a specific value — the
         // shared concurrent test DB can't guarantee this agent sees only our own task.
         var body = getContent(second);
-        assertTrue(body.contains("id="),
-                "409 body should surface a conflicting task id; got: " + body);
+        // Assert on the PARSED envelope message, not the raw body: ApiResponses
+        // serializes through Gson, which HTML-escapes '=' to =, so a raw
+        // body.contains("id=") never matches even though the id is present.
+        // Every real consumer (frontend $fetch / JSON.parse) un-escapes it.
+        var message = com.google.gson.JsonParser.parseString(body)
+                .getAsJsonObject().get("message").getAsString();
+        assertTrue(message.contains("id="),
+                "409 message should surface a conflicting task id; got: " + body);
     }
 
     @Test
