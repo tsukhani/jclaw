@@ -500,6 +500,10 @@ public class ApiMetricsController extends Controller {
                         return null;
                     });
         } catch (Throwable t) {
+            // JCLAW-674: Throwable is REQUIRED here, not over-broad — Play's
+            // JPA.withTransaction(...) declares `throws Throwable`, so narrowing
+            // to Exception does not compile. The 500 is the right response for
+            // any failure enabling the mock provider.
             ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to enable mock provider: " + t.getMessage());
         }
     }
