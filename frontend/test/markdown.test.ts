@@ -1,23 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
-
-// Mirror the chat.vue renderMarkdown function
-marked.setOptions({ breaks: true, gfm: true })
-
-function normalizeMarkdownLinks(text: string): string {
-  return text.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (match, label, dest) => {
-    const trimmed = dest.trim()
-    if (trimmed.startsWith('<') && trimmed.endsWith('>')) return match
-    if (!/\s/.test(trimmed)) return match
-    return `[${label}](<${trimmed}>)`
-  })
-}
-
-function renderMarkdown(text: string): string {
-  if (!text) return ''
-  return DOMPurify.sanitize(marked.parse(normalizeMarkdownLinks(text)) as string)
-}
+import { renderMarkdown } from '~/utils/chat-markdown'
 
 describe('renderMarkdown', () => {
   it('returns empty string for empty input', () => {
