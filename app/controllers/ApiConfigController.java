@@ -13,6 +13,7 @@ import services.ConfigService;
 import services.InternalApiTokenService;
 import services.LoadTestRunner;
 import services.LoggerLevelService;
+import utils.ApiResponses;
 
 import java.util.List;
 
@@ -114,13 +115,13 @@ public class ApiConfigController extends Controller {
             badRequest();
         }
         if (isReservedKey(key)) {
-            error(409, "The config key prefix '%s' is reserved for internal use"
+            ApiResponses.error(409, "reserved_key", "The config key prefix '%s' is reserved for internal use"
                     .formatted(RESERVED_KEY_PREFIX));
         }
 
         var rejection = ConfigService.setWithSideEffects(key, value);
         if (rejection != null) {
-            error(403, rejection);
+            ApiResponses.error(403, "forbidden", rejection);
         }
 
         renderJSON(gson.toJson(new ConfigSaveResponse(
@@ -131,7 +132,7 @@ public class ApiConfigController extends Controller {
     @Operation(summary = "Delete a config value by key")
     public static void delete(String key) {
         if (isReservedKey(key)) {
-            error(409, "The config key prefix '%s' is reserved for internal use"
+            ApiResponses.error(409, "reserved_key", "The config key prefix '%s' is reserved for internal use"
                     .formatted(RESERVED_KEY_PREFIX));
         }
         ConfigService.deleteWithSideEffects(key);

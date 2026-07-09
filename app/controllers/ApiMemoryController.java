@@ -166,7 +166,7 @@ public class ApiMemoryController extends Controller {
         if (body.has(KEY_IMPORTANCE) && !body.get(KEY_IMPORTANCE).isJsonNull()) {
             double imp = body.get(KEY_IMPORTANCE).getAsDouble();
             if (imp < 0.0 || imp > 1.0) {
-                error(400, "importance must be between 0.0 and 1.0");
+                ApiResponses.error(400, "invalid_request", "importance must be between 0.0 and 1.0");
             }
             memory.importance = imp;
         }

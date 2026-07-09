@@ -14,7 +14,6 @@ import models.Agent;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
-import play.Logger;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -31,6 +30,7 @@ import services.TimezoneResolver;
 import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
+import utils.ApiResponses;
 import utils.JpqlFilter;
 
 import java.io.IOException;
@@ -352,8 +352,8 @@ public class ApiTasksController extends Controller {
             // — Error subclasses that escape a narrower catch and yield a
             // generic Play 500 page with no useful diagnostic. Log the full
             // stack so version-bump incompats are debuggable.
-            Logger.error(e, "search-transcripts failed for q='%s'", q);
-            error(500, "Search failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            ApiResponses.errorAndLog(e, 500, "search_failed",
+                    "Search failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
@@ -640,7 +640,7 @@ public class ApiTasksController extends Controller {
                 var until = (to != null && !to.isBlank()) ? Instant.parse(to) : Instant.now();
                 return new RunWindow(since, until);
             } catch (DateTimeException _) {
-                error(400, "from/to must be ISO-8601 instants");
+                ApiResponses.error(400, "invalid_request", "from/to must be ISO-8601 instants");
                 throw new AssertionError("unreachable: error() throws");
             }
         }
@@ -819,12 +819,12 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     private static Agent requireAgentFromBody(JsonObject body) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) {
-            error(400, "agentId is required");
+            ApiResponses.error(400, "invalid_request", "agentId is required");
             throw new AssertionError("unreachable: error() throws");
         }
         var agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null) {
-            error(400, "agentId does not resolve to an existing agent");
+            ApiResponses.error(400, "invalid_request", "agentId does not resolve to an existing agent");
             throw new AssertionError("unreachable: error() throws");
         }
         return agent;
@@ -833,12 +833,12 @@ public class ApiTasksController extends Controller {
     @SuppressWarnings("java:S2259")
     private static String requireTaskName(JsonObject body) {
         if (!body.has(KEY_NAME) || body.get(KEY_NAME).isJsonNull()) {
-            error(400, "name is required");
+            ApiResponses.error(400, "invalid_request", "name is required");
             throw new AssertionError("unreachable: error() throws");
         }
         var name = body.get(KEY_NAME).getAsString();
         if (name == null || name.isBlank()) {
-            error(400, "name must be non-blank");
+            ApiResponses.error(400, "invalid_request", "name must be non-blank");
             throw new AssertionError("unreachable: error() throws");
         }
         return name;
@@ -854,20 +854,20 @@ public class ApiTasksController extends Controller {
         var delivery = readOptionalString(body, KEY_DELIVERY);
         if (delivery == null) return;
         var err = DeliverySpec.validate(delivery);
-        if (err != null) error(400, err);
+        if (err != null) ApiResponses.error(400, "invalid_request", err);
     }
 
     @SuppressWarnings("java:S2259")
     private static ScheduleShorthandParser.ScheduleSpec requireScheduleSpec(JsonObject body) {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) {
-            error(400, "schedule is required");
+            ApiResponses.error(400, "invalid_request", "schedule is required");
             throw new AssertionError("unreachable: error() throws");
         }
         try {
             var zone = TimezoneResolver.resolve(readOptionalString(body, KEY_TIMEZONE));
             return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
-            error(400, "Invalid schedule: " + e.getMessage());
+            ApiResponses.error(400, "invalid_request", "Invalid schedule: " + e.getMessage());
             throw new AssertionError("unreachable: error() throws");
         }
     }
@@ -884,7 +884,7 @@ public class ApiTasksController extends Controller {
         List<Task> conflicts = TaskService.findRecurringConflicts(name, agent);
         if (!conflicts.isEmpty()) {
             var conflictId = conflicts.getFirst().id;
-            error(409, "A recurring task named '%s' already exists for this agent (id=%d)"
+            ApiResponses.error(409, "conflict", "A recurring task named '%s' already exists for this agent (id=%d)"
                     .formatted(name, conflictId));
         }
     }
@@ -905,7 +905,7 @@ public class ApiTasksController extends Controller {
                 .stream().filter(t -> !t.id.equals(task.id)).toList();
         if (!conflicts.isEmpty()) {
             var conflictId = conflicts.getFirst().id;
-            error(409, "A recurring task named '%s' already exists for this agent (id=%d)"
+            ApiResponses.error(409, "conflict", "A recurring task named '%s' already exists for this agent (id=%d)"
                     .formatted(name, conflictId));
         }
     }
@@ -1007,7 +1007,7 @@ public class ApiTasksController extends Controller {
         boolean anyChange = scheduleChanged || nameChanged || fieldsChanged;
 
         if (!anyChange) {
-            error(400, "No patchable fields in body");
+            ApiResponses.error(400, "invalid_request", "No patchable fields in body");
         }
 
         task.save();
@@ -1040,7 +1040,7 @@ public class ApiTasksController extends Controller {
         try {
             spec = ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString());
         } catch (IllegalArgumentException e) {
-            error(400, "Invalid schedule: " + e.getMessage());
+            ApiResponses.error(400, "invalid_request", "Invalid schedule: " + e.getMessage());
             return false; // unreachable — error() throws
         }
         task.type = spec.type();
@@ -1070,7 +1070,7 @@ public class ApiTasksController extends Controller {
         var el = body.get(KEY_NAME);
         var name = el.isJsonNull() ? null : el.getAsString();
         if (name == null || name.isBlank()) {
-            error(400, "name must be non-blank");
+            ApiResponses.error(400, "invalid_request", "name must be non-blank");
             return false; // unreachable — error() throws
         }
         rejectDuplicateRecurringRename(name, task);

@@ -15,6 +15,7 @@ import models.AgentToolConfig;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import utils.ApiResponses;
 
 import java.util.HashMap;
 import java.util.List;
@@ -147,7 +148,7 @@ public class ApiToolsController extends Controller {
         // direct per-action enable/disable is no longer a supported path.
         var tool = ToolRegistry.lookupTool(name);
         if (tool != null && tool.group() != null && !tool.isServerLevel()) {
-            error(400, "Per-action MCP tools are no longer toggleable individually. "
+            ApiResponses.error(400, "invalid_request", "Per-action MCP tools are no longer toggleable individually. "
                     + "Use PUT /api/agents/" + id + "/tool-groups/" + tool.group()
                     + " to enable or disable the entire '" + tool.group() + "' server.");
         }

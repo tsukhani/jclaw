@@ -10,6 +10,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.LoggerLevelService;
+import utils.ApiResponses;
 
 import java.util.List;
 
@@ -64,7 +65,7 @@ public class ApiLoggingController extends Controller {
 
         var rejection = LoggerLevelService.validate(logger, level);
         if (rejection != null) {
-            error(400, rejection);
+            ApiResponses.error(400, "invalid_request", rejection);
         }
 
         ConfigService.setWithSideEffects(LoggerLevelService.PREFIX + logger, level);
