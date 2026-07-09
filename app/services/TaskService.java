@@ -32,10 +32,14 @@ public final class TaskService {
      * inspects to 409 a duplicate recurring task. Exposes the inline
      * {@code Task.find(...)} at that create site so the controller no longer
      * calls a raw JPA finder. Relies on the caller's ambient transaction.
+     *
+     * <p>Ordered by {@code id} so callers taking {@code getFirst()} report a
+     * deterministic conflict (the oldest matching task) rather than an arbitrary
+     * one from an unordered fetch.
      */
     public static List<Task> findRecurringConflicts(String name, Agent agent) {
         return Task.<Task>find(
-                "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5",
+                "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5 ORDER BY id",
                 name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED
         ).fetch();
     }
