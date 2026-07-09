@@ -23,6 +23,7 @@ import services.MimeExtensions;
 import services.Tx;
 import services.UploadLimits;
 import tools.SubagentSpawnTool;
+import utils.ApiResponses;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
 
@@ -167,7 +168,7 @@ public class ApiChatController extends Controller {
     private static AttachmentService.Input parseAttachment(JsonObject o) {
         var id = o.has(KEY_ATTACHMENT_ID) ? o.get(KEY_ATTACHMENT_ID).getAsString() : null;
         if (id == null || id.isBlank()) {
-            error(400, "attachment missing attachmentId");
+            ApiResponses.error(400, "invalid_request", "attachment missing attachmentId");
         }
         var originalFilename = o.has(KEY_ORIGINAL_FILENAME) ? o.get(KEY_ORIGINAL_FILENAME).getAsString() : null;
         var mimeType = o.has(KEY_MIME_TYPE) ? o.get(KEY_MIME_TYPE).getAsString() : null;
@@ -259,7 +260,7 @@ public class ApiChatController extends Controller {
         } catch (IOException e) {
             EventLogger.error("chat", "Chat upload failed for agent %s: %s"
                     .formatted(agent.name, e.getMessage()));
-            error(500, "Upload failed: " + e.getMessage());
+            ApiResponses.error(500, "internal_error", "Upload failed: " + e.getMessage());
         }
 
         var resp = new HashMap<String, Object>();
@@ -270,14 +271,16 @@ public class ApiChatController extends Controller {
     @SuppressWarnings("java:S2259")
     private static void validateUploads(Upload[] files) {
         if (files == null || files.length == 0) {
-            error(400, "No files uploaded");
+            ApiResponses.error(400, "invalid_request", "No files uploaded");
         }
         int maxFiles = UploadLimits.maxFiles();
         if (files.length > maxFiles) {
-            error(400, "Too many files (max " + maxFiles + ")");
+            ApiResponses.error(400, "invalid_request", "Too many files (max " + maxFiles + ")");
         }
         for (var u : files) {
-            if (u == null || u.asFile() == null || !u.asFile().exists()) error(400, "Invalid file upload");
+            if (u == null || u.asFile() == null || !u.asFile().exists()) {
+                ApiResponses.error(400, "invalid_request", "Invalid file upload");
+            }
         }
     }
 
@@ -286,8 +289,8 @@ public class ApiChatController extends Controller {
         try {
             return AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
         } catch (SecurityException _) {
-            error(400, "Invalid upload target");
-            return null; // unreachable — error() throws
+            ApiResponses.error(400, "invalid_request", "Invalid upload target");
+            return null; // unreachable — ApiResponses.error() throws
         }
     }
 
@@ -297,7 +300,7 @@ public class ApiChatController extends Controller {
         var f = upload.asFile();
         var safeName = sanitizeFilename(upload.getFileName() != null ? upload.getFileName() : f.getName());
         if (safeName.isEmpty()) {
-            error(400, "Invalid filename: " + upload.getFileName());
+            ApiResponses.error(400, "invalid_request", "Invalid filename: " + upload.getFileName());
         }
         var sniffedMime = sniffMime(f, upload.getContentType());
         var kind = MessageAttachment.kindForMime(sniffedMime);
@@ -340,7 +343,7 @@ public class ApiChatController extends Controller {
     private static void enforceUploadCap(File f, String kind, String originalName) {
         var cap = UploadLimits.forKind(kind);
         if (f.length() > cap) {
-            error(400, "%s too large: %s (max %d MB for %s)"
+            ApiResponses.error(400, "invalid_request", "%s too large: %s (max %d MB for %s)"
                     .formatted(UploadLimits.displayName(kind),
                             originalName, cap / (1024 * 1024),
                             UploadLimits.displayName(kind)));
@@ -358,8 +361,8 @@ public class ApiChatController extends Controller {
         try {
             return AgentService.acquireContained(stagingDir, leaf);
         } catch (SecurityException _) {
-            error(400, "Invalid filename: " + originalName);
-            return null; // unreachable — error() throws
+            ApiResponses.error(400, "invalid_request", "Invalid filename: " + originalName);
+            return null; // unreachable — ApiResponses.error() throws
         }
     }
 

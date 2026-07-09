@@ -81,7 +81,7 @@ public class ApiMcpServersController extends Controller {
 
         var name = readRequiredString(body, "name");
         if (McpServer.findByName(name) != null) {
-            error(409, "An MCP server named '%s' already exists".formatted(name));
+            ApiResponses.error(409, "conflict", "An MCP server named '%s' already exists".formatted(name));
         }
         var transport = readTransport(body);
         var row = new McpServer();
@@ -100,7 +100,7 @@ public class ApiMcpServersController extends Controller {
         try {
             McpServerService.validate(row);
         } catch (IllegalArgumentException e) {
-            error(400, e.getMessage());
+            ApiResponses.error(400, "invalid_request", e.getMessage());
         }
         row.save();
 
@@ -141,7 +141,7 @@ public class ApiMcpServersController extends Controller {
         try {
             McpServerService.validate(row);
         } catch (IllegalArgumentException e) {
-            error(400, e.getMessage());
+            ApiResponses.error(400, "invalid_request", e.getMessage());
         }
         row.save();
 
@@ -161,7 +161,7 @@ public class ApiMcpServersController extends Controller {
         if (newName.equals(row.name)) return;
         var existing = McpServer.findByName(newName);
         if (existing != null && !existing.id.equals(row.id)) {
-            error(409, "An MCP server named '%s' already exists".formatted(newName));
+            ApiResponses.error(409, "conflict", "An MCP server named '%s' already exists".formatted(newName));
         }
         row.name = newName;
     }
@@ -199,10 +199,10 @@ public class ApiMcpServersController extends Controller {
     @SuppressWarnings("java:S2259")
     private static String readRequiredString(JsonObject body, String key) {
         if (!body.has(key) || body.get(key).isJsonNull()) {
-            error(400, "Field '%s' is required".formatted(key));
+            ApiResponses.error(400, "invalid_request", "Field '%s' is required".formatted(key));
         }
         var s = body.get(key).getAsString();
-        if (s.isBlank()) error(400, "Field '%s' must not be blank".formatted(key));
+        if (s.isBlank()) ApiResponses.error(400, "invalid_request", "Field '%s' must not be blank".formatted(key));
         return s;
     }
 
@@ -212,8 +212,8 @@ public class ApiMcpServersController extends Controller {
         try {
             return McpServer.Transport.valueOf(raw.toUpperCase());
         } catch (IllegalArgumentException _) {
-            error(400, "Unknown transport '%s' (expected STDIO or HTTP)".formatted(raw));
-            return null;  // unreachable; error() throws
+            ApiResponses.error(400, "invalid_request", "Unknown transport '%s' (expected STDIO or HTTP)".formatted(raw));
+            return null;  // unreachable; ApiResponses.error() throws
         }
     }
 
