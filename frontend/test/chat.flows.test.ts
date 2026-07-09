@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
 
 /**
@@ -246,6 +246,112 @@ describe('Chat page — image attachment on a vision-capable model', () => {
     // The composer renders one chip per attachedFile with the filename
     // visible. Probe the DOM directly to catch a template regression.
     expect(component.html()).toContain('attached.png')
+  })
+})
+
+describe('Chat page — image-gen progress bar is scoped to the generate_image turn (JCLAW-683)', () => {
+  // Bug: the progress bar polled /api/imagegen/progress on EVERY streaming
+  // turn, so a real generation's 0%-load phase leaked onto unrelated turns.
+  // Fix: polling starts only when a turn fires a generate_image tool call, and
+  // the bar is keyed to that turn.
+
+  function streamWith(frames: string[]) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (!String(input ?? '').includes('/api/chat/stream')) {
+        return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      const encoder = new TextEncoder()
+      const body = new ReadableStream({
+        start(controller) {
+          for (const f of frames) controller.enqueue(encoder.encode(f))
+          controller.close()
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    })
+  }
+
+  async function sendOnce(component: VueWrapper, text: string) {
+    const textarea = component.find<HTMLTextAreaElement>('textarea')
+    await textarea.setValue(text)
+    await component.find('form').trigger('submit.prevent')
+    await flushPromises()
+  }
+
+  it('does NOT poll /api/imagegen/progress on a turn with no generate_image tool call', async () => {
+    setupChatApi()
+    let progressPolls = 0
+    registerEndpoint('/api/imagegen/progress', () => {
+      progressPolls++
+      return { percent: 40 }
+    })
+    streamWith([
+      'data: {"type":"init","conversationId":42}\n',
+      'data: {"type":"token","content":"hi"}\n',
+      'data: {"type":"complete","content":"hi"}\n',
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    await sendOnce(component, 'just chat, no image')
+
+    expect(progressPolls).toBe(0)
+    // And the transient bar never appears.
+    expect(component.html()).not.toContain('Generating image')
+  })
+
+  it('polls /api/imagegen/progress once a generate_image tool call fires in the turn', async () => {
+    setupChatApi()
+    let progressPolls = 0
+    registerEndpoint('/api/imagegen/progress', () => {
+      progressPolls++
+      return { percent: 40 }
+    })
+    streamWith([
+      'data: {"type":"init","conversationId":42}\n',
+      'data: {"type":"tool_call","id":"tc1","name":"generate_image","arguments":"{\\"prompt\\":\\"a cat\\"}"}\n',
+      'data: {"type":"complete","content":"here is your cat"}\n',
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    await sendOnce(component, 'draw me a cat')
+
+    // The immediate poll fired synchronously when the generate_image tool call
+    // was dispatched during the stream.
+    expect(progressPolls).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does not leak polling across turns: a plain turn after a generate_image turn adds no polls', async () => {
+    setupChatApi()
+    let progressPolls = 0
+    registerEndpoint('/api/imagegen/progress', () => {
+      progressPolls++
+      return { percent: 40 }
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    // Turn 1: generate_image → polls.
+    streamWith([
+      'data: {"type":"init","conversationId":42}\n',
+      'data: {"type":"tool_call","id":"tc1","name":"generate_image","arguments":"{}"}\n',
+      'data: {"type":"complete","content":"done"}\n',
+    ])
+    await sendOnce(component, 'make an image')
+    const afterTurn1 = progressPolls
+    expect(afterTurn1).toBeGreaterThanOrEqual(1)
+    vi.restoreAllMocks()
+
+    // Turn 2: plain turn — polling must not resume (it was torn down at turn 1 end).
+    streamWith([
+      'data: {"type":"init","conversationId":42}\n',
+      'data: {"type":"token","content":"ok"}\n',
+      'data: {"type":"complete","content":"ok"}\n',
+    ])
+    await sendOnce(component, 'now just talk')
+    expect(progressPolls).toBe(afterTurn1)
   })
 })
 

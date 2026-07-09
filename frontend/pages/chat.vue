@@ -36,14 +36,12 @@ import {
   MicrophoneIcon as MicrophoneIconSolid,
   StopIcon as StopIconSolid,
 } from '@heroicons/vue/24/solid'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { formatTokensPerSec, renderMarkdown, renderMarkdownStreaming } from '~/utils/chat-markdown'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
 import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
-import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 import { formatVideoDuration, isVideoJobPending, videoDisplayState, videoGenMeta, videoProgressPercent, videoResultSizeBytes, videoSrc, type VideoJobStatus } from '~/utils/video-job'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
@@ -54,6 +52,7 @@ import { shouldDisplayMessage } from '~/utils/display-message-filter'
 import type { Agent, Conversation, Message, MessageAttachment, ConfigResponse, ToolCall, ToolCallResultChip } from '~/types/api'
 import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
 import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
+import { useChatAttachments, type UploadedAttachment } from '~/composables/useChatAttachments'
 
 // Local helpers for fields that streaming/optimistic bubbles carry in addition
 // to the persisted Message shape. Kept co-located rather than in types/api.ts
@@ -69,82 +68,6 @@ interface StreamingMessage extends Message {
 interface ConversationQueueStatus {
   busy: boolean
   [key: string]: unknown
-}
-
-// Configure marked for safe rendering
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-})
-
-function formatTokensPerSec(usage: MessageUsage): string | null {
-  if (!usage.durationMs || usage.durationMs <= 0 || !usage.completion) return null
-  const tps = (usage.completion / usage.durationMs) * 1000
-  return tps.toFixed(1) + ' tok/s'
-}
-
-// Configure DOMPurify to allow images, audio, video, and download links
-DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
-  // Allow src attributes on img/audio/video/source that point to our API
-  if (data.attrName === 'src' && data.attrValue?.startsWith('/api/')) {
-    data.forceKeepAttr = true
-  }
-  // Allow href for download links to our API
-  if (data.attrName === 'href' && data.attrValue?.startsWith('/api/')) {
-    data.forceKeepAttr = true
-  }
-})
-
-// Marked (CommonMark) only allows whitespace in link destinations when they
-// are wrapped in angle brackets. LLMs routinely emit bare filenames with
-// spaces like `[file.docx](file.docx)`, which silently fall through as plain
-// text. Wrap such destinations in <...> so they parse into real anchors.
-function normalizeMarkdownLinks(text: string): string {
-  return text.replaceAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (match, label, dest) => {
-    const trimmed = dest.trim()
-    if (trimmed.startsWith('<') && trimmed.endsWith('>')) return match
-    if (!/\s/.test(trimmed)) return match
-    return `[${label}](<${trimmed}>)`
-  })
-}
-
-// Memoized markdown rendering — avoids re-parsing unchanged messages on re-render.
-// Cache is keyed by (text + agentId); the streaming message renders through
-// renderMarkdownStreaming() which bypasses the cache entirely (its content
-// changes every token, so caching every intermediate state would thrash both
-// the cache and the LRU bound).
-const markdownCache = new Map<string, string>()
-const MARKDOWN_CACHE_MAX = 200
-
-function renderMarkdownInner(text: string, agentId: number | null): string {
-  const html = marked.parse(normalizeMarkdownLinks(text)) as string
-  const sanitized = DOMPurify.sanitize(html, {
-    ADD_TAGS: ['img', 'audio', 'video', 'source'],
-    ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target'],
-  })
-  return agentId == null ? sanitized : rewriteWorkspaceLinks(sanitized, agentId)
-}
-
-function renderMarkdown(text: string, agentId: number | null = null): string {
-  if (!text) return ''
-  const cacheKey = `${agentId}:${text}`
-  const cached = markdownCache.get(cacheKey)
-  if (cached) return cached
-
-  const result = renderMarkdownInner(text, agentId)
-  // Only cache if under limit (prevents unbounded growth during long sessions)
-  if (markdownCache.size < MARKDOWN_CACHE_MAX) {
-    markdownCache.set(cacheKey, result)
-  }
-  return result
-}
-
-// Cache-bypassing variant for the in-flight streaming bubble. The content
-// changes every token; caching every intermediate string would saturate the
-// 200-entry LRU before the cache helped any historical message.
-function renderMarkdownStreaming(text: string, agentId: number | null = null): string {
-  if (!text) return ''
-  return renderMarkdownInner(text, agentId)
 }
 
 const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
@@ -1474,9 +1397,15 @@ function stopVideoPolling() {
 }
 
 // Local image-gen progress bar (JCLAW-228). Image gen is synchronous (no job to poll like video), so the
-// chat polls the sidecar's live step-percent during any streaming turn; the endpoint returns null for
-// cloud providers and when idle, so the bar only appears for an in-flight LOCAL generation.
+// chat polls the sidecar's live step-percent while a generate_image tool call is running; the endpoint
+// returns null for cloud providers and when idle, so the bar only appears for an in-flight LOCAL generation.
 const imageGenPercent = ref<number | null>(null)
+// JCLAW-683: _key of the assistant message whose turn actually invoked
+// generate_image. The progress bar is scoped to this turn (mirroring the
+// generated-video card's generationJobId keying) instead of a global footer
+// bar, so a concurrent generation's 0%-load phase can't leak onto an unrelated
+// streaming turn. Set from handleStreamToolCallEvent, cleared when polling stops.
+const imageGenTurnKey = ref<string | null>(null)
 const IMAGE_PROGRESS_INTERVAL_MS = 1000
 let imageProgressTimer: ReturnType<typeof setInterval> | null = null
 
@@ -1502,11 +1431,14 @@ function stopImageProgressPolling() {
     imageProgressTimer = null
   }
   imageGenPercent.value = null
+  imageGenTurnKey.value = null
 }
-// Poll only while a turn is streaming — that's the only window a generate_image runs.
+// JCLAW-683: polling now STARTS from handleStreamToolCallEvent when a
+// generate_image tool call fires (scoped to that turn) rather than on every
+// streaming turn. This watch only tears the poll down when the turn ends, so a
+// stale bar never carries into the next turn.
 watch(streaming, (on) => {
-  if (on) startImageProgressPolling()
-  else stopImageProgressPolling()
+  if (!on) stopImageProgressPolling()
 })
 
 /** Template helpers for the generated-video card (thin wrappers over the pure utils/video-job logic). */
@@ -2211,6 +2143,15 @@ function handleStreamToolCallEvent(ctx: StreamContext, event: ToolCallEvent) {
     resultStructured: event.resultStructured ?? null,
     _expanded: true,
   })
+  // JCLAW-683: scope the local image-gen progress bar to THIS turn. A
+  // generate_image call is the only thing that runs the local sidecar's
+  // step loop, so start polling now — keyed to the invoking assistant
+  // message's _key — rather than on every streaming turn. This is what stops
+  // a concurrent generation's load phase from leaking onto an unrelated turn.
+  if (event.name === 'generate_image') {
+    imageGenTurnKey.value = m._key ?? null
+    startImageProgressPolling()
+  }
   // JCLAW-228/562: the call produced inline attachments (image / voice clips) — attach them to the
   // streaming bubble so they render immediately (the server already persisted them on the
   // assistant turn).
@@ -2494,71 +2435,22 @@ watch(isEmptyChat, async () => {
   )
 })
 
-const fileInput = ref<HTMLInputElement | null>(null)
-const attachedFiles = ref<File[]>([])
-const attachError = ref<string | null>(null)
-const MAX_ATTACHMENTS = 5
-
-// JCLAW-131: per-kind upload caps sourced from /api/config, with defaults
-// matching services/UploadLimits.java. The server re-applies these caps on
-// upload (authoritative); the frontend copy is just UX — showing the user
-// the refusal before bytes leave the browser.
-const DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024
-const DEFAULT_MAX_AUDIO_BYTES = 100 * 1024 * 1024
-const DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024
-
-function configInt(key: string, fallback: number): number {
-  const raw = configData.value?.entries?.find(e => e.key === key)?.value
-  if (!raw) return fallback
-  const parsed = Number.parseInt(raw, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
-}
-const maxImageBytes = computed(() => configInt('upload.maxImageBytes', DEFAULT_MAX_IMAGE_BYTES))
-const maxAudioBytes = computed(() => configInt('upload.maxAudioBytes', DEFAULT_MAX_AUDIO_BYTES))
-const maxFileBytes = computed(() => configInt('upload.maxFileBytes', DEFAULT_MAX_FILE_BYTES))
-
-// Per-file thumbnail preview URL for image attachments (JCLAW-25). Keyed by
-// File identity via a WeakMap-like ref map; createObjectURL results are
-// revoked when the chip is removed so we don't leak blob handles across
-// long chat sessions.
-const attachmentPreviews = ref(new Map<File, string>())
-
-/** Upload response shape returned per file from POST /api/chat/upload.
- *  AUDIO joins IMAGE / FILE on this union — the backend's
- *  {@code MessageAttachment.kindForMime} routes audio mimetypes through
- *  the AUDIO branch (browser-recorded voice notes especially). */
-interface UploadedAttachment {
-  attachmentId: string
-  originalFilename: string
-  mimeType: string
-  sizeBytes: number
-  kind: 'IMAGE' | 'AUDIO' | 'FILE'
-}
-
-function isImageFile(f: File): boolean {
-  return typeof f.type === 'string' && f.type.startsWith('image/')
-}
-
-function isAudioFile(f: File): boolean {
-  return typeof f.type === 'string' && f.type.startsWith('audio/')
-}
-
-/** Effective byte cap for this File's kind, sourced from Settings config. */
-function capForFile(f: File): number {
-  if (isImageFile(f)) return maxImageBytes.value
-  if (isAudioFile(f)) return maxAudioBytes.value
-  return maxFileBytes.value
-}
-
-function kindLabelForFile(f: File): string {
-  if (isImageFile(f)) return 'image'
-  if (isAudioFile(f)) return 'audio'
-  return 'file'
-}
-
-function triggerFileUpload() {
-  fileInput.value?.click()
-}
+// Composer attachment lifecycle (staged files, per-kind caps, previews,
+// paperclip upload, voice recorder) lives in a dedicated composable so it's
+// one cohesive unit. The page keeps only the read-only-transcript guarded
+// event handlers below, which route into addAttachments.
+const {
+  fileInput,
+  attachedFiles,
+  attachError,
+  attachmentPreviews,
+  isRecording,
+  addAttachments,
+  removeAttachment,
+  triggerFileUpload,
+  toggleRecording,
+  uploadAttachments,
+} = useChatAttachments(configDataRef)
 
 function handleFileUpload(event: Event) {
   const target = event.target as HTMLInputElement
@@ -2598,164 +2490,6 @@ function handlePaste(event: ClipboardEvent) {
   addAttachments(files)
 }
 
-function addAttachments(files: File[]) {
-  attachError.value = null
-  for (const f of files) {
-    if (attachedFiles.value.length >= MAX_ATTACHMENTS) {
-      attachError.value = `Maximum ${MAX_ATTACHMENTS} files per message`
-      break
-    }
-    // JCLAW-131: per-kind size cap, sourced from Settings config. The
-    // human-readable message names the kind so the operator knows which
-    // limit to raise.
-    const cap = capForFile(f)
-    if (f.size > cap) {
-      const label = kindLabelForFile(f)
-      attachError.value = `${f.name} exceeds ${Math.round(cap / (1024 * 1024))} MB limit for ${label} uploads`
-      continue
-    }
-    // JCLAW-215: images are universally accepted regardless of the model's
-    // supportsVision flag — a non-vision model gets a server-generated caption
-    // text part (via the captioning pipeline), exactly as JCLAW-165 gives a
-    // text-only model an audio transcript. No client-side gate for either.
-    attachedFiles.value.push(f)
-    if (isImageFile(f)) {
-      attachmentPreviews.value.set(f, URL.createObjectURL(f))
-    }
-  }
-}
-
-function removeAttachment(idx: number) {
-  const f = attachedFiles.value[idx]
-  if (f) {
-    const url = attachmentPreviews.value.get(f)
-    if (url) {
-      URL.revokeObjectURL(url)
-      attachmentPreviews.value.delete(f)
-    }
-  }
-  attachedFiles.value.splice(idx, 1)
-}
-
-// ────────────────────── Voice-note recording (browser mic) ─────────────────
-// One click starts the recorder; a second click stops it and attaches the
-// captured blob through the same addAttachments() pipeline as paperclip
-// uploads. Universally available — JCLAW-165's transcription pipeline lets
-// every model consume audio, so no capability gate is needed.
-
-const isRecording = ref(false)
-// Kept as plain non-reactive bindings — Vue reactivity on a MediaRecorder
-// proxy would be wasteful and the ondataavailable callback can't walk a
-// reactive wrapper without surprises.
-let mediaRecorder: MediaRecorder | null = null
-let mediaStream: MediaStream | null = null
-let recordedChunks: Blob[] = []
-
-/** Pick the best supported MIME for this browser. Chromium ships
- *  audio/webm (Opus); Safari exposes audio/mp4 instead. Returns null if
- *  neither is supported so the caller can fall back to a default. */
-function pickAudioMime(): string | null {
-  if (typeof MediaRecorder === 'undefined') return null
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
-  for (const c of candidates) {
-    if (MediaRecorder.isTypeSupported(c)) return c
-  }
-  return null
-}
-
-function extensionForMime(mime: string): string {
-  if (mime.startsWith('audio/webm')) return 'webm'
-  if (mime.startsWith('audio/mp4')) return 'm4a'
-  return 'bin'
-}
-
-function releaseRecorder() {
-  if (mediaStream) {
-    for (const track of mediaStream.getTracks()) track.stop()
-  }
-  mediaStream = null
-  mediaRecorder = null
-  recordedChunks = []
-}
-
-async function startRecording() {
-  if (isRecording.value) return
-  // JCLAW-165: voice recording is universally available — the transcription
-  // pipeline pairs every audio attachment with a transcript before the LLM
-  // sees it, so model.supportsAudio no longer gates the mic.
-  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-    attachError.value = 'Voice recording not supported in this browser'
-    return
-  }
-  let stream: MediaStream
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-  }
-  catch {
-    // NotAllowedError (denied) and NotFoundError (no device) both land here;
-    // the user-visible string is deliberately generic since the remedy —
-    // "check site permissions / plug in a mic" — covers both.
-    attachError.value = 'Microphone access denied or unavailable'
-    return
-  }
-  const mime = pickAudioMime()
-  mediaStream = stream
-  recordedChunks = []
-  try {
-    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
-  }
-  catch {
-    attachError.value = 'Voice recording not supported in this browser'
-    releaseRecorder()
-    return
-  }
-  mediaRecorder.ondataavailable = (e: BlobEvent) => {
-    if (e.data && e.data.size > 0) recordedChunks.push(e.data)
-  }
-  mediaRecorder.onstop = () => {
-    // mediaRecorder is nulled in releaseRecorder(); capture the type first.
-    const effectiveType = mediaRecorder?.mimeType || mime || 'audio/webm'
-    const blob = new Blob(recordedChunks, { type: effectiveType })
-    const ext = extensionForMime(effectiveType)
-    // YYYYMMDD-HHMMSS in local time — readable at a glance in the chip
-    // and unique enough across a single session. We skip the timezone
-    // because the filename doesn't roundtrip to the agent; it's just UX.
-    const d = new Date()
-    const pad = (n: number) => String(n).padStart(2, '0')
-    const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
-      + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
-    const file = new File([blob], `voice-${ts}.${ext}`, { type: effectiveType })
-    addAttachments([file])
-    releaseRecorder()
-  }
-  mediaRecorder.start()
-  isRecording.value = true
-}
-
-function stopRecording() {
-  if (!isRecording.value) return
-  isRecording.value = false
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    // onstop fires asynchronously after this call; releaseRecorder is
-    // invoked from inside the handler so the final blob is built before
-    // we tear down.
-    mediaRecorder.stop()
-  }
-  else {
-    releaseRecorder()
-  }
-}
-
-function toggleRecording() {
-  if (isRecording.value) stopRecording()
-  else void startRecording()
-}
-
-onBeforeUnmount(() => {
-  if (isRecording.value) stopRecording()
-  else releaseRecorder()
-})
-
 const formatAttachmentSize = formatSize
 
 /**
@@ -2774,20 +2508,6 @@ function generatedImageLabel(att: MessageAttachment): string {
     catch { /* fall through to the filename */ }
   }
   return att.originalFilename
-}
-
-async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]> {
-  if (!attachedFiles.value.length) return []
-  const form = new FormData()
-  form.append('agentId', String(agentId))
-  for (const f of attachedFiles.value) {
-    form.append('files', f, f.name)
-  }
-  const res = await $fetch<{ files: UploadedAttachment[] }>(
-    '/api/chat/upload',
-    { method: 'POST', body: form },
-  )
-  return res.files
 }
 
 // JCLAW-25: expose the attachment-gate surface so vitest can exercise the
@@ -3824,6 +3544,37 @@ function exportConversation() {
                     >
                       (empty response)
                     </div>
+                    <!-- JCLAW-683: local image-gen progress, scoped to the turn
+                         that invoked generate_image (keyed by _key, mirroring the
+                         generated-video card's generationJobId keying). Polled via
+                         /api/imagegen/progress; polling starts only when THIS turn
+                         fires a generate_image tool call, so a concurrent
+                         generation's load phase can't leak onto an unrelated turn.
+                         Hidden for cloud providers (no per-step info) and when idle. -->
+                    <div
+                      v-if="msg._key === imageGenTurnKey && imageGenPercent != null"
+                      class="mt-2 flex items-center gap-2.5 bg-surface-elevated border border-border rounded-xl px-3 py-2 text-xs text-fg-strong"
+                    >
+                      <PhotoIcon
+                        class="w-4 h-4 shrink-0 text-purple-500"
+                        aria-hidden="true"
+                      />
+                      <div class="flex flex-col gap-1 min-w-0 flex-1">
+                        <span class="font-medium">Generating image… {{ imageGenPercent }}%</span>
+                        <div
+                          class="h-1 w-full rounded-full bg-border overflow-hidden"
+                          role="progressbar"
+                          :aria-valuenow="imageGenPercent"
+                          aria-valuemin="0"
+                          aria-valuemax="100"
+                        >
+                          <div
+                            class="h-full bg-purple-500 transition-[width] duration-500"
+                            :style="{ width: imageGenPercent + '%' }"
+                          />
+                        </div>
+                      </div>
+                    </div>
                     <!-- JCLAW-291: model-output truncation marker. Sits below
                          the rendered reply (and inside the inline subagent
                          block when subagentRunId is set) so the operator sees
@@ -4119,33 +3870,6 @@ function exportConversation() {
             ~25% alpha, black shadows vanish against #222427 — this
             is the "elevated card" token across the auth pages.
         -->
-          <!-- Local image-gen progress: a determinate bar while the local sidecar reports per-step
-               progress (polled via /api/imagegen/progress during a streaming turn). Hidden for cloud
-               providers (no per-step info — like the video cloud path) and when idle. -->
-          <div
-            v-if="imageGenPercent != null"
-            class="mb-2 flex items-center gap-2.5 bg-surface-elevated border border-border rounded-xl px-3 py-2 text-xs text-fg-strong"
-          >
-            <PhotoIcon
-              class="w-4 h-4 shrink-0 text-purple-500"
-              aria-hidden="true"
-            />
-            <div class="flex flex-col gap-1 min-w-0 flex-1">
-              <span class="font-medium">Generating image… {{ imageGenPercent }}%</span>
-              <div
-                class="h-1 w-full rounded-full bg-border overflow-hidden"
-                role="progressbar"
-                :aria-valuenow="imageGenPercent"
-                aria-valuemin="0"
-                aria-valuemax="100"
-              >
-                <div
-                  class="h-full bg-purple-500 transition-[width] duration-500"
-                  :style="{ width: imageGenPercent + '%' }"
-                />
-              </div>
-            </div>
-          </div>
           <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
           <form
             data-tour="chat-composer"
