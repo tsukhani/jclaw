@@ -109,7 +109,7 @@ public class ApiWhatsAppBindingsController extends Controller {
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
                 ? body.get(KEY_AGENT_ID).getAsLong() : null;
         if (agentId == null) {
-            error(400, "agentId is required");
+            ApiResponses.error(400, "invalid_request", "agentId is required");
             throw new AssertionError("unreachable: error() throws");
         }
 
@@ -121,22 +121,22 @@ public class ApiWhatsAppBindingsController extends Controller {
         // no credentials here — it's QR-paired in JCLAW-448.
         if (transport == WhatsAppTransport.CLOUD_API
                 && (phoneNumberId == null || accessToken == null)) {
-            error(400, "The Cloud API transport requires a phone number id and an access token");
+            ApiResponses.error(400, "invalid_request", "The Cloud API transport requires a phone number id and an access token");
             throw new AssertionError("unreachable: error() throws");
         }
 
         Agent agent = AgentService.findById(agentId);
         if (agent == null || !agent.enabled) {
-            error(400, "agentId must reference an enabled agent");
+            ApiResponses.error(400, "invalid_request", "agentId must reference an enabled agent");
             throw new AssertionError("unreachable: error() throws");
         }
         if (phoneNumberId != null && WhatsAppBinding.findByPhoneNumberId(phoneNumberId) != null) {
-            error(409, "A binding with this phone number id already exists");
+            ApiResponses.error(409, "phone_number_conflict", "A binding with this phone number id already exists");
         }
         // Agent uniqueness mirrors Slack/Telegram: agent memory is scoped per agent,
         // so binding one agent to a second WhatsApp number would share memory.
         if (WhatsAppBinding.findByAgent(agent) != null) {
-            error(409, "Agent '%s' is already bound to another WhatsApp binding".formatted(agent.name));
+            ApiResponses.error(409, "agent_already_bound", "Agent '%s' is already bound to another WhatsApp binding".formatted(agent.name));
         }
 
         var binding = new WhatsAppBinding();
@@ -255,7 +255,7 @@ public class ApiWhatsAppBindingsController extends Controller {
         EventLogger.warn(EVENT_CATEGORY_CHANNEL,
                 binding.agent != null ? binding.agent.name : null, CHANNEL_WHATSAPP,
                 "Cloud-API credential verification failed: " + reason);
-        error(422, "WhatsApp Cloud-API verification failed: " + reason);
+        ApiResponses.error(422, "cloud_api_verification_failed", "WhatsApp Cloud-API verification failed: " + reason);
         return false;
     }
 
@@ -271,7 +271,7 @@ public class ApiWhatsAppBindingsController extends Controller {
         if (next != null) {
             var existing = WhatsAppBinding.findByPhoneNumberId(next);
             if (existing != null && !existing.id.equals(binding.id)) {
-                error(409, "A binding with this phone number id already exists");
+                ApiResponses.error(409, "phone_number_conflict", "A binding with this phone number id already exists");
             }
         }
         binding.phoneNumberId = next;
@@ -282,12 +282,12 @@ public class ApiWhatsAppBindingsController extends Controller {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
         Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
-            error(400, "agentId must reference an enabled agent");
+            ApiResponses.error(400, "invalid_request", "agentId must reference an enabled agent");
         }
         if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
             var other = WhatsAppBinding.findByAgent(agent);
             if (other != null && !other.id.equals(binding.id)) {
-                error(409, "Agent '%s' is already bound to another WhatsApp binding".formatted(agent.name));
+                ApiResponses.error(409, "agent_already_bound", "Agent '%s' is already bound to another WhatsApp binding".formatted(agent.name));
             }
         }
         binding.agent = agent;

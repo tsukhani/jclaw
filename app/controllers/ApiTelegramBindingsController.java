@@ -119,26 +119,26 @@ public class ApiTelegramBindingsController extends Controller {
         String telegramUserId = readRequiredString(body, KEY_TELEGRAM_USER_ID);
 
         if (botToken == null || agentId == null || telegramUserId == null) {
-            error(400, "botToken, agentId, and telegramUserId are required");
+            ApiResponses.error(400, "invalid_request", "botToken, agentId, and telegramUserId are required");
             throw new AssertionError("unreachable: error() throws");
         }
         if (!telegramUserId.matches("\\d+")) {
-            error(400, "telegramUserId must be numeric");
+            ApiResponses.error(400, "invalid_request", "telegramUserId must be numeric");
         }
 
         Agent agent = AgentService.findById(agentId);
         if (agent == null || !agent.enabled) {
-            error(400, "agentId must reference an enabled agent");
+            ApiResponses.error(400, "invalid_request", "agentId must reference an enabled agent");
             throw new AssertionError("unreachable: error() throws");
         }
         if (TelegramBinding.findByBotToken(botToken) != null) {
-            error(409, "A binding with this bot token already exists");
+            ApiResponses.error(409, "bot_token_conflict", "A binding with this bot token already exists");
         }
         // Agent uniqueness: planned agent memory is scoped per agent, so
         // re-binding an agent to a second Telegram user would share memory
         // across those users. Reject before the unique constraint fires.
         if (TelegramBinding.findByAgent(agent) != null) {
-            error(409, "Agent '%s' is already bound to another Telegram binding".formatted(agent.name));
+            ApiResponses.error(409, "agent_already_bound", "Agent '%s' is already bound to another Telegram binding".formatted(agent.name));
         }
 
         var binding = new TelegramBinding();
@@ -195,7 +195,7 @@ public class ApiTelegramBindingsController extends Controller {
         if (newToken == null || newToken.isBlank() || newToken.equals(binding.botToken)) return;
         var existing = TelegramBinding.findByBotToken(newToken);
         if (existing != null && !existing.id.equals(binding.id)) {
-            error(409, "A binding with this bot token already exists");
+            ApiResponses.error(409, "bot_token_conflict", "A binding with this bot token already exists");
         }
         binding.botToken = newToken;
     }
@@ -205,12 +205,12 @@ public class ApiTelegramBindingsController extends Controller {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
         Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
-            error(400, "agentId must reference an enabled agent");
+            ApiResponses.error(400, "invalid_request", "agentId must reference an enabled agent");
         }
         if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
             var other = TelegramBinding.findByAgent(agent);
             if (other != null && !other.id.equals(binding.id)) {
-                error(409, "Agent '%s' is already bound to another Telegram binding".formatted(agent.name));
+                ApiResponses.error(409, "agent_already_bound", "Agent '%s' is already bound to another Telegram binding".formatted(agent.name));
             }
         }
         binding.agent = agent;
@@ -221,7 +221,7 @@ public class ApiTelegramBindingsController extends Controller {
         if (!body.has(KEY_TELEGRAM_USER_ID)) return;
         String uid = body.get(KEY_TELEGRAM_USER_ID).getAsString();
         if (uid == null || !uid.matches("\\d+")) {
-            error(400, "telegramUserId must be numeric");
+            ApiResponses.error(400, "invalid_request", "telegramUserId must be numeric");
         }
         binding.telegramUserId = uid;
     }
@@ -255,14 +255,14 @@ public class ApiTelegramBindingsController extends Controller {
         if (body.has(KEY_REPLY_TO_MODE)) {
             String v = readOptionalString(body, KEY_REPLY_TO_MODE);
             if (v != null && !v.matches("off|first|all")) {
-                error(400, "replyToMode must be one of: off, first, all");
+                ApiResponses.error(400, "invalid_request", "replyToMode must be one of: off, first, all");
             }
             binding.replyToMode = v;
         }
         if (body.has(KEY_ERROR_REPLY_POLICY)) {
             String v = readOptionalString(body, KEY_ERROR_REPLY_POLICY);
             if (v != null && !v.matches("reply|silent")) {
-                error(400, "errorReplyPolicy must be one of: reply, silent");
+                ApiResponses.error(400, "invalid_request", "errorReplyPolicy must be one of: reply, silent");
             }
             binding.errorReplyPolicy = v;
         }
@@ -273,7 +273,7 @@ public class ApiTelegramBindingsController extends Controller {
             } else {
                 long ms = el.getAsLong();
                 if (ms <= 0) {
-                    error(400, "notifierCooldownMs must be a positive number of milliseconds");
+                    ApiResponses.error(400, "invalid_request", "notifierCooldownMs must be a positive number of milliseconds");
                 }
                 binding.notifierCooldownMs = ms;
             }
