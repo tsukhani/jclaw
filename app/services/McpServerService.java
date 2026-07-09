@@ -125,6 +125,15 @@ public final class McpServerService {
         return rows.stream().map(View::of).toList();
     }
 
+    /**
+     * JCLAW-153: entity-lookup accessor so controllers route through the
+     * service layer instead of calling {@code McpServer.findById(...)} raw.
+     * Thin passthrough relying on the caller's ambient JPA transaction.
+     */
+    public static McpServer findById(Long id) {
+        return McpServer.findById(id);
+    }
+
     // ==================== translation ====================
 
     /**

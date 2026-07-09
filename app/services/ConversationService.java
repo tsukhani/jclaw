@@ -511,6 +511,33 @@ public class ConversationService {
     }
 
     /**
+     * JCLAW-153: entity-lookup accessor for a single {@link Message} so
+     * controllers route through the service layer instead of calling
+     * {@code Message.findById(...)} raw. Thin passthrough relying on the
+     * caller's ambient JPA transaction.
+     */
+    public static Message findMessageById(Long id) {
+        return Message.findById(id);
+    }
+
+    /**
+     * JCLAW-153: load and delete a single message inside its own transaction.
+     * Replaces the inline {@code Tx.run((Runnable) message::delete)} at the
+     * {@code DELETE /api/conversations/{id}/messages/{mid}} controller site.
+     * The controller still loads the message (via {@link #findMessageById}) to
+     * validate it belongs to the addressed conversation; this method owns the
+     * delete transaction. A no-op when the id no longer resolves.
+     *
+     * @param messageId the message primary key to delete
+     */
+    public static void deleteMessage(Long messageId) {
+        Tx.run(() -> {
+            Message message = Message.findById(messageId);
+            if (message != null) message.delete();
+        });
+    }
+
+    /**
      * Bulk-delete conversations (and their messages) by ID using JPQL.
      * Both single and bulk delete routes use this to ensure consistent behavior.
      *

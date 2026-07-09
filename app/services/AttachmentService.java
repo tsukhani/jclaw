@@ -55,6 +55,16 @@ public final class AttachmentService {
             String kind) {}
 
     /**
+     * JCLAW-153: entity-lookup accessor for a single {@link MessageAttachment}
+     * so controllers route through the service layer instead of calling
+     * {@code MessageAttachment.findById(...)} raw. Thin passthrough relying on
+     * the caller's ambient JPA transaction.
+     */
+    public static MessageAttachment findById(Long id) {
+        return MessageAttachment.findById(id);
+    }
+
+    /**
      * Move a staged upload to its conversation-keyed final path and persist
      * the {@link MessageAttachment} row. Re-sniffs MIME on finalize so
      * client-declared metadata never outranks filesystem truth. Caller must

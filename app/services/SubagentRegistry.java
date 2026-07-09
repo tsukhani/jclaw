@@ -421,6 +421,16 @@ public final class SubagentRegistry {
         return true;
     }
 
+    /**
+     * JCLAW-153: entity-lookup accessor for a single {@link SubagentRun} so
+     * controllers route through the service layer instead of calling
+     * {@code SubagentRun.findById(...)} raw. Thin passthrough relying on the
+     * caller's ambient JPA transaction — no {@link Tx} wrapper.
+     */
+    public static SubagentRun findRunById(Long id) {
+        return SubagentRun.findById(id);
+    }
+
     /** Convenience for the {@code /subagent kill} return text: did the
      *  caller's runId match a row at all? Distinct from {@link #isActive}
      *  because a row may exist in the DB but not in the registry (terminal,

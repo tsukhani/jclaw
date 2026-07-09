@@ -26,6 +26,15 @@ public final class VideoGenerationJobService {
     private VideoGenerationJobService() {}
 
     /**
+     * JCLAW-153: entity-lookup accessor so controllers route through the
+     * service layer instead of calling {@code VideoGenerationJob.findById(...)}
+     * raw. Thin passthrough relying on the caller's ambient JPA transaction.
+     */
+    public static VideoGenerationJob findById(Long id) {
+        return VideoGenerationJob.findById(id);
+    }
+
+    /**
      * Create a job in {@code PENDING}, submit it to the configured provider, and transition to
      * {@code RUNNING} with the returned provider id. A provider submit failure lands the job in
      * {@code FAILED} (the async UX shows an error card, JCLAW-234) rather than throwing — the job row is
