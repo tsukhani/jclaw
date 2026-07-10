@@ -1801,10 +1801,12 @@ describe('Settings page — General operator timezone (app.timezone)', () => {
     const component = await mountSuspended(Settings)
     await flushPromises()
 
-    // Enter edit mode for the General timezone (mirrors clicking the pencil),
-    // then drive the unique <select> + Save button through the DOM.
-    const vm = component.vm as unknown as { editingGeneralField: string | null }
-    vm.editingGeneralField = 'timezone'
+    // Enter edit mode for the General timezone by clicking the pencil, then
+    // drive the unique <select> + Save button through the DOM. General is the
+    // first section, so its Edit button is the first rendered.
+    const editBtn = component.find('button[title="Edit"]')
+    expect(editBtn.exists()).toBe(true)
+    await editBtn.trigger('click')
     await flushPromises()
 
     const select = component.find('select[aria-label="Operator timezone"]')
