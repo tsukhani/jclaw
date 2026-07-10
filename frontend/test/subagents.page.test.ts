@@ -107,12 +107,13 @@ describe('Subagents admin page', () => {
     const component = await mountSuspended(Subagents)
     await flushPromises()
 
-    // One transcript link per row, regardless of status. The href shape
-    // matches the JCLAW-270 announce card's "View full" link
-    // (/chat?conversation=ID) so both surfaces converge on the standard
-    // conversation viewer.
+    // One transcript link per row, regardless of status. Now an icon-only
+    // action (matching the conversations page), so match on the title rather
+    // than visible text. The href shape matches the JCLAW-270 announce card's
+    // "View full" link (/chat?conversation=ID) so both surfaces converge on
+    // the standard conversation viewer.
     const links = component.findAll('a')
-      .filter(a => a.text().toLowerCase().includes('view transcript'))
+      .filter(a => (a.attributes('title') ?? '').toLowerCase().includes('view transcript'))
     expect(links.length).toBe(2)
     const hrefs = links.map(a => a.attributes('href'))
     expect(hrefs).toContain('/chat?conversation=42')

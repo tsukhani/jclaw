@@ -194,12 +194,9 @@ async function deleteRun(run: SubagentRun) {
  * would reject with 409.
  */
 const {
-  selectMode,
   selectedIds,
   deletingBulk,
   selectableRows: selectableRuns,
-  enter: enterSelectMode,
-  exit: exitSelectMode,
   toggle: toggleSelection,
   toggleAll: toggleSelectAll,
   deleteSelected,
@@ -214,6 +211,13 @@ const {
   }),
 })
 
+// Always-on selection (mirrors the conversations page): the checkbox column is
+// always visible rather than gated behind a select-mode toggle. RUNNING rows
+// stay out of the candidate set (selectableRuns) so "select all" never picks a
+// live run the backend would reject with 409.
+const allRunsSelected = computed(() => selectableRuns.value.length > 0 && selectedIds.value.size === selectableRuns.value.length)
+const someRunsSelected = computed(() => selectedIds.value.size > 0 && !allRunsSelected.value)
+
 // (JCLAW-304: select-input ids were retired when the three dropdowns
 // were replaced with FilterBar. FilterBar manages its own ARIA labels
 // on the underlying input.)
@@ -226,34 +230,15 @@ const {
         Subagents
       </h1>
       <div class="flex items-center gap-2">
-        <template v-if="!selectMode">
-          <button
-            :disabled="!selectableRuns.length"
-            class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
-            title="Delete subagent runs"
-            @click="enterSelectMode"
-          >
-            <TrashIcon
-              class="w-4 h-4"
-              aria-hidden="true"
-            />
-          </button>
-        </template>
-        <template v-else>
-          <button
-            class="px-3 py-1.5 border border-input text-fg-muted text-xs hover:text-fg-strong hover:border-neutral-500 transition-colors"
-            @click="exitSelectMode"
-          >
-            Cancel
-          </button>
-          <button
-            :disabled="!selectedIds.size || deletingBulk"
-            class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 transition-colors"
-            @click="deleteSelected"
-          >
-            Delete {{ selectedIds.size || '' }}
-          </button>
-        </template>
+        <!-- Selection-driven bulk delete, matching the conversations page's
+             always-visible "Delete N" button. -->
+        <button
+          :disabled="!selectedIds.size || deletingBulk"
+          class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          @click="deleteSelected"
+        >
+          {{ deletingBulk ? 'Deleting...' : `Delete${selectedIds.size ? ' ' + selectedIds.size : ''}` }}
+        </button>
       </div>
     </div>
 
@@ -306,14 +291,13 @@ const {
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
-            <th
-              v-if="selectMode"
-              class="px-4 py-2.5 font-medium w-8"
-            >
+            <th class="px-4 py-2.5 font-medium w-8">
               <input
                 type="checkbox"
-                :checked="!!selectableRuns.length && selectedIds.size === selectableRuns.length"
-                :indeterminate.prop="selectedIds.size > 0 && selectedIds.size < selectableRuns.length"
+                :checked="allRunsSelected"
+                :indeterminate.prop="someRunsSelected"
+                :disabled="!selectableRuns.length"
+                class="accent-red-500 align-middle"
                 aria-label="Select all deletable runs on this page"
                 @change="toggleSelectAll"
               >
@@ -348,22 +332,16 @@ const {
           <tr
             v-for="run in runs"
             :key="run.id"
-            :class="{
-              'bg-muted/30 cursor-pointer': selectMode && run.status !== 'RUNNING',
-              'opacity-60': selectMode && run.status === 'RUNNING',
-            }"
-            @click="selectMode && run.status !== 'RUNNING' ? toggleSelection(run.id) : undefined"
+            class="hover:bg-muted/30 transition-colors"
           >
-            <td
-              v-if="selectMode"
-              class="px-4 py-2.5 w-8"
-            >
+            <td class="px-4 py-2.5 w-8">
               <input
                 v-if="run.status !== 'RUNNING'"
                 type="checkbox"
                 :checked="selectedIds.has(run.id)"
+                class="accent-red-500 align-middle"
                 :aria-label="`Select run #${run.id}`"
-                @click.stop="toggleSelection(run.id)"
+                @change="toggleSelection(run.id)"
               >
             </td>
             <td class="px-4 py-2.5 font-mono text-xs text-fg-muted">
@@ -409,39 +387,63 @@ const {
                 —
               </template>
             </td>
-            <td class="px-4 py-2.5 text-right">
-              <!--
-                JCLAW-274: "View transcript" link per row opens the child
-                conversation in the standard chat viewer (same shape as the
-                JCLAW-270 announce card's "View full" link). Inline-mode
-                runs share parentConversationId == childConversationId — the
-                link still works there (it just lands back at the parent),
-                no special-casing needed.
-              -->
-              <NuxtLink
-                v-if="!selectMode && run.childConversationId !== null"
-                :to="`/chat?conversation=${run.childConversationId}`"
-                class="text-xs text-blue-700 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors mr-3"
-                @click.stop
-              >
-                View transcript
-              </NuxtLink>
-              <button
-                v-if="!selectMode && run.status === 'RUNNING'"
-                :disabled="killing.has(run.id)"
-                class="text-xs text-red-700 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-40 mr-3"
-                @click.stop="killRun(run.id)"
-              >
-                {{ killing.has(run.id) ? 'Killing...' : 'Kill' }}
-              </button>
-              <button
-                v-if="!selectMode && run.status !== 'RUNNING'"
-                class="text-xs text-fg-muted hover:text-red-400 transition-colors"
-                :title="`Permanently delete run #${run.id} and its child agent + transcript`"
-                @click.stop="deleteRun(run)"
-              >
-                Delete
-              </button>
+            <td class="px-4 py-2.5">
+              <div class="flex items-center justify-end gap-1">
+                <!--
+                  JCLAW-274: "View transcript" opens the child conversation in the
+                  standard chat viewer. Icon-only (eye) to match the conversations
+                  page's action column. Inline-mode runs share
+                  parentConversationId == childConversationId — the link still
+                  works there (it lands back at the parent), no special-casing.
+                -->
+                <NuxtLink
+                  v-if="run.childConversationId !== null"
+                  :to="`/chat?conversation=${run.childConversationId}`"
+                  class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="View transcript"
+                  @click.stop
+                >
+                  <svg
+                    class="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                    />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                </NuxtLink>
+                <button
+                  v-if="run.status === 'RUNNING'"
+                  :disabled="killing.has(run.id)"
+                  class="text-xs text-red-700 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-40"
+                  @click.stop="killRun(run.id)"
+                >
+                  {{ killing.has(run.id) ? 'Killing...' : 'Kill' }}
+                </button>
+                <button
+                  v-else
+                  class="p-1.5 text-fg-muted hover:text-red-400 transition-colors"
+                  :title="`Permanently delete run #${run.id} and its child agent + transcript`"
+                  @click.stop="deleteRun(run)"
+                >
+                  <TrashIcon
+                    class="w-4 h-4"
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>

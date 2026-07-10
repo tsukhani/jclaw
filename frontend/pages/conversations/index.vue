@@ -313,7 +313,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
   },
   {
     id: 'actions',
-    header: '',
+    header: 'Actions',
     enableSorting: false,
     size: 96,
     cell: ({ row }) => h('div', { class: 'flex items-center justify-end gap-1' }, [
