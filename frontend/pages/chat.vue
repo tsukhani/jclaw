@@ -51,6 +51,7 @@ import ChatAttachmentChip from '~/components/chat/ChatAttachmentChip.vue'
 import ChatAudioAttachment from '~/components/chat/ChatAudioAttachment.vue'
 import ChatGeneratedImage from '~/components/chat/ChatGeneratedImage.vue'
 import ChatGeneratedVideo from '~/components/chat/ChatGeneratedVideo.vue'
+import ChatThinkingCard from '~/components/chat/ChatThinkingCard.vue'
 import ChatToolCalls from '~/components/chat/ChatToolCalls.vue'
 
 // Local helpers for fields that streaming/optimistic bubbles carry in addition
@@ -2901,64 +2902,18 @@ function exportConversation() {
                   turns open on first reasoning delta and auto-collapse at the
                   reasoning→content transition.
                 -->
-                    <div
+                    <ChatThinkingCard
                       v-if="msg.reasoning"
-                      class="mb-3 border border-neutral-200 dark:border-neutral-700 rounded-xl overflow-hidden bg-surface-elevated"
-                    >
-                      <div class="flex items-center gap-2 px-3 py-2">
-                        <button
-                          type="button"
-                          class="flex-1 flex items-center gap-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none"
-                          :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'"
-                          @click="toggleThinking(msg)"
-                        >
-                          <LightBulbIconSolid
-                            class="w-3.5 h-3.5 shrink-0 text-amber-700 dark:text-amber-400 drop-shadow-[0_0_4px_rgba(251,191,36,0.55)]"
-                            aria-hidden="true"
-                          />
-                          <span class="font-medium">{{ thinkingHeaderLabel(msg) }}</span>
-                          <ChevronDownIcon
-                            class="w-3.5 h-3.5 transition-transform ml-1"
-                            :class="msg.thinkingCollapsed ? '' : 'rotate-180'"
-                            aria-hidden="true"
-                          />
-                        </button>
-                        <button
-                          type="button"
-                          class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[11px] text-fg-muted hover:text-fg-strong transition-colors"
-                          :title="copiedMessageId === `reason:${msg.id ?? msg._key}` ? 'Copied' : 'Copy reasoning'"
-                          @click.stop="copyReasoning(msg)"
-                        >
-                          <ClipboardIcon
-                            v-if="copiedMessageId !== `reason:${msg.id ?? msg._key}`"
-                            class="w-3.5 h-3.5"
-                            aria-hidden="true"
-                          />
-                          <CheckIcon
-                            v-else
-                            class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400"
-                            aria-hidden="true"
-                          />
-                          <span>Copy</span>
-                        </button>
-                      </div>
-                      <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
-                      <!--
-                        For the in-flight assistant bubble, render from
-                        streamReasoningHtml (throttled markdown render of
-                        streamReasoning). For historical messages, render via
-                        the cached renderMarkdown(msg.reasoning) path. This
-                        is what closes the "main thread runs marked.parse on
-                        every reasoning chunk" finding from the perf audit.
-                      -->
-                      <div
-                        v-if="!msg.thinkingCollapsed"
-                        data-reasoning-body
-                        class="prose-chat px-4 pb-4 pt-3 text-sm text-fg-primary break-words max-h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
-                        v-html="msg._key === streamingMessageKey ? streamReasoningHtml : renderMarkdown(msg.reasoning, effectiveDisplayAgentId)"
-                      />
-                      <!-- eslint-enable vue/no-v-html -->
-                    </div>
+                      :collapsed="!!msg.thinkingCollapsed"
+                      :header-label="thinkingHeaderLabel(msg)"
+                      :copied="copiedMessageId === `reason:${msg.id ?? msg._key}`"
+                      :reasoning="msg.reasoning"
+                      :agent-id="effectiveDisplayAgentId"
+                      :is-streaming="msg._key === streamingMessageKey"
+                      :stream-html="streamReasoningHtml"
+                      @toggle="toggleThinking(msg)"
+                      @copy="copyReasoning(msg)"
+                    />
                     <!-- Response content — plain rendered markdown, no bubble. -->
                     <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
                     <!--
