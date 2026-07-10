@@ -1351,25 +1351,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           @keydown.enter.prevent="editAgent(agent)"
           @keydown.space.prevent="editAgent(agent)"
         >
+          <!-- Name + enabled toggle share the top row so the switch aligns with
+               the agent name rather than centering against the whole card. -->
           <div class="flex items-center justify-between gap-3">
-            <div class="min-w-0">
-              <span class="text-sm text-fg-strong">{{ agent.name }}</span>
-              <div
-                v-if="agent.description"
-                class="text-xs text-fg-muted mt-0.5"
-              >
-                {{ agent.description }}
-              </div>
-              <div class="text-xs text-fg-muted mt-3">
-                {{ agent.modelProvider }} / {{ agent.modelId }}
-              </div>
-              <ModelCapabilityPills
-                :model="modelForAgent(agent)"
-                :thinking-mode="agent.thinkingMode"
-                class="mt-2"
-                @toggle="(cap) => toggleListingCapability(agent, cap)"
-              />
-            </div>
+            <span class="text-sm text-fg-strong truncate min-w-0">{{ agent.name }}</span>
             <div class="flex items-center gap-3 shrink-0">
               <span
                 v-if="agent.enabled && !agent.providerConfigured"
@@ -1389,13 +1374,28 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </button>
             </div>
           </div>
+          <div
+            v-if="agent.description"
+            class="text-xs text-fg-muted mt-0.5"
+          >
+            {{ agent.description }}
+          </div>
+          <div class="text-xs text-fg-muted mt-3">
+            {{ agent.modelProvider }} / {{ agent.modelId }}
+          </div>
+          <ModelCapabilityPills
+            :model="modelForAgent(agent)"
+            :thinking-mode="agent.thinkingMode"
+            class="mt-2"
+            @toggle="(cap) => toggleListingCapability(agent, cap)"
+          />
           <!-- Per-agent delete: bottom-right trash. @click/keydown .stop keeps
                activating it from bubbling up and opening the edit form. -->
           <div class="flex justify-end mt-3">
             <button
               type="button"
               :disabled="deletingId === agent.id"
-              class="p-1.5 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 transition-colors"
+              class="p-1.5 text-fg-muted hover:text-red-400 disabled:opacity-40 transition-colors"
               :title="`Delete ${agent.name}`"
               @click.stop="deleteAgent(agent)"
               @keydown.enter.stop="deleteAgent(agent)"
