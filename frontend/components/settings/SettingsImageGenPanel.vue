@@ -7,6 +7,8 @@
 // state, host capability) each drive their own poll loop + lifecycle. Config
 // reads/writes go through the shared store; API-key checks + the shared
 // inline config-row editor are injected from it.
+import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+
 const { configData, saving, refresh, saveField, apiKeyConfigured, editingKey, editValue, updateEntry } = useSettingsConfig()
 
 const openaiApiKeyConfigured = computed(() => apiKeyConfigured('openai'))

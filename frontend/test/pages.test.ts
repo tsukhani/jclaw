@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
 import Index from '~/pages/index.vue'
 import Agents from '~/pages/agents.vue'
 import Settings from '~/pages/settings.vue'
@@ -129,20 +130,29 @@ describe('Agents page', () => {
 
 describe('Settings page', () => {
   it('renders provider sections', async () => {
+    // JCLAW-680: the page renders one section at a time via a TOC swap, so open
+    // the LLM Providers section (deep-linked via ?section) before asserting on
+    // its provider cards.
     setupMockApi()
-    const component = await mountSuspended(Settings)
+    const component = await mountSuspended(Settings, { route: '/settings?section=providers' })
+    await flushPromises()
+    await flushPromises()
 
     expect(component.text()).toContain('Settings')
+    // LLM Providers appears in the TOC rail regardless; Ollama Cloud is the
+    // provider card's friendly display label (JCLAW-182), only rendered when the
+    // Providers panel is the active section.
     expect(component.text()).toContain('LLM Providers')
-    // JCLAW-182: provider cards now render the friendly display label.
     expect(component.text()).toContain('Ollama Cloud')
   })
 
   it('does not expose an add-entry form for ad-hoc config', async () => {
     // The generic config list is a read-only diagnostic for stale/unmanaged keys,
     // not a place to create new rows — arbitrary keys aren't read by anything.
+    // It lives in the Unmanaged Config section, so open that section to assert.
     setupMockApi()
-    const component = await mountSuspended(Settings)
+    const component = await mountSuspended(Settings, { route: '/settings?section=unmanaged' })
+    await flushPromises()
 
     expect(component.text()).not.toContain('Add Entry')
   })
