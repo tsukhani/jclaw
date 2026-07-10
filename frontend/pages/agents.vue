@@ -1376,14 +1376,16 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           </div>
           <div
             v-if="agent.description"
-            class="text-xs text-fg-muted mt-0.5"
+            class="text-xs text-fg-muted mt-1"
           >
             {{ agent.description }}
           </div>
           <!-- Bottom row: provider/model + capability pills stay left-aligned and
-               share the row with the bottom-right delete button. @click/keydown
-               .stop keeps the trash from bubbling up and opening the edit form. -->
-          <div class="flex items-center justify-between gap-3 mt-3">
+               share the row with the bottom-right delete button. mt-4 gives a
+               consistent, roomy separation from the name/description group above
+               whether or not this agent has a description. @click/keydown .stop
+               keeps the trash from bubbling up and opening the edit form. -->
+          <div class="flex items-center justify-between gap-3 mt-4">
             <div class="min-w-0">
               <div class="text-xs text-fg-muted">
                 {{ agent.modelProvider }} / {{ agent.modelId }}
