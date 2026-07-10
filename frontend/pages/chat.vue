@@ -1,22 +1,14 @@
 <script setup lang="ts">
 import {
   ArrowDownTrayIcon,
-  ArrowPathIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  ClipboardIcon,
-  ExclamationTriangleIcon,
   EyeIcon,
   FilmIcon,
   LightBulbIcon,
   MicrophoneIcon,
   PaperAirplaneIcon,
   PaperClipIcon,
-  PencilIcon,
   PencilSquareIcon,
-  PhotoIcon,
   SpeakerWaveIcon,
-  TrashIcon,
   UsersIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
@@ -30,10 +22,10 @@ import {
   MicrophoneIcon as MicrophoneIconSolid,
   StopIcon as StopIconSolid,
 } from '@heroicons/vue/24/solid'
-import { formatTokensPerSec, renderMarkdown, renderMarkdownStreaming } from '~/utils/chat-markdown'
-import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
+import { renderMarkdownStreaming } from '~/utils/chat-markdown'
+import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
-import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
+import { initCollapsedState } from '~/utils/thinking'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
 import { isVideoJobPending, type VideoJobStatus } from '~/utils/video-job'
@@ -47,13 +39,7 @@ import type { Agent, Conversation, Message, MessageAttachment, ConfigResponse, T
 import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
 import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
 import { useChatAttachments, type UploadedAttachment } from '~/composables/useChatAttachments'
-import ChatAttachmentChip from '~/components/chat/ChatAttachmentChip.vue'
-import ChatAudioAttachment from '~/components/chat/ChatAudioAttachment.vue'
-import ChatGeneratedImage from '~/components/chat/ChatGeneratedImage.vue'
-import ChatGeneratedVideo from '~/components/chat/ChatGeneratedVideo.vue'
-import ChatSubagentRow from '~/components/chat/ChatSubagentRow.vue'
-import ChatThinkingCard from '~/components/chat/ChatThinkingCard.vue'
-import ChatToolCalls from '~/components/chat/ChatToolCalls.vue'
+import ChatMessage from '~/components/chat/ChatMessage.vue'
 
 // Local helpers for fields that streaming/optimistic bubbles carry in addition
 // to the persisted Message shape. Kept co-located rather than in types/api.ts
@@ -430,11 +416,18 @@ function shouldShowModelSwitchIndicator(idx: number): boolean {
   return prior.modelId !== msg.usage.modelId || prior.modelProvider !== msg.usage.modelProvider
 }
 
-/** Compact "provider/model-id" label for the switch indicator. */
-function formatModelLabel(msg: Message): string {
-  const u = msg.usage
-  if (!u) return '?'
-  return u.modelProvider ? `${u.modelProvider}/${u.modelId ?? '?'}` : (u.modelId ?? '?')
+/**
+ * JCLAW-690: per-message render digest passed to <ChatMessage :render-token>.
+ * `messages` is a shallowRef whose Message objects are mutated in-place then
+ * forced with triggerRef, so nested-field changes (thinkingCollapsed,
+ * toolCallsCollapsed, each tool call's _expanded, each attachment's deleted)
+ * carry no reference change on the `:msg` prop and would be swallowed across
+ * the component boundary. This digest changes whenever any of those mutable
+ * fields does, so the child re-renders in lockstep with the old inline v-for.
+ * Not a `:key` — the row identity stays `msg.id ?? msg._key`.
+ */
+function messageRenderKey(msg: Message): string {
+  return `${!!msg.thinkingCollapsed}|${!!msg.toolCallsCollapsed}|${(msg.toolCalls ?? []).map(t => t._expanded ? 1 : 0).join('')}|${(msg.attachments ?? []).map(a => a.deleted ? 1 : 0).join('')}`
 }
 
 /**
@@ -2576,505 +2569,39 @@ function exportConversation() {
           past the card's right edge.
         -->
           <div class="mx-auto w-full max-w-3xl px-4 space-y-5">
-            <template
+            <ChatMessage
               v-for="(msg, msgIdx) in displayMessages"
               :key="msg.id ?? msg._key"
-            >
-              <!--
-                JCLAW-267: inline-subagent block header. Renders before the
-                FIRST message of each collapsible nested-turn block; clicking
-                it toggles the run's collapsed state. The header label is
-                derived from the boundary-start marker's content (set by
-                SubagentSpawnTool); the status pill comes from the boundary-
-                end marker.
-              -->
-              <div
-                v-if="subagentRunSlices[msgIdx]?.position === 'first'"
-                class="flex items-center gap-2 select-none"
-              >
-                <button
-                  type="button"
-                  class="flex items-center gap-2 px-3 py-1.5 text-xs text-fg-muted hover:text-fg-strong border border-neutral-200 dark:border-neutral-700 rounded-full bg-surface-elevated transition-colors"
-                  :title="subagentRunSlices[msgIdx]?.collapsed ? 'Expand subagent run' : 'Collapse subagent run'"
-                  @click="toggleSubagentRun(subagentRunSlices[msgIdx]!.runId)"
-                >
-                  <UsersIcon
-                    class="w-3.5 h-3.5 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span class="font-medium truncate max-w-xs">
-                    Subagent: {{ subagentBlockLabel(subagentRunSlices[msgIdx]!.runId, displayMessages) }}
-                  </span>
-                  <span
-                    class="px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide rounded"
-                    :class="{
-                      'bg-muted text-fg-muted': subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) === 'Running',
-                      'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300': subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) === 'Completed',
-                      'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300': subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) === 'Failed' || subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) === 'Timed out',
-                    }"
-                  >
-                    {{ subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) }}
-                  </span>
-                  <ChevronDownIcon
-                    class="w-3.5 h-3.5 transition-transform"
-                    :class="subagentRunSlices[msgIdx]?.collapsed ? '-rotate-90' : ''"
-                    aria-hidden="true"
-                  />
-                </button>
-                <span class="flex-1 border-t border-dashed border-neutral-200 dark:border-neutral-700" />
-              </div>
-              <!-- JCLAW-108: divider when two adjacent assistant messages ran on
-                 different models. Helps make mid-conversation /model switches
-                 visible in the scrollback. -->
-              <div
-                v-if="shouldShowModelSwitchIndicator(msgIdx)"
-                class="flex items-center gap-3 text-xs text-fg-muted select-none"
-              >
-                <span class="flex-1 border-t border-border-subtle" />
-                <span class="whitespace-nowrap">Switched to {{ formatModelLabel(msg) }}</span>
-                <span class="flex-1 border-t border-border-subtle" />
-              </div>
-              <!--
-                JCLAW-270: async-spawn completion card. Renders as a single
-                self-contained tile (NOT a collapsible block — the card IS
-                the entire announce surface; the full reply lives at the
-                /conversations/{childConversationId} link). Branches off
-                ahead of the user/assistant message rendering so the
-                SYSTEM-role row doesn't fall into either bubble path.
-              -->
-              <ChatSubagentRow
-                v-if="msg.messageKind === 'subagent_announce'"
-                v-show="!subagentRunSlices[msgIdx] || !subagentRunSlices[msgIdx]?.collapsed"
-                :msg="msg"
-                :agent-id="effectiveDisplayAgentId"
-              />
-              <div
-                v-else
-                v-show="!subagentRunSlices[msgIdx] || !subagentRunSlices[msgIdx]?.collapsed"
-                :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
-              >
-                <div
-                  :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%] w-full'"
-                  class="min-w-0"
-                >
-                  <!-- User messages: subtle rounded pill + hover actions (copy, edit, delete) -->
-                  <div
-                    v-if="msg.role === 'user'"
-                    class="group"
-                  >
-                    <!-- JCLAW-279: persisted attachment chips, rendered on conversation reload.
-                         Placed above the message bubble so the hover-action icons that sit below
-                         the bubble unambiguously apply to the message text rather than the
-                         attachment row. -->
-                    <div
-                      v-if="msg.attachments?.length"
-                      class="flex flex-wrap gap-2 mb-2 justify-end"
-                    >
-                      <ChatAttachmentChip
-                        v-for="att in msg.attachments"
-                        :key="att.uuid"
-                        :att="att"
-                      />
-                    </div>
-                    <!-- JCLAW-327: USER-role rows with messageKind=subagent_send
-                         are agent-authored (the `message` tool persists as USER
-                         so the LLM sees it via loadRecentMessages, but the
-                         content is markdown the agent wrote — render it
-                         through the same markdown pipeline the assistant
-                         bubble uses). True user-typed content stays on the
-                         plain-text path so a literal `<script>` in user input
-                         can't inject HTML. -->
-                    <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
-                    <div
-                      v-if="msg.messageKind === 'subagent_send'"
-                      class="prose-chat inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base break-words"
-                      v-html="renderMarkdown(msg.content ?? '', effectiveDisplayAgentId)"
-                    />
-                    <!-- eslint-enable vue/no-v-html -->
-                    <div
-                      v-else
-                      class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
-                    >
-                      {{ msg.content }}
-                    </div>
-                    <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        type="button"
-                        class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
-                        :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
-                        @click="copyMessage(msg)"
-                      >
-                        <ClipboardIcon
-                          v-if="copiedMessageId !== (msg.id ?? msg._key)"
-                          class="w-4 h-4"
-                          aria-hidden="true"
-                        />
-                        <CheckIcon
-                          v-else
-                          class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
-                          aria-hidden="true"
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        :disabled="streaming"
-                        class="p-1 text-fg-muted hover:text-fg-primary disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
-                        title="Edit & resubmit"
-                        @click="editUserMessage(msg)"
-                      >
-                        <PencilIcon
-                          class="w-4 h-4"
-                          aria-hidden="true"
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        :disabled="streaming"
-                        class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
-                        title="Delete message"
-                        @click="deleteMessage(msg)"
-                      >
-                        <TrashIcon
-                          class="w-4 h-4"
-                          aria-hidden="true"
-                        />
-                      </button>
-                    </div>
-                  </div>
-                  <!-- Assistant messages: optional tool-calls block + thinking card + plain markdown body -->
-                  <div
-                    v-else
-                    class="group"
-                  >
-                    <!-- JCLAW-227/228: tool-generated images (generate_image) inline on the
-                         assistant turn. A generated image renders an inline preview — the same
-                         "image inline + download link below" shape a browser-tool screenshot
-                         gets — while every other attachment keeps the compact chip. -->
-                    <div
-                      v-if="msg.attachments?.length"
-                      class="flex flex-col gap-3 mb-2 items-start"
-                    >
-                      <template
-                        v-for="att in msg.attachments"
-                        :key="att.uuid"
-                      >
-                        <ChatGeneratedImage
-                          v-if="att.generated && att.kind === 'IMAGE'"
-                          :att="att"
-                          :deleted="!!att.deleted"
-                          @delete="deleteAttachment(att)"
-                        />
-                        <ChatGeneratedVideo
-                          v-else-if="att.generated && att.kind === 'VIDEO'"
-                          :att="att"
-                          :job-status="att.generationJobId != null ? videoJobStatus[att.generationJobId] : undefined"
-                          :deleted="!!att.deleted"
-                          @delete="deleteAttachment(att)"
-                        />
-                        <ChatAudioAttachment
-                          v-else-if="att.kind === 'AUDIO' && !att.deleted"
-                          :att="att"
-                        />
-                        <ChatAttachmentChip
-                          v-else
-                          :att="att"
-                        />
-                      </template>
-                    </div>
-                    <!--
-                      JCLAW-170: tool-calls accordion. Renders above the
-                      thinking card whenever the assistant message carries one
-                      or more tool invocations (live-streamed via the
-                      {@code tool_call} SSE frame, or hydrated from persisted
-                      {@code tool_results_*} columns on reload). Mirrors the
-                      thinking card's bordered-card + header-button pattern;
-                      auto-collapses on reload and on stream-completion,
-                      expands when a new call lands so in-flight tool activity
-                      is visible without a click.
-                    -->
-                    <ChatToolCalls
-                      v-if="msg.toolCalls?.length"
-                      :tool-calls="[...msg.toolCalls]"
-                      :collapsed="!!(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed"
-                      @toggle-collapse="toggleToolCalls(msg)"
-                      @toggle-call="toggleToolCallExpansion($event)"
-                    />
-                    <!--
-                  Thinking/reasoning block, Unsloth-style: bordered card with a
-                  "Thought for Xs" header (lightbulb + chevron) and an in-place
-                  Copy button. Collapsed by default on historical turns; in-flight
-                  turns open on first reasoning delta and auto-collapse at the
-                  reasoning→content transition.
-                -->
-                    <ChatThinkingCard
-                      v-if="msg.reasoning"
-                      :collapsed="!!msg.thinkingCollapsed"
-                      :header-label="thinkingHeaderLabel(msg)"
-                      :copied="copiedMessageId === `reason:${msg.id ?? msg._key}`"
-                      :reasoning="msg.reasoning"
-                      :agent-id="effectiveDisplayAgentId"
-                      :is-streaming="msg._key === streamingMessageKey"
-                      :stream-html="streamReasoningHtml"
-                      @toggle="toggleThinking(msg)"
-                      @copy="copyReasoning(msg)"
-                    />
-                    <!-- Response content — plain rendered markdown, no bubble. -->
-                    <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
-                    <!--
-                      Streaming bubble: bind to streamContentHtml so the
-                      template re-renders at the throttled cadence (~12.5 fps)
-                      driven by scheduleStreamContentRender. Historical
-                      messages still go through renderMarkdown's cached path.
-                      streamingMessageKey is the _key of the in-flight
-                      assistant message (set when the placeholder is pushed
-                      in sendMessage, cleared on stream end).
-                    -->
-                    <div
-                      v-if="msg._key === streamingMessageKey ? !!streamContent : !!msg.content"
-                      class="prose-chat text-fg-primary text-base overflow-x-auto break-words"
-                      v-html="msg._key === streamingMessageKey ? streamContentHtml : renderMarkdown(msg.content ?? '', effectiveDisplayAgentId)"
-                    />
-                    <!-- eslint-enable vue/no-v-html -->
-                    <div
-                      v-else-if="!msg.reasoning && !msg.toolCalls?.length && !streaming"
-                      class="text-fg-muted text-base italic"
-                    >
-                      (empty response)
-                    </div>
-                    <!-- JCLAW-683: local image-gen progress, scoped to the turn
-                         that invoked generate_image (keyed by _key, mirroring the
-                         generated-video card's generationJobId keying). Polled via
-                         /api/imagegen/progress; polling starts only when THIS turn
-                         fires a generate_image tool call, so a concurrent
-                         generation's load phase can't leak onto an unrelated turn.
-                         Hidden for cloud providers (no per-step info) and when idle. -->
-                    <div
-                      v-if="msg._key === imageGenTurnKey && imageGenPercent != null"
-                      class="mt-2 flex items-center gap-2.5 bg-surface-elevated border border-border rounded-xl px-3 py-2 text-xs text-fg-strong"
-                    >
-                      <PhotoIcon
-                        class="w-4 h-4 shrink-0 text-purple-500"
-                        aria-hidden="true"
-                      />
-                      <div class="flex flex-col gap-1 min-w-0 flex-1">
-                        <span class="font-medium">Generating image… {{ imageGenPercent }}%</span>
-                        <div
-                          class="h-1 w-full rounded-full bg-border overflow-hidden"
-                          role="progressbar"
-                          :aria-valuenow="imageGenPercent"
-                          aria-valuemin="0"
-                          aria-valuemax="100"
-                        >
-                          <div
-                            class="h-full bg-purple-500 transition-[width] duration-500"
-                            :style="{ width: imageGenPercent + '%' }"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <!-- JCLAW-291: model-output truncation marker. Sits below
-                         the rendered reply (and inside the inline subagent
-                         block when subagentRunId is set) so the operator sees
-                         "this isn't the full answer" without parsing finish
-                         reasons. Same amber chip style as the announce-card
-                         marker at the SYSTEM-role render path above. -->
-                    <div
-                      v-if="msg.truncated"
-                      class="flex items-center gap-1.5 mt-1.5 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded bg-amber-50/50 dark:bg-amber-950/20"
-                      data-testid="truncated-marker"
-                    >
-                      <ExclamationTriangleIcon
-                        class="w-3.5 h-3.5 shrink-0"
-                        aria-hidden="true"
-                      />
-                      <span>Reply was truncated by the model</span>
-                    </div>
-                    <!--
-                      Assistant footer — Unsloth-style compact row:
-                      [copy] [regenerate] [delete] [tok/s pill with hover
-                      popover for full stats]. Icons render as soon as
-                      streaming ends (no msg.id gate) so there's no
-                      perceptible delay during the persist race. Delete
-                      button is disabled until msg.id lands since the
-                      server needs an id to act on.
-                    -->
-                    <div
-                      v-if="!streaming && (msg.id || msg._key) && msg.content"
-                      :class="[
-                        'flex items-center gap-1 mt-1.5 -ml-1 transition-opacity',
-                        tokStatsHoverKey === (msg.id ?? msg._key)
-                          ? 'opacity-100'
-                          : 'opacity-0 group-hover:opacity-100',
-                      ]"
-                    >
-                      <button
-                        type="button"
-                        class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
-                        :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
-                        @click="copyMessage(msg)"
-                      >
-                        <ClipboardIcon
-                          v-if="copiedMessageId !== (msg.id ?? msg._key)"
-                          class="w-4 h-4"
-                          aria-hidden="true"
-                        />
-                        <CheckIcon
-                          v-else
-                          class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
-                          aria-hidden="true"
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        :disabled="streaming"
-                        class="p-1 text-fg-muted hover:text-fg-primary disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
-                        title="Regenerate response"
-                        @click="regenerateMessage(msg)"
-                      >
-                        <ArrowPathIcon
-                          class="w-4 h-4"
-                          aria-hidden="true"
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        :disabled="streaming || !msg.id"
-                        class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
-                        title="Delete message"
-                        @click="deleteMessage(msg)"
-                      >
-                        <TrashIcon
-                          class="w-4 h-4"
-                          aria-hidden="true"
-                        />
-                      </button>
-                      <!--
-                        tok/s trigger + hover popover for the full usage
-                        breakdown. Only rendered once msg.usage has landed
-                        (post-stream "complete" event) so we don't flash
-                        a dash during the commit race.
-                      -->
-                      <Popover
-                        v-if="msg.usage && formatTokensPerSec(msg.usage)"
-                        :open="tokStatsHoverKey === (msg.id ?? msg._key)"
-                        @update:open="(v) => { if (!v) tokStatsHoverKey = null }"
-                      >
-                        <PopoverTrigger as-child>
-                          <!-- JCLAW-175: tok/s is informational only — supplementary
-                               observability, not actionable. Rendered as a
-                               non-interactive span (no button semantics, no focus
-                               ring, no aria-label). The detailed breakdown opens
-                               on hover via the controlled :open binding; the
-                               summary number itself is always visible inline so
-                               the data is not hover-locked.
-
-                               Mouse-only handlers below intentionally lack focus
-                               siblings: the speed breakdown is supplementary
-                               metric data, not essential UI, and adding focus
-                               would re-introduce the visual "this is clickable"
-                               affordance the user explicitly removed. -->
-                          <!-- eslint-disable vuejs-accessibility/mouse-events-have-key-events, vuejs-accessibility/no-static-element-interactions -->
-                          <span
-                            class="ml-1 px-2 py-0.5 text-xs font-mono tabular-nums text-fg-muted hover:text-fg-primary rounded-md transition-colors cursor-help select-none"
-                            @mouseenter="tokStatsHoverKey = msg.id ?? msg._key ?? null"
-                            @mouseleave="tokStatsHoverKey = null"
-                          >
-                            {{ formatTokensPerSec(msg.usage) }}
-                          </span>
-                          <!-- eslint-enable vuejs-accessibility/mouse-events-have-key-events, vuejs-accessibility/no-static-element-interactions -->
-                        </PopoverTrigger>
-                        <PopoverContent
-                          side="top"
-                          align="start"
-                          :side-offset="8"
-                          class="min-w-52 px-3 py-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
-                          @mouseenter="tokStatsHoverKey = msg.id ?? msg._key ?? null"
-                          @mouseleave="tokStatsHoverKey = null"
-                          @focusin="tokStatsHoverKey = msg.id ?? msg._key ?? null"
-                          @focusout="tokStatsHoverKey = null"
-                        >
-                          <dl class="grid gap-1.5 text-xs">
-                            <div class="flex items-center justify-between gap-4">
-                              <dt class="text-muted-foreground">
-                                Prompt tokens
-                              </dt>
-                              <dd class="font-mono tabular-nums">
-                                {{ msg.usage.prompt.toLocaleString() }}
-                              </dd>
-                            </div>
-                            <div
-                              v-if="msg.usage.reasoning"
-                              class="flex items-center justify-between gap-4"
-                            >
-                              <dt class="text-muted-foreground">
-                                Thinking tokens
-                              </dt>
-                              <dd class="font-mono tabular-nums">
-                                {{ msg.usage.reasoning.toLocaleString() }}
-                              </dd>
-                            </div>
-                            <div
-                              v-if="msg.usage.cached"
-                              class="flex items-center justify-between gap-4"
-                            >
-                              <dt class="text-muted-foreground">
-                                Cached tokens
-                              </dt>
-                              <dd class="font-mono tabular-nums">
-                                {{ msg.usage.cached.toLocaleString() }}
-                              </dd>
-                            </div>
-                            <div class="flex items-center justify-between gap-4">
-                              <dt class="text-muted-foreground">
-                                Completion
-                              </dt>
-                              <dd class="font-mono tabular-nums">
-                                {{ msg.usage.completion.toLocaleString() }}
-                              </dd>
-                            </div>
-                            <div
-                              aria-hidden="true"
-                              class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
-                            />
-                            <div class="flex items-center justify-between gap-4">
-                              <dt class="text-muted-foreground">
-                                Speed
-                              </dt>
-                              <dd class="font-mono tabular-nums">
-                                {{ formatTokensPerSec(msg.usage) }}
-                              </dd>
-                            </div>
-                            <div
-                              v-if="msg.usage.durationMs"
-                              class="flex items-center justify-between gap-4"
-                            >
-                              <dt class="text-muted-foreground">
-                                Total
-                              </dt>
-                              <dd class="font-mono tabular-nums">
-                                {{ (msg.usage.durationMs / 1000).toFixed(2) }}s
-                              </dd>
-                            </div>
-                            <div
-                              v-if="formatUsageCost(msg.usage)"
-                              class="flex items-center justify-between gap-4"
-                              :title="formatUsageCostTooltip(msg.usage) ?? undefined"
-                            >
-                              <dt class="text-muted-foreground">
-                                Cost
-                              </dt>
-                              <dd class="font-mono tabular-nums text-amber-700/80 dark:text-amber-400/80">
-                                {{ formatUsageCost(msg.usage) }}
-                              </dd>
-                            </div>
-                          </dl>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </template>
+              :msg="msg"
+              :msg-idx="msgIdx"
+              :render-token="messageRenderKey(msg)"
+              :agent-id="effectiveDisplayAgentId"
+              :streaming="streaming"
+              :copied-message-id="copiedMessageId"
+              :streaming-message-key="streamingMessageKey"
+              :stream-content="streamContent"
+              :stream-content-html="streamContentHtml"
+              :stream-reasoning-html="streamReasoningHtml"
+              :video-job-status="videoJobStatus"
+              :image-gen-turn-key="imageGenTurnKey"
+              :image-gen-percent="imageGenPercent"
+              :tok-stats-hover-key="tokStatsHoverKey"
+              :run-slice="subagentRunSlices[msgIdx] ?? null"
+              :run-label="subagentRunSlices[msgIdx] ? subagentBlockLabel(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
+              :run-status="subagentRunSlices[msgIdx] ? subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
+              :show-model-switch="shouldShowModelSwitchIndicator(msgIdx)"
+              @toggle-subagent-run="toggleSubagentRun"
+              @delete-attachment="deleteAttachment"
+              @toggle-tool-calls="toggleToolCalls"
+              @toggle-tool-call-expansion="toggleToolCallExpansion"
+              @toggle-thinking="toggleThinking"
+              @copy-reasoning="copyReasoning"
+              @copy-message="copyMessage"
+              @edit-user-message="editUserMessage"
+              @delete-message="deleteMessage"
+              @regenerate-message="regenerateMessage"
+              @set-tok-stats-hover-key="tokStatsHoverKey = $event"
+            />
             <!--
               Pre-first-byte placeholder. Visible only during the gap between
               "user sent the request" and "the first stream event (reasoning
