@@ -22,7 +22,6 @@ import {
   MicrophoneIcon as MicrophoneIconSolid,
   StopIcon as StopIconSolid,
 } from '@heroicons/vue/24/solid'
-import { renderMarkdownStreaming } from '~/utils/chat-markdown'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
 import { initCollapsedState } from '~/utils/thinking'
@@ -41,6 +40,7 @@ import { useChatAttachments, type UploadedAttachment } from '~/composables/useCh
 import { useChatScroll } from '~/composables/useChatScroll'
 import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
+import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 
 // Local helpers for fields that streaming/optimistic bubbles carry in addition
@@ -546,13 +546,6 @@ const streamStatus = ref('')
 // streamReasoningHtml (throttled markdown render) instead of running the full
 // renderMarkdown pipeline on every token mutation.
 const streamingMessageKey = ref<string | null>(null)
-// Throttled markdown HTML for the streaming bubble. Updated at most once per
-// STREAM_RENDER_INTERVAL_MS so a 200 tok/s reasoning burst does not run
-// marked.parse + DOMPurify on a growing string at full throttle. Final state
-// gets a forced flush in onComplete so the bubble lands on the exact final
-// text before we hand off to renderMarkdown's cached path.
-const streamContentHtml = ref('')
-const streamReasoningHtml = ref('')
 const chatInput = ref<HTMLTextAreaElement | null>(null)
 
 /**
@@ -872,56 +865,17 @@ const abortController = ref<AbortController | null>(null)
 // lives in useChatScroll; it reads the stream state it reacts to as args.
 const { messagesEl, scrollToBottom } = useChatScroll(streaming, streamReasoning)
 
-// Throttle interval for the streaming bubble's markdown render. ~80 ms gives
-// roughly 12.5 fps, which the eye reads as live for streaming text while
-// capping marked.parse + DOMPurify on a growing string. Streaming providers
-// often fire 50-200 events per second; without this cap the main thread
-// saturates by token ~1000 of a long reasoning response.
-const STREAM_RENDER_INTERVAL_MS = 80
-let streamRenderTimer: ReturnType<typeof setTimeout> | null = null
-let streamReasoningTimer: ReturnType<typeof setTimeout> | null = null
-
-function scheduleStreamContentRender() {
-  if (streamRenderTimer != null) return
-  streamRenderTimer = setTimeout(() => {
-    streamRenderTimer = null
-    streamContentHtml.value = renderMarkdownStreaming(streamContent.value, selectedAgentId.value)
-    // Vue's compiled v-for slot tracks the messages shallowRef as its primary
-    // dep — top-level refs read inside the slot's v-html (streamContentHtml)
-    // alone don't always re-run the slot's render under v-for + shallowRef.
-    // Force a re-render at the throttle's cadence so the in-flight bubble's
-    // v-html picks up the latest streamContentHtml string. Cost is at most
-    // STREAM_RENDER_INTERVAL_MS — i.e. the same cap the throttle already
-    // imposes; tokens still stream as fast as they arrive.
-    triggerRef(messages)
-  }, STREAM_RENDER_INTERVAL_MS)
-}
-
-function scheduleStreamReasoningRender() {
-  if (streamReasoningTimer != null) return
-  streamReasoningTimer = setTimeout(() => {
-    streamReasoningTimer = null
-    streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
-    triggerRef(messages)
-  }, STREAM_RENDER_INTERVAL_MS)
-}
-
-// Force an immediate render and clear any pending throttle timer. Called at
-// stream start (reset) and stream end (flush the last delta into the bubble
-// before we hand off to renderMarkdown's cached path).
-function flushStreamRender() {
-  if (streamRenderTimer != null) {
-    clearTimeout(streamRenderTimer)
-    streamRenderTimer = null
-  }
-  if (streamReasoningTimer != null) {
-    clearTimeout(streamReasoningTimer)
-    streamReasoningTimer = null
-  }
-  streamContentHtml.value = renderMarkdownStreaming(streamContent.value, selectedAgentId.value)
-  streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
-  triggerRef(messages)
-}
+// Throttled markdown rendering for the in-flight streaming bubble lives in
+// useStreamMarkdownRender; the SSE handlers below call schedule*/flush and the
+// template reads the two HTML refs. (A building block the eventual useChatStream
+// will compose.)
+const {
+  streamContentHtml,
+  streamReasoningHtml,
+  scheduleStreamContentRender,
+  scheduleStreamReasoningRender,
+  flushStreamRender,
+} = useStreamMarkdownRender(streamContent, streamReasoning, selectedAgentId, messages)
 
 onMounted(() => {
   focusInput()
@@ -1234,8 +1188,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   abortController.value?.abort()
-  if (streamRenderTimer != null) clearTimeout(streamRenderTimer)
-  if (streamReasoningTimer != null) clearTimeout(streamReasoningTimer)
   if (announcePollTimer != null) clearInterval(announcePollTimer)
   document.removeEventListener('error', onMarkdownImageError, true)
 })
