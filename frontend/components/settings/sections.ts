@@ -38,7 +38,7 @@ import {
 } from '@heroicons/vue/24/outline'
 
 import SettingsChatPanel from './SettingsChatPanel.vue'
-import SettingsGeneralPanel from './SettingsGeneralPanel.vue'
+import SettingsTimezonePanel from './SettingsTimezonePanel.vue'
 import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
 import SettingsImageGenPanel from './SettingsImageGenPanel.vue'
 import SettingsLoggingPanel from './SettingsLoggingPanel.vue'
@@ -82,7 +82,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
   {
     label: 'System',
     sections: [
-      { id: 'timezone', title: 'Timezone', icon: Cog6ToothIcon, component: SettingsGeneralPanel },
+      { id: 'timezone', title: 'Timezone', icon: Cog6ToothIcon, component: SettingsTimezonePanel },
       { id: 'logging', title: 'Logging', icon: DocumentTextIcon, component: SettingsLoggingPanel },
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },

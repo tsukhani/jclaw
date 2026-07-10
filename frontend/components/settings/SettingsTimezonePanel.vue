@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// General settings panel (JCLAW-680). Operator-wide settings; Timezone is the
-// zone the assistant treats as "now" when its system prompt injects the current
+// Timezone settings panel (JCLAW-680). The operator wall-clock zone the
+// assistant treats as "now" when its system prompt injects the current
 // date/time. Defaults to the server's JVM zone; distinct from the Tasks default
 // timezone (which governs CRON scheduling and defaults to UTC).
 // Moved verbatim from pages/settings.vue. Owns its own (Nuxt-deduped)
