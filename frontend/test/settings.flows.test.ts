@@ -162,6 +162,20 @@ function setupDefaultApi(opts?: { capturePost?: (body: { key?: string, value?: s
   })
 }
 
+/**
+ * Mount Settings and open a specific section. The page renders one section at a
+ * time (`<component :is>` swap), so tests must activate their section before
+ * asserting on its DOM. Setting activeSectionId drives the swap; the double
+ * flush settles the freshly-mounted panel's async setup + <Suspense>.
+ */
+async function mountSettingsSection(sectionId: string) {
+  const component = await mountSuspended(Settings)
+  ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = sectionId
+  await flushPromises()
+  await flushPromises()
+  return component
+}
+
 describe('Settings page — provider enable/disable toggle (JCLAW-110/113)', () => {
   beforeEach(() => {
     clearNuxtData()
@@ -170,8 +184,7 @@ describe('Settings page — provider enable/disable toggle (JCLAW-110/113)', () 
   it('POSTs provider.{name}.enabled=false when the operator clicks the per-provider toggle', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // The toggle is the button with aria-label="Disable ollama-cloud provider"
     // when enabled, or "Enable" when disabled. Default fixture has all providers
@@ -195,8 +208,7 @@ describe('Settings page — price refresh toggle (JCLAW-28 follow-up)', () => {
   it('POSTs pricing.refresh.enabled=true when the toggle is flipped on', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const toggle = component.find('button[aria-label="Auto-update model prices nightly"]')
     expect(toggle.exists()).toBe(true)
@@ -210,8 +222,7 @@ describe('Settings page — price refresh toggle (JCLAW-28 follow-up)', () => {
 
   it('reports "Enable the toggle above first." when Refresh now is clicked while toggle is off', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // The "Refresh now" button is disabled when the toggle is off via the
     // :disabled binding, but the click handler still has an early-return path
@@ -243,8 +254,7 @@ describe('Settings page — price refresh toggle (JCLAW-28 follow-up)', () => {
       handler: () => ({ skipped: false, providersScanned: 2, modelsUpdated: 4, warnings: [] }),
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const refreshBtn = component.findAll('button').find(b => b.text() === 'Refresh now')
     expect(refreshBtn).toBeTruthy()
@@ -277,8 +287,7 @@ describe('Settings page — price refresh toggle (JCLAW-28 follow-up)', () => {
         warnings: ['rate-limited on provider X'] }),
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const refreshBtn = component.findAll('button').find(b => b.text() === 'Refresh now')
     await refreshBtn!.trigger('click')
@@ -297,8 +306,7 @@ describe('Settings page — entry inline edit (baseUrl / apiKey)', () => {
   it('promotes a provider row to edit mode and POSTs the new value on save', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // Find the Edit button on the baseUrl row of ollama-cloud. There's a
     // forest of similar pencils across the page, so scope to the LLM Providers
@@ -336,8 +344,7 @@ describe('Settings page — entry inline edit (baseUrl / apiKey)', () => {
 
   it('cancels inline edit when the Cancel button is clicked, restoring the read-only view', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const editButtons = component.findAll('button[title="Edit"]')
     await editButtons[0]!.trigger('click')
@@ -360,8 +367,7 @@ describe('Settings page — ollama keepAlive', () => {
 
   it('renders the ollama keepAlive row for Ollama Cloud', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     expect(component.text()).toContain('keepAlive')
     expect(component.text()).toContain('30m')
@@ -375,8 +381,7 @@ describe('Settings page — payment modality / subscription (JCLAW-280)', () => 
 
   it('renders paymentModality and subscriptionMonthlyUsd for the ollama-cloud provider', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     expect(component.text()).toContain('paymentModality')
     // Ollama Cloud is SUBSCRIPTION-only in the providers fixture.
@@ -388,8 +393,7 @@ describe('Settings page — payment modality / subscription (JCLAW-280)', () => 
 
   it('renders an Edit pencil for paymentModality when the provider supports more than one modality', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // OpenAI is PER_TOKEN with both modalities supported in our providers fixture.
     // The row should expose an editable pencil; the LockClosedIcon affordance is
@@ -410,8 +414,7 @@ describe('Settings page — model management', () => {
 
   it('expands the model panel for a provider on click and lists the configured model', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // The toggle button has title="Manage models" when closed, "Close models" when open.
     const manageBtn = component.find('button[title="Manage models"]')
@@ -427,8 +430,7 @@ describe('Settings page — model management', () => {
 
   it('exposes Add model form when the Add (+) button is clicked', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // Expand the panel first.
     const manageBtn = component.find('button[title="Manage models"]')
@@ -453,8 +455,7 @@ describe('Settings page — model management', () => {
   it('POSTs the merged models JSON when a new model is added', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const manageBtn = component.find('button[title="Manage models"]')
     await manageBtn.trigger('click')
@@ -492,8 +493,7 @@ describe('Settings page — model management', () => {
 
   it('enters edit mode for an existing model when the pencil is clicked', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const manageBtn = component.find('button[title="Manage models"]')
     await manageBtn.trigger('click')
@@ -513,8 +513,7 @@ describe('Settings page — model management', () => {
   it('POSTs the trimmed models JSON when a model is deleted', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const manageBtn = component.find('button[title="Manage models"]')
     await manageBtn.trigger('click')
@@ -569,8 +568,7 @@ describe('Settings page — model management', () => {
       }),
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const discoverBtn = component.find('button[title="Discover models from provider"]')
     expect(discoverBtn.exists()).toBe(true)
@@ -620,8 +618,7 @@ describe('Settings page — model management', () => {
       }),
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
     await component.find('button[title="Discover models from provider"]').trigger('click')
     await flushPromises()
 
@@ -647,8 +644,7 @@ describe('Settings page — Search Providers', () => {
 
   it('renders each search provider card with the right active/needs-key/disabled pill', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('search')
 
     const text = component.text()
     // Perplexity has enabled=true + apiKey set → active
@@ -666,8 +662,7 @@ describe('Settings page — Search Providers', () => {
   it('POSTs search.{id}.enabled when the per-provider toggle is clicked', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('search')
 
     // The toggle button doesn't have a stable aria-label here, just a :title.
     // Find by title="Disable provider" or "Enable provider".
@@ -684,8 +679,7 @@ describe('Settings page — Search Providers', () => {
   it('POSTs search.perplexity.recencyFilter on @change', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('search')
 
     // The recency filter is a <select> with aria-label="Recency filter" inside
     // the Perplexity card.
@@ -708,8 +702,7 @@ describe('Settings page — Chat section save flow', () => {
   it('POSTs chat.maxToolRounds when the operator saves the field', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('chat')
 
     // Find the Edit button for the maxToolRounds row.
     const editBtns = component.findAll('button[title="Edit"]')
@@ -745,8 +738,7 @@ describe('Settings page — Chat section save flow', () => {
   it('POSTs chat.maxContextMessages when the operator saves that field', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('chat')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -786,8 +778,7 @@ describe('Settings page — Performance section save flow', () => {
   it('POSTs dispatcher.llm.maxRequestsPerHost when saved', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('performance')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -821,8 +812,7 @@ describe('Settings page — Performance section save flow', () => {
   it('POSTs dispatcher.llm.maxRequests when saved', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('performance')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -862,8 +852,7 @@ describe('Settings page — Uploads (JCLAW-131)', () => {
 
   it('renders each per-kind cap row in MB', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('uploads')
 
     const text = component.text()
     expect(text).toContain('maxImageBytes')
@@ -878,8 +867,7 @@ describe('Settings page — Uploads (JCLAW-131)', () => {
   it('POSTs upload.maxImageBytes converted from MB → bytes on save', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('uploads')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -914,8 +902,7 @@ describe('Settings page — Uploads (JCLAW-131)', () => {
   it('POSTs upload.maxFiles (count, not MB) on save', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('uploads')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -949,8 +936,7 @@ describe('Settings page — Uploads (JCLAW-131)', () => {
   it('clamps an out-of-range image MB value to the hard ceiling (20 MB)', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('uploads')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -988,8 +974,7 @@ describe('Settings page — Skills Promotion', () => {
 
   it('renders Skills Promotion section with the default (from main agent) placeholder', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('skills')
 
     expect(component.text()).toContain('Skills Promotion')
     // skillsPromotion.provider is blank → falls back to main agent's provider.
@@ -1001,8 +986,7 @@ describe('Settings page — Skills Promotion', () => {
   it('POSTs skillsPromotion.timeoutSeconds when the timeout row is saved', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('skills')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -1036,8 +1020,7 @@ describe('Settings page — Skills Promotion', () => {
   it('POSTs skillsPromotion.batchSizeKb when the batch row is saved', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('skills')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -1076,8 +1059,7 @@ describe('Settings page — Shell Execution', () => {
 
   it('renders the allowlist textarea in edit mode', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('shell')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -1099,8 +1081,7 @@ describe('Settings page — Shell Execution', () => {
   it('POSTs shell.allowlist when saved', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('shell')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -1141,8 +1122,7 @@ describe('Settings page — Shell Execution', () => {
   it('POSTs shell.defaultTimeoutSeconds when saved', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('shell')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -1180,8 +1160,7 @@ describe('Settings page — Malware Scanners', () => {
 
   it('renders each scanner card with its label and the right pill', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('malware')
 
     const text = component.text()
     expect(text).toContain('Malware and Virus Scanners')
@@ -1193,8 +1172,7 @@ describe('Settings page — Malware Scanners', () => {
   it('POSTs scanner.virustotal.enabled when its toggle is clicked', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('malware')
 
     // Scanner toggles use title="Disable scanner" or "Enable scanner".
     const toggleBtns = component.findAll('button[title="Disable scanner"]')
@@ -1216,8 +1194,7 @@ describe('Settings page — OCR toggle round-trip', () => {
   it('POSTs ocr.tesseract.enabled=false when the toggle is clicked while active', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('ocr')
 
     const toggle = component.find('button[aria-label="Disable Tesseract OCR"]')
     expect(toggle.exists()).toBe(true)
@@ -1258,8 +1235,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
       },
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     const enableBtn = component.find('button[aria-label="Enable transcription"]')
     expect(enableBtn.exists()).toBe(true)
@@ -1293,8 +1269,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
       },
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     // No transcription.diarization.provider entry in the default fixture →
     // diarization renders OFF; flipping the toggle enables it with a
@@ -1342,8 +1317,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
       },
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     // The picker lists ONLY audio-capable models.
     const select = component.find('select[aria-label="Diarization audio model"]')
@@ -1388,8 +1362,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
       },
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     // OpenAI radio is gated by provider.openai.apiKey — set in our fixture as
     // sk-openai-****, so it should be enabled.
@@ -1424,8 +1397,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     })
     registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     const select = component.find<HTMLSelectElement>('select[aria-label="Whisper model size"]')
     expect(select.exists()).toBe(true)
@@ -1465,8 +1437,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
       },
     })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     const dlBtn = component.findAll('button').find(b => b.text().trim() === 'Download')
     expect(dlBtn).toBeTruthy()
@@ -1490,8 +1461,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     })
     registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     // Mirrors the Image Captioning "Active:" line — resolves the whisper model's display name.
     expect(component.text()).toContain('Active: Self-Hosted Whisper (Small (English))')
@@ -1527,8 +1497,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: defaultConfigEntries() }) }) // no caption.provider → off
     captureConfig(captured)
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('image-caption')
 
     // Off: no provider radios rendered yet.
     expect(component.find('input[name="caption-provider"]').exists()).toBe(false)
@@ -1552,8 +1521,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     })
     captureConfig(captured)
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('image-caption')
 
     // OpenAI radio is gated by provider.openai.apiKey (sk-openai-**** in the fixture → enabled).
     const openaiRadio = component.find('input[name="caption-provider"][value="openai"]')
@@ -1576,8 +1544,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     })
     registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('image-caption')
 
     const radios = component.findAll('input[name="caption-provider"]')
     expect(radios.length).toBe(3) // openrouter, openai, ollama-local — no "None"
@@ -1607,8 +1574,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     })
     registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('image-caption')
 
     const select = component.find('select[aria-label="Caption cloud model"]')
     expect(select.exists()).toBe(true)
@@ -1637,8 +1603,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     })
     registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('image-caption')
 
     const select = component.find('select[aria-label="Caption cloud model"]')
     const optionValues = select.findAll('option').map(o => o.attributes('value'))
@@ -1667,8 +1632,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     })
     captureConfig(captured)
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('image-caption')
 
     const select = component.find('select[aria-label="Ollama vision model"]')
     expect(select.exists()).toBe(true) // a <select>, not free text
@@ -1690,8 +1654,7 @@ describe('Settings page — Password reset confirm dialog', () => {
 
   it('renders the Reset button in the Password section', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('password')
 
     const text = component.text()
     expect(text).toContain('Password')
@@ -1711,8 +1674,7 @@ describe('Settings page — Subagents maxChildrenPerParent', () => {
   it('POSTs subagent.maxChildrenPerParent when the operator saves the field', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('subagents')
 
     const editBtns = component.findAll('button[title="Edit"]')
     let target: typeof editBtns[number] | null = null
@@ -1768,8 +1730,7 @@ describe('Settings page — Unmanaged keys diagnostic', () => {
     })
     registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('unmanaged')
 
     const text = component.text()
     expect(text).toContain('Unmanaged keys')
@@ -1778,8 +1739,7 @@ describe('Settings page — Unmanaged keys diagnostic', () => {
 
   it('does not render the Unmanaged keys section when no orphan rows exist', async () => {
     setupDefaultApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('unmanaged')
 
     expect(component.text()).not.toContain('Unmanaged keys')
   })
@@ -1798,8 +1758,7 @@ describe('Settings page — General operator timezone (app.timezone)', () => {
     }))
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('general')
 
     // Enter edit mode for the General timezone by clicking the pencil, then
     // drive the unique <select> + Save button through the DOM. General is the
@@ -1834,8 +1793,7 @@ describe('Settings page — subagent model (JCLAW-422)', () => {
   it('POSTs subagent.modelProvider + subagent.modelId when a specific model is picked', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('subagents')
 
     const select = component.find('select[aria-label="Subagent model"]')
     expect(select.exists()).toBe(true)

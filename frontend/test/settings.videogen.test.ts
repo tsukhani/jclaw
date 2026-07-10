@@ -48,13 +48,26 @@ function setupApi(opts?: {
   })
 }
 
+/**
+ * Mount Settings and open a specific section. The page renders one section at a
+ * time (`<component :is>` swap), so tests must activate their section before
+ * asserting on its DOM. Setting activeSectionId drives the swap; the double
+ * flush settles the freshly-mounted panel's async setup + <Suspense>.
+ */
+async function mountSettingsSection(sectionId: string) {
+  const component = await mountSuspended(Settings)
+  ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = sectionId
+  await flushPromises()
+  await flushPromises()
+  return component
+}
+
 describe('Settings — Video Generation (JCLAW-236)', () => {
   beforeEach(() => clearNuxtData())
 
   it('renders the section; the enable toggle is disabled when no Replicate key is set', async () => {
     setupApi()
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-generation')
 
     expect(c.text()).toContain('Video Generation')
     const toggle = c.find<HTMLButtonElement>('button[aria-label="Enable video generation"]')
@@ -69,8 +82,7 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
       { key: 'videogen.maxJobMinutes', value: '45' },
       { key: 'videogen.cloud.model', value: 'lightricks/ltx-video' },
     ] })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-generation')
 
     const radio = c.find<HTMLInputElement>('#videogen-provider-replicate')
     expect(radio.exists()).toBe(true)
@@ -97,8 +109,7 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
         { key: 'videogen.provider', value: 'replicate' },
       ],
     })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-generation')
 
     const select = c.find('select[aria-label="Replicate video model"]')
     expect(select.exists()).toBe(true)
@@ -116,8 +127,7 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
       { key: 'videogen.provider', value: 'replicate' },
       { key: 'videogen.maxJobMinutes', value: '30' },
     ] })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-generation')
 
     const timeout = c.find('input[aria-label="Video job timeout in minutes"]')
     await timeout.setValue('15')
@@ -139,8 +149,7 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
         { key: 'provider.replicate.apiKey', value: 'r8_****' },
         { key: 'videogen.provider', value: 'replicate' },
       ] })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-generation')
 
     const select = c.find('select[aria-label="Replicate video model"]')
     await select.setValue('wan-video/wan-2.2-t2v-fast')

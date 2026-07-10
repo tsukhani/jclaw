@@ -103,6 +103,20 @@ let transcriptionStatePayload: {
   ],
 }
 
+/**
+ * Mount Settings and open a specific section. The page renders one section at a
+ * time (`<component :is>` swap), so tests must activate their section before
+ * asserting on its DOM. Setting activeSectionId drives the swap; the double
+ * flush settles the freshly-mounted panel's async setup + <Suspense>.
+ */
+async function mountSettingsSection(sectionId: string) {
+  const component = await mountSuspended(Settings)
+  ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = sectionId
+  await flushPromises()
+  await flushPromises()
+  return component
+}
+
 describe('Settings page — provider section', () => {
   // JCLAW-182: the grouping test below reshapes the /api/config response, so
   // clear Nuxt's useFetch cache between tests — otherwise the next test re-uses
@@ -113,8 +127,7 @@ describe('Settings page — provider section', () => {
 
   it('surfaces the configured provider name from the config payload', async () => {
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     expect(component.text()).toContain('LLM Providers')
     // JCLAW-182: provider cards now render the friendly display label
@@ -143,8 +156,7 @@ describe('Settings page — provider section', () => {
     }))
     registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const html = component.html()
 
@@ -174,8 +186,7 @@ describe('Settings page — provider section', () => {
 
   it('surfaces a models count badge from the persisted models JSON', async () => {
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // Models are parsed out of provider.{name}.models and summarized as a
     // click-to-expand count badge — the detail rows only render after the
@@ -188,8 +199,7 @@ describe('Settings page — provider section', () => {
     // frontend just renders what the backend hands it. Pin the contract that
     // we don't accidentally bypass that guard with a local re-fetch path.
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     const html = component.html()
     expect(html).toContain('sk-test-****')
@@ -200,8 +210,7 @@ describe('Settings page — provider section', () => {
 describe('Settings page — form binding', () => {
   it('renders interactive buttons for the inline edit affordance', async () => {
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // Settings uses a click-to-edit pattern: rows render read-only by default
     // and promote to a v-model'd input only after the operator clicks edit.
@@ -214,8 +223,7 @@ describe('Settings page — form binding', () => {
 
   it('honors programmatic input value updates as a v-model smoke check', async () => {
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // Find the first text-shaped input (skips checkboxes/radios) and verify
     // setValue propagates through jsdom's input event. This is the most
@@ -239,8 +247,7 @@ describe('Settings page — form binding', () => {
     // provider section carries the "configured" state marker for the
     // provider whose models the modal would edit.
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     expect(component.text().toLowerCase()).toContain('configured')
   })
@@ -257,27 +264,27 @@ describe('Settings page — OCR section', () => {
 
   it('renders the OCR section between Search Providers and Transcription', async () => {
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('ocr')
 
     const text = component.text()
     expect(text).toContain('OCR')
     expect(text).toContain('Tesseract OCR')
 
     // Slot order (operator request 2026-07-03): LLM Providers, then Search
-    // Providers, then the OCR heading, then Transcription. The heading text
-    // is unique enough to survive other matches in the page (no other
-    // element renders the bare string "OCR" at the section-heading level).
+    // Providers, then OCR, then Transcription. Post-JCLAW-680 the page swaps one
+    // section at a time, so this ordering guarantee now lives in the TOC rail
+    // (components/settings/sections.ts order) rather than a stacked DOM — assert
+    // the rail items appear in that order.
     const html = component.html()
-    const llmIdx = html.indexOf('LLM Providers')
-    const searchIdx = html.indexOf('Search Providers')
-    const ocrIdx = html.search(/<h2[^>]*>\s*OCR\s*</)
-    const transcriptionIdx = html.indexOf('Enable transcription')
-    expect(llmIdx).toBeGreaterThan(-1)
+    const providersIdx = html.indexOf('data-testid="settings-toc-item-providers"')
+    const searchIdx = html.indexOf('data-testid="settings-toc-item-search"')
+    const ocrIdx = html.indexOf('data-testid="settings-toc-item-ocr"')
+    const transcriptionIdx = html.indexOf('data-testid="settings-toc-item-transcription"')
+    expect(providersIdx).toBeGreaterThan(-1)
     expect(searchIdx).toBeGreaterThan(-1)
     expect(ocrIdx).toBeGreaterThan(-1)
     expect(transcriptionIdx).toBeGreaterThan(-1)
-    expect(llmIdx).toBeLessThan(searchIdx)
+    expect(providersIdx).toBeLessThan(searchIdx)
     expect(searchIdx).toBeLessThan(ocrIdx)
     expect(ocrIdx).toBeLessThan(transcriptionIdx)
   })
@@ -294,8 +301,7 @@ describe('Settings page — OCR section', () => {
       }],
     }
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('ocr')
 
     expect(component.text()).toContain('active')
     const toggle = component.find('button[aria-label*="Tesseract OCR"]')
@@ -320,8 +326,7 @@ describe('Settings page — OCR section', () => {
       }],
     }
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('ocr')
 
     expect(component.text()).toContain('not detected')
     expect(component.text()).toContain('apt-get install tesseract-ocr')
@@ -362,8 +367,7 @@ describe('Settings page — Subagents section (JCLAW-266)', () => {
     registerEndpoint('/api/config', () => subagentConfigPayload('3', '7'))
     registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
     registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('subagents')
 
     const html = component.html()
     // Heading is unique enough to anchor the section.
@@ -397,8 +401,7 @@ describe('Settings page — Subagents section (JCLAW-266)', () => {
     registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
     registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('subagents')
 
     // Promote the maxDepth row to edit mode via its Edit button. The
     // aria-labelled input "Max recursion depth" only renders after editing
@@ -448,8 +451,7 @@ describe('Settings page — Subagents section (JCLAW-266)', () => {
 describe('Settings page — discovery surface', () => {
   it('renders the discovery search input when models exist', async () => {
     setupConfigApi()
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('providers')
 
     // discoverySearch is bound to a text input under the model discovery panel.
     // It is gated on the panel being open, so we only assert the broader
@@ -486,8 +488,7 @@ describe('Settings page — Transcription section (JCLAW-164)', () => {
     registerEndpoint('/api/config', () => configPayload([]))
     registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
     registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     // Self-Hosted Whisper is always enabled — it doesn't depend on a remote key.
     const whisper = component.find('input[name="transcription-provider"][value="whisper-local"]')
@@ -513,8 +514,7 @@ describe('Settings page — Transcription section (JCLAW-164)', () => {
     ]))
     registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
     registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     const openrouter = component.find('input[name="transcription-provider"][value="openrouter"]')
     const openai = component.find('input[name="transcription-provider"][value="openai"]')
@@ -539,8 +539,7 @@ describe('Settings page — Transcription section (JCLAW-164)', () => {
     registerEndpoint('/api/config', () => configPayload([]))
     registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
     registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('transcription')
 
     const text = component.text()
     expect(text).toContain('ffmpeg')

@@ -80,6 +80,20 @@ function setupApi(opts: Opts = {}) {
   })
 }
 
+/**
+ * Mount Settings and open a specific section. The page renders one section at a
+ * time (`<component :is>` swap), so tests must activate their section before
+ * asserting on its DOM. Setting activeSectionId drives the swap; the double
+ * flush settles the freshly-mounted panel's async setup + <Suspense>.
+ */
+async function mountSettingsSection(sectionId: string) {
+  const component = await mountSuspended(Settings)
+  ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = sectionId
+  await flushPromises()
+  await flushPromises()
+  return component
+}
+
 describe('Settings page — Image Generation (JCLAW-229)', () => {
   beforeEach(() => {
     clearNuxtData()
@@ -87,16 +101,14 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
 
   it('renders the section and shows off when no provider is set', async () => {
     setupApi({ openaiKey: 'sk-****' })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
     expect(c.text()).toContain('Image Generation')
     expect(c.text()).toContain('Image generation is off')
   })
 
   it('renders the three provider radios, checks the active one, and gates the keyless ones', async () => {
     setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', bflKey: '', replicateKey: '' })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     const openai = c.find<HTMLInputElement>('#imagegen-provider-openai')
     const bfl = c.find<HTMLInputElement>('#imagegen-provider-bfl')
@@ -120,8 +132,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
   it('enables the self-hosted Flux radio when uv is available and POSTs flux-local on select', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', uvAvailable: true, capturePost: b => captured.push(b) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     const flux = c.find<HTMLInputElement>('#imagegen-provider-flux-local')
     expect(flux.exists()).toBe(true)
@@ -137,16 +148,14 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
 
   it('shows the uv-missing banner when flux-local is selected but uv is absent', async () => {
     setupApi({ imagegenProvider: 'flux-local', openaiKey: 'sk-****', uvAvailable: false })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
     expect(c.text()).toContain('Install uv')
   })
 
   it('sets the optional Hugging Face token inline', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ imagegenProvider: 'flux-local', openaiKey: 'sk-****', uvAvailable: true, capturePost: b => captured.push(b) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     // Inline guidance: a link to the HF tokens page is present so users aren't left guessing.
     expect(c.html()).toContain('huggingface.co/settings/tokens')
@@ -167,8 +176,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
   it('triggers the weight pull when the Download button is clicked', async () => {
     const pulls: number[] = []
     setupApi({ imagegenProvider: 'flux-local', openaiKey: 'sk-****', uvAvailable: true, fluxModelStatus: 'ABSENT', capturePull: () => pulls.push(1) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     const btn = c.findAll('button').find(b => b.text() === 'Download')
     expect(btn).toBeTruthy()
@@ -182,8 +190,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
   it('POSTs imagegen.provider when the section is enabled', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ openaiKey: 'sk-****', capturePost: b => captured.push(b) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     await c.find('button[aria-label="Enable image generation"]').trigger('click')
     await flushPromises()
@@ -196,8 +203,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
   it('POSTs imagegen.provider=bfl when the BFL radio is selected', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', bflKey: 'bfl-****', capturePost: b => captured.push(b) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     await c.find('#imagegen-provider-bfl').trigger('change')
     await flushPromises()
@@ -210,8 +216,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
   it('sets the BFL API key inline (not via LLM Providers)', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', bflKey: '', capturePost: b => captured.push(b) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     // BFL key not set → reveal the inline field, type a key, and save it.
     await c.find('button[aria-label="Edit Black Forest Labs API key"]').trigger('click')
@@ -230,8 +235,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
   it('POSTs imagegen.provider=replicate when the Replicate radio is selected', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', replicateKey: 'r8-****', capturePost: b => captured.push(b) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     await c.find('#imagegen-provider-replicate').trigger('change')
     await flushPromises()
@@ -244,8 +248,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
   it('sets the Replicate API key inline', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', replicateKey: '', capturePost: b => captured.push(b) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('image-generation')
 
     await c.find('button[aria-label="Edit Replicate API key"]').trigger('click')
     await flushPromises()

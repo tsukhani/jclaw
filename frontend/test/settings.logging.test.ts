@@ -14,6 +14,21 @@ function baseEndpoints() {
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/config', () => ({ entries: [] }))
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
+  registerEndpoint('/api/providers', () => [])
+}
+
+/**
+ * Mount Settings and open a specific section. The page renders one section at a
+ * time (`<component :is>` swap), so tests must activate their section before
+ * asserting on its DOM. Setting activeSectionId drives the swap; the double
+ * flush settles the freshly-mounted panel's async setup + <Suspense>.
+ */
+async function mountSettingsSection(sectionId: string) {
+  const component = await mountSuspended(Settings)
+  ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = sectionId
+  await flushPromises()
+  await flushPromises()
+  return component
 }
 
 describe('Settings page — Logging Levels', () => {
@@ -31,8 +46,7 @@ describe('Settings page — Logging Levels', () => {
       knownLoggers: ['root', 'play', 'com.example.WidgetService'],
     }))
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('logging')
 
     expect(component.text()).toContain('Logging Levels')
     expect(component.text()).toContain('com.example.WidgetService')
@@ -46,8 +60,7 @@ describe('Settings page — Logging Levels', () => {
       knownLoggers: ['root', 'play'],
     }))
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('logging')
 
     const html = component.html()
     expect(html).toContain('>TRACE<')
@@ -63,8 +76,7 @@ describe('Settings page — Logging Levels', () => {
       knownLoggers: ['root', 'play', 'controllers.ApiChatController'],
     }))
 
-    const component = await mountSuspended(Settings)
-    await flushPromises()
+    const component = await mountSettingsSection('logging')
 
     // Known loggers are surfaced as <datalist> options for the add field.
     const html = component.html()

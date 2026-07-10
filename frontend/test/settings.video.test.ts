@@ -66,6 +66,20 @@ function setupApi(opts?: { capturePost?: (b: { key?: string, value?: string }) =
   })
 }
 
+/**
+ * Mount Settings and open a specific section. The page renders one section at a
+ * time (`<component :is>` swap), so tests must activate their section before
+ * asserting on its DOM. Setting activeSectionId drives the swap; the double
+ * flush settles the freshly-mounted panel's async setup + <Suspense>.
+ */
+async function mountSettingsSection(sectionId: string) {
+  const component = await mountSuspended(Settings)
+  ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = sectionId
+  await flushPromises()
+  await flushPromises()
+  return component
+}
+
 describe('Settings page — Video Interpretation (JCLAW-223)', () => {
   beforeEach(() => {
     clearNuxtData()
@@ -73,8 +87,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
 
   it('renders the section, the frames input at its configured value, and the default model tier', async () => {
     setupApi({ videoFrames: '8' })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
 
     expect(c.text()).toContain('Video Interpretation')
     const input = c.find<HTMLInputElement>('input[aria-label="Max frames per video"]')
@@ -87,8 +100,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
 
   it('shows Tier 2 when the default model supports vision but not video', async () => {
     setupApi({ models: '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535,"supportsVision":true}]' })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
     expect(c.text()).toContain('supports vision')
     expect(c.text()).toContain('still images')
   })
@@ -97,16 +109,14 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     // Any model with supportsVideo (e.g. Gemini, here also kimi for the test) → native video_url.
     // No Qwen-family special-casing anymore.
     setupApi({ models: '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535,"supportsVision":true,"supportsVideo":true}]' })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
     expect(c.text()).toContain('supports native video')
   })
 
   it('POSTs video.sampleFrames on change', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ capturePost: b => captured.push(b), videoFrames: '8' })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
 
     const input = c.find('input[aria-label="Max frames per video"]')
     await input.setValue('16')
@@ -121,8 +131,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
   it('renders the seconds-per-frame input and POSTs video.secondsPerFrame on change', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ capturePost: b => captured.push(b), extraEntries: [{ key: 'video.secondsPerFrame', value: '10' }] })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
 
     const input = c.find<HTMLInputElement>('input[aria-label="Seconds per frame"]')
     expect(input.exists()).toBe(true)
@@ -139,8 +148,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
   it('clamps seconds-per-frame to the 60 ceiling', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ capturePost: b => captured.push(b) })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
 
     const input = c.find('input[aria-label="Seconds per frame"]')
     await input.setValue('999')
@@ -153,8 +161,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
   it('clamps an out-of-range value to the 32 ceiling', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     setupApi({ capturePost: b => captured.push(b), videoFrames: '8' })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
 
     const input = c.find('input[aria-label="Max frames per video"]')
     await input.setValue('99')
@@ -177,7 +184,11 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
         { id: 'qwen/qwen3.5-flash', name: 'Qwen3.5 Flash' },
       ],
     })
-    const c = await mountSuspended(Settings)
+    const c = await mountSettingsSection('video-interpretation')
+    // Video-model discovery is a $fetch fired from an immediate watcher (and
+    // re-fired once the vLLM probe resolves), so it settles a couple of ticks
+    // after the panel mounts — drain them before reading the resolved dropdown.
+    await flushPromises()
     await flushPromises()
     const select = c.find('select[aria-label="Video model"]')
     expect(select.exists()).toBe(true)
@@ -194,7 +205,9 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
       ],
       videoModels: [],
     })
-    const c = await mountSuspended(Settings)
+    const c = await mountSettingsSection('video-interpretation')
+    // Discovery $fetch settles a couple of ticks after mount (see above).
+    await flushPromises()
     await flushPromises()
     expect(c.text()).toContain('No video-capable models found on openrouter')
   })
@@ -209,7 +222,10 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
       ],
       vllmReachable: true,
     })
-    const c = await mountSuspended(Settings)
+    const c = await mountSettingsSection('video-interpretation')
+    // The vLLM reachability probe is a $fetch from an immediate watcher; let it
+    // resolve (and re-run the model discovery it gates) before asserting.
+    await flushPromises()
     await flushPromises()
     const radio = c.find<HTMLInputElement>('#video-provider-vllm')
     expect(radio.exists()).toBe(true)
@@ -226,8 +242,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
       ],
       vllmReachable: false,
     })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
     const radio = c.find<HTMLInputElement>('#video-provider-vllm')
     expect(radio.element.disabled).toBe(true)
     expect(c.text()).toContain('not reachable')
@@ -242,8 +257,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
         { key: 'provider.ollama-local.baseUrl', value: 'http://localhost:11434/v1' },
       ],
     })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
     const local = c.find<HTMLInputElement>('#video-provider-ollama-local')
     const cloud = c.find<HTMLInputElement>('#video-provider-ollama-cloud')
     expect(local.exists()).toBe(true)
@@ -259,8 +273,7 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
         { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
       ],
     })
-    const c = await mountSuspended(Settings)
-    await flushPromises()
+    const c = await mountSettingsSection('video-interpretation')
     const local = c.find<HTMLInputElement>('#video-provider-ollama-local')
     expect(local.exists()).toBe(true)
     expect(local.element.disabled).toBe(true)
@@ -278,7 +291,9 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
         { key: 'provider.ollama-local.baseUrl', value: 'http://localhost:11434/v1' },
       ],
     })
-    const c = await mountSuspended(Settings)
+    const c = await mountSettingsSection('video-interpretation')
+    // Discovery $fetch settles a couple of ticks after mount (see above).
+    await flushPromises()
     await flushPromises()
     const select = c.find('select[aria-label="Video model"]')
     expect(select.exists()).toBe(true)
