@@ -20,7 +20,7 @@ import {
   ChatBubbleBottomCenterTextIcon,
   ChatBubbleOvalLeftEllipsisIcon,
   ClipboardDocumentCheckIcon,
-  Cog6ToothIcon,
+  ClockIcon,
   CommandLineIcon,
   CpuChipIcon,
   DocumentMagnifyingGlassIcon,
@@ -82,7 +82,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
   {
     label: 'System',
     sections: [
-      { id: 'timezone', title: 'Timezone', icon: Cog6ToothIcon, component: SettingsTimezonePanel },
+      { id: 'timezone', title: 'Timezone', icon: ClockIcon, component: SettingsTimezonePanel },
       { id: 'logging', title: 'Logging', icon: DocumentTextIcon, component: SettingsLoggingPanel },
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
