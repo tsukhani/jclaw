@@ -22,6 +22,12 @@ function mem(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// Importance is unique per fixture row, so the ordered importance-input values
+// are a precise fingerprint of the rendered row order — handy for sort assertions.
+function importances(c: { findAll: (s: string) => { element: Element }[] }): number[] {
+  return c.findAll('[data-testid="importance-input"]').map(i => Number((i.element as HTMLInputElement).value))
+}
+
 let memoriesResponse: unknown[] = []
 let putBody: Record<string, unknown> | null = null
 let bulkDeleteBody: Record<string, unknown> | null = null
@@ -160,5 +166,65 @@ describe('memories admin page (JCLAW-40)', () => {
     expect(bulkDeleteBody).toEqual({ filter: {} })
     await flushPromises()
     expect(c.find('[data-testid="memory-empty"]').exists()).toBe(true)
+  })
+})
+
+describe('memories admin page — sortable columns', () => {
+  // Three rows whose server order, importance order, and agent order are all
+  // distinct, so each sort produces a recognisably different arrangement.
+  function threeRows() {
+    memoriesResponse = [
+      mem({ id: '1', agentName: 'zeta', importance: 0.5 }),
+      mem({ id: '2', agentName: 'alpha', importance: 0.7 }),
+      mem({ id: '3', agentName: 'main', importance: 0.9 }),
+    ]
+  }
+
+  it('preserves the server order until a header is clicked', async () => {
+    threeRows()
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+    expect(importances(c)).toEqual([0.5, 0.7, 0.9])
+  })
+
+  it('sorts by importance descending on first click, ascending on the second', async () => {
+    threeRows()
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    await c.find('[data-testid="sort-importance"]').trigger('click')
+    expect(importances(c)).toEqual([0.9, 0.7, 0.5]) // numeric default = descending
+
+    await c.find('[data-testid="sort-importance"]').trigger('click')
+    expect(importances(c)).toEqual([0.5, 0.7, 0.9]) // same column flips direction
+  })
+
+  it('sorts by agent ascending, and switching columns resets to that column default', async () => {
+    threeRows()
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    await c.find('[data-testid="sort-agent"]').trigger('click')
+    expect(importances(c)).toEqual([0.7, 0.9, 0.5]) // agent asc: alpha, main, zeta
+
+    // Switching to importance uses ITS default (desc), not the carried-over asc.
+    await c.find('[data-testid="sort-importance"]').trigger('click')
+    expect(importances(c)).toEqual([0.9, 0.7, 0.5])
+  })
+
+  it('marks the active column with aria-sort reflecting the direction', async () => {
+    memoriesResponse = [mem()]
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    const created = c.find('[data-testid="sort-created"]')
+    expect(created.attributes('aria-sort')).toBe('none')
+    await created.trigger('click')
+    expect(created.attributes('aria-sort')).toBe('descending') // created default = desc
+    await created.trigger('click')
+    expect(created.attributes('aria-sort')).toBe('ascending')
+    // A different column then reads 'none' on the created header.
+    await c.find('[data-testid="sort-agent"]').trigger('click')
+    expect(created.attributes('aria-sort')).toBe('none')
   })
 })

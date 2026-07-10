@@ -11,6 +11,7 @@
  * `status:superseded` / `status:all` expose the JCLAW-525 supersession trail,
  * rendered dimmed with a "superseded" badge that carries the when/by-whom.
  */
+import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/vue/24/outline'
 
 interface MemoryDto {
   id: string
@@ -78,6 +79,71 @@ function supersededTitle(mem: MemoryDto): string {
 // mountSuspended resolves with data in tests.
 const { data: memoriesData, error: fetchError, refresh } = await useFetch<MemoryDto[]>(url)
 const memories = computed(() => memoriesData.value ?? [])
+
+// ── Client-side column sort ────────────────────────────────────────────────
+// The ≤200 rows the API returns are sorted in the browser. sortBy=null keeps the
+// server's default order; clicking a header sorts by it, clicking the same header
+// flips direction, clicking a different one resets to that column's natural
+// default (importance/created default descending — most-important / newest first;
+// text columns default ascending).
+type SortColumn = 'agent' | 'text' | 'category' | 'importance' | 'created'
+type SortDir = 'asc' | 'desc'
+
+const SORT_COLUMNS: { key: SortColumn, label: string, thClass: string }[] = [
+  { key: 'agent', label: 'Agent', thClass: '' },
+  { key: 'text', label: 'Memory', thClass: '' },
+  { key: 'category', label: 'Category', thClass: '' },
+  { key: 'importance', label: 'Importance', thClass: 'w-32' },
+  { key: 'created', label: 'Created', thClass: '' },
+]
+
+const sortBy = ref<SortColumn | null>(null)
+const sortDir = ref<SortDir>('asc')
+
+function defaultDirFor(col: SortColumn): SortDir {
+  return col === 'importance' || col === 'created' ? 'desc' : 'asc'
+}
+
+function toggleSort(col: SortColumn) {
+  if (sortBy.value === col) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  }
+  else {
+    sortBy.value = col
+    sortDir.value = defaultDirFor(col)
+  }
+}
+
+const sortedMemories = computed<MemoryDto[]>(() => {
+  const col = sortBy.value
+  if (!col) return memories.value // untouched: preserve the server's default order
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  return [...memories.value].sort((a, b) => {
+    let cmp: number
+    if (col === 'importance') {
+      cmp = a.importance - b.importance
+    }
+    else if (col === 'created') {
+      // ISO strings sort lexicographically == chronologically; missing dates
+      // always sort last, regardless of direction.
+      if (a.createdAt === b.createdAt) cmp = 0
+      else if (!a.createdAt) return 1
+      else if (!b.createdAt) return -1
+      else cmp = a.createdAt.localeCompare(b.createdAt)
+    }
+    else if (col === 'agent') {
+      cmp = a.agentName.localeCompare(b.agentName)
+    }
+    else if (col === 'category') {
+      cmp = (a.category ?? '').localeCompare(b.category ?? '')
+    }
+    else {
+      cmp = a.text.localeCompare(b.text)
+    }
+    // Stable, deterministic tie-break by id.
+    return cmp !== 0 ? cmp * dir : a.id.localeCompare(b.id)
+  })
+})
 
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
@@ -292,26 +358,38 @@ function exportMemories() {
                 @change="toggleSelectAll"
               >
             </th>
-            <th class="px-4 py-2.5 font-medium">
-              Agent
-            </th>
-            <th class="px-4 py-2.5 font-medium">
-              Memory
-            </th>
-            <th class="px-4 py-2.5 font-medium">
-              Category
-            </th>
-            <th class="w-32 px-4 py-2.5 font-medium">
-              Importance
-            </th>
-            <th class="px-4 py-2.5 font-medium">
-              Created
+            <th
+              v-for="col in SORT_COLUMNS"
+              :key="col.key"
+              class="px-4 py-2.5 font-medium"
+              :class="col.thClass"
+            >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                :class="sortBy === col.key ? 'text-fg-strong' : ''"
+                :aria-sort="sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+                :data-testid="`sort-${col.key}`"
+                @click="toggleSort(col.key)"
+              >
+                {{ col.label }}
+                <ChevronUpIcon
+                  v-if="sortBy === col.key && sortDir === 'asc'"
+                  class="w-3 h-3"
+                  aria-hidden="true"
+                />
+                <ChevronDownIcon
+                  v-else-if="sortBy === col.key && sortDir === 'desc'"
+                  class="w-3 h-3"
+                  aria-hidden="true"
+                />
+              </button>
             </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
           <tr
-            v-for="mem in memories"
+            v-for="mem in sortedMemories"
             :key="mem.id"
             data-testid="memory-row"
             class="align-top"
