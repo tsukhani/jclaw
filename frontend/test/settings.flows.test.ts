@@ -1758,7 +1758,7 @@ describe('Settings page — General operator timezone (app.timezone)', () => {
     }))
     const captured: Array<{ key?: string, value?: string }> = []
     setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSettingsSection('general')
+    const component = await mountSettingsSection('timezone')
 
     // Enter edit mode for the General timezone by clicking the pencil, then
     // drive the unique <select> + Save button through the DOM. General is the

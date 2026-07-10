@@ -29,12 +29,12 @@ describe('Settings page — TOC navigation + section swap', () => {
     await flushPromises()
 
     // Every section has a rail button.
-    for (const id of ['general', 'providers', 'transcription', 'shell', 'unmanaged']) {
+    for (const id of ['timezone', 'providers', 'transcription', 'shell', 'unmanaged']) {
       expect(component.find(`[data-testid="settings-toc-item-${id}"]`).exists()).toBe(true)
     }
-    // Default active section is the first (general).
-    const general = component.find('[data-testid="settings-toc-item-general"]')
-    expect(general.attributes('aria-current')).toBe('page')
+    // Default active section is the first (timezone).
+    const timezone = component.find('[data-testid="settings-toc-item-timezone"]')
+    expect(timezone.attributes('aria-current')).toBe('page')
     // A non-active item carries no aria-current.
     const shell = component.find('[data-testid="settings-toc-item-shell"]')
     expect(shell.attributes('aria-current')).toBeUndefined()
@@ -57,7 +57,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     await flushPromises()
 
     // General is active; Shell is not yet.
-    expect(component.find('[data-testid="settings-toc-item-general"]').attributes('aria-current')).toBe('page')
+    expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current')).toBe('page')
 
     await component.find('[data-testid="settings-toc-item-shell"]').trigger('click')
     await flushPromises()
@@ -65,7 +65,7 @@ describe('Settings page — TOC navigation + section swap', () => {
 
     // Highlight moved to Shell; General is no longer current.
     expect(component.find('[data-testid="settings-toc-item-shell"]').attributes('aria-current')).toBe('page')
-    expect(component.find('[data-testid="settings-toc-item-general"]').attributes('aria-current')).toBeUndefined()
+    expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current')).toBeUndefined()
     // The Shell panel is now mounted (its Allowlist control renders).
     expect(component.text()).toContain('Shell Execution')
   })
@@ -76,7 +76,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     await flushPromises()
 
     expect(component.find('[data-testid="settings-toc-item-malware"]').attributes('aria-current')).toBe('page')
-    expect(component.find('[data-testid="settings-toc-item-general"]').attributes('aria-current')).toBeUndefined()
+    expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current')).toBeUndefined()
     expect(component.text()).toContain('Malware Scanners')
   })
 
@@ -85,6 +85,6 @@ describe('Settings page — TOC navigation + section swap', () => {
     const component = await mountSuspended(Settings, { route: '/settings?section=does-not-exist' })
     await flushPromises()
 
-    expect(component.find('[data-testid="settings-toc-item-general"]').attributes('aria-current')).toBe('page')
+    expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current')).toBe('page')
   })
 })

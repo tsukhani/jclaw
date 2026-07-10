@@ -82,7 +82,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
   {
     label: 'System',
     sections: [
-      { id: 'general', title: 'General', icon: Cog6ToothIcon, component: SettingsGeneralPanel },
+      { id: 'timezone', title: 'Timezone', icon: Cog6ToothIcon, component: SettingsGeneralPanel },
       { id: 'logging', title: 'Logging', icon: DocumentTextIcon, component: SettingsLoggingPanel },
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
