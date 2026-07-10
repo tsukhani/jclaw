@@ -102,6 +102,36 @@ class ApiToolsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"icon\""), "meta must carry icon: " + body);
     }
 
+    /**
+     * JCLAW-654 regression guard: every native tool must enumerate its callable
+     * {@code actions()} so the /tools page renders a non-empty "Functions"
+     * disclosure. The {@code Tool.actions()} default is an empty list — a
+     * forgotten override degrades to "Functions 0" rather than breaking
+     * registration, so the convention needs a test to stay honest (this is how
+     * {@code diarize_audio} shipped with no functions). MCP tools carry a
+     * non-null {@code group} and fold into one server card, so they're excluded.
+     */
+    @Test
+    void everyNativeToolEnumeratesItsActions() {
+        login();
+        var resp = GET("/api/tools/meta");
+        assertIsOk(resp);
+        var arr = com.google.gson.JsonParser.parseString(getContent(resp)).getAsJsonArray();
+        var offenders = new java.util.ArrayList<String>();
+        for (var el : arr) {
+            var obj = el.getAsJsonObject();
+            var group = obj.get("group");
+            boolean isNative = group == null || group.isJsonNull();
+            if (!isNative) continue;
+            var actions = obj.getAsJsonArray("actions");
+            if (actions == null || actions.size() == 0) {
+                offenders.add(obj.get("name").getAsString());
+            }
+        }
+        assertTrue(offenders.isEmpty(),
+                "native tools missing an actions() override (render as Functions 0): " + offenders);
+    }
+
     // --- GET /api/agents/{id}/tools ---
 
     @Test

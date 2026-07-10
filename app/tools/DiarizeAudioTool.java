@@ -1,5 +1,6 @@
 package tools;
 
+import agents.ToolAction;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
@@ -108,6 +109,15 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     @Override
     public String summary() {
         return "Who-said-what transcript of a recording via the configured audio-capable model.";
+    }
+
+    /** Two callable actions, mirroring the {@code action} enum in {@link #parameters()}. */
+    @Override
+    public List<ToolAction> actions() {
+        return List.of(
+                new ToolAction(ACTION_DIARIZE, "Produce a verbatim who-said-what transcript of a recording, one line per speaker turn"),
+                new ToolAction(ACTION_ENROLL,  "Save a short reference sample of the attachment's voice so later transcripts label that speaker by name")
+        );
     }
 
     @Override
