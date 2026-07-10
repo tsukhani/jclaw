@@ -3071,7 +3071,11 @@ do_test() {
     echo "==> Running frontend tests (pnpm test)..."
     t0=$(_now)
     set +e
-    (cd "$SCRIPT_DIR/frontend" && pnpm test) 2>&1 | tee "$frontend_log"
+    # JCLAW-680: clean-prepare before vitest so the suite can't false-green
+    # against a stale .nuxt / vite transform cache — the class of failure that
+    # slipped a broken settings.vue past the local pre-push but failed the clean
+    # CI build. Regenerating codegen makes the local gate match Jenkins (~15s).
+    (cd "$SCRIPT_DIR/frontend" && rm -rf .nuxt node_modules/.vite && npx nuxi prepare && pnpm test) 2>&1 | tee "$frontend_log"
     frontend_rc=${PIPESTATUS[0]}
     set -e
     frontend_elapsed=$(_elapsed "$t0")
