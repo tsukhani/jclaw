@@ -6,7 +6,6 @@ import {
   ChevronDownIcon,
   ClipboardIcon,
   CommandLineIcon,
-  DocumentIcon,
   ExclamationTriangleIcon,
   EyeIcon,
   FilmIcon,
@@ -42,7 +41,7 @@ import { formatSize } from '~/utils/format'
 import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
-import { formatVideoDuration, isVideoJobPending, videoDisplayState, videoGenMeta, videoProgressPercent, videoResultSizeBytes, videoSrc, type VideoJobStatus } from '~/utils/video-job'
+import { isVideoJobPending, type VideoJobStatus } from '~/utils/video-job'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
@@ -53,6 +52,10 @@ import type { Agent, Conversation, Message, MessageAttachment, ConfigResponse, T
 import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
 import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
 import { useChatAttachments, type UploadedAttachment } from '~/composables/useChatAttachments'
+import ChatAttachmentChip from '~/components/chat/ChatAttachmentChip.vue'
+import ChatAudioAttachment from '~/components/chat/ChatAudioAttachment.vue'
+import ChatGeneratedImage from '~/components/chat/ChatGeneratedImage.vue'
+import ChatGeneratedVideo from '~/components/chat/ChatGeneratedVideo.vue'
 
 // Local helpers for fields that streaming/optimistic bubbles carry in addition
 // to the persisted Message shape. Kept co-located rather than in types/api.ts
@@ -1441,60 +1444,6 @@ watch(streaming, (on) => {
   if (!on) stopImageProgressPolling()
 })
 
-/** Template helpers for the generated-video card (thin wrappers over the pure utils/video-job logic). */
-function videoCardState(att: MessageAttachment) {
-  return videoDisplayState(att, att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined)
-}
-function videoCardSrc(att: MessageAttachment) {
-  return videoSrc(att, att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined)
-}
-function videoCardError(att: MessageAttachment): string {
-  const s = att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined
-  return s?.errorMessage || 'Unknown error'
-}
-function videoCardPercent(att: MessageAttachment): number | null {
-  return videoProgressPercent(att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined)
-}
-
-// Generated-video chip metadata (JCLAW-234). Thin reactive wrappers over the pure video-job helpers:
-// aspect/fps from the persisted metadata, size from the poll status or attachment, and duration captured
-// from each <video> element (the rendered clip's real length), with the requested value as a fallback.
-/** Rendered-clip duration (seconds) captured from each <video>'s loadedmetadata, keyed by attachment uuid. */
-const videoDurations = ref<Record<string, number>>({})
-function onVideoLoadedMeta(att: MessageAttachment, ev: Event) {
-  const el = ev.target as HTMLVideoElement
-  if (Number.isFinite(el.duration) && el.duration > 0) videoDurations.value[att.uuid] = el.duration
-}
-function videoAspect(att: MessageAttachment): string | null {
-  return videoGenMeta(att.generationMetadata).aspectRatio
-}
-function videoFps(att: MessageAttachment): number | null {
-  return videoGenMeta(att.generationMetadata).fps
-}
-function videoSizeLabel(att: MessageAttachment): string {
-  const s = att.generationJobId != null ? videoJobStatus.value[att.generationJobId] : undefined
-  const bytes = videoResultSizeBytes(att, s)
-  return bytes > 0 ? formatSize(bytes) : ''
-}
-function videoDurationLabel(att: MessageAttachment): string {
-  return formatVideoDuration(videoDurations.value[att.uuid], videoGenMeta(att.generationMetadata).durationSeconds)
-}
-
-// Generated-image chip dimensions (JCLAW-228). Read off the rendered <img>'s natural size on load — the
-// truest source, since a provider may return different pixels than requested (e.g. Replicate renders its
-// own aspect_ratio dims, not the width/height we sent). Keyed by attachment uuid.
-const imageDimensions = ref<Record<string, { w: number, h: number }>>({})
-function onImageLoad(att: MessageAttachment, ev: Event) {
-  const el = ev.target as HTMLImageElement
-  if (el.naturalWidth > 0 && el.naturalHeight > 0) {
-    imageDimensions.value[att.uuid] = { w: el.naturalWidth, h: el.naturalHeight }
-  }
-}
-function imageDimsLabel(att: MessageAttachment): string {
-  const d = imageDimensions.value[att.uuid]
-  return d ? `${d.w}×${d.h}` : ''
-}
-
 onMounted(() => {
   announcePollTimer = setInterval(announcePollTick, ANNOUNCE_POLL_INTERVAL_MS)
   // Capture phase: image load errors don't bubble, so a document-level listener
@@ -2492,24 +2441,6 @@ function handlePaste(event: ClipboardEvent) {
 
 const formatAttachmentSize = formatSize
 
-/**
- * JCLAW-228: the visible label for a generated-image download link. The
- * synthetic filename (generated-yyyymmdd-hhmmss.png) carries no information,
- * so for a generated image we surface the full prompt parsed out of
- * generationMetadata ({"prompt": "...", "generatedBy": "...", ...}). Falls
- * back to the filename if the metadata is missing or unparseable.
- */
-function generatedImageLabel(att: MessageAttachment): string {
-  if (att.generationMetadata) {
-    try {
-      const meta = JSON.parse(att.generationMetadata) as { prompt?: unknown }
-      if (typeof meta.prompt === 'string' && meta.prompt.trim()) return meta.prompt
-    }
-    catch { /* fall through to the filename */ }
-  }
-  return att.originalFilename
-}
-
 // JCLAW-25: expose the attachment-gate surface so vitest can exercise the
 // visionSupported refusal without needing to synthesize a drag-drop or
 // file-input event. Kept minimal — only the three symbols the test asserts
@@ -2937,39 +2868,11 @@ function exportConversation() {
                       v-if="msg.attachments?.length"
                       class="flex flex-wrap gap-2 mb-2 justify-end"
                     >
-                      <a
+                      <ChatAttachmentChip
                         v-for="att in msg.attachments"
                         :key="att.uuid"
-                        :href="`/api/attachments/${att.uuid}`"
-                        target="_blank"
-                        rel="noopener"
-                        class="inline-flex items-center gap-2 max-w-[260px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-fg-strong hover:bg-muted/60 transition-colors"
-                        :title="`${att.originalFilename} · ${formatSize(att.sizeBytes)} · ${att.mimeType}`"
-                      >
-                        <PhotoIcon
-                          v-if="att.kind === 'IMAGE'"
-                          class="w-4 h-4 shrink-0 text-fg-muted"
-                          aria-hidden="true"
-                        />
-                        <SpeakerWaveIcon
-                          v-else-if="att.kind === 'AUDIO'"
-                          class="w-4 h-4 shrink-0 text-fg-muted"
-                          aria-hidden="true"
-                        />
-                        <DocumentIcon
-                          v-else
-                          class="w-4 h-4 shrink-0 text-fg-muted"
-                          aria-hidden="true"
-                        />
-                        <span class="truncate">{{ att.originalFilename }}</span>
-                        <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
-                        <!-- JCLAW-227: corner-mark images produced by the generate_image tool. -->
-                        <span
-                          v-if="att.generated"
-                          class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
-                          :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated image'"
-                        >gen</span>
-                      </a>
+                        :att="att"
+                      />
                     </div>
                     <!-- JCLAW-327: USER-role rows with messageKind=subagent_send
                          are agent-authored (the `message` tool persists as USER
@@ -3053,301 +2956,27 @@ function exportConversation() {
                         v-for="att in msg.attachments"
                         :key="att.uuid"
                       >
-                        <!-- Generated image: inline preview + a chip carrying the full
-                             prompt, a download button, and a delete button. Deleting frees
-                             the workspace file but keeps the record, so a deleted image
-                             collapses to the chip with a "deleted from workspace" marker. -->
-                        <div
+                        <ChatGeneratedImage
                           v-if="att.generated && att.kind === 'IMAGE'"
-                          class="flex flex-col gap-1.5 items-start"
-                        >
-                          <!-- Inline preview — only while the bytes still exist in the workspace. -->
-                          <a
-                            v-if="!att.deleted"
-                            :href="`/api/attachments/${att.uuid}`"
-                            target="_blank"
-                            rel="noopener"
-                            :title="generatedImageLabel(att)"
-                          >
-                            <img
-                              :src="`/api/attachments/${att.uuid}`"
-                              alt="AI-generated graphic"
-                              class="max-w-[320px] max-h-[320px] rounded-lg border border-border object-contain"
-                              @load="onImageLoad(att, $event)"
-                            >
-                          </a>
-                          <!-- Info + actions chip: a header row (type icon, size, pixel dimensions, and
-                               the download/delete actions) above the full-width prompt, so the
-                               prompt uses the whole chip width instead of a cramped column. Pinned
-                               to the inline preview's width for a clean stacked look. -->
-                          <div
-                            class="flex flex-col gap-2 w-[320px] max-w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs"
-                            :class="att.deleted ? 'text-fg-muted' : 'text-fg-strong'"
-                          >
-                            <!-- Header: icon + size + dimensions on the left; actions (or the deleted
-                                 marker) pushed to the right. -->
-                            <div class="flex items-center gap-2">
-                              <PhotoIcon
-                                class="w-4 h-4 shrink-0 text-fg-muted"
-                                aria-hidden="true"
-                              />
-                              <span
-                                v-if="!att.deleted"
-                                class="text-fg-muted"
-                              >{{ formatSize(att.sizeBytes) }}</span>
-                              <span
-                                v-if="!att.deleted && imageDimsLabel(att)"
-                                class="text-fg-muted"
-                              >{{ imageDimsLabel(att) }}</span>
-                              <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
-                              <span
-                                v-if="att.deleted"
-                                class="ml-auto text-[11px] italic text-red-700/90 dark:text-red-400/90"
-                              >deleted from workspace</span>
-                              <!-- Actions while the file exists: download + delete, right-aligned. -->
-                              <template v-else>
-                                <a
-                                  :href="`/api/attachments/${att.uuid}`"
-                                  :download="att.originalFilename"
-                                  class="ml-auto shrink-0 w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong transition-colors"
-                                  title="Download image"
-                                  aria-label="Download image"
-                                >
-                                  <ArrowDownTrayIcon
-                                    class="w-4 h-4"
-                                    aria-hidden="true"
-                                  />
-                                </a>
-                                <button
-                                  type="button"
-                                  class="shrink-0 w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                  title="Delete image from workspace"
-                                  @click="deleteAttachment(att)"
-                                >
-                                  <TrashIcon
-                                    class="w-4 h-4"
-                                    aria-hidden="true"
-                                  />
-                                </button>
-                              </template>
-                            </div>
-                            <!-- Prompt: full chip width, wraps naturally. -->
-                            <p class="break-words leading-relaxed">
-                              {{ generatedImageLabel(att) }}
-                            </p>
-                          </div>
-                        </div>
-                        <!-- JCLAW-234: tool-generated video. Async — a generating card while the job
-                             runs (poll loop), swapping to an inline player on success or an error card
-                             on failure. -->
-                        <div
+                          :att="att"
+                          :deleted="!!att.deleted"
+                          @delete="deleteAttachment(att)"
+                        />
+                        <ChatGeneratedVideo
                           v-else-if="att.generated && att.kind === 'VIDEO'"
-                          class="flex flex-col gap-1.5 items-start"
-                        >
-                          <template v-if="videoCardState(att) === 'ready'">
-                            <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- an AI-generated clip has no caption track -->
-                            <video
-                              v-if="!att.deleted"
-                              :src="videoCardSrc(att)"
-                              controls
-                              preload="metadata"
-                              class="max-w-[360px] max-h-[360px] rounded-lg border border-border bg-black"
-                              @loadedmetadata="onVideoLoadedMeta(att, $event)"
-                            />
-                            <!-- Info + actions chip, mirroring the generated-image chip: a header row
-                                 (film icon · size · aspect · fps · duration, download/delete pushed right)
-                                 above the full-width prompt. Pinned to the player width for a stacked look. -->
-                            <div
-                              class="flex flex-col gap-2 w-[360px] max-w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs"
-                              :class="att.deleted ? 'text-fg-muted' : 'text-fg-strong'"
-                            >
-                              <div class="flex items-center gap-2">
-                                <FilmIcon
-                                  class="w-4 h-4 shrink-0 text-fg-muted"
-                                  aria-hidden="true"
-                                />
-                                <template v-if="!att.deleted">
-                                  <span
-                                    v-if="videoSizeLabel(att)"
-                                    class="text-fg-muted"
-                                  >{{ videoSizeLabel(att) }}</span>
-                                  <span
-                                    v-if="videoAspect(att)"
-                                    class="text-fg-muted"
-                                  >{{ videoAspect(att) }}</span>
-                                  <span
-                                    v-if="videoFps(att) != null"
-                                    class="text-fg-muted"
-                                  >{{ videoFps(att) }} fps</span>
-                                  <span
-                                    v-if="videoDurationLabel(att)"
-                                    class="text-fg-muted"
-                                  >{{ videoDurationLabel(att) }}</span>
-                                  <!-- Actions while the file exists: download + delete, right-aligned. -->
-                                  <a
-                                    :href="`/api/attachments/${att.uuid}`"
-                                    :download="att.originalFilename"
-                                    class="ml-auto shrink-0 w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong transition-colors"
-                                    title="Download video"
-                                    aria-label="Download video"
-                                  >
-                                    <ArrowDownTrayIcon
-                                      class="w-4 h-4"
-                                      aria-hidden="true"
-                                    />
-                                  </a>
-                                  <button
-                                    type="button"
-                                    class="shrink-0 w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                    title="Delete video from workspace"
-                                    @click="deleteAttachment(att)"
-                                  >
-                                    <TrashIcon
-                                      class="w-4 h-4"
-                                      aria-hidden="true"
-                                    />
-                                  </button>
-                                </template>
-                                <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
-                                <span
-                                  v-else
-                                  class="ml-auto text-[11px] italic text-red-700/90 dark:text-red-400/90"
-                                >deleted from workspace</span>
-                              </div>
-                              <!-- Prompt: full chip width, wraps naturally. -->
-                              <p class="break-words leading-relaxed">
-                                {{ generatedImageLabel(att) }}
-                              </p>
-                            </div>
-                          </template>
-                          <div
-                            v-else-if="videoCardState(att) === 'failed'"
-                            class="flex items-start gap-2 w-[320px] max-w-full bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg px-3 py-2 text-xs text-red-700 dark:text-red-400"
-                          >
-                            <ExclamationTriangleIcon
-                              class="w-4 h-4 shrink-0 mt-0.5"
-                              aria-hidden="true"
-                            />
-                            <div class="flex flex-col gap-0.5 min-w-0">
-                              <span class="font-medium">Video generation failed</span>
-                              <span class="break-words text-red-700/90 dark:text-red-400/90">{{ videoCardError(att) }}</span>
-                            </div>
-                          </div>
-                          <div
-                            v-else
-                            class="flex items-center gap-2.5 w-[320px] max-w-full bg-muted border border-border rounded-lg px-3 py-2.5 text-xs text-fg-strong"
-                          >
-                            <svg
-                              class="w-4 h-4 shrink-0 animate-spin text-purple-500"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              aria-hidden="true"
-                            >
-                              <circle
-                                class="opacity-25"
-                                cx="12"
-                                cy="12"
-                                r="10"
-                                stroke="currentColor"
-                                stroke-width="4"
-                              />
-                              <path
-                                class="opacity-75"
-                                fill="currentColor"
-                                d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                              />
-                            </svg>
-                            <div class="flex flex-col gap-0.5 min-w-0 flex-1">
-                              <span class="font-medium">
-                                Generating video…<template v-if="videoCardPercent(att) != null"> {{ videoCardPercent(att) }}%</template>
-                              </span>
-                              <span class="truncate text-fg-muted">{{ generatedImageLabel(att) }}</span>
-                              <!-- Determinate bar only when the local engine reports real per-step progress
-                                   (JCLAW-232); cloud jobs (percent null) keep the bare spinner. -->
-                              <div
-                                v-if="videoCardPercent(att) != null"
-                                class="mt-1 h-1 w-full rounded-full bg-border overflow-hidden"
-                                role="progressbar"
-                                :aria-valuenow="videoCardPercent(att) ?? 0"
-                                aria-valuemin="0"
-                                aria-valuemax="100"
-                              >
-                                <div
-                                  class="h-full bg-purple-500 transition-[width] duration-500"
-                                  :style="{ width: videoCardPercent(att) + '%' }"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <!-- JCLAW-562: audio on the assistant turn (the extract action's
-                             voice-lineup file, or any tool-produced audio) gets an inline
-                             player — a bare download chip gave the operator nothing to
-                             listen to when the agent asks "who is voice-1?". The compact
-                             chip stays below it for filename/size/download. -->
-                        <div
+                          :att="att"
+                          :job-status="att.generationJobId != null ? videoJobStatus[att.generationJobId] : undefined"
+                          :deleted="!!att.deleted"
+                          @delete="deleteAttachment(att)"
+                        />
+                        <ChatAudioAttachment
                           v-else-if="att.kind === 'AUDIO' && !att.deleted"
-                          class="flex flex-col gap-1.5 items-start"
-                        >
-                          <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- chat audio has no caption track -->
-                          <audio
-                            :src="`/api/attachments/${att.uuid}`"
-                            controls
-                            preload="metadata"
-                            class="w-[320px] max-w-full"
-                          />
-                          <a
-                            :href="`/api/attachments/${att.uuid}`"
-                            target="_blank"
-                            rel="noopener"
-                            class="inline-flex items-center gap-2 max-w-[320px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-fg-strong hover:bg-muted/60 transition-colors"
-                            :title="`${att.originalFilename} · ${formatSize(att.sizeBytes)} · ${att.mimeType}`"
-                          >
-                            <SpeakerWaveIcon
-                              class="w-4 h-4 shrink-0 text-fg-muted"
-                              aria-hidden="true"
-                            />
-                            <span class="truncate">{{ att.originalFilename }}</span>
-                            <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
-                            <span
-                              v-if="att.generated"
-                              class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
-                              :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated audio'"
-                            >gen</span>
-                          </a>
-                        </div>
-                        <!-- Everything else: the compact chip. -->
-                        <a
+                          :att="att"
+                        />
+                        <ChatAttachmentChip
                           v-else
-                          :href="`/api/attachments/${att.uuid}`"
-                          target="_blank"
-                          rel="noopener"
-                          class="inline-flex items-center gap-2 max-w-[260px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-fg-strong hover:bg-muted/60 transition-colors"
-                          :title="`${att.originalFilename} · ${formatSize(att.sizeBytes)} · ${att.mimeType}`"
-                        >
-                          <PhotoIcon
-                            v-if="att.kind === 'IMAGE'"
-                            class="w-4 h-4 shrink-0 text-fg-muted"
-                            aria-hidden="true"
-                          />
-                          <SpeakerWaveIcon
-                            v-else-if="att.kind === 'AUDIO'"
-                            class="w-4 h-4 shrink-0 text-fg-muted"
-                            aria-hidden="true"
-                          />
-                          <DocumentIcon
-                            v-else
-                            class="w-4 h-4 shrink-0 text-fg-muted"
-                            aria-hidden="true"
-                          />
-                          <span class="truncate">{{ att.originalFilename }}</span>
-                          <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
-                          <span
-                            v-if="att.generated"
-                            class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
-                            :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated image'"
-                          >gen</span>
-                        </a>
+                          :att="att"
+                        />
                       </template>
                     </div>
                     <!--
