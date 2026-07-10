@@ -24,14 +24,11 @@ import {
 } from '@heroicons/vue/24/solid'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
-import { initCollapsedState } from '~/utils/thinking'
-import { hydrateToolCalls } from '~/utils/tool-calls'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
 // suppression rule closes.
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
-import { backfillServerIds } from '~/utils/message-reconcile'
 
 import type { Agent, Conversation, Message, MessageAttachment, ConfigResponse, ToolCall } from '~/types/api'
 import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
@@ -39,6 +36,7 @@ import { useChatAttachments } from '~/composables/useChatAttachments'
 import { useChatScroll } from '~/composables/useChatScroll'
 import { useChatConversation, type ChatConversationLoadHooks } from '~/composables/useChatConversation'
 import { useAgentModel } from '~/composables/useAgentModel'
+import { useChatAnnouncePoller } from '~/composables/useChatAnnouncePoller'
 import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useChatStream } from '~/composables/useChatStream'
@@ -497,291 +495,6 @@ onMounted(() => {
   focusInput()
 })
 
-/**
- * JCLAW-270 async-spawn announce poller. After the parent's streaming turn
- * ends, the {@code subagent_announce} Message that closes an async spawn can
- * arrive seconds (or minutes) later — the SSE stream is already closed by
- * then, so the chat view has no reactive path to learn about it. Without a
- * refresh the announce sits in the DB and the user has to manually reload.
- *
- * Mirror {@code /subagents}'s "auto-refresh while RUNNING" pattern: while
- * the open conversation has at least one tool result reporting
- * {@code status:RUNNING} for a {@code run_id} that no {@code subagent_announce}
- * row has closed yet, poll {@code /api/conversations/{id}/messages} every
- * {@link ANNOUNCE_POLL_INTERVAL_MS}. Merge any newer rows by server id —
- * never clobber in-flight optimistic placeholders. Stops as soon as the
- * announce arrives or the page unmounts.
- *
- * Deliberately silent during streaming — the SSE path already keeps the
- * messages list reactive, so polling on top of it would race and risk
- * stomping the in-flight assistant bubble. The check runs every 5s
- * regardless, so within one cadence of stream end the loop kicks in.
- */
-const ANNOUNCE_POLL_INTERVAL_MS = 5000
-
-/**
- * Keep polling for this long after the most recent subagent_announce row
- * lands, even though {@link hasPendingAsyncAnnounce} flips false. Covers
- * the gap where {@link AgentRunner#runYieldResume} runs the parent's
- * resumed turn on the backend with no SSE stream to the chat tab — any
- * `message` tool calls or sync sub-agent activity inside the resumed
- * turn would otherwise sit in the DB until the user reloads. Three
- * minutes accommodates a typical Phase 4 import (Radarr scan + verify
- * + transmission cleanup, ~30-180s) plus headroom; long enough that
- * the user sees the full workflow inline, short enough that idle
- * conversations don't poll forever.
- */
-const POST_ANNOUNCE_GRACE_MS = 180_000
-let announcePollTimer: ReturnType<typeof setInterval> | undefined
-
-/**
- * Extract the async-spawn {@code run_id} from a JSON-shaped tool result body.
- * Returns null when the body isn't a {@code status:RUNNING} async-spawn
- * payload — every "not an async-pending result" branch falls through
- * harmlessly. The cheap substring pre-check avoids JSON.parse on every other
- * tool result body (web_search responses, file reads, etc.) on every poll
- * tick.
- */
-function pendingAsyncRunIdFromResultText(text: string | null | undefined): string | null {
-  if (!text) return null
-  if (!text.includes('"status"') || !text.includes('RUNNING')) return null
-  try {
-    const parsed = JSON.parse(text) as { run_id?: unknown, status?: unknown }
-    if (parsed?.status !== 'RUNNING') return null
-    const runId = parsed.run_id
-    if (typeof runId === 'string') return runId
-    if (typeof runId === 'number') return String(runId)
-    return null
-  }
-  catch {
-    return null
-  }
-}
-
-/**
- * Returns the {@code run_id} string carried in a tool-role message's JSON
- * content when the result reported {@code status:RUNNING}. This is the
- * post-reload shape — the standalone tool-role row only lands in
- * {@code messages.value} after a transcript refetch.
- */
-function pendingAsyncRunId(m: Message): string | null {
-  if (m.role !== 'tool') return null
-  return pendingAsyncRunIdFromResultText(m.content)
-}
-
-/**
- * True when the open conversation has at least one async-spawn tool result
- * whose announce hasn't landed. Drives the poll-tick decision: if false we
- * skip the network call entirely and let the interval idle until either a
- * new spawn fires or the page unmounts.
- *
- * Walks both shapes the spawn result can take in the local list:
- *   1. Standalone tool-role row (post-reload, after the {@code /messages}
- *      refetch that {@code loadConversation} runs).
- *   2. {@code resultText} on an entry of an assistant message's
- *      {@link Message.toolCalls} array — this is the only shape that exists
- *      between stream-end and the next reload, since the SSE
- *      {@code tool_call} frame folds the result inline rather than emitting
- *      a separate tool-role message. Without this branch the poller would
- *      never fire on the same-page spawn-and-wait path, and the user would
- *      have to navigate away to see the announce land.
- */
-/** Collect the set of run-ids that have already produced an announce row. */
-function collectAnnouncedRunIds(msgs: Message[]): Set<string> {
-  const announcedRunIds = new Set<string>()
-  for (const m of msgs) {
-    if (m.messageKind !== 'subagent_announce') continue
-    const meta = (m as Message & { metadata?: { runId?: number | string } }).metadata
-    const rid = meta?.runId
-    if (rid != null) announcedRunIds.add(String(rid))
-  }
-  return announcedRunIds
-}
-
-/**
- * JCLAW-326: count of subagent runs that have produced an announce row in
- * the current conversation. Drives the "View N subagents in this
- * conversation" banner; 0 hides the banner. Counts unique run-ids rather
- * than raw announce messages so a hypothetical duplicate (re-render race)
- * doesn't inflate the figure.
- */
-const announcedSubagentCount = computed(() => collectAnnouncedRunIds(messages.value).size)
-
-/**
- * Check whether {@code m}'s assistant toolCalls contain a pending async
- * spawn whose run-id has not yet been announced.
- */
-function hasUnannouncedToolCallPending(m: Message, announcedRunIds: Set<string>): boolean {
-  if (m.role !== 'assistant' || !m.toolCalls?.length) return false
-  for (const tc of m.toolCalls) {
-    const tcPending = pendingAsyncRunIdFromResultText(tc.resultText)
-    if (tcPending && !announcedRunIds.has(tcPending)) return true
-  }
-  return false
-}
-
-function hasPendingAsyncAnnounce(): boolean {
-  const msgs = messages.value
-  if (!msgs.length) return false
-  const announcedRunIds = collectAnnouncedRunIds(msgs)
-  for (const m of msgs) {
-    const pending = pendingAsyncRunId(m)
-    if (pending && !announcedRunIds.has(pending)) return true
-    if (hasUnannouncedToolCallPending(m, announcedRunIds)) return true
-  }
-  return false
-}
-
-/**
- * True when the most recent {@code subagent_announce} row arrived within
- * {@link POST_ANNOUNCE_GRACE_MS}. Drives a grace-window poll after an
- * announce lands so messages persisted by the subsequent yield-resumed
- * turn (which has no SSE channel to this tab) surface inline rather
- * than only on manual reload.
- */
-function isWithinPostAnnounceGrace(): boolean {
-  const msgs = messages.value
-  if (!msgs.length) return false
-  let latest = 0
-  for (const m of msgs) {
-    if (m.messageKind !== 'subagent_announce') continue
-    if (!m.createdAt) continue
-    const t = Date.parse(m.createdAt)
-    if (!Number.isFinite(t)) continue
-    if (t > latest) latest = t
-  }
-  if (latest === 0) return false
-  return Date.now() - latest < POST_ANNOUNCE_GRACE_MS
-}
-
-/**
- * Grace window for polling after a {@code task_manager.createTask} call:
- * once a scheduled / recurring task is in the conversation's history, the
- * fire that lands on the server has no SSE channel back to this tab (the
- * task fires on a virtual-thread carrier, not in a chat turn). Poll for
- * this long after the latest createTask call so the auto-delivered fire
- * output (TaskExecutor → DeliveryDispatcher web-send) surfaces inline
- * rather than only on manual reload. Generous because recurring tasks
- * re-fire indefinitely; one createTask call typically intends to receive
- * many deliveries over time.
- */
-const TASK_DELIVERY_POLL_GRACE_MS = 30 * 60_000
-
-/**
- * Tool name that schedules background tasks; matches
- * {@code TaskTool.TOOL_NAME} on the backend. Detecting by name (not by
- * tool-result substring) is stable across the two shapes a tool call
- * takes in the local list — the SSE {@code tool_call} frame may not
- * populate {@code resultText} the same way the persisted-row reload
- * does, but the {@code name} field is invariant.
- */
-const TASK_MANAGER_TOOL_NAME = 'task_manager'
-
-/**
- * True when the open conversation has any {@code task_manager} tool call
- * within {@link TASK_DELIVERY_POLL_GRACE_MS}. While true,
- * {@link announcePollTick} polls so a task fire's auto-delivered message
- * (Bug 1 fix) surfaces inline. Scans both shapes the tool call takes in
- * the local list (mirrors {@link hasPendingAsyncAnnounce}): standalone
- * tool-role rows post-reload (where the assistant row above carried the
- * call's name), and live SSE-pushed entries on the streaming assistant's
- * {@link Message.toolCalls} array pre-reload.
- *
- * <p>Triggers on every {@code task_manager} action, not just
- * {@code createTask} — only createTask actually schedules a new fire,
- * but updateTask / pause / resume / runNow / cancelTask all leave the
- * conversation in a state where another fire may land soon, and the cost
- * of one extra GET per 5s while the grace window is open is trivial.
- */
-function hasRecentTaskCreate(): boolean {
-  const msgs = messages.value
-  if (!msgs.length) return false
-  const cutoff = Date.now() - TASK_DELIVERY_POLL_GRACE_MS
-  for (const m of msgs) {
-    const messageAge = m.createdAt ? Date.parse(m.createdAt) : Number.NaN
-    // When the message has no createdAt (optimistic), treat as "now" so
-    // we don't skip a just-issued create that races the timestamp write.
-    if (Number.isFinite(messageAge) && messageAge < cutoff) continue
-    if (m.toolCalls?.length) {
-      for (const tc of m.toolCalls) {
-        if (tc.name === TASK_MANAGER_TOOL_NAME) return true
-      }
-    }
-  }
-  return false
-}
-
-/**
- * Refetch the open conversation's messages and append any rows whose server
- * id isn't already present locally. Preserves client-only state on existing
- * rows (toolCallsCollapsed, _key on optimistic placeholders, etc.) by
- * never mutating or replacing them.
- *
- * Backfills server ids onto id-less optimistic rows BEFORE computing the
- * additions set: without that step the server-side copies of those rows
- * (which carry ids the local set doesn't yet have) sail past the
- * id-membership filter and get appended as duplicates, producing the
- * "user prompt rendered twice" symptom on async-spawn turns.
- */
-async function pollForAnnounce() {
-  const convoId = selectedConvoId.value
-  if (!convoId) return
-  let fresh: Message[]
-  try {
-    fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`) ?? []
-  }
-  catch (e) {
-    console.error('Failed to poll for announce:', e)
-    return
-  }
-  if (!fresh.length) return
-  backfillServerIds(messages.value, fresh)
-  const knownIds = new Set<number>()
-  for (const m of messages.value) {
-    if (typeof m.id === 'number') knownIds.add(m.id)
-  }
-  const additions = fresh.filter(m => typeof m.id === 'number' && !knownIds.has(m.id))
-  if (!additions.length) return
-  // Hydrate tool-role rows into the preceding assistant message's toolCalls
-  // array on the additions before pushing (mirrors loadConversation). Pass
-  // the full fresh list so hydrateToolCalls can match tool rows against
-  // their owning assistant turn, then drop everything but additions.
-  hydrateToolCalls(fresh as unknown as Array<Record<string, unknown>>)
-  for (const m of additions) {
-    if (!m.toolCalls?.length) continue
-    (m as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed = true
-    for (let i = 0; i < m.toolCalls.length; i++) {
-      m.toolCalls[i]!._expanded = i === m.toolCalls.length - 1
-    }
-  }
-  messages.value = [...messages.value, ...additions]
-  initCollapsedState(messages.value)
-  initSubagentCollapsedState(messages.value)
-  triggerRef(messages)
-}
-
-function announcePollTick() {
-  // Don't fight the streaming path — SSE already keeps the messages list
-  // reactive during the parent's own turn. Resume on the next tick after
-  // streaming ends.
-  if (streaming.value) return
-  // Three reasons to poll:
-  //   1. An async-spawn is in flight, awaiting its announce row.
-  //   2. An announce row arrived within POST_ANNOUNCE_GRACE_MS — the
-  //      backend's yield-resume may still be writing follow-up messages
-  //      (Phase 4 "import starting", Phase 5 "ready to watch", etc.).
-  //   3. A task_manager.createTask call landed within
-  //      TASK_DELIVERY_POLL_GRACE_MS — its scheduled fire will auto-deliver
-  //      back into this conversation on a virtual-thread carrier with no
-  //      SSE channel to this tab (TaskExecutor → DeliveryDispatcher
-  //      web-send). Without polling, the delivered Message row sits in the
-  //      DB until the user reloads.
-  if (!hasPendingAsyncAnnounce()
-    && !isWithinPostAnnounceGrace()
-    && !hasRecentTaskCreate()) return
-  void pollForAnnounce()
-}
-
 // Media-generation progress pollers (video job status + local image-gen
 // step-percent) live in useMediaGenPolling. Both straddle the stream and
 // conversation lifecycles: the page sets imageGenTurnKey and calls the start*
@@ -796,14 +509,12 @@ const {
 } = useMediaGenPolling(messages, streaming)
 
 onMounted(() => {
-  announcePollTimer = setInterval(announcePollTick, ANNOUNCE_POLL_INTERVAL_MS)
   // Capture phase: image load errors don't bubble, so a document-level listener
   // only sees them in capture. The handler is scoped to `.prose-chat`.
   document.addEventListener('error', onMarkdownImageError, true)
 })
 
 onUnmounted(() => {
-  if (announcePollTimer != null) clearInterval(announcePollTimer)
   document.removeEventListener('error', onMarkdownImageError, true)
 })
 
@@ -837,6 +548,17 @@ convHooks.afterLoad = (msgs) => {
   focusInput()
   startVideoPolling() // resume progress polling for any pending video placeholder
 }
+
+// Async-spawn announce / task-delivery poller (JCLAW-270/326) lives in
+// useChatAnnouncePoller. Conversation-refresh, not display — it merges
+// late-arriving rows into messages and re-runs the subagent-collapse init.
+// Owns its own 5s poll timer; placed after useChatSubagents for that init dep.
+const {
+  announcedSubagentCount,
+  hasPendingAsyncAnnounce,
+  hasRecentTaskCreate,
+  pollForAnnounce,
+} = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState })
 
 // Recompute the cost meter only when streaming is idle — usage lands at
 // end-of-turn, so any recompute mid-stream would walk every message and call
