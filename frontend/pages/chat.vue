@@ -39,6 +39,7 @@ import type { Agent, Conversation, Message, MessageAttachment, ConfigResponse, T
 import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
 import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
 import { useChatAttachments, type UploadedAttachment } from '~/composables/useChatAttachments'
+import { useChatScroll } from '~/composables/useChatScroll'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 
 // Local helpers for fields that streaming/optimistic bubbles carry in addition
@@ -865,16 +866,10 @@ async function editUserMessage(msg: Message) {
 const agentBusy = ref(false)
 const streamContent = ref('')
 const streamReasoning = ref('')
-const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
-let scrollRaf: number | null = null
-function scrollToBottom() {
-  if (scrollRaf) return
-  scrollRaf = requestAnimationFrame(() => {
-    if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
-    scrollRaf = null
-  })
-}
+// Autoscroll coordination (viewport el + scrollToBottom + reasoning-body pin)
+// lives in useChatScroll; it reads the stream state it reacts to as args.
+const { messagesEl, scrollToBottom } = useChatScroll(streaming, streamReasoning)
 
 // Throttle interval for the streaming bubble's markdown render. ~80 ms gives
 // roughly 12.5 fps, which the eye reads as live for streaming text while
@@ -926,29 +921,6 @@ function flushStreamRender() {
   streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
   triggerRef(messages)
 }
-
-/**
- * Reasoning bubble is a fixed-height scroll region (see the h-80 data-
- * reasoning-body div in the template). As reasoning tokens stream in, pin
- * the last one to its own bottom so the latest thought is visible without
- * the user having to chase the scroll themselves. Only the in-flight
- * message's bubble is updated — historical messages keep whatever scroll
- * position the user set.
- *
- * RAF-coalesced so a 200 tok/s reasoning burst doesn't force a synchronous
- * layout reflow per chunk (scrollHeight read + scrollTop write is a layout-
- * thrash pattern when fired at chunk rate). Mirrors scrollToBottom's pattern.
- */
-let reasoningScrollRaf: number | null = null
-watch(streamReasoning, () => {
-  if (!streaming.value || reasoningScrollRaf != null) return
-  reasoningScrollRaf = requestAnimationFrame(() => {
-    reasoningScrollRaf = null
-    const bodies = messagesEl.value?.querySelectorAll<HTMLElement>('[data-reasoning-body]')
-    const last = bodies?.[bodies.length - 1]
-    if (last) last.scrollTop = last.scrollHeight
-  })
-})
 
 onMounted(() => {
   focusInput()
@@ -1345,8 +1317,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   abortController.value?.abort()
-  if (scrollRaf) cancelAnimationFrame(scrollRaf)
-  if (reasoningScrollRaf) cancelAnimationFrame(reasoningScrollRaf)
   if (streamRenderTimer != null) clearTimeout(streamRenderTimer)
   if (streamReasoningTimer != null) clearTimeout(streamReasoningTimer)
   if (announcePollTimer != null) clearInterval(announcePollTimer)
