@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import type { Agent, Message } from '~/types/api'
+// UsersRound matches the Subagents nav icon (the "spawned children" glyph) so
+// the empty-state landing reads as the same surface.
+import { UsersRound } from 'lucide-vue-next'
 
 /**
  * JCLAW-271: SubagentRuns admin page. Lists every subagent run with filters
@@ -277,6 +280,13 @@ const hasActiveFilters = computed(() =>
   !!(qFilter.value || parentAgentFilter.value || parentConversationFilter.value || statusFilter.value || sinceFilter.value),
 )
 
+// Welcome-style landing (mirrors the conversations page): shown only when the
+// list is genuinely empty — zero runs AND no active filter. With a filter
+// active, keep the filter bar + table so the "no matches" message stands and
+// the operator can adjust the filter. !loading guards against a flash before
+// the first fetch resolves.
+const hasNoData = computed(() => !loading.value && total.value === 0 && !hasActiveFilters.value)
+
 /**
  * Wipe every terminal run matching the active filter (or the whole table when
  * unfiltered). Separate destructive surface from "Delete N": filter-scoped,
@@ -345,7 +355,10 @@ function closePeek() {
       <h1 class="text-lg font-semibold text-fg-strong">
         Subagents
       </h1>
-      <div class="flex items-center gap-2">
+      <div
+        v-if="!hasNoData"
+        class="flex items-center gap-2"
+      >
         <!-- Selection-driven bulk delete, matching the conversations page's
              always-visible "Delete N" button. -->
         <button
@@ -373,6 +386,29 @@ function closePeek() {
       </div>
     </div>
 
+    <!-- Empty-state landing: zero runs AND no active filter. Mirrors the
+         conversations page — hides the filter bar / table / pager so the page
+         reads as a first-run explainer rather than an empty data view. The
+         "no rows after a filter" case keeps the chrome below and uses the
+         table's own "No subagent runs matching filters" message. -->
+    <section
+      v-if="hasNoData"
+      class="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-6 py-12 text-center dark:border-zinc-700 dark:bg-zinc-900/30"
+    >
+      <UsersRound class="mx-auto h-10 w-10 text-zinc-400" />
+      <h2 class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+        No subagent runs yet
+      </h2>
+      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
+        <!-- Link text sits flush against the tags so Vue's whitespace
+             condensing doesn't leak a space before the comma. -->
+        Runs appear here when an agent delegates part of a task to a child agent — via the spawn tool or a <NuxtLink
+          to="/chat"
+          class="font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400"
+        >/subagent command in chat</NuxtLink>. Each run's status, transcript, and outcome shows up in this list.
+      </p>
+    </section>
+
     <!-- Filter bar. JCLAW-304 replaces the three select dropdowns
          (parent agent, status, started-after) with a FilterBar
          consistent with /conversations and /tasks. The bar's `q:`
@@ -383,7 +419,10 @@ function closePeek() {
          parentConversation chip below is preserved as a separate
          visual element so deep links from chat still surface their
          filter unambiguously. -->
-    <div class="flex flex-wrap gap-3 mb-4">
+    <div
+      v-if="!hasNoData"
+      class="flex flex-wrap gap-3 mb-4"
+    >
       <div class="flex-1 min-w-[280px]">
         <FilterBar
           storage-key="subagents"
@@ -418,7 +457,10 @@ function closePeek() {
     </div>
 
     <!-- Table -->
-    <div class="bg-surface-elevated border border-border">
+    <div
+      v-if="!hasNoData"
+      class="bg-surface-elevated border border-border"
+    >
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">

@@ -238,3 +238,35 @@ describe('Subagents — pagination', () => {
     expect(component.text()).toContain('Page 1 of 3')
   })
 })
+
+describe('Subagents — empty-state landing', () => {
+  it('shows the welcome landing and hides the chrome when there are no runs and no filter', async () => {
+    listRows = []
+    totalCount = 0
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    // Welcome copy + link to chat.
+    expect(component.text()).toContain('No subagent runs yet')
+    expect(component.find('a[href="/chat"]').exists()).toBe(true)
+
+    // Chrome is hidden: no filter input, no Delete buttons, no pager.
+    expect(component.find('input[aria-label="Filter query"]').exists()).toBe(false)
+    expect(component.findAll('button').some(b => b.text().startsWith('Delete'))).toBe(false)
+    expect(component.findAll('button').some(b => b.text() === 'Prev' || b.text() === 'Next')).toBe(false)
+  })
+
+  it('keeps the filter bar + "no matches" message when a filter yields zero rows', async () => {
+    // A URL-driven parentConversation filter counts as active, so this is the
+    // "filtered to nothing" case — not the first-run landing.
+    routeQuery.value = { parentConversationId: '5' }
+    listRows = []
+    totalCount = 0
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    expect(component.text()).not.toContain('No subagent runs yet')
+    expect(component.text()).toContain('No subagent runs matching filters')
+    expect(component.find('input[aria-label="Filter query"]').exists()).toBe(true)
+  })
+})
