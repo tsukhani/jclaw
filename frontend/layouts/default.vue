@@ -315,11 +315,11 @@ const navGroups: NavGroup[] = [
         <span
           v-if="sidebarOpen"
           class="inline-flex items-center justify-center
-                 rounded-full border border-emerald-700 dark:border-emerald-400
+                 rounded-full border border-blue-700 dark:border-blue-400
                  px-[5px] py-[2px]
                  text-[8px] font-medium leading-none tracking-[0.04em]
-                 text-emerald-700 dark:text-emerald-400"
-        >ALPHA</span>
+                 text-blue-700 dark:text-blue-400"
+        >BETA</span>
         <button
           v-if="sidebarOpen"
           class="p-1.5 rounded-full border border-fg-muted/40 text-fg-muted hover:text-fg-strong hover:border-fg-muted transition-colors"
