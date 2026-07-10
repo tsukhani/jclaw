@@ -51,6 +51,7 @@ function run(over: Record<string, unknown> = {}) {
 
 let listRows: unknown[] = []
 let totalCount = 0
+let capturedQueries: Record<string, unknown>[] = []
 let deleteBody: Record<string, unknown> | null = null
 
 registerEndpoint('/api/agents', () => [
@@ -60,6 +61,8 @@ registerEndpoint('/api/agents', () => [
 registerEndpoint('/api/subagent-runs', {
   method: 'GET',
   handler: async (event) => {
+    const { getQuery } = await import('h3')
+    capturedQueries.push({ ...getQuery(event) })
     event.node.res.setHeader('x-total-count', String(totalCount))
     return listRows
   },
@@ -84,6 +87,7 @@ beforeEach(() => {
   routeQuery.value = {}
   listRows = [run(), run({ id: 12, childAgentName: 'main-sub-def', childConversationId: 7 })]
   totalCount = 2
+  capturedQueries = []
   deleteBody = null
 })
 
@@ -187,5 +191,50 @@ describe('Subagents — quick preview peek panel', () => {
     panel.vm.$emit('update:open', false)
     await nextTick()
     expect(panel.props('open')).toBe(false)
+  })
+})
+
+describe('Subagents — pagination', () => {
+  it('Next/Prev move the offset and the page label follows x-total-count', async () => {
+    totalCount = 42 // 3 pages at pageSize 20
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    // rangeEnd is page-arithmetic (min(page × 20, total)), independent of how
+    // many rows the stub actually returned.
+    expect(component.text()).toContain('Showing 1–20 of 42')
+    expect(component.text()).toContain('Page 1 of 3')
+    expect(component.findAll('button').find(b => b.text() === 'Prev')!.attributes('disabled')).toBeDefined()
+
+    await component.findAll('button').find(b => b.text() === 'Next')!.trigger('click')
+    // page → offset lives in the `url` computed; the watch turns the change
+    // into a refetch, so wait for the captured offset rather than asserting
+    // synchronously.
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('20'))
+    expect(component.text()).toContain('Page 2 of 3')
+
+    // Both pager buttons are disabled while the refetch is in flight; wait for
+    // Prev to re-arm before clicking (a trigger on a disabled button no-ops).
+    const prevBtn = component.findAll('button').find(b => b.text() === 'Prev')!
+    await vi.waitFor(() => expect(prevBtn.attributes('disabled')).toBeUndefined())
+    await prevBtn.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('0'))
+    expect(component.text()).toContain('Page 1 of 3')
+  })
+
+  it('committing a filter resets to page 1', async () => {
+    totalCount = 42
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    await component.findAll('button').find(b => b.text() === 'Next')!.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('20'))
+
+    const input = component.find('input[aria-label="Filter query"]')
+    await input.setValue('status:COMPLETED')
+    await input.trigger('keydown', { key: 'Enter' })
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('0'))
+    expect(capturedQueries.at(-1)!.status).toBe('COMPLETED')
+    expect(component.text()).toContain('Page 1 of 3')
   })
 })

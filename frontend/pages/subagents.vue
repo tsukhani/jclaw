@@ -56,9 +56,20 @@ function onFiltersChanged(filters: Filter[]) {
   // for round-trip consistency; the chip's clear-button writes through
   // here too so the URL state and the bar's chip stay in lockstep.
   parentConversationFilter.value = filters.find(f => f.key === 'parentConversation')?.value ?? parentConversationFilter.value
+  // A new filter set changes the result count, so jump back to page 1 and drop
+  // any carried-over selection. page + the filter refs are all `url` deps, so
+  // Vue batches this into a single recompute → one refetch via the watch.
+  page.value = 1
+  selectedIds.value = new Set()
 }
 
 const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: () => [] })
+
+// Pagination, matching the conversations page. `page` feeds the `offset`
+// param inside `url`, so goto() → url change → the existing watch refetches;
+// no separate load() path is needed.
+const pageSize = 20
+const page = ref(1)
 
 const url = computed(() => {
   const params = new URLSearchParams()
@@ -96,7 +107,8 @@ const url = computed(() => {
     // shapes — and the typed picker can layer on later if needed.
     params.set('since', `${sinceFilter.value}:00Z`)
   }
-  params.set('limit', '200')
+  params.set('limit', String(pageSize))
+  params.set('offset', String((page.value - 1) * pageSize))
   return `/api/subagent-runs?${params}`
 })
 
@@ -106,22 +118,41 @@ const url = computed(() => {
 // the test harness which mounts the page across `it` blocks without
 // invalidating the cache.
 const runs = ref<SubagentRun[]>([])
-// Full matching count (pre-pagination), read from the same X-Total-Count
-// header the list endpoint sets. `runs` is capped at limit=200 but `total`
-// reflects every row the filter matches — which is what "Delete all matching"
-// wipes, so the button's label and the confirm count must come from here, not
-// runs.length.
+// Full matching count (pre-pagination), read from the X-Total-Count header the
+// list endpoint sets. `runs` holds only the current page; `total` reflects
+// every row the filter matches — driving both the pager range and the "Delete
+// all matching" count, neither of which can come from runs.length.
 const total = ref(0)
+const loading = ref(false)
 async function refresh() {
-  const res = await $fetch.raw<SubagentRun[]>(url.value)
-  runs.value = res._data ?? []
-  const headerTotal = res.headers.get('x-total-count')
-  total.value = headerTotal ? Number.parseInt(headerTotal, 10) : runs.value.length
+  loading.value = true
+  try {
+    const res = await $fetch.raw<SubagentRun[]>(url.value)
+    runs.value = res._data ?? []
+    const headerTotal = res.headers.get('x-total-count')
+    total.value = headerTotal ? Number.parseInt(headerTotal, 10) : runs.value.length
+  }
+  finally {
+    loading.value = false
+  }
 }
 await refresh()
 watch(url, () => {
   refresh()
 })
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const rangeStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize + 1)
+const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
+
+// Page navigation. Mutating `page` changes the `offset` in `url`, which the
+// watch above turns into a refetch; we only clear the selection here so a
+// carried-over checkbox set can't span pages.
+function goto(p: number) {
+  if (p < 1 || p > totalPages.value || p === page.value || loading.value) return
+  page.value = p
+  selectedIds.value = new Set()
+}
 
 // Auto-refresh every 5s when there is at least one RUNNING row — keeps the
 // admin view live during an actual subagent fan-out without polling
@@ -271,6 +302,7 @@ async function deleteAll() {
       body: { filter: activeFilterPayload() },
     })
     selectedIds.value = new Set()
+    page.value = 1
     await refresh()
   }
   catch (e) {
@@ -575,6 +607,29 @@ function closePeek() {
         class="px-4 py-8 text-center text-sm text-fg-muted"
       >
         No subagent runs matching filters
+      </div>
+      <div
+        v-if="total > 0"
+        class="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-fg-muted"
+      >
+        <span>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ total }}</span>
+        <div class="flex items-center gap-1">
+          <button
+            :disabled="page <= 1 || loading"
+            class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            @click="goto(page - 1)"
+          >
+            Prev
+          </button>
+          <span class="px-2">Page {{ page }} of {{ totalPages }}</span>
+          <button
+            :disabled="page >= totalPages || loading"
+            class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            @click="goto(page + 1)"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
 
