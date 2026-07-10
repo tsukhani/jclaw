@@ -301,14 +301,20 @@ function toggleAllExpanded() {
               </div>
             </div>
 
-            <!-- Description — fixed height so Functions header aligns across all cards in a row -->
+            <!-- Description — clamped to 3 lines with a min-height floor so short
+                 descriptions don't collapse the card. Footer alignment across a row
+                 is handled by mt-auto on the Functions header below, not by this
+                 min-height (3 clamped lines can exceed 4rem, so a min-height alone
+                 leaves taller cards' footers lower). -->
             <p class="px-4 pb-4 text-xs text-fg-muted leading-relaxed min-h-[4rem] line-clamp-3">
               {{ card.description }}
             </p>
 
-            <!-- Functions accordion header -->
+            <!-- Functions accordion header — mt-auto pins it to the bottom of the
+                 (grid-stretched) card so every card's Functions disclosure aligns
+                 across the row regardless of description length. -->
             <button
-              class="px-4 py-2.5 border-t border-border flex items-center justify-between w-full group transition-colors"
+              class="mt-auto px-4 py-2.5 border-t border-border flex items-center justify-between w-full group transition-colors"
               :class="expandedSet.has(card.key) ? 'bg-muted' : 'hover:bg-muted'"
               @click="toggleExpand(card.key)"
             >
