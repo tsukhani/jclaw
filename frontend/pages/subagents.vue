@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { Agent, Message } from '~/types/api'
-import { TrashIcon } from '@heroicons/vue/24/outline'
 
 /**
  * JCLAW-271: SubagentRuns admin page. Lists every subagent run with filters
@@ -171,30 +170,9 @@ async function killRun(id: number) {
   }
 }
 
+// confirm() drives the "Delete all" typed-confirmation dialog below; the
+// selection-driven "Delete N" runs its own confirm inside useBulkSelect.
 const { confirm } = useConfirm()
-
-/**
- * Hard-delete a subagent run and its child agent (which cascades to
- * the child conversation, its messages, and the run row itself via
- * AgentService.delete's FK chain). RUNNING rows are rejected by the
- * backend with 409 — kill first, then delete.
- */
-async function deleteRun(run: SubagentRun) {
-  const ok = await confirm({
-    title: 'Delete subagent run?',
-    message: `Run #${run.id} (${run.childAgentName ?? 'child'}) and its child agent + transcript will be permanently removed. This cannot be undone.`,
-    confirmText: 'Delete',
-    variant: 'danger',
-  })
-  if (!ok) return
-  try {
-    await $fetch(`/api/subagent-runs/${run.id}`, { method: 'DELETE' })
-    await refresh()
-  }
-  catch (e) {
-    console.error('Failed to delete subagent run:', e)
-  }
-}
 
 /**
  * Bulk-select wiring shared with tasks.vue via useBulkSelect. The
@@ -573,6 +551,12 @@ function closePeek() {
                     />
                   </svg>
                 </button>
+                <!--
+                  Kill is the only per-row destructive action left: RUNNING rows
+                  can't be checkbox-selected (they're excluded from the delete
+                  set), so they need their own affordance. Terminal rows are
+                  deleted via the checkbox + "Delete N" toolbar button.
+                -->
                 <button
                   v-if="run.status === 'RUNNING'"
                   :disabled="killing.has(run.id)"
@@ -580,17 +564,6 @@ function closePeek() {
                   @click.stop="killRun(run.id)"
                 >
                   {{ killing.has(run.id) ? 'Killing...' : 'Kill' }}
-                </button>
-                <button
-                  v-else
-                  class="p-1.5 text-fg-muted hover:text-red-400 transition-colors"
-                  :title="`Permanently delete run #${run.id} and its child agent + transcript`"
-                  @click.stop="deleteRun(run)"
-                >
-                  <TrashIcon
-                    class="w-4 h-4"
-                    aria-hidden="true"
-                  />
                 </button>
               </div>
             </td>
