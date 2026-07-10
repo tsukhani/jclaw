@@ -98,14 +98,14 @@ const allModelOptions = computed(() => {
 async function saveSubagentModel(value: string) {
   saving.value = true
   try {
-    if (!value) {
-      await $fetch('/api/config/subagent.modelProvider', { method: 'DELETE' })
-      await $fetch('/api/config/subagent.modelId', { method: 'DELETE' })
-    }
-    else {
+    if (value) {
       const sep = value.indexOf('::')
       await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.modelProvider', value: value.slice(0, sep) } })
       await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.modelId', value: value.slice(sep + 2) } })
+    }
+    else {
+      await $fetch('/api/config/subagent.modelProvider', { method: 'DELETE' })
+      await $fetch('/api/config/subagent.modelId', { method: 'DELETE' })
     }
     refresh()
   }

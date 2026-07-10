@@ -89,6 +89,47 @@ export interface UseChatStream {
   stopStreaming: () => void
 }
 
+/**
+ * Translate uploaded server handles into the shape the chat bubble's
+ * optimistic-attachment chips expect (attachmentId → uuid). Returns
+ * undefined when there were no uploads so the field is omitted entirely.
+ */
+function buildOptimisticAttachments(uploaded: UploadedAttachment[]) {
+  if (!uploaded.length) return undefined
+  return uploaded.map(u => ({
+    uuid: u.attachmentId,
+    originalFilename: u.originalFilename,
+    mimeType: u.mimeType,
+    sizeBytes: u.sizeBytes,
+    kind: u.kind,
+  }))
+}
+
+/**
+ * Stamp the once-per-turn "thinking started" fields on the first reasoning
+ * chunk. Subsequent chunks are no-ops here to avoid Vue reactivity churn.
+ */
+function markThinkingStartedIfFirst(m: StreamingMessage): boolean {
+  if (m._thinkingStartedAt) return false
+  m._thinkingStartedAt = Date.now()
+  m._thinkingInProgress = true
+  m._thinkingDurationMs = null
+  m.thinkingCollapsed = false
+  return true
+}
+
+/**
+ * Stamp the reasoning→content transition exactly once. Returns true if
+ * the transition fired so the caller can decide whether to triggerRef.
+ */
+function finalizeThinkingOnTransition(m: StreamingMessage): boolean {
+  if (m._thinkingInProgress !== true) return false
+  m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
+  m._thinkingInProgress = false
+  m.thinkingCollapsed = true
+  return true
+}
+
 export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   const {
     messages, selectedConvoId, subagentTranscript, selectedAgentId,
@@ -149,22 +190,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       if (url) URL.revokeObjectURL(url)
       attachmentPreviews.value.delete(f)
     }
-  }
-
-  /**
-   * Translate uploaded server handles into the shape the chat bubble's
-   * optimistic-attachment chips expect (attachmentId → uuid). Returns
-   * undefined when there were no uploads so the field is omitted entirely.
-   */
-  function buildOptimisticAttachments(uploaded: UploadedAttachment[]) {
-    if (!uploaded.length) return undefined
-    return uploaded.map(u => ({
-      uuid: u.attachmentId,
-      originalFilename: u.originalFilename,
-      mimeType: u.mimeType,
-      sizeBytes: u.sizeBytes,
-      kind: u.kind,
-    }))
   }
 
   /** Reset all streaming buffers and flip the {@code streaming} flag on. */
@@ -228,19 +253,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     streamStatus.value = content ?? ''
   }
 
-  /**
-   * Stamp the once-per-turn "thinking started" fields on the first reasoning
-   * chunk. Subsequent chunks are no-ops here to avoid Vue reactivity churn.
-   */
-  function markThinkingStartedIfFirst(m: StreamingMessage): boolean {
-    if (m._thinkingStartedAt) return false
-    m._thinkingStartedAt = Date.now()
-    m._thinkingInProgress = true
-    m._thinkingDurationMs = null
-    m.thinkingCollapsed = false
-    return true
-  }
-
   function handleStreamReasoningEvent(ctx: StreamContext, event: { content: string }) {
     const m = messages.value[ctx.assistantIdx] as StreamingMessage
     const stateChanged = markThinkingStartedIfFirst(m)
@@ -258,18 +270,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       streamStatus.value = 'thinking...'
     }
     scrollToBottom()
-  }
-
-  /**
-   * Stamp the reasoning→content transition exactly once. Returns true if
-   * the transition fired so the caller can decide whether to triggerRef.
-   */
-  function finalizeThinkingOnTransition(m: StreamingMessage): boolean {
-    if (m._thinkingInProgress !== true) return false
-    m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
-    m._thinkingInProgress = false
-    m.thinkingCollapsed = true
-    return true
   }
 
   function handleStreamTokenEvent(ctx: StreamContext, event: { content?: string, timestamp?: string }) {
@@ -335,7 +335,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // streaming bubble so they render immediately (the server already persisted them on the
     // assistant turn).
     if (event.generatedAttachments?.length) {
-      if (!m.attachments) m.attachments = []
+      m.attachments ??= []
       for (const att of event.generatedAttachments) {
         if (!m.attachments.some(a => a.uuid === att.uuid)) {
           m.attachments.push(att)
@@ -436,7 +436,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       // of replacing the bubble with a scary error.
       const existing = messages.value[assistantIdx]!.content || streamContent.value || ''
       messages.value[assistantIdx]!.content = existing
-        ? existing.replace(/\s*$/, '') + '\n\n_(stopped)_'
+        ? existing.trimEnd() + '\n\n_(stopped)_'
         : '_(stopped before any response)_'
     }
     else {

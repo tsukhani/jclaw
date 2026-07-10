@@ -222,11 +222,7 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
       // When the message has no createdAt (optimistic), treat as "now" so
       // we don't skip a just-issued create that races the timestamp write.
       if (Number.isFinite(messageAge) && messageAge < cutoff) continue
-      if (m.toolCalls?.length) {
-        for (const tc of m.toolCalls) {
-          if (tc.name === TASK_MANAGER_TOOL_NAME) return true
-        }
-      }
+      if (m.toolCalls?.some(tc => tc.name === TASK_MANAGER_TOOL_NAME)) return true
     }
     return false
   }
