@@ -679,8 +679,8 @@ onBeforeUnmount(() => {
             >
               <span
                 :class="{
-                  'text-red-400': event.level === 'ERROR',
-                  'text-yellow-400': event.level === 'WARN',
+                  'text-red-700 dark:text-red-400': event.level === 'ERROR',
+                  'text-yellow-700 dark:text-yellow-400': event.level === 'WARN',
                   'text-fg-muted': event.level === 'INFO',
                 }"
                 class="text-xs font-mono mt-0.5 shrink-0 w-10"

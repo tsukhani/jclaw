@@ -219,13 +219,13 @@ function deliveryLabel(r: Task): string {
 // read with the same colored-mono convention as the rest of the app (rather
 // than the old rounded-pill badges).
 const statusColors: Record<string, string> = {
-  PENDING: 'text-yellow-400',
-  ACTIVE: 'text-emerald-400',
-  RUNNING: 'text-blue-400',
-  LOST: 'text-orange-400',
-  COMPLETED: 'text-green-400',
-  FAILED: 'text-red-400',
-  CANCELLED: 'text-neutral-600',
+  PENDING: 'text-yellow-700 dark:text-yellow-400',
+  ACTIVE: 'text-emerald-700 dark:text-emerald-400',
+  RUNNING: 'text-blue-700 dark:text-blue-400',
+  LOST: 'text-orange-700 dark:text-orange-400',
+  COMPLETED: 'text-green-700 dark:text-green-400',
+  FAILED: 'text-red-700 dark:text-red-400',
+  CANCELLED: 'text-fg-muted',
 }
 </script>
 

@@ -702,13 +702,13 @@ for (const evt of ['task.started', 'task.completed', 'task.failed', 'task.delive
 // the task is stuck but db-scheduler will auto-recover it. Orange
 // communicates "needs attention but not yet a terminal failure".
 const statusColors: Record<string, string> = {
-  PENDING: 'text-yellow-400',
-  ACTIVE: 'text-emerald-400',
-  RUNNING: 'text-blue-400',
-  LOST: 'text-orange-400',
-  COMPLETED: 'text-green-400',
-  FAILED: 'text-red-400',
-  CANCELLED: 'text-neutral-600',
+  PENDING: 'text-yellow-700 dark:text-yellow-400',
+  ACTIVE: 'text-emerald-700 dark:text-emerald-400',
+  RUNNING: 'text-blue-700 dark:text-blue-400',
+  LOST: 'text-orange-700 dark:text-orange-400',
+  COMPLETED: 'text-green-700 dark:text-green-400',
+  FAILED: 'text-red-700 dark:text-red-400',
+  CANCELLED: 'text-fg-muted',
 }
 
 // v0.12.38: ACTIVE was promoted from a frontend display-only alias to a

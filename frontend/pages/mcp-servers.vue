@@ -248,10 +248,10 @@ async function testFromForm() {
 }
 
 const statusBadgeClass: Record<McpServer['status'], string> = {
-  CONNECTED: 'text-green-400 border-green-400/30',
-  CONNECTING: 'text-yellow-400 border-yellow-400/30',
-  DISCONNECTED: 'text-neutral-500 border-neutral-500/30',
-  ERROR: 'text-red-400 border-red-400/30',
+  CONNECTED: 'text-green-700 dark:text-green-400 border-green-400/30',
+  CONNECTING: 'text-yellow-700 dark:text-yellow-400 border-yellow-400/30',
+  DISCONNECTED: 'text-fg-muted border-neutral-500/30',
+  ERROR: 'text-red-700 dark:text-red-400 border-red-400/30',
 }
 
 function addEnvRow() {

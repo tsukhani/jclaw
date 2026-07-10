@@ -24,13 +24,13 @@ const emit = defineEmits<{ (e: 'open-run', run: RecentRunView): void }>()
 
 // Status → text color (month-grid fires). Mirrors the Tasks/Reminders tables.
 const statusColors: Record<string, string> = {
-  PENDING: 'text-yellow-400',
-  ACTIVE: 'text-emerald-400',
-  RUNNING: 'text-blue-400',
-  LOST: 'text-orange-400',
-  COMPLETED: 'text-green-400',
-  FAILED: 'text-red-400',
-  CANCELLED: 'text-neutral-600',
+  PENDING: 'text-yellow-700 dark:text-yellow-400',
+  ACTIVE: 'text-emerald-700 dark:text-emerald-400',
+  RUNNING: 'text-blue-700 dark:text-blue-400',
+  LOST: 'text-orange-700 dark:text-orange-400',
+  COMPLETED: 'text-green-700 dark:text-green-400',
+  FAILED: 'text-red-700 dark:text-red-400',
+  CANCELLED: 'text-fg-muted',
 }
 // Solid block fills for actual runs (the text statusColors are too faint as a
 // filled background). Falls back to neutral for any unmapped status.
