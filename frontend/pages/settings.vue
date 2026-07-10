@@ -17,7 +17,7 @@
  * Sections come from `components/settings/sections.ts` — one entry per panel.
  */
 import { Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
-import { sections } from '~/components/settings/sections'
+import { sectionGroups, sections } from '~/components/settings/sections'
 
 // The shared /api/config store, inline config-row editor, and /api/providers
 // billing projection live in the composable; every panel injects this context.
@@ -90,35 +90,43 @@ watch(() => route.query.section, (s) => {
         aria-label="Settings sections"
       >
         <nav class="border border-border rounded-xl bg-surface-elevated overflow-hidden">
-          <div class="px-3 py-2 border-b border-border text-[11px] font-medium uppercase tracking-wide text-fg-muted">
-            Sections
-          </div>
-          <ul class="py-1">
-            <li
-              v-for="s in sections"
-              :key="s.id"
-            >
-              <button
-                type="button"
-                :class="[
-                  'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors',
-                  activeSectionId === s.id
-                    ? 'bg-emerald-50/60 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 font-medium'
-                    : 'text-fg-strong hover:bg-muted/40',
-                ]"
-                :aria-current="activeSectionId === s.id ? 'page' : undefined"
-                :data-testid="`settings-toc-item-${s.id}`"
-                @click="selectSection(s.id)"
+          <!-- One block per functional group: an uppercase header, then its
+               section items. A top border separates each group from the last. -->
+          <div
+            v-for="(group, gi) in sectionGroups"
+            :key="group.label"
+            :class="gi > 0 ? 'border-t border-border' : ''"
+          >
+            <div class="px-3 pt-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+              {{ group.label }}
+            </div>
+            <ul class="pb-1.5">
+              <li
+                v-for="s in group.sections"
+                :key="s.id"
               >
-                <component
-                  :is="s.icon"
-                  class="w-3.5 h-3.5 shrink-0"
-                  aria-hidden="true"
-                />
-                <span class="truncate">{{ s.title }}</span>
-              </button>
-            </li>
-          </ul>
+                <button
+                  type="button"
+                  :class="[
+                    'w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors',
+                    activeSectionId === s.id
+                      ? 'bg-emerald-50/60 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 font-medium'
+                      : 'text-fg-strong hover:bg-muted/40',
+                  ]"
+                  :aria-current="activeSectionId === s.id ? 'page' : undefined"
+                  :data-testid="`settings-toc-item-${s.id}`"
+                  @click="selectSection(s.id)"
+                >
+                  <component
+                    :is="s.icon"
+                    class="w-3.5 h-3.5 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span class="truncate">{{ s.title }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
         </nav>
       </aside>
 

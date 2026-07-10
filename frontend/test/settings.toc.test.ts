@@ -40,6 +40,17 @@ describe('Settings page — TOC navigation + section swap', () => {
     expect(shell.attributes('aria-current')).toBeUndefined()
   })
 
+  it('renders the functional group headers in the rail', async () => {
+    baseEndpoints()
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const text = component.text()
+    for (const label of ['System', 'Providers', 'Media', 'Agents & Automation', 'Security & Access']) {
+      expect(text).toContain(label)
+    }
+  })
+
   it('swaps the active section when a rail item is clicked', async () => {
     baseEndpoints()
     const component = await mountSuspended(Settings)
