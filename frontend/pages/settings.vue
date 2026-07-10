@@ -18,34 +18,22 @@ import type {
   DiscoveredModel,
   DiscoverModelsResponse,
   OcrStatusResponse,
+  ProviderInfo,
   ProviderModelDef,
 } from '~/types/api'
 
-// JCLAW-280: provider billing-shape info. Carries the selected
-// paymentModality, monthly subscription price, and the supported-
-// modality set. Used by the per-provider Settings card to know which
-// modality choices to offer and by the modality+subscription rows to
-// render their current values. Fetched before the config store so its
-// refresh can be handed to the shared updateEntry (below).
-interface ProviderInfo {
-  name: string
-  paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION'
-  subscriptionMonthlyUsd: number
-  supportedModalities: ('PER_TOKEN' | 'SUBSCRIPTION')[]
-}
-const { data: providersInfo, refresh: refreshProviders }
-  = await useFetch<ProviderInfo[]>('/api/providers')
-
-// JCLAW-680: the shared /api/config store + page-wide inline config-row editor
-// live in a composable that provides a reactive context to the extracted panels.
-// The page still holds the same configData/refresh/saving/editingKey refs
-// (children inject the identical objects). refreshProviders is handed in so the
-// shared updateEntry can refresh the billing projection on provider.* writes.
+// JCLAW-680: the shared /api/config store, page-wide inline config-row editor,
+// and /api/providers billing projection live in a composable that provides a
+// reactive context to the extracted panels. The page still holds the same
+// configData/refresh/saving/editingKey refs (children inject the identical
+// objects).
 const {
   configData, refresh, saving, getProviderModels,
-  editingKey, editValue, startEdit, updateEntry, asyncConfig,
-} = useProvideSettingsConfig({ refreshProviders })
+  editingKey, editValue, startEdit, updateEntry,
+  providersData, asyncConfig, asyncProviders,
+} = useProvideSettingsConfig()
 await asyncConfig
+await asyncProviders
 // JCLAW-177 follow-up: probe state + Config DB toggle for the OCR section.
 // Fetched separately from /api/config so the section can render the toggle
 // as uninteractive when the binary isn't on PATH (probe.available=false),
@@ -55,7 +43,7 @@ const { data: ocrStatus, refresh: refreshOcrStatus }
 
 const providerInfoMap = computed(() => {
   const map = new Map<string, ProviderInfo>()
-  for (const p of providersInfo.value ?? []) map.set(p.name, p)
+  for (const p of providersData.value ?? []) map.set(p.name, p)
   return map
 })
 function supportedModalitiesFor(name: string): ('PER_TOKEN' | 'SUBSCRIPTION')[] {

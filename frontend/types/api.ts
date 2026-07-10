@@ -690,6 +690,18 @@ export interface TaskStats {
   retentionDays: number
 }
 
+/**
+ * Provider billing-shape projection from GET /api/providers. Carries the
+ * selected paymentModality, monthly subscription price, and the supported-
+ * modality set used by the LLM Providers Settings cards.
+ */
+export interface ProviderInfo {
+  name: string
+  paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION'
+  subscriptionMonthlyUsd: number
+  supportedModalities: ('PER_TOKEN' | 'SUBSCRIPTION')[]
+}
+
 /** A single persisted model on a provider (stored inside provider.{name}.models JSON). */
 export interface ProviderModelDef {
   id: string

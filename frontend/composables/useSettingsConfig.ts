@@ -1,5 +1,5 @@
 import type { InjectionKey, Ref } from 'vue'
-import type { ConfigEntry, ConfigResponse, ProviderModelDef } from '~/types/api'
+import type { ConfigEntry, ConfigResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
 
 /**
  * Shared /api/config store for the Settings page and its extracted panels
@@ -43,6 +43,13 @@ export interface SettingsConfigContext {
   editValue: Ref<string>
   startEdit: (entry: ConfigEntry) => void
   updateEntry: (key: string) => Promise<void>
+  /**
+   * GET /api/providers billing projection (JCLAW-680 second pass). A shared read
+   * — the inline editor's {@code updateEntry} refreshes it on {@code provider.*}
+   * writes, and the LLM Providers panel injects it for its billing rows.
+   */
+  providersData: Ref<ProviderInfo[] | null>
+  refreshProviders: () => Promise<void>
 }
 
 export const settingsConfigKey: InjectionKey<SettingsConfigContext>
@@ -55,8 +62,9 @@ export const settingsConfigKey: InjectionKey<SettingsConfigContext>
  * {@code configData}/{@code refresh}/{@code saving} refs the page still uses
  * directly for the panels not yet extracted.
  */
-export function useProvideSettingsConfig(opts: { refreshProviders?: () => void } = {}) {
+export function useProvideSettingsConfig() {
   const asyncConfig = useFetch<ConfigResponse>('/api/config')
+  const asyncProviders = useFetch<ProviderInfo[]>('/api/providers')
   const saving = ref(false)
 
   function configValue(key: string, fallback = ''): string {
@@ -109,7 +117,7 @@ export function useProvideSettingsConfig(opts: { refreshProviders?: () => void }
       // JCLAW-280: provider-scoped config rows (modality, subscription price,
       // API keys) feed the /api/providers projection; refresh it so provider
       // billing rows reflect the new value immediately.
-      if (key.startsWith('provider.')) opts.refreshProviders?.()
+      if (key.startsWith('provider.')) asyncProviders.refresh()
     }
     catch (e) {
       console.error('Failed to update config:', e)
@@ -131,9 +139,11 @@ export function useProvideSettingsConfig(opts: { refreshProviders?: () => void }
     editValue,
     startEdit,
     updateEntry,
+    providersData: asyncProviders.data as Ref<ProviderInfo[] | null>,
+    refreshProviders: asyncProviders.refresh,
   }
   provide(settingsConfigKey, context)
-  return { ...context, asyncConfig }
+  return { ...context, asyncConfig, asyncProviders }
 }
 
 /** Panel-level: inject the shared config context provided by the page. */
