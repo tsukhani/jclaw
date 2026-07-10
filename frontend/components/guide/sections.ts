@@ -123,7 +123,7 @@ export const sections: GuideSection[] = [
   },
   {
     id: 'memory',
-    title: 'Memory',
+    title: 'Memories',
     icon: CircleStackIcon,
     content: memoryMd,
   },
