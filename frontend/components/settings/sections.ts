@@ -86,6 +86,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'logging', title: 'Logging', icon: DocumentTextIcon, component: SettingsLoggingPanel },
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
+      { id: 'password', title: 'Password', icon: KeyIcon, component: SettingsPasswordPanel },
       { id: 'unmanaged', title: 'Unmanaged Config', icon: ExclamationTriangleIcon, component: SettingsUnmanagedPanel },
     ],
   },
@@ -117,11 +118,10 @@ export const sectionGroups: SettingsSectionGroup[] = [
     ],
   },
   {
-    label: 'Security & Access',
+    label: 'Security',
     sections: [
       { id: 'shell', title: 'Shell Execution', icon: CommandLineIcon, component: SettingsShellPanel },
       { id: 'malware', title: 'Malware Scanners', icon: ShieldCheckIcon, component: SettingsMalwarePanel },
-      { id: 'password', title: 'Password', icon: KeyIcon, component: SettingsPasswordPanel },
     ],
   },
 ]

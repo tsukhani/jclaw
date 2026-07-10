@@ -46,7 +46,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     await flushPromises()
 
     const text = component.text()
-    for (const label of ['System', 'Providers', 'Media', 'Agents & Automation', 'Security & Access']) {
+    for (const label of ['System', 'Providers', 'Media', 'Agents & Automation', 'Security']) {
       expect(text).toContain(label)
     }
   })
