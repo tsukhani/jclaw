@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -299,6 +300,116 @@ public class ApiSubagentRunsController extends Controller {
         }
         AgentService.delete(childAgent);
         ApiResponses.ok("id", id);
+    }
+
+    /** Count of runs removed by a bulk delete. */
+    public record DeletedCountResponse(int deleted) {}
+
+    /**
+     * DELETE /api/subagent-runs — bulk delete terminal runs, either by an
+     * explicit {@code ids} array or by the same {@code filter} the list view
+     * uses ("delete all matching"). Mirrors
+     * {@link ApiConversationsController#deleteConversations}.
+     *
+     * <p>RUNNING rows are skipped, never rejected: a "delete all" over a mixed
+     * set silently leaves live runs intact (kill-then-delete remains the path
+     * for those, exactly as {@link #delete(Long)} enforces per-row). Each
+     * removed run cascades through {@link services.AgentService#delete} on its
+     * child agent, sweeping the child conversation, transcript, and run row.
+     */
+    @RequestBody(content = @Content(schema = @Schema(implementation = DeleteBulkRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
+    @Operation(summary = "Bulk delete terminal subagent runs by ids or filter (RUNNING rows are skipped)")
+    public static void deleteBulk() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Missing request body.");
+            return;
+        }
+
+        List<SubagentRun> targets;
+        if (body.has("ids")) {
+            var arr = body.getAsJsonArray("ids");
+            var ids = new ArrayList<Long>();
+            for (var elem : arr) ids.add(elem.getAsLong());
+            if (ids.isEmpty()) {
+                renderJSON(gson.toJson(new DeletedCountResponse(0)));
+                return;
+            }
+            targets = JPA.em()
+                    .createQuery("SELECT r FROM SubagentRun r WHERE r.id IN :ids", SubagentRun.class)
+                    .setParameter("ids", ids)
+                    .getResultList();
+        } else if (body.has("filter")) {
+            var f = body.getAsJsonObject("filter");
+            String statusRaw = stringField(f, "status");
+            SubagentRun.Status statusEnum = parseStatusFilter(statusRaw);
+            if (statusEnum == null && statusRaw != null && !statusRaw.isBlank()) return;
+            String sinceRaw = stringField(f, "since");
+            Instant sinceInstant = parseSinceFilter(sinceRaw);
+            if (sinceInstant == null && sinceRaw != null && !sinceRaw.isBlank()) return;
+            targets = findMatchingRuns(
+                    longField(f, "parentAgentId"),
+                    longField(f, "parentConversationId"),
+                    statusEnum, sinceInstant, stringField(f, "q"));
+        } else {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provide 'ids' or 'filter'.");
+            return;
+        }
+
+        int deleted = 0;
+        for (var run : targets) {
+            if (run.status == SubagentRun.Status.RUNNING) continue; // live rows: kill first
+            var childAgent = run.childAgent;
+            if (childAgent == null) run.delete();
+            else AgentService.delete(childAgent);
+            deleted++;
+        }
+        renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
+    }
+
+    /** Shape of the {@link #deleteBulk()} request body (ids OR filter). */
+    public record DeleteBulkRequest(List<Long> ids, DeleteFilter filter) {
+        public record DeleteFilter(Long parentAgentId, Long parentConversationId,
+                                   String status, String since, String q) {}
+    }
+
+    /**
+     * Resolve every run matching the list-view filter, unpaginated, for bulk
+     * delete. Mirrors the WHERE-clause + FTS construction in {@link #list} so
+     * "delete all matching" targets exactly the rows the operator sees.
+     */
+    private static List<SubagentRun> findMatchingRuns(Long parentAgentId, Long parentConversationId,
+                                                      SubagentRun.Status status, Instant since, String q) {
+        var filter = new JpqlFilter()
+                .eq("parentAgent.id", parentAgentId)
+                .eq("parentConversation.id", parentConversationId)
+                .eq("status", status)
+                .gte("startedAt", since);
+        var ftsRunIds = ftsSubagentRunIds(q);
+        var where = filter.toWhereClause();
+        if (ftsRunIds != null) {
+            if (ftsRunIds.isEmpty()) return List.of();
+            where = where.isEmpty() ? "id IN (:fts)" : where + " AND id IN (:fts)";
+        }
+        var jpql = where.isEmpty()
+                ? "SELECT r FROM SubagentRun r"
+                : "SELECT r FROM SubagentRun r WHERE " + where;
+        var jpaQ = JPA.em().createQuery(jpql, SubagentRun.class);
+        var params = filter.paramList();
+        for (int i = 0; i < params.size(); i++) {
+            jpaQ.setParameter(i + 1, params.get(i));
+        }
+        if (ftsRunIds != null) jpaQ.setParameter("fts", ftsRunIds);
+        return jpaQ.getResultList();
+    }
+
+    private static String stringField(JsonObject obj, String key) {
+        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : null;
+    }
+
+    private static Long longField(JsonObject obj, String key) {
+        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsLong() : null;
     }
 
     /**

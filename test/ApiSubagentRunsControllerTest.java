@@ -329,6 +329,97 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    // ── bulk delete (DELETE /api/subagent-runs) ──────────────────────
+
+    /**
+     * Bulk delete by explicit ids sweeps terminal rows and silently skips
+     * RUNNING ones — a "delete selected" over a mixed set leaves live runs
+     * intact rather than 409-ing the whole batch. Each removed row cascades
+     * through AgentService.delete on its child agent.
+     */
+    @Test
+    void deleteBulkByIdsRemovesTerminalRunsAndSkipsRunning() {
+        login();
+        var data = commitInFreshTx(() -> {
+            var p = AgentService.create("api-bulk-ids-p", "openrouter", "gpt-4.1");
+            var c1 = AgentService.create("api-bulk-ids-c1", "openrouter", "gpt-4.1");
+            var c2 = AgentService.create("api-bulk-ids-c2", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc1 = ConversationService.create(c1, "subagent", null);
+            var cc2 = ConversationService.create(c2, "subagent", null);
+            var doneId = persistRun(p, c1, pc, cc1, SubagentRun.Status.COMPLETED);
+            var runningId = persistRun(p, c2, pc, cc2, SubagentRun.Status.RUNNING);
+            return new long[]{doneId, runningId, c1.id};
+        });
+
+        var resp = deleteWithJsonBody("/api/subagent-runs",
+                "{\"ids\":[" + data[0] + "," + data[1] + "]}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":1"),
+                "only the terminal row counts as deleted, got: " + getContent(resp));
+
+        JPA.em().clear();
+        assertNull(SubagentRun.findById(data[0]), "COMPLETED run swept");
+        assertNull(Agent.findById(data[2]), "child agent of deleted run swept by cascade");
+        assertNotNull(SubagentRun.findById(data[1]), "RUNNING run left intact");
+    }
+
+    /**
+     * Bulk delete by filter mirrors the list view's WHERE clause: only rows
+     * matching parentAgentId are removed, and a RUNNING match is skipped.
+     */
+    @Test
+    void deleteBulkByFilterScopedToParentAgentDeletesOnlyMatchingTerminalRows() {
+        login();
+        var data = commitInFreshTx(() -> {
+            var target = AgentService.create("api-bulk-filter-target", "openrouter", "gpt-4.1");
+            var other = AgentService.create("api-bulk-filter-other", "openrouter", "gpt-4.1");
+            var tc = ConversationService.create(target, "web", "u");
+            var oc = ConversationService.create(other, "web", "u");
+            // Each run owns a DISTINCT child agent — a subagent spawns a fresh
+            // child per run. Sharing one child agent would make the first
+            // AgentService.delete cascade sweep every run pointing at it,
+            // masking the RUNNING-skip the test is asserting.
+            var cDone = AgentService.create("api-bulk-filter-c-done", "openrouter", "gpt-4.1");
+            var cRunning = AgentService.create("api-bulk-filter-c-running", "openrouter", "gpt-4.1");
+            var cOther = AgentService.create("api-bulk-filter-c-other", "openrouter", "gpt-4.1");
+            var ccDone = ConversationService.create(cDone, "subagent", null);
+            var ccRunning = ConversationService.create(cRunning, "subagent", null);
+            var ccOther = ConversationService.create(cOther, "subagent", null);
+            var targetDone = persistRun(target, cDone, tc, ccDone, SubagentRun.Status.COMPLETED);
+            var targetRunning = persistRun(target, cRunning, tc, ccRunning, SubagentRun.Status.RUNNING);
+            var otherDone = persistRun(other, cOther, oc, ccOther, SubagentRun.Status.COMPLETED);
+            return new long[]{target.id, targetDone, targetRunning, otherDone};
+        });
+
+        var resp = deleteWithJsonBody("/api/subagent-runs",
+                "{\"filter\":{\"parentAgentId\":" + data[0] + "}}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":1"),
+                "only the target agent's terminal row removed, got: " + getContent(resp));
+
+        JPA.em().clear();
+        assertNull(SubagentRun.findById(data[1]), "target COMPLETED run swept");
+        assertNotNull(SubagentRun.findById(data[2]), "target RUNNING run skipped");
+        assertNotNull(SubagentRun.findById(data[3]), "other agent's run untouched by scoped filter");
+    }
+
+    @Test
+    void deleteBulkWithNeitherIdsNorFilterReturns400() {
+        login();
+        var resp = deleteWithJsonBody("/api/subagent-runs", "{}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void deleteBulkWithEmptyIdsArrayReportsZeroDeleted() {
+        login();
+        var resp = deleteWithJsonBody("/api/subagent-runs", "{\"ids\":[]}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":0"),
+                "empty ids array is a no-op, got: " + getContent(resp));
+    }
+
     // ── kill body-reason branch coverage ─────────────────────────────
 
     @Test
@@ -587,6 +678,36 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
     }
 
     // ── helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Play 1.x's {@link FunctionalTest#DELETE} helper overwrites the request
+     * body with an empty stream, so a DELETE that carries a JSON payload has
+     * to drive {@code makeRequest} directly. Mirrors the identical helper in
+     * ApiConversationsControllerTest — the two bulk-delete endpoints share the
+     * ids-or-filter body shape.
+     */
+    private static play.mvc.Http.Response deleteWithJsonBody(String url, String json) {
+        var req = newRequest();
+        req.method = "DELETE";
+        req.contentType = "application/json";
+        var qIdx = url.indexOf('?');
+        req.url = url;
+        req.path = qIdx >= 0 ? url.substring(0, qIdx) : url;
+        req.querystring = qIdx >= 0 ? url.substring(qIdx + 1) : "";
+        req.body = new java.io.ByteArrayInputStream(
+                json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try {
+            var f = FunctionalTest.class.getDeclaredField("savedCookies");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var cookies = (java.util.Map<String, play.mvc.Http.Cookie>) f.get(null);
+            if (cookies != null) req.cookies = cookies;
+        } catch (Exception _) {
+            // savedCookies field may shift across play versions; an
+            // unauthenticated DELETE surfaces as 401.
+        }
+        return makeRequest(req);
+    }
 
     private static long persistRun(Agent p, Agent c, Conversation pc, Conversation cc,
                                     SubagentRun.Status status) {

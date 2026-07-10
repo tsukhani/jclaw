@@ -228,6 +228,7 @@ GET     /api/logs                               ApiLogsController.list
 GET     /api/subagent-runs                      ApiSubagentRunsController.list
 GET     /api/subagent-runs/{id}/steps           ApiSubagentRunsController.steps
 POST    /api/subagent-runs/{id}/kill            ApiSubagentRunsController.kill
+DELETE  /api/subagent-runs                       ApiSubagentRunsController.deleteBulk
 DELETE  /api/subagent-runs/{id}                 ApiSubagentRunsController.delete
 
 # Metrics API (in-memory latency histograms — reset on JVM restart)

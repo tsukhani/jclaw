@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Agent } from '~/types/api'
+import type { Agent, Message } from '~/types/api'
 import { TrashIcon } from '@heroicons/vue/24/outline'
 
 /**
@@ -107,8 +107,17 @@ const url = computed(() => {
 // the test harness which mounts the page across `it` blocks without
 // invalidating the cache.
 const runs = ref<SubagentRun[]>([])
+// Full matching count (pre-pagination), read from the same X-Total-Count
+// header the list endpoint sets. `runs` is capped at limit=200 but `total`
+// reflects every row the filter matches — which is what "Delete all matching"
+// wipes, so the button's label and the confirm count must come from here, not
+// runs.length.
+const total = ref(0)
 async function refresh() {
-  runs.value = await $fetch<SubagentRun[]>(url.value)
+  const res = await $fetch.raw<SubagentRun[]>(url.value)
+  runs.value = res._data ?? []
+  const headerTotal = res.headers.get('x-total-count')
+  total.value = headerTotal ? Number.parseInt(headerTotal, 10) : runs.value.length
 }
 await refresh()
 watch(url, () => {
@@ -218,6 +227,103 @@ const {
 const allRunsSelected = computed(() => selectableRuns.value.length > 0 && selectedIds.value.size === selectableRuns.value.length)
 const someRunsSelected = computed(() => selectedIds.value.size > 0 && !allRunsSelected.value)
 
+const deletingAll = ref(false)
+
+/**
+ * Filter object for the DELETE /api/subagent-runs body. Mirrors the param
+ * construction in the `url` computed exactly (name→id resolution, the `:00Z`
+ * since suffix) so "Delete all matching" wipes precisely the rows the list
+ * shows. RUNNING rows the filter still matches are skipped server-side.
+ */
+function activeFilterPayload(): { parentAgentId?: number, parentConversationId?: number, status?: string, since?: string, q?: string } {
+  const out: { parentAgentId?: number, parentConversationId?: number, status?: string, since?: string, q?: string } = {}
+  if (qFilter.value) out.q = qFilter.value
+  if (parentAgentFilter.value) {
+    const v = parentAgentFilter.value
+    const asNumber = Number(v)
+    if (Number.isFinite(asNumber) && Number.isInteger(asNumber)) out.parentAgentId = asNumber
+    else {
+      const match = agentList.value?.find((a: Agent) => a.name.toLowerCase() === v.toLowerCase())
+      if (match) out.parentAgentId = match.id
+    }
+  }
+  if (parentConversationFilter.value) out.parentConversationId = Number(parentConversationFilter.value)
+  if (statusFilter.value) out.status = statusFilter.value
+  if (sinceFilter.value) out.since = `${sinceFilter.value}:00Z`
+  return out
+}
+
+/** Human-readable echo of the active filters for the confirm message. */
+function activeFilterDescription(): string {
+  const parts: string[] = []
+  if (qFilter.value) parts.push(`q:${qFilter.value}`)
+  if (parentAgentFilter.value) parts.push(`parentAgent:${parentAgentFilter.value}`)
+  if (parentConversationFilter.value) parts.push(`conversation:#${parentConversationFilter.value}`)
+  if (statusFilter.value) parts.push(`status:${statusFilter.value}`)
+  if (sinceFilter.value) parts.push(`since:${sinceFilter.value}`)
+  return parts.join(' ')
+}
+
+const hasActiveFilters = computed(() =>
+  !!(qFilter.value || parentAgentFilter.value || parentConversationFilter.value || statusFilter.value || sinceFilter.value),
+)
+
+/**
+ * Wipe every terminal run matching the active filter (or the whole table when
+ * unfiltered). Separate destructive surface from "Delete N": filter-scoped,
+ * so it reaches rows beyond the 200-row page cap, and gated behind a typed
+ * 'delete' confirmation because the blast radius is the full matching set.
+ */
+async function deleteAll() {
+  if (deletingAll.value || total.value <= 0) return
+  const filterDesc = activeFilterDescription()
+  const scope = filterDesc ? ` matching ${filterDesc}` : ''
+  const ok = await confirm({
+    title: 'Delete all subagent runs',
+    message: `Delete all ${total.value} subagent run${total.value === 1 ? '' : 's'}${scope} along with their child agents and transcripts? Running rows are skipped. This cannot be undone.`,
+    confirmText: `Delete ${total.value}`,
+    variant: 'danger',
+    requireText: 'delete',
+  })
+  if (!ok) return
+  deletingAll.value = true
+  try {
+    await $fetch('/api/subagent-runs', {
+      method: 'DELETE',
+      body: { filter: activeFilterPayload() },
+    })
+    selectedIds.value = new Set()
+    await refresh()
+  }
+  catch (e) {
+    console.error('Failed to delete all subagent runs:', e)
+  }
+  finally {
+    deletingAll.value = false
+  }
+}
+
+// ── Quick-preview peek (mirrors the conversations page) ───────────────
+// A run's transcript IS its child conversation, so the peek fetches the
+// child conversation's messages. The "View transcript" eye-link opens the
+// full chat viewer; this peek is the inline read-without-leaving glance.
+const peekOpen = ref(false)
+const selectedRun = ref<SubagentRun | null>(null)
+const peekMessages = ref<Message[]>([])
+
+async function selectRun(run: SubagentRun) {
+  selectedRun.value = run
+  peekOpen.value = true
+  peekMessages.value = run.childConversationId !== null
+    ? (await $fetch<Message[]>(`/api/conversations/${run.childConversationId}/messages`) ?? [])
+    : []
+}
+
+function closePeek() {
+  peekOpen.value = false
+  // Keep selectedRun so re-opening preserves the last selection.
+}
+
 // (JCLAW-304: select-input ids were retired when the three dropdowns
 // were replaced with FilterBar. FilterBar manages its own ARIA labels
 // on the underlying input.)
@@ -238,6 +344,21 @@ const someRunsSelected = computed(() => selectedIds.value.size > 0 && !allRunsSe
           @click="deleteSelected"
         >
           {{ deletingBulk ? 'Deleting...' : `Delete${selectedIds.size ? ' ' + selectedIds.size : ''}` }}
+        </button>
+        <!--
+          "Delete all" mirrors the conversations page: a separate destructive
+          surface from selection-driven "Delete N". Only shown when the match
+          count is greater than zero; wipes only the matching subset when a
+          filter is active, and the confirm dialog echoes that scope before the
+          user types 'delete' to commit.
+        -->
+        <button
+          v-if="total > 0"
+          :disabled="deletingAll"
+          class="px-3 py-1.5 border border-red-700 text-red-700 dark:text-red-400 text-xs font-medium hover:bg-red-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          @click="deleteAll"
+        >
+          {{ deletingAll ? 'Deleting...' : `Delete all${hasActiveFilters ? ' matching' : ''}` }}
         </button>
       </div>
     </div>
@@ -424,6 +545,34 @@ const someRunsSelected = computed(() => selectedIds.value.size > 0 && !allRunsSe
                     />
                   </svg>
                 </NuxtLink>
+                <!--
+                  Quick preview — slide-in peek of the child transcript without
+                  leaving the page. Icon matches the conversations page's
+                  "Quick preview" (split-panel glyph). The eye-link above opens
+                  the full chat viewer; this is the inline glance.
+                -->
+                <button
+                  v-if="run.childConversationId !== null"
+                  type="button"
+                  class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Quick preview"
+                  @click.stop="selectRun(run)"
+                >
+                  <svg
+                    class="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M4 4h16v16H4z M14 4v16"
+                    />
+                  </svg>
+                </button>
                 <button
                   v-if="run.status === 'RUNNING'"
                   :disabled="killing.has(run.id)"
@@ -455,5 +604,50 @@ const someRunsSelected = computed(() => selectedIds.value.size > 0 && !allRunsSe
         No subagent runs matching filters
       </div>
     </div>
+
+    <!-- Quick-preview peek: the run's child transcript, read without leaving
+         the page. Mirrors the conversations page's PeekPanel. -->
+    <PeekPanel
+      :open="peekOpen"
+      :title="selectedRun ? `Run #${selectedRun.id} · ${selectedRun.childAgentName || 'child'}` : 'Subagent run'"
+      :description="selectedRun ? `${selectedRun.parentAgentName || '—'} → ${selectedRun.childAgentName || '—'} · ${selectedRun.status}` : ''"
+      @update:open="closePeek"
+    >
+      <template v-if="selectedRun">
+        <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-fg-muted mb-4">
+          <span>Mode: <strong class="text-fg-primary font-mono">{{ selectedRun.mode || '—' }}</strong></span>
+          <span>Status: <strong class="text-fg-primary">{{ selectedRun.status }}</strong></span>
+          <span>Started: <strong class="text-fg-primary">{{ selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : '—' }}</strong></span>
+          <span v-if="durationSeconds(selectedRun) !== null">Duration: <strong class="text-fg-primary font-mono">{{ durationSeconds(selectedRun) }}s</strong></span>
+        </div>
+        <div
+          v-if="selectedRun.outcome"
+          class="mb-4 bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap"
+        >
+          {{ selectedRun.outcome }}
+        </div>
+        <div class="space-y-3">
+          <div
+            v-for="msg in peekMessages"
+            :key="msg.id"
+            :class="msg.role === 'user' ? 'ml-12' : msg.role === 'tool' ? 'ml-6' : ''"
+          >
+            <div class="flex items-center gap-2 mb-0.5">
+              <span class="text-xs font-mono text-fg-muted">{{ msg.role }}</span>
+              <span class="text-xs text-fg-muted">{{ new Date(msg.createdAt).toLocaleTimeString() }}</span>
+            </div>
+            <div class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap">
+              {{ msg.content || '(tool call)' }}
+            </div>
+          </div>
+          <div
+            v-if="!peekMessages.length"
+            class="text-sm text-fg-muted"
+          >
+            No transcript messages yet.
+          </div>
+        </div>
+      </template>
+    </PeekPanel>
   </div>
 </template>
