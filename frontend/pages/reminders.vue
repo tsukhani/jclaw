@@ -569,14 +569,23 @@ const statusColors: Record<string, string> = {
 <style scoped>
 /* Autolinked URLs in the expanded reminder body. v-html content isn't touched
    by scoped attributes, so `:deep()` is required to reach the injected <a>.
-   Emerald + underline matches the page's other links (the empty-state hint). */
+   Emerald + underline matches the page's other links (the empty-state hint):
+   emerald-700 in light (AA on the pale card), emerald-400 in dark. */
 .reminder-body :deep(a) {
-  color: #10b981; /* emerald-500 */
+  color: #047857; /* emerald-700 — clears 4.5:1 on the light reminder card */
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
+html.dark .reminder-body :deep(a) {
+  color: #34d399; /* emerald-400 — vivid on the dark surface */
+}
+
 .reminder-body :deep(a:hover) {
-  color: #34d399; /* emerald-400 */
+  color: #065f46; /* emerald-800 */
+}
+
+html.dark .reminder-body :deep(a:hover) {
+  color: #6ee7b7; /* emerald-300 */
 }
 </style>
