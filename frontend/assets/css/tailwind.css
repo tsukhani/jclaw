@@ -43,13 +43,13 @@
     --secondary: hsl(0 0% 96.1%);
     --secondary-foreground: hsl(0 0% 9%);
     --muted: hsl(0 0% 96.1%);
-    --muted-foreground: hsl(0 0% 45.1%);
+    --muted-foreground: hsl(0 0% 43%);     /* JCLAW-691 #6: 45.1%→43% so muted text ≥4.5:1 on --muted */
     --accent: hsl(0 0% 96.1%);
     --accent-foreground: hsl(0 0% 9%);
-    --destructive: hsl(0 84.2% 60.2%);
+    --destructive: hsl(0 72% 45%);         /* JCLAW-691 #5: darkened so white --destructive-foreground ≥4.5:1 (was 60.2% ≈3.6:1) */
     --destructive-foreground: hsl(0 0% 98%);
-    --border: hsl(0 0% 89.8%);
-    --input: hsl(0 0% 89.8%);
+    --border: hsl(0 0% 80%);               /* JCLAW-691 #4: 89.8%→80% — moderate lift for decorative dividers (full 3:1 is a heavier global change to confirm visually) */
+    --input: hsl(0 0% 55%);                /* JCLAW-691 #4: 89.8%→55% so form-field borders ≥3:1 non-text on the near-white surface */
     --ring: hsl(0 0% 3.9%);
     --radius: 0.5rem;
 
@@ -63,10 +63,10 @@
     --fg-primary: hsl(0 0% 27%);           /* body text — neutral-700 */
     --fg-muted: hsl(0 0% 43%);             /* secondary text — neutral; ≥4.5:1 incl. tinted surfaces (WCAG AA) */
     --fg-strong: hsl(0 0% 9%);             /* emphasis/hover — neutral-900 */
-    --ok: hsl(160 84% 39%);                /* success — emerald-600 */
-    --danger: hsl(0 72% 51%);              /* error — red-600 */
-    --warning: hsl(45 93% 47%);            /* warning — amber-500 */
-    --info: hsl(217 91% 60%);              /* informational — blue-500 */
+    --ok: hsl(160 84% 27%);                /* success — JCLAW-691 #2: darkened emerald so text ≥4.5:1 on white (was 39% ≈2.6:1); dark keeps 39% */
+    --danger: hsl(0 72% 51%);              /* error — red-600 (already ≥4.5:1 on white) */
+    --warning: hsl(38 92% 33%);            /* warning — JCLAW-691 #2: darkened amber so text ≥4.5:1 on white (was amber-500 ≈2:1); dark keeps amber-500 */
+    --info: hsl(221 83% 45%);              /* informational — JCLAW-691 #2: darkened blue so text ≥4.5:1 on white (was blue-500 ≈3.6:1); dark keeps blue-500 */
   }
 
   .dark {
@@ -106,8 +106,8 @@
        intentional-invisibility uses of `dark:border-border` in
        layouts/default.vue have been switched to `dark:border-transparent`
        to preserve their structural-spacer behavior. */
-    --border: hsl(0 0% 22%);
-    --input: hsl(0 0% 22%);
+    --border: hsl(0 0% 32%);               /* JCLAW-691 #4: 22%→32% — more-visible decorative dividers (full 3:1 is a heavier global change to confirm) */
+    --input: hsl(0 0% 45%);                /* JCLAW-691 #4: 22%→45% so form-field borders ≥3:1 non-text on the elevated dark surface */
     --ring: hsl(0 0% 83.1%);
 
     /* ── JClaw semantic design tokens ──────────────────────────────────── */
