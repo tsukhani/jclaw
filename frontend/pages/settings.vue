@@ -21,23 +21,12 @@ import type {
   ProviderModelDef,
 } from '~/types/api'
 
-// JCLAW-680: the shared /api/config store lives in a composable that provides a
-// reactive context to the extracted panels. The page still holds the same
-// configData/refresh/saving refs (children inject the identical objects).
-const { configData, refresh, saving, saveField, getProviderModels, apiKeyConfigured, asyncConfig } = useProvideSettingsConfig()
-await asyncConfig
-// JCLAW-177 follow-up: probe state + Config DB toggle for the OCR section.
-// Fetched separately from /api/config so the section can render the toggle
-// as uninteractive when the binary isn't on PATH (probe.available=false),
-// regardless of what the stored ocr.tesseract.enabled row says.
-const { data: ocrStatus, refresh: refreshOcrStatus }
-  = await useFetch<OcrStatusResponse>('/api/ocr/status')
-
 // JCLAW-280: provider billing-shape info. Carries the selected
 // paymentModality, monthly subscription price, and the supported-
 // modality set. Used by the per-provider Settings card to know which
 // modality choices to offer and by the modality+subscription rows to
-// render their current values.
+// render their current values. Fetched before the config store so its
+// refresh can be handed to the shared updateEntry (below).
 interface ProviderInfo {
   name: string
   paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION'
@@ -46,6 +35,24 @@ interface ProviderInfo {
 }
 const { data: providersInfo, refresh: refreshProviders }
   = await useFetch<ProviderInfo[]>('/api/providers')
+
+// JCLAW-680: the shared /api/config store + page-wide inline config-row editor
+// live in a composable that provides a reactive context to the extracted panels.
+// The page still holds the same configData/refresh/saving/editingKey refs
+// (children inject the identical objects). refreshProviders is handed in so the
+// shared updateEntry can refresh the billing projection on provider.* writes.
+const {
+  configData, refresh, saving, saveField, getProviderModels, apiKeyConfigured,
+  editingKey, editValue, startEdit, updateEntry, asyncConfig,
+} = useProvideSettingsConfig({ refreshProviders })
+await asyncConfig
+// JCLAW-177 follow-up: probe state + Config DB toggle for the OCR section.
+// Fetched separately from /api/config so the section can render the toggle
+// as uninteractive when the binary isn't on PATH (probe.available=false),
+// regardless of what the stored ocr.tesseract.enabled row says.
+const { data: ocrStatus, refresh: refreshOcrStatus }
+  = await useFetch<OcrStatusResponse>('/api/ocr/status')
+
 const providerInfoMap = computed(() => {
   const map = new Map<string, ProviderInfo>()
   for (const p of providersInfo.value ?? []) map.set(p.name, p)
@@ -59,35 +66,6 @@ function paymentModalityFor(name: string): 'PER_TOKEN' | 'SUBSCRIPTION' {
 }
 function subscriptionMonthlyFor(name: string): number {
   return providerInfoMap.value.get(name)?.subscriptionMonthlyUsd ?? 0
-}
-const editingKey = ref<string | null>(null)
-const editValue = ref('')
-
-async function updateEntry(key: string) {
-  saving.value = true
-  try {
-    await $fetch('/api/config', {
-      method: 'POST',
-      body: { key, value: editValue.value },
-    })
-    editingKey.value = null
-    refresh()
-    // JCLAW-280: provider-scoped config rows (modality, subscription
-    // price) feed the /api/providers projection; refresh it so the
-    // pencil-edit row reflects the new value immediately.
-    if (key.startsWith('provider.')) refreshProviders()
-  }
-  catch (e) {
-    console.error('Failed to update config:', e)
-  }
-  finally {
-    saving.value = false
-  }
-}
-
-function startEdit(entry: ConfigEntry) {
-  editingKey.value = entry.key
-  editValue.value = entry.value
 }
 
 function isSensitive(key: string) {

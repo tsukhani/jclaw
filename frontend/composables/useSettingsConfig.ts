@@ -1,5 +1,5 @@
 import type { InjectionKey, Ref } from 'vue'
-import type { ConfigResponse, ProviderModelDef } from '~/types/api'
+import type { ConfigEntry, ConfigResponse, ProviderModelDef } from '~/types/api'
 
 /**
  * Shared /api/config store for the Settings page and its extracted panels
@@ -31,6 +31,18 @@ export interface SettingsConfigContext {
   getProviderModels: (providerName: string) => ProviderModelDef[]
   /** True when {@code provider.<name>.apiKey} is set and non-blank. */
   apiKeyConfigured: (providerName: string) => boolean
+  /**
+   * Page-wide inline config-row editor (JCLAW-680 second pass). The Settings
+   * page and every section that edits a config row inline share ONE editor —
+   * only a single key is editable at a time. {@code editingKey} names it (null
+   * = nothing editing), {@code editValue} is the buffer, {@code startEdit}
+   * opens a row, {@code updateEntry} POSTs the buffer and closes the editor.
+   * Panels inject these so their pencil-edit UIs drive the same singleton.
+   */
+  editingKey: Ref<string | null>
+  editValue: Ref<string>
+  startEdit: (entry: ConfigEntry) => void
+  updateEntry: (key: string) => Promise<void>
 }
 
 export const settingsConfigKey: InjectionKey<SettingsConfigContext>
@@ -43,7 +55,7 @@ export const settingsConfigKey: InjectionKey<SettingsConfigContext>
  * {@code configData}/{@code refresh}/{@code saving} refs the page still uses
  * directly for the panels not yet extracted.
  */
-export function useProvideSettingsConfig() {
+export function useProvideSettingsConfig(opts: { refreshProviders?: () => void } = {}) {
   const asyncConfig = useFetch<ConfigResponse>('/api/config')
   const saving = ref(false)
 
@@ -76,6 +88,37 @@ export function useProvideSettingsConfig() {
     return !!v && v.trim().length > 0
   }
 
+  // Page-wide inline config-row editor — single editable key at a time.
+  const editingKey = ref<string | null>(null)
+  const editValue = ref('')
+
+  function startEdit(entry: ConfigEntry) {
+    editingKey.value = entry.key
+    editValue.value = entry.value
+  }
+
+  async function updateEntry(key: string) {
+    saving.value = true
+    try {
+      await $fetch('/api/config', {
+        method: 'POST',
+        body: { key, value: editValue.value },
+      })
+      editingKey.value = null
+      asyncConfig.refresh()
+      // JCLAW-280: provider-scoped config rows (modality, subscription price,
+      // API keys) feed the /api/providers projection; refresh it so provider
+      // billing rows reflect the new value immediately.
+      if (key.startsWith('provider.')) opts.refreshProviders?.()
+    }
+    catch (e) {
+      console.error('Failed to update config:', e)
+    }
+    finally {
+      saving.value = false
+    }
+  }
+
   const context: SettingsConfigContext = {
     configData: asyncConfig.data as Ref<ConfigResponse | null>,
     refresh: asyncConfig.refresh,
@@ -84,6 +127,10 @@ export function useProvideSettingsConfig() {
     saveField,
     getProviderModels,
     apiKeyConfigured,
+    editingKey,
+    editValue,
+    startEdit,
+    updateEntry,
   }
   provide(settingsConfigKey, context)
   return { ...context, asyncConfig }
