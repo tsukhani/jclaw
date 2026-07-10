@@ -162,8 +162,24 @@ describe('Tasks page — JCLAW-328 q: wiring', () => {
 })
 
 describe('Subagents page — JCLAW-328 q: wiring + JCLAW-326 chip integration', () => {
+  // Seed one run (with X-Total-Count) so the page renders its data view — the
+  // empty-state landing card hides the FilterBar by design when there are no
+  // runs and no active filter. We're testing the data-view wiring here.
+  function seedOneRun() {
+    registerEndpoint('/api/subagent-runs', () => new Response(
+      JSON.stringify([{
+        id: 1, parentAgentId: 1, parentAgentName: 'main', childAgentId: 2,
+        childAgentName: 'main-sub', parentConversationId: 5, childConversationId: 6,
+        mode: 'session', status: 'COMPLETED', startedAt: '2026-05-27T00:00:00Z',
+        endedAt: '2026-05-27T00:00:30Z', outcome: 'ok',
+      }]),
+      { status: 200, headers: { 'x-total-count': '1', 'content-type': 'application/json' } },
+    ))
+  }
+
   it('renders a FilterBar with q in the placeholder hint', async () => {
     setupMockApi()
+    seedOneRun()
     const component = await mountSuspended(Subagents)
     const input = component.find('input[placeholder*="q:"]')
     expect(input.exists()).toBe(true)
@@ -175,6 +191,7 @@ describe('Subagents page — JCLAW-328 q: wiring + JCLAW-326 chip integration', 
     // Defensive check that no leftover <select> with the legacy
     // option text is rendering alongside the bar.
     setupMockApi()
+    seedOneRun()
     const component = await mountSuspended(Subagents)
     const legacy = component.findAll('select').filter((s) => {
       const opts = s.findAll('option').map(o => o.text())
