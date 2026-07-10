@@ -1,5 +1,5 @@
 import type { InjectionKey, Ref } from 'vue'
-import type { ConfigResponse } from '~/types/api'
+import type { ConfigResponse, ProviderModelDef } from '~/types/api'
 
 /**
  * Shared /api/config store for the Settings page and its extracted panels
@@ -21,6 +21,16 @@ export interface SettingsConfigContext {
   configValue: (key: string, fallback?: string) => string
   /** POST {@code {key, value}} to /api/config then refresh the store. */
   saveField: (key: string, value: string) => Promise<void>
+  /**
+   * Parsed {@code provider.<name>.models} JSON, or [] when unset/invalid.
+   * The LLM-provider model catalog is a pure read-projection of the config
+   * store, so media panels (transcription diarization, captioning, video)
+   * that need a provider's audio/vision/video models inject it from here
+   * rather than each re-deriving it (JCLAW-680 second pass).
+   */
+  getProviderModels: (providerName: string) => ProviderModelDef[]
+  /** True when {@code provider.<name>.apiKey} is set and non-blank. */
+  apiKeyConfigured: (providerName: string) => boolean
 }
 
 export const settingsConfigKey: InjectionKey<SettingsConfigContext>
@@ -52,12 +62,28 @@ export function useProvideSettingsConfig() {
     }
   }
 
+  function getProviderModels(providerName: string): ProviderModelDef[] {
+    const modelsEntry = asyncConfig.data.value?.entries?.find(e => e.key === `provider.${providerName}.models`)
+    if (!modelsEntry?.value) return []
+    try {
+      return JSON.parse(modelsEntry.value) as ProviderModelDef[]
+    }
+    catch { return [] }
+  }
+
+  function apiKeyConfigured(providerName: string): boolean {
+    const v = asyncConfig.data.value?.entries?.find(e => e.key === `provider.${providerName}.apiKey`)?.value
+    return !!v && v.trim().length > 0
+  }
+
   const context: SettingsConfigContext = {
     configData: asyncConfig.data as Ref<ConfigResponse | null>,
     refresh: asyncConfig.refresh,
     saving,
     configValue,
     saveField,
+    getProviderModels,
+    apiKeyConfigured,
   }
   provide(settingsConfigKey, context)
   return { ...context, asyncConfig }
