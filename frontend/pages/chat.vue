@@ -28,7 +28,6 @@ import { formatSize } from '~/utils/format'
 import { initCollapsedState } from '~/utils/thinking'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
-import { isVideoJobPending, type VideoJobStatus } from '~/utils/video-job'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
@@ -41,6 +40,7 @@ import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
 import { useChatAttachments, type UploadedAttachment } from '~/composables/useChatAttachments'
 import { useChatScroll } from '~/composables/useChatScroll'
 import { useChatSubagents } from '~/composables/useChatSubagents'
+import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 
 // Local helpers for fields that streaming/optimistic bubbles carry in addition
@@ -1212,102 +1212,18 @@ function announcePollTick() {
   void pollForAnnounce()
 }
 
-// JCLAW-234: async video-generation progress. A generated-video attachment starts as a zero-byte
-// placeholder linked to a VideoGenerationJob; we poll the job status (~2s — the SV-4 decision: polling,
-// not SSE, because the job outlives the per-turn chat stream) until it fills or fails, then the card
-// swaps to an inline player or an error. Mirrors settings.vue's imagegen-download poll: start on a
-// trigger, stop when nothing's pending, clean up on unmount.
-const videoJobStatus = ref<Record<number, VideoJobStatus>>({})
-const VIDEO_POLL_INTERVAL_MS = 2000
-let videoPollTimer: ReturnType<typeof setInterval> | null = null
-
-function pendingVideoJobIds(): number[] {
-  const ids: number[] = []
-  for (const m of messages.value) {
-    for (const a of (m.attachments ?? [])) {
-      const jobId = a.generationJobId
-      if (jobId != null && isVideoJobPending(a, videoJobStatus.value[jobId]) && !ids.includes(jobId)) {
-        ids.push(jobId)
-      }
-    }
-  }
-  return ids
-}
-
-async function pollVideoJobs() {
-  const ids = pendingVideoJobIds()
-  if (!ids.length) {
-    stopVideoPolling()
-    return
-  }
-  try {
-    const data = await $fetch<VideoJobStatus[]>(`/api/videogen/jobs?ids=${ids.join(',')}`)
-    for (const s of data ?? []) videoJobStatus.value[s.id] = s
-    triggerRef(messages)
-  }
-  catch {
-    // transient — the next tick retries
-  }
-  if (!pendingVideoJobIds().length) stopVideoPolling()
-}
-
-function startVideoPolling() {
-  if (videoPollTimer != null || !pendingVideoJobIds().length) return
-  void pollVideoJobs()
-  videoPollTimer = setInterval(() => void pollVideoJobs(), VIDEO_POLL_INTERVAL_MS)
-}
-
-function stopVideoPolling() {
-  if (videoPollTimer != null) {
-    clearInterval(videoPollTimer)
-    videoPollTimer = null
-  }
-}
-
-// Local image-gen progress bar (JCLAW-228). Image gen is synchronous (no job to poll like video), so the
-// chat polls the sidecar's live step-percent while a generate_image tool call is running; the endpoint
-// returns null for cloud providers and when idle, so the bar only appears for an in-flight LOCAL generation.
-const imageGenPercent = ref<number | null>(null)
-// JCLAW-683: _key of the assistant message whose turn actually invoked
-// generate_image. The progress bar is scoped to this turn (mirroring the
-// generated-video card's generationJobId keying) instead of a global footer
-// bar, so a concurrent generation's 0%-load phase can't leak onto an unrelated
-// streaming turn. Set from handleStreamToolCallEvent, cleared when polling stops.
-const imageGenTurnKey = ref<string | null>(null)
-const IMAGE_PROGRESS_INTERVAL_MS = 1000
-let imageProgressTimer: ReturnType<typeof setInterval> | null = null
-
-async function pollImageProgress() {
-  try {
-    const r = await $fetch<{ percent: number | null }>('/api/imagegen/progress')
-    // Guard against a late-resolving poll after polling stopped — it must not resurrect a stale bar.
-    if (imageProgressTimer != null) imageGenPercent.value = r?.percent ?? null
-  }
-  catch {
-    if (imageProgressTimer != null) imageGenPercent.value = null // transient — next tick retries
-  }
-}
-function startImageProgressPolling() {
-  if (imageProgressTimer != null) return
-  // Set the timer before the first poll so pollImageProgress's "still polling?" guard sees it as active.
-  imageProgressTimer = setInterval(() => void pollImageProgress(), IMAGE_PROGRESS_INTERVAL_MS)
-  void pollImageProgress()
-}
-function stopImageProgressPolling() {
-  if (imageProgressTimer != null) {
-    clearInterval(imageProgressTimer)
-    imageProgressTimer = null
-  }
-  imageGenPercent.value = null
-  imageGenTurnKey.value = null
-}
-// JCLAW-683: polling now STARTS from handleStreamToolCallEvent when a
-// generate_image tool call fires (scoped to that turn) rather than on every
-// streaming turn. This watch only tears the poll down when the turn ends, so a
-// stale bar never carries into the next turn.
-watch(streaming, (on) => {
-  if (!on) stopImageProgressPolling()
-})
+// Media-generation progress pollers (video job status + local image-gen
+// step-percent) live in useMediaGenPolling. Both straddle the stream and
+// conversation lifecycles: the page sets imageGenTurnKey and calls the start*
+// controls from its stream/conversation handlers below.
+const {
+  videoJobStatus,
+  imageGenPercent,
+  imageGenTurnKey,
+  startVideoPolling,
+  stopVideoPolling,
+  startImageProgressPolling,
+} = useMediaGenPolling(messages, streaming)
 
 onMounted(() => {
   announcePollTimer = setInterval(announcePollTick, ANNOUNCE_POLL_INTERVAL_MS)
@@ -1322,8 +1238,6 @@ onUnmounted(() => {
   if (streamReasoningTimer != null) clearTimeout(streamReasoningTimer)
   if (announcePollTimer != null) clearInterval(announcePollTimer)
   document.removeEventListener('error', onMarkdownImageError, true)
-  stopVideoPolling()
-  stopImageProgressPolling()
 })
 
 function stopStreaming() {
