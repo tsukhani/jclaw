@@ -361,14 +361,15 @@ function exportMemories() {
             <th
               v-for="col in SORT_COLUMNS"
               :key="col.key"
+              scope="col"
               class="px-4 py-2.5 font-medium"
               :class="col.thClass"
+              :aria-sort="sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
               <button
                 type="button"
                 class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
                 :class="sortBy === col.key ? 'text-fg-strong' : ''"
-                :aria-sort="sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
                 :data-testid="`sort-${col.key}`"
                 @click="toggleSort(col.key)"
               >

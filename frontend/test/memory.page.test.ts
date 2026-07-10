@@ -217,14 +217,17 @@ describe('memories admin page — sortable columns', () => {
     const c = await mountSuspended(Memory)
     await flushPromises()
 
-    const created = c.find('[data-testid="sort-created"]')
-    expect(created.attributes('aria-sort')).toBe('none')
-    await created.trigger('click')
-    expect(created.attributes('aria-sort')).toBe('descending') // created default = desc
-    await created.trigger('click')
-    expect(created.attributes('aria-sort')).toBe('ascending')
+    // aria-sort lives on the <th> (columnheader) that owns the sort state; the
+    // button inside is only the actuator. Read the header via the button's testid.
+    const createdBtn = c.find('[data-testid="sort-created"]')
+    const createdSort = () => createdBtn.element.closest('th')?.getAttribute('aria-sort')
+    expect(createdSort()).toBe('none')
+    await createdBtn.trigger('click')
+    expect(createdSort()).toBe('descending') // created default = desc
+    await createdBtn.trigger('click')
+    expect(createdSort()).toBe('ascending')
     // A different column then reads 'none' on the created header.
     await c.find('[data-testid="sort-agent"]').trigger('click')
-    expect(created.attributes('aria-sort')).toBe('none')
+    expect(createdSort()).toBe('none')
   })
 })

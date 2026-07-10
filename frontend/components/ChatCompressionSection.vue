@@ -185,6 +185,7 @@ function fmt(n: number) {
         >
           <button
             type="button"
+            role="tab"
             :aria-selected="view === 'table'"
             title="Table view"
             class="p-1.5"
@@ -195,6 +196,7 @@ function fmt(n: number) {
           </button>
           <button
             type="button"
+            role="tab"
             :aria-selected="view === 'chart'"
             title="Chart view"
             class="p-1.5"

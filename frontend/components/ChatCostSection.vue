@@ -1521,12 +1521,12 @@ defineExpose({ refresh })
                 <th
                   scope="col"
                   class="text-left px-4 py-2 font-medium w-1/4"
+                  :aria-sort="sortBy === 'model' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
                 >
                   <button
                     type="button"
                     class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
                     :class="sortBy === 'model' ? 'text-fg-strong' : ''"
-                    :aria-sort="sortBy === 'model' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
                     @click="toggleSort('model')"
                   >
                     Model
@@ -1554,12 +1554,12 @@ defineExpose({ refresh })
                   :key="col.key"
                   scope="col"
                   class="text-right px-3 py-2 font-medium"
+                  :aria-sort="sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
                 >
                   <button
                     type="button"
                     class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
                     :class="sortBy === col.key ? 'text-fg-strong' : ''"
-                    :aria-sort="sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
                     @click="toggleSort(col.key)"
                   >
                     {{ col.label }}
