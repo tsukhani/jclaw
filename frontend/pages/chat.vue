@@ -22,7 +22,6 @@ import {
   MicrophoneIcon as MicrophoneIconSolid,
   StopIcon as StopIconSolid,
 } from '@heroicons/vue/24/solid'
-import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
@@ -33,6 +32,7 @@ import { shouldDisplayMessage } from '~/utils/display-message-filter'
 import type { Agent, Conversation, Message, ConfigResponse } from '~/types/api'
 import { useChatComposer } from '~/composables/useChatComposer'
 import { useChatMessageActions } from '~/composables/useChatMessageActions'
+import { useChatUsageMeter } from '~/composables/useChatUsageMeter'
 import { useChatAttachments } from '~/composables/useChatAttachments'
 import { useChatScroll } from '~/composables/useChatScroll'
 import { useChatConversation, type ChatConversationLoadHooks } from '~/composables/useChatConversation'
@@ -64,39 +64,6 @@ const configDataRef = computed(() => configData.value ?? null)
 const { providers } = useProviders(configDataRef)
 
 /**
- * JCLAW-108 helpers for model-switch indicators and the conversation-total
- * display in the chat UI.
- */
-
-/**
- * Walk {@code displayMessages} backwards from {@code idx - 1} to find the
- * most recent PRIOR assistant message with usage — i.e. the model that ran
- * the preceding turn. Returns null when no prior assistant turn exists
- * (the conversation is on its first assistant message, or earlier rows
- * predate JCLAW-107 and lack usage data).
- */
-function previousAssistantUsage(idx: number): MessageUsage | null {
-  for (let i = idx - 1; i >= 0; i--) {
-    const prev = displayMessages.value[i]
-    if (prev && prev.role === 'assistant' && prev.usage) return prev.usage
-  }
-  return null
-}
-
-/**
- * True when message at {@code idx} is an assistant turn whose
- * {@code modelProvider/modelId} differs from the previous assistant turn.
- * Drives the "Switched to X" divider between mid-conversation model changes.
- */
-function shouldShowModelSwitchIndicator(idx: number): boolean {
-  const msg = displayMessages.value[idx]
-  if (!msg || msg.role !== 'assistant' || !msg.usage?.modelId) return false
-  const prior = previousAssistantUsage(idx)
-  if (!prior || !prior.modelId) return false
-  return prior.modelId !== msg.usage.modelId || prior.modelProvider !== msg.usage.modelProvider
-}
-
-/**
  * JCLAW-690: per-message render digest passed to <ChatMessage :render-token>.
  * `messages` is a shallowRef whose Message objects are mutated in-place then
  * forced with triggerRef, so nested-field changes (thinkingCollapsed,
@@ -109,50 +76,6 @@ function shouldShowModelSwitchIndicator(idx: number): boolean {
 function messageRenderKey(msg: Message): string {
   return `${!!msg.thinkingCollapsed}|${!!msg.toolCallsCollapsed}|${(msg.toolCalls ?? []).map(t => t._expanded ? 1 : 0).join('')}|${(msg.attachments ?? []).map(a => a.deleted ? 1 : 0).join('')}`
 }
-
-/**
- * Latest assistant turn's usage block, or null when the conversation has none
- * yet. Drives the top-right context meter's numbers — we show the prompt/
- * completion from the most recent turn because that represents the context
- * about to be resent on the next request.
- */
-const latestAssistantUsage = computed<MessageUsage | null>(() => {
-  const msgs = displayMessages.value ?? []
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i]
-    if (m && m.role === 'assistant' && m.usage) return m.usage
-  }
-  return null
-})
-
-/**
- * Cumulative tokens billed across the whole conversation: sum of every
- * assistant turn's prompt + completion. This double-counts the carried
- * context (each turn re-sends the prior history), which is the right
- * thing for "total since the beginning" — it matches what the operator
- * was actually billed for. Distinct from `latestAssistantUsage` which
- * reports the *current* context size and shrinks after a compaction.
- */
-const conversationCumulativeTokens = computed<number>(() => {
-  const msgs = displayMessages.value ?? []
-  let total = 0
-  for (const m of msgs) {
-    if (m && m.role === 'assistant' && m.usage) {
-      total += (m.usage.prompt ?? 0) + (m.usage.completion ?? 0)
-    }
-  }
-  return total
-})
-
-/**
- * Running cost summary for the currently open conversation. Honors each turn's
- * own embedded pricing so mixed-model conversations (e.g. Kimi → Flash) total
- * correctly. Null when the conversation has no assistant turns.
- *
- * The watch that populates this lives near {@link displayMessages} since it
- * depends on that computed; declared up here so template bindings resolve.
- */
-const conversationCostSummary = ref<{ label: string, tooltip: string, turnCount: number } | null>(null)
 
 /** Broken images inside a rendered markdown body collapse instead of showing
  *  the browser's broken-image icon + alt text. Markdown is injected via v-html
@@ -321,33 +244,15 @@ const {
   pollForAnnounce,
 } = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState })
 
-// Recompute the cost meter only when streaming is idle — usage lands at
-// end-of-turn, so any recompute mid-stream would walk every message and call
-// computeConversationCost for an unchanged value. The shallowRef migration
-// on messages already prevents per-token cascades; this watch keeps the
-// recompute off the displayMessages tracking path entirely so the meter
-// stays stable through the streaming → idle transition.
-watch(() => [displayMessages.value, streaming.value] as const, ([msgs, isStreaming]) => {
-  if (isStreaming) return
-  const usages = (msgs ?? [])
-    .filter(m => m.role === 'assistant' && m.usage)
-    .map(m => m.usage as MessageUsage)
-  if (usages.length === 0) {
-    conversationCostSummary.value = null
-    return
-  }
-  const breakdown = computeConversationCost(usages)
-  const label = formatConversationCost(breakdown)
-  if (label === null) {
-    conversationCostSummary.value = null
-    return
-  }
-  conversationCostSummary.value = {
-    label,
-    tooltip: formatConversationCostTooltip(breakdown),
-    turnCount: breakdown.turnCount,
-  }
-}, { immediate: true })
+// Token-usage + cost meter (latest-turn usage, cumulative tokens, running cost
+// recomputed only when idle, and the JCLAW-108 model-switch divider predicate)
+// lives in useChatUsageMeter, deriving off displayMessages + streaming.
+const {
+  shouldShowModelSwitchIndicator,
+  latestAssistantUsage,
+  conversationCumulativeTokens,
+  conversationCostSummary,
+} = useChatUsageMeter(displayMessages, streaming)
 
 // Deep-link: if ?conversation=ID is present, load that conversation and switch
 // to its agent on mount.
