@@ -39,6 +39,7 @@ import { effectiveThinkingLevels, type ProviderModel } from '~/composables/usePr
 import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
 import { useChatAttachments, type UploadedAttachment } from '~/composables/useChatAttachments'
 import { useChatScroll } from '~/composables/useChatScroll'
+import { useChatConversation, type ChatConversationLoadHooks } from '~/composables/useChatConversation'
 import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
@@ -530,14 +531,27 @@ function onMarkdownImageError(ev: Event) {
 const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(
   () => `/api/conversations?channel=web&agentId=${selectedAgentId.value}&limit=50`,
 )
-const selectedConvoId = ref<number | null>(null)
-// shallowRef so per-token property mutations (m.content = ..., m.reasoning = ...)
-// don't cascade through every computed that walks the messages array. Structural
-// changes (push, splice, replace, property writes that should propagate) MUST be
-// followed by triggerRef(messages). The streaming bubble reads its live text from
-// streamContentHtml / streamReasoningHtml instead of msg.content / msg.reasoning,
-// so suppressing per-token reactivity does not affect what the user sees.
-const messages = shallowRef<Message[]>([])
+// Conversation lifecycle (current-conversation messages, load/switch/resolve,
+// end-of-stream id reconciliation, read-only subagent transcript) lives in
+// useChatConversation, which OWNS the messages shallowRef every other chat
+// composable reads (shallowRef so per-token property mutations don't cascade
+// through computeds that walk the array; structural changes triggerRef it). Its
+// loadConversation side effects (video poll, subagent-collapse, scroll, focus)
+// are wired through convHooks *after* the leaf composables below are created —
+// they read this composable's messages, so it must exist first. See the wiring
+// block after useChatSubagents.
+const convHooks: ChatConversationLoadHooks = {}
+const {
+  messages,
+  selectedConvoId,
+  subagentTranscript,
+  effectiveDisplayAgentId,
+  clearSubagentTranscript,
+  initializing,
+  reconcileMessageIds,
+  resolveAndLoadConversation,
+  loadConversation,
+} = useChatConversation({ agents, selectedAgentId, hooks: convHooks })
 const input = ref('')
 const streaming = ref(false)
 const streamStatus = ref('')
@@ -708,30 +722,6 @@ async function regenerateMessage(msg: Message) {
  * time; v-for rows bind their individual open state off this ref.
  */
 const tokStatsHoverKey = ref<string | number | null>(null)
-
-/**
- * Backfill server ids onto the local `messages` array after a stream turn.
- *
- * The stream protocol doesn't emit persisted message ids (see
- * ApiChatController.writeSse — the complete event carries only content).
- * Without this, the optimistic user + assistant bubbles stay id-less until
- * the user leaves and re-enters the conversation, which disabled the Delete
- * button (gated on `msg.id`) and caused {@link pollForAnnounce} to treat
- * the server-side copy of those same rows as new additions, duplicating
- * the user bubble in the transcript.
- */
-async function reconcileMessageIds() {
-  const convoId = selectedConvoId.value
-  if (!convoId) return
-  try {
-    const fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`)
-    if (!fresh?.length) return
-    if (backfillServerIds(messages.value, fresh)) triggerRef(messages)
-  }
-  catch (e) {
-    console.error('Failed to reconcile message ids:', e)
-  }
-}
 
 async function deleteMessage(msg: Message) {
   // Skip mid-stream placeholders that have no server-side row yet — the
@@ -1142,6 +1132,20 @@ const {
   subagentBlockStatus,
 } = useChatSubagents(displayMessages, selectedConvoId)
 
+// Wire useChatConversation's loadConversation side effects now that the leaf
+// composables exist (they read the conversation's messages, so it was created
+// first — this closes that construction-order cycle). The hooks only fire at
+// load time, so the deep-link resolution below (which can call loadConversation
+// synchronously on its immediate watch) sees them already populated. focusInput
+// is a hoisted function declaration, so referencing it here is safe.
+convHooks.beforeLoad = () => stopVideoPolling() // don't leak a prior convo's poll loop
+convHooks.afterLoad = (msgs) => {
+  initSubagentCollapsedState(msgs)
+  scrollToBottom()
+  focusInput()
+  startVideoPolling() // resume progress polling for any pending video placeholder
+}
+
 // Recompute the cost meter only when streaming is idle — usage lands at
 // end-of-turn, so any recompute mid-stream would walk every message and call
 // computeConversationCost for an unchanged value. The shallowRef migration
@@ -1174,95 +1178,6 @@ watch(() => [displayMessages.value, streaming.value] as const, ([msgs, isStreami
 // to its agent on mount.
 const route = useRoute()
 const deepLinkConvoId = route.query.conversation ? Number(route.query.conversation) : null
-const initializing = ref(true) // suppresses agent-change clear during setup
-
-/**
- * Read-only transcript mode for subagent conversations (JCLAW-274).
- *
- * Subagents are filtered out of {@code /api/agents} (they don't belong in the
- * user-facing dropdown), so their conversations can't be "selected" the way
- * top-level agents' can. When the user opens {@code /chat?conversation=ID}
- * from the /subagents page or a {@code subagent_announce} card, this ref
- * holds the owning subagent's identity so the page can:
- *   1. Render a "Read-only transcript" banner naming the subagent.
- *   2. Disable the composer — sending a message would post against whatever
- *      agent the dropdown happens to be showing, not the subagent that owns
- *      the transcript.
- *   3. Pass the subagent's id into {@code renderMarkdown} so workspace-file
- *      links inside the transcript resolve against the subagent's
- *      workspace, not the parent agent's.
- *
- * Cleared by {@code clearSubagentTranscript} whenever the user navigates
- * away from the read-only view (agent change, new chat, sidebar Recents
- * click, or deep-linking to a non-subagent conversation).
- */
-const subagentTranscript = ref<{ agentId: number, agentName: string } | null>(null)
-
-/** Effective agent id for {@code renderMarkdown} workspace-link rewriting. */
-const effectiveDisplayAgentId = computed(() => subagentTranscript.value?.agentId ?? selectedAgentId.value)
-
-function clearSubagentTranscript() {
-  subagentTranscript.value = null
-}
-
-// Auto-select agent on load
-watch(agents, (val) => {
-  if (!val?.length || selectedAgentId.value) return
-  const def = val.find(a => a.isMain) || val[0]
-  if (!def) return
-  selectedAgentId.value = def.id
-}, { immediate: true })
-
-// When agent changes, clear current conversation (unless during initial setup)
-watch(selectedAgentId, () => {
-  if (initializing.value) return
-  selectedConvoId.value = null
-  messages.value = []
-  clearSubagentTranscript()
-})
-
-/**
- * Resolve and load a deep-linked conversation that isn't in the current
- * agent's list. Returns {@code true} if the conversation was loaded (either
- * by switching agents or by entering read-only subagent-transcript mode),
- * {@code false} if it couldn't be resolved.
- *
- * Uses {@code GET /api/conversations/{id}} so it works for any channel type
- * (web, telegram, subagent, etc.) — the prior implementation scanned
- * {@code /api/conversations?channel=web&limit=100} which structurally
- * missed subagent conversations stamped with {@code channelType="subagent"}.
- */
-async function resolveAndLoadConversation(id: number): Promise<boolean> {
-  let convo: Conversation | null = null
-  try {
-    convo = await $fetch<Conversation>(`/api/conversations/${id}`)
-  }
-  catch { return false }
-  if (!convo) return false
-
-  const owningAgent = agents.value?.find(a => a.id === convo!.agentId)
-  if (owningAgent) {
-    // Top-level agent we know about — switch the dropdown to it. The
-    // selectedAgentId watcher would normally clear messages, but we suppress
-    // that during initial setup via {@code initializing}; for in-page
-    // navigations we accept the brief clear since loadConversation runs next.
-    clearSubagentTranscript()
-    if (owningAgent.id !== selectedAgentId.value) {
-      selectedAgentId.value = owningAgent.id
-    }
-    await loadConversation(id)
-    return true
-  }
-
-  // Owning agent is filtered from the dropdown — almost always a subagent
-  // (parentAgent != null). Enter read-only transcript mode. We deliberately
-  // do NOT mutate selectedAgentId here: the dropdown should keep showing
-  // whatever top-level agent the user had chosen, and the banner names the
-  // subagent.
-  subagentTranscript.value = { agentId: convo.agentId, agentName: convo.agentName }
-  await loadConversation(id)
-  return true
-}
 
 // Deep-link: once conversations are loaded, find and select the target conversation.
 // The useFetch URL function above re-fires when selectedAgentId changes, so we
@@ -1300,35 +1215,6 @@ else {
   watch(conversations, () => {
     if (initializing.value) initializing.value = false
   }, { once: true })
-}
-
-async function loadConversation(id: number) {
-  selectedConvoId.value = id
-  stopVideoPolling() // a prior conversation's poll loop shouldn't leak into this one
-  const loaded = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
-  // JCLAW-170: fold persisted tool-role rows into the following assistant
-  // message's toolCalls array so the tool-calls block re-renders on reload.
-  // Mutates in place, then we also collapse the block by default for
-  // historical turns — same UX as the thinking card.
-  hydrateToolCalls(loaded as unknown as Array<Record<string, unknown>>)
-  for (const m of loaded) {
-    if (!m.toolCalls?.length) continue
-    // Outer accordion: collapsed by default on historical turns to keep the
-    // transcript dense; users click "N tool calls" to drill in.
-    (m as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed = true
-    // Per-call expansion: pre-expand the LAST call so opening the accordion
-    // surfaces its chip grid immediately. Earlier calls stay collapsed —
-    // user can expand them individually if they want to compare results.
-    for (let i = 0; i < m.toolCalls.length; i++) {
-      m.toolCalls[i]!._expanded = i === m.toolCalls.length - 1
-    }
-  }
-  messages.value = loaded
-  initCollapsedState(messages.value)
-  initSubagentCollapsedState(messages.value)
-  scrollToBottom()
-  focusInput()
-  startVideoPolling() // resume progress polling for any pending video placeholder on (re)load
 }
 
 // Land the cursor in the composer textarea so the user can start typing
