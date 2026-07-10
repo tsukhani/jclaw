@@ -62,6 +62,6 @@ The natural next step is [Chat](/guide#chat) — the base loop everything else b
 Every page title in the top breadcrumb takes you back to that page. The **JClaw** crumb is always home (the [Dashboard](/)).
 :::
 
-:::note Alpha software
+:::note Beta software
 JClaw is still pre-1.0. UI labels and behaviors may shift between releases. If something you see doesn't match what this guide says, the **Feedback** link in the sidebar is the fastest way to flag it.
 :::

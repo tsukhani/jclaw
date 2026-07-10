@@ -1,4 +1,4 @@
-# Memory
+# Memories
 
 Agents remember. After each conversation turn, JClaw quietly extracts durable, reusable facts — preferences you've stated, decisions made, lessons learned — and stores them per agent. Those memories flow back into later sessions: the most important are loaded at session start, the rest are recalled when relevant to what you're asking. The [Memories](/memory) page (sidebar → **Admin**) is where you inspect and curate everything your agents have captured.
 
