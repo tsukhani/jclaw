@@ -330,8 +330,8 @@ async function testBinding(binding: TelegramBindingSummary) {
         </h1>
       </div>
       <button
-        class="px-4 py-1.5 bg-emerald-600 text-white text-sm font-medium
-               hover:bg-emerald-500 transition-colors"
+        class="px-4 py-1.5 bg-emerald-700 text-white text-sm font-medium
+               hover:bg-emerald-600 transition-colors"
         @click="openCreate"
       >
         + New binding
@@ -750,8 +750,8 @@ async function testBinding(binding: TelegramBindingSummary) {
       <div class="flex gap-2 mt-4">
         <button
           :disabled="saving || !canSave"
-          class="px-4 py-1.5 bg-emerald-600 text-white text-sm font-medium
-                 hover:bg-emerald-500 disabled:opacity-40 transition-colors"
+          class="px-4 py-1.5 bg-emerald-700 text-white text-sm font-medium
+                 hover:bg-emerald-600 disabled:opacity-40 transition-colors"
           @click="save"
         >
           {{ saving ? 'Saving…' : 'Save' }}

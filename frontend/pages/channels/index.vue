@@ -157,7 +157,7 @@ onActivated(() => {
         class="px-4 py-1.5 text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         :class="tailscale?.enabled
           ? 'border-input text-fg-strong hover:border-ring hover:bg-muted'
-          : 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500'"
+          : 'border-emerald-600 bg-emerald-700 text-white hover:bg-emerald-600'"
         @click="toggleTailscale"
       >
         {{ tailscaleToggling ? 'Working...' : (tailscale?.enabled ? 'Disable Funnel' : 'Enable Funnel') }}
