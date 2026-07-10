@@ -1374,10 +1374,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </button>
             </div>
           </div>
-          <div
-            v-if="agent.description"
-            class="text-xs text-fg-muted mt-1"
-          >
+          <!-- Always render the description slot (min-h reserves one line, truncate
+               keeps it to one) so cards with and without a description share the
+               same top-block height — the list stays vertically consistent. -->
+          <div class="text-xs text-fg-muted mt-1 min-h-4 truncate">
             {{ agent.description }}
           </div>
           <!-- Bottom row: provider/model + capability pills stay left-aligned and
