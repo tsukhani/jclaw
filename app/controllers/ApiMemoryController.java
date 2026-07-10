@@ -66,13 +66,23 @@ public class ApiMemoryController extends Controller {
      * or {@code all}. Any other value falls back to active.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MemoryDto.class))))
-    @Operation(summary = "List memories across agents with a filter query (q / agent / category / importance / status)")
+    @Operation(summary = "List memories across agents with a filter query (q / agent / category / importance / status), paginated with X-Total-Count")
     public static void list(String q, String agent, String category, String importance,
-                            String status, Integer limit, Integer offset) {
+                            String status, String sort, String dir, Integer limit, Integer offset) {
         int effLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         int effOffset = (offset != null && offset >= 0) ? offset : 0;
         var agentNames = agentNamesById();
-        List<Memory> rows = selectMemories(q, agent, category, importance, status, effLimit, effOffset);
+
+        // Resolve the filter (and any FTS hit set) ONCE, then run the count and
+        // the page off the same resolution — otherwise a q= search would hit
+        // Lucene twice per request. `total` drives the frontend pager via the
+        // X-Total-Count header, matching Conversations/Subagents.
+        var resolved = resolveQuery(q, agent, category, importance);
+        long total = resolved.empty() ? 0 : runCount(resolved, status);
+        List<Memory> rows = resolved.empty() ? List.of() : runList(resolved, status, sort, dir, effOffset, effLimit);
+
+        response.setHeader("X-Total-Count", String.valueOf(total));
+        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
         renderJSON(gson.toJson(rows.stream().map(m -> toDto(m, agentNames)).toList()));
     }
 
@@ -84,10 +94,24 @@ public class ApiMemoryController extends Controller {
     private static List<Memory> selectMemories(String q, String agent, String category,
                                                String importance, String status,
                                                int limit, int offset) {
+        var resolved = resolveQuery(q, agent, category, importance);
+        // bulkDelete doesn't care about order — pass null sort → server default.
+        return resolved.empty() ? List.of() : runList(resolved, status, null, null, offset, limit);
+    }
+
+    /**
+     * Filter + optional FTS hit set, resolved once. {@code empty} means the
+     * filter can't match anything — an unknown agent name, or an FTS search
+     * that ran but hit nothing — so callers short-circuit to zero rows/count
+     * rather than issue a query that would return everything.
+     */
+    private record ResolvedQuery(JpqlFilter filter, List<Long> ftsIds, boolean empty) {}
+
+    private static ResolvedQuery resolveQuery(String q, String agent, String category, String importance) {
         Long agentIdFilter = null;
         if (agent != null && !agent.isBlank()) {
             agentIdFilter = agentIdForName(agent.strip());
-            if (agentIdFilter == null) return List.of();
+            if (agentIdFilter == null) return new ResolvedQuery(null, null, true);
         }
         var filter = new JpqlFilter()
                 .eq("m.agent.id", agentIdFilter)
@@ -95,17 +119,30 @@ public class ApiMemoryController extends Controller {
         applyImportance(filter, importance);
 
         var ftsResult = resolveFtsIds(filter, q);
-        if (ftsResult.isPresent() && ftsResult.get().isEmpty()) return List.of();
-        List<Long> ftsIds = ftsResult.orElse(null);
+        if (ftsResult.isPresent() && ftsResult.get().isEmpty()) return new ResolvedQuery(null, null, true);
+        return new ResolvedQuery(filter, ftsResult.orElse(null), false);
+    }
 
-        String jpql = buildSelectJpql(filter, ftsIds != null, status);
-        var jpaQ = JPA.em().createQuery(jpql, Memory.class);
-        var params = filter.paramList();
+    /** Page of memories for a resolved filter, ordered by sort/dir (server default when absent). */
+    private static List<Memory> runList(ResolvedQuery r, String status, String sort, String dir, int offset, int limit) {
+        var jpaQ = JPA.em().createQuery(buildSelectJpql(r.filter(), r.ftsIds() != null, status, sort, dir), Memory.class);
+        var params = r.filter().paramList();
         for (int i = 0; i < params.size(); i++) {
             jpaQ.setParameter(i + 1, params.get(i));
         }
-        if (ftsIds != null) jpaQ.setParameter("fts", ftsIds);
+        if (r.ftsIds() != null) jpaQ.setParameter("fts", r.ftsIds());
         return jpaQ.setFirstResult(offset).setMaxResults(limit).getResultList();
+    }
+
+    /** Full matching count for a resolved filter (pre-pagination), for X-Total-Count. */
+    private static long runCount(ResolvedQuery r, String status) {
+        var jpaQ = JPA.em().createQuery(buildCountJpql(r.filter(), r.ftsIds() != null, status), Long.class);
+        var params = r.filter().paramList();
+        for (int i = 0; i < params.size(); i++) {
+            jpaQ.setParameter(i + 1, params.get(i));
+        }
+        if (r.ftsIds() != null) jpaQ.setParameter("fts", r.ftsIds());
+        return jpaQ.getSingleResult();
     }
 
     /**
@@ -128,9 +165,10 @@ public class ApiMemoryController extends Controller {
         }
     }
 
-    /** Assemble the ORDER-BY-newest SELECT, folding in the filter where-clause,
-     *  the optional FTS id constraint, and the status condition. */
-    private static String buildSelectJpql(JpqlFilter filter, boolean hasFts, String status) {
+    /** The shared WHERE body: the filter clause, the optional FTS id
+     *  constraint, and the status condition, AND-ed together. Empty string
+     *  when nothing narrows. */
+    private static String whereClause(JpqlFilter filter, boolean hasFts, String status) {
         var where = filter.toWhereClause();
         if (hasFts) {
             where = where.isEmpty() ? "m.id IN (:fts)" : where + " AND m.id IN (:fts)";
@@ -139,9 +177,47 @@ public class ApiMemoryController extends Controller {
         if (statusCondition != null) {
             where = where.isEmpty() ? statusCondition : where + " AND " + statusCondition;
         }
+        return where;
+    }
+
+    /** SELECT over {@link #whereClause}, ordered by the requested sort column. */
+    private static String buildSelectJpql(JpqlFilter filter, boolean hasFts, String status,
+                                          String sort, String dir) {
+        var where = whereClause(filter, hasFts, status);
+        var orderBy = orderByClause(sort, dir);
         return where.isEmpty()
-                ? "SELECT m FROM Memory m ORDER BY m.updatedAt DESC"
-                : "SELECT m FROM Memory m WHERE " + where + " ORDER BY m.updatedAt DESC";
+                ? "SELECT m FROM Memory m " + orderBy
+                : "SELECT m FROM Memory m WHERE " + where + " " + orderBy;
+    }
+
+    /**
+     * Map the frontend sort column + direction to an ORDER BY. Columns are a
+     * closed whitelist (switch) and direction resolves to the literal ASC/DESC,
+     * so the concatenated JPQL carries no user input — no injection surface. An
+     * absent/unknown column falls back to the recency default (newest first),
+     * matching the pre-sort behaviour. A stable id tiebreak keeps paging
+     * deterministic when the sort key has ties.
+     */
+    private static String orderByClause(String sort, String dir) {
+        String col = switch (sort == null ? "" : sort) {
+            case "agent" -> "m.agent.name";
+            case "text" -> "m.text";
+            case "category" -> "m.category";
+            case "importance" -> "m.importance";
+            case "created" -> "m.createdAt";
+            default -> null;
+        };
+        if (col == null) return "ORDER BY m.updatedAt DESC";
+        String direction = "desc".equalsIgnoreCase(dir) ? "DESC" : "ASC";
+        return "ORDER BY " + col + " " + direction + ", m.id ASC";
+    }
+
+    /** COUNT over the same {@link #whereClause} — no ORDER BY. */
+    private static String buildCountJpql(JpqlFilter filter, boolean hasFts, String status) {
+        var where = whereClause(filter, hasFts, status);
+        return where.isEmpty()
+                ? "SELECT COUNT(m) FROM Memory m"
+                : "SELECT COUNT(m) FROM Memory m WHERE " + where;
     }
 
     /**

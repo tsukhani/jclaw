@@ -175,6 +175,99 @@ class ApiMemoryControllerTest extends FunctionalTest {
         assertTrue(all.contains("Berlin") && all.contains("Porto"), "status=all shows both");
     }
 
+    // ─── Pagination (X-Total-Count) ──────────────────────────────────────────
+
+    @Test
+    void listSetsTotalCountHeaderReflectingFullMatchNotThePage() {
+        seedMemory("alice", "mem one", "fact", 0.5);
+        seedMemory("alice", "mem two", "fact", 0.5);
+        seedMemory("bob", "mem three", "core", 0.9);
+        login();
+
+        // limit=2 caps the body to a page, but the header must report all 3.
+        var resp = GET("/api/memories?limit=2");
+        assertIsOk(resp);
+        assertEquals("3", resp.getHeader("X-Total-Count"),
+                "X-Total-Count reports the full match count, not the page size");
+        assertEquals(2, countOccurrences(getContent(resp), "\"agentName\""),
+                "body is capped to the requested page size");
+    }
+
+    @Test
+    void listTotalCountHonorsTheFilter() {
+        seedMemory("alice", "alice one", "fact", 0.5);
+        seedMemory("alice", "alice two", "fact", 0.5);
+        seedMemory("bob", "bob one", "core", 0.9);
+        login();
+
+        var resp = GET("/api/memories?agent=alice");
+        assertIsOk(resp);
+        assertEquals("2", resp.getHeader("X-Total-Count"),
+                "count reflects the agent filter, not the whole table");
+    }
+
+    @Test
+    void listTotalCountIsZeroForUnknownAgent() {
+        seedMemory("alice", "alice one", "fact", 0.5);
+        login();
+
+        // Unknown agent → the resolve short-circuits to empty; count must be 0
+        // (not a bare COUNT that would return the whole table).
+        var resp = GET("/api/memories?agent=ghost");
+        assertIsOk(resp);
+        assertEquals("0", resp.getHeader("X-Total-Count"), "no rows for an unknown agent");
+        assertFalse(getContent(resp).contains("alice one"), "no rows leaked");
+    }
+
+    // ─── Server-side sort ────────────────────────────────────────────────────
+
+    @Test
+    void sortsByImportanceServerSide() {
+        seedMemory("alice", "lowimp", "fact", 0.2);
+        seedMemory("alice", "highimp", "fact", 0.9);
+        seedMemory("alice", "midimp", "fact", 0.5);
+        login();
+
+        var asc = getContent(GET("/api/memories?sort=importance&dir=asc"));
+        assertTrue(asc.indexOf("lowimp") < asc.indexOf("midimp") && asc.indexOf("midimp") < asc.indexOf("highimp"),
+                "ascending by importance is low<mid<high, got: " + asc);
+
+        var desc = getContent(GET("/api/memories?sort=importance&dir=desc"));
+        assertTrue(desc.indexOf("highimp") < desc.indexOf("midimp") && desc.indexOf("midimp") < desc.indexOf("lowimp"),
+                "descending by importance is high<mid<low, got: " + desc);
+    }
+
+    @Test
+    void sortsByAgentNameServerSide() {
+        seedMemory("zeta", "z-mem", "fact", 0.5);
+        seedMemory("alpha", "a-mem", "fact", 0.5);
+        login();
+
+        var asc = getContent(GET("/api/memories?sort=agent&dir=asc"));
+        assertTrue(asc.indexOf("alpha") < asc.indexOf("zeta"),
+                "ascending by agent name puts alpha before zeta, got: " + asc);
+    }
+
+    @Test
+    void unknownSortColumnFallsBackToDefaultOrderNot400() {
+        seedMemory("alice", "only-one", "fact", 0.5);
+        login();
+        // A bogus sort column must not error — it falls back to the recency default.
+        var resp = GET("/api/memories?sort=bogus&dir=sideways");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("only-one"), "row still returned under fallback order");
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) >= 0) {
+            count++;
+            idx += needle.length();
+        }
+        return count;
+    }
+
     // ─── Update / Delete (by memory id) ──────────────────────────────────────
 
     @Test

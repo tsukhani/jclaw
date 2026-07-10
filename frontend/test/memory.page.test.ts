@@ -28,15 +28,54 @@ function importances(c: { findAll: (s: string) => { element: Element }[] }): num
   return c.findAll('[data-testid="importance-input"]').map(i => Number((i.element as HTMLInputElement).value))
 }
 
+interface MemRow {
+  id: string
+  agentName: string
+  text: string
+  category: string | null
+  importance: number
+  createdAt: string | null
+  supersededAt: string | null
+  supersededById: string | null
+}
+
 let memoriesResponse: unknown[] = []
 let putBody: Record<string, unknown> | null = null
 let bulkDeleteBody: Record<string, unknown> | null = null
+let capturedQueries: Record<string, unknown>[] = []
 
-// GET is stable across tests (the page fetches /api/memories?...; the path
-// matches regardless of query string). PUT on the row is registered
-// per-test (the 2-arg shorthand only matches GET). The bulk DELETE
-// endpoint captures its body for the selection/filter assertions.
-registerEndpoint('/api/memories', () => memoriesResponse)
+// Sorting + pagination are now server-side, so the GET mock mirrors the
+// backend: it sorts `memoriesResponse` by the sort/dir params, slices to the
+// limit/offset page, and reports the full count via X-Total-Count — the same
+// contract the real endpoint honors. PUT on the row is registered per-test
+// (the 2-arg shorthand only matches GET). The bulk DELETE endpoint captures
+// its body for the selection/filter assertions.
+registerEndpoint('/api/memories', {
+  method: 'GET',
+  handler: async (event) => {
+    const { getQuery } = await import('h3')
+    const query = getQuery(event)
+    capturedQueries.push({ ...query })
+    const rows = [...memoriesResponse] as MemRow[]
+    const sort = typeof query.sort === 'string' ? query.sort : ''
+    const dir = query.dir === 'desc' ? -1 : 1
+    if (sort) {
+      rows.sort((a, b) => {
+        let cmp: number
+        if (sort === 'importance') cmp = a.importance - b.importance
+        else if (sort === 'agent') cmp = a.agentName.localeCompare(b.agentName)
+        else if (sort === 'category') cmp = (a.category ?? '').localeCompare(b.category ?? '')
+        else if (sort === 'created') cmp = String(a.createdAt).localeCompare(String(b.createdAt))
+        else cmp = a.text.localeCompare(b.text)
+        return cmp !== 0 ? cmp * dir : a.id.localeCompare(b.id)
+      })
+    }
+    const limit = Number(query.limit ?? 20)
+    const offset = Number(query.offset ?? 0)
+    event.node.res.setHeader('x-total-count', String(rows.length))
+    return rows.slice(offset, offset + limit)
+  },
+})
 registerEndpoint('/api/memories', {
   method: 'DELETE',
   handler: async (event) => {
@@ -52,6 +91,7 @@ beforeEach(() => {
   memoriesResponse = []
   putBody = null
   bulkDeleteBody = null
+  capturedQueries = []
 })
 
 describe('memories admin page (JCLAW-40)', () => {
@@ -192,11 +232,16 @@ describe('memories admin page — sortable columns', () => {
     const c = await mountSuspended(Memory)
     await flushPromises()
 
+    // Sorting is server-side now: a header click refetches with sort/dir params.
+    // The $fetch-through-Nitro refetch needs vi.waitFor (one flushPromises round
+    // isn't enough to drain it), so wait on the re-rendered order.
     await c.find('[data-testid="sort-importance"]').trigger('click')
-    expect(importances(c)).toEqual([0.9, 0.7, 0.5]) // numeric default = descending
+    await vi.waitFor(() => expect(importances(c)).toEqual([0.9, 0.7, 0.5])) // numeric default = desc
+    expect(capturedQueries.at(-1)).toMatchObject({ sort: 'importance', dir: 'desc' })
 
     await c.find('[data-testid="sort-importance"]').trigger('click')
-    expect(importances(c)).toEqual([0.5, 0.7, 0.9]) // same column flips direction
+    await vi.waitFor(() => expect(importances(c)).toEqual([0.5, 0.7, 0.9])) // same column flips direction
+    expect(capturedQueries.at(-1)).toMatchObject({ sort: 'importance', dir: 'asc' })
   })
 
   it('sorts by agent ascending, and switching columns resets to that column default', async () => {
@@ -205,11 +250,11 @@ describe('memories admin page — sortable columns', () => {
     await flushPromises()
 
     await c.find('[data-testid="sort-agent"]').trigger('click')
-    expect(importances(c)).toEqual([0.7, 0.9, 0.5]) // agent asc: alpha, main, zeta
+    await vi.waitFor(() => expect(importances(c)).toEqual([0.7, 0.9, 0.5])) // agent asc: alpha, main, zeta
 
     // Switching to importance uses ITS default (desc), not the carried-over asc.
     await c.find('[data-testid="sort-importance"]').trigger('click')
-    expect(importances(c)).toEqual([0.9, 0.7, 0.5])
+    await vi.waitFor(() => expect(importances(c)).toEqual([0.9, 0.7, 0.5]))
   })
 
   it('marks the active column with aria-sort reflecting the direction', async () => {
@@ -223,11 +268,55 @@ describe('memories admin page — sortable columns', () => {
     const createdSort = () => createdBtn.element.closest('th')?.getAttribute('aria-sort')
     expect(createdSort()).toBe('none')
     await createdBtn.trigger('click')
+    await flushPromises()
     expect(createdSort()).toBe('descending') // created default = desc
     await createdBtn.trigger('click')
+    await flushPromises()
     expect(createdSort()).toBe('ascending')
     // A different column then reads 'none' on the created header.
     await c.find('[data-testid="sort-agent"]').trigger('click')
+    await flushPromises()
     expect(createdSort()).toBe('none')
+  })
+})
+
+describe('memories admin page — pagination', () => {
+  function makeRows(n: number) {
+    return Array.from({ length: n }, (_, i) => mem({ id: String(i + 1), importance: i / 100 }))
+  }
+
+  it('pages the list, moving the offset and following X-Total-Count', async () => {
+    memoriesResponse = makeRows(25) // 2 pages at pageSize 20
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    expect(c.text()).toContain('Showing 1–20 of 25')
+    expect(c.text()).toContain('Page 1 of 2')
+    expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(20)
+    expect(capturedQueries.at(-1)).toMatchObject({ limit: '20', offset: '0' })
+
+    const next = c.findAll('button').find(b => b.text() === 'Next')!
+    await next.trigger('click')
+    await vi.waitFor(() => expect(c.findAll('[data-testid="memory-row"]')).toHaveLength(5))
+    expect(capturedQueries.at(-1)!.offset).toBe('20')
+    expect(c.text()).toContain('Showing 21–25 of 25')
+    expect(c.text()).toContain('Page 2 of 2')
+
+    const prev = c.findAll('button').find(b => b.text() === 'Prev')!
+    await prev.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('0'))
+    expect(c.text()).toContain('Page 1 of 2')
+  })
+
+  it('has no pager when everything fits on one page', async () => {
+    memoriesResponse = makeRows(3)
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+    // total (3) ≤ pageSize, so there's a single page — the Prev/Next controls
+    // still render (total > 0) but both are disabled.
+    expect(c.text()).toContain('Showing 1–3 of 3')
+    expect(c.text()).toContain('Page 1 of 1')
+    expect(c.findAll('button').find(b => b.text() === 'Next')!.attributes('disabled')).toBeDefined()
+    expect(c.findAll('button').find(b => b.text() === 'Prev')!.attributes('disabled')).toBeDefined()
   })
 })

@@ -56,16 +56,44 @@ function onFiltersChanged(filters: Filter[]) {
   categoryFilter.value = filters.find(f => f.key === 'category')?.value ?? ''
   importanceFilter.value = filters.find(f => f.key === 'importance')?.value ?? ''
   statusFilter.value = filters.find(f => f.key === 'status')?.value ?? ''
+  // A new filter set changes the count, so jump back to page 1 and drop any
+  // carried-over selection (it could reference rows off the new page).
+  page.value = 1
+  selectedIds.value = new Set()
 }
 
-const url = computed(() => {
+// Server-side sort + pagination (matches Conversations/Subagents). sortBy/
+// sortDir and page all feed the reactive `url`, so a header click or page
+// change refetches — the sort spans the whole result set, not just the page,
+// and totals come from the X-Total-Count header. Declared above `url` because
+// the top-level `await useFetch(url)` reads the computed during setup.
+type SortColumn = 'agent' | 'text' | 'category' | 'importance' | 'created'
+type SortDir = 'asc' | 'desc'
+const sortBy = ref<SortColumn | null>(null)
+const sortDir = ref<SortDir>('asc')
+const pageSize = 20
+const page = ref(1)
+
+// Filter + sort params shared by the paginated list URL and the export (which
+// pulls the whole matching set, not just the visible page).
+function filterParams(): URLSearchParams {
   const params = new URLSearchParams()
   if (qFilter.value) params.set('q', qFilter.value)
   if (agentFilter.value) params.set('agent', agentFilter.value)
   if (categoryFilter.value) params.set('category', categoryFilter.value)
   if (importanceFilter.value) params.set('importance', importanceFilter.value)
   if (statusFilter.value) params.set('status', statusFilter.value)
-  params.set('limit', '200')
+  if (sortBy.value) {
+    params.set('sort', sortBy.value)
+    params.set('dir', sortDir.value)
+  }
+  return params
+}
+
+const url = computed(() => {
+  const params = filterParams()
+  params.set('limit', String(pageSize))
+  params.set('offset', String((page.value - 1) * pageSize))
   return `/api/memories?${params}`
 })
 
@@ -75,20 +103,40 @@ function supersededTitle(mem: MemoryDto): string {
   return `Superseded${by} at ${when} — excluded from recall`
 }
 
-// Top-level await + reactive URL: re-fetches whenever a filter changes, and
-// mountSuspended resolves with data in tests.
-const { data: memoriesData, error: fetchError, refresh } = await useFetch<MemoryDto[]>(url)
-const memories = computed(() => memoriesData.value ?? [])
+// $fetch.raw + an explicit watch on the reactive URL (rather than useFetch) so
+// the X-Total-Count header is readable off the response — the pager total comes
+// from there. Matches the Conversations/Subagents fetch shape, and re-fetches
+// on any filter / sort / page change. Top-level await resolves data before the
+// first render (and for mountSuspended in tests).
+const memoriesData = ref<MemoryDto[]>([])
+const total = ref(0)
+const fetchError = ref(false)
+async function refresh() {
+  try {
+    const res = await $fetch.raw<MemoryDto[]>(url.value)
+    memoriesData.value = res._data ?? []
+    const h = res.headers.get('x-total-count')
+    total.value = h != null ? Number.parseInt(h, 10) : memoriesData.value.length
+    fetchError.value = false
+  }
+  catch (e) {
+    console.error('Failed to load memories:', e)
+    fetchError.value = true
+  }
+}
+await refresh()
+watch(url, () => {
+  refresh()
+})
+const memories = computed(() => memoriesData.value)
 
-// ── Client-side column sort ────────────────────────────────────────────────
-// The ≤200 rows the API returns are sorted in the browser. sortBy=null keeps the
-// server's default order; clicking a header sorts by it, clicking the same header
-// flips direction, clicking a different one resets to that column's natural
-// default (importance/created default descending — most-important / newest first;
-// text columns default ascending).
-type SortColumn = 'agent' | 'text' | 'category' | 'importance' | 'created'
-type SortDir = 'asc' | 'desc'
-
+// ── Column sort (server-side) ────────────────────────────────────────────────
+// sortBy/sortDir (declared above `url`) drive the `sort`/`dir` query params, so
+// clicking a header refetches an ordered page from the backend — the sort spans
+// the whole result set, not just the current page. sortBy=null keeps the
+// server's recency default; clicking a header sorts by it, clicking the same
+// header flips direction, clicking a different one resets to that column's
+// natural default (importance/created descending; text columns ascending).
 const SORT_COLUMNS: { key: SortColumn, label: string, thClass: string }[] = [
   { key: 'agent', label: 'Agent', thClass: '' },
   { key: 'text', label: 'Memory', thClass: '' },
@@ -96,9 +144,6 @@ const SORT_COLUMNS: { key: SortColumn, label: string, thClass: string }[] = [
   { key: 'importance', label: 'Importance', thClass: 'w-32' },
   { key: 'created', label: 'Created', thClass: '' },
 ]
-
-const sortBy = ref<SortColumn | null>(null)
-const sortDir = ref<SortDir>('asc')
 
 function defaultDirFor(col: SortColumn): SortDir {
   return col === 'importance' || col === 'created' ? 'desc' : 'asc'
@@ -112,38 +157,22 @@ function toggleSort(col: SortColumn) {
     sortBy.value = col
     sortDir.value = defaultDirFor(col)
   }
+  // Re-sorting reorders the whole set; go back to page 1 so the top of the new
+  // ordering is what shows. (sortBy/sortDir/page are all `url` deps → one refetch.)
+  page.value = 1
+  selectedIds.value = new Set()
 }
 
-const sortedMemories = computed<MemoryDto[]>(() => {
-  const col = sortBy.value
-  if (!col) return memories.value // untouched: preserve the server's default order
-  const dir = sortDir.value === 'asc' ? 1 : -1
-  return [...memories.value].sort((a, b) => {
-    let cmp: number
-    if (col === 'importance') {
-      cmp = a.importance - b.importance
-    }
-    else if (col === 'created') {
-      // ISO strings sort lexicographically == chronologically; missing dates
-      // always sort last, regardless of direction.
-      if (a.createdAt === b.createdAt) cmp = 0
-      else if (!a.createdAt) return 1
-      else if (!b.createdAt) return -1
-      else cmp = a.createdAt.localeCompare(b.createdAt)
-    }
-    else if (col === 'agent') {
-      cmp = a.agentName.localeCompare(b.agentName)
-    }
-    else if (col === 'category') {
-      cmp = (a.category ?? '').localeCompare(b.category ?? '')
-    }
-    else {
-      cmp = a.text.localeCompare(b.text)
-    }
-    // Stable, deterministic tie-break by id.
-    return cmp !== 0 ? cmp * dir : a.id.localeCompare(b.id)
-  })
-})
+// ── Pagination (mirrors Conversations/Subagents) ─────────────────────────────
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const rangeStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize + 1)
+const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
+
+function goto(p: number) {
+  if (p < 1 || p > totalPages.value || p === page.value) return
+  page.value = p
+  selectedIds.value = new Set()
+}
 
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
@@ -224,7 +253,7 @@ function activeFilterPayload() {
 }
 
 async function deleteAll() {
-  if (deletingAll.value || memories.value.length === 0) return
+  if (deletingAll.value || total.value === 0) return
   const scope = activeFilterCount.value ? ' matching the active filters' : ''
   const ok = await confirm({
     title: 'Delete all memories',
@@ -241,6 +270,7 @@ async function deleteAll() {
       body: { filter: activeFilterPayload() },
     })
     selectedIds.value = new Set()
+    page.value = 1
     await refresh()
   }
   catch (e) {
@@ -267,11 +297,16 @@ function downloadBlob(filename: string, content: string, type: string) {
   URL.revokeObjectURL(objectUrl)
 }
 
-function exportMemories() {
+async function exportMemories() {
+  // Export the whole matching set, not just the visible page. Reuses the list
+  // filters/sort and pulls up to the backend's cap in one request.
+  const params = filterParams()
+  params.set('limit', '500')
+  const all = await $fetch<MemoryDto[]>(`/api/memories?${params}`) ?? []
   const payload = {
     exportedAt: new Date().toISOString(),
-    memoryCount: memories.value.length,
-    memories: memories.value,
+    memoryCount: all.length,
+    memories: all,
   }
   downloadBlob(`jclaw-memories-${fileStamp()}.json`, JSON.stringify(payload, null, 2), 'application/json')
 }
@@ -390,7 +425,7 @@ function exportMemories() {
         </thead>
         <tbody class="divide-y divide-border">
           <tr
-            v-for="mem in sortedMemories"
+            v-for="mem in memories"
             :key="mem.id"
             data-testid="memory-row"
             class="align-top"
@@ -444,6 +479,29 @@ function exportMemories() {
           </tr>
         </tbody>
       </table>
+      <div
+        v-if="total > 0"
+        class="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-fg-muted"
+      >
+        <span>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ total }}</span>
+        <div class="flex items-center gap-1">
+          <button
+            :disabled="page <= 1"
+            class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            @click="goto(page - 1)"
+          >
+            Prev
+          </button>
+          <span class="px-2">Page {{ page }} of {{ totalPages }}</span>
+          <button
+            :disabled="page >= totalPages"
+            class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            @click="goto(page + 1)"
+          >
+            Next
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
