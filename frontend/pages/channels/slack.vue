@@ -386,9 +386,9 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
         class="bg-surface-elevated border border-border p-4"
       >
         <div class="flex items-center justify-between mb-3 gap-2">
-          <h3 class="text-sm font-medium text-fg-strong truncate">
+          <h2 class="text-sm font-medium text-fg-strong truncate">
             {{ b.agentName ?? '(no agent)' }}
-          </h3>
+          </h2>
           <div class="flex items-center gap-2 shrink-0">
             <!-- The aria-checked attribute is dynamically bound via the Vue colon shorthand; Sonar's static analyser does not resolve those bindings, but the required ARIA property is in fact present. -->
             <button

@@ -89,7 +89,7 @@ const style = computed(() => variantStyles[props.variant])
     <!-- Dismiss button (only for transient conditions) -->
     <button
       v-if="dismissable"
-      class="p-0.5 opacity-60 hover:opacity-100 transition-opacity shrink-0"
+      class="w-6 h-6 inline-flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity shrink-0"
       aria-label="Dismiss"
       @click="dismissed = true; emit('dismiss')"
     >

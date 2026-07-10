@@ -66,9 +66,9 @@ onActivated(() => {
         class="bg-surface-elevated border border-border p-4 block hover:border-ring transition-colors"
       >
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-medium text-fg-strong">
+          <h2 class="text-sm font-medium text-fg-strong">
             Telegram
-          </h3>
+          </h2>
           <span
             :class="telegramActiveCount > 0 ? 'text-green-700 dark:text-green-400' : 'text-fg-muted'"
             class="text-xs font-mono"
@@ -84,9 +84,9 @@ onActivated(() => {
         class="bg-surface-elevated border border-border p-4 block hover:border-ring transition-colors"
       >
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-medium text-fg-strong">
+          <h2 class="text-sm font-medium text-fg-strong">
             Slack
-          </h3>
+          </h2>
           <span
             :class="slackActiveCount > 0 ? 'text-green-700 dark:text-green-400' : 'text-fg-muted'"
             class="text-xs font-mono"
@@ -102,9 +102,9 @@ onActivated(() => {
         class="bg-surface-elevated border border-border p-4 block hover:border-ring transition-colors"
       >
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-medium text-fg-strong">
+          <h2 class="text-sm font-medium text-fg-strong">
             WhatsApp
-          </h3>
+          </h2>
           <span
             :class="whatsappActiveCount > 0 ? 'text-green-700 dark:text-green-400' : 'text-fg-muted'"
             class="text-xs font-mono"
@@ -121,9 +121,9 @@ onActivated(() => {
       data-tour="tailscale-funnel"
     >
       <div class="flex items-center justify-between mb-2">
-        <h3 class="text-sm font-medium text-fg-strong">
+        <h2 class="text-sm font-medium text-fg-strong">
           Public access — Tailscale Funnel
-        </h3>
+        </h2>
         <span
           :class="tailscale?.enabled && tailscale?.available ? 'text-green-700 dark:text-green-400' : 'text-fg-muted'"
           class="text-xs font-mono"

@@ -1264,9 +1264,9 @@ function zoneForTaskRender(task: Task): string | undefined {
                      value before PATCH; the backend re-validates and 400s. -->
                     <section>
                       <div class="flex items-center justify-between mb-1.5">
-                        <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
+                        <div class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
                           Name
-                        </h3>
+                        </div>
                         <button
                           v-if="editingNameId !== task.id"
                           type="button"
@@ -1338,9 +1338,9 @@ function zoneForTaskRender(task: Task): string | undefined {
                      default with an inline editor (slice E) behind Edit. -->
                     <section>
                       <div class="flex items-center justify-between mb-1.5">
-                        <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
+                        <div class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
                           Instructions
-                        </h3>
+                        </div>
                         <button
                           v-if="editingId !== task.id"
                           type="button"
@@ -1406,7 +1406,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                               type="button"
                               :disabled="i === 0"
                               :aria-label="`Move step ${i + 1} up`"
-                              class="p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
+                              class="w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
                               @click="moveStep(i, -1)"
                             >
                               <ArrowUpIcon
@@ -1418,7 +1418,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                               type="button"
                               :disabled="i === editSteps.length - 1"
                               :aria-label="`Move step ${i + 1} down`"
-                              class="p-0.5 text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
+                              class="w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong disabled:opacity-30 disabled:cursor-not-allowed"
                               @click="moveStep(i, 1)"
                             >
                               <ArrowDownIcon
@@ -1429,7 +1429,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                             <button
                               type="button"
                               :aria-label="`Remove step ${i + 1}`"
-                              class="p-0.5 text-fg-muted hover:text-red-400"
+                              class="w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-red-400"
                               @click="removeStep(i)"
                             >
                               <XMarkIcon
@@ -1487,9 +1487,9 @@ function zoneForTaskRender(task: Task): string | undefined {
                      the backend re-validates on PATCH and 400s with a message. -->
                     <section>
                       <div class="flex items-center justify-between mb-1.5">
-                        <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
+                        <div class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
                           Channel
-                        </h3>
+                        </div>
                         <button
                           v-if="editingDeliveryId !== task.id"
                           type="button"
@@ -1613,9 +1613,9 @@ function zoneForTaskRender(task: Task): string | undefined {
                   </div>
                   <!-- Run history: lazy-loaded TaskRuns, most-recent first. -->
                   <section>
-                    <h3 class="text-[10px] uppercase tracking-wider font-medium text-fg-muted mb-1.5">
+                    <div class="text-[10px] uppercase tracking-wider font-medium text-fg-muted mb-1.5">
                       Run history
-                    </h3>
+                    </div>
                     <p
                       v-if="runsLoading[task.id]"
                       class="text-xs text-fg-muted"

@@ -3109,7 +3109,7 @@ function exportConversation() {
                                 <a
                                   :href="`/api/attachments/${att.uuid}`"
                                   :download="att.originalFilename"
-                                  class="ml-auto shrink-0 p-0.5 text-fg-muted hover:text-fg-strong transition-colors"
+                                  class="ml-auto shrink-0 w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong transition-colors"
                                   title="Download image"
                                   aria-label="Download image"
                                 >
@@ -3120,7 +3120,7 @@ function exportConversation() {
                                 </a>
                                 <button
                                   type="button"
-                                  class="shrink-0 p-0.5 text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                  class="shrink-0 w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
                                   title="Delete image from workspace"
                                   @click="deleteAttachment(att)"
                                 >
@@ -3187,7 +3187,7 @@ function exportConversation() {
                                   <a
                                     :href="`/api/attachments/${att.uuid}`"
                                     :download="att.originalFilename"
-                                    class="ml-auto shrink-0 p-0.5 text-fg-muted hover:text-fg-strong transition-colors"
+                                    class="ml-auto shrink-0 w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong transition-colors"
                                     title="Download video"
                                     aria-label="Download video"
                                   >
@@ -3198,7 +3198,7 @@ function exportConversation() {
                                   </a>
                                   <button
                                     type="button"
-                                    class="shrink-0 p-0.5 text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                    class="shrink-0 w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-red-600 dark:hover:text-red-400 transition-colors"
                                     title="Delete video from workspace"
                                     @click="deleteAttachment(att)"
                                   >
