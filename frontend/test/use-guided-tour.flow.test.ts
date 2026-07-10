@@ -11,12 +11,13 @@ import {
 // decide whether to drive a popover or queue a router.push. useRouter is left
 // real because Nuxt's internal navigation-repaint plugin calls beforeResolve()
 // on it; stubbing breaks the runtime.
-const { routePath } = vi.hoisted(() => ({
+const { routePath, routeQuery } = vi.hoisted(() => ({
   routePath: { value: '/' },
+  routeQuery: { value: {} as Record<string, string> },
 }))
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: composable returns RouteLocationNormalized; we only stub the fields useGuidedTour reads.
-mockNuxtImport('useRoute', () => () => ({ path: routePath.value } as any))
+mockNuxtImport('useRoute', () => () => ({ path: routePath.value, query: routeQuery.value, fullPath: routePath.value } as any))
 
 /**
  * JCLAW-314 — useGuidedTour state-machine coverage.
@@ -282,6 +283,58 @@ describe('useGuidedTour — showStepForCurrentPage drives the popover', () => {
     vi.useRealTimers()
 
     expect(driverFactory).not.toHaveBeenCalled()
+  })
+})
+
+describe('useGuidedTour — Settings step opens the Providers section (JCLAW-680)', () => {
+  // The Settings page now renders one section at a time; step 0's anchor
+  // ([data-tour="llm-providers"]) only mounts when the Providers section is
+  // active. The tour deep-links via ?section=providers rather than landing on
+  // the default section, where the anchor wouldn't exist.
+  beforeEach(() => {
+    driverFactory.mockClear()
+    driveSpy.mockClear()
+    destroySpy.mockClear()
+    routePath.value = '/'
+    routeQuery.value = {}
+    registerEndpoint('/api/onboarding/tour-progress', {
+      method: 'POST',
+      handler: () => ({ maxStepReached: 1 }),
+    })
+  })
+
+  afterEach(() => {
+    document.body.replaceChildren()
+    routeQuery.value = {}
+  })
+
+  it('defers driving (navigates first) when starting off the Providers section', () => {
+    // On /settings but WITHOUT ?section=providers — the anchor isn't mounted,
+    // so goToStepRoute must navigate rather than drive the popover in place.
+    routePath.value = '/settings'
+    routeQuery.value = {}
+    const tour = useGuidedTour()
+    tour.confirmStart()
+    // The tour started, but driving is deferred until the section-navigation
+    // lands and the route watch re-drives on the new fullPath.
+    expect(tour.isActive.value).toBe(true)
+    expect(tour.state.value.step).toBe(0)
+    expect(driverFactory).not.toHaveBeenCalled()
+  })
+
+  it('drives directly when already on the Providers section (anchor present)', async () => {
+    const div = document.createElement('div')
+    div.setAttribute('data-tour', 'llm-providers')
+    document.body.appendChild(div)
+    routePath.value = '/settings'
+    routeQuery.value = { section: 'providers' }
+
+    const tour = useGuidedTour()
+    tour.confirmStart()
+    await flushPromises()
+
+    // Query matches → goToStepRoute drives in place instead of navigating.
+    expect(driverFactory).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -7,6 +7,14 @@ interface TourState {
 
 interface TourStep {
   path: string
+  /**
+   * Optional query params to include when navigating to `path`. The Settings
+   * page renders one section at a time (JCLAW-680), so a step whose anchor
+   * lives in a specific section must open it first — the page deep-links via
+   * `?section=<id>`, so `{ section: 'providers' }` mounts the LLM Providers
+   * panel before the tour looks for its anchor.
+   */
+  query?: Record<string, string>
   selector: string
   /** Step heading shown in the popover header. */
   title: string
@@ -40,6 +48,7 @@ interface TourStep {
 const steps: TourStep[] = [
   {
     path: '/settings',
+    query: { section: 'providers' },
     selector: '[data-tour="llm-providers"]',
     title: 'Add an API key',
     description: 'Enter an API key for <strong>Ollama Cloud</strong> or <strong>OpenRouter</strong> (or both). Chat needs at least one provider configured before the Main Agent has anything to route to.',
@@ -258,6 +267,27 @@ export function useGuidedTour() {
     if (step.advanceOnAppearOf) installAdvanceObserver(step.advanceOnAppearOf)
   }
 
+  // ── Route navigation for a step ────────────────────────────────────────────
+  // A step lives at `path` (+ optional `?section` query). Navigate there and,
+  // once the route settles, drive its popover. If we're already on the exact
+  // route, drive directly — router.push to the current location is a no-op that
+  // wouldn't re-fire the route watch. That watch keys on route.fullPath, so a
+  // query-only change (same path, different ?section) still triggers it.
+  function locationForStep(step: TourStep) {
+    return step.query ? { path: step.path, query: step.query } : step.path
+  }
+
+  function isOnStepRoute(step: TourStep): boolean {
+    if (route.path !== step.path) return false
+    if (!step.query) return true
+    return Object.entries(step.query).every(([k, v]) => route.query[k] === v)
+  }
+
+  function goToStepRoute(step: TourStep) {
+    if (isOnStepRoute(step)) showStepForCurrentPage()
+    else router.push(locationForStep(step))
+  }
+
   /** Open the intro dialog. Always opens regardless of backend flag — the
    *  flag governs auto-show on first login only. Manual invocation from the
    *  sidebar should always succeed. */
@@ -277,8 +307,7 @@ export function useGuidedTour() {
     const first = steps[0]
     if (!first) return
     state.value = { step: 0, active: true }
-    if (route.path === first.path) showStepForCurrentPage()
-    else router.push(first.path)
+    goToStepRoute(first)
   }
 
   /** User dismissed the intro dialog without starting → close dialog and
@@ -305,8 +334,7 @@ export function useGuidedTour() {
     // clamps to Math.max so duplicates / out-of-order writes are safe.
     void recordStepReached(next + 1)
     state.value = { step: next, active: true }
-    if (route.path === nextStep.path) showStepForCurrentPage()
-    else router.push(nextStep.path)
+    goToStepRoute(nextStep)
   }
 
   function back() {
@@ -318,8 +346,7 @@ export function useGuidedTour() {
     // high-water mark and the backend already clamps with Math.max, so
     // moving backward through the tour must not lower it.
     state.value = { step: prev, active: true }
-    if (route.path === prevStep.path) showStepForCurrentPage()
-    else router.push(prevStep.path)
+    goToStepRoute(prevStep)
   }
 
   function end() {
@@ -357,7 +384,10 @@ export function installGuidedTourHooks() {
   const tour = useGuidedTour()
   const route = useRoute()
 
-  watch(() => route.path, () => {
+  // Key on fullPath (not just path) so navigating between two sections of the
+  // same page — e.g. /settings?section=timezone → ?section=providers — still
+  // re-drives the step onto the section that carries its anchor (JCLAW-680).
+  watch(() => route.fullPath, () => {
     if (tour.isActive.value) tour.showStepForCurrentPage()
   })
 }
