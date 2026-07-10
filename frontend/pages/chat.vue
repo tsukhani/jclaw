@@ -41,6 +41,7 @@ import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useChatStream } from '~/composables/useChatStream'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
+import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 
 const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
 const { data: configData } = await useFetch<ConfigResponse>('/api/config')
@@ -56,9 +57,6 @@ const { data: configData } = await useFetch<ConfigResponse>('/api/config')
 const selectedAgentId = ref<number | null>(
   agents.value?.find(a => a.isMain)?.id ?? agents.value?.[0]?.id ?? null,
 )
-
-// A11y: generated ids for label/control association
-const agentSelectId = useId()
 
 // Extract configured providers and their models from config
 const configDataRef = computed(() => configData.value ?? null)
@@ -786,41 +784,10 @@ function exportConversation() {
         hard division line.
       -->
       <div class="relative px-3 py-2 border-b border-neutral-300 dark:border-neutral-700 flex items-center gap-2">
-        <label
-          v-if="(agents?.length ?? 0) > 1"
-          :for="agentSelectId"
-          class="text-sm text-fg-muted flex items-center gap-1.5"
-        >
-          <span>Agent:</span>
-          <select
-            :id="agentSelectId"
-            v-model="selectedAgentId"
-            class="bg-transparent border-0 text-base text-fg-strong px-1 py-1
-                   focus:outline-hidden cursor-pointer hover:bg-muted rounded"
-          >
-            <option
-              v-for="agent in agents"
-              :key="agent.id"
-              :value="agent.id"
-            >
-              {{ agent.name }}
-            </option>
-          </select>
-        </label>
-        <!--
-          Single-agent case: no dropdown — the user has nothing to pick
-          between. Render as static text to preserve the same horizontal
-          slot (keeps the absolute-centered model combobox optically
-          centered) while making it obvious no choice is expected. Uses
-          a div, not a label: there's no input to associate with.
-        -->
-        <div
-          v-else-if="(agents?.length ?? 0) === 1"
-          class="text-sm text-fg-muted flex items-center gap-1.5"
-        >
-          <span>Agent:</span>
-          <span class="text-base text-fg-strong px-1 py-1">{{ selectedAgent?.name }}</span>
-        </div>
+        <ChatAgentSelector
+          v-model="selectedAgentId"
+          :agents="agents"
+        />
         <div class="absolute left-1/2 -translate-x-1/2">
           <ChatModelCombobox
             :providers="providers"
