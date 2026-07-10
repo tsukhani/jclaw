@@ -806,8 +806,8 @@ function zoneForTaskRender(task: Task): string | undefined {
              tasks.retentionDays (default 30, 0 = disabled). -->
         <NuxtLink
           v-if="retentionDisplay"
-          to="/settings"
-          class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
+          to="/settings?section=tasks"
+          class="inline-flex items-center leading-none text-xs text-fg-muted hover:text-fg-strong transition-colors"
           title="Configure in Settings → Tasks"
         >
           {{ retentionDisplay }}

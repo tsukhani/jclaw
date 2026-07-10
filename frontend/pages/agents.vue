@@ -1259,7 +1259,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       class="bg-surface-elevated border border-border p-4 mb-4 text-sm text-fg-muted"
     >
       No LLM providers configured. Go to <NuxtLink
-        to="/settings"
+        to="/settings?section=providers"
         class="text-fg-strong underline"
       >Settings</NuxtLink> and add an API key first.
     </div>
