@@ -1380,22 +1380,25 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           >
             {{ agent.description }}
           </div>
-          <div class="text-xs text-fg-muted mt-3">
-            {{ agent.modelProvider }} / {{ agent.modelId }}
-          </div>
-          <ModelCapabilityPills
-            :model="modelForAgent(agent)"
-            :thinking-mode="agent.thinkingMode"
-            class="mt-2"
-            @toggle="(cap) => toggleListingCapability(agent, cap)"
-          />
-          <!-- Per-agent delete: bottom-right trash. @click/keydown .stop keeps
-               activating it from bubbling up and opening the edit form. -->
-          <div class="flex justify-end mt-3">
+          <!-- Bottom row: provider/model + capability pills stay left-aligned and
+               share the row with the bottom-right delete button. @click/keydown
+               .stop keeps the trash from bubbling up and opening the edit form. -->
+          <div class="flex items-center justify-between gap-3 mt-3">
+            <div class="min-w-0">
+              <div class="text-xs text-fg-muted">
+                {{ agent.modelProvider }} / {{ agent.modelId }}
+              </div>
+              <ModelCapabilityPills
+                :model="modelForAgent(agent)"
+                :thinking-mode="agent.thinkingMode"
+                class="mt-2"
+                @toggle="(cap) => toggleListingCapability(agent, cap)"
+              />
+            </div>
             <button
               type="button"
               :disabled="deletingId === agent.id"
-              class="p-1.5 text-fg-muted hover:text-red-400 disabled:opacity-40 transition-colors"
+              class="p-1.5 shrink-0 text-fg-muted hover:text-red-400 disabled:opacity-40 transition-colors"
               :title="`Delete ${agent.name}`"
               @click.stop="deleteAgent(agent)"
               @keydown.enter.stop="deleteAgent(agent)"
