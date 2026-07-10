@@ -231,6 +231,47 @@ class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void sortsByChannelTypeServerSide() {
+        login();
+        commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "sort-conv-agent";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            ConversationService.create(agent, "zeta-chan", "u1");
+            ConversationService.create(agent, "alpha-chan", "u2");
+            return null;
+        });
+
+        var asc = getContent(GET("/api/conversations?sort=channelType&dir=asc"));
+        assertTrue(asc.indexOf("alpha-chan") < asc.indexOf("zeta-chan"),
+                "channelType asc: alpha-chan before zeta-chan, got: " + asc);
+
+        var desc = getContent(GET("/api/conversations?sort=channelType&dir=desc"));
+        assertTrue(desc.indexOf("zeta-chan") < desc.indexOf("alpha-chan"),
+                "channelType desc: zeta-chan before alpha-chan, got: " + desc);
+    }
+
+    @Test
+    void unknownSortColumnFallsBackToDefaultOrderNot400() {
+        login();
+        commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "sort-fallback-agent";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            ConversationService.create(agent, "only-chan", "u1");
+            return null;
+        });
+        // Bogus sort column must not 400 — it falls back to updatedAt DESC.
+        var resp = GET("/api/conversations?sort=bogus&dir=sideways");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("only-chan"), "row still returned under fallback order");
+    }
+
+    @Test
     void deleteByFilterSkipsSubagentChildren() {
         // Companion to the list test above: bulk-delete-by-filter must
         // mirror the listing exclusion. Otherwise a /conversations "Delete

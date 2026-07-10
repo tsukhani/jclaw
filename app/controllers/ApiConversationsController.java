@@ -143,7 +143,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConversationView.class))))
     @Operation(summary = "List conversations with optional channel, agent, name, peer, and full-text (q) filters, paginated")
     public static void listConversations(String channel, Long agentId, String name, String peer,
-                                          String q, Integer limit, Integer offset) {
+                                          String q, String sort, String dir, Integer limit, Integer offset) {
         boolean hasNameFilter = name != null && !name.isBlank();
 
         var filter = new JpqlFilter()
@@ -191,7 +191,7 @@ public class ApiConversationsController extends Controller {
             fullWhere = fullWhere + " AND c.id IN (:fts)";
         }
         String jpql = "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE "
-                + fullWhere + " ORDER BY c.updatedAt DESC";
+                + fullWhere + " " + orderByClause(sort, dir);
         var jpaQ = JPA.em().createQuery(jpql, Conversation.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
@@ -580,6 +580,29 @@ public class ApiConversationsController extends Controller {
     private static void setPaginationHeaders(long total) {
         response.setHeader("X-Total-Count", String.valueOf(total));
         response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+    }
+
+    /**
+     * Map the DataTable sort column + direction to an ORDER BY. Columns are a
+     * closed whitelist keyed by the frontend column ids; direction resolves to
+     * the ASC/DESC literal, so the concatenated JPQL carries no user input. An
+     * absent/unknown column falls back to the recency default (newest first).
+     * A stable id tiebreak keeps paging deterministic across equal sort keys.
+     */
+    private static String orderByClause(String sort, String dir) {
+        String col = switch (sort == null ? "" : sort) {
+            case "preview" -> "c.preview";
+            case "channelType" -> "c.channelType";
+            case "agentName" -> "c.agent.name";
+            case "peerId" -> "c.peerId";
+            case "messageCount" -> "c.messageCount";
+            case "createdAt" -> "c.createdAt";
+            case "updatedAt" -> "c.updatedAt";
+            default -> null;
+        };
+        if (col == null) return "ORDER BY c.updatedAt DESC";
+        String direction = "desc".equalsIgnoreCase(dir) ? "DESC" : "ASC";
+        return "ORDER BY " + col + " " + direction + ", c.id ASC";
     }
 
     /**

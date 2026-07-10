@@ -92,6 +92,7 @@ public class ApiSubagentRunsController extends Controller {
     @Operation(summary = "List subagent runs with optional filters and pagination")
     public static void list(Long parentAgentId, Long parentConversationId,
                             String status, String since, String q,
+                            String sort, String dir,
                             Integer limit, Integer offset) {
         Instant sinceInstant = parseSinceFilter(since);
         if (sinceInstant == null && since != null && !since.isBlank()) return;
@@ -135,9 +136,10 @@ public class ApiSubagentRunsController extends Controller {
         // direct-JPA path matches what ApiConversationsController and
         // ApiTasksController already do for the same q-intersection
         // pattern.
+        var orderBy = orderByClause(sort, dir);
         var jpql = where.isEmpty()
-                ? "SELECT r FROM SubagentRun r ORDER BY r.startedAt DESC"
-                : "SELECT r FROM SubagentRun r WHERE " + where + " ORDER BY r.startedAt DESC";
+                ? "SELECT r FROM SubagentRun r " + orderBy
+                : "SELECT r FROM SubagentRun r WHERE " + where + " " + orderBy;
         var jpaQ = JPA.em().createQuery(jpql, SubagentRun.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
@@ -402,6 +404,27 @@ public class ApiSubagentRunsController extends Controller {
         }
         if (ftsRunIds != null) jpaQ.setParameter("fts", ftsRunIds);
         return jpaQ.getResultList();
+    }
+
+    /**
+     * Map the table sort column + direction to an ORDER BY. Closed whitelist +
+     * literal ASC/DESC, so no user input reaches the JPQL string. `mode` (from
+     * spawn events) and `duration` (computed) aren't DB columns, so they're not
+     * sortable server-side. Unknown/absent column → recency default (newest
+     * first); a stable id tiebreak keeps paging deterministic.
+     */
+    private static String orderByClause(String sort, String dir) {
+        String col = switch (sort == null ? "" : sort) {
+            case "id" -> "r.id";
+            case "parent" -> "r.parentAgent.name";
+            case "child" -> "r.childAgent.name";
+            case "status" -> "r.status";
+            case "started" -> "r.startedAt";
+            default -> null;
+        };
+        if (col == null) return "ORDER BY r.startedAt DESC";
+        String direction = "desc".equalsIgnoreCase(dir) ? "DESC" : "ASC";
+        return "ORDER BY " + col + " " + direction + ", r.id ASC";
     }
 
     private static String stringField(JsonObject obj, String key) {

@@ -2,7 +2,7 @@
 import type { Agent, Conversation, Message } from '~/types/api'
 import type { Filter } from '~/components/FilterBar.vue'
 import { h } from 'vue'
-import type { ColumnDef } from '@tanstack/vue-table'
+import type { ColumnDef, SortingState } from '@tanstack/vue-table'
 import { ChatBubbleLeftRightIcon } from '@heroicons/vue/24/outline'
 
 const { confirm } = useConfirm()
@@ -15,6 +15,11 @@ const loading = ref(false)
 
 // Active filters from FilterBar — maps filter keys to API params
 const activeFilters = ref<Filter[]>([])
+
+// Server-side sort state (JCLAW parity with Memory/Subagents). DataTable runs
+// in manualSorting mode and emits the new state on a header click; we map it to
+// the sort/dir query params in load(). Empty → the server's recency default.
+const sortState = ref<SortingState>([])
 
 const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: () => [] })
 
@@ -60,6 +65,10 @@ async function load() {
       if (a) params.set('agentId', String(a.id))
     }
     if (peer) params.set('peer', peer)
+    if (sortState.value.length) {
+      params.set('sort', sortState.value[0]!.id)
+      params.set('dir', sortState.value[0]!.desc ? 'desc' : 'asc')
+    }
     const res = await $fetch.raw<Conversation[]>(`/api/conversations?${params.toString()}`)
     conversations.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
@@ -74,6 +83,15 @@ await load()
 
 function onFiltersChanged(filters: Filter[]) {
   activeFilters.value = filters
+  page.value = 1
+  selectedIds.value = new Set()
+  load()
+}
+
+// A header click emits the new sort state; refetch from page 1 with the
+// server-side sort applied (dropping any carried-over selection).
+function onSortChange(s: SortingState) {
+  sortState.value = s
   page.value = 1
   selectedIds.value = new Set()
   load()
@@ -457,8 +475,10 @@ const columns: ColumnDef<Conversation, unknown>[] = [
           :columns="columns"
           :data="conversations"
           :loading="loading"
+          manual-sorting
           empty-message="No matching conversations"
           @row-click="(c: Conversation) => navigateTo(`/chat?conversation=${c.id}`)"
+          @sort-change="onSortChange"
         />
         <div
           v-if="total > 0"

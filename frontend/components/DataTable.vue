@@ -25,16 +25,25 @@ const props = withDefaults(defineProps<{
   emptyAction?: string
   /** Enable row selection checkboxes */
   selectable?: boolean
+  /**
+   * Sort server-side: don't reorder rows in the browser (the data prop is
+   * already server-ordered); instead emit `sort-change` so the parent can
+   * refetch with sort/dir params. Header clicks still cycle none→desc→asc and
+   * show the arrow. Off by default → the table sorts its own rows client-side.
+   */
+  manualSorting?: boolean
 }>(), {
   loading: false,
   emptyMessage: 'No data',
   emptyAction: '',
   selectable: false,
+  manualSorting: false,
 })
 
 const emit = defineEmits<{
   (e: 'row-click', row: TData): void
   (e: 'empty-action'): void
+  (e: 'sort-change', sorting: SortingState): void
 }>()
 
 // ── Table state ─────────────────────────────────────────────────────────────
@@ -47,12 +56,17 @@ const table = useVueTable({
   get columns() { return props.columns },
   getCoreRowModel: getCoreRowModel(),
   getSortedRowModel: getSortedRowModel(),
+  // manualSorting=true tells the table the rows arrive pre-sorted (from the
+  // server), so getSortedRowModel becomes a passthrough — the sort state is
+  // still tracked for the header arrow, and the change is emitted upward.
+  get manualSorting() { return props.manualSorting },
   state: {
     get sorting() { return sorting.value },
     get rowSelection() { return rowSelection.value },
   },
   onSortingChange: (updater) => {
     sorting.value = typeof updater === 'function' ? updater(sorting.value) : updater
+    if (props.manualSorting) emit('sort-change', sorting.value)
   },
   onRowSelectionChange: (updater) => {
     rowSelection.value = typeof updater === 'function' ? updater(rowSelection.value) : updater

@@ -234,6 +234,50 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
                 "keep row is the one match: " + body);
     }
 
+    // ── server-side sort ─────────────────────────────────────────────
+
+    @Test
+    void sortsByParentAgentNameServerSide() {
+        login();
+        var data = commitInFreshTx(() -> {
+            var pz = AgentService.create("sort-zeta", "openrouter", "gpt-4.1");
+            var pa = AgentService.create("sort-alpha", "openrouter", "gpt-4.1");
+            var c = AgentService.create("sort-child", "openrouter", "gpt-4.1");
+            var pzc = ConversationService.create(pz, "web", "u");
+            var pac = ConversationService.create(pa, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            persistRun(pz, c, pzc, cc, SubagentRun.Status.COMPLETED);
+            persistRun(pa, c, pac, cc, SubagentRun.Status.COMPLETED);
+            return new long[]{pa.id, pz.id};
+        });
+        assertNotNull(data);
+
+        var asc = getContent(GET("/api/subagent-runs?sort=parent&dir=asc"));
+        assertTrue(asc.indexOf("sort-alpha") < asc.indexOf("sort-zeta"),
+                "parent asc: sort-alpha before sort-zeta, got: " + asc);
+
+        var desc = getContent(GET("/api/subagent-runs?sort=parent&dir=desc"));
+        assertTrue(desc.indexOf("sort-zeta") < desc.indexOf("sort-alpha"),
+                "parent desc: sort-zeta before sort-alpha, got: " + desc);
+    }
+
+    @Test
+    void unknownSortColumnFallsBackToDefaultOrderNot400() {
+        login();
+        commitInFreshTx(() -> {
+            var p = AgentService.create("sort-fallback-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("sort-fallback-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            persistRun(p, c, pc, cc, SubagentRun.Status.COMPLETED);
+            return null;
+        });
+        // A bogus sort column must not 400 — it falls back to startedAt DESC.
+        var resp = GET("/api/subagent-runs?sort=bogus&dir=sideways");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("sort-fallback-c"), "row still returned under fallback order");
+    }
+
     // ── kill endpoint ────────────────────────────────────────────────
 
     @Test

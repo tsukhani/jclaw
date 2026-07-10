@@ -163,6 +163,28 @@ describe('Subagents — delete all with filter scope', () => {
   })
 })
 
+describe('Subagents — server-side sort', () => {
+  it('sends sort/dir params on a header click and flips direction on the second', async () => {
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    // "Started" is a sortable header; its default direction is desc.
+    const startedBtn = component.findAll('button').find(b => b.text().startsWith('Started'))!
+    expect(startedBtn).toBeTruthy()
+    await startedBtn.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ sort: 'started', dir: 'desc' }))
+
+    // Same column flips to asc.
+    await startedBtn.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ sort: 'started', dir: 'asc' }))
+
+    // A different column resets to its own default (parent → asc).
+    const parentBtn = component.findAll('button').find(b => b.text().startsWith('Parent'))!
+    await parentBtn.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ sort: 'parent', dir: 'asc' }))
+  })
+})
+
 describe('Subagents — quick preview peek panel', () => {
   it('opens the panel with run meta, the child transcript, and the (tool call) placeholder', async () => {
     const component = await mountSuspended(Subagents)

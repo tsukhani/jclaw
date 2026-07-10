@@ -74,6 +74,14 @@ const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: ()
 const pageSize = 20
 const page = ref(1)
 
+// Server-side sort (parity with Memory/Conversations). sortBy/sortDir feed the
+// `sort`/`dir` params, so a header click refetches an ordered page — the sort
+// spans the whole result set, not just the current page. `mode` (from spawn
+// events) and `duration` (computed) aren't DB columns, so they aren't sortable.
+type SortColumn = 'id' | 'parent' | 'child' | 'status' | 'started'
+const sortBy = ref<SortColumn | null>(null)
+const sortDir = ref<'asc' | 'desc'>('desc')
+
 const url = computed(() => {
   const params = new URLSearchParams()
   // JCLAW-304: q goes first as the FTS keyword; backend unions
@@ -109,6 +117,10 @@ const url = computed(() => {
     // Less ideal than a typed picker but consistent with the other key
     // shapes — and the typed picker can layer on later if needed.
     params.set('since', `${sinceFilter.value}:00Z`)
+  }
+  if (sortBy.value) {
+    params.set('sort', sortBy.value)
+    params.set('dir', sortDir.value)
   }
   params.set('limit', String(pageSize))
   params.set('offset', String((page.value - 1) * pageSize))
@@ -155,6 +167,26 @@ function goto(p: number) {
   if (p < 1 || p > totalPages.value || p === page.value || loading.value) return
   page.value = p
   selectedIds.value = new Set()
+}
+
+// Header click → server-side sort. Same column flips direction; a new column
+// resets to its natural default (started/id newest-first, text columns asc).
+// sortBy/sortDir + page are `url` deps, so this refetches via the watch.
+function toggleSort(col: SortColumn) {
+  if (sortBy.value === col) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  }
+  else {
+    sortBy.value = col
+    sortDir.value = col === 'started' || col === 'id' ? 'desc' : 'asc'
+  }
+  page.value = 1
+  selectedIds.value = new Set()
+}
+
+function sortArrow(col: SortColumn): string {
+  if (sortBy.value !== col) return ''
+  return sortDir.value === 'asc' ? '↑' : '↓'
 }
 
 // Auto-refresh every 5s when there is at least one RUNNING row — keeps the
@@ -475,23 +507,88 @@ function closePeek() {
                 @change="toggleSelectAll"
               >
             </th>
-            <th class="px-4 py-2.5 font-medium">
-              ID
+            <th
+              class="px-4 py-2.5 font-medium"
+              :aria-sort="sortBy === 'id' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                :class="sortBy === 'id' ? 'text-fg-strong' : ''"
+                @click="toggleSort('id')"
+              >
+                ID <span
+                  v-if="sortArrow('id')"
+                  aria-hidden="true"
+                >{{ sortArrow('id') }}</span>
+              </button>
             </th>
-            <th class="px-4 py-2.5 font-medium">
-              Parent
+            <th
+              class="px-4 py-2.5 font-medium"
+              :aria-sort="sortBy === 'parent' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                :class="sortBy === 'parent' ? 'text-fg-strong' : ''"
+                @click="toggleSort('parent')"
+              >
+                Parent <span
+                  v-if="sortArrow('parent')"
+                  aria-hidden="true"
+                >{{ sortArrow('parent') }}</span>
+              </button>
             </th>
-            <th class="px-4 py-2.5 font-medium">
-              Child
+            <th
+              class="px-4 py-2.5 font-medium"
+              :aria-sort="sortBy === 'child' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                :class="sortBy === 'child' ? 'text-fg-strong' : ''"
+                @click="toggleSort('child')"
+              >
+                Child <span
+                  v-if="sortArrow('child')"
+                  aria-hidden="true"
+                >{{ sortArrow('child') }}</span>
+              </button>
             </th>
             <th class="px-4 py-2.5 font-medium">
               Mode
             </th>
-            <th class="px-4 py-2.5 font-medium">
-              Status
+            <th
+              class="px-4 py-2.5 font-medium"
+              :aria-sort="sortBy === 'status' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                :class="sortBy === 'status' ? 'text-fg-strong' : ''"
+                @click="toggleSort('status')"
+              >
+                Status <span
+                  v-if="sortArrow('status')"
+                  aria-hidden="true"
+                >{{ sortArrow('status') }}</span>
+              </button>
             </th>
-            <th class="px-4 py-2.5 font-medium">
-              Started
+            <th
+              class="px-4 py-2.5 font-medium"
+              :aria-sort="sortBy === 'started' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                :class="sortBy === 'started' ? 'text-fg-strong' : ''"
+                @click="toggleSort('started')"
+              >
+                Started <span
+                  v-if="sortArrow('started')"
+                  aria-hidden="true"
+                >{{ sortArrow('started') }}</span>
+              </button>
             </th>
             <th class="px-4 py-2.5 font-medium">
               Duration

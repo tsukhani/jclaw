@@ -301,6 +301,29 @@ describe('Conversations — delete all with filter scope', () => {
   })
 })
 
+describe('Conversations — server-side sort', () => {
+  it('clicking a column header refetches with sort/dir params (manual sorting)', async () => {
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+
+    // DataTable runs in manualSorting mode: a header click emits sort-change,
+    // which load() turns into sort/dir query params. Click the Channel header.
+    const channelHeader = component.findAll('th').find(th => th.text().includes('Channel'))!
+    expect(channelHeader).toBeTruthy()
+    await channelHeader.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.sort).toBe('channelType'))
+    const firstDir = capturedQueries.at(-1)!.dir
+    expect(firstDir).toBeDefined()
+
+    // A second click on the same column flips the direction (still server-side).
+    await channelHeader.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.dir).not.toBe(firstDir))
+    expect(capturedQueries.at(-1)!.sort).toBe('channelType')
+    // Sort resets to page 1.
+    expect(capturedQueries.at(-1)!.offset).toBe('0')
+  })
+})
+
 describe('Conversations — quick preview peek panel', () => {
   it('opens the panel with conversation meta, messages, and the (tool call) placeholder', async () => {
     const component = await mountSuspended(Conversations)
