@@ -70,7 +70,7 @@ onActivated(() => {
             Telegram
           </h3>
           <span
-            :class="telegramActiveCount > 0 ? 'text-green-400' : 'text-fg-muted'"
+            :class="telegramActiveCount > 0 ? 'text-green-700 dark:text-green-400' : 'text-fg-muted'"
             class="text-xs font-mono"
           >{{ telegramActiveCount > 0 ? `${telegramActiveCount} active` : 'not configured' }}</span>
         </div>
@@ -88,7 +88,7 @@ onActivated(() => {
             Slack
           </h3>
           <span
-            :class="slackActiveCount > 0 ? 'text-green-400' : 'text-fg-muted'"
+            :class="slackActiveCount > 0 ? 'text-green-700 dark:text-green-400' : 'text-fg-muted'"
             class="text-xs font-mono"
           >{{ slackActiveCount > 0 ? `${slackActiveCount} active` : 'not configured' }}</span>
         </div>
@@ -106,7 +106,7 @@ onActivated(() => {
             WhatsApp
           </h3>
           <span
-            :class="whatsappActiveCount > 0 ? 'text-green-400' : 'text-fg-muted'"
+            :class="whatsappActiveCount > 0 ? 'text-green-700 dark:text-green-400' : 'text-fg-muted'"
             class="text-xs font-mono"
           >{{ whatsappActiveCount > 0 ? `${whatsappActiveCount} active` : 'not configured' }}</span>
         </div>
@@ -125,7 +125,7 @@ onActivated(() => {
           Public access — Tailscale Funnel
         </h3>
         <span
-          :class="tailscale?.enabled && tailscale?.available ? 'text-green-400' : 'text-fg-muted'"
+          :class="tailscale?.enabled && tailscale?.available ? 'text-green-700 dark:text-green-400' : 'text-fg-muted'"
           class="text-xs font-mono"
         >{{ tailscaleStatus === 'pending' ? 'checking…' : (tailscale?.enabled ? (tailscale?.available ? 'active' : 'enabled (unavailable)') : 'off') }}</span>
       </div>
@@ -144,7 +144,7 @@ onActivated(() => {
       </p>
       <p
         v-if="tailscale?.error"
-        class="text-xs text-amber-400 mb-3"
+        class="text-xs text-amber-700 dark:text-amber-400 mb-3"
       >
         {{ tailscale?.error }}
         <span

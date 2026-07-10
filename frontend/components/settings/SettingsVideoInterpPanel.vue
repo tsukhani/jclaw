@@ -371,7 +371,7 @@ async function setVideoModel(value: string) {
             <span
               v-else
               class="text-[10px] px-1 border"
-              :class="videoProvider === 'vllm' ? 'text-green-400 border-green-400/30' : 'text-fg-muted border-input'"
+              :class="videoProvider === 'vllm' ? 'text-green-700 dark:text-green-400 border-green-400/30' : 'text-fg-muted border-input'"
             >reachable</span>
           </label>
           <label

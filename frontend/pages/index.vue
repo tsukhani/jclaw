@@ -292,7 +292,7 @@ onBeforeUnmount(() => {
           >
             <div
               class="text-2xl font-semibold leading-none"
-              :class="workspaceBytes >= WORKSPACE_WARN_BYTES ? 'text-amber-500' : 'text-fg-strong'"
+              :class="workspaceBytes >= WORKSPACE_WARN_BYTES ? 'text-amber-700 dark:text-amber-400' : 'text-fg-strong'"
               data-testid="workspace-size-value"
             >
               {{ workspaceSize.value }}

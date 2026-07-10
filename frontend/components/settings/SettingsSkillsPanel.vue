@@ -213,7 +213,7 @@ async function saveSPField(configKey: string, value: string) {
           <template v-else>
             <span
               class="flex-1 text-sm font-mono"
-              :class="spModelRaw || !spHasExplicitProvider ? 'text-fg-primary' : 'text-amber-500'"
+              :class="spModelRaw || !spHasExplicitProvider ? 'text-fg-primary' : 'text-amber-700 dark:text-amber-400'"
             >
               {{ spModelRaw ? spModelRaw : spHasExplicitProvider ? 'Select a model' : spEffectiveModel ? spEffectiveModel + ' (from main agent)' : 'Not configured' }}
             </span>

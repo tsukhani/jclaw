@@ -400,7 +400,7 @@ onBeforeUnmount(stopPoll)
                once the Cloud-API save's verify probe has succeeded. -->
           <div
             v-if="b.transport !== 'WHATSAPP_WEB' && b.verifiedName"
-            class="flex justify-between gap-4 text-emerald-400"
+            class="flex justify-between gap-4 text-emerald-700 dark:text-emerald-400"
           >
             <dt>Verified</dt>
             <dd
@@ -712,7 +712,7 @@ onBeforeUnmount(stopPoll)
           </ul>
           <p
             v-if="form.agentQuery && !form.agentId && !agentDropdownOpen"
-            class="mt-1 text-xs text-amber-400"
+            class="mt-1 text-xs text-amber-700 dark:text-amber-400"
           >
             Select an agent from the dropdown before saving.
           </p>
@@ -721,7 +721,7 @@ onBeforeUnmount(stopPoll)
 
       <p
         v-if="errorMessage"
-        class="mt-3 text-xs text-red-400"
+        class="mt-3 text-xs text-red-700 dark:text-red-400"
       >
         {{ errorMessage }}
       </p>
@@ -767,13 +767,13 @@ onBeforeUnmount(stopPoll)
         <div class="flex flex-col items-center gap-3 min-h-[16rem] justify-center">
           <p
             v-if="pairConnected"
-            class="text-sm text-emerald-400 font-medium"
+            class="text-sm text-emerald-700 dark:text-emerald-400 font-medium"
           >
             Connected ✓
           </p>
           <p
             v-else-if="pairError"
-            class="text-xs text-red-400 text-center"
+            class="text-xs text-red-700 dark:text-red-400 text-center"
           >
             {{ pairError }}
           </p>

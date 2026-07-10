@@ -2903,7 +2903,7 @@ function exportConversation() {
                          mistake it for content. -->
                     <div
                       v-if="subagentAnnounceTruncated(msg)"
-                      class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400 border-t border-neutral-200 dark:border-neutral-700 bg-amber-50/50 dark:bg-amber-950/20"
+                      class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-400 border-t border-neutral-200 dark:border-neutral-700 bg-amber-50/50 dark:bg-amber-950/20"
                       data-testid="truncated-marker"
                     >
                       <ExclamationTriangleIcon
@@ -3102,7 +3102,7 @@ function exportConversation() {
                               <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
                               <span
                                 v-if="att.deleted"
-                                class="ml-auto text-[11px] italic text-red-500/90"
+                                class="ml-auto text-[11px] italic text-red-700/90 dark:text-red-400/90"
                               >deleted from workspace</span>
                               <!-- Actions while the file exists: download + delete, right-aligned. -->
                               <template v-else>
@@ -3211,7 +3211,7 @@ function exportConversation() {
                                 <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
                                 <span
                                   v-else
-                                  class="ml-auto text-[11px] italic text-red-500/90"
+                                  class="ml-auto text-[11px] italic text-red-700/90 dark:text-red-400/90"
                                 >deleted from workspace</span>
                               </div>
                               <!-- Prompt: full chip width, wraps naturally. -->
@@ -3222,7 +3222,7 @@ function exportConversation() {
                           </template>
                           <div
                             v-else-if="videoCardState(att) === 'failed'"
-                            class="flex items-start gap-2 w-[320px] max-w-full bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg px-3 py-2 text-xs text-red-600 dark:text-red-400"
+                            class="flex items-start gap-2 w-[320px] max-w-full bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 rounded-lg px-3 py-2 text-xs text-red-700 dark:text-red-400"
                           >
                             <ExclamationTriangleIcon
                               class="w-4 h-4 shrink-0 mt-0.5"
@@ -3230,7 +3230,7 @@ function exportConversation() {
                             />
                             <div class="flex flex-col gap-0.5 min-w-0">
                               <span class="font-medium">Video generation failed</span>
-                              <span class="break-words text-red-500/90">{{ videoCardError(att) }}</span>
+                              <span class="break-words text-red-700/90 dark:text-red-400/90">{{ videoCardError(att) }}</span>
                             </div>
                           </div>
                           <div
@@ -3475,7 +3475,7 @@ function exportConversation() {
                           @click="toggleThinking(msg)"
                         >
                           <LightBulbIconSolid
-                            class="w-3.5 h-3.5 shrink-0 text-amber-400 drop-shadow-[0_0_4px_rgba(251,191,36,0.55)]"
+                            class="w-3.5 h-3.5 shrink-0 text-amber-700 dark:text-amber-400 drop-shadow-[0_0_4px_rgba(251,191,36,0.55)]"
                             aria-hidden="true"
                           />
                           <span class="font-medium">{{ thinkingHeaderLabel(msg) }}</span>
@@ -3498,7 +3498,7 @@ function exportConversation() {
                           />
                           <CheckIcon
                             v-else
-                            class="w-3.5 h-3.5 text-emerald-500"
+                            class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400"
                             aria-hidden="true"
                           />
                           <span>Copy</span>
@@ -3583,7 +3583,7 @@ function exportConversation() {
                          marker at the SYSTEM-role render path above. -->
                     <div
                       v-if="msg.truncated"
-                      class="flex items-center gap-1.5 mt-1.5 px-2 py-1 text-[11px] text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded bg-amber-50/50 dark:bg-amber-950/20"
+                      class="flex items-center gap-1.5 mt-1.5 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded bg-amber-50/50 dark:bg-amber-950/20"
                       data-testid="truncated-marker"
                     >
                       <ExclamationTriangleIcon
@@ -3766,7 +3766,7 @@ function exportConversation() {
                               <dt class="text-muted-foreground">
                                 Cost
                               </dt>
-                              <dd class="font-mono tabular-nums text-amber-500/80">
+                              <dd class="font-mono tabular-nums text-amber-700/80 dark:text-amber-400/80">
                                 {{ formatUsageCost(msg.usage) }}
                               </dd>
                             </div>
@@ -3926,7 +3926,7 @@ function exportConversation() {
                 <span>{{ attachError }}</span>
                 <button
                   type="button"
-                  class="text-red-600 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
+                  class="text-red-700 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
                   title="Dismiss"
                   @click="attachError = null"
                 >
@@ -3996,7 +3996,7 @@ function exportConversation() {
                   type="button"
                   class="inline-flex items-center justify-center w-8 h-8 rounded-full border transition-colors"
                   :class="isRecording
-                    ? 'border-red-500 text-red-500 bg-red-500/10 animate-pulse'
+                    ? 'border-red-500 text-red-700 dark:text-red-400 bg-red-500/10 animate-pulse'
                     : 'border-border text-fg-muted hover:text-fg-strong hover:bg-muted'"
                   :title="isRecording ? 'Stop recording' : 'Record voice'"
                   :aria-pressed="isRecording"
@@ -4029,7 +4029,7 @@ function exportConversation() {
                     thinkingLock.locked
                       ? 'bg-emerald-700/30 text-emerald-300 cursor-not-allowed'
                       : (thinkingActive
-                        ? 'bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25'
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25'
                         : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'),
                   ]"
                   :aria-disabled="thinkingLock.locked"
@@ -4060,7 +4060,7 @@ function exportConversation() {
                 -->
                 <span
                   v-if="visionSupported"
-                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-sky-500/15 text-sky-400 cursor-default"
+                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-sky-500/15 text-sky-700 dark:text-sky-400 cursor-default"
                   title="This model accepts image inputs natively. Other models receive a generated text description."
                 >
                   <EyeIcon
@@ -4078,7 +4078,7 @@ function exportConversation() {
                 -->
                 <span
                   v-if="audioSupported"
-                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-amber-500/15 text-amber-400 cursor-default"
+                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-amber-500/15 text-amber-700 dark:text-amber-400 cursor-default"
                   title="This model handles audio natively. Voice notes pass through directly; non-audio models receive a transcript."
                 >
                   <SpeakerWaveIcon
@@ -4139,7 +4139,7 @@ function exportConversation() {
                 <button
                   v-if="streaming"
                   type="button"
-                  class="p-1.5 text-red-500 hover:text-red-400 transition-colors"
+                  class="p-1.5 text-red-700 dark:text-red-400 hover:text-red-400 transition-colors"
                   title="Stop generating"
                   @click="stopStreaming"
                 >
@@ -4201,7 +4201,7 @@ function exportConversation() {
                   type="button"
                   class="px-3 py-1.5 text-xs font-medium text-left whitespace-nowrap transition-colors"
                   :class="selectedAgent?.thinkingMode === level
-                    ? 'bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25'
+                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25'
                     : 'text-fg-muted hover:text-fg-strong hover:bg-muted'"
                   @click="setThinkingLevel(level)"
                 >

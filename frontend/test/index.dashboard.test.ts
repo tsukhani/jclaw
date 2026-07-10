@@ -114,7 +114,7 @@ describe('Dashboard — workspace disk footprint line', () => {
     const value = c.find('[data-testid="workspace-size-value"]')
     expect(value.exists()).toBe(true)
     expect(value.text()).toBe('2.0')
-    expect(value.classes()).not.toContain('text-amber-500')
+    expect(value.classes()).not.toContain('text-amber-700')
     expect(c.find('[data-testid="workspace-size-label"]').text()).toBe('Size (in KB)')
   })
 
@@ -127,7 +127,8 @@ describe('Dashboard — workspace disk footprint line', () => {
 
     const value = c.find('[data-testid="workspace-size-value"]')
     expect(value.text()).toBe('30.0')
-    expect(value.classes()).toContain('text-amber-500')
+    expect(value.classes()).toContain('text-amber-700')
+    expect(value.classes()).toContain('dark:text-amber-400')
     expect(c.find('[data-testid="workspace-size-label"]').text()).toBe('Size (in GB)')
   })
 

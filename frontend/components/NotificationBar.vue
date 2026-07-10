@@ -136,12 +136,12 @@ onUnmounted(() => {
             />
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between gap-2">
-                <span class="text-xs font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                <span class="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
                   Reminder
                 </span>
                 <span
                   v-if="t.createdAt"
-                  class="text-[0.65rem] text-amber-600 dark:text-amber-400"
+                  class="text-[0.65rem] text-amber-700 dark:text-amber-400"
                 >
                   {{ formatWhen(t.createdAt) }}
                 </span>
@@ -151,7 +151,7 @@ onUnmounted(() => {
               </p>
               <div class="mt-2 flex items-center justify-between gap-3">
                 <button
-                  class="text-xs font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                  class="text-xs font-medium text-amber-700 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
                   @click="acknowledge(t.id)"
                 >
                   Mark as seen

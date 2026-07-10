@@ -284,7 +284,7 @@ function fmt(n: number) {
           <div class="text-[11px] uppercase tracking-wide text-fg-muted">
             Tokens saved
           </div>
-          <div class="mt-1 text-2xl font-semibold leading-none tabular-nums text-emerald-500">
+          <div class="mt-1 text-2xl font-semibold leading-none tabular-nums text-emerald-700 dark:text-emerald-400">
             {{ fmt(agg.tokensSaved) }}
           </div>
           <div class="mt-1.5 text-xs text-fg-muted">
@@ -349,7 +349,7 @@ function fmt(n: number) {
             </div>
             <span class="text-xs text-fg-muted tabular-nums w-32 text-right shrink-0">
               {{ fmt(t.saved) }}
-              <span class="text-emerald-500 ml-1">↓{{ 100 - pct(t.ratio) }}%</span>
+              <span class="text-emerald-700 dark:text-emerald-400 ml-1">↓{{ 100 - pct(t.ratio) }}%</span>
             </span>
           </div>
         </div>
@@ -466,7 +466,7 @@ function fmt(n: number) {
           class="flex items-start gap-1.5 text-xs text-fg-muted"
         >
           <ExclamationTriangleIcon
-            class="w-3.5 h-3.5 shrink-0 mt-px text-amber-500/80"
+            class="w-3.5 h-3.5 shrink-0 mt-px text-amber-700/80 dark:text-amber-400/80"
             aria-hidden="true"
           />
           <span>{{ a }}</span>

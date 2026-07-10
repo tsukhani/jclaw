@@ -78,7 +78,7 @@ const pills = computed<PillDef[]>(() => {
       enabled: thinkingLocked || !!props.thinkingMode,
       onCls: thinkingLocked
         ? 'text-emerald-300 border-emerald-500/60 bg-emerald-500/15'
-        : 'text-emerald-400 border-emerald-400/40 bg-emerald-400/5 hover:bg-emerald-400/10',
+        : 'text-emerald-700 dark:text-emerald-400 border-emerald-400/40 bg-emerald-400/5 hover:bg-emerald-400/10',
       interactive: !thinkingLocked,
       locked: thinkingLocked,
     },
@@ -88,7 +88,7 @@ const pills = computed<PillDef[]>(() => {
       icon: Eye,
       supported: !!m.supportsVision,
       enabled: true,
-      onCls: 'text-sky-400 border-sky-400/40 bg-sky-400/5',
+      onCls: 'text-sky-700 dark:text-sky-400 border-sky-400/40 bg-sky-400/5',
       interactive: false,
       locked: false,
     },
@@ -98,7 +98,7 @@ const pills = computed<PillDef[]>(() => {
       icon: Volume2,
       supported: !!m.supportsAudio,
       enabled: true,
-      onCls: 'text-amber-400 border-amber-400/40 bg-amber-400/5',
+      onCls: 'text-amber-700 dark:text-amber-400 border-amber-400/40 bg-amber-400/5',
       interactive: false,
       locked: false,
     },

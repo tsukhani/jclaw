@@ -450,7 +450,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           <div>
             <span class="block mb-1">Events API Request URL:</span>
             <div class="flex items-start gap-2">
-              <code class="font-mono break-all text-emerald-400">{{ b.effectiveRequestUrl }}</code>
+              <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ b.effectiveRequestUrl }}</code>
               <button
                 type="button"
                 class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
@@ -459,7 +459,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               >
                 <CheckIcon
                   v-if="copied === b.effectiveRequestUrl"
-                  class="h-4 w-4 text-emerald-400"
+                  class="h-4 w-4 text-emerald-700 dark:text-emerald-400"
                 />
                 <ClipboardDocumentIcon
                   v-else
@@ -471,7 +471,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           <div>
             <span class="block mb-1">Interactivity Request URL:</span>
             <div class="flex items-start gap-2">
-              <code class="font-mono break-all text-emerald-400">{{ `${b.effectiveRequestUrl}/interactive` }}</code>
+              <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ `${b.effectiveRequestUrl}/interactive` }}</code>
               <button
                 type="button"
                 class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
@@ -480,7 +480,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               >
                 <CheckIcon
                   v-if="copied === `${b.effectiveRequestUrl}/interactive`"
-                  class="h-4 w-4 text-emerald-400"
+                  class="h-4 w-4 text-emerald-700 dark:text-emerald-400"
                 />
                 <ClipboardDocumentIcon
                   v-else
@@ -537,7 +537,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
         >
           <p
             v-if="probeResults[b.id]?.ok"
-            class="text-emerald-400"
+            class="text-emerald-700 dark:text-emerald-400"
           >
             OK — connected as
             <span class="font-mono text-fg-strong">{{ probeResults[b.id]?.botUserId ?? '?' }}</span>
@@ -545,7 +545,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           </p>
           <p
             v-else
-            class="text-red-400"
+            class="text-red-700 dark:text-red-400"
           >
             {{ probeResults[b.id]?.error ?? 'Probe failed.' }}
           </p>
@@ -626,7 +626,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               :key="v"
               class="flex items-start gap-2"
             >
-              <code class="font-mono break-all text-emerald-400">{{ v }}</code>
+              <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ v }}</code>
               <button
                 type="button"
                 class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
@@ -635,7 +635,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               >
                 <CheckIcon
                   v-if="copied === v"
-                  class="h-4 w-4 text-emerald-400"
+                  class="h-4 w-4 text-emerald-700 dark:text-emerald-400"
                 />
                 <ClipboardDocumentIcon
                   v-else
@@ -653,7 +653,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               :key="v"
               class="flex items-start gap-2"
             >
-              <code class="font-mono break-all text-emerald-400">{{ v }}</code>
+              <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ v }}</code>
               <button
                 type="button"
                 class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
@@ -662,7 +662,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               >
                 <CheckIcon
                   v-if="copied === v"
-                  class="h-4 w-4 text-emerald-400"
+                  class="h-4 w-4 text-emerald-700 dark:text-emerald-400"
                 />
                 <ClipboardDocumentIcon
                   v-else
@@ -787,7 +787,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           </ul>
           <p
             v-if="form.agentQuery && !form.agentId && !agentDropdownOpen"
-            class="mt-1 text-xs text-amber-400"
+            class="mt-1 text-xs text-amber-700 dark:text-amber-400"
           >
             Select an agent from the dropdown before saving.
           </p>
@@ -817,7 +817,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           </span>
           <p
             v-if="ownerRequired"
-            class="mt-1 text-xs text-amber-400"
+            class="mt-1 text-xs text-amber-700 dark:text-amber-400"
           >
             The main agent has full filesystem and shell access. An owner is required so
             only you can reach it — others are blocked entirely.
@@ -847,7 +847,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
             <div class="space-y-1">
               <span class="block">Events API Request URL — paste this into the Slack app's Event Subscriptions:</span>
               <div class="flex items-start gap-2">
-                <code class="font-mono break-all text-emerald-400">{{ fullRequestUrl }}</code>
+                <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ fullRequestUrl }}</code>
                 <button
                   type="button"
                   class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
@@ -856,7 +856,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
                 >
                   <CheckIcon
                     v-if="copied === fullRequestUrl"
-                    class="h-4 w-4 text-emerald-400"
+                    class="h-4 w-4 text-emerald-700 dark:text-emerald-400"
                   />
                   <ClipboardDocumentIcon
                     v-else
@@ -868,7 +868,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
             <div class="space-y-1">
               <span class="block">Interactivity Request URL — paste this into Interactivity &amp; Shortcuts (needed for exec approvals):</span>
               <div class="flex items-start gap-2">
-                <code class="font-mono break-all text-emerald-400">{{ fullInteractiveUrl }}</code>
+                <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ fullInteractiveUrl }}</code>
                 <button
                   type="button"
                   class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
@@ -877,7 +877,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
                 >
                   <CheckIcon
                     v-if="copied === fullInteractiveUrl"
-                    class="h-4 w-4 text-emerald-400"
+                    class="h-4 w-4 text-emerald-700 dark:text-emerald-400"
                   />
                   <ClipboardDocumentIcon
                     v-else
@@ -889,7 +889,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           </div>
           <p
             v-else-if="!form.webhookBaseUrl.trim()"
-            class="text-xs text-amber-400"
+            class="text-xs text-amber-700 dark:text-amber-400"
           >
             Enter your public HTTPS URL — or enable the Tailscale Funnel on the
             Channels page — so Slack can reach this binding's Request URL.
@@ -906,7 +906,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
 
       <p
         v-if="errorMessage"
-        class="mt-3 text-xs text-red-400"
+        class="mt-3 text-xs text-red-700 dark:text-red-400"
       >
         {{ errorMessage }}
       </p>

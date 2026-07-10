@@ -449,14 +449,14 @@ async function testBinding(binding: TelegramBindingSummary) {
         >
           <p
             v-if="probeResults[b.id]?.ok"
-            class="text-emerald-400"
+            class="text-emerald-700 dark:text-emerald-400"
           >
             OK — connected as
             <span class="font-mono text-fg-strong">@{{ probeResults[b.id]?.botUsername ?? '?' }}</span>
           </p>
           <p
             v-else
-            class="text-red-400"
+            class="text-red-700 dark:text-red-400"
           >
             {{ probeResults[b.id]?.error ?? 'Probe failed.' }}
           </p>
@@ -469,7 +469,7 @@ async function testBinding(binding: TelegramBindingSummary) {
           </p>
           <p
             v-if="probeResults[b.id]?.webhookLastError"
-            class="text-amber-400 mt-1"
+            class="text-amber-700 dark:text-amber-400 mt-1"
           >
             Last webhook error: {{ probeResults[b.id]?.webhookLastError }}
           </p>
@@ -589,7 +589,7 @@ async function testBinding(binding: TelegramBindingSummary) {
           </ul>
           <p
             v-if="form.agentQuery && !form.agentId && !agentDropdownOpen"
-            class="mt-1 text-xs text-amber-400"
+            class="mt-1 text-xs text-amber-700 dark:text-amber-400"
           >
             Select an agent from the dropdown before saving.
           </p>
@@ -721,12 +721,12 @@ async function testBinding(binding: TelegramBindingSummary) {
             class="text-xs text-fg-muted space-y-1"
           >
             <span class="block">Webhook URL — JClaw registers this with Telegram automatically on save:</span>
-            <code class="block font-mono break-all text-emerald-400">{{ fullWebhookUrl }}</code>
+            <code class="block font-mono break-all text-emerald-700 dark:text-emerald-400">{{ fullWebhookUrl }}</code>
             <span class="block">The path and secret are generated for you; only the public host above is editable. Keep it private.</span>
           </div>
           <p
             v-else-if="!form.webhookBaseUrl.trim()"
-            class="text-xs text-amber-400"
+            class="text-xs text-amber-700 dark:text-amber-400"
           >
             Enter your public HTTPS URL — or enable the Tailscale Funnel on the
             Channels page — so JClaw can register the webhook with Telegram.
@@ -742,7 +742,7 @@ async function testBinding(binding: TelegramBindingSummary) {
 
       <p
         v-if="errorMessage"
-        class="mt-3 text-xs text-red-400"
+        class="mt-3 text-xs text-red-700 dark:text-red-400"
       >
         {{ errorMessage }}
       </p>

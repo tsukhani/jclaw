@@ -283,7 +283,7 @@ function exportConversation() {
             <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
               Cached
             </dt>
-            <dd class="mt-1 text-sm font-mono text-amber-400 tabular-nums">
+            <dd class="mt-1 text-sm font-mono text-amber-700 dark:text-amber-400 tabular-nums">
               {{ conversationStats.cachedTokens.toLocaleString() }}
             </dd>
           </div>
@@ -307,7 +307,7 @@ function exportConversation() {
             <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
               Cost
             </dt>
-            <dd class="mt-1 text-sm font-mono text-emerald-400 tabular-nums">
+            <dd class="mt-1 text-sm font-mono text-emerald-700 dark:text-emerald-400 tabular-nums">
               {{ conversationStats.totalCost < 0.0001 ? '< $0.0001' : '$' + conversationStats.totalCost.toFixed(4) }}
             </dd>
           </div>
@@ -318,7 +318,7 @@ function exportConversation() {
             <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
               Saved
             </dt>
-            <dd class="mt-1 text-sm font-mono text-emerald-400 tabular-nums">
+            <dd class="mt-1 text-sm font-mono text-emerald-700 dark:text-emerald-400 tabular-nums">
               {{ conversationStats.savings < 0.0001 ? '< $0.0001' : '$' + conversationStats.savings.toFixed(4) }}
               <span class="text-fg-muted">({{ conversationStats.savingsPct.toFixed(0) }}%)</span>
             </dd>

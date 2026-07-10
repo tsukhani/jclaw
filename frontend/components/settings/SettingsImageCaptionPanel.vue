@@ -224,7 +224,7 @@ async function setCaptionModel(value: string) {
             <span
               class="text-[10px] px-1 border"
               :class="captionProvider === 'ollama-local'
-                ? 'text-green-400 border-green-400/30'
+                ? 'text-green-700 dark:text-green-400 border-green-400/30'
                 : 'text-fg-muted border-input'"
             >local</span>
           </label>

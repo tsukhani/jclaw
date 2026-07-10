@@ -562,7 +562,7 @@ onUnmounted(() => stopImagegenLocalPolling())
           <!-- ERROR — probe failed. -->
           <div
             v-else-if="imageCapState === 'ERROR'"
-            class="px-4 py-2.5 text-[11px] text-rose-600 dark:text-rose-400"
+            class="px-4 py-2.5 text-[11px] text-rose-700 dark:text-rose-400"
           >
             {{ imageCapability?.error ?? 'Capability probe failed.' }}
           </div>
@@ -626,7 +626,7 @@ onUnmounted(() => stopImagegenLocalPolling())
                 </div>
               </template>
               <template v-else-if="fluxModelStatus === 'AVAILABLE'">
-                <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
+                <span class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1">Ready</span>
               </template>
               <template v-else>
                 <button

@@ -245,7 +245,7 @@ function handleInputKeydown(e: KeyboardEvent) {
               @keydown.escape="showSaveInput = false"
             >
             <button
-              class="text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
+              class="text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
               @click="saveCurrentView"
             >
               Save

@@ -402,7 +402,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
         <button
           v-if="total > 0"
           :disabled="deletingAll"
-          class="px-3 py-1.5 border border-red-700 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          class="px-3 py-1.5 border border-red-700 text-red-700 dark:text-red-400 text-xs font-medium hover:bg-red-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           @click="deleteAll"
         >
           {{ deletingAll ? 'Deleting...' : `Delete all${activeFilters.length ? ' matching' : ''}` }}
@@ -432,7 +432,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
              otherwise show as a visible gap before the comma. -->
         Start a <NuxtLink
           to="/chat"
-          class="font-medium text-emerald-600 underline-offset-2 hover:underline dark:text-emerald-400"
+          class="font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400"
         >new chat</NuxtLink>,
         send a message to one of your bound Telegram bots, or hook up another channel —
         every back-and-forth shows up here.

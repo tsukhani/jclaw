@@ -324,7 +324,7 @@ const statusColors: Record<string, string> = {
         </div>
         <div
           class="text-lg font-semibold"
-          :class="reminderStats.activeCount > 0 ? 'text-emerald-400' : 'text-fg-strong'"
+          :class="reminderStats.activeCount > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-strong'"
         >
           {{ reminderStats.activeCount }}
         </div>
@@ -335,7 +335,7 @@ const statusColors: Record<string, string> = {
         </div>
         <div
           class="text-lg font-semibold"
-          :class="reminderStats.pendingCount > 0 ? 'text-yellow-400' : 'text-fg-strong'"
+          :class="reminderStats.pendingCount > 0 ? 'text-yellow-700 dark:text-yellow-400' : 'text-fg-strong'"
         >
           {{ reminderStats.pendingCount }}
         </div>
@@ -346,7 +346,7 @@ const statusColors: Record<string, string> = {
         </div>
         <div
           class="text-lg font-semibold"
-          :class="reminderStats.failedCount > 0 ? 'text-red-400' : 'text-fg-strong'"
+          :class="reminderStats.failedCount > 0 ? 'text-red-700 dark:text-red-400' : 'text-fg-strong'"
         >
           {{ reminderStats.failedCount }}
         </div>
@@ -392,7 +392,7 @@ const statusColors: Record<string, string> = {
           Open
           <NuxtLink
             to="/chat"
-            class="font-medium text-emerald-500 underline-offset-2 hover:underline"
+            class="font-medium text-emerald-700 dark:text-emerald-400 underline-offset-2 hover:underline"
           >
             a chat
           </NuxtLink>

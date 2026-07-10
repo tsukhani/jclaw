@@ -429,7 +429,7 @@ function fmtRunTime(run: RecentRunView): string {
           </div>
           <div
             class="text-xs"
-            :class="col.isToday ? 'font-semibold text-emerald-400' : 'text-fg-primary'"
+            :class="col.isToday ? 'font-semibold text-emerald-700 dark:text-emerald-400' : 'text-fg-primary'"
           >
             {{ col.date.getDate() }}
           </div>

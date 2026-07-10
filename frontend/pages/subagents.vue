@@ -421,7 +421,7 @@ const {
               <NuxtLink
                 v-if="!selectMode && run.childConversationId !== null"
                 :to="`/chat?conversation=${run.childConversationId}`"
-                class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors mr-3"
+                class="text-xs text-blue-700 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors mr-3"
                 @click.stop
               >
                 View transcript
@@ -429,7 +429,7 @@ const {
               <button
                 v-if="!selectMode && run.status === 'RUNNING'"
                 :disabled="killing.has(run.id)"
-                class="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-40 mr-3"
+                class="text-xs text-red-700 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-40 mr-3"
                 @click.stop="killRun(run.id)"
               >
                 {{ killing.has(run.id) ? 'Killing...' : 'Kill' }}

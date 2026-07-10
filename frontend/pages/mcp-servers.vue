@@ -527,7 +527,7 @@ function removeHeaderRow(i: number) {
 
         <div
           v-if="saveError"
-          class="text-xs text-red-400 border border-red-400/30 bg-red-400/5 p-2"
+          class="text-xs text-red-700 dark:text-red-400 border border-red-400/30 bg-red-400/5 p-2"
         >
           {{ saveError }}
         </div>
@@ -926,7 +926,7 @@ function removeHeaderRow(i: number) {
                   <div
                     v-if="testResult && testResultForId === server.id"
                     class="text-xs p-2 border"
-                    :class="testResult.success ? 'text-green-400 border-green-400/30 bg-green-400/5' : 'text-red-400 border-red-400/30 bg-red-400/5'"
+                    :class="testResult.success ? 'text-green-700 dark:text-green-400 border-green-400/30 bg-green-400/5' : 'text-red-700 dark:text-red-400 border-red-400/30 bg-red-400/5'"
                   >
                     <div class="font-medium">
                       {{ testResult.success ? '✓ Connection successful' : '✗ Connection failed' }}
@@ -938,7 +938,7 @@ function removeHeaderRow(i: number) {
 
                   <div
                     v-if="saveError"
-                    class="text-xs text-red-400 border border-red-400/30 bg-red-400/5 p-2"
+                    class="text-xs text-red-700 dark:text-red-400 border border-red-400/30 bg-red-400/5 p-2"
                   >
                     {{ saveError }}
                   </div>
@@ -975,7 +975,7 @@ function removeHeaderRow(i: number) {
               <td
                 colspan="6"
                 class="bg-muted/30 px-4 py-2 text-xs"
-                :class="testResult.success ? 'text-green-400' : 'text-red-400'"
+                :class="testResult.success ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'"
               >
                 {{ testResult.success ? '✓ ' : '✗ ' }}{{ testResult.message }}
               </td>

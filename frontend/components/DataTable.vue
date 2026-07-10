@@ -165,7 +165,7 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
               {{ emptyMessage }}
               <button
                 v-if="emptyAction"
-                class="ml-2 text-emerald-600 dark:text-emerald-400 hover:underline"
+                class="ml-2 text-emerald-700 dark:text-emerald-400 hover:underline"
                 @click="emit('empty-action')"
               >
                 {{ emptyAction }}

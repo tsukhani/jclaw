@@ -164,10 +164,10 @@ const KIND_META: Record<string, KindMeta> = {
   thought: { label: 'Thinking', badge: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300' },
   thinking: { label: 'Thinking', badge: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300' },
   reasoning: { label: 'Thinking', badge: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300' },
-  tool_call: { label: 'Tool', badge: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' },
-  tool_result: { label: 'Result', badge: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300' },
-  diff: { label: 'Diff', badge: 'bg-violet-50 text-violet-600 dark:bg-violet-900/30 dark:text-violet-300' },
-  error: { label: 'Error', badge: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300' },
+  tool_call: { label: 'Tool', badge: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
+  tool_result: { label: 'Result', badge: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
+  diff: { label: 'Diff', badge: 'bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300' },
+  error: { label: 'Error', badge: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
 }
 
 function kindMeta(kind: string): KindMeta {
@@ -177,11 +177,11 @@ function kindMeta(kind: string): KindMeta {
 
 const statusMeta = computed<KindMeta>(() => {
   switch (status.value) {
-    case 'running': return { label: 'Running', badge: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' }
-    case 'completed': return { label: 'Completed', badge: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300' }
-    case 'failed': return { label: 'Failed', badge: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300' }
-    case 'timeout': return { label: 'Timed out', badge: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300' }
-    case 'killed': return { label: 'Killed', badge: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300' }
+    case 'running': return { label: 'Running', badge: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' }
+    case 'completed': return { label: 'Completed', badge: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' }
+    case 'failed': return { label: 'Failed', badge: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' }
+    case 'timeout': return { label: 'Timed out', badge: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' }
+    case 'killed': return { label: 'Killed', badge: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' }
     default: return { label: status.value, badge: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300' }
   }
 })
@@ -192,9 +192,9 @@ function diffLines(diff: string): string[] {
 }
 
 function diffLineClass(line: string): string {
-  if (line.startsWith('+') && !line.startsWith('+++')) return 'text-emerald-600 dark:text-emerald-400'
-  if (line.startsWith('-') && !line.startsWith('---')) return 'text-red-600 dark:text-red-400'
-  if (line.startsWith('@@')) return 'text-cyan-600 dark:text-cyan-400'
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'text-emerald-700 dark:text-emerald-400'
+  if (line.startsWith('-') && !line.startsWith('---')) return 'text-red-700 dark:text-red-400'
+  if (line.startsWith('@@')) return 'text-cyan-700 dark:text-cyan-400'
   return 'text-fg-muted'
 }
 
@@ -223,7 +223,7 @@ function attachmentIcon(kind: MessageAttachment['kind']): typeof DocumentIcon {
           v-if="isRunning"
           type="button"
           class="ml-auto inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded
-                 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20
+                 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20
                  disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           :disabled="killing"
           @click="killRun"
@@ -243,7 +243,7 @@ function attachmentIcon(kind: MessageAttachment['kind']): typeof DocumentIcon {
       >
         <p
           v-if="loadError"
-          class="text-xs text-red-600 dark:text-red-400"
+          class="text-xs text-red-700 dark:text-red-400"
         >
           {{ loadError }}
         </p>

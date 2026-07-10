@@ -150,7 +150,7 @@ const passwordId = useId()
 
         <p
           v-if="error"
-          class="text-sm text-red-500 dark:text-red-400"
+          class="text-sm text-red-700 dark:text-red-400"
         >
           {{ error }}
         </p>

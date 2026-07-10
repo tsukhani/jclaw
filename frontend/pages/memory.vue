@@ -304,7 +304,7 @@ function exportMemories() {
         <button
           data-testid="delete-all"
           :disabled="deletingAll"
-          class="px-3 py-1.5 border border-red-700 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          class="px-3 py-1.5 border border-red-700 text-red-700 dark:text-red-400 text-xs font-medium hover:bg-red-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           @click="deleteAll"
         >
           {{ deletingAll ? 'Deleting...' : `Delete all${activeFilterCount ? ' matching' : ''}` }}
@@ -323,7 +323,7 @@ function exportMemories() {
 
     <p
       v-if="fetchError"
-      class="mb-4 text-sm text-red-400"
+      class="mb-4 text-sm text-red-700 dark:text-red-400"
     >
       Failed to load memories.
     </p>

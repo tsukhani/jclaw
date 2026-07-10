@@ -1552,7 +1552,8 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     expect(component.text()).toContain('Local VLM (Ollama)')
     // ollama-local is selected → the "local" badge lights up green as the active cue.
     const badge = component.findAll('span').find(s => s.text() === 'local')
-    expect(badge?.classes()).toContain('text-green-400')
+    expect(badge?.classes()).toContain('text-green-700')
+    expect(badge?.classes()).toContain('dark:text-green-400')
   })
 
   it('shows the vision-model picker (filtered to vision models) for a cloud provider', async () => {

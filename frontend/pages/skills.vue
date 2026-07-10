@@ -914,7 +914,7 @@ function totalSkillCount(agentId: number) {
     >
       <span>{{ dragError }}</span>
       <button
-        class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 shrink-0"
+        class="text-red-700 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 shrink-0"
         title="Dismiss"
         @click="dragError = null"
       >
@@ -928,7 +928,7 @@ function totalSkillCount(agentId: number) {
     >
       <span>{{ infoBanner }}</span>
       <button
-        class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 shrink-0"
+        class="text-blue-700 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 shrink-0"
         title="Dismiss"
         @click="infoBanner = null"
       >
@@ -1362,7 +1362,7 @@ function totalSkillCount(agentId: number) {
         </button>
         <button
           v-if="!isStructuralSkill(editing)"
-          class="p-1.5 text-red-400/70 hover:text-red-400 transition-colors"
+          class="p-1.5 text-red-700/70 dark:text-red-400/70 hover:text-red-400 transition-colors"
           title="Delete skill"
           @click="editingAgentId != null ? deleteAgentSkill(editingAgentId, editing) : deleteSkill(editing)"
         >
@@ -1387,13 +1387,13 @@ function totalSkillCount(agentId: number) {
               <span class="text-sm font-medium text-fg-strong font-mono">{{ editing.folderName || editing.name }}</span>
               <span
                 v-if="editingAgentId != null"
-                class="text-[10px] text-blue-400 border border-blue-400/30 px-1"
+                class="text-[10px] text-blue-700 dark:text-blue-400 border border-blue-400/30 px-1"
               >
                 {{ agents?.find((a: any) => a.id === editingAgentId)?.name ?? 'agent' }}
               </span>
               <span
                 v-else
-                class="text-[10px] text-green-400 border border-green-400/30 px-1"
+                class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
               >global</span>
             </div>
             <div class="text-xs text-fg-muted">
@@ -1416,7 +1416,7 @@ function totalSkillCount(agentId: number) {
       >
         <div class="flex items-center gap-2 mb-3">
           <Cog6ToothIcon
-            class="w-4 h-4 text-amber-400"
+            class="w-4 h-4 text-amber-700 dark:text-amber-400"
             aria-hidden="true"
           />
           <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Required Tools</span>
@@ -1446,7 +1446,7 @@ function totalSkillCount(agentId: number) {
       >
         <div class="flex items-center gap-2 mb-3">
           <CommandLineIcon
-            class="w-4 h-4 text-cyan-400"
+            class="w-4 h-4 text-cyan-700 dark:text-cyan-400"
             aria-hidden="true"
           />
           <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Commands</span>
@@ -1658,7 +1658,7 @@ function totalSkillCount(agentId: number) {
             </div>
             <div
               v-else-if="catalogError"
-              class="px-4 py-8 text-center text-sm text-red-600 dark:text-red-400"
+              class="px-4 py-8 text-center text-sm text-red-700 dark:text-red-400"
             >
               {{ catalogError }}
             </div>
@@ -1694,7 +1694,7 @@ function totalSkillCount(agentId: number) {
                   <template v-if="canImport(s)">
                     <span
                       v-if="importedKeys.has(catalogKey(s))"
-                      class="text-xs text-emerald-600 dark:text-emerald-400"
+                      class="text-xs text-emerald-700 dark:text-emerald-400"
                     >Imported ✓</span>
                     <button
                       v-else
@@ -1738,7 +1738,7 @@ function totalSkillCount(agentId: number) {
 
           <div
             v-if="importMessage"
-            class="px-4 py-2 border-t border-border text-xs text-red-600 dark:text-red-400 shrink-0"
+            class="px-4 py-2 border-t border-border text-xs text-red-700 dark:text-red-400 shrink-0"
           >
             {{ importMessage }}
           </div>

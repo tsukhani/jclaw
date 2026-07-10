@@ -660,7 +660,7 @@ const groupedProviders = computed(() => {
             <span class="text-sm font-medium text-fg-strong">{{ providerLabel(name) }}</span>
             <span
               v-if="entries.some((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
-              class="text-[10px] text-green-400 border border-green-400/30 px-1"
+              class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
             >configured</span>
             <span
               v-if="!isProviderEnabled(name)"
@@ -672,7 +672,7 @@ const groupedProviders = computed(() => {
                    to read the hint text below. -->
             <span
               v-if="!isProviderEnabled(name) && agentsRoutingToProvider(name) > 0"
-              class="text-[10px] text-amber-400 border border-amber-400/40 px-1"
+              class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
               :title="`${agentsRoutingToProvider(name)} agent(s) still route LLM calls to this provider`"
             >{{ agentsRoutingToProvider(name) }} agent{{ agentsRoutingToProvider(name) === 1 ? '' : 's' }} still routing</span>
             <!-- JCLAW-110: per-provider enable/disable toggle. Hidden from
@@ -1216,7 +1216,7 @@ const groupedProviders = computed(() => {
                     <span
                       v-if="getModelRank(name, model.id)"
                       class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
-                      :class="getModelRank(name, model.id)! <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
+                      :class="getModelRank(name, model.id)! <= 3 ? 'text-amber-700 dark:text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
                       :title="`#${getModelRank(name, model.id)} on provider leaderboard`"
                     >
                       #{{ getModelRank(name, model.id) }}
@@ -1229,7 +1229,7 @@ const groupedProviders = computed(() => {
                       >{{ model.name }}</span>
                       <span
                         v-if="model.supportsThinking && !model.alwaysThinks"
-                        class="ml-2 text-[10px] text-emerald-400 border border-emerald-400/30 px-1"
+                        class="ml-2 text-[10px] text-emerald-700 dark:text-emerald-400 border border-emerald-400/30 px-1"
                       >thinking</span>
                       <span
                         v-else-if="model.alwaysThinks"
@@ -1241,11 +1241,11 @@ const groupedProviders = computed(() => {
                       /></span>
                       <span
                         v-if="model.supportsVision"
-                        class="ml-2 text-[10px] text-sky-400 border border-sky-400/30 px-1"
+                        class="ml-2 text-[10px] text-sky-700 dark:text-sky-400 border border-sky-400/30 px-1"
                       >vision</span>
                       <span
                         v-if="model.supportsAudio"
-                        class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1"
+                        class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
                       >audio</span>
                       <span
                         v-if="model.supportsVideo"
@@ -1256,7 +1256,7 @@ const groupedProviders = computed(() => {
                   <div class="flex items-center gap-2">
                     <span
                       v-if="(model.promptPrice ?? 0) > 0"
-                      class="text-xs text-amber-500/70 font-mono"
+                      class="text-xs text-amber-700/70 dark:text-amber-400/70 font-mono"
                       :title="`Input: $${model.promptPrice}/M tokens, Output: $${model.completionPrice}/M tokens`"
                     >
                       ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
@@ -1547,7 +1547,7 @@ const groupedProviders = computed(() => {
             v-else-if="discoveryError"
             class="px-4 py-4 text-center"
           >
-            <span class="text-xs text-red-400">{{ discoveryError }}</span>
+            <span class="text-xs text-red-700 dark:text-red-400">{{ discoveryError }}</span>
           </div>
 
           <!-- Results -->
@@ -1690,7 +1690,7 @@ const groupedProviders = computed(() => {
                 <span
                   v-if="model.leaderboardRank"
                   class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
-                  :class="model.leaderboardRank <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
+                  :class="model.leaderboardRank <= 3 ? 'text-amber-700 dark:text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
                   :title="`#${model.leaderboardRank} on provider leaderboard`"
                 >
                   #{{ model.leaderboardRank }}
@@ -1705,7 +1705,7 @@ const groupedProviders = computed(() => {
                 <div class="flex items-center gap-2 shrink-0">
                   <span
                     v-if="model.isFree"
-                    class="text-[10px] text-green-400 border border-green-400/30 px-1"
+                    class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
                   >free</span>
                   <span
                     v-else-if="(model.promptPrice ?? -1) >= 0"
@@ -1726,7 +1726,7 @@ const groupedProviders = computed(() => {
                   /></span>
                   <span
                     v-else-if="model.supportsThinking && model.thinkingDetectedFromProvider"
-                    class="text-[10px] text-emerald-400 border border-emerald-400/30 px-1"
+                    class="text-[10px] text-emerald-700 dark:text-emerald-400 border border-emerald-400/30 px-1"
                     title="Thinking support confirmed by provider"
                   >thinking</span>
                   <span
@@ -1736,7 +1736,7 @@ const groupedProviders = computed(() => {
                   >thinking?</span>
                   <span
                     v-if="model.supportsVision && model.visionDetectedFromProvider"
-                    class="text-[10px] text-sky-400 border border-sky-400/30 px-1"
+                    class="text-[10px] text-sky-700 dark:text-sky-400 border border-sky-400/30 px-1"
                     title="Vision support confirmed by provider"
                   >vision</span>
                   <span
@@ -1746,7 +1746,7 @@ const groupedProviders = computed(() => {
                   >vision?</span>
                   <span
                     v-if="model.supportsAudio && model.audioDetectedFromProvider"
-                    class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
+                    class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
                     title="Audio support confirmed by provider"
                   >audio</span>
                   <span

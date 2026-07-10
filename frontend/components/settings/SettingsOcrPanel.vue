@@ -65,7 +65,7 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
           <span class="text-sm font-medium text-fg-strong">{{ backend.displayName }}</span>
           <span
             v-if="backend.available && backend.enabled"
-            class="text-[10px] text-green-400 border border-green-400/30 px-1"
+            class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
           >active</span>
           <span
             v-else-if="backend.available && !backend.enabled"
@@ -73,7 +73,7 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
           >disabled</span>
           <span
             v-else
-            class="text-[10px] text-amber-400 border border-amber-400/40 px-1"
+            class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
             :title="backend.reason ?? 'binary not detected on PATH'"
           >not detected</span>
           <span
@@ -105,7 +105,7 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
         {{ backend.description }}
         <span
           v-if="!backend.available"
-          class="block mt-1 text-amber-400"
+          class="block mt-1 text-amber-700 dark:text-amber-400"
         >{{ backend.installHint }}</span>
       </div>
     </div>

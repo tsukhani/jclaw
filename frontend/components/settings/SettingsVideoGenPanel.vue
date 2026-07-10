@@ -354,7 +354,7 @@ onUnmounted(() => stopVideoCapPolling())
           <!-- ERROR — probe failed. -->
           <div
             v-else-if="videoCapState === 'ERROR'"
-            class="px-4 py-2.5 text-[11px] text-rose-600 dark:text-rose-400"
+            class="px-4 py-2.5 text-[11px] text-rose-700 dark:text-rose-400"
           >
             {{ videoCapability?.error ?? 'Capability probe failed.' }}
           </div>

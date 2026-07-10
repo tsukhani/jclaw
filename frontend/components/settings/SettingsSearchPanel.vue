@@ -232,11 +232,11 @@ function onSearchDragEnd() {
           <span class="text-sm font-medium text-fg-strong">{{ SEARCH_PROVIDERS[id]!.label }}</span>
           <span
             v-if="searchActive(id)"
-            class="text-[10px] text-green-400 border border-green-400/30 px-1"
+            class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
           >active</span>
           <span
             v-else-if="searchEnabled(id)"
-            class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
+            class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
           >needs API key</span>
           <span
             v-else

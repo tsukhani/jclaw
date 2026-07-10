@@ -891,7 +891,7 @@ function zoneForTaskRender(task: Task): string | undefined {
         </div>
         <div
           class="text-lg font-semibold"
-          :class="stats.runningCount > 0 ? 'text-blue-400' : 'text-fg-strong'"
+          :class="stats.runningCount > 0 ? 'text-blue-700 dark:text-blue-400' : 'text-fg-strong'"
         >
           {{ stats.runningCount }}
         </div>
@@ -902,7 +902,7 @@ function zoneForTaskRender(task: Task): string | undefined {
         </div>
         <div
           class="text-lg font-semibold"
-          :class="stats.activeCount > 0 ? 'text-emerald-400' : 'text-fg-strong'"
+          :class="stats.activeCount > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-strong'"
         >
           {{ stats.activeCount }}
         </div>
@@ -913,7 +913,7 @@ function zoneForTaskRender(task: Task): string | undefined {
         </div>
         <div
           class="text-lg font-semibold"
-          :class="stats.pendingCount > 0 ? 'text-yellow-400' : 'text-fg-strong'"
+          :class="stats.pendingCount > 0 ? 'text-yellow-700 dark:text-yellow-400' : 'text-fg-strong'"
         >
           {{ stats.pendingCount }}
         </div>
@@ -924,7 +924,7 @@ function zoneForTaskRender(task: Task): string | undefined {
         </div>
         <div
           class="text-lg font-semibold"
-          :class="stats.failedCount > 0 ? 'text-red-400' : 'text-fg-strong'"
+          :class="stats.failedCount > 0 ? 'text-red-700 dark:text-red-400' : 'text-fg-strong'"
         >
           {{ stats.failedCount }}
         </div>
@@ -968,7 +968,7 @@ function zoneForTaskRender(task: Task): string | undefined {
       </p>
       <p
         v-else-if="transcriptError"
-        class="px-4 py-6 text-center text-sm text-red-400"
+        class="px-4 py-6 text-center text-sm text-red-700 dark:text-red-400"
       >
         {{ transcriptError }}
       </p>
@@ -1149,7 +1149,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                   <button
                     v-else-if="!selectMode && isRecurring(task) && task.runningRunId"
                     type="button"
-                    class="p-1 text-red-400 hover:text-red-300 transition-colors"
+                    class="p-1 text-red-700 dark:text-red-400 hover:text-red-300 transition-colors"
                     :title="`Cancel the running fire of “${task.name}” — stops at the next safe point; schedule unchanged`"
                     :aria-label="`Cancel the running fire of ${task.name}`"
                     @click.stop="task.runningRunId && cancelRunningRun(task.runningRunId)"
@@ -1177,7 +1177,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                   <button
                     v-else-if="!selectMode && isRecurring(task) && isLive(task) && task.paused"
                     type="button"
-                    class="p-1 text-emerald-400 hover:text-emerald-300 transition-colors"
+                    class="p-1 text-emerald-700 dark:text-emerald-400 hover:text-emerald-300 transition-colors"
                     :title="`Resume schedule for “${task.name}”`"
                     :aria-label="`Resume ${task.name}`"
                     @click.stop="resumeTask(task.id)"
@@ -1315,7 +1315,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                           <button
                             type="button"
                             :disabled="savingName"
-                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
                             @click="saveName(task)"
                           >
                             <CheckIcon
@@ -1327,7 +1327,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                         </div>
                         <p
                           v-if="nameError"
-                          class="text-xs text-red-400"
+                          class="text-xs text-red-700 dark:text-red-400"
                         >
                           {{ nameError }}
                         </p>
@@ -1463,7 +1463,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                           <button
                             type="button"
                             :disabled="savingSteps"
-                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
                             @click="saveSteps(task)"
                           >
                             <CheckIcon
@@ -1475,7 +1475,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                         </div>
                         <p
                           v-if="stepsError"
-                          class="text-xs text-red-400"
+                          class="text-xs text-red-700 dark:text-red-400"
                         >
                           {{ stepsError }}
                         </p>
@@ -1516,7 +1516,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                        bot can't reach (private/uninvited). Lazily fetched on expand. -->
                       <p
                         v-if="editingDeliveryId !== task.id && deliveryAdvisories[task.id]"
-                        class="mt-1 flex items-start gap-1 text-[11px] text-amber-400"
+                        class="mt-1 flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-400"
                       >
                         <span aria-hidden="true">⚠</span>
                         <span>{{ deliveryAdvisories[task.id] }}</span>
@@ -1592,7 +1592,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                           <button
                             type="button"
                             :disabled="savingDelivery"
-                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
                             @click="saveDelivery(task)"
                           >
                             <CheckIcon
@@ -1604,7 +1604,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                         </div>
                         <p
                           v-if="deliveryError"
-                          class="text-xs text-red-400"
+                          class="text-xs text-red-700 dark:text-red-400"
                         >
                           {{ deliveryError }}
                         </p>
@@ -1624,7 +1624,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                     </p>
                     <p
                       v-else-if="runsError[task.id]"
-                      class="text-xs text-red-400"
+                      class="text-xs text-red-700 dark:text-red-400"
                     >
                       {{ runsError[task.id] }}
                     </p>
@@ -1660,7 +1660,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                             >· {{ (run.durationMs / 1000).toFixed(1) }}s</span>
                             <span
                               v-else-if="run.status === 'RUNNING'"
-                              class="text-blue-400"
+                              class="text-blue-700 dark:text-blue-400"
                             >· {{ elapsedSince(run.startedAt) }} elapsed</span>
                             <span
                               v-if="run.deliveryStatus && run.deliveryStatus !== 'NOT_REQUESTED'"
@@ -1669,7 +1669,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                           </div>
                           <p
                             v-if="run.error"
-                            class="text-red-400 mt-0.5 whitespace-pre-wrap break-words"
+                            class="text-red-700 dark:text-red-400 mt-0.5 whitespace-pre-wrap break-words"
                           >
                             {{ run.error }}
                           </p>
@@ -1724,7 +1724,7 @@ function zoneForTaskRender(task: Task): string | undefined {
       </p>
       <p
         v-else-if="peekError"
-        class="text-sm text-red-400"
+        class="text-sm text-red-700 dark:text-red-400"
       >
         {{ peekError }}
       </p>
@@ -1757,7 +1757,7 @@ function zoneForTaskRender(task: Task): string | undefined {
             <span class="text-[10px] text-fg-muted">turn {{ msg.turnIndex }}</span>
             <span
               v-if="msg.truncated"
-              class="text-[10px] text-amber-400"
+              class="text-[10px] text-amber-700 dark:text-amber-400"
             >truncated</span>
           </div>
           <p

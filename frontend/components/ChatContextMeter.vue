@@ -86,9 +86,9 @@ function kFormat(n: number): string {
 const triggerRight = computed(() => capacity.value ? kFormat(capacity.value) : '—')
 const percentColor = computed(() => {
   const p = percent.value
-  if (p >= 90) return 'text-red-400'
-  if (p >= 70) return 'text-amber-400'
-  return 'text-emerald-400'
+  if (p >= 90) return 'text-red-700 dark:text-red-400'
+  if (p >= 70) return 'text-amber-700 dark:text-amber-400'
+  return 'text-emerald-700 dark:text-emerald-400'
 })
 
 /**

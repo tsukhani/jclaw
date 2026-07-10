@@ -205,7 +205,7 @@ async function deleteLoggerLevel(logger: string) {
 
     <p
       v-if="newLoggerUnknown"
-      class="text-xs text-amber-600 dark:text-amber-400"
+      class="text-xs text-amber-700 dark:text-amber-400"
     >
       No logger named <span class="font-mono">{{ newLoggerName.trim() }}</span> has
       logged yet — double-check the spelling, or add it anyway to pre-set a logger
@@ -213,7 +213,7 @@ async function deleteLoggerLevel(logger: string) {
     </p>
     <p
       v-if="loggingError"
-      class="text-xs text-red-600 dark:text-red-400"
+      class="text-xs text-red-700 dark:text-red-400"
     >
       {{ loggingError }}
     </p>
