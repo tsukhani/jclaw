@@ -3,6 +3,7 @@ package agents;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -206,24 +207,23 @@ public final class MessageDeduplicator {
 
         var downloads = new ArrayList<String>();
         for (var img : collectedImages) {
-            var entry = downloadEntryFor(img, linkedFilenames);
-            if (entry != null) downloads.add(entry);
+            downloadEntryFor(img, linkedFilenames).ifPresent(downloads::add);
         }
         return downloads.isEmpty() ? "" : "\n\n" + String.join("\n\n", downloads);
     }
 
     /**
      * Build a "[download alt](url)" entry for {@code img} (a collected
-     * "![alt](url)" markdown). Returns {@code null} when the URL can't
-     * be extracted or when the filename is already linked in
+     * "![alt](url)" markdown). Returns {@link Optional#empty()} when the URL
+     * can't be extracted or when the filename is already linked in
      * {@code linkedFilenames} (LLM already wrote a download affordance).
      */
-    private static String downloadEntryFor(String img, HashSet<String> linkedFilenames) {
+    private static Optional<String> downloadEntryFor(String img, HashSet<String> linkedFilenames) {
         var urlMatcher = PAREN_URL_PATTERN.matcher(img);
-        if (!urlMatcher.find()) return null;
+        if (!urlMatcher.find()) return Optional.empty();
         var url = urlMatcher.group(1);
         var filename = extractFilename(url);
-        if (!filename.isEmpty() && linkedFilenames.contains(filename)) return null;
+        if (!filename.isEmpty() && linkedFilenames.contains(filename)) return Optional.empty();
 
         // Pull alt text out of the leading "![alt]" portion; fall back
         // to an empty alt (= just "download" as the link label) if the
@@ -232,6 +232,6 @@ public final class MessageDeduplicator {
         var altMatcher = ALT_TEXT_PATTERN.matcher(img);
         var alt = altMatcher.find() ? altMatcher.group(1).trim() : "";
         var label = alt.isEmpty() ? "download" : "download " + alt;
-        return "[" + label + "](" + url + ")";
+        return Optional.of("[" + label + "](" + url + ")");
     }
 }

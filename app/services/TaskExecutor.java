@@ -13,6 +13,7 @@ import tools.MessageTool;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Orchestrates one fire of a {@link Task}. Creates the {@link TaskRun},
@@ -86,13 +87,14 @@ public final class TaskExecutor {
         // Open the TaskRun in RUNNING state before any LLM/tool work so
         // observers (monitoring UI, db-scheduler heartbeat) see a row to
         // attach to even if the body throws partway through.
-        final TaskRun run = openRunningTaskRun(task);
-        if (run == null) {
+        var runOpt = openRunningTaskRun(task);
+        if (runOpt.isEmpty()) {
             EventLogger.warn("task", null, null,
                     "TaskExecutor.runTask: Task id %d disappeared between handler resolution and TaskRun creation; skipping"
                             .formatted(task.id));
             return null;
         }
+        final TaskRun run = runOpt.get();
 
         // Cap persisted run history to the most recent MAX_RUNS_PER_TASK fires.
         // Best-effort and in its own transaction (the run above is already
@@ -187,13 +189,13 @@ public final class TaskExecutor {
     /**
      * Open the TaskRun in RUNNING state. The re-query can race with deletion
      * (Fixtures.deleteDatabase in tests, or an operator cancel + delete in
-     * prod) — return null so TaskExecutionHandler can drop the orphan via
-     * defaultCompletion (same path as its own pre-flight null check).
+     * prod) — return {@link Optional#empty()} so TaskExecutionHandler can drop
+     * the orphan via defaultCompletion (same path as its own pre-flight null check).
      */
-    private static TaskRun openRunningTaskRun(Task task) {
+    private static Optional<TaskRun> openRunningTaskRun(Task task) {
         return Tx.run(() -> {
             var resolvedTask = (Task) Task.findById(task.id);
-            if (resolvedTask == null) return null;
+            if (resolvedTask == null) return Optional.<TaskRun>empty();
             // Documented lifecycle: a one-shot (PENDING) or recurring (ACTIVE)
             // task — or a re-fired LOST one — enters RUNNING for the duration of
             // the fire, so the Status pill and LostTaskDetector observe it. Flip
@@ -212,7 +214,7 @@ public final class TaskExecutor {
             r.startedAt = Instant.now();
             r.status = TaskRun.Status.RUNNING;
             r.save();
-            return r;
+            return Optional.of(r);
         });
     }
 

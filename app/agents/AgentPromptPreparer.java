@@ -15,6 +15,7 @@ import utils.LatencyTrace;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -77,10 +78,10 @@ final class AgentPromptPreparer {
      * Synchronous prologue Tx: persist the user message (unless
      * {@code skipUserAppend}), re-fetch the managed conversation, assemble the
      * system prompt + compaction summary + parent-context, hydrate messages and
-     * tool definitions, and resolve the provider. Returns {@code null} (after
-     * persisting the canned error via the sink) when no provider is configured.
+     * tool definitions, and resolve the provider. Returns {@link Optional#empty()}
+     * (after persisting the canned error via the sink) when no provider is configured.
      */
-    static PreparedData prepareSyncData(Agent agent, String userMessage,
+    static Optional<PreparedData> prepareSyncData(Agent agent, String userMessage,
                                         List<AttachmentService.Input> attachments,
                                         boolean skipUserAppend, Long conversationId,
                                         AgentExecutionSink sink, LatencyTrace trace) {
@@ -120,7 +121,7 @@ final class AgentPromptPreparer {
                 var error = AgentRunner.NO_LLM_PROVIDER_ERROR;
                 EventLogger.error("llm", agent.name, null, error);
                 sink.appendAssistantMessage(error, null);
-                return null;
+                return Optional.empty();
             }
             var secondary = ProviderRegistry.getSecondary();
 
@@ -132,7 +133,7 @@ final class AgentPromptPreparer {
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
 
-            return new PreparedData(messages, primary, secondary, tools, audioBearers, imageBearers, videoBearers);
+            return Optional.of(new PreparedData(messages, primary, secondary, tools, audioBearers, imageBearers, videoBearers));
         });
     }
 

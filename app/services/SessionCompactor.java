@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Session compaction: when a conversation's active context approaches the
@@ -131,8 +132,9 @@ public final class SessionCompactor {
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, Summarizer summarizer,
                                             boolean force, String additionalInstructions) {
-        var plan = Tx.run(() -> buildPlan(conversationId, force));
-        if (plan == null) return CompactionResult.skipped("no safe boundary or below min-turns");
+        var planOpt = Tx.run(() -> buildPlan(conversationId, force));
+        if (planOpt.isEmpty()) return CompactionResult.skipped("no safe boundary or below min-turns");
+        var plan = planOpt.get();
 
         var systemPrompt = SUMMARIZATION_INSTRUCTIONS;
         if (additionalInstructions != null && !additionalInstructions.isBlank()) {
@@ -224,18 +226,18 @@ public final class SessionCompactor {
     public record MessageSnapshot(String role, String content, String toolCalls, String toolResults, Instant createdAt) {}
     record CompactionPlan(List<MessageSnapshot> toSummarize, Instant firstKeptAt) {}
 
-    private static CompactionPlan buildPlan(Long conversationId, boolean force) {
+    private static Optional<CompactionPlan> buildPlan(Long conversationId, boolean force) {
         var conv = Conversation.<Conversation>findById(conversationId);
-        if (conv == null) return null;
+        if (conv == null) return Optional.empty();
         var recent = ConversationService.loadRecentMessages(conv);
         int boundary = force ? findSafeBoundaryForced(recent) : findSafeBoundary(recent);
-        if (boundary <= 0) return null;
+        if (boundary <= 0) return Optional.empty();
         var snaps = new ArrayList<MessageSnapshot>(boundary);
         for (int i = 0; i < boundary; i++) {
             var m = recent.get(i);
             snaps.add(new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt));
         }
-        return new CompactionPlan(snaps, recent.get(boundary).createdAt);
+        return Optional.of(new CompactionPlan(snaps, recent.get(boundary).createdAt));
     }
 
     /**

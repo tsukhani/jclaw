@@ -13,6 +13,7 @@ import services.EventLogger;
 import services.Tx;
 
 import java.time.Duration;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -190,9 +191,9 @@ public final class DangerousActionGate {
             // of posting an unanswerable approval that would only ever time out.
             if (binding != null && binding.enabled
                     && binding.ownerUserId != null && !binding.ownerUserId.isBlank()) {
-                var channelId = resolvePeerId(conversationId);
-                if (channelId != null) {
-                    return promptAndAwaitSlack(agent, toolName, argsJson, binding, channelId);
+                var channelIdOpt = resolvePeerId(conversationId);
+                if (channelIdOpt.isPresent()) {
+                    return promptAndAwaitSlack(agent, toolName, argsJson, binding, channelIdOpt.get());
                 }
             }
         }
@@ -271,14 +272,14 @@ public final class DangerousActionGate {
         });
     }
 
-    /** The conversation's {@code peerId} (the Slack channel to prompt in), or {@code null}. */
-    private static String resolvePeerId(Long conversationId) {
+    /** The conversation's {@code peerId} (the Slack channel to prompt in), or {@link Optional#empty()}. */
+    private static Optional<String> resolvePeerId(Long conversationId) {
         if (conversationId == null) {
-            return null;
+            return Optional.empty();
         }
         return Tx.run(() -> {
             Conversation c = Conversation.findById(conversationId);
-            return c == null ? null : c.peerId;
+            return Optional.ofNullable(c == null ? null : c.peerId);
         });
     }
 

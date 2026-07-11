@@ -488,14 +488,15 @@ public class AgentRunner {
             // Callers on virtual threads (TaskExecutionHandler, webhooks) pass entities that were
             // loaded in a separate, already-committed Tx.run() — those are detached and
             // would throw PersistentObjectException on save().
-            var prepared = AgentPromptPreparer.prepareSyncData(agent, userMessage, attachments,
+            var preparedOpt = AgentPromptPreparer.prepareSyncData(agent, userMessage, attachments,
                     skipUserAppend, conversationId, sink, trace);
 
-            if (prepared == null) {
+            if (preparedOpt.isEmpty()) {
                 var error = NO_LLM_PROVIDER_ERROR;
                 return new RunResult(error,
                         Tx.run(() -> ConversationService.findById(conversationId)));
             }
+            var prepared = preparedOpt.get();
 
             // Compression → compaction → context-window trim → audio/vision/video
             // capability rewrite, all outside the prologue Tx (LLM calls inside).

@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static java.util.stream.Collectors.joining;
@@ -575,8 +576,9 @@ public class SkillPromotionService {
     private static void stageBinaryFiles(Path skillDir, Path stagingDir,
                                           List<String> binaryFiles) throws IOException {
         for (var sourceName : binaryFiles) {
-            var source = resolveBinarySource(skillDir, sourceName);
-            if (source != null && Files.exists(source)) {
+            var sourceOpt = resolveBinarySource(skillDir, sourceName);
+            if (sourceOpt.isPresent() && Files.exists(sourceOpt.get())) {
+                var source = sourceOpt.get();
                 var staged = stagingDir.resolve(sourceName);
                 Files.createDirectories(staged.getParent());
                 Files.copy(source, staged, StandardCopyOption.REPLACE_EXISTING);
@@ -589,14 +591,14 @@ public class SkillPromotionService {
      * the file isn't there (the structure enforcer relocated it into tools/),
      * falls back to walking skillDir for any file with the same basename.
      */
-    private static Path resolveBinarySource(Path skillDir, String sourceName) throws IOException {
+    private static Optional<Path> resolveBinarySource(Path skillDir, String sourceName) throws IOException {
         var source = skillDir.resolve(sourceName);
-        if (Files.exists(source)) return source;
+        if (Files.exists(source)) return Optional.of(source);
         var fileName = baseName(sourceName);
         try (var srcWalk = Files.walk(skillDir)) {
             return srcWalk.filter(Files::isRegularFile)
                     .filter(f -> f.getFileName().toString().equals(fileName))
-                    .findFirst().orElse(null);
+                    .findFirst();
         }
     }
 

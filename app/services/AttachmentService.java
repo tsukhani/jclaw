@@ -17,6 +17,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -77,12 +78,10 @@ public final class AttachmentService {
             throw new IllegalArgumentException("attachmentId is required");
         }
         var stagingDir = AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
-        var stagedFile = findStagedFile(stagingDir, input.attachmentId());
-        if (stagedFile == null) {
-            throw new IllegalStateException(
-                    "No staged attachment found for id " + input.attachmentId()
-                            + " under " + stagingDir);
-        }
+        var stagedFile = findStagedFile(stagingDir, input.attachmentId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "No staged attachment found for id " + input.attachmentId()
+                                + " under " + stagingDir));
 
         String sniffedMime;
         long sizeBytes;
@@ -363,8 +362,8 @@ public final class AttachmentService {
      * for the first entry whose filename starts with {@code uuid + "."} —
      * the on-disk layout written by {@code ApiChatController.uploadChatFiles}.
      */
-    private static Path findStagedFile(Path stagingDir, String uuid) {
-        if (!Files.isDirectory(stagingDir)) return null;
+    private static Optional<Path> findStagedFile(Path stagingDir, String uuid) {
+        if (!Files.isDirectory(stagingDir)) return Optional.empty();
         try (var stream = Files.list(stagingDir)) {
             return stream
                     .filter(p -> {
@@ -372,8 +371,7 @@ public final class AttachmentService {
                         return name.equals(uuid)
                                 || name.startsWith(uuid + ".");
                     })
-                    .findFirst()
-                    .orElse(null);
+                    .findFirst();
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to list staging dir: " + e.getMessage(), e);
         }

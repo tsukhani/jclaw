@@ -19,6 +19,7 @@ import utils.LatencyTrace;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -78,9 +79,10 @@ final class StreamingAgentRunner {
             var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, queueReleased);
             try {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
-                var conversation = resolveConversationAndAcquireQueue(
+                var conversationOpt = resolveConversationAndAcquireQueue(
                         agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments);
-                if (conversation == null) return; // queued, not-found, or error — already handled
+                if (conversationOpt.isEmpty()) return; // queued, not-found, or error — already handled
+                var conversation = conversationOpt.get();
                 conversationIdRef[0] = conversation.id;
 
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
@@ -173,10 +175,10 @@ final class StreamingAgentRunner {
     /**
      * Phase 1 of streaming: resolve or create conversation, acquire the
      * conversation queue, and persist the user message. Returns the conversation
-     * or {@code null} if the request was queued, not found, or errored (in which
-     * case callbacks have already been invoked).
+     * or {@link Optional#empty()} if the request was queued, not found, or
+     * errored (in which case callbacks have already been invoked).
      */
-    private static Conversation resolveConversationAndAcquireQueue(
+    private static Optional<Conversation> resolveConversationAndAcquireQueue(
             Agent agent, Long conversationId, String channelType, String peerId,
             String userMessage, AgentRunner.StreamingCallbacks cb,
             List<AttachmentService.Input> attachments) {
@@ -193,7 +195,7 @@ final class StreamingAgentRunner {
 
         if (conversation == null) {
             cb.onError().accept(new RuntimeException("Conversation not found"));
-            return null;
+            return Optional.empty();
         }
 
         var queueMsg = new ConversationQueue.QueuedMessage(
@@ -201,7 +203,7 @@ final class StreamingAgentRunner {
         if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
             cb.onInit().accept(conversation);
             cb.onComplete().accept(AgentRunner.QUEUED_MESSAGE_RESPONSE);
-            return null;
+            return Optional.empty();
         }
 
         // JCLAW-21: route the user-message persist through ConversationSink.
@@ -212,7 +214,7 @@ final class StreamingAgentRunner {
         Tx.run(() -> sink.appendUserMessage(userMessage, attachments));
 
         cb.onInit().accept(conversation);
-        return conversation;
+        return Optional.of(conversation);
     }
 
     /**

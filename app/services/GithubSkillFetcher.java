@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -69,11 +70,12 @@ public final class GithubSkillFetcher {
             return new FetchResult(false, 0, "could not read repo tree: " + e.getMessage());
         }
 
-        var prefix = locateSkillDir(tree, skillId);
-        if (prefix == null) {
+        var prefixOpt = locateSkillDir(tree, skillId);
+        if (prefixOpt.isEmpty()) {
             return new FetchResult(false, 0,
                     "could not find skill '%s' in %s/%s".formatted(skillId, owner, repo));
         }
+        var prefix = prefixOpt.get();
 
         int n = 0;
         for (var path : tree) {
@@ -132,19 +134,19 @@ public final class GithubSkillFetcher {
      * Find the directory that holds the skill's SKILL.md. Prefers a directory
      * whose basename equals {@code skillId}; falls back to the sole SKILL.md when
      * the repo contains exactly one. Returns the dir prefix ("" = repo root), or
-     * null when no SKILL.md matches.
+     * {@link Optional#empty()} when no SKILL.md matches.
      */
-    static String locateSkillDir(List<String> blobPaths, String skillId) {
+    static Optional<String> locateSkillDir(List<String> blobPaths, String skillId) {
         String onlySkillMd = null;
         int skillMdCount = 0;
         for (var path : blobPaths) {
             if (!isSkillMd(path)) continue;
             skillMdCount++;
             var dir = parentDir(path);
-            if (basename(dir).equals(skillId)) return dir;
+            if (basename(dir).equals(skillId)) return Optional.of(dir);
             onlySkillMd = dir;
         }
-        return skillMdCount == 1 ? onlySkillMd : null;
+        return skillMdCount == 1 ? Optional.of(onlySkillMd) : Optional.empty();
     }
 
     private static boolean isSkillMd(String path) {

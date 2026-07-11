@@ -19,6 +19,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -225,11 +226,10 @@ public class SystemPromptAssembler {
             appendSafetySection(b.sb);
             b.startSection("Execution Bias");
             appendExecutionBiasSection(b.sb);
-            var loadtestGuidance = channelGuidanceFor(channelType);
-            if (loadtestGuidance != null) {
+            channelGuidanceFor(channelType).ifPresent(loadtestGuidance -> {
                 b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
                 appendChannelGuidanceSection(b.sb, channelType, loadtestGuidance);
-            }
+            });
             return List.of();
         }
         // Workspace files are emitted in a deliberate narrative order: SOUL (psyche) →
@@ -324,11 +324,10 @@ public class SystemPromptAssembler {
         // Sits in the cacheable prefix because the guidance is static per channel;
         // different channels produce different cache keys, which is the intended
         // trade-off for per-channel tuning.
-        var guidance = channelGuidanceFor(channelType);
-        if (guidance != null) {
+        channelGuidanceFor(channelType).ifPresent(guidance -> {
             b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
             appendChannelGuidanceSection(b.sb, channelType, guidance);
-        }
+        });
 
         // 9. Environment info — only JVM-stable, per-agent values. The current
         // date/time used to live here, but it is per-turn-variable and was
@@ -386,17 +385,17 @@ public class SystemPromptAssembler {
     }
 
     /**
-     * Resolve a per-channel guidance body, or {@code null} when the channel has
-     * no registered section (Slack, WhatsApp, unknown types). Telegram and Web
-     * are the two cases that ship today — Slack and WhatsApp can be added here
-     * once we decide what prompt-level tuning they need.
+     * Resolve a per-channel guidance body, or {@link Optional#empty()} when the
+     * channel has no registered section (Slack, WhatsApp, unknown types).
+     * Telegram and Web are the two cases that ship today — Slack and WhatsApp
+     * can be added here once we decide what prompt-level tuning they need.
      */
-    private static String channelGuidanceFor(String channelType) {
-        if (channelType == null) return null;
+    private static Optional<String> channelGuidanceFor(String channelType) {
+        if (channelType == null) return Optional.empty();
         return switch (channelType.toLowerCase()) {
-            case "web" -> WEB_CHANNEL_GUIDANCE;
-            case "telegram" -> TELEGRAM_CHANNEL_GUIDANCE;
-            default -> null;
+            case "web" -> Optional.of(WEB_CHANNEL_GUIDANCE);
+            case "telegram" -> Optional.of(TELEGRAM_CHANNEL_GUIDANCE);
+            default -> Optional.empty();
         };
     }
 

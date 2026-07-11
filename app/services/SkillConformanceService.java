@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
@@ -129,10 +130,11 @@ public final class SkillConformanceService {
             originalBody = raw;  // no frontmatter to strip — the whole file is the body
         }
 
-        var proposed = proposeWithLlm(raw, fallbackName);
-        if (proposed == null) {
+        var proposedOpt = proposeWithLlm(raw, fallbackName);
+        if (proposedOpt.isEmpty()) {
             return ConformanceResult.fail("conformance pass failed (LLM unavailable or returned an invalid response)");
         }
+        var proposed = proposedOpt.get();
 
         var gate = applyHardGates(proposed, fallbackName, stagedBinaries, provenance, originalBody);
         if (!gate.ok()) return ConformanceResult.fail(gate.reason());
@@ -194,17 +196,19 @@ public final class SkillConformanceService {
 
     // --- generation (LLM) ---
 
-    private static ProposedSkill proposeWithLlm(String rawSkillMd, String fallbackName) {
-        var provider = resolveProvider();
-        if (provider == null) {
+    private static Optional<ProposedSkill> proposeWithLlm(String rawSkillMd, String fallbackName) {
+        var providerOpt = resolveProvider();
+        if (providerOpt.isEmpty()) {
             EventLogger.warn(CATEGORY, "Conformance skipped: no LLM provider resolved");
-            return null;
+            return Optional.empty();
         }
-        var modelId = resolveModel();
-        if (modelId == null || modelId.isBlank()) {
+        var provider = providerOpt.get();
+        var modelOpt = resolveModel();
+        if (modelOpt.isEmpty()) {
             EventLogger.warn(CATEGORY, "Conformance skipped: no model resolved");
-            return null;
+            return Optional.empty();
         }
+        var modelId = modelOpt.get();
         var catalog = ToolCatalog.formatCatalogForPrompt(Set.of());
         var messages = List.of(
                 ChatMessage.system(conformanceSystemPrompt(catalog)),
@@ -212,10 +216,10 @@ public final class SkillConformanceService {
         try {
             var response = provider.chat(modelId, messages, null, null, null, LLM_TIMEOUT_SECONDS, null);
             var text = response.choices().getFirst().message().content().toString();
-            return parseProposed(parseJsonObjectLenient(text));
+            return Optional.of(parseProposed(parseJsonObjectLenient(text)));
         } catch (Exception e) {
             EventLogger.warn(CATEGORY, "Conformance LLM pass failed: " + e.getMessage());
-            return null;
+            return Optional.empty();
         }
     }
 
@@ -265,21 +269,22 @@ public final class SkillConformanceService {
                """.formatted(toolCatalog);
     }
 
-    private static LlmProvider resolveProvider() {
+    private static Optional<LlmProvider> resolveProvider() {
         var configProvider = ConfigService.get("skillsPromotion.provider");
         if (configProvider != null && !configProvider.isBlank()) {
             var p = ProviderRegistry.get(configProvider);
-            if (p != null) return p;
+            if (p != null) return Optional.of(p);
         }
         var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
-        return main != null ? ProviderRegistry.get(main.modelProvider) : null;
+        return Optional.ofNullable(main != null ? ProviderRegistry.get(main.modelProvider) : null);
     }
 
-    private static String resolveModel() {
+    private static Optional<String> resolveModel() {
         var configModel = ConfigService.get("skillsPromotion.model");
-        if (configModel != null && !configModel.isBlank()) return configModel;
+        if (configModel != null && !configModel.isBlank()) return Optional.of(configModel);
         var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
-        return main != null ? main.modelId : null;
+        return Optional.ofNullable(main != null ? main.modelId : null)
+                .filter(m -> !m.isBlank());
     }
 
     // --- helpers ---
