@@ -13,6 +13,7 @@ import utils.Filenames;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.SsrfGuard;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -153,7 +154,7 @@ public final class WhatsAppMediaDownloader {
                     "Cloud-API media staging dir failed: " + e.getMessage());
             return null;
         }
-        Path stagedPath = AgentService.acquireContained(stagingDir, leaf);
+        Path stagedPath = WorkspacePathGuard.acquireContained(stagingDir, leaf);
         if (!streamCdnToStaging(cdnUrl, token, stagedPath, agentName)) {
             bestEffortDelete(stagedPath);
             return null;
@@ -361,7 +362,7 @@ public final class WhatsAppMediaDownloader {
         var stagingDir = AgentService.acquireWorkspacePath(agentName, "attachments/staging");
         try {
             Files.createDirectories(stagingDir);
-            Path stagedPath = AgentService.acquireContained(stagingDir, leaf);
+            Path stagedPath = WorkspacePathGuard.acquireContained(stagingDir, leaf);
             Files.write(stagedPath, bytes);
         } catch (IOException e) {
             EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,

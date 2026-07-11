@@ -11,6 +11,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import utils.WorkspacePathGuard;
 
 import javax.imageio.ImageIO;
 
@@ -355,7 +356,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         // a double-resolve, so a symlink inside the workspace pointing outside
         // is rejected here as well, not just textual `..` traversal.
         try {
-            return AgentService.acquireContained(workspace, workdirStr);
+            return WorkspacePathGuard.acquireContained(workspace, workdirStr);
         } catch (SecurityException _) {
             throw new IllegalArgumentException(
                     "Working directory must be within the agent workspace.");

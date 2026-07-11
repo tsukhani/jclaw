@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import okhttp3.Request;
 import play.Play;
 import utils.HttpFactories;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,7 +23,7 @@ import java.util.concurrent.TimeUnit;
  * <h2>Trust boundary</h2>
  * The {@code owner/repo/skillId} come from untrusted catalog rows, so the host
  * is pinned to GitHub (api + raw) and every write is path-contained via
- * {@link AgentService#resolveContained}. An optional
+ * {@link WorkspacePathGuard#resolveContained}. An optional
  * {@value #TOKEN_PROPERTY} raises the unauthenticated GitHub API rate limit.
  */
 public final class GithubSkillFetcher {
@@ -79,7 +80,7 @@ public final class GithubSkillFetcher {
             if (!underPrefix(path, prefix)) continue;
             var rel = relativize(path, prefix);
             try {
-                var dest = AgentService.resolveContained(stagedDir, rel);
+                var dest = WorkspacePathGuard.resolveContained(stagedDir, rel);
                 if (dest == null) {
                     EventLogger.warn(CATEGORY, "Import: skipping path escaping staged dir: " + path);
                     continue;

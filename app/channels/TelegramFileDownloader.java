@@ -10,6 +10,7 @@ import utils.Filenames;
 import utils.HttpFactories;
 import utils.SsrfGuard;
 import utils.Strings;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -138,7 +139,7 @@ public final class TelegramFileDownloader {
         } catch (IOException e) {
             return new DownloadFailed("Failed to create staging dir: " + e.getMessage());
         }
-        Path stagedPath = AgentService.acquireContained(stagingDir, leaf);
+        Path stagedPath = WorkspacePathGuard.acquireContained(stagingDir, leaf);
 
         var stageResult = streamFileToStaging(fileBaseUrl, ok.filePath(), stagedPath);
         if (stageResult != null) return stageResult;

@@ -26,6 +26,7 @@ import tools.SubagentSpawnTool;
 import utils.ApiResponses;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
+import utils.WorkspacePathGuard;
 
 import java.io.File;
 import java.io.IOException;
@@ -359,7 +360,7 @@ public class ApiChatController extends Controller {
     private static Path acquireContainedOr400(
             Path stagingDir, String leaf, String originalName) {
         try {
-            return AgentService.acquireContained(stagingDir, leaf);
+            return WorkspacePathGuard.acquireContained(stagingDir, leaf);
         } catch (SecurityException _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid filename: " + originalName);
             return null; // unreachable — ApiResponses.error() throws

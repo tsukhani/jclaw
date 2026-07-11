@@ -5,6 +5,7 @@ import models.Message;
 import models.MessageAttachment;
 import play.Logger;
 import utils.TikaHolder;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -108,7 +109,7 @@ public final class AttachmentService {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to create attachments directory: " + e.getMessage(), e);
         }
-        var finalPath = AgentService.acquireContained(conversationDir, leaf);
+        var finalPath = WorkspacePathGuard.acquireContained(conversationDir, leaf);
         try {
             Files.move(stagedFile, finalPath, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
@@ -167,7 +168,7 @@ public final class AttachmentService {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to create attachments directory: " + e.getMessage(), e);
         }
-        var finalPath = AgentService.acquireContained(conversationDir, leaf);
+        var finalPath = WorkspacePathGuard.acquireContained(conversationDir, leaf);
         try {
             Files.write(finalPath, bytes);
         } catch (IOException e) {

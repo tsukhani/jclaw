@@ -22,6 +22,7 @@ import services.catalog.CatalogPage;
 import services.catalog.CatalogQuery;
 import services.catalog.CatalogRegistry;
 import services.Tx;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -664,7 +665,7 @@ public class ApiSkillsController extends Controller {
     private static void readSkillFileFrom(Path dir, String filePath) {
         Path target;
         try {
-            target = AgentService.acquireContained(dir, filePath);
+            target = WorkspacePathGuard.acquireContained(dir, filePath);
         } catch (SecurityException _) {
             ApiResponses.error(403, "forbidden", "Path escapes skill directory");
             return;  // javac definite-assignment: target is unassigned on this catch path
@@ -699,7 +700,7 @@ public class ApiSkillsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     private static Path resolveSkillName(Path root, String name) {
-        var resolved = AgentService.resolveContained(root, name);
+        var resolved = WorkspacePathGuard.resolveContained(root, name);
         if (resolved == null) {
             notFound();
             throw new AssertionError("unreachable: notFound() throws");

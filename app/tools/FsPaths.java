@@ -3,6 +3,7 @@ package tools;
 import com.google.gson.JsonObject;
 import models.Agent;
 import services.AgentService;
+import utils.WorkspacePathGuard;
 
 import java.nio.file.Path;
 
@@ -47,7 +48,7 @@ final class FsPaths {
      */
     static String checkSkillCreatorReadOnly(Agent agent, Path workspace, Path target) {
         if ("main".equalsIgnoreCase(agent.name)) return null;
-        var skillCreatorDir = AgentService.resolveContained(workspace, "skills/skill-creator");
+        var skillCreatorDir = WorkspacePathGuard.resolveContained(workspace, "skills/skill-creator");
         if (skillCreatorDir != null && target.startsWith(skillCreatorDir)) {
             return "Error: The 'skill-creator' skill is read-only for agent '"
                     + agent.name

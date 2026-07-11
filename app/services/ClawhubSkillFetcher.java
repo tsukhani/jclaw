@@ -6,6 +6,7 @@ import okhttp3.HttpUrl;
 import okhttp3.Request;
 import play.Play;
 import utils.HttpFactories;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,7 +25,7 @@ import java.util.concurrent.TimeUnit;
  * version-detail endpoint: {@code GET /api/v1/skills/{slug}/versions/{version}}
  * returns {@code version.files[].path}. So: resolve the latest version, read its
  * file list, download each file. Host-pinned to clawhub; every write is
- * path-contained via {@link AgentService#resolveContained}.
+ * path-contained via {@link WorkspacePathGuard#resolveContained}.
  *
  * <h2>Owner-scoped slugs</h2>
  * ClawHub slugs are <em>not</em> globally unique — several authors can publish
@@ -71,7 +72,7 @@ public final class ClawhubSkillFetcher {
         int n = 0;
         for (var path : paths) {
             try {
-                var dest = AgentService.resolveContained(stagedDir, path);
+                var dest = WorkspacePathGuard.resolveContained(stagedDir, path);
                 if (dest == null) {
                     EventLogger.warn(CATEGORY, "Import: skipping path escaping staged dir: " + path);
                     continue;

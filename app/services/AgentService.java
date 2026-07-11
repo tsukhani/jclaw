@@ -15,13 +15,13 @@ import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 import tools.JClawApiTool;
+import utils.WorkspacePathGuard;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -653,23 +653,11 @@ public class AgentService {
 
     /**
      * Resolve {@code relativePath} inside {@code root}, rejecting any target
-     * that would escape the root. Two-layer validation:
-     *
-     * <ol>
-     *   <li><b>Lexical</b>: collapse {@code ..} via {@code normalize()} and
-     *       verify the result starts with {@code root}.</li>
-     *   <li><b>Canonical</b>: realpath the deepest existing ancestor of the
-     *       target (handles writes whose target doesn't exist yet), append the
-     *       missing suffix, and verify the resulting absolute path is still
-     *       inside the canonical root. Catches symlink escapes — a symlink
-     *       inside the root that points to {@code /etc} would pass step 1 but
-     *       fail step 2.</li>
-     * </ol>
-     *
-     * Returns the canonical absolute path on success, or {@code null} on any
-     * escape, missing root, or I/O error. Prefer {@link #acquireContained}
-     * when the result is about to be opened or executed against — it
-     * additionally double-resolves to shrink the validate→use TOCTOU window.
+     * that would escape the root. Thin delegate to
+     * {@link WorkspacePathGuard#resolveContained} — the general
+     * filesystem-boundary guard (JCLAW-703) — retained here as the
+     * agent-domain entry point. See there for the two-layer lexical +
+     * canonical (symlink-catching, missing-suffix walk-up) validation.
      *
      * @param root         the workspace root (or any other "must stay inside"
      *                     boundary)
@@ -679,73 +667,16 @@ public class AgentService {
      *         {@code null} on escape / missing root / I/O error
      */
     public static Path resolveContained(Path root, String relativePath) {
-        try {
-            // Layer 1: lexical
-            var rootAbs = root.toAbsolutePath().normalize();
-            var target = rootAbs.resolve(relativePath).normalize();
-            if (!target.startsWith(rootAbs)) return null;
-
-            // Make sure the root exists so we can realpath it (idempotent).
-            Files.createDirectories(rootAbs);
-            var rootReal = rootAbs.toRealPath();
-
-            // Layer 2: canonical with missing-suffix walk-up. toRealPath()
-            // throws NoSuchFileException for not-yet-created targets, so for
-            // write paths we walk up to the deepest existing ancestor,
-            // realpath that, then re-attach the missing tail.
-            var existing = target;
-            var missingSuffix = new ArrayDeque<Path>();
-            while (existing != null && !Files.exists(existing)) {
-                missingSuffix.push(existing.getFileName());
-                existing = existing.getParent();
-            }
-            if (existing == null) return null;
-            var canonical = existing.toRealPath();
-            if (!canonical.startsWith(rootReal)) return null;
-
-            for (var seg : missingSuffix) canonical = canonical.resolve(seg);
-            canonical = canonical.normalize();
-            return canonical.startsWith(rootReal) ? canonical : null;
-        } catch (IOException _) {
-            return null;
-        }
+        return WorkspacePathGuard.resolveContained(root, relativePath);
     }
 
     /**
-     * Resolve, validate, then re-resolve immediately to confirm the canonical
-     * target hasn't changed between the two resolutions. Additionally rejects
-     * regular files whose inode has more than one hardlink. Returns the
-     * canonical absolute path. Throws {@link SecurityException} on any escape,
-     * mid-resolution divergence, or hardlink violation.
-     *
-     * <p><b>Three layers of defense</b>:
-     * <ol>
-     *   <li><b>Lexical + canonical</b> (via {@link #resolveContained}): rejects
-     *       textual {@code ..} traversal and symlinks whose realpath escapes
-     *       the root.</li>
-     *   <li><b>Double-resolve</b>: re-resolves immediately and asserts the
-     *       canonical target is unchanged. Achievable Java equivalent of
-     *       OpenClaw's post-open re-check (Java NIO can't fstat an open
-     *       {@code InputStream}, so we can't truly hold-then-validate; the
-     *       double-resolve shrinks the validate→use TOCTOU window from
-     *       "unbounded" to "microseconds").</li>
-     *   <li><b>Hardlink rejection</b>: a regular file inside a workspace
-     *       should never have {@code nlink > 1}. jclaw never creates hardlinks
-     *       itself, the default shell allowlist doesn't include {@code ln},
-     *       and pnpm-style hardlink dedup happens in dev trees outside any
-     *       agent workspace. If we see {@code nlink > 1} here, treat it as an
-     *       attempt to read across the sandbox boundary via the inode side
-     *       door — hardlinks bypass the symlink check because there's no
-     *       "link" to follow; both names point to the same inode. Skipped for
-     *       directories (their nlink encodes subdirectory count) and on
-     *       non-POSIX filesystems where {@code unix:nlink} isn't supported.</li>
-     * </ol>
-     *
-     * <p>Callers should pass the returned path directly to the file operation
-     * with no further work in between. Use from {@code FileSystemTools},
-     * {@code DocumentsTool}, {@code ShellExecTool} (workdir), upload handlers,
-     * and {@code serveWorkspaceFile}. Use {@link #resolveContained} only when
-     * you need a non-throwing yes/no check.
+     * Resolve, double-validate (TOCTOU-window shrink), and hardlink-reject a
+     * path inside {@code root}. Thin delegate to
+     * {@link WorkspacePathGuard#acquireContained} — retained here as the
+     * agent-domain entry point. See there for the three-layer defense
+     * (lexical + canonical, double-resolve, {@code nlink > 1} hardlink
+     * rejection).
      *
      * @param root         the workspace root the target must stay inside
      * @param relativePath path relative to {@code root}
@@ -754,36 +685,7 @@ public class AgentService {
      *                           hardlink violation
      */
     public static Path acquireContained(Path root, String relativePath) {
-        var first = resolveContained(root, relativePath);
-        if (first == null) {
-            throw new SecurityException("Path '%s' escapes the workspace.".formatted(relativePath));
-        }
-        var second = resolveContained(root, relativePath);
-        if (second == null || !second.equals(first)) {
-            throw new SecurityException(
-                    "Path '%s' resolved to a different target between validations (possible TOCTOU)."
-                            .formatted(relativePath));
-        }
-        // Hardlink check: only meaningful for existing regular files. Directories
-        // legitimately have nlink > 1 (each subdir contributes a `..` entry), and
-        // not-yet-created targets have no inode to inspect.
-        try {
-            if (Files.exists(second) && Files.isRegularFile(second)) {
-                var nlink = Files.getAttribute(second, "unix:nlink");
-                if (nlink instanceof Number n && n.intValue() > 1) {
-                    throw new SecurityException(
-                            "Path '%s' is a hardlink (nlink=%d); rejected to prevent cross-sandbox inode aliasing."
-                                    .formatted(relativePath, n.intValue()));
-                }
-            }
-        } catch (UnsupportedOperationException _) {
-            // Non-POSIX filesystem (e.g. Windows / FAT). Lexical and canonical
-            // layers still apply; just degrade the hardlink check.
-        } catch (IOException e) {
-            throw new SecurityException(
-                    "Failed to inspect '%s': %s".formatted(relativePath, e.getMessage()));
-        }
-        return second;
+        return WorkspacePathGuard.acquireContained(root, relativePath);
     }
 
     /**
