@@ -9,6 +9,7 @@ import play.Play;
 import services.EventLogger;
 import services.SkillCategoryClassifier;
 import utils.HttpFactories;
+import utils.Strings;
 
 import java.io.IOException;
 import java.net.URLEncoder;
@@ -153,7 +154,7 @@ public final class ClawhubCatalog implements Catalog {
     /** Map a {@code /api/v1/skills} browse item to a normalized row. */
     public static CatalogSkill mapBrowseItem(JsonObject o, String base) {
         var slug = str(o, "slug");
-        var displayName = firstNonBlank(str(o, "displayName"), slug);
+        var displayName = Strings.firstNonBlank(str(o, "displayName"), slug);
         var stats = o.has(KEY_STATS) && o.get(KEY_STATS).isJsonObject() ? o.getAsJsonObject(KEY_STATS) : null;
         long installs = stats != null ? asLong(stats, "installsAllTime", asLong(stats, KEY_DOWNLOADS, 0)) : 0;
         var category = SkillCategoryClassifier.classifyText(
@@ -168,7 +169,7 @@ public final class ClawhubCatalog implements Catalog {
     /** Map a {@code /api/v1/search} result to a normalized row. */
     public static CatalogSkill mapSearchResult(JsonObject o, String base) {
         var slug = str(o, "slug");
-        var displayName = firstNonBlank(str(o, "displayName"), slug);
+        var displayName = Strings.firstNonBlank(str(o, "displayName"), slug);
         var owner = nz(str(o, "ownerHandle"));
         long installs = asLong(o, KEY_DOWNLOADS, 0);
         var category = SkillCategoryClassifier.classifyText(join(slug, displayName, str(o, "summary")));
@@ -236,10 +237,6 @@ public final class ClawhubCatalog implements Catalog {
 
     private static long asLong(JsonObject o, String key, long dflt) {
         return o != null && o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsLong() : dflt;
-    }
-
-    private static String firstNonBlank(String a, String b) {
-        return a != null && !a.isBlank() ? a : nz(b);
     }
 
     private static String join(String... parts) {

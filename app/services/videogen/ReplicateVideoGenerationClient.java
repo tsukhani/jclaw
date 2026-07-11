@@ -10,6 +10,7 @@ import okhttp3.RequestBody;
 import services.ConfigService;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 
@@ -54,7 +55,7 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
             throw new VideoGenerationException("video generation: prompt is required");
         }
         var apiKey = requireConfig("provider.replicate.apiKey");
-        var model = firstNonBlank(request.model(), ConfigService.get("videogen.cloud.model"), DEFAULT_MODEL);
+        var model = Strings.firstNonBlank(request.model(), ConfigService.get("videogen.cloud.model"), DEFAULT_MODEL);
 
         var input = new JsonObject();
         input.addProperty("prompt", request.prompt());
@@ -69,7 +70,7 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
             var body = resp.body().string();
             if (!resp.isSuccessful()) {
                 throw new VideoGenerationException("replicate submit failed: HTTP %d%s".formatted(
-                        resp.code(), body.isEmpty() ? "" : " — " + truncate(body, 500)));
+                        resp.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, 500)));
             }
             var id = JsonParser.parseString(body).getAsJsonObject().get("id");
             if (id == null || id.isJsonNull() || id.getAsString().isBlank()) {
@@ -130,7 +131,7 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
     }
 
     private static String baseUrl() {
-        return trimTrailingSlash(firstNonBlank(ConfigService.get("provider.replicate.baseUrl"), DEFAULT_BASE));
+        return Strings.trimTrailingSlash(Strings.firstNonBlank(ConfigService.get("provider.replicate.baseUrl"), DEFAULT_BASE));
     }
 
     private static String requireConfig(String key) {
@@ -139,19 +140,4 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
         return v;
     }
 
-    private static String firstNonBlank(String... values) {
-        for (var v : values) {
-            if (v != null && !v.isBlank()) return v;
-        }
-        return null;
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
-    }
 }

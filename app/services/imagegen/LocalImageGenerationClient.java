@@ -7,6 +7,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
 import utils.HttpFactories;
+import utils.Strings;
 
 import java.io.IOException;
 import java.util.Base64;
@@ -87,7 +88,7 @@ public class LocalImageGenerationClient implements ImageGenerationService {
             if (!resp.isSuccessful()) {
                 var body = resp.body().string();
                 throw new ImageGenerationException("flux-local generate failed: HTTP %d%s".formatted(
-                        resp.code(), body.isEmpty() ? "" : " — " + truncate(body, 500)));
+                        resp.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, 500)));
             }
             var contentType = resp.header("Content-Type", "image/png");
             var mimeType = contentType.split(";")[0].trim();
@@ -102,10 +103,5 @@ public class LocalImageGenerationClient implements ImageGenerationService {
         if (repo == null || repo.isBlank()) return "flux";
         int slash = repo.lastIndexOf('/');
         return slash >= 0 ? repo.substring(slash + 1) : repo;
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 }

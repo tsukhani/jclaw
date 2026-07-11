@@ -13,6 +13,7 @@ import services.AttachmentService;
 import services.ConfigService;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 
@@ -90,7 +91,7 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
         // local Ollama, which rejects WebP) gets an image it can load.
         imageDataUrl = CaptionImageNormalizer.toModelSafeDataUrl(imageDataUrl);
 
-        var url = trimTrailingSlash(baseUrl) + "/chat/completions";
+        var url = Strings.trimTrailingSlash(baseUrl) + "/chat/completions";
         var request = new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
@@ -99,7 +100,7 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
 
         try (var response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                var snippet = truncate(response.body().string(), 500);
+                var snippet = Strings.truncate(response.body().string(), 500);
                 throw new CaptionException("%s captioning failed: HTTP %d %s%s".formatted(
                         providerName, response.code(), response.message(),
                         snippet.isEmpty() ? "" : (" — " + snippet)));
@@ -150,14 +151,5 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
             return "";
         }
         return message.get(CONTENT).getAsString().trim();
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 }

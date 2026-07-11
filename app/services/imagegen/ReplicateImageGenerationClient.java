@@ -10,6 +10,7 @@ import okhttp3.RequestBody;
 import services.ConfigService;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 import java.util.Base64;
@@ -71,9 +72,9 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         if (apiKey == null || apiKey.isBlank()) {
             throw new ImageGenerationException("provider.replicate.apiKey is not configured");
         }
-        var effModel = firstNonBlank(model, ConfigService.get("imagegen.replicate.model"), DEFAULT_MODEL);
+        var effModel = Strings.firstNonBlank(model, ConfigService.get("imagegen.replicate.model"), DEFAULT_MODEL);
 
-        var prediction = createPrediction(trimTrailingSlash(baseUrl), effModel, apiKey, prompt, width, height, referenceImage);
+        var prediction = createPrediction(Strings.trimTrailingSlash(baseUrl), effModel, apiKey, prompt, width, height, referenceImage);
         var imageUrl = resolveOutputUrl(prediction, apiKey);
         return fetchImage(imageUrl, "replicate:" + effModel);
     }
@@ -106,7 +107,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             var body = response.body().string();
             if (!response.isSuccessful()) {
                 throw new ImageGenerationException("replicate create failed: HTTP %d %s%s".formatted(
-                        response.code(), response.message(), body.isEmpty() ? "" : (" — " + truncate(body, 500))));
+                        response.code(), response.message(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, 500))));
             }
             return JsonParser.parseString(body).getAsJsonObject();
         } catch (IOException e) {
@@ -127,7 +128,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             }
             if ("failed".equalsIgnoreCase(status) || "canceled".equalsIgnoreCase(status)) {
                 throw new ImageGenerationException("replicate prediction " + status + ": "
-                        + truncate(current.toString(), 500));
+                        + Strings.truncate(current.toString(), 500));
             }
             if (System.nanoTime() >= deadline) {
                 throw new ImageGenerationException("replicate generation timed out after " + (timeoutMs / 1000) + "s");
@@ -201,17 +202,6 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         return "image/png";
     }
 
-    private static String firstNonBlank(String... values) {
-        for (var v : values) {
-            if (v != null && !v.isBlank()) return v;
-        }
-        return null;
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
-    }
-
     /** Map the tool's width/height back to a Flux {@code aspect_ratio} label (landscape/portrait/square);
      *  null when dims are unset, so the model keeps its own default. */
     private static String aspectRatioFor(Integer width, Integer height) {
@@ -219,10 +209,5 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         if (width > height) return "16:9";
         if (height > width) return "9:16";
         return "1:1";
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 }

@@ -10,6 +10,7 @@ import play.Logger;
 import services.ConfigService;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -73,8 +74,8 @@ public final class ReplicateVideoModelCatalog {
     public List<VideoModel> fetch() {
         var apiKey = ConfigService.get("provider.replicate.apiKey");
         if (apiKey == null || apiKey.isBlank()) return List.of();
-        var base = firstNonBlank(ConfigService.get("provider.replicate.baseUrl"), DEFAULT_BASE);
-        var url = trimTrailingSlash(base) + "/collections/" + COLLECTION;
+        var base = Strings.firstNonBlank(ConfigService.get("provider.replicate.baseUrl"), DEFAULT_BASE);
+        var url = Strings.trimTrailingSlash(base) + "/collections/" + COLLECTION;
         var req = new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
@@ -109,13 +110,5 @@ public final class ReplicateVideoModelCatalog {
 
     private static String asString(JsonObject o, String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
-    }
-
-    private static String firstNonBlank(String a, String b) {
-        return a != null && !a.isBlank() ? a : b;
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 }

@@ -8,6 +8,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
 import utils.HttpFactories;
+import utils.Strings;
 
 import java.io.IOException;
 import java.util.Base64;
@@ -69,11 +70,11 @@ public class BflImageGenerationClient implements ImageGenerationService {
         if (apiKey == null || apiKey.isBlank()) {
             throw new ImageGenerationException("provider.bfl.apiKey is not configured");
         }
-        var effModel = firstNonBlank(model, ConfigService.get("imagegen.bfl.model"), DEFAULT_MODEL);
+        var effModel = Strings.firstNonBlank(model, ConfigService.get("imagegen.bfl.model"), DEFAULT_MODEL);
         int w = width != null ? width : 1024;
         int h = height != null ? height : 1024;
 
-        var pollingUrl = submit(trimTrailingSlash(baseUrl), effModel, apiKey, prompt, w, h, referenceImage);
+        var pollingUrl = submit(Strings.trimTrailingSlash(baseUrl), effModel, apiKey, prompt, w, h, referenceImage);
         var sampleUrl = pollUntilReady(pollingUrl, apiKey);
         return new GeneratedImage(fetchBytes(sampleUrl), "image/png", "bfl:" + effModel);
     }
@@ -98,7 +99,7 @@ public class BflImageGenerationClient implements ImageGenerationService {
             var body = response.body().string();
             if (!response.isSuccessful()) {
                 throw new ImageGenerationException("bfl submit failed: HTTP %d %s%s".formatted(
-                        response.code(), response.message(), body.isEmpty() ? "" : (" — " + truncate(body, 500))));
+                        response.code(), response.message(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, 500))));
             }
             var json = JsonParser.parseString(body).getAsJsonObject();
             if (json.has(POLLING_URL) && !json.get(POLLING_URL).isJsonNull()) {
@@ -144,7 +145,7 @@ public class BflImageGenerationClient implements ImageGenerationService {
                 return readySampleUrl(json);
             }
             if ("Error".equalsIgnoreCase(status) || "Failed".equalsIgnoreCase(status)) {
-                throw new ImageGenerationException("bfl generation failed: " + truncate(body, 500));
+                throw new ImageGenerationException("bfl generation failed: " + Strings.truncate(body, 500));
             }
             return null; // Pending / Queued / Processing — keep polling until the deadline.
         } catch (IOException e) {
@@ -181,19 +182,4 @@ public class BflImageGenerationClient implements ImageGenerationService {
         }
     }
 
-    private static String firstNonBlank(String... values) {
-        for (var v : values) {
-            if (v != null && !v.isBlank()) return v;
-        }
-        return null;
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
-    }
 }

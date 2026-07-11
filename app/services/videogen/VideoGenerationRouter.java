@@ -1,6 +1,7 @@
 package services.videogen;
 
 import services.ConfigService;
+import utils.Strings;
 
 import java.util.Optional;
 
@@ -47,14 +48,10 @@ public final class VideoGenerationRouter {
             // sizes (wan-5b / wan-14b) on CUDA — so both arms read the operator's choice, defaulting to
             // the smallest in each family.
             case "ltx-local" -> Optional.of(new LocalVideoGenerationClient(
-                    firstNonBlank(ConfigService.get("videogen.local.model"), "ltx")));
+                    Strings.firstNonBlank(ConfigService.get("videogen.local.model"), "ltx")));
             case "wan-local" -> Optional.of(new LocalVideoGenerationClient(
-                    firstNonBlank(ConfigService.get("videogen.local.model"), "wan-5b")));
+                    Strings.firstNonBlank(ConfigService.get("videogen.local.model"), "wan-5b")));
             default -> Optional.empty();
         };
-    }
-
-    private static String firstNonBlank(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
     }
 }

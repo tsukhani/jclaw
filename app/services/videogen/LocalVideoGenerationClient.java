@@ -7,6 +7,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import utils.HttpFactories;
+import utils.Strings;
 
 import java.io.IOException;
 
@@ -97,14 +98,14 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
                 // The free-VRAM gate (SV-2): the runner turns this into a FAILED job, which the
                 // generate_video tool can surface so the user can switch to the cloud provider.
                 throw new VideoGenerationException("local video generation rejected (likely insufficient free VRAM): "
-                        + truncate(body, 300));
+                        + Strings.truncate(body, 300));
             }
             if (!resp.isSuccessful()) {
-                throw new VideoGenerationException("local video submit failed: HTTP " + resp.code() + " " + truncate(body, 200));
+                throw new VideoGenerationException("local video submit failed: HTTP " + resp.code() + " " + Strings.truncate(body, 200));
             }
             var id = JsonParser.parseString(body).getAsJsonObject().get("job_id");
             if (id == null || id.isJsonNull()) {
-                throw new VideoGenerationException("local video submit returned no job_id: " + truncate(body, 200));
+                throw new VideoGenerationException("local video submit returned no job_id: " + Strings.truncate(body, 200));
             }
             return id.getAsString();
         } catch (IOException e) {
@@ -122,7 +123,7 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
         try (var resp = client.newCall(httpReq).execute()) {
             var body = resp.body().string();
             if (!resp.isSuccessful()) {
-                throw new VideoGenerationException("local video poll failed: HTTP " + resp.code() + " " + truncate(body, 200));
+                throw new VideoGenerationException("local video poll failed: HTTP " + resp.code() + " " + Strings.truncate(body, 200));
             }
             var j = JsonParser.parseString(body).getAsJsonObject();
             var state = j.has(KEY_STATE) && !j.get(KEY_STATE).isJsonNull() ? j.get(KEY_STATE).getAsString() : "";
@@ -149,10 +150,5 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
             case "1:1" -> new int[]{512, 512};  // square
             default -> null;
         };
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 }

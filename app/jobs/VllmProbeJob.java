@@ -5,6 +5,7 @@ import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.LocalProviderProbeSupport;
+import utils.Strings;
 
 /**
  * Probe the configured self-hosted vLLM instance once at boot. Same shape as
@@ -28,12 +29,8 @@ public class VllmProbeJob extends Job<Void> {
                 "Start a vLLM OpenAI-compatible server (e.g. `vllm serve <model>`, default port 8000) "
                         + "and set provider.vllm.baseUrl to its /v1 URL.",
                 baseUrl -> {
-                    var r = LocalProviderProbeSupport.probeModels(trimTrailingSlash(baseUrl), "vllm");
+                    var r = LocalProviderProbeSupport.probeModels(Strings.trimTrailingSlash(baseUrl), "vllm");
                     return new ProbeJobs.Outcome(r.available(), r.modelCount(), r.reason(), r.connectionRefused());
                 });
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 }

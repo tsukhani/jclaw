@@ -11,6 +11,7 @@ import okhttp3.RequestBody;
 import services.ConfigService;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 import java.util.Base64;
@@ -80,12 +81,12 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
         if (apiKey == null || apiKey.isBlank()) {
             throw new ImageGenerationException("provider." + providerName + ".apiKey is not configured");
         }
-        var effModel = firstNonBlank(model, ConfigService.get("imagegen." + providerName + ".model"), defaultModel);
+        var effModel = Strings.firstNonBlank(model, ConfigService.get("imagegen." + providerName + ".model"), defaultModel);
         if (effModel == null || effModel.isBlank()) {
             throw new ImageGenerationException(providerName + " image generation: no model configured");
         }
 
-        var base = trimTrailingSlash(baseUrl);
+        var base = Strings.trimTrailingSlash(baseUrl);
         var size = sizeFor(width, height);
         boolean hasReference = referenceImage != null
                 && referenceImage.bytes() != null && referenceImage.bytes().length > 0;
@@ -98,7 +99,7 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
             if (!response.isSuccessful()) {
                 throw new ImageGenerationException("%s image generation failed: HTTP %d %s%s".formatted(
                         providerName, response.code(), response.message(),
-                        body.isEmpty() ? "" : (" — " + truncate(body, 500))));
+                        body.isEmpty() ? "" : (" — " + Strings.truncate(body, 500))));
             }
             return parseImage(body, effModel);
         } catch (IOException e) {
@@ -195,19 +196,4 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
         return "1024x1024";
     }
 
-    private static String firstNonBlank(String... values) {
-        for (var v : values) {
-            if (v != null && !v.isBlank()) return v;
-        }
-        return null;
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
-    }
 }

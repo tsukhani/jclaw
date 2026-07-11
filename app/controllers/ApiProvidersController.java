@@ -22,6 +22,7 @@ import services.PricingRefreshService;
 import services.video.VideoInterpretationClient;
 import services.video.VideoInterpretationRouter;
 import utils.ApiResponses;
+import utils.Strings;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -131,12 +132,8 @@ public class ApiProvidersController extends Controller {
         if (baseUrl == null || baseUrl.isBlank()) {
             renderJSON(gson.toJson(new ReachableResponse(name, false, 0, "not configured")));
         }
-        var r = LocalProviderProbeSupport.probeModels(trimTrailingSlash(baseUrl), name);
+        var r = LocalProviderProbeSupport.probeModels(Strings.trimTrailingSlash(baseUrl), name);
         renderJSON(gson.toJson(new ReachableResponse(name, r.available(), r.modelCount(), r.reason())));
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 
     /**

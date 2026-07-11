@@ -13,6 +13,7 @@ import services.AttachmentService;
 import services.ConfigService;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -189,7 +190,7 @@ public class VideoInterpretationClient {
     /** POST a prebuilt {@code /chat/completions} body and return the parsed prose. Shared by both modes. */
     private String executeChat(String baseUrl, String requestJson) {
         var builder = new Request.Builder()
-                .url(trimTrailingSlash(baseUrl) + "/chat/completions")
+                .url(Strings.trimTrailingSlash(baseUrl) + "/chat/completions")
                 .post(RequestBody.create(requestJson, JSON));
         var apiKey = ConfigService.get("provider." + providerName + ".apiKey");
         if (apiKey != null && !apiKey.isBlank()) {
@@ -198,7 +199,7 @@ public class VideoInterpretationClient {
 
         try (var response = client.newCall(builder.build()).execute()) {
             if (!response.isSuccessful()) {
-                var snippet = truncate(response.body().string(), 500);
+                var snippet = Strings.truncate(response.body().string(), 500);
                 throw new VideoAdapterException("%s video interpretation failed: HTTP %d %s%s".formatted(
                         providerName, response.code(), response.message(),
                         snippet.isEmpty() ? "" : (" — " + snippet)));
@@ -264,14 +265,5 @@ public class VideoInterpretationClient {
             throw new VideoAdapterException(providerName + " video interpretation: empty content in response");
         }
         return message.get(CONTENT).getAsString().trim();
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 }

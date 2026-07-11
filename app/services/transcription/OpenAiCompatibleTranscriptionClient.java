@@ -13,6 +13,7 @@ import services.AgentService;
 import services.ConfigService;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -94,7 +95,7 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
                 .addFormDataPart("response_format", "json")
                 .build();
 
-        var url = trimTrailingSlash(baseUrl) + "/audio/transcriptions";
+        var url = Strings.trimTrailingSlash(baseUrl) + "/audio/transcriptions";
         var request = new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
@@ -106,7 +107,7 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
             // synchronously-executed call, so no defensive null guards
             // are needed below — the body may be empty, but never null.
             if (!response.isSuccessful()) {
-                var snippet = truncate(response.body().string(), 500);
+                var snippet = Strings.truncate(response.body().string(), 500);
                 throw new TranscriptionException(
                         "%s transcription failed: HTTP %d %s%s".formatted(
                                 providerName, response.code(), response.message(),
@@ -133,14 +134,5 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
         if (name == null || name.isBlank()) name = attachment.uuid;
         // Strip quotes / newlines that would break the Content-Disposition header.
         return name.replaceAll("[\"\\r\\n]", "_");
-    }
-
-    private static String trimTrailingSlash(String s) {
-        return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 }
