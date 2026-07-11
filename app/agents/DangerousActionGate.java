@@ -45,8 +45,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * interactive approval surface, so the gate applies the configured off-channel
  * policy ({@value #CFG_OFF_CHANNEL_POLICY}, default {@code allow}) instead of
  * routing a prompt to a Telegram chat the operator may not be watching — which
- * used to leave web-initiated turns blocking on a prompt nobody saw. A standing
- * grant still proceeds under either policy. Non-dangerous tools never reach the
+ * used to leave web-initiated turns blocking on a prompt nobody saw. JCLAW-709
+ * adds an opt-in {@code ask} that explicitly routes the confirmation to the
+ * agent's bound Telegram DM (fail-closed if there is none). A standing grant
+ * still proceeds under any policy. Non-dangerous tools never reach the
  * gate — it returns {@link Decision#PROCEED} before any I/O.
  *
  * <h2>Session / always scope</h2>
@@ -83,8 +85,10 @@ public final class DangerousActionGate {
      * JCLAW-423: policy for a dangerous tool dispatched on a channel with no
      * interactive approval surface (anything but Telegram). {@code allow}
      * (default) runs it ungated, preserving the pre-423 behavior where non-
-     * Telegram channels never gated dangerous tools; {@code deny} fails closed.
-     * An explicit standing grant still proceeds under either policy.
+     * Telegram channels never gated dangerous tools; {@code deny} fails closed;
+     * JCLAW-709 {@code ask} routes the confirmation to the agent's bound Telegram
+     * DM (fail-closed if there is none). An explicit standing grant still proceeds
+     * under any policy.
      */
     public static final String CFG_OFF_CHANNEL_POLICY = "tool.approval.offChannelPolicy";
     private static final String DEFAULT_OFF_CHANNEL_POLICY = "allow";
@@ -193,17 +197,19 @@ public final class DangerousActionGate {
             }
         }
 
-        return offChannelDecision(agent, toolName, channelType);
+        return offChannelDecision(agent, toolName, argsJson, channelType);
     }
 
     /**
-     * Off-Telegram fallback: there is no interactive approval surface for this
-     * dispatch, so apply the operator-configured policy
+     * Off-channel fallback: there is no interactive approval surface on THIS
+     * dispatch's own channel, so apply the operator-configured policy
      * ({@value #CFG_OFF_CHANNEL_POLICY}, default {@code allow}). {@code allow}
-     * proceeds ungated (the pre-JCLAW-423 behavior); {@code deny} fails closed.
-     * A standing grant has already short-circuited before this point.
+     * proceeds ungated (the pre-JCLAW-423 behavior); {@code deny} fails closed;
+     * JCLAW-709 {@code ask} routes a confirmation to the agent's bound Telegram
+     * DM (fail-closed if there is none). A standing grant has already
+     * short-circuited before this point.
      */
-    private static Decision offChannelDecision(Agent agent, String toolName, String channelType) {
+    private static Decision offChannelDecision(Agent agent, String toolName, String argsJson, String channelType) {
         var chan = channelType == null ? "none" : channelType;
         var policy = ConfigService.get(CFG_OFF_CHANNEL_POLICY, DEFAULT_OFF_CHANNEL_POLICY);
         if ("deny".equalsIgnoreCase(policy)) {
@@ -212,10 +218,36 @@ public final class DangerousActionGate {
                             .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
             return Decision.ABORT;
         }
+        if ("ask".equalsIgnoreCase(policy)) {
+            return askViaTelegram(agent, toolName, argsJson, chan);
+        }
         EventLogger.info(LOG_CATEGORY, agent.name, chan,
                 "Dangerous tool '%s' on non-Telegram channel '%s' — proceeding ungated (%s=allow)"
                         .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
         return Decision.PROCEED;
+    }
+
+    /**
+     * JCLAW-709: {@code offChannelPolicy=ask} — the hardened-deployment middle
+     * ground between {@code allow} and {@code deny}. A dispatch with no approval
+     * surface on its own channel is confirmed on the agent's bound Telegram DM
+     * instead (in a private chat {@code chat.id == telegramUserId}), so a web-
+     * initiated dangerous tool still reaches the operator. With no usable Telegram
+     * binding there is nobody who can confirm, so it fails closed (ABORT) rather
+     * than run ungated. Reuses the same blocking prompt/await as the Telegram path.
+     */
+    private static Decision askViaTelegram(Agent agent, String toolName, String argsJson, String chan) {
+        var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
+        if (binding != null && binding.enabled) {
+            EventLogger.info(LOG_CATEGORY, agent.name, chan,
+                    "Dangerous tool '%s' on off-channel '%s' — confirming on the bound Telegram DM (%s=ask)"
+                            .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
+            return promptAndAwait(agent, toolName, argsJson, binding);
+        }
+        EventLogger.warn(LOG_CATEGORY, agent.name, chan,
+                ("Dangerous tool '%s' on off-channel '%s' but no Telegram binding to confirm on — denying "
+                        + "(%s=ask, fail-closed)").formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
+        return Decision.ABORT;
     }
 
     /**

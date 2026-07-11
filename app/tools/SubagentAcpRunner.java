@@ -256,8 +256,10 @@ final class SubagentAcpRunner {
         Process proc = null;
         try {
             // JCLAW-672: batch mode has no streaming adapter; sandbox with the
-            // generic (no HOME allowances) profile when enabled.
-            var launched = HarnessSandbox.wrap(command, workdir, new GenericAdapter());
+            // generic (no HOME allowances) profile when enabled. JCLAW-709: pass
+            // the origin trust so the untrusted-only mode can confine this run.
+            var launched = HarnessSandbox.wrap(
+                    command, workdir, new GenericAdapter(), sandboxTrustedOrigin(runId));
             var pb = new ProcessBuilder(launched);
             if (workdir != null) pb.directory(workdir);
             proc = pb.start();
@@ -332,7 +334,8 @@ final class SubagentAcpRunner {
         boolean taskOnStdin = !argv.contains(task);
         Process proc = null;
         try {
-            var pb = new ProcessBuilder(HarnessSandbox.wrap(argv, workdir, adapter));
+            var pb = new ProcessBuilder(
+                    HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
             if (workdir != null) pb.directory(workdir);
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill and the
@@ -408,7 +411,8 @@ final class SubagentAcpRunner {
         Process proc = null;
         OutputStream stdin = null;
         try {
-            var pb = new ProcessBuilder(HarnessSandbox.wrap(argv, workdir, adapter));
+            var pb = new ProcessBuilder(
+                    HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
             if (workdir != null) pb.directory(workdir);
             proc = pb.start();
             // JCLAW-664: track the live process so the kill / idle-timeout paths can
@@ -477,6 +481,16 @@ final class SubagentAcpRunner {
             var run = (SubagentRun) SubagentRun.findById(runId);
             return run != null && run.parentConversation != null ? run.parentConversation.id : null;
         });
+    }
+
+    /** JCLAW-709: a coding run is "trusted" for sandbox purposes when its origin is
+     *  the operator's own web chat (or has no channel origin) — the same web-vs-
+     *  unsafe boundary {@link #enforceChannelApproval} uses. The untrusted-only
+     *  sandbox mode ({@code subagent.acp.sandbox=untrusted}) confines exactly the
+     *  runs this returns {@code false} for. */
+    private static boolean sandboxTrustedOrigin(Long runId) {
+        var origin = parentChannelType(runId);
+        return origin == null || "web".equals(origin);
     }
 
     /**

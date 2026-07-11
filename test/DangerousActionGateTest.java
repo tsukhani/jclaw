@@ -191,6 +191,38 @@ class DangerousActionGateTest extends UnitTest {
                 "a standing grant proceeds even under the deny policy, with no prompt");
     }
 
+    // ── JCLAW-709: tool.approval.offChannelPolicy=ask confirms on the bound
+    //    Telegram DM even for a web-origin dangerous tool. ──
+    @Test
+    void webConversationAskPolicyConfirmsOnTelegramAndProceeds() throws Exception {
+        commitInFreshTx(() -> { ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "ask"); return null; });
+        ConfigService.clearCache();
+        var agent = boundAgent("gate-web-ask");
+        var convId = webConvId(agent);
+
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}");
+        var approvalId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_ONCE, TG_USER);
+
+        assertEquals(Decision.PROCEED, verdict.get(2, TimeUnit.SECONDS));
+        assertTrue(server.countRequests("sendMessage") >= 1,
+                "the ask policy routes a Telegram prompt even for a web-origin dangerous tool");
+    }
+
+    // ── JCLAW-709: ask with no Telegram binding to confirm on fails closed. ──
+    @Test
+    void webConversationAskPolicyFailsClosedWithoutTelegramBinding() {
+        commitInFreshTx(() -> { ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "ask"); return null; });
+        ConfigService.clearCache();
+        var agent = unboundAgent("gate-web-ask-unbound");
+        var convId = webConvId(agent);
+
+        assertEquals(Decision.ABORT,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm x\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "ask with no Telegram binding must fail closed, with no prompt");
+    }
+
     // ── Session/Always scope suppresses re-prompt ──────────────────────
 
     @Test

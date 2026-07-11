@@ -64,6 +64,37 @@ class HarnessSandboxTest extends UnitTest {
         assertTrue(e.getMessage().contains("session working directory"), e.getMessage());
     }
 
+    // JCLAW-709: the tri-state config parses to the right Scope, back-compat intact.
+    @Test
+    void scopeParsesTriState() {
+        ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "");
+        assertEquals(HarnessSandbox.Scope.OFF, HarnessSandbox.scope());
+        assertFalse(HarnessSandbox.enabled());
+        ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
+        assertEquals(HarnessSandbox.Scope.ALL, HarnessSandbox.scope());
+        assertTrue(HarnessSandbox.enabled());
+        ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "untrusted");
+        assertEquals(HarnessSandbox.Scope.UNTRUSTED, HarnessSandbox.scope());
+        // untrusted is NOT "confine everything", so enabled() (== ALL) stays false.
+        assertFalse(HarnessSandbox.enabled());
+    }
+
+    // JCLAW-709: untrusted mode confines ONLY untrusted-origin runs. A trusted
+    // origin passes through even with the mode on; an untrusted origin takes the
+    // sandbox path (proven cross-platform by the null-workdir fail-closed guard).
+    @Test
+    void untrustedModeConfinesOnlyUntrustedOrigin() {
+        ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "untrusted");
+        var argv = List.of("claude", "-p");
+        // trustedOrigin=true → not confined even though the mode is on.
+        assertEquals(argv, HarnessSandbox.wrap(argv, session.toFile(), new ClaudeAdapter(), true));
+        // trustedOrigin=false → the sandbox applies; a null workdir fails closed
+        // (same guard as the always-on mode), proving the confine path is taken.
+        var e = assertThrows(HarnessSandbox.SandboxUnavailableException.class,
+                () -> HarnessSandbox.wrap(List.of("claude"), null, new ClaudeAdapter(), false));
+        assertTrue(e.getMessage().contains("session working directory"), e.getMessage());
+    }
+
     @Test
     @EnabledOnOs(OS.MAC)
     void macProfileWrapsAndConfinesWrites() throws Exception {

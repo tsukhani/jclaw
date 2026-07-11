@@ -9,8 +9,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * JCLAW-672: opt-in OS sandbox around a coding-harness process. When
- * {@code subagent.acp.sandbox=true}, the resolved harness argv is wrapped so
+ * JCLAW-672: opt-in OS sandbox around a coding-harness process. When enabled
+ * ({@code subagent.acp.sandbox=true}, or JCLAW-709's {@code =untrusted} for
+ * untrusted-origin runs only), the resolved harness argv is wrapped so
  * the process can write only inside its session directory and cannot read the
  * operator's secrets (~/.ssh, other apps' tokens, arbitrary home files). The
  * harness's own declared state paths (see {@link HarnessAdapter#sandboxAllowances})
@@ -39,7 +40,17 @@ import java.util.Locale;
  */
 public final class HarnessSandbox {
 
-    /** {@code subagent.acp.sandbox} — off by default. */
+    /**
+     * {@code subagent.acp.sandbox} — tri-state, {@code false} by default:
+     * <ul>
+     *   <li>{@code false} — never sandbox (the shipped default; the trusted
+     *       operator's coding runs stay fast and unconfined).</li>
+     *   <li>{@code true} — sandbox EVERY acp run.</li>
+     *   <li>{@code untrusted} — JCLAW-709: sandbox only runs whose ORIGIN is not
+     *       the operator's own web chat (inbound Telegram/Slack, the prompt-
+     *       injection surface), leaving the operator's web runs unconfined.</li>
+     * </ul>
+     */
     public static final String ACP_SANDBOX_KEY = "subagent.acp.sandbox";
 
     private static final String BWRAP = "bwrap";
@@ -50,19 +61,66 @@ public final class HarnessSandbox {
 
     private HarnessSandbox() {}
 
+    /** JCLAW-709: how broadly the OS sandbox applies, from {@link #ACP_SANDBOX_KEY}. */
+    public enum Scope {
+        /** Never confine (shipped default). */
+        OFF,
+        /** Confine every acp run ({@code subagent.acp.sandbox=true}). */
+        ALL,
+        /** Confine only untrusted-origin runs ({@code subagent.acp.sandbox=untrusted}). */
+        UNTRUSTED
+    }
+
+    /** Resolve the configured {@link Scope}. Unknown/empty/{@code false} → {@link Scope#OFF}. */
+    public static Scope scope() {
+        var raw = ConfigService.get(ACP_SANDBOX_KEY, "").strip();
+        if ("untrusted".equalsIgnoreCase(raw)) {
+            return Scope.UNTRUSTED;
+        }
+        return Boolean.parseBoolean(raw) ? Scope.ALL : Scope.OFF;
+    }
+
+    /** True when the sandbox confines EVERY run ({@link Scope#ALL}) — the meaning
+     *  a context-less caller of the 3-arg {@link #wrap} gets. */
     public static boolean enabled() {
-        return ConfigService.getBoolean(ACP_SANDBOX_KEY, false);
+        return scope() == Scope.ALL;
+    }
+
+    /** Whether the configured {@link #scope()} confines a run with this origin trust. */
+    private static boolean appliesTo(boolean trustedOrigin) {
+        return switch (scope()) {
+            case OFF -> false;
+            case ALL -> true;
+            case UNTRUSTED -> !trustedOrigin;
+        };
+    }
+
+    /**
+     * Back-compat 3-arg wrap for callers with no origin-trust context: confines
+     * only when the sandbox is on for EVERY run ({@link Scope#ALL}). The
+     * untrusted-only mode ({@link Scope#UNTRUSTED}) needs an origin signal, so a
+     * context-less caller is treated as trusted (unconfined) under it.
+     */
+    public static List<String> wrap(List<String> argv, File session, HarnessAdapter adapter) {
+        return wrap(argv, session, adapter, true);
     }
 
     /**
      * Wrap {@code argv} in the platform sandbox, confining writes to
      * {@code session} plus the adapter's declared allowances. No-op passthrough
-     * when the sandbox is disabled. Throws {@link SandboxUnavailableException}
-     * when enabled on an unsupported platform or when the sandbox binary is
+     * when the sandbox does not apply to this run (see {@link Scope} and
+     * {@code trustedOrigin}). Throws {@link SandboxUnavailableException} when the
+     * sandbox applies but this platform is unsupported or the sandbox binary is
      * absent — the caller must treat that as fail-closed (abort the run).
+     *
+     * @param trustedOrigin JCLAW-709: whether the run originates from the trusted
+     *                       operator (web chat / no channel). Ignored unless the
+     *                       configured {@link Scope} is {@link Scope#UNTRUSTED},
+     *                       where only {@code false} (untrusted origin) confines.
      */
-    public static List<String> wrap(List<String> argv, File session, HarnessAdapter adapter) {
-        if (!enabled()) return argv;
+    public static List<String> wrap(List<String> argv, File session, HarnessAdapter adapter,
+                                    boolean trustedOrigin) {
+        if (!appliesTo(trustedOrigin)) return argv;
         if (session == null) {
             throw new SandboxUnavailableException(
                     "sandboxing requires a session working directory, but none was resolved");
