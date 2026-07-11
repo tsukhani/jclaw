@@ -9,6 +9,7 @@ import services.ConfigService;
 import utils.HttpFactories;
 
 import java.io.IOException;
+import java.util.Base64;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -45,6 +46,18 @@ public class LocalImageGenerationClient implements ImageGenerationService {
 
     @Override
     public GeneratedImage generate(String prompt, String model, Integer width, Integer height) {
+        return generate(prompt, model, width, height, null);
+    }
+
+    /**
+     * JCLAW-699: image-to-image / style transfer. When {@code referenceImage} is present it's sent as
+     * a base64 {@code image} field; the sidecar decodes it and passes it as {@code image=} to the
+     * FLUX.2 Klein pipeline (which conditions on it natively — no pipeline swap). Null reference is
+     * plain text-to-image.
+     */
+    @Override
+    public GeneratedImage generate(String prompt, String model, Integer width, Integer height,
+                                   ReferenceImage referenceImage) {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
@@ -55,6 +68,9 @@ public class LocalImageGenerationClient implements ImageGenerationService {
         root.addProperty("prompt", prompt);
         if (width != null) root.addProperty("width", width);
         if (height != null) root.addProperty("height", height);
+        if (referenceImage != null && referenceImage.bytes() != null && referenceImage.bytes().length > 0) {
+            root.addProperty("image", Base64.getEncoder().encodeToString(referenceImage.bytes()));
+        }
         var generatedBy = "flux-local:" + shortName(ImageModelManager.configuredModel());
 
         int timeoutS = ConfigService.getInt("imagegen.local.generateTimeoutSeconds", 300);

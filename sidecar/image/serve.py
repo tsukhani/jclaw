@@ -13,8 +13,11 @@ Protocol (bound to 127.0.0.1 only):
   GET  /capability -> 200 {kind, gpu, freeVramGb, totalVramGb, runnable, tier, reason}
   GET  /progress-> 200 {percent}   (0..100 while generating, null when idle)
   (CLI) --probe -> same capability JSON to stdout, one-shot (no server, no model load)
-  POST /generate {prompt, width?, height?, steps?, seed?}
+  POST /generate {prompt, width?, height?, steps?, seed?, image?}
+        image? = base64 reference for image-to-image / style transfer (JCLAW-699);
+                 passed as image= to Flux2KleinPipeline, which conditions on it natively.
         -> 200 image/png  (raw bytes)
+        -> 400 {error}     when a supplied reference image can't be decoded
         -> 409 {error}     when weights are not present (call /pull first),
                            OR when a generation is already in progress (one at a time)
         -> 500 {error}     on generation failure
@@ -339,6 +342,21 @@ class Handler(BaseHTTPRequestHandler):
         # klein is step-distilled to ~4 steps — the default that keeps MPS tolerable.
         steps = int(body.get("steps") or 4)
         seed = body.get("seed")
+        # JCLAW-699: optional reference image (base64) for image-to-image / style transfer. Decoded to
+        # a PIL image and passed as image= to Flux2KleinPipeline, which conditions on it natively (the
+        # same loaded pipe does text-to-image when image is absent). Resized to the target dims to
+        # bound the extra MPS memory the reference tokens add.
+        ref_image = None
+        ref_b64 = body.get("image")
+        if ref_b64:
+            import base64
+            from PIL import Image
+            try:
+                ref_image = Image.open(
+                    io.BytesIO(base64.b64decode(ref_b64))).convert("RGB").resize((width, height))
+            except Exception as e:
+                self._send_json(400, {"error": "invalid reference image: %s" % e})
+                return
         # One generation at a time. The resident pipeline isn't safe to drive concurrently, and the
         # shared %-progress assumes a single in-flight gen. A second caller gets 409 (the Java client
         # surfaces it the same way the video sidecar's busy gate does).
@@ -363,6 +381,8 @@ class Handler(BaseHTTPRequestHandler):
 
                 kwargs = {"prompt": prompt, "width": width, "height": height,
                           "num_inference_steps": steps, "callback_on_step_end": on_step}
+                if ref_image is not None:
+                    kwargs["image"] = ref_image  # reference conditioning -> image-to-image
                 if seed is not None:
                     import torch
                     kwargs["generator"] = torch.Generator(

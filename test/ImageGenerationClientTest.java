@@ -274,6 +274,28 @@ class ImageGenerationClientTest extends UnitTest {
     }
 
     @Test
+    void fluxLocalSendsReferenceImageForImageToImage() throws Exception {
+        // JCLAW-699: a reference image is sent as a base64 "image" field in the /generate JSON; the
+        // sidecar decodes it and passes image= to Flux2KleinPipeline for reference conditioning.
+        var imageBytes = new byte[]{4, 3, 2, 1};
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "image/png").body(bytesBuf(imageBytes)).build());
+
+        var refBytes = new byte[]{9, 9, 9, 9};
+        var ref = new ImageGenerationService.ReferenceImage(refBytes, "image/webp");
+        var result = new LocalImageGenerationClient(mockBase(), testClient)
+                .generate("in this style", null, 1024, 1024, ref);
+        assertArrayEquals(imageBytes, result.bytes());
+
+        var body = server.takeRequest().getBody().utf8();
+        assertTrue(body.contains("\"image\""),
+                "reference must be sent as a base64 image field: "
+                        + body.substring(0, Math.min(200, body.length())));
+        assertTrue(body.contains(Base64.getEncoder().encodeToString(refBytes)),
+                "the reference bytes must be base64-encoded into the image field");
+    }
+
+    @Test
     void fluxLocalThrowsNotDownloadedOn409() {
         // 409 from the sidecar means the weights aren't present yet.
         server.enqueue(new MockResponse.Builder().code(409)
