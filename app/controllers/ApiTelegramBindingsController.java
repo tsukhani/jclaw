@@ -22,6 +22,12 @@ import utils.ApiResponses;
 import java.security.SecureRandom;
 import java.util.Base64;
 
+import static controllers.BindingKeys.EVENT_CATEGORY_CHANNEL;
+import static controllers.BindingKeys.KEY_AGENT_ID;
+import static controllers.BindingKeys.KEY_ENABLED;
+import static controllers.BindingKeys.KEY_REPLY_TO_MODE;
+import static controllers.BindingKeys.KEY_TRANSPORT;
+import static controllers.BindingKeys.KEY_WEBHOOK_BASE_URL;
 import static utils.GsonHolder.INSTANCE;
 
 /**
@@ -42,19 +48,13 @@ public class ApiTelegramBindingsController extends Controller {
 
     // JSON body keys reused across create/update parsers.
     private static final String KEY_BOT_TOKEN = "botToken";
-    private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_TELEGRAM_USER_ID = "telegramUserId";
     private static final String KEY_WEBHOOK_SECRET = "webhookSecret";
-    private static final String KEY_WEBHOOK_BASE_URL = "webhookBaseUrl";
-    private static final String KEY_ENABLED = "enabled";
-    private static final String KEY_TRANSPORT = "transport";
     // JCLAW-378: per-binding setting overrides (null = fall back to global config).
-    private static final String KEY_REPLY_TO_MODE = "replyToMode";
     private static final String KEY_ERROR_REPLY_POLICY = "errorReplyPolicy";
     private static final String KEY_NOTIFIER_COOLDOWN_MS = "notifierCooldownMs";
 
-    // EventLogger category + channel identifier for this binding type.
-    private static final String EVENT_CATEGORY_CHANNEL = "channel";
+    // Channel identifier for this binding type.
     private static final String CHANNEL_TELEGRAM = "telegram";
 
     /** Flat projection the frontend consumes. {@code botToken} and
@@ -113,10 +113,10 @@ public class ApiTelegramBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        String botToken = readRequiredString(body, KEY_BOT_TOKEN);
+        String botToken = JsonBodyReader.requiredString(body, KEY_BOT_TOKEN);
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
                 ? body.get(KEY_AGENT_ID).getAsLong() : null;
-        String telegramUserId = readRequiredString(body, KEY_TELEGRAM_USER_ID);
+        String telegramUserId = JsonBodyReader.requiredString(body, KEY_TELEGRAM_USER_ID);
 
         if (botToken == null || agentId == null || telegramUserId == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "botToken, agentId, and telegramUserId are required");
@@ -145,7 +145,7 @@ public class ApiTelegramBindingsController extends Controller {
         binding.botToken = botToken;
         binding.agent = agent;
         binding.telegramUserId = telegramUserId;
-        binding.transport = parseTransport(body, ChannelTransport.POLLING);
+        binding.transport = BindingKeys.parseTransport(body, ChannelTransport.POLLING, ChannelTransport::parse);
         binding.webhookSecret = readOptionalString(body, KEY_WEBHOOK_SECRET);
         binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
         binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
@@ -228,7 +228,7 @@ public class ApiTelegramBindingsController extends Controller {
 
     private static void applyOptionalFieldUpdates(TelegramBinding binding, JsonObject body) {
         if (body.has(KEY_TRANSPORT)) {
-            binding.transport = parseTransport(body, binding.transport);
+            binding.transport = BindingKeys.parseTransport(body, binding.transport, ChannelTransport::parse);
         }
         if (body.has(KEY_WEBHOOK_SECRET)) {
             binding.webhookSecret = readOptionalString(body, KEY_WEBHOOK_SECRET);
@@ -371,20 +371,7 @@ public class ApiTelegramBindingsController extends Controller {
 
     // ── helpers ──
 
-    private static String readRequiredString(JsonObject body, String key) {
-        if (!body.has(key) || body.get(key).isJsonNull()) return null;
-        String s = body.get(key).getAsString();
-        return (s == null || s.isBlank()) ? null : s.trim();
-    }
-
     private static String readOptionalString(JsonObject body, String key) {
         return JsonBodyReader.optString(body, key, true);
-    }
-
-    private static ChannelTransport parseTransport(JsonObject body,
-                                                    ChannelTransport fallback) {
-        String raw = body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()
-                ? body.get(KEY_TRANSPORT).getAsString() : null;
-        return ChannelTransport.parse(raw, fallback);
     }
 }

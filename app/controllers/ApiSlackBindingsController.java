@@ -18,6 +18,12 @@ import services.AgentService;
 import services.EventLogger;
 import utils.ApiResponses;
 
+import static controllers.BindingKeys.EVENT_CATEGORY_CHANNEL;
+import static controllers.BindingKeys.KEY_AGENT_ID;
+import static controllers.BindingKeys.KEY_ENABLED;
+import static controllers.BindingKeys.KEY_REPLY_TO_MODE;
+import static controllers.BindingKeys.KEY_TRANSPORT;
+import static controllers.BindingKeys.KEY_WEBHOOK_BASE_URL;
 import static utils.GsonHolder.INSTANCE;
 
 /**
@@ -41,14 +47,8 @@ public class ApiSlackBindingsController extends Controller {
     private static final String KEY_BOT_TOKEN = "botToken";
     private static final String KEY_SIGNING_SECRET = "signingSecret";
     private static final String KEY_APP_TOKEN = "appToken";
-    private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_OWNER_USER_ID = "ownerUserId";
-    private static final String KEY_TRANSPORT = "transport";
-    private static final String KEY_WEBHOOK_BASE_URL = "webhookBaseUrl";
-    private static final String KEY_ENABLED = "enabled";
-    private static final String KEY_REPLY_TO_MODE = "replyToMode";
 
-    private static final String EVENT_CATEGORY_CHANNEL = "channel";
     private static final String CHANNEL_SLACK = "slack";
 
     /** The fixed Slack Events API contract path; the per-binding id is appended. */
@@ -122,8 +122,8 @@ public class ApiSlackBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        String botToken = readRequiredString(body, KEY_BOT_TOKEN);
-        var transport = parseTransport(body, ChannelTransport.HTTP);
+        String botToken = JsonBodyReader.requiredString(body, KEY_BOT_TOKEN);
+        var transport = BindingKeys.parseTransport(body, ChannelTransport.HTTP, ChannelTransport::parse);
         String signingSecret = readOptionalString(body, KEY_SIGNING_SECRET);
         String appToken = readOptionalString(body, KEY_APP_TOKEN);
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
@@ -296,7 +296,7 @@ public class ApiSlackBindingsController extends Controller {
         }
         if (body.has(KEY_APP_TOKEN)) binding.appToken = readOptionalString(body, KEY_APP_TOKEN);
         if (body.has(KEY_OWNER_USER_ID)) binding.ownerUserId = readOptionalString(body, KEY_OWNER_USER_ID);
-        if (body.has(KEY_TRANSPORT)) binding.transport = parseTransport(body, binding.transport);
+        if (body.has(KEY_TRANSPORT)) binding.transport = BindingKeys.parseTransport(body, binding.transport, ChannelTransport::parse);
         if (body.has(KEY_WEBHOOK_BASE_URL)) binding.webhookBaseUrl = readOptionalString(body, KEY_WEBHOOK_BASE_URL);
         if (body.has(KEY_ENABLED)) binding.enabled = body.get(KEY_ENABLED).getAsBoolean();
         if (body.has(KEY_REPLY_TO_MODE)) binding.replyToMode = readOptionalString(body, KEY_REPLY_TO_MODE);
@@ -314,19 +314,7 @@ public class ApiSlackBindingsController extends Controller {
 
     // ── shared helpers ──
 
-    private static String readRequiredString(JsonObject body, String key) {
-        if (!body.has(key) || body.get(key).isJsonNull()) return null;
-        String s = body.get(key).getAsString();
-        return (s == null || s.isBlank()) ? null : s.trim();
-    }
-
     private static String readOptionalString(JsonObject body, String key) {
         return JsonBodyReader.optString(body, key, true);
-    }
-
-    private static ChannelTransport parseTransport(JsonObject body, ChannelTransport fallback) {
-        String raw = body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()
-                ? body.get(KEY_TRANSPORT).getAsString() : null;
-        return ChannelTransport.parse(raw, fallback);
     }
 }

@@ -1,18 +1,11 @@
 package services.videogen;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
 import services.ConfigService;
+import services.ReplicatePredictions;
 import utils.HttpFactories;
-import utils.HttpKeys;
 import utils.Strings;
-
-import java.io.IOException;
 
 /**
  * Replicate video-generation client (JCLAW-231). Replicate runs hosted video models (WAN 2.x, LTX)
@@ -23,6 +16,10 @@ import java.io.IOException;
  * — until the prediction reaches a terminal status. A succeeded prediction's {@code output} is an mp4
  * URL (or array; first taken) handed to the storage path (JCLAW-234) to fetch.
  *
+ * <p>The create/poll transport is shared with the image client via {@link ReplicatePredictions}
+ * (JCLAW-708); this client owns the video-specific input-building and status→{@link PollResult}
+ * mapping.
+ *
  * <p>Config: {@code provider.replicate.baseUrl} (default {@code https://api.replicate.com/v1}),
  * {@code provider.replicate.apiKey}, and {@code videogen.cloud.model} (the {@code owner/model} slug,
  * e.g. {@code wan-video/wan-2.2-t2v-fast} or {@code lightricks/ltx-video}). Only {@code prompt} is sent
@@ -31,14 +28,11 @@ import java.io.IOException;
  */
 public class ReplicateVideoGenerationClient implements VideoGenerationService {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
     private static final String DEFAULT_BASE = "https://api.replicate.com/v1";
     private static final String DEFAULT_MODEL = "wan-video/wan-2.2-t2v-fast";
     private static final String STATUS = "status";
-    private static final String OUTPUT = "output";
-    private static final String ERROR = "error";
 
-    private final OkHttpClient client;
+    private final ReplicatePredictions predictions;
 
     public ReplicateVideoGenerationClient() {
         this(HttpFactories.general());
@@ -46,7 +40,7 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
 
     /** Test seam — inject a MockWebServer-backed client. */
     public ReplicateVideoGenerationClient(OkHttpClient client) {
-        this.client = client;
+        this.predictions = new ReplicatePredictions(client);
     }
 
     @Override
@@ -59,75 +53,48 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
 
         var input = new JsonObject();
         input.addProperty("prompt", request.prompt());
-        var root = new JsonObject();
-        root.add("input", input);
-        var httpReq = new Request.Builder()
-                .url(baseUrl() + "/models/" + model + "/predictions")
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
-                .post(RequestBody.create(root.toString(), JSON))
-                .build();
-        try (var resp = client.newCall(httpReq).execute()) {
-            var body = resp.body().string();
-            if (!resp.isSuccessful()) {
-                throw new VideoGenerationException("replicate submit failed: HTTP %d%s".formatted(
-                        resp.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, 500)));
+        JsonObject prediction;
+        try {
+            prediction = predictions.create(baseUrl(), model, apiKey, input, false); // async — no Prefer: wait
+        } catch (ReplicatePredictions.ReplicateException e) {
+            if (e.isTransport()) {
+                throw new VideoGenerationException("replicate submit transport failed: " + e.getCause().getMessage(), e.getCause());
             }
-            var id = JsonParser.parseString(body).getAsJsonObject().get("id");
-            if (id == null || id.isJsonNull() || id.getAsString().isBlank()) {
-                throw new VideoGenerationException("replicate submit returned no prediction id");
-            }
-            return id.getAsString();
-        } catch (IOException e) {
-            throw new VideoGenerationException("replicate submit transport failed: " + e.getMessage(), e);
+            var body = e.body();
+            throw new VideoGenerationException("replicate submit failed: HTTP %d%s".formatted(
+                    e.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, 500)));
         }
+        var id = prediction.get("id");
+        if (id == null || id.isJsonNull() || id.getAsString().isBlank()) {
+            throw new VideoGenerationException("replicate submit returned no prediction id");
+        }
+        return id.getAsString();
     }
 
     @Override
     public PollResult poll(String providerJobId) {
         var apiKey = requireConfig("provider.replicate.apiKey");
-        var httpReq = new Request.Builder()
-                .url(baseUrl() + "/predictions/" + providerJobId)
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
-                .get().build();
-        try (var resp = client.newCall(httpReq).execute()) {
-            var body = resp.body().string();
-            if (!resp.isSuccessful()) {
-                throw new VideoGenerationException("replicate poll failed: HTTP " + resp.code());
+        JsonObject pred;
+        try {
+            pred = predictions.get(baseUrl() + "/predictions/" + providerJobId, apiKey);
+        } catch (ReplicatePredictions.ReplicateException e) {
+            if (e.isTransport()) {
+                throw new VideoGenerationException("replicate poll transport failed: " + e.getCause().getMessage(), e.getCause());
             }
-            var pred = JsonParser.parseString(body).getAsJsonObject();
-            var status = pred.has(STATUS) && !pred.get(STATUS).isJsonNull() ? pred.get(STATUS).getAsString() : "";
-            return switch (status.toLowerCase()) {
-                case "succeeded" -> {
-                    var url = extractUrl(pred);
-                    yield url == null
-                            ? PollResult.failed("replicate succeeded but produced no output")
-                            : PollResult.succeeded(url);
-                }
-                case "failed", "canceled" -> PollResult.failed(extractError(pred, status));
-                // starting / processing — Replicate exposes no reliable percent for video.
-                default -> PollResult.running(null);
-            };
-        } catch (IOException e) {
-            throw new VideoGenerationException("replicate poll transport failed: " + e.getMessage(), e);
+            throw new VideoGenerationException("replicate poll failed: HTTP " + e.code());
         }
-    }
-
-    /** {@code output} is an mp4 URL string or an array of URL strings — take the first. */
-    private static String extractUrl(JsonObject pred) {
-        if (!pred.has(OUTPUT) || pred.get(OUTPUT).isJsonNull()) return null;
-        var output = pred.get(OUTPUT);
-        if (output.isJsonArray()) {
-            JsonArray arr = output.getAsJsonArray();
-            return arr.isEmpty() ? null : arr.get(0).getAsString();
-        }
-        return output.getAsString();
-    }
-
-    private static String extractError(JsonObject pred, String status) {
-        if (pred.has(ERROR) && !pred.get(ERROR).isJsonNull()) {
-            return "replicate " + status + ": " + pred.get(ERROR).getAsString();
-        }
-        return "replicate prediction " + status;
+        var status = pred.has(STATUS) && !pred.get(STATUS).isJsonNull() ? pred.get(STATUS).getAsString() : "";
+        return switch (status.toLowerCase()) {
+            case "succeeded" -> {
+                var url = ReplicatePredictions.firstOutputUrl(pred);
+                yield url == null
+                        ? PollResult.failed("replicate succeeded but produced no output")
+                        : PollResult.succeeded(url);
+            }
+            case "failed", "canceled" -> PollResult.failed(ReplicatePredictions.extractError(pred, status));
+            // starting / processing — Replicate exposes no reliable percent for video.
+            default -> PollResult.running(null);
+        };
     }
 
     private static String baseUrl() {

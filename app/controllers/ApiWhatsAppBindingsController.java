@@ -20,6 +20,10 @@ import utils.ApiResponses;
 
 import java.util.Objects;
 
+import static controllers.BindingKeys.EVENT_CATEGORY_CHANNEL;
+import static controllers.BindingKeys.KEY_AGENT_ID;
+import static controllers.BindingKeys.KEY_ENABLED;
+import static controllers.BindingKeys.KEY_TRANSPORT;
 import static utils.GsonHolder.INSTANCE;
 
 /**
@@ -43,18 +47,14 @@ public class ApiWhatsAppBindingsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
-    private static final String KEY_TRANSPORT = "transport";
     private static final String KEY_PHONE_NUMBER_ID = "phoneNumberId";
     private static final String KEY_ACCESS_TOKEN = "accessToken";
     private static final String KEY_APP_SECRET = "appSecret";
     private static final String KEY_VERIFY_TOKEN = "verifyToken";
-    private static final String KEY_AGENT_ID = "agentId";
-    private static final String KEY_ENABLED = "enabled";
     private static final String KEY_TEMPLATE_NAME = "templateName";
     private static final String KEY_TEMPLATE_LANGUAGE = "templateLanguage";
     private static final String KEY_DEFAULT_TARGET = "defaultTarget";
 
-    private static final String EVENT_CATEGORY_CHANNEL = "channel";
     private static final String CHANNEL_WHATSAPP = "whatsapp";
 
     /** Flat projection the frontend consumes. The secrets ({@code accessToken},
@@ -105,7 +105,7 @@ public class ApiWhatsAppBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        var transport = parseTransport(body, WhatsAppTransport.CLOUD_API);
+        var transport = BindingKeys.parseTransport(body, WhatsAppTransport.CLOUD_API, WhatsAppTransport::parse);
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
                 ? body.get(KEY_AGENT_ID).getAsLong() : null;
         if (agentId == null) {
@@ -294,7 +294,7 @@ public class ApiWhatsAppBindingsController extends Controller {
     }
 
     private static void applyOptionalFieldUpdates(WhatsAppBinding binding, JsonObject body) {
-        if (body.has(KEY_TRANSPORT)) binding.transport = parseTransport(body, binding.transport);
+        if (body.has(KEY_TRANSPORT)) binding.transport = BindingKeys.parseTransport(body, binding.transport, WhatsAppTransport::parse);
         // Secrets: a present-and-non-blank value replaces; a blank leaves the
         // stored value untouched (the form sends blank to keep existing).
         if (body.has(KEY_ACCESS_TOKEN)) {
@@ -329,11 +329,5 @@ public class ApiWhatsAppBindingsController extends Controller {
 
     private static String readOptionalString(JsonObject body, String key) {
         return JsonBodyReader.optString(body, key, true);
-    }
-
-    private static WhatsAppTransport parseTransport(JsonObject body, WhatsAppTransport fallback) {
-        String raw = body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()
-                ? body.get(KEY_TRANSPORT).getAsString() : null;
-        return WhatsAppTransport.parse(raw, fallback);
     }
 }

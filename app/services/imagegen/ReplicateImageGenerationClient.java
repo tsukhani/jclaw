@@ -1,15 +1,11 @@
 package services.imagegen;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
-import okhttp3.RequestBody;
 import services.ConfigService;
+import services.ReplicatePredictions;
 import utils.HttpFactories;
-import utils.HttpKeys;
 import utils.Strings;
 
 import java.io.IOException;
@@ -23,19 +19,21 @@ import java.util.Base64;
  * array of URLs) to the produced image, which is fetched for its bytes. Auth is
  * {@code Authorization: Bearer} (unlike BFL's {@code x-key}). Image-gen only — not a chat provider.
  *
+ * <p>The create/poll transport is shared with the video client via {@link ReplicatePredictions}
+ * (JCLAW-708); this client owns the image-specific input-building (aspect ratio, reference image) and
+ * output-mapping (fetching the produced image bytes).
+ *
  * <p>Configuration: {@code provider.replicate.baseUrl} (default {@code https://api.replicate.com/v1}),
  * {@code provider.replicate.apiKey}, {@code imagegen.replicate.model} (default
  * {@code black-forest-labs/flux-schnell}), {@code imagegen.timeoutSeconds} (poll deadline).
  */
 public class ReplicateImageGenerationClient implements ImageGenerationService {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
     private static final String DEFAULT_MODEL = "black-forest-labs/flux-schnell";
     private static final long POLL_INTERVAL_MS = 1000L;
     private static final String STATUS = "status";
-    private static final String OUTPUT = "output";
 
-    private final OkHttpClient client;
+    private final ReplicatePredictions predictions;
 
     public ReplicateImageGenerationClient() {
         this(HttpFactories.llmSingleShot());
@@ -43,7 +41,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
 
     /** Test seam — inject a MockWebServer-backed client. */
     public ReplicateImageGenerationClient(OkHttpClient client) {
-        this.client = client;
+        this.predictions = new ReplicatePredictions(client);
     }
 
     @Override
@@ -95,23 +93,15 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             input.addProperty("input_image",
                     "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(referenceImage.bytes()));
         }
-        var root = new JsonObject();
-        root.add("input", input);
-        var request = new Request.Builder()
-                .url(baseUrl + "/models/" + model + "/predictions")
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
-                .header("Prefer", "wait") // run inline up to ~60s, then fall back to polling
-                .post(RequestBody.create(root.toString(), JSON))
-                .build();
-        try (var response = client.newCall(request).execute()) {
-            var body = response.body().string();
-            if (!response.isSuccessful()) {
-                throw new ImageGenerationException("replicate create failed: HTTP %d %s%s".formatted(
-                        response.code(), response.message(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, 500))));
+        try {
+            return predictions.create(baseUrl, model, apiKey, input, true); // Prefer: wait — run inline ~60s
+        } catch (ReplicatePredictions.ReplicateException e) {
+            if (e.isTransport()) {
+                throw new ImageGenerationException("replicate create transport failed: " + e.getCause().getMessage(), e.getCause());
             }
-            return JsonParser.parseString(body).getAsJsonObject();
-        } catch (IOException e) {
-            throw new ImageGenerationException("replicate create transport failed: " + e.getMessage(), e);
+            var body = e.body();
+            throw new ImageGenerationException("replicate create failed: HTTP %d %s%s".formatted(
+                    e.code(), e.statusMessage(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, 500))));
         }
     }
 
@@ -124,7 +114,11 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             var status = current.has(STATUS) && !current.get(STATUS).isJsonNull()
                     ? current.get(STATUS).getAsString() : "";
             if ("succeeded".equalsIgnoreCase(status)) {
-                return extractUrl(current);
+                var url = ReplicatePredictions.firstOutputUrl(current);
+                if (url == null) {
+                    throw new ImageGenerationException("replicate succeeded but produced no output");
+                }
+                return url;
             }
             if ("failed".equalsIgnoreCase(status) || "canceled".equalsIgnoreCase(status)) {
                 throw new ImageGenerationException("replicate prediction " + status + ": "
@@ -152,31 +146,14 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
     }
 
     private JsonObject poll(String getUrl, String apiKey) {
-        var request = new Request.Builder()
-                .url(getUrl).header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey).get().build();
-        try (var response = client.newCall(request).execute()) {
-            var body = response.body().string();
-            if (!response.isSuccessful()) {
-                throw new ImageGenerationException("replicate poll failed: HTTP " + response.code());
+        try {
+            return predictions.get(getUrl, apiKey);
+        } catch (ReplicatePredictions.ReplicateException e) {
+            if (e.isTransport()) {
+                throw new ImageGenerationException("replicate poll transport failed: " + e.getCause().getMessage(), e.getCause());
             }
-            return JsonParser.parseString(body).getAsJsonObject();
-        } catch (IOException e) {
-            throw new ImageGenerationException("replicate poll transport failed: " + e.getMessage(), e);
+            throw new ImageGenerationException("replicate poll failed: HTTP " + e.code());
         }
-    }
-
-    /** {@code output} is a URL string or an array of URL strings — take the first. */
-    private String extractUrl(JsonObject prediction) {
-        if (!prediction.has(OUTPUT) || prediction.get(OUTPUT).isJsonNull()) {
-            throw new ImageGenerationException("replicate succeeded but produced no output");
-        }
-        var output = prediction.get(OUTPUT);
-        if (output.isJsonArray()) {
-            JsonArray arr = output.getAsJsonArray();
-            if (arr.isEmpty()) throw new ImageGenerationException("replicate output array is empty");
-            return arr.get(0).getAsString();
-        }
-        return output.getAsString();
     }
 
     /** Fetch the produced image, reading its real content type (Replicate's Flux output is webp). */

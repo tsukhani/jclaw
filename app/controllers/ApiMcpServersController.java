@@ -79,7 +79,7 @@ public class ApiMcpServersController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        var name = readRequiredString(body, "name");
+        var name = JsonBodyReader.requiredOr400(body, "name");
         if (McpServer.findByName(name) != null) {
             ApiResponses.error(409, ApiResponses.CONFLICT, "An MCP server named '%s' already exists".formatted(name));
         }
@@ -197,18 +197,8 @@ public class ApiMcpServersController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static String readRequiredString(JsonObject body, String key) {
-        if (!body.has(key) || body.get(key).isJsonNull()) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field '%s' is required".formatted(key));
-        }
-        var s = body.get(key).getAsString();
-        if (s.isBlank()) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field '%s' must not be blank".formatted(key));
-        return s;
-    }
-
-    @SuppressWarnings("java:S2259")
     private static McpServer.Transport readTransport(JsonObject body) {
-        var raw = readRequiredString(body, KEY_TRANSPORT);
+        var raw = JsonBodyReader.requiredOr400(body, KEY_TRANSPORT);
         try {
             return McpServer.Transport.valueOf(raw.toUpperCase());
         } catch (IllegalArgumentException _) {
