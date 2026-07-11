@@ -267,7 +267,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
             for (var el : args.get(PARAM_RUN_IDS).getAsJsonArray()) {
                 try {
                     list.add(el.getAsLong());
-                } catch (RuntimeException _) {
+                } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) {
                     // skip a non-numeric entry rather than failing the whole collect
                 }
             }
@@ -397,6 +397,6 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
     private static int optInt(JsonObject obj, String key, int fallback) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (RuntimeException _) { return fallback; }
+        try { return el.getAsInt(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return fallback; }
     }
 }

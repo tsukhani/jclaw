@@ -6,6 +6,7 @@ import agents.ToolRegistry;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.MessageAttachment;
@@ -166,7 +167,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         try {
             args = JsonParser.parseString(argsJson == null || argsJson.isBlank() ? "{}" : argsJson)
                     .getAsJsonObject();
-        } catch (RuntimeException _) {
+        } catch (JsonParseException | IllegalStateException _) {
             return "Error: invalid arguments for " + TOOL_NAME + ".";
         }
 

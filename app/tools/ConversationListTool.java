@@ -267,12 +267,12 @@ public class ConversationListTool implements ToolRegistry.Tool {
     private static Long optLong(JsonObject obj, String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
-        try { return el.getAsLong(); } catch (RuntimeException _) { return null; }
+        try { return el.getAsLong(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return null; }
     }
 
     private static int optInt(JsonObject obj, String key, int fallback) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (RuntimeException _) { return fallback; }
+        try { return el.getAsInt(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return fallback; }
     }
 }

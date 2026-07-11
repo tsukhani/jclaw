@@ -259,6 +259,6 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
     private static int optInt(JsonObject obj, String key, int fallback) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (RuntimeException _) { return fallback; }
+        try { return el.getAsInt(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return fallback; }
     }
 }

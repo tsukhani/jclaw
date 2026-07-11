@@ -90,18 +90,18 @@ record SubagentSpawnArgs(
     static Long optLong(JsonObject obj, String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
-        try { return el.getAsLong(); } catch (RuntimeException _) { return null; }
+        try { return el.getAsLong(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return null; }
     }
 
     static int optInt(JsonObject obj, String key, int fallback) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (RuntimeException _) { return fallback; }
+        try { return el.getAsInt(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return fallback; }
     }
 
     static boolean optBool(JsonObject obj, String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return false;
-        try { return el.getAsBoolean(); } catch (RuntimeException _) { return false; }
+        try { return el.getAsBoolean(); } catch (UnsupportedOperationException | IllegalStateException _) { return false; }
     }
 }
