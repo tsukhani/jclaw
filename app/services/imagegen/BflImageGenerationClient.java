@@ -10,6 +10,7 @@ import services.ConfigService;
 import utils.HttpFactories;
 
 import java.io.IOException;
+import java.util.Base64;
 
 /**
  * Black Forest Labs (Flux) image-generation client (JCLAW-225). BFL's API is asynchronous even on the
@@ -45,6 +46,18 @@ public class BflImageGenerationClient implements ImageGenerationService {
 
     @Override
     public GeneratedImage generate(String prompt, String model, Integer width, Integer height) {
+        return generate(prompt, model, width, height, null);
+    }
+
+    /**
+     * JCLAW-695: FLUX.2 does image-to-image on the same endpoint via an {@code input_image}
+     * field (base64 or URL) — no separate editing endpoint. When {@code referenceImage} is
+     * present, the configured model (default flux-2-pro; flux-kontext-pro/max for stronger
+     * style transfer) restyles/uses it for consistency; when null this is plain text-to-image.
+     */
+    @Override
+    public GeneratedImage generate(String prompt, String model, Integer width, Integer height,
+                                   ReferenceImage referenceImage) {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
@@ -60,16 +73,22 @@ public class BflImageGenerationClient implements ImageGenerationService {
         int w = width != null ? width : 1024;
         int h = height != null ? height : 1024;
 
-        var pollingUrl = submit(trimTrailingSlash(baseUrl), effModel, apiKey, prompt, w, h);
+        var pollingUrl = submit(trimTrailingSlash(baseUrl), effModel, apiKey, prompt, w, h, referenceImage);
         var sampleUrl = pollUntilReady(pollingUrl, apiKey);
         return new GeneratedImage(fetchBytes(sampleUrl), "image/png", "bfl:" + effModel);
     }
 
-    private String submit(String baseUrl, String model, String apiKey, String prompt, int w, int h) {
+    private String submit(String baseUrl, String model, String apiKey, String prompt, int w, int h,
+                          ReferenceImage referenceImage) {
         var root = new JsonObject();
         root.addProperty("prompt", prompt);
         root.addProperty("width", w);
         root.addProperty("height", h);
+        if (referenceImage != null && referenceImage.bytes() != null && referenceImage.bytes().length > 0) {
+            // FLUX.2 reference field: base64 image (URL also accepted). Turns the request into
+            // image-to-image / style transfer against the same model + poll path.
+            root.addProperty("input_image", Base64.getEncoder().encodeToString(referenceImage.bytes()));
+        }
         var request = new Request.Builder()
                 .url(baseUrl + "/" + model)
                 .header(KEY_HEADER, apiKey)

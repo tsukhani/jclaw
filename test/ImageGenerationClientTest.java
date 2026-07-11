@@ -10,6 +10,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.imagegen.BflImageGenerationClient;
+import services.imagegen.ImageGenerationService;
 import services.imagegen.LocalImageGenerationClient;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
@@ -128,6 +129,26 @@ class ImageGenerationClientTest extends UnitTest {
         var result = new BflImageGenerationClient(testClient).generate("a cat", null, 512, 512);
         assertArrayEquals(imageBytes, result.bytes());
         assertEquals("bfl:flux-test", result.generatedBy());
+    }
+
+    @Test
+    void bflSendsInputImageForImageToImage() throws Exception {
+        // JCLAW-695: with a reference image, the FLUX.2 submit body carries input_image (base64)
+        // on the same endpoint + poll path — turning the request into image-to-image / style transfer.
+        var imageBytes = new byte[]{9, 8, 7};
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"id\":\"abc\",\"polling_url\":\"" + server.url("/poll") + "\"}")).build());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"status\":\"Ready\",\"result\":{\"sample\":\"" + server.url("/img") + "\"}}")).build());
+        server.enqueue(new MockResponse.Builder().code(200).body(bytesBuf(imageBytes)).build());
+
+        var ref = new ImageGenerationService.ReferenceImage(new byte[]{1, 2, 3, 4}, "image/png");
+        var result = new BflImageGenerationClient(testClient).generate("in this style", null, 512, 512, ref);
+        assertArrayEquals(imageBytes, result.bytes());
+
+        var submitBody = server.takeRequest().getBody().utf8();
+        assertTrue(submitBody.contains("input_image"),
+                "BFL submit must carry the reference as input_image: " + submitBody);
     }
 
     @Test
