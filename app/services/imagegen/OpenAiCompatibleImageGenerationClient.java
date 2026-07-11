@@ -25,7 +25,8 @@ import java.util.Base64;
  * <ul>
  *   <li>{@code provider.{name}.baseUrl} — {@code /images/generations} is appended.</li>
  *   <li>{@code provider.{name}.apiKey} — sent as {@code Authorization: Bearer}.</li>
- *   <li>{@code imagegen.cloud.model} — overrides the subclass default model.</li>
+ *   <li>{@code imagegen.{name}.model} — overrides the subclass default model (provider-scoped,
+ *       so switching providers can't leak one provider's model id into another).</li>
  *   <li>{@code imagegen.imageSize} — default size string when the caller passes no dimensions.</li>
  * </ul>
  */
@@ -62,7 +63,7 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
         if (apiKey == null || apiKey.isBlank()) {
             throw new ImageGenerationException("provider." + providerName + ".apiKey is not configured");
         }
-        var effModel = firstNonBlank(model, ConfigService.get("imagegen.cloud.model"), defaultModel);
+        var effModel = firstNonBlank(model, ConfigService.get("imagegen." + providerName + ".model"), defaultModel);
         if (effModel == null || effModel.isBlank()) {
             throw new ImageGenerationException(providerName + " image generation: no model configured");
         }

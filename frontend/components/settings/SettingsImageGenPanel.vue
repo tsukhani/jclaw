@@ -70,8 +70,11 @@ interface ImageModel {
   name: string
   description: string | null
 }
+// Replicate's chosen model is stored provider-scoped (imagegen.replicate.model),
+// not a shared cloud-model key — switching providers must not carry a Replicate
+// slug into OpenAI/BFL, which reject it.
 const imagegenModel = computed(() =>
-  configData.value?.entries?.find(e => e.key === 'imagegen.cloud.model')?.value ?? '',
+  configData.value?.entries?.find(e => e.key === 'imagegen.replicate.model')?.value ?? '',
 )
 // Lazy: Replicate's text-to-image collection is a slow outbound call (~seconds). Awaiting it blocked the
 // whole Settings page render; lazy lets the page paint immediately and the dropdown fills in when ready.
@@ -475,7 +478,7 @@ onUnmounted(() => stopImagegenLocalPolling())
               :disabled="saving"
               aria-label="Replicate image model"
               class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="saveField('imagegen.cloud.model', ($event.target as HTMLSelectElement).value)"
+              @change="saveField('imagegen.replicate.model', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">
                 Provider default (black-forest-labs/flux-schnell)

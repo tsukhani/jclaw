@@ -20,7 +20,7 @@ import java.util.List;
  * Discovers Replicate's curated <b>text-to-image</b> models for the Settings "Model" dropdown — the
  * image-gen analogue of {@link services.videogen.ReplicateVideoModelCatalog}. Replicate maintains a
  * {@code text-to-image} collection; {@code GET /v1/collections/text-to-image} returns its models, each an
- * {@code owner/name} slug — exactly what {@code imagegen.cloud.model} stores. The {@code generate_image}
+ * {@code owner/name} slug — exactly what {@code imagegen.replicate.model} stores. The {@code generate_image}
  * tool sends only a prompt (plus optional dimensions), so text-to-image is the compatible set
  * ({@code image-to-image} models need an input image the tool doesn't provide).
  *
@@ -30,7 +30,7 @@ import java.util.List;
  */
 public final class ReplicateImageModelCatalog {
 
-    /** One curated text-to-image model. {@code slug} is the {@code owner/name} for imagegen.cloud.model. */
+    /** One curated text-to-image model. {@code slug} is the {@code owner/name} for imagegen.replicate.model. */
     public record ImageModel(String slug, String name, String description) {}
 
     private static final String DEFAULT_BASE = "https://api.replicate.com/v1";

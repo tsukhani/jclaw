@@ -19,7 +19,7 @@ import java.io.IOException;
  * this does NOT extend {@link OpenAiCompatibleImageGenerationClient}.
  *
  * <p>Configuration: {@code provider.bfl.baseUrl} (default {@code https://api.bfl.ai/v1}),
- * {@code provider.bfl.apiKey}, {@code imagegen.cloud.model} (default {@code flux-2-pro}),
+ * {@code provider.bfl.apiKey}, {@code imagegen.bfl.model} (default {@code flux-2-pro}),
  * {@code imagegen.timeoutSeconds} (poll deadline, default 60).
  */
 public class BflImageGenerationClient implements ImageGenerationService {
@@ -56,7 +56,7 @@ public class BflImageGenerationClient implements ImageGenerationService {
         if (apiKey == null || apiKey.isBlank()) {
             throw new ImageGenerationException("provider.bfl.apiKey is not configured");
         }
-        var effModel = firstNonBlank(model, ConfigService.get("imagegen.cloud.model"), DEFAULT_MODEL);
+        var effModel = firstNonBlank(model, ConfigService.get("imagegen.bfl.model"), DEFAULT_MODEL);
         int w = width != null ? width : 1024;
         int h = height != null ? height : 1024;
 

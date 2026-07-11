@@ -22,7 +22,7 @@ import java.io.IOException;
  * {@code Authorization: Bearer} (unlike BFL's {@code x-key}). Image-gen only — not a chat provider.
  *
  * <p>Configuration: {@code provider.replicate.baseUrl} (default {@code https://api.replicate.com/v1}),
- * {@code provider.replicate.apiKey}, {@code imagegen.cloud.model} (default
+ * {@code provider.replicate.apiKey}, {@code imagegen.replicate.model} (default
  * {@code black-forest-labs/flux-schnell}), {@code imagegen.timeoutSeconds} (poll deadline).
  */
 public class ReplicateImageGenerationClient implements ImageGenerationService {
@@ -57,7 +57,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         if (apiKey == null || apiKey.isBlank()) {
             throw new ImageGenerationException("provider.replicate.apiKey is not configured");
         }
-        var effModel = firstNonBlank(model, ConfigService.get("imagegen.cloud.model"), DEFAULT_MODEL);
+        var effModel = firstNonBlank(model, ConfigService.get("imagegen.replicate.model"), DEFAULT_MODEL);
 
         var prediction = createPrediction(trimTrailingSlash(baseUrl), effModel, apiKey, prompt, width, height);
         var imageUrl = resolveOutputUrl(prediction, apiKey);

@@ -45,6 +45,13 @@ class ImageGenerationClientTest extends UnitTest {
         ConfigService.set("provider.bfl.baseUrl", server.url("/").toString());
         ConfigService.set("provider.bfl.apiKey", "test-key");
         ConfigService.set("imagegen.timeoutSeconds", "5");
+        // ConfigService state persists across methods in this class (its cache
+        // isn't wiped by deleteDatabase), so reset the per-provider model
+        // overrides to a clean baseline — otherwise one test's model choice
+        // leaks into another's default resolution.
+        ConfigService.set("imagegen.openai.model", "");
+        ConfigService.set("imagegen.bfl.model", "");
+        ConfigService.set("imagegen.replicate.model", "");
     }
 
     @AfterEach
@@ -67,6 +74,36 @@ class ImageGenerationClientTest extends UnitTest {
     }
 
     @Test
+    void openAiIgnoresAnotherProvidersModelKey() {
+        // Regression: after switching the image-gen provider (e.g. Replicate → OpenAI),
+        // a stale imagegen.replicate.model must NOT leak into OpenAI — that produced an
+        // HTTP 400 "model does not exist". OpenAI resolves its own imagegen.openai.model
+        // → gpt-image-1 default, ignoring other providers' model keys.
+        ConfigService.set("imagegen.replicate.model", "black-forest-labs/flux-kontext-pro");
+        var imageBytes = new byte[]{1, 2, 3};
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "application/json")
+                .body(jsonBuf("{\"data\":[{\"b64_json\":\"" + Base64.getEncoder().encodeToString(imageBytes) + "\"}]}")).build());
+
+        var result = new OpenAiImageGenerationClient(testClient).generate("a red bicycle", null, 1024, 1024);
+        assertEquals("openai:gpt-image-1", result.generatedBy(),
+                "OpenAI must use its own gpt-image-1 default, not another provider's model key");
+    }
+
+    @Test
+    void openAiHonorsItsOwnModelKey() {
+        // The provider-scoped override still works: imagegen.openai.model wins for OpenAI.
+        ConfigService.set("imagegen.openai.model", "gpt-image-1-mini");
+        var imageBytes = new byte[]{4, 5, 6};
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "application/json")
+                .body(jsonBuf("{\"data\":[{\"b64_json\":\"" + Base64.getEncoder().encodeToString(imageBytes) + "\"}]}")).build());
+
+        var result = new OpenAiImageGenerationClient(testClient).generate("a red bicycle", null, 1024, 1024);
+        assertEquals("openai:gpt-image-1-mini", result.generatedBy());
+    }
+
+    @Test
     void openAiThrowsOnHttpError() {
         server.enqueue(new MockResponse.Builder().code(500).body(jsonBuf("upstream boom")).build());
 
@@ -79,7 +116,7 @@ class ImageGenerationClientTest extends UnitTest {
 
     @Test
     void bflSubmitsPollsAndFetchesSignedUrl() {
-        ConfigService.set("imagegen.cloud.model", "flux-test");
+        ConfigService.set("imagegen.bfl.model", "flux-test");
         var imageBytes = new byte[]{9, 8, 7, 6};
         // 1) submit → polling_url ; 2) poll → Ready + sample URL ; 3) the signed image bytes.
         server.enqueue(new MockResponse.Builder().code(200)

@@ -6,7 +6,6 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
-import services.ConfigService;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
 
@@ -107,8 +106,12 @@ public class GenerateImageTool implements ToolRegistry.Tool {
 
         var dims = resolveDimensions(args);
         try {
-            var image = serviceOpt.get().generate(
-                    prompt, ConfigService.get("imagegen.cloud.model"), dims[0], dims[1]);
+            // No model override from here: each provider client resolves its OWN
+            // model from its provider-scoped config (imagegen.<provider>.model) →
+            // built-in default. A single shared key used to leak one provider's
+            // model id into another after a Settings provider switch — e.g. a
+            // Replicate slug sent to OpenAI, which 400s with "model does not exist".
+            var image = serviceOpt.get().generate(prompt, null, dims[0], dims[1]);
             var metadata = buildMetadata(prompt, image.generatedBy(), dims[0], dims[1]);
             // The image is delivered out-of-band (raw bytes -> generated attachment, rendered inline by
             // the chat UI); the model never receives its URL. Say so explicitly: a model that
