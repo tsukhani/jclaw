@@ -116,6 +116,32 @@ class ImageGenerationClientTest extends UnitTest {
     }
 
     @Test
+    void openAiSendsReferenceToImagesEditsForImageToImage() throws Exception {
+        // JCLAW-697: a reference image switches OpenAI from JSON /images/generations to the multipart
+        // /images/edits endpoint — the reference rides as the image part, and gpt-image models get
+        // input_fidelity. (The text-to-image path stays JSON — covered by openAiParsesBase64Image.)
+        var imageBytes = new byte[]{7, 7, 7};
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "application/json")
+                .body(jsonBuf("{\"data\":[{\"b64_json\":\""
+                        + Base64.getEncoder().encodeToString(imageBytes) + "\"}]}")).build());
+
+        var ref = new ImageGenerationService.ReferenceImage(new byte[]{1, 2, 3, 4}, "image/png");
+        var result = new OpenAiImageGenerationClient(testClient).generate("in this style", null, 1024, 1024, ref);
+        assertArrayEquals(imageBytes, result.bytes());
+        assertEquals("openai:gpt-image-1", result.generatedBy());
+
+        // A multipart body proves the edits branch ran (generations is JSON). The reference is the
+        // image part; gpt-image-1 carries input_fidelity.
+        var body = server.takeRequest().getBody().utf8();
+        assertTrue(body.contains("name=\"image\""),
+                "reference must be sent as the multipart image part: "
+                        + body.substring(0, Math.min(300, body.length())));
+        assertTrue(body.contains("name=\"input_fidelity\""), "gpt-image edits must send input_fidelity");
+        assertTrue(body.contains("name=\"prompt\""), "prompt must be a form field on the edits request");
+    }
+
+    @Test
     void bflSubmitsPollsAndFetchesSignedUrl() {
         ConfigService.set("imagegen.bfl.model", "flux-test");
         var imageBytes = new byte[]{9, 8, 7, 6};

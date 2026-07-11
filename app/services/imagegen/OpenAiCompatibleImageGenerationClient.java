@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.MediaType;
+import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -16,14 +17,16 @@ import java.util.Base64;
 
 /**
  * Cloud image-generation backend (JCLAW-225) that speaks OpenAI's {@code POST /images/generations}
- * shape. For the GPT image models ({@code gpt-image-1} and family) the response carries the image as
- * base64 by default, so no {@code response_format} is sent; a {@code url}-shaped response (dall-e, or
- * an OpenAI-compatible proxy) is also handled by fetching the bytes. Subclasses bind name + default
- * model only, mirroring {@code services.caption.OpenAiCompatibleImageCaptionClient}.
+ * shape for text-to-image, and {@code POST /images/edits} (multipart) for image-to-image when a
+ * reference image is supplied (JCLAW-697). For the GPT image models ({@code gpt-image-1} and family)
+ * the response carries the image as base64 by default, so no {@code response_format} is sent; a
+ * {@code url}-shaped response (dall-e, or an OpenAI-compatible proxy) is also handled by fetching the
+ * bytes. Subclasses bind name + default model only, mirroring
+ * {@code services.caption.OpenAiCompatibleImageCaptionClient}.
  *
  * <p>Configuration:
  * <ul>
- *   <li>{@code provider.{name}.baseUrl} — {@code /images/generations} is appended.</li>
+ *   <li>{@code provider.{name}.baseUrl} — {@code /images/generations} or {@code /images/edits} is appended.</li>
  *   <li>{@code provider.{name}.apiKey} — sent as {@code Authorization: Bearer}.</li>
  *   <li>{@code imagegen.{name}.model} — overrides the subclass default model (provider-scoped,
  *       so switching providers can't leak one provider's model id into another).</li>
@@ -52,6 +55,19 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
 
     @Override
     public GeneratedImage generate(String prompt, String model, Integer width, Integer height) {
+        return generate(prompt, model, width, height, null);
+    }
+
+    /**
+     * JCLAW-697: image-to-image / style transfer. With a {@code referenceImage}, the request switches
+     * from the JSON {@code /images/generations} create endpoint to the multipart {@code /images/edits}
+     * endpoint, sending the reference as the {@code image} part. gpt-image models additionally get
+     * {@code input_fidelity=high} so the subject stays recognizable (style transfer + consistency).
+     * A null reference is the original text-to-image path.
+     */
+    @Override
+    public GeneratedImage generate(String prompt, String model, Integer width, Integer height,
+                                   ReferenceImage referenceImage) {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
@@ -68,12 +84,13 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
             throw new ImageGenerationException(providerName + " image generation: no model configured");
         }
 
-        var url = trimTrailingSlash(baseUrl) + "/images/generations";
-        var request = new Request.Builder()
-                .url(url)
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
-                .post(RequestBody.create(buildRequestJson(effModel, prompt, sizeFor(width, height)), JSON))
-                .build();
+        var base = trimTrailingSlash(baseUrl);
+        var size = sizeFor(width, height);
+        boolean hasReference = referenceImage != null
+                && referenceImage.bytes() != null && referenceImage.bytes().length > 0;
+        var request = hasReference
+                ? buildEditsRequest(base, apiKey, effModel, prompt, size, referenceImage)
+                : buildGenerationsRequest(base, apiKey, effModel, prompt, size);
 
         try (var response = client.newCall(request).execute()) {
             var body = response.body().string();
@@ -88,14 +105,51 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
         }
     }
 
-    /** Build the OpenAI {@code /images/generations} body. b64 is the default for GPT image models. */
-    private String buildRequestJson(String model, String prompt, String size) {
+    /** JSON {@code /images/generations} (text-to-image). b64 is the default for GPT image models. */
+    private Request buildGenerationsRequest(String base, String apiKey, String model, String prompt, String size) {
         var root = new JsonObject();
         root.addProperty("model", model);
         root.addProperty("prompt", prompt);
         root.addProperty("size", size);
         root.addProperty("n", 1);
-        return root.toString();
+        return new Request.Builder()
+                .url(base + "/images/generations")
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
+                .post(RequestBody.create(root.toString(), JSON))
+                .build();
+    }
+
+    /** Multipart {@code /images/edits} (image-to-image): the reference rides as the {@code image} part. */
+    private Request buildEditsRequest(String base, String apiKey, String model, String prompt, String size,
+                                      ReferenceImage referenceImage) {
+        var mime = (referenceImage.mimeType() != null && !referenceImage.mimeType().isBlank())
+                ? referenceImage.mimeType() : "image/png";
+        var builder = new MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("model", model)
+                .addFormDataPart("prompt", prompt)
+                .addFormDataPart("size", size)
+                .addFormDataPart("n", "1")
+                .addFormDataPart("image", "reference." + extForMime(mime),
+                        RequestBody.create(referenceImage.bytes(), MediaType.parse(mime)));
+        // gpt-image models expose input_fidelity (low|high) to tune how strongly the output preserves
+        // the reference; "high" favors character/style consistency. Skip it for non-gpt-image models
+        // (e.g. dall-e edits) that would 400 on the unknown field.
+        if (model.startsWith("gpt-image")) {
+            builder.addFormDataPart("input_fidelity", "high");
+        }
+        return new Request.Builder()
+                .url(base + "/images/edits")
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
+                .post(builder.build())
+                .build();
+    }
+
+    private static String extForMime(String mime) {
+        return switch (mime) {
+            case "image/jpeg", "image/jpg" -> "jpg";
+            case "image/webp" -> "webp";
+            default -> "png";
+        };
     }
 
     private GeneratedImage parseImage(String responseBody, String model) {
