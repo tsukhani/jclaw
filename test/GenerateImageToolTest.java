@@ -100,6 +100,32 @@ class GenerateImageToolTest extends UnitTest {
     }
 
     @Test
+    void referenceLookupSurvivesNoAmbientTransaction() throws Exception {
+        // JCLAW-694 regression (caught in UAT): the generate_image tool runs on the dispatcher's
+        // virtual threads, which carry NO ambient EntityManager. A bare attachment lookup there
+        // throws "No active EntityManager"; resolveReferenceImage must wrap it in Tx.run. Reproduce
+        // on a fresh platform thread (no JPA tx) and assert the wrap makes the lookup runnable.
+        var bareThrew = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var wrappedError = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                MessageAttachment.findLatestUploadedImage(1L);
+            } catch (Exception e) {
+                bareThrew.set(true); // no tx on this thread → the raw finder can't run
+            }
+            try {
+                services.Tx.run(() -> MessageAttachment.findLatestUploadedImage(1L));
+            } catch (Throwable e) {
+                wrappedError.set(e);
+            }
+        });
+        t.join();
+        assertTrue(bareThrew.get(), "a bare finder call on a no-transaction thread must fail (the bug)");
+        assertNull(wrappedError.get(),
+                () -> "Tx.run must let the finder run without an ambient transaction: " + wrappedError.get());
+    }
+
+    @Test
     void toolReportsWhenNotConfigured() {
         // No imagegen.provider → the router is empty; the tool reports, doesn't throw, no image.
         var result = new GenerateImageTool().executeRich("{\"prompt\":\"anything\"}", new Agent());

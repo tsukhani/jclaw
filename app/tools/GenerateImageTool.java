@@ -9,6 +9,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.MessageAttachment;
 import services.AttachmentService;
+import services.Tx;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
 import services.imagegen.ImageGenerationService;
@@ -165,18 +166,21 @@ public class GenerateImageTool implements ToolRegistry.Tool {
     private static ImageGenerationService.ReferenceImage resolveReferenceImage(JsonObject args) {
         if (!optBool(args, ARG_USE_REFERENCE)) return null;
         var conversationId = ToolContext.conversationId();
-        var attachment = MessageAttachment.findLatestUploadedImage(conversationId);
-        if (attachment == null) {
+        // Tools execute on the dispatcher's virtual threads with no ambient EntityManager, so the
+        // attachment lookup + byte read must open their own JPA transaction (JCLAW-694). Returns
+        // null when there's no usable upload; the caller turns that into a tool-visible message.
+        var reference = Tx.run(() -> {
+            var attachment = MessageAttachment.findLatestUploadedImage(conversationId);
+            if (attachment == null) return null;
+            return new ImageGenerationService.ReferenceImage(
+                    AttachmentService.readBytes(attachment), attachment.mimeType);
+        });
+        if (reference == null) {
             throw new ReferenceUnavailable(
                     "No uploaded image found in this conversation to use as a reference. Ask the user "
                             + "to attach an image, or generate without a reference (set use_reference_image false).");
         }
-        try {
-            return new ImageGenerationService.ReferenceImage(
-                    AttachmentService.readBytes(attachment), attachment.mimeType);
-        } catch (RuntimeException e) {
-            throw new ReferenceUnavailable("Could not read the reference image: " + e.getMessage());
-        }
+        return reference;
     }
 
     /** {width, height} from explicit pixels or an aspect ratio; nulls mean "provider default". */
