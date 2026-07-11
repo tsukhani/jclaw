@@ -181,6 +181,26 @@ class MessageAttachmentTest extends UnitTest {
         assertNull(found.transcript);
     }
 
+    @Test
+    void findLatestUploadedImagePicksNewestNonGeneratedImage() {
+        // JCLAW-694: resolves the reference image for generate_image's image-to-image path.
+        var oldImg = persist("old.png", MessageAttachment.KIND_IMAGE);
+        persist("doc.pdf", MessageAttachment.KIND_FILE);       // non-image excluded
+        var generated = persist("gen.png", MessageAttachment.KIND_IMAGE);
+        generated.generated = true;                            // a prior generation must not feed back
+        generated.save();
+        var newest = persist("new.png", MessageAttachment.KIND_IMAGE);
+
+        var found = MessageAttachment.findLatestUploadedImage(conversation.id);
+        assertNotNull(found);
+        assertEquals(newest.id, found.id, "newest uploaded image wins");
+        assertNotEquals(generated.id, found.id, "generated images are excluded");
+        assertNotEquals(oldImg.id, found.id, "older upload loses to the newest");
+
+        assertNull(MessageAttachment.findLatestUploadedImage(null), "null conversation → null");
+        assertNull(MessageAttachment.findLatestUploadedImage(999_999L), "conversation with no attachments → null");
+    }
+
     private MessageAttachment persistAudio(String transcript) {
         var uuid = UUID.randomUUID().toString();
         var att = new MessageAttachment();

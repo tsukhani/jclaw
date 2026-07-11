@@ -158,6 +158,16 @@ public class MessageAttachment extends Model {
         return MessageAttachment.find("message = ?1 ORDER BY id ASC", message).fetch();
     }
 
+    /** JCLAW-694: the most recent user-uploaded (non-generated) image in a conversation, or null.
+     *  Resolves the reference image for {@code generate_image}'s image-to-image / style-transfer
+     *  path — generated images are excluded so a prior generation isn't fed back as a reference. */
+    public static MessageAttachment findLatestUploadedImage(Long conversationId) {
+        if (conversationId == null) return null;
+        return MessageAttachment.find(
+                "message.conversation.id = ?1 and kind = ?2 and generated = false ORDER BY id DESC",
+                conversationId, KIND_IMAGE).first();
+    }
+
     /** JCLAW-234: the placeholder row linked to a video-generation job (null until the tool creates one). */
     public static MessageAttachment findByGenerationJobId(Long jobId) {
         if (jobId == null) return null;

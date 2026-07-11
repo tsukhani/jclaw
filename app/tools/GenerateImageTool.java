@@ -2,12 +2,16 @@ package tools;
 
 import agents.GeneratedAttachment;
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.MessageAttachment;
+import services.AttachmentService;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
+import services.imagegen.ImageGenerationService;
 
 import java.util.List;
 import java.util.Map;
@@ -29,6 +33,7 @@ public class GenerateImageTool implements ToolRegistry.Tool {
     private static final String ARG_WIDTH = "width";
     private static final String ARG_HEIGHT = "height";
     private static final String ARG_ASPECT = "aspect_ratio";
+    private static final String ARG_USE_REFERENCE = "use_reference_image";
 
     @Override public String name() { return "generate_image"; }
     @Override public String category() { return "Utilities"; }
@@ -45,9 +50,12 @@ public class GenerateImageTool implements ToolRegistry.Tool {
         return """
                 Generate an image from a text prompt and show it to the user inline. Provide a \
                 detailed 'prompt'. Optionally set 'width' and 'height' in pixels, or an 'aspect_ratio' \
-                (1:1, 16:9, 9:16) used when width/height are omitted. The image is produced by the \
-                operator-configured backend (OpenAI gpt-image-1, Black Forest Labs Flux, or a \
-                self-hosted engine) and shown to the user as part of your reply.""";
+                (1:1, 16:9, 9:16) used when width/height are omitted. To restyle or match the look of \
+                an image the user uploaded in this conversation, set 'use_reference_image' true \
+                (image-to-image style transfer / visual consistency); the most recently uploaded \
+                image is used as the reference. The image is produced by the operator-configured \
+                backend (OpenAI gpt-image-1, Black Forest Labs Flux, or a self-hosted engine) and \
+                shown to the user as part of your reply.""";
     }
 
     @Override
@@ -68,7 +76,11 @@ public class GenerateImageTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION, "Optional height in pixels."),
                         ARG_ASPECT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.ENUM, List.of("1:1", "16:9", "9:16"),
-                                SchemaKeys.DESCRIPTION, "Optional aspect ratio, used when width/height are omitted.")
+                                SchemaKeys.DESCRIPTION, "Optional aspect ratio, used when width/height are omitted."),
+                        ARG_USE_REFERENCE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                                SchemaKeys.DESCRIPTION, "When true, use the most recent image the user uploaded in this "
+                                        + "conversation as a reference for style transfer / visual consistency "
+                                        + "(image-to-image). Defaults to false (text-to-image).")
                 ),
                 SchemaKeys.REQUIRED, List.of(ARG_PROMPT)
         );
@@ -104,6 +116,17 @@ public class GenerateImageTool implements ToolRegistry.Tool {
                             + "Settings → Image Generation.");
         }
 
+        // JCLAW-694: optional image-to-image reference. When the model asks to reuse the user's
+        // uploaded image, resolve the most recent non-generated image in this conversation to raw
+        // bytes. Backends that don't yet support references degrade to text-to-image (the default
+        // ImageGenerationService.generate override ignores it).
+        ImageGenerationService.ReferenceImage reference;
+        try {
+            reference = resolveReferenceImage(args);
+        } catch (ReferenceUnavailable e) {
+            return ToolRegistry.ToolResult.text(e.getMessage());
+        }
+
         var dims = resolveDimensions(args);
         try {
             // No model override from here: each provider client resolves its OWN
@@ -111,7 +134,7 @@ public class GenerateImageTool implements ToolRegistry.Tool {
             // built-in default. A single shared key used to leak one provider's
             // model id into another after a Settings provider switch — e.g. a
             // Replicate slug sent to OpenAI, which 400s with "model does not exist".
-            var image = serviceOpt.get().generate(prompt, null, dims[0], dims[1]);
+            var image = serviceOpt.get().generate(prompt, null, dims[0], dims[1], reference);
             var metadata = buildMetadata(prompt, image.generatedBy(), dims[0], dims[1]);
             // The image is delivered out-of-band (raw bytes -> generated attachment, rendered inline by
             // the chat UI); the model never receives its URL. Say so explicitly: a model that
@@ -125,6 +148,34 @@ public class GenerateImageTool implements ToolRegistry.Tool {
                     new GeneratedAttachment(image.bytes(), image.mimeType(), metadata));
         } catch (ImageGenerationException e) {
             return ToolRegistry.ToolResult.text("Image generation failed: " + e.getMessage());
+        }
+    }
+
+    /** Signals that the model requested a reference image but none is usable — surfaced to the
+     *  agent as a tool-visible message so it can ask the user to attach one. */
+    private static final class ReferenceUnavailable extends RuntimeException {
+        ReferenceUnavailable(String message) { super(message); }
+    }
+
+    /**
+     * JCLAW-694: resolve the image-to-image reference when {@code use_reference_image} is set.
+     * Returns null (text-to-image) when the flag is absent/false. Uses the current conversation
+     * (via {@link ToolContext}) to find the most recent uploaded image and reads its bytes.
+     */
+    private static ImageGenerationService.ReferenceImage resolveReferenceImage(JsonObject args) {
+        if (!optBool(args, ARG_USE_REFERENCE)) return null;
+        var conversationId = ToolContext.conversationId();
+        var attachment = MessageAttachment.findLatestUploadedImage(conversationId);
+        if (attachment == null) {
+            throw new ReferenceUnavailable(
+                    "No uploaded image found in this conversation to use as a reference. Ask the user "
+                            + "to attach an image, or generate without a reference (set use_reference_image false).");
+        }
+        try {
+            return new ImageGenerationService.ReferenceImage(
+                    AttachmentService.readBytes(attachment), attachment.mimeType);
+        } catch (RuntimeException e) {
+            throw new ReferenceUnavailable("Could not read the reference image: " + e.getMessage());
         }
     }
 
@@ -164,5 +215,9 @@ public class GenerateImageTool implements ToolRegistry.Tool {
 
     private static Integer optInt(JsonObject args, String key) {
         return args.has(key) && !args.get(key).isJsonNull() ? args.get(key).getAsInt() : null;
+    }
+
+    private static boolean optBool(JsonObject args, String key) {
+        return args.has(key) && !args.get(key).isJsonNull() && args.get(key).getAsBoolean();
     }
 }
