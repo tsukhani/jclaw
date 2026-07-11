@@ -143,7 +143,7 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     catch { return false }
     if (!convo) return false
 
-    const owningAgent = agents.value?.find(a => a.id === convo!.agentId)
+    const owningAgent = agents.value?.find(a => a.id === convo.agentId)
     if (owningAgent) {
       // Top-level agent we know about — switch the dropdown to it. The
       // selectedAgentId watcher would normally clear messages, but we suppress

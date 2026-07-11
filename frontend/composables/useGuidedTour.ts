@@ -127,6 +127,14 @@ function waitForElement(selector: string, timeoutMs = 2000): Promise<Element | n
   })
 }
 
+/**
+ * Resolve a tour step's router-push target: a `{ path, query }` object when the
+ * step pins a query section, else the bare path. Pure — depends only on `step`.
+ */
+function locationForStep(step: TourStep) {
+  return step.query ? { path: step.path, query: step.query } : step.path
+}
+
 export function useGuidedTour() {
   const router = useRouter()
   const route = useRoute()
@@ -273,10 +281,6 @@ export function useGuidedTour() {
   // route, drive directly — router.push to the current location is a no-op that
   // wouldn't re-fire the route watch. That watch keys on route.fullPath, so a
   // query-only change (same path, different ?section) still triggers it.
-  function locationForStep(step: TourStep) {
-    return step.query ? { path: step.path, query: step.query } : step.path
-  }
-
   function isOnStepRoute(step: TourStep): boolean {
     if (route.path !== step.path) return false
     if (!step.query) return true

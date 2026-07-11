@@ -30,7 +30,7 @@ export function useChatUsageMeter(
   function previousAssistantUsage(idx: number): MessageUsage | null {
     for (let i = idx - 1; i >= 0; i--) {
       const prev = displayMessages.value[i]
-      if (prev && prev.role === 'assistant' && prev.usage) return prev.usage
+      if (prev?.role === 'assistant' && prev.usage) return prev.usage
     }
     return null
   }
@@ -42,9 +42,9 @@ export function useChatUsageMeter(
    */
   function shouldShowModelSwitchIndicator(idx: number): boolean {
     const msg = displayMessages.value[idx]
-    if (!msg || msg.role !== 'assistant' || !msg.usage?.modelId) return false
+    if (msg?.role !== 'assistant' || !msg.usage?.modelId) return false
     const prior = previousAssistantUsage(idx)
-    if (!prior || !prior.modelId) return false
+    if (!prior?.modelId) return false
     return prior.modelId !== msg.usage.modelId || prior.modelProvider !== msg.usage.modelProvider
   }
 
@@ -58,7 +58,7 @@ export function useChatUsageMeter(
     const msgs = displayMessages.value ?? []
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
-      if (m && m.role === 'assistant' && m.usage) return m.usage
+      if (m?.role === 'assistant' && m.usage) return m.usage
     }
     return null
   })
@@ -75,7 +75,7 @@ export function useChatUsageMeter(
     const msgs = displayMessages.value ?? []
     let total = 0
     for (const m of msgs) {
-      if (m && m.role === 'assistant' && m.usage) {
+      if (m?.role === 'assistant' && m.usage) {
         total += (m.usage.prompt ?? 0) + (m.usage.completion ?? 0)
       }
     }
