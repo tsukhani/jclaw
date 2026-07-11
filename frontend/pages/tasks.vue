@@ -760,7 +760,11 @@ function zoneForTaskRender(task: Task): string | undefined {
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-6">
+    <!-- Three zones: title (left), retention TTL (dead-centered via the auto
+         middle column flanked by equal 1fr sides), action icons (right). The
+         1fr/auto/1fr grid centers the label on the row regardless of the left
+         and right group widths. -->
+    <div class="grid grid-cols-[1fr_auto_1fr] items-center mb-6">
       <div class="flex items-center gap-3">
         <h1 class="text-lg font-semibold text-fg-strong">
           Tasks
@@ -799,11 +803,13 @@ function zoneForTaskRender(task: Task): string | undefined {
           </button>
         </div>
       </div>
-      <div class="flex items-center gap-2">
-        <!-- JCLAW-259: live retention TTL. Subtle muted text so it doesn't
-             compete with the page title but stays visible enough that
-             operators don't get surprised by auto-deletes. Sourced from
-             tasks.retentionDays (default 30, 0 = disabled). -->
+      <!-- JCLAW-259: live retention TTL, centered on the row. Subtle muted text
+           so it doesn't compete with the page title but stays visible enough
+           that operators don't get surprised by auto-deletes. Sourced from
+           tasks.retentionDays (default 30, 0 = disabled). Wrapper is always
+           present so it holds the center grid column even when the link is
+           hidden (retentionDays null). -->
+      <div class="flex justify-center">
         <NuxtLink
           v-if="retentionDisplay"
           to="/settings?section=tasks"
@@ -812,6 +818,8 @@ function zoneForTaskRender(task: Task): string | undefined {
         >
           {{ retentionDisplay }}
         </NuxtLink>
+      </div>
+      <div class="flex items-center gap-2 justify-self-end">
         <template v-if="!selectMode">
           <button
             :disabled="!tasks?.length"
