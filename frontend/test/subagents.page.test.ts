@@ -81,11 +81,10 @@ describe('Subagents admin page', () => {
     const component = await mountSuspended(Subagents)
     await flushPromises()
 
-    // Kill buttons are the only buttons in the table cells; the filter
-    // bar above has selects but no buttons, so a button-only query lands
-    // on the action column.
+    // Kill is now an icon-only action (red stop glyph), so match on its
+    // title/aria-label rather than visible text.
     const killButtons = component.findAll('button')
-      .filter(b => b.text().toLowerCase().includes('kill'))
+      .filter(b => (b.attributes('title') ?? '').toLowerCase().includes('kill'))
     expect(killButtons.length).toBe(1)
   })
 
@@ -185,7 +184,7 @@ describe('Subagents admin page', () => {
     await flushPromises()
 
     const killBtn = component.findAll('button')
-      .find(b => b.text().toLowerCase().includes('kill'))
+      .find(b => (b.attributes('title') ?? '').toLowerCase().includes('kill'))
     expect(killBtn?.exists()).toBe(true)
     await killBtn!.trigger('click')
     await flushPromises()

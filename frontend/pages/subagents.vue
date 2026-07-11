@@ -626,7 +626,7 @@ function closePeek() {
             <td class="px-4 py-2.5">
               <span
                 v-if="run.mode"
-                class="font-mono text-xs bg-muted px-1.5 py-0.5 text-fg-primary"
+                class="inline-block -ml-1.5 font-mono text-xs bg-muted px-1.5 py-0.5 text-fg-primary"
               >{{ run.mode }}</span>
               <span
                 v-else
@@ -636,7 +636,7 @@ function closePeek() {
             <td class="px-4 py-2.5">
               <span
                 :class="statusColors[run.status]"
-                class="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 border"
+                class="inline-flex items-center gap-1 -ml-1.5 text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 border"
               >
                 <span
                   v-if="run.status === 'RUNNING'"
@@ -731,10 +731,35 @@ function closePeek() {
                 <button
                   v-if="run.status === 'RUNNING'"
                   :disabled="killing.has(run.id)"
-                  class="text-xs text-red-700 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-40"
+                  class="p-1.5 rounded text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-500 transition-colors disabled:opacity-40"
+                  :title="killing.has(run.id) ? 'Killing…' : 'Kill run'"
+                  :aria-label="killing.has(run.id) ? 'Killing run' : 'Kill run'"
                   @click.stop="killRun(run.id)"
                 >
-                  {{ killing.has(run.id) ? 'Killing...' : 'Kill' }}
+                  <!-- Stop-circle glyph: destructive/active action, red-highlighted
+                       and set apart from the muted view/preview icons. Pulses while
+                       the kill is in flight. -->
+                  <svg
+                    class="w-4 h-4"
+                    :class="killing.has(run.id) ? 'animate-pulse' : ''"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M9 9.563C9 9.252 9.252 9 9.563 9h4.874c.311 0 .563.252.563.563v4.874c0 .311-.252.563-.563.563H9.564A.562.562 0 019 14.437V9.564z"
+                    />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
                 </button>
               </div>
             </td>
