@@ -181,6 +181,32 @@ class ImageGenerationClientTest extends UnitTest {
     }
 
     @Test
+    void replicateSendsInputImageForImageToImage() throws Exception {
+        // JCLAW-696: with a reference image, the prediction input carries input_image as a base64
+        // data URI (Kontext image-to-image / style transfer). Only meaningful on an i2i model, but
+        // the field must be present and correctly shaped whenever a reference is supplied.
+        ConfigService.set("provider.replicate.baseUrl", server.url("/").toString());
+        ConfigService.set("provider.replicate.apiKey", "test-key");
+        var imageBytes = new byte[]{5, 6, 7, 8};
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"status\":\"succeeded\",\"output\":[\"" + server.url("/img") + "\"],"
+                        + "\"urls\":{\"get\":\"" + server.url("/pred") + "\"}}")).build());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .addHeader("Content-Type", "image/webp").body(bytesBuf(imageBytes)).build());
+
+        var ref = new ImageGenerationService.ReferenceImage(new byte[]{1, 2, 3}, "image/png");
+        var result = new ReplicateImageGenerationClient(testClient)
+                .generate("in this style", null, 1024, 1024, ref);
+        assertArrayEquals(imageBytes, result.bytes());
+
+        var createBody = server.takeRequest().getBody().utf8();
+        assertTrue(createBody.contains("\"input_image\""),
+                "Replicate create body must carry the reference as input_image: " + createBody);
+        assertTrue(createBody.contains("data:image/png;base64,"),
+                "reference sent as a base64 data URI: " + createBody);
+    }
+
+    @Test
     void replicateMapsDimsToAspectRatio() throws Exception {
         // The tool resolves aspect_ratio -> width/height; Flux on Replicate wants the label back, so the
         // client must derive aspect_ratio (landscape/portrait/square) and send no label when dims are unset.

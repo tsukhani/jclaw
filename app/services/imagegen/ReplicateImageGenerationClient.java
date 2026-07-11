@@ -12,6 +12,7 @@ import utils.HttpFactories;
 import utils.HttpKeys;
 
 import java.io.IOException;
+import java.util.Base64;
 
 /**
  * Replicate image-generation client (JCLAW-225/229). Replicate runs hosted image models behind an
@@ -46,6 +47,19 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
 
     @Override
     public GeneratedImage generate(String prompt, String model, Integer width, Integer height) {
+        return generate(prompt, model, width, height, null);
+    }
+
+    /**
+     * JCLAW-696: image-to-image / style transfer. When {@code referenceImage} is present the
+     * reference is sent as {@code input_image} (a base64 data URI) inside the prediction input.
+     * This only produces a restyled image on an image-to-image-capable model — set
+     * {@code imagegen.replicate.model} to a Kontext slug (e.g. black-forest-labs/flux-kontext-pro);
+     * a text-to-image model ignores the field. Null reference = text-to-image as before.
+     */
+    @Override
+    public GeneratedImage generate(String prompt, String model, Integer width, Integer height,
+                                   ReferenceImage referenceImage) {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
@@ -59,13 +73,13 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         }
         var effModel = firstNonBlank(model, ConfigService.get("imagegen.replicate.model"), DEFAULT_MODEL);
 
-        var prediction = createPrediction(trimTrailingSlash(baseUrl), effModel, apiKey, prompt, width, height);
+        var prediction = createPrediction(trimTrailingSlash(baseUrl), effModel, apiKey, prompt, width, height, referenceImage);
         var imageUrl = resolveOutputUrl(prediction, apiKey);
         return fetchImage(imageUrl, "replicate:" + effModel);
     }
 
     private JsonObject createPrediction(String baseUrl, String model, String apiKey, String prompt,
-            Integer width, Integer height) {
+            Integer width, Integer height, ReferenceImage referenceImage) {
         var input = new JsonObject();
         input.addProperty("prompt", prompt);
         // Flux models on Replicate take an aspect_ratio string, not raw pixels (those need
@@ -73,6 +87,13 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         // label — the same width/height→label move OpenAiCompatibleImageGenerationClient.sizeFor makes.
         var aspect = aspectRatioFor(width, height);
         if (aspect != null) input.addProperty("aspect_ratio", aspect);
+        if (referenceImage != null && referenceImage.bytes() != null && referenceImage.bytes().length > 0) {
+            // Kontext image-to-image reference: a base64 data URI in input_image (Replicate also
+            // accepts a hosted URL). Only meaningful on an image-to-image model.
+            var mime = referenceImage.mimeType() != null ? referenceImage.mimeType() : "image/png";
+            input.addProperty("input_image",
+                    "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(referenceImage.bytes()));
+        }
         var root = new JsonObject();
         root.add("input", input);
         var request = new Request.Builder()
