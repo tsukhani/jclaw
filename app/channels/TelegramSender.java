@@ -2,9 +2,6 @@ package channels;
 
 import channels.Channel.SendResult;
 import models.Agent;
-import models.TelegramBinding;
-import okhttp3.OkHttpClient;
-import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.TelegramUrl;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
@@ -25,7 +22,6 @@ import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
-import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.media.InputMedia;
@@ -39,16 +35,12 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
-import play.Play;
 import services.EventLogger;
 import utils.RetryScheduler;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -73,70 +65,19 @@ class TelegramSender {
     private final TelegramClient client;
 
     /**
-     * Bot-API HTTP timeouts (JCLAW-100). OkHttp defaults to 10 s on every
-     * timeout, which means a slow or hung Telegram edge can burn ~10 s of
-     * critical path (inside TelegramStreamingSink.seal → final edit) before
-     * the existing scheduled-retry logic engages. The values below fail
-     * fast — 2 s connect, 3 s read, 2 s write — so a transient stall is
-     * caught and absorbed by the sink's retry tick rather than stretching
-     * the user-visible turn.
-     */
-    private static final int BOT_API_CONNECT_TIMEOUT_SEC = 2;
-    private static final int BOT_API_READ_TIMEOUT_SEC = 3;
-    private static final int BOT_API_WRITE_TIMEOUT_SEC = 2;
-
-    /**
-     * Timeouts for {@code sendPhoto} / {@code sendDocument} (JCLAW-122). The
-     * 2 s write timeout the text paths use is far too tight for a multi-MB
-     * upload — a 1–2 MB screenshot on a typical home connection needs
-     * several seconds of write bandwidth, plus Telegram server processing.
-     * Before this split, every photo upload silently timed out into a
-     * {@code TelegramApiException("Unable to execute sendphoto method")}
-     * and the planner dropped the file segment. Generous read and write
-     * accommodate the largest files the planner will deliver (10 MB photo
-     * limit, 50 MB document limit in practice).
-     */
-    private static final int BOT_API_UPLOAD_CONNECT_TIMEOUT_SEC = 5;
-    private static final int BOT_API_UPLOAD_READ_TIMEOUT_SEC = 60;
-    private static final int BOT_API_UPLOAD_WRITE_TIMEOUT_SEC = 60;
-
-    /**
      * Dedicated upload client for {@link #trySendPhoto} / {@link #trySendDocument}.
      * Distinct from {@link #client} so file uploads don't share the aggressive
-     * text-message timeouts. Configured in the constructor alongside {@code client}.
+     * text-message timeouts. Both clients are built by
+     * {@link TelegramBotApiHttpClients} in the constructor.
      */
     private final TelegramClient uploadClient;
 
-    // ── JCLAW-383: bot-sent-message-id cache ─────────────────────────────
-    //
-    // To make telegram.reactions.notify=own work in groups (where the reacted
-    // message's author is NOT carried on the message_reaction update), we
-    // remember the ids of messages THIS bot sent, per chat, so the reaction
-    // gate can ask "was this message one of ours?". The cache is bounded two
-    // ways so it can't grow without limit on a busy multi-chat bot:
-    //   - at most {@link TelegramChannel#SENT_CHATS_CAP} chats are tracked (access-ordered
-    //     LRU: the least-recently-touched chat is evicted first);
-    //   - within each chat, at most {@link TelegramChannel#SENT_IDS_PER_CHAT_CAP} message ids
-    //     are retained (insertion-ordered FIFO: the oldest id is evicted).
-    // It populates only from sends this process made, so it is cold after a
-    // restart — acceptable: a cold miss under-notifies (conservative), it
-    // never over-notifies. See {@link #wasSentByBot}.
-
     /**
-     * chatId → ring of recently bot-sent message ids in that chat. Outer map is
-     * access-ordered (LRU on the chat key); each inner set is a bounded
-     * insertion-ordered FIFO. All access is guarded by synchronizing on
-     * {@code sentByChat} itself — sends and the reaction-gate read happen on
-     * different threads.
+     * JCLAW-383: bounded bot-sent-message-id cache (per-instance). See
+     * {@link TelegramSentMessageCache} for the two-way eviction bounds and the
+     * {@code notify=own} rationale.
      */
-    private final LinkedHashMap<String, LinkedHashSet<Integer>> sentByChat =
-            new LinkedHashMap<>(16, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(
-                        Map.Entry<String, LinkedHashSet<Integer>> eldest) {
-                    return size() > TelegramChannel.SENT_CHATS_CAP;
-                }
-            };
+    private final TelegramSentMessageCache sentCache = new TelegramSentMessageCache();
 
     TelegramSender(String botToken) {
         this(botToken, null);
@@ -144,40 +85,8 @@ class TelegramSender {
 
     TelegramSender(String botToken, TelegramUrl urlOverride) {
         this.botToken = botToken;
-        // Fast client for text paths: sendMessage, editMessageText, typing,
-        // callback answers, etc. Tight timeouts fail fast into the
-        // streaming-sink retry tick (JCLAW-98).
-        var textOkHttp = new OkHttpClient.Builder()
-                .connectTimeout(BOT_API_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
-                .readTimeout(BOT_API_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
-                .writeTimeout(BOT_API_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
-                .build();
-        this.client = urlOverride != null
-                ? new OkHttpTelegramClient(textOkHttp, botToken, urlOverride)
-                : new OkHttpTelegramClient(textOkHttp, botToken);
-        // Upload client for sendPhoto / sendDocument (JCLAW-122). Must be
-        // tolerant of multi-second upload bodies and Telegram's slower
-        // file-processing path.
-        //
-        // JCLAW-126: retryOnConnectionFailure set to false. OkHttp's default
-        // of true silently retries on any transient connection issue —
-        // including a server-side RST mid-upload — with no upper bound on
-        // total attempts until the write timeout expires. Combined with our
-        // 60 s write timeout, one transient reset can compound into 60-120 s
-        // of invisible wait. Disabling auto-retry makes a failure visible
-        // (the SDK throws, we log a warn, the planner surfaces it) instead
-        // of hiding in socket-level replay. The streaming-sink and
-        // outbound-planner retry at a higher level where we control the
-        // policy.
-        var uploadOkHttp = new OkHttpClient.Builder()
-                .connectTimeout(BOT_API_UPLOAD_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
-                .readTimeout(BOT_API_UPLOAD_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
-                .writeTimeout(BOT_API_UPLOAD_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
-                .retryOnConnectionFailure(false)
-                .build();
-        this.uploadClient = urlOverride != null
-                ? new OkHttpTelegramClient(uploadOkHttp, botToken, urlOverride)
-                : new OkHttpTelegramClient(uploadOkHttp, botToken);
+        this.client = TelegramBotApiHttpClients.textClient(botToken, urlOverride);
+        this.uploadClient = TelegramBotApiHttpClients.uploadClient(botToken, urlOverride);
     }
 
     String botToken() { return botToken; }
@@ -194,24 +103,7 @@ class TelegramSender {
      * to {@link TelegramChannel#SENT_CHATS_CAP} (coldest chat evicted).
      */
     private void recordSentMessage(String chatId, Integer messageId) {
-        if (chatId == null || chatId.isBlank() || messageId == null) return;
-        synchronized (sentByChat) {
-            var ring = sentByChat.computeIfAbsent(chatId, _ ->
-                    new LinkedHashSet<>() {
-                        @Override
-                        public boolean add(Integer id) {
-                            boolean added = super.add(id);
-                            // Insertion-ordered FIFO: drop the oldest id once over cap.
-                            if (size() > TelegramChannel.SENT_IDS_PER_CHAT_CAP) {
-                                var it = iterator();
-                                it.next();
-                                it.remove();
-                            }
-                            return added;
-                        }
-                    });
-            ring.add(messageId);
-        }
+        sentCache.record(chatId, messageId);
     }
 
     /**
@@ -222,11 +114,7 @@ class TelegramSender {
      * over-notify.
      */
     public boolean wasSentByBot(String chatId, Integer messageId) {
-        if (chatId == null || messageId == null) return false;
-        synchronized (sentByChat) {
-            var ring = sentByChat.get(chatId);
-            return ring != null && ring.contains(messageId);
-        }
+        return sentCache.wasSent(chatId, messageId);
     }
 
     /**
@@ -252,7 +140,7 @@ class TelegramSender {
                 .chatId(chatId)
                 .messageId(messageId)
                 .text(text);
-        var linkPreview = linkPreviewOptions();
+        var linkPreview = TelegramSendPolicy.linkPreviewOptions();
         if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         client.execute(builder.build());
     }
@@ -474,188 +362,6 @@ class TelegramSender {
         }
     }
 
-    // ── JCLAW-369: outbound reply targeting + topic-aware sends ──────────
-
-    /**
-     * JCLAW-369: reply-targeting policy. Controls whether — and how often —
-     * an inbound {@code replyToMessageId} is applied to the turn's outbound
-     * messages, read from {@code telegram.replyTo.mode} via
-     * {@link play.Play#configuration} (default {@link #REPLY_MODE_FIRST} when
-     * unset/blank/unrecognized):
-     *
-     * <ul>
-     *   <li>{@link #REPLY_MODE_OFF} — never set {@code reply_parameters};</li>
-     *   <li>{@link #REPLY_MODE_FIRST} — set it on only the first chunk/message
-     *       of a turn (the natural "this is my answer to that" affordance
-     *       without spamming a reply badge on every chunk);</li>
-     *   <li>{@link #REPLY_MODE_ALL} — set it on every chunk/message.</li>
-     * </ul>
-     *
-     * <p>Dormant until a caller threads a non-null {@code replyToMessageId}
-     * into one of the send overloads; the no-arg behavior is unchanged.
-     */
-    private static final String CFG_REPLY_TO_MODE = "telegram.replyTo.mode";
-    static final String REPLY_MODE_OFF = "off";
-    static final String REPLY_MODE_FIRST = "first";
-    static final String REPLY_MODE_ALL = "all";
-
-    /**
-     * The Telegram "General" forum topic always has {@code message_thread_id == 1},
-     * and the Bot API rejects a send that names it explicitly — so JCLAW-369
-     * OMITS {@code message_thread_id} on sends to General (a bare send already
-     * lands there). Typing actions, by contrast, accept it.
-     */
-    static final int GENERAL_TOPIC_THREAD_ID = 1;
-
-    // ── JCLAW-359: link-preview suppression ──────────────────────────────
-
-    /**
-     * JCLAW-359: link-preview policy, read from {@code telegram.linkPreview} via
-     * {@link play.Play#configuration}. Telegram auto-renders a preview card for
-     * the first URL in a message; some operators want that off so a chat full of
-     * agent-cited links stays compact. The flag is a coarse on/off:
-     *
-     * <ul>
-     *   <li>{@code on} (default; also any unset/blank/unrecognized value) — leave
-     *       {@code link_preview_options} unset, preserving Telegram's default
-     *       preview-on behavior;</li>
-     *   <li>{@code off} — attach {@code LinkPreviewOptions(is_disabled=true)} to
-     *       every text send so no preview card is generated.</li>
-     * </ul>
-     */
-    private static final String CFG_LINK_PREVIEW = "telegram.linkPreview";
-    static final String LINK_PREVIEW_ON = "on";
-    static final String LINK_PREVIEW_OFF = "off";
-
-    /**
-     * JCLAW-359: marker substring identifying a Telegram "can't parse entities"
-     * rejection. Telegram returns it inside a 400 {@code Bad Request} description
-     * (e.g. {@code Bad Request: can't parse entities: Unsupported start tag ...})
-     * when the HTML payload is malformed — typically a revoked / mangled entity
-     * the markdown formatter emitted. Matched case-insensitively so a wording
-     * tweak in the apostrophe / casing doesn't slip the detection.
-     */
-    private static final String PARSE_ENTITIES_MARKER = "can't parse entities";
-
-    /**
-     * JCLAW-359: true when link previews should be suppressed on outbound text
-     * sends ({@code telegram.linkPreview = off}). Public so default-package tests
-     * can assert the config-read contract, mirroring {@link #replyToMode()}.
-     */
-    public static boolean suppressLinkPreview() {
-        var raw = Play.configuration.getProperty(CFG_LINK_PREVIEW, LINK_PREVIEW_ON);
-        return raw != null && raw.trim().equalsIgnoreCase(LINK_PREVIEW_OFF);
-    }
-
-    /**
-     * JCLAW-359: the {@link LinkPreviewOptions}
-     * to attach to a text send, or null to leave Telegram's default preview-on
-     * behavior. Returns a disabled-preview options object only when
-     * {@link #suppressLinkPreview()} is true.
-     */
-    private static LinkPreviewOptions linkPreviewOptions() {
-        if (!suppressLinkPreview()) return null;
-        return LinkPreviewOptions.builder()
-                .isDisabled(true)
-                .build();
-    }
-
-    /**
-     * JCLAW-359: true when {@code e} is a 400 "can't parse entities" rejection —
-     * the HTML payload was malformed and the SAME send should be retried once as
-     * plain text. Distinct from the 429 rate-limit path (handled separately) and
-     * from other 400s (genuine bad requests that a plain-text retry can't fix).
-     */
-    private static boolean isParseEntitiesError(TelegramApiRequestException e) {
-        Integer code = e.getErrorCode();
-        if (code == null || code != 400) return false;
-        var desc = e.getApiResponse();
-        return desc != null && desc.toLowerCase().contains(PARSE_ENTITIES_MARKER);
-    }
-
-    /**
-     * Resolve the configured reply mode, normalizing unknown/blank values to
-     * {@link #REPLY_MODE_FIRST}. Public so default-package tests can assert the
-     * config-read contract (matches the {@code *ForTest} convention used
-     * elsewhere in this class for test-reachable surface).
-     */
-    public static String replyToMode() {
-        var raw = Play.configuration.getProperty(CFG_REPLY_TO_MODE, REPLY_MODE_FIRST);
-        return normalizeReplyMode(raw, REPLY_MODE_FIRST);
-    }
-
-    /** Normalize a raw reply-mode value (config or per-binding override) to a
-     *  known constant, falling back to {@code fallback} on null/blank/unknown. */
-    private static String normalizeReplyMode(String raw, String fallback) {
-        if (raw == null) return fallback;
-        var v = raw.trim().toLowerCase();
-        return switch (v) {
-            case REPLY_MODE_OFF, REPLY_MODE_FIRST, REPLY_MODE_ALL -> v;
-            default -> fallback;
-        };
-    }
-
-    /**
-     * JCLAW-378: the effective reply mode for a bot token: the per-binding
-     * {@link models.TelegramBinding#replyToMode} override when set (and valid),
-     * otherwise the JVM-wide {@link #replyToMode()} config default. A blank /
-     * unrecognized override is ignored and the config default applies. Public so
-     * default-package tests can assert the override-wins / null-falls-back
-     * contract, matching the {@code *ForTest} convention.
-     */
-    public static String effectiveReplyToMode(String botToken) {
-        var override = TelegramBinding.overridesForToken(botToken).replyToMode();
-        if (override == null || override.isBlank()) return replyToMode();
-        return normalizeReplyMode(override, replyToMode());
-    }
-
-    /**
-     * Build the {@link ReplyParameters} to apply on a given outbound chunk, or
-     * null when none should be set. Honors the {@link #replyToMode()} policy:
-     * {@code off} → never; {@code first} → only when {@code firstChunk}; {@code all}
-     * → always (given a non-null target). {@code allow_sending_without_reply=true}
-     * so a since-deleted target degrades to a plain send instead of a 400.
-     */
-    private static ReplyParameters replyParamsFor(Integer replyToMessageId, boolean firstChunk, String mode) {
-        if (replyToMessageId == null) return null;
-        boolean apply = switch (mode) {
-            case REPLY_MODE_ALL -> true;
-            case REPLY_MODE_FIRST -> firstChunk;
-            default -> false; // off
-        };
-        if (!apply) return null;
-        return ReplyParameters.builder()
-                .messageId(replyToMessageId)
-                .allowSendingWithoutReply(true)
-                .build();
-    }
-
-    /**
-     * The {@code message_thread_id} to set on an outbound send, or null to omit
-     * it. Returns null when {@code messageThreadId} is null or names the General
-     * topic ({@link #GENERAL_TOPIC_THREAD_ID}) — a bare send already lands in
-     * General, and naming it explicitly is rejected by the Bot API.
-     */
-    private static Integer sendThreadId(Integer messageThreadId) {
-        if (messageThreadId == null || messageThreadId == GENERAL_TOPIC_THREAD_ID) return null;
-        return messageThreadId;
-    }
-
-    /**
-     * JCLAW-369: package-private bridge for {@link TelegramStreamingSink}. The
-     * streaming placeholder is the turn's first (and only live) message, so the
-     * sink always evaluates the reply policy as the first chunk. Returns null
-     * when no badge should be applied ({@code off}, or a null target).
-     */
-    static ReplyParameters replyParamsForSink(String botToken, Integer replyToMessageId) {
-        return replyParamsFor(replyToMessageId, true, effectiveReplyToMode(botToken));
-    }
-
-    /** JCLAW-369: package-private bridge so the sink shares the General-topic strip rule. */
-    static Integer sendThreadIdForSink(Integer messageThreadId) {
-        return sendThreadId(messageThreadId);
-    }
-
     /**
      * JCLAW-369: topic-aware typing action. When {@code messageThreadId} is
      * set the indicator is scoped to that forum topic — General (thread id 1)
@@ -716,13 +422,13 @@ class TelegramSender {
      *
      * <ul>
      *   <li>{@code replyToMessageId} — when non-null, the turn's chunks reply to
-     *       this message per the {@link #replyToMode()} policy
+     *       this message per the {@link TelegramSendPolicy#replyToMode()} policy
      *       ({@code telegram.replyTo.mode}: {@code first} sets it on only the
      *       first chunk, {@code all} on every chunk, {@code off} never).
      *       {@code allow_sending_without_reply=true} so a deleted target won't
      *       fail the send.</li>
      *   <li>{@code messageThreadId} — when non-null and not the General topic
-     *       ({@link #GENERAL_TOPIC_THREAD_ID}), scopes every send to that forum
+     *       ({@link TelegramSendPolicy#GENERAL_TOPIC_THREAD_ID}), scopes every send to that forum
      *       topic; General is omitted (a bare send already lands there).</li>
      * </ul>
      *
@@ -746,10 +452,10 @@ class TelegramSender {
         // JCLAW-369: track "first chunk of the turn" across all segments so the
         // `first` reply-mode applies the reply badge once, not once per segment.
         var firstChunk = new AtomicBoolean(true);
-        Integer threadId = sendThreadId(messageThreadId);
+        Integer threadId = TelegramSendPolicy.sendThreadId(messageThreadId);
         // JCLAW-378: resolve the reply mode once per turn from the binding
         // override (?? config default) so every segment shares one decision.
-        String mode = effectiveReplyToMode(botToken);
+        String mode = TelegramSendPolicy.effectiveReplyToMode(botToken);
         boolean allOk = true;
         for (var segment : segments) {
             if (!dispatchSegment(this, chatId, segment, replyToMessageId, threadId, firstChunk, mode)) {
@@ -874,7 +580,7 @@ class TelegramSender {
         for (int i = 0; i < total; i++) {
             String part = withChunkMarker(chunks.get(i), i + 1, total);
             boolean ownsFirst = firstChunk.getAndSet(false);
-            var reply = replyParamsFor(replyToMessageId, ownsFirst, mode);
+            var reply = TelegramSendPolicy.replyParamsFor(replyToMessageId, ownsFirst, mode);
             if (!channel.sendTextWithRetry(chatId, part, reply, threadId)) allOk = false;
         }
         return allOk;
@@ -898,8 +604,8 @@ class TelegramSender {
      * {@link #CHUNK_BUDGET}-to-4096 headroom, so it never risks the 4096 cap.
      *
      * <p>Public so default-package tests can assert the marker contract directly,
-     * matching the convention used by {@link #replyToMode()} /
-     * {@link #suppressLinkPreview()}.
+     * matching the convention used by {@link TelegramSendPolicy#replyToMode()} /
+     * {@link TelegramSendPolicy#suppressLinkPreview()}.
      */
     public static String withChunkMarker(String chunk, int index, int total) {
         if (total <= 1) return chunk;
@@ -915,7 +621,7 @@ class TelegramSender {
                                             TelegramOutboundPlanner.FileSegment fs,
                                             Integer replyToMessageId, Integer threadId,
                                             boolean firstChunk, String mode) {
-        var reply = replyParamsFor(replyToMessageId, firstChunk, mode);
+        var reply = TelegramSendPolicy.replyParamsFor(replyToMessageId, firstChunk, mode);
         var file = fs.file();
         var name = fs.displayName();
         var caption = fs.caption();
@@ -948,7 +654,7 @@ class TelegramSender {
                                                  AtomicBoolean firstChunk,
                                                  String mode) {
         boolean ownsFirst = firstChunk.getAndSet(false);
-        var reply = replyParamsFor(replyToMessageId, ownsFirst, mode);
+        var reply = TelegramSendPolicy.replyParamsFor(replyToMessageId, ownsFirst, mode);
         if (channel.sendMediaGroup(chatId, mg.items(), mg.caption(), reply, threadId)) {
             return true;
         }
@@ -1378,7 +1084,7 @@ class TelegramSender {
             // retry also fails. Other 400s (and any non-parse request error) fall
             // straight through to FAILED with no retry, so a genuine bad request
             // can't spin.
-            if (isParseEntitiesError(e)) {
+            if (TelegramSendPolicy.isParseEntitiesError(e)) {
                 EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                         "HTML parse rejected; retrying as plain text: %s".formatted(e.getMessage()));
                 return retryPlainText(peerId, text, replyParams, messageThreadId);
@@ -1408,7 +1114,7 @@ class TelegramSender {
         if (parseMode != null) builder.parseMode(parseMode);
         if (replyParams != null) builder.replyParameters(replyParams);
         if (messageThreadId != null) builder.messageThreadId(messageThreadId);
-        var linkPreview = linkPreviewOptions();
+        var linkPreview = TelegramSendPolicy.linkPreviewOptions();
         if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         var sent = client.execute(builder.build());
         // JCLAW-383: remember the id so notify=own recognizes a later group
@@ -1484,7 +1190,7 @@ class TelegramSender {
 
     /**
      * JCLAW-369: reply-targeting + topic-aware keyboard send. {@code replyToMessageId}
-     * (null to omit) is applied per the {@link #replyToMode()} policy treating this
+     * (null to omit) is applied per the {@link TelegramSendPolicy#replyToMode()} policy treating this
      * single message as the turn's first chunk ({@code off} → never; {@code first}
      * / {@code all} → applied, since there is exactly one message). {@code messageThreadId}
      * (null to omit) is General-stripped before being set. The shorter overload
@@ -1503,11 +1209,11 @@ class TelegramSender {
                 .text(htmlText)
                 .parseMode("HTML")
                 .replyMarkup(keyboard);
-        var reply = replyParamsFor(replyToMessageId, true, effectiveReplyToMode(botToken));
+        var reply = TelegramSendPolicy.replyParamsFor(replyToMessageId, true, TelegramSendPolicy.effectiveReplyToMode(botToken));
         if (reply != null) builder.replyParameters(reply);
-        var threadId = sendThreadId(messageThreadId);
+        var threadId = TelegramSendPolicy.sendThreadId(messageThreadId);
         if (threadId != null) builder.messageThreadId(threadId);
-        var linkPreview = linkPreviewOptions();
+        var linkPreview = TelegramSendPolicy.linkPreviewOptions();
         if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         try {
             var msg = client.execute(builder.build());
@@ -1535,7 +1241,7 @@ class TelegramSender {
                 .text(htmlText)
                 .parseMode("HTML");
         if (keyboard != null) builder.replyMarkup(keyboard);
-        var linkPreview = linkPreviewOptions();
+        var linkPreview = TelegramSendPolicy.linkPreviewOptions();
         if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         try {
             channel.client.execute(builder.build());

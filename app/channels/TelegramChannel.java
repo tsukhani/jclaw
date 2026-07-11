@@ -268,7 +268,7 @@ public class TelegramChannel implements Channel {
      * can assert the config-read contract, mirroring {@link #replyToMode()}.
      */
     public static boolean suppressLinkPreview() {
-        return TelegramSender.suppressLinkPreview();
+        return TelegramSendPolicy.suppressLinkPreview();
     }
 
     /**
@@ -278,7 +278,7 @@ public class TelegramChannel implements Channel {
      * test-reachable surface).
      */
     public static String replyToMode() {
-        return TelegramSender.replyToMode();
+        return TelegramSendPolicy.replyToMode();
     }
 
     /**
@@ -287,7 +287,7 @@ public class TelegramChannel implements Channel {
      * otherwise the JVM-wide {@link #replyToMode()} config default.
      */
     public static String effectiveReplyToMode(String botToken) {
-        return TelegramSender.effectiveReplyToMode(botToken);
+        return TelegramSendPolicy.effectiveReplyToMode(botToken);
     }
 
     /**
@@ -297,12 +297,12 @@ public class TelegramChannel implements Channel {
      * when no badge should be applied ({@code off}, or a null target).
      */
     static ReplyParameters replyParamsForSink(String botToken, Integer replyToMessageId) {
-        return TelegramSender.replyParamsForSink(botToken, replyToMessageId);
+        return TelegramSendPolicy.replyParamsForSink(botToken, replyToMessageId);
     }
 
     /** JCLAW-369: package-private bridge so the sink shares the General-topic strip rule. */
     static Integer sendThreadIdForSink(Integer messageThreadId) {
-        return TelegramSender.sendThreadIdForSink(messageThreadId);
+        return TelegramSendPolicy.sendThreadIdForSink(messageThreadId);
     }
 
     /**
