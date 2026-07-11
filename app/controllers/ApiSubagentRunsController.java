@@ -59,6 +59,8 @@ public class ApiSubagentRunsController extends Controller {
     private static final String KEY_REASON = "reason";
     private static final String KEY_RUN_ID = "run_id";
     private static final String HDR_TOTAL_COUNT = "X-Total-Count";
+    // Run "status" reused as a filter path, request-body field, and sort-whitelist key.
+    private static final String STATUS = "status";
 
     @SuppressWarnings("java:S107") // each query param is its own filter axis; bundling into a DTO would hide them from OpenAPI generation
     public record SubagentRunView(Long id, Long parentAgentId, String parentAgentName,
@@ -103,7 +105,7 @@ public class ApiSubagentRunsController extends Controller {
         var filter = new JpqlFilter()
                 .eq("parentAgent.id", parentAgentId)
                 .eq("parentConversation.id", parentConversationId)
-                .eq("status", statusEnum)
+                .eq(STATUS, statusEnum)
                 .gte("startedAt", sinceInstant);
 
         // JCLAW-304: q resolves against TWO Lucene scopes and unions the
@@ -331,20 +333,10 @@ public class ApiSubagentRunsController extends Controller {
 
         List<SubagentRun> targets;
         if (body.has("ids")) {
-            var arr = body.getAsJsonArray("ids");
-            var ids = new ArrayList<Long>();
-            for (var elem : arr) ids.add(elem.getAsLong());
-            if (ids.isEmpty()) {
-                renderJSON(gson.toJson(new DeletedCountResponse(0)));
-                return;
-            }
-            targets = JPA.em()
-                    .createQuery("SELECT r FROM SubagentRun r WHERE r.id IN :ids", SubagentRun.class)
-                    .setParameter("ids", ids)
-                    .getResultList();
+            targets = targetsFromIds(body);
         } else if (body.has("filter")) {
             var f = body.getAsJsonObject("filter");
-            String statusRaw = stringField(f, "status");
+            String statusRaw = stringField(f, STATUS);
             SubagentRun.Status statusEnum = parseStatusFilter(statusRaw);
             if (statusEnum == null && statusRaw != null && !statusRaw.isBlank()) return;
             String sinceRaw = stringField(f, "since");
@@ -359,6 +351,30 @@ public class ApiSubagentRunsController extends Controller {
             return;
         }
 
+        renderJSON(gson.toJson(new DeletedCountResponse(deleteTerminalRuns(targets))));
+    }
+
+    /**
+     * Resolve the explicit-ids delete set. An empty {@code ids} array yields an
+     * empty list — the caller then reports 0 deleted, identical to the prior
+     * inline fast-path, so no special-casing leaks back into {@link #deleteBulk()}.
+     */
+    private static List<SubagentRun> targetsFromIds(JsonObject body) {
+        var ids = new ArrayList<Long>();
+        for (var elem : body.getAsJsonArray("ids")) ids.add(elem.getAsLong());
+        if (ids.isEmpty()) return List.of();
+        return JPA.em()
+                .createQuery("SELECT r FROM SubagentRun r WHERE r.id IN :ids", SubagentRun.class)
+                .setParameter("ids", ids)
+                .getResultList();
+    }
+
+    /**
+     * Cascade-delete every terminal run in {@code targets}, returning the count
+     * actually removed. RUNNING rows are skipped (kill-first), never rejected —
+     * each removed run cascades through {@link services.AgentService#delete}.
+     */
+    private static int deleteTerminalRuns(List<SubagentRun> targets) {
         int deleted = 0;
         for (var run : targets) {
             if (run.status == SubagentRun.Status.RUNNING) continue; // live rows: kill first
@@ -367,7 +383,7 @@ public class ApiSubagentRunsController extends Controller {
             else AgentService.delete(childAgent);
             deleted++;
         }
-        renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
+        return deleted;
     }
 
     /** Shape of the {@link #deleteBulk()} request body (ids OR filter). */
@@ -386,7 +402,7 @@ public class ApiSubagentRunsController extends Controller {
         var filter = new JpqlFilter()
                 .eq("parentAgent.id", parentAgentId)
                 .eq("parentConversation.id", parentConversationId)
-                .eq("status", status)
+                .eq(STATUS, status)
                 .gte("startedAt", since);
         var ftsRunIds = ftsSubagentRunIds(q);
         var where = filter.toWhereClause();
@@ -418,7 +434,7 @@ public class ApiSubagentRunsController extends Controller {
             case "id" -> "r.id";
             case "parent" -> "r.parentAgent.name";
             case "child" -> "r.childAgent.name";
-            case "status" -> "r.status";
+            case STATUS -> "r.status";
             case "started" -> "r.startedAt";
             default -> null;
         };

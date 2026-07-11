@@ -202,8 +202,8 @@ public class ApiMemoryController extends Controller {
         String col = switch (sort == null ? "" : sort) {
             case "agent" -> "m.agent.name";
             case "text" -> "m.text";
-            case "category" -> "m.category";
-            case "importance" -> "m.importance";
+            case KEY_CATEGORY -> "m.category";
+            case KEY_IMPORTANCE -> FIELD_IMPORTANCE;
             case "created" -> "m.createdAt";
             default -> null;
         };

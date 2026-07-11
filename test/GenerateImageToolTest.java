@@ -110,7 +110,7 @@ class GenerateImageToolTest extends UnitTest {
         var t = Thread.ofPlatform().start(() -> {
             try {
                 MessageAttachment.findLatestUploadedImage(1L);
-            } catch (Exception e) {
+            } catch (Exception _) {
                 bareThrew.set(true); // no tx on this thread → the raw finder can't run
             }
             try {

@@ -37,6 +37,7 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
 
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String B64_JSON = "b64_json";
+    private static final String MIME_PNG = "image/png";
 
     private final String providerName;
     private final String defaultModel;
@@ -123,7 +124,7 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
     private Request buildEditsRequest(String base, String apiKey, String model, String prompt, String size,
                                       ReferenceImage referenceImage) {
         var mime = (referenceImage.mimeType() != null && !referenceImage.mimeType().isBlank())
-                ? referenceImage.mimeType() : "image/png";
+                ? referenceImage.mimeType() : MIME_PNG;
         var builder = new MultipartBody.Builder().setType(MultipartBody.FORM)
                 .addFormDataPart("model", model)
                 .addFormDataPart("prompt", prompt)
@@ -161,11 +162,11 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
         var first = data.get(0).getAsJsonObject();
         if (first.has(B64_JSON) && !first.get(B64_JSON).isJsonNull()) {
             byte[] bytes = Base64.getDecoder().decode(first.get(B64_JSON).getAsString());
-            return new GeneratedImage(bytes, "image/png", providerName + ":" + model);
+            return new GeneratedImage(bytes, MIME_PNG, providerName + ":" + model);
         }
         if (first.has("url") && !first.get("url").isJsonNull()) {
             byte[] bytes = fetchBytes(first.get("url").getAsString());
-            return new GeneratedImage(bytes, "image/png", providerName + ":" + model);
+            return new GeneratedImage(bytes, MIME_PNG, providerName + ":" + model);
         }
         throw new ImageGenerationException(providerName + " image generation: response had neither b64_json nor url");
     }

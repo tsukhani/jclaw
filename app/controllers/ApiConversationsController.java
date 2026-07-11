@@ -49,6 +49,9 @@ public class ApiConversationsController extends Controller {
 
     // OpenAI-shaped tool-call element key (the wrapping "function" object).
     private static final String KEY_FUNCTION = "function";
+    // Conversation field/JSON keys reused across the filter, sort whitelist, and view mappers.
+    private static final String CHANNEL_TYPE = "channelType";
+    private static final String CREATED_AT = "createdAt";
 
     public record ConversationView(Long id, Long agentId, String agentName, String channelType,
                                    String peerId, String createdAt, String updatedAt,
@@ -147,7 +150,7 @@ public class ApiConversationsController extends Controller {
         boolean hasNameFilter = name != null && !name.isBlank();
 
         var filter = new JpqlFilter()
-                .eq("channelType", channel)
+                .eq(CHANNEL_TYPE, channel)
                 .eq("agent.id", agentId)
                 .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
                 .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null);
@@ -335,7 +338,7 @@ public class ApiConversationsController extends Controller {
         // re-renders identically after a conversation reload. Null for
         // assistant turns without thinking and for user/tool rows.
         if (m.reasoning != null) map.put("reasoning", m.reasoning);
-        map.put("createdAt", m.createdAt.toString());
+        map.put(CREATED_AT, m.createdAt.toString());
         if (m.usageJson != null) {
             map.put("usage", JsonParser.parseString(m.usageJson));
         }
@@ -592,11 +595,11 @@ public class ApiConversationsController extends Controller {
     private static String orderByClause(String sort, String dir) {
         String col = switch (sort == null ? "" : sort) {
             case "preview" -> "c.preview";
-            case "channelType" -> "c.channelType";
+            case CHANNEL_TYPE -> "c.channelType";
             case "agentName" -> "c.agent.name";
             case "peerId" -> "c.peerId";
             case "messageCount" -> "c.messageCount";
-            case "createdAt" -> "c.createdAt";
+            case CREATED_AT -> "c.createdAt";
             case "updatedAt" -> "c.updatedAt";
             default -> null;
         };
@@ -618,9 +621,9 @@ public class ApiConversationsController extends Controller {
         map.put("id", c.id);
         map.put("agentId", c.agent.id);
         map.put("agentName", c.agent.name);
-        map.put("channelType", c.channelType);
+        map.put(CHANNEL_TYPE, c.channelType);
         map.put("peerId", c.peerId);
-        map.put("createdAt", c.createdAt.toString());
+        map.put(CREATED_AT, c.createdAt.toString());
         map.put("updatedAt", c.updatedAt.toString());
         map.put("messageCount", c.messageCount);
         map.put("preview", c.preview != null ? c.preview : "");

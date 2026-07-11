@@ -116,7 +116,7 @@ async function refresh() {
     const res = await $fetch.raw<MemoryDto[]>(url.value)
     memoriesData.value = res._data ?? []
     const h = res.headers.get('x-total-count')
-    total.value = h != null ? Number.parseInt(h, 10) : memoriesData.value.length
+    total.value = h == null ? memoriesData.value.length : Number.parseInt(h, 10)
     fetchError.value = false
   }
   catch (e) {

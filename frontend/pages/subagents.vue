@@ -366,9 +366,9 @@ const peekMessages = ref<Message[]>([])
 async function selectRun(run: SubagentRun) {
   selectedRun.value = run
   peekOpen.value = true
-  peekMessages.value = run.childConversationId !== null
-    ? (await $fetch<Message[]>(`/api/conversations/${run.childConversationId}/messages`) ?? [])
-    : []
+  peekMessages.value = run.childConversationId === null
+    ? []
+    : (await $fetch<Message[]>(`/api/conversations/${run.childConversationId}/messages`) ?? [])
 }
 
 function closePeek() {
