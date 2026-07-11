@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { readBody } from 'h3'
@@ -127,6 +127,30 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     const flux = c.find<HTMLInputElement>('#imagegen-provider-flux-local')
     expect(flux.exists()).toBe(true)
     expect(flux.element.disabled).toBe(true)
+  })
+
+  it('JCLAW-700: groups Replicate models into image-to-image and text-to-image optgroups', async () => {
+    registerEndpoint('/api/imagegen/models', () => [
+      { slug: 'black-forest-labs/flux-schnell', name: 'flux-schnell', description: 'fast t2i', imageToImage: false },
+      { slug: 'black-forest-labs/flux-kontext-pro', name: 'flux-kontext-pro', description: 'style transfer', imageToImage: true },
+    ])
+    setupApi({ imagegenProvider: 'replicate', replicateKey: 're_****' })
+    const c = await mountSettingsSection('image-generation')
+
+    const select = c.find('select[aria-label="Replicate image model"]')
+    expect(select.exists()).toBe(true)
+
+    // The discovered models are grouped under labeled optgroups (image-to-image first).
+    await vi.waitFor(() => {
+      const labels = select.findAll('optgroup').map(g => g.attributes('label'))
+      expect(labels).toContain('Image-to-image (style transfer)')
+      expect(labels).toContain('Text-to-image')
+    })
+    const groups = select.findAll('optgroup')
+    const i2i = groups.find(g => g.attributes('label') === 'Image-to-image (style transfer)')!
+    expect(i2i.text()).toContain('black-forest-labs/flux-kontext-pro')
+    const t2i = groups.find(g => g.attributes('label') === 'Text-to-image')!
+    expect(t2i.text()).toContain('black-forest-labs/flux-schnell')
   })
 
   it('enables the self-hosted Flux radio when uv is available and POSTs flux-local on select', async () => {

@@ -91,11 +91,13 @@ public class ApiImagegenController extends Controller {
         renderJSON(gson.toJson(new DownloadStartedResponse("downloading", model)));
     }
 
-    /** GET /api/imagegen/models — Replicate text-to-image models for the Settings model dropdown.
-     *  Empty when no Replicate API key is set or discovery fails; the UI degrades to "no models". */
-    @Operation(summary = "Discover Replicate text-to-image models (Settings model dropdown)")
+    /** GET /api/imagegen/models — selectable Replicate models for the Settings dropdown: discovered
+     *  text-to-image models plus the curated image-to-image (Kontext) set, each tagged with an
+     *  {@code imageToImage} flag so the UI can group them. Empty when no Replicate API key is set or
+     *  discovery fails; the UI degrades to "no models". */
+    @Operation(summary = "List selectable Replicate image models (text-to-image + Kontext image-to-image)")
     public static void models() {
-        renderJSON(gson.toJson(ReplicateImageModelCatalog.textToImageModels()));
+        renderJSON(gson.toJson(ReplicateImageModelCatalog.availableModels()));
     }
 
     /** GET /api/imagegen/progress — live step-progress of an in-flight LOCAL image generation, polled by

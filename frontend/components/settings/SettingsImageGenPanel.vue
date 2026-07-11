@@ -69,6 +69,9 @@ interface ImageModel {
   slug: string
   name: string
   description: string | null
+  // JCLAW-700: true for Kontext / style-transfer models that accept an uploaded reference; drives
+  // the capability grouping in the dropdown.
+  imageToImage: boolean
 }
 // Replicate's chosen model is stored provider-scoped (imagegen.replicate.model),
 // not a shared cloud-model key — switching providers must not carry a Replicate
@@ -84,10 +87,14 @@ const imagegenModelOptions = computed<ImageModel[]>(() => {
   const discovered = imagegenModels.value ?? []
   const saved = imagegenModel.value
   if (saved && !discovered.some(m => m.slug === saved)) {
-    return [{ slug: saved, name: saved, description: null }, ...discovered]
+    return [{ slug: saved, name: saved, description: null, imageToImage: false }, ...discovered]
   }
   return discovered
 })
+// JCLAW-700: split by capability so the single dropdown groups models under labeled optgroups —
+// image-to-image (Kontext / style transfer, accept an uploaded reference) vs text-to-image.
+const textToImageOptions = computed(() => imagegenModelOptions.value.filter(m => !m.imageToImage))
+const imageToImageOptions = computed(() => imagegenModelOptions.value.filter(m => m.imageToImage))
 
 // ──────────────────── Local Flux 2 Klein sidecar (JCLAW-226) ──────────────
 // Runtime state — uv availability + Flux weight download status — comes from
@@ -483,14 +490,35 @@ onUnmounted(() => stopImagegenLocalPolling())
               <option value="">
                 Provider default (black-forest-labs/flux-schnell)
               </option>
-              <option
-                v-for="m in imagegenModelOptions"
-                :key="m.slug"
-                :value="m.slug"
-                :title="m.description ?? ''"
+              <!-- JCLAW-700: image-to-image (Kontext) models grouped + labeled so the operator can
+                   pick a style-transfer backend for use_reference_image; a text-to-image model
+                   ignores an uploaded reference. -->
+              <optgroup
+                v-if="imageToImageOptions.length"
+                label="Image-to-image (style transfer)"
               >
-                {{ m.slug }}
-              </option>
+                <option
+                  v-for="m in imageToImageOptions"
+                  :key="m.slug"
+                  :value="m.slug"
+                  :title="m.description ?? ''"
+                >
+                  {{ m.slug }}
+                </option>
+              </optgroup>
+              <optgroup
+                v-if="textToImageOptions.length"
+                label="Text-to-image"
+              >
+                <option
+                  v-for="m in textToImageOptions"
+                  :key="m.slug"
+                  :value="m.slug"
+                  :title="m.description ?? ''"
+                >
+                  {{ m.slug }}
+                </option>
+              </optgroup>
             </select>
             <button
               type="button"

@@ -20,18 +20,37 @@ import java.util.List;
  * Discovers Replicate's curated <b>text-to-image</b> models for the Settings "Model" dropdown — the
  * image-gen analogue of {@link services.videogen.ReplicateVideoModelCatalog}. Replicate maintains a
  * {@code text-to-image} collection; {@code GET /v1/collections/text-to-image} returns its models, each an
- * {@code owner/name} slug — exactly what {@code imagegen.replicate.model} stores. The {@code generate_image}
- * tool sends only a prompt (plus optional dimensions), so text-to-image is the compatible set
- * ({@code image-to-image} models need an input image the tool doesn't provide).
+ * {@code owner/name} slug — exactly what {@code imagegen.replicate.model} stores.
  *
- * <p>The cached {@link #textToImageModels()} entry point is what the controller calls; the uncached
+ * <p>JCLAW-700: {@code image-to-image} (Kontext) models live in a different collection and would
+ * otherwise be unselectable, so a curated set is appended (flagged {@code imageToImage=true}) — the
+ * dropdown groups the two by capability. Kontext takes an optional {@code input_image} (JCLAW-696),
+ * so those models serve both modes.
+ *
+ * <p>The cached {@link #availableModels()} entry point is what the controller calls; the uncached
  * {@link #fetch()} instance method takes an injectable client so it's unit-testable against a
  * MockWebServer without touching the process-global cache.
  */
 public final class ReplicateImageModelCatalog {
 
-    /** One curated text-to-image model. {@code slug} is the {@code owner/name} for imagegen.replicate.model. */
-    public record ImageModel(String slug, String name, String description) {}
+    /** One selectable Replicate model. {@code slug} is the {@code owner/name} for
+     *  imagegen.replicate.model. {@code imageToImage} true means it accepts an uploaded reference
+     *  (Kontext / style transfer) — the Settings dropdown groups by this flag (JCLAW-700). */
+    public record ImageModel(String slug, String name, String description, boolean imageToImage) {}
+
+    /**
+     * JCLAW-700: curated image-to-image (Kontext) models. These live in Replicate's image-editing
+     * collection, not the {@code text-to-image} one the dropdown fetches, so they'd otherwise be
+     * unselectable. Kontext accepts an optional {@code input_image}, so each also does plain
+     * text-to-image — selecting one covers both modes. Offered only when a Replicate key is set.
+     */
+    private static final List<ImageModel> KONTEXT_MODELS = List.of(
+            new ImageModel("black-forest-labs/flux-kontext-pro", "flux-kontext-pro",
+                    "Image editing & style transfer (Kontext); also text-to-image.", true),
+            new ImageModel("black-forest-labs/flux-kontext-max", "flux-kontext-max",
+                    "Highest-quality Kontext image editing / style transfer; also text-to-image.", true),
+            new ImageModel("black-forest-labs/flux-kontext-dev", "flux-kontext-dev",
+                    "Open-weight Kontext image editing (non-commercial license).", true));
 
     private static final String DEFAULT_BASE = "https://api.replicate.com/v1";
     private static final String COLLECTION = "text-to-image";
@@ -39,7 +58,7 @@ public final class ReplicateImageModelCatalog {
 
     // Replicate's curated collection changes on the order of days, so a short TTL keeps the Settings
     // dropdown responsive without an outbound call on every page load. Only successful, non-empty
-    // results are cached (see textToImageModels), so a missing-key or transient-error state re-fetches.
+    // results are cached (see availableModels), so a missing-key or transient-error state re-fetches.
     private static final Cache<String, List<ImageModel>> CACHE = Caffeine.newBuilder()
             .expireAfterWrite(Duration.ofMinutes(10))
             .maximumSize(1)
@@ -57,16 +76,22 @@ public final class ReplicateImageModelCatalog {
     }
 
     /**
-     * Cached entry point for the controller. Returns an empty list when no Replicate API key is
-     * configured or on a transport/HTTP error — the dropdown degrades to "no models discovered".
-     * Empties are not cached so the list repopulates once a key is set or the error clears.
+     * Cached entry point for the controller: the discovered text-to-image models plus the curated
+     * image-to-image (Kontext) set, for the Settings dropdown. Returns an empty list when no
+     * Replicate API key is configured — the dropdown degrades to "no models discovered" — since
+     * every model here (Kontext included) runs on Replicate and needs the key. With a key set, the
+     * fetched text-to-image list is cached (empties aren't, so a transient error re-fetches) and
+     * the static Kontext models are always appended.
      */
-    public static List<ImageModel> textToImageModels() {
+    public static List<ImageModel> availableModels() {
+        var apiKey = ConfigService.get("provider.replicate.apiKey");
+        if (apiKey == null || apiKey.isBlank()) return List.of();
         var cached = CACHE.getIfPresent(COLLECTION);
-        if (cached != null) return cached;
-        var fresh = new ReplicateImageModelCatalog().fetch();
-        if (!fresh.isEmpty()) CACHE.put(COLLECTION, fresh);
-        return fresh;
+        var textToImage = cached != null ? cached : new ReplicateImageModelCatalog().fetch();
+        if (cached == null && !textToImage.isEmpty()) CACHE.put(COLLECTION, textToImage);
+        var out = new ArrayList<ImageModel>(textToImage);
+        out.addAll(KONTEXT_MODELS);
+        return out;
     }
 
     /** Uncached fetch + parse of the {@code text-to-image} collection — directly unit-testable. */
@@ -102,7 +127,7 @@ public final class ReplicateImageModelCatalog {
             var owner = asString(m, "owner");
             var name = asString(m, "name");
             if (owner != null && !owner.isBlank() && name != null && !name.isBlank()) {
-                out.add(new ImageModel(owner + "/" + name, name, asString(m, "description")));
+                out.add(new ImageModel(owner + "/" + name, name, asString(m, "description"), false));
             }
         }
         return out;

@@ -56,7 +56,18 @@ class ReplicateImageModelCatalogTest extends UnitTest {
         assertEquals("black-forest-labs/flux-schnell", first.slug());
         assertEquals("flux-schnell", first.name());
         assertEquals("Fast Flux text-to-image", first.description());
+        assertFalse(first.imageToImage(), "JCLAW-700: discovered collection models are text-to-image");
         assertEquals("stability-ai/sdxl", models.get(1).slug());
+    }
+
+    @Test
+    void availableModelsEmptyWithoutApiKey() {
+        // JCLAW-700: every dropdown model (curated Kontext included) runs on Replicate, so with no
+        // API key the list is empty — the key gate returns before any fetch, so the curated Kontext
+        // set is not offered either.
+        ConfigService.delete("provider.replicate.apiKey");
+        assertTrue(ReplicateImageModelCatalog.availableModels().isEmpty(),
+                "no API key → no selectable models (incl. curated Kontext)");
     }
 
     @Test
