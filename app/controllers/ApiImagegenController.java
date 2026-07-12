@@ -9,11 +9,11 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
+import services.UvProbe;
 import services.imagegen.ImageCapabilityProbe;
 import services.imagegen.ImageModelManager;
 import services.imagegen.LocalImageSidecarManager;
 import services.imagegen.ReplicateImageModelCatalog;
-import services.UvProbe;
 
 import java.util.LinkedHashMap;
 

@@ -2,7 +2,6 @@ package agents;
 
 import channels.ChannelStreamingSink;
 import com.google.gson.Gson;
-import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;

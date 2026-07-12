@@ -10,9 +10,9 @@ import play.jobs.OnApplicationStop;
 import services.EventLogger;
 import services.TailscaleFunnel;
 import services.imagegen.LocalImageSidecarManager;
-import services.videogen.LocalVideoSidecarManager;
 import services.search.LuceneIndexer;
 import services.transcription.AsrSidecarManager;
+import services.videogen.LocalVideoSidecarManager;
 import tools.PlaywrightBrowserTool;
 
 import java.util.List;
