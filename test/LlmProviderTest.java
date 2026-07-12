@@ -8,6 +8,7 @@ import llm.LlmTypes.ToolDef;
 import llm.OllamaProvider;
 import llm.OpenAiProvider;
 import llm.OpenRouterProvider;
+import llm.ToolCallChunkMerger;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
@@ -255,11 +256,11 @@ class LlmProviderTest extends UnitTest {
 
     @Test
     void toolCallBuilderProducesToolCallWithAccumulatedArgs() {
-        var b = new LlmProvider.ToolCallBuilder();
-        b.id = "call-1";
-        b.functionName = "web_fetch";
-        b.arguments.append("{\"url\":");
-        b.arguments.append("\"https://x\"}");
+        var b = new ToolCallChunkMerger.ToolCallBuilder();
+        b.id("call-1")
+                .functionName("web_fetch")
+                .appendArguments("{\"url\":")
+                .appendArguments("\"https://x\"}");
         var tc = b.build();
         assertEquals("call-1", tc.id());
         assertEquals("function", tc.type(),
@@ -270,10 +271,10 @@ class LlmProviderTest extends UnitTest {
 
     @Test
     void toolCallBuilderRespectsExplicitType() {
-        var b = new LlmProvider.ToolCallBuilder();
-        b.id = "x";
-        b.type = "custom-type";
-        b.functionName = "fn";
+        var b = new ToolCallChunkMerger.ToolCallBuilder();
+        b.id("x")
+                .type("custom-type")
+                .functionName("fn");
         var tc = b.build();
         assertEquals("custom-type", tc.type());
     }

@@ -229,7 +229,7 @@ class AgentRunnerUsageTest extends UnitTest {
 
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(round1);
-        var round1ReasoningEnd = round1.reasoningEndNanos;
+        var round1ReasoningEnd = round1.reasoningEndNanos();
 
         // Simulate tool execution gap — far longer than the in-round
         // reasoning span, so round-1-anchored timing would massively
@@ -246,7 +246,7 @@ class AgentRunnerUsageTest extends UnitTest {
 
         assertTrue(obj.has("reasoningDurationMs"), "duration field present: " + json);
         var persisted = obj.get("reasoningDurationMs").getAsLong();
-        var roundLocal = (round1ReasoningEnd - round1.reasoningStartNanos) / 1_000_000L;
+        var roundLocal = (round1ReasoningEnd - round1.reasoningStartNanos()) / 1_000_000L;
         assertTrue(persisted >= 20L,
                 "turn-level duration must include the inter-round gap (>= 20ms), got " + persisted);
         assertTrue(persisted > roundLocal + 10L,
@@ -290,12 +290,12 @@ class AgentRunnerUsageTest extends UnitTest {
         // empty-content stamp landing in the same nanosecond.
         acc.appendReasoningText("reasoning");
         acc.noteFirstContentChunk();   // first call records this instant
-        var earlyContentNanos = acc.firstContentNanos;
+        var earlyContentNanos = acc.firstContentNanos();
 
         try { Thread.sleep(5); } catch (InterruptedException _) {}
         acc.noteFirstContentChunk();   // second call MUST be idempotent
 
-        assertEquals(earlyContentNanos, acc.firstContentNanos,
+        assertEquals(earlyContentNanos, acc.firstContentNanos(),
                 "noteFirstContentChunk must record only the first call's instant");
     }
 
