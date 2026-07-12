@@ -11,9 +11,8 @@ import okhttp3.RequestBody;
 import play.Logger;
 import services.AttachmentService;
 import services.ConfigService;
+import services.openaicompat.OpenAiCompatibleClientBase;
 import utils.HttpFactories;
-import utils.HttpKeys;
-import utils.Strings;
 
 import java.io.IOException;
 
@@ -23,6 +22,10 @@ import java.io.IOException;
  * identical wire format — only the base URL + API key differ — so subclasses bind name + default
  * model only, mirroring {@code OpenAiCompatibleTranscriptionClient}.
  *
+ * <p>Credential resolution and HTTP-error → typed-exception mapping live in
+ * {@link OpenAiCompatibleClientBase} (JCLAW-721); this class owns only the {@code /chat/completions}
+ * endpoint and the request/response body shaping.
+ *
  * <p>Configuration:
  * <ul>
  *   <li>{@code provider.{name}.baseUrl} — {@code /chat/completions} is appended.</li>
@@ -31,7 +34,8 @@ import java.io.IOException;
  *       model. Should name a <b>vision-capable</b> model on the chosen provider (JCLAW-214).</li>
  * </ul>
  */
-public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
+public class OpenAiCompatibleImageCaptionClient extends OpenAiCompatibleClientBase
+        implements ImageCaptionService {
 
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String INSTRUCTION =
@@ -39,9 +43,7 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
     /** OpenAI chat-completions message field name (request part + response parse). */
     private static final String CONTENT = "content";
 
-    private final String providerName;
     private final String defaultModel;
-    private final OkHttpClient client;
 
     public OpenAiCompatibleImageCaptionClient(String providerName, String defaultModel) {
         this(providerName, defaultModel, HttpFactories.llmSingleShot());
@@ -49,9 +51,23 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
 
     /** Test seam — inject a MockWebServer-backed client. */
     public OpenAiCompatibleImageCaptionClient(String providerName, String defaultModel, OkHttpClient client) {
-        this.providerName = providerName;
+        super(providerName, client);
         this.defaultModel = defaultModel;
-        this.client = client;
+    }
+
+    @Override
+    protected String operationLabel() {
+        return "captioning";
+    }
+
+    @Override
+    protected RuntimeException newException(String message) {
+        return new CaptionException(message);
+    }
+
+    @Override
+    protected RuntimeException newException(String message, Throwable cause) {
+        return new CaptionException(message, cause);
     }
 
     @Override
@@ -71,43 +87,31 @@ public class OpenAiCompatibleImageCaptionClient implements ImageCaptionService {
      * or on-disk attachment needed.
      */
     public String captionDataUrl(String imageDataUrl) {
-        var baseUrl = ConfigService.get("provider." + providerName + ".baseUrl");
-        var apiKey = ConfigService.get("provider." + providerName + ".apiKey");
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new CaptionException("provider." + providerName + ".baseUrl is not configured");
-        }
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new CaptionException("provider." + providerName + ".apiKey is not configured");
-        }
+        var creds = resolveCredentials();
         var model = ConfigService.get("caption.model");
         if (model == null || model.isBlank()) model = defaultModel;
         if (model == null || model.isBlank()) {
             // No caption.model and no provider default (ollama-local has none — there's no
             // universally-pulled Ollama vision model). Fail fast rather than POST a blank model.
-            throw new CaptionException("%s captioning: no model configured — set caption.model".formatted(providerName));
+            throw newException("%s captioning: no model configured — set caption.model".formatted(providerName));
         }
 
         // Transcode WebP/etc. → PNG so a caption model that can't decode the source format (notably
         // local Ollama, which rejects WebP) gets an image it can load.
         imageDataUrl = CaptionImageNormalizer.toModelSafeDataUrl(imageDataUrl);
 
-        var url = Strings.trimTrailingSlash(baseUrl) + "/chat/completions";
-        var request = new Request.Builder()
-                .url(url)
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
+        var url = creds.baseUrl() + "/chat/completions";
+        var request = bearer(new Request.Builder().url(url), creds.apiKey())
                 .post(RequestBody.create(buildRequestJson(model, imageDataUrl), JSON))
                 .build();
 
         try (var response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                var snippet = Strings.truncate(response.body().string(), 500);
-                throw new CaptionException("%s captioning failed: HTTP %d %s%s".formatted(
-                        providerName, response.code(), response.message(),
-                        snippet.isEmpty() ? "" : (" — " + snippet)));
+                throw httpError(response, response.body().string());
             }
             return parseCaption(response.body().string());
         } catch (IOException e) {
-            throw new CaptionException(providerName + " captioning transport failed: " + e.getMessage(), e);
+            throw transportError(e);
         }
     }
 
