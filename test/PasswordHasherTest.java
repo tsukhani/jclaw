@@ -64,4 +64,36 @@ class PasswordHasherTest extends UnitTest {
         var hash = PasswordHasher.hash("first-password");
         assertFalse(PasswordHasher.verify("second-password", hash));
     }
+
+    // JCLAW-731: the work factor was raised from 150,000 to OWASP-2023's
+    // 600,000. verify() reads the iteration count from the stored string, not
+    // the constant, so a hash written at the old factor must still authenticate.
+    @Test
+    void freshHashUsesRaisedIterationCount() {
+        var stored = PasswordHasher.hash("x");
+        var iterations = Integer.parseInt(stored.split(":")[1]);
+        assertEquals(600_000, iterations,
+                "new hashes must use the OWASP-2023 PBKDF2-HMAC-SHA256 work factor");
+    }
+
+    @Test
+    void verifyAcceptsLegacyLowerIterationHash() throws Exception {
+        // Build a hash at the pre-JCLAW-731 factor (150k) using the same scheme
+        // PasswordHasher stores (pbkdf2-sha256:<iters>:<b64 salt>:<b64 hash>,
+        // 256-bit, unpadded base64), then prove the current code verifies it.
+        var pw = "legacy-admin-secret";
+        var salt = new byte[16];
+        new java.security.SecureRandom().nextBytes(salt);
+        var legacyIterations = 150_000;
+        var spec = new javax.crypto.spec.PBEKeySpec(pw.toCharArray(), salt, legacyIterations, 256);
+        var skf = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+        var hash = skf.generateSecret(spec).getEncoded();
+        var b64 = java.util.Base64.getEncoder().withoutPadding();
+        var stored = "pbkdf2-sha256:%d:%s:%s".formatted(
+                legacyIterations, b64.encodeToString(salt), b64.encodeToString(hash));
+
+        assertTrue(PasswordHasher.verify(pw, stored),
+                "a legacy 150k-iteration hash must still verify after the bump");
+        assertFalse(PasswordHasher.verify("wrong-password", stored));
+    }
 }

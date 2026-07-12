@@ -14,9 +14,13 @@ import java.util.Base64;
  * into a single {@code ConfigService} value without extra columns:
  * {@code pbkdf2-sha256:<iterations>:<base64-salt>:<base64-hash>}.
  *
- * <p>Iteration count is pinned at {@link #ITERATIONS}; bumping it requires a
- * one-time re-hash on next login (not yet implemented — single-admin scope
- * means manual password reset works as the upgrade path).
+ * <p>Iteration count is pinned at {@link #ITERATIONS} — 600,000, the OWASP-2023
+ * work factor for PBKDF2-HMAC-SHA256 (JCLAW-731 raised it from 150,000).
+ * {@link #verify} reads the count from the stored string rather than the
+ * constant, so hashes written at any earlier factor still authenticate — no
+ * forced reset. Transparent rehash-on-login (upgrade an old hash on the next
+ * successful verify) is a one-line change at the caller and remains unwired;
+ * within the single-admin model a manual password reset is the upgrade path.
  *
  * <p>Why PBKDF2 instead of BCrypt: no new dependency needed, JDK ships the
  * algorithm, and the threat model is "single-user self-hosted app" — the
@@ -28,7 +32,7 @@ public final class PasswordHasher {
     private PasswordHasher() {}
 
     private static final String ALGORITHM = "PBKDF2WithHmacSHA256";
-    private static final int ITERATIONS = 150_000;
+    private static final int ITERATIONS = 600_000;
     private static final int SALT_BYTES = 16;
     private static final int HASH_BITS = 256;
     private static final String PREFIX = "pbkdf2-sha256";

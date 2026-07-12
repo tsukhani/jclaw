@@ -251,6 +251,86 @@ class SsrfGuardTest extends UnitTest {
                 () -> SsrfGuard.assertUrlSafe("http://2130706433/"));
     }
 
+    // ── JCLAW-731: parser-differential hardening + literal-IP pinning ──
+
+    @Test
+    void assertUrlSafeRejectsEmbeddedCredentials() {
+        // Userinfo blurs which token the host is across Java's URI parser and
+        // Chromium's WHATWG parser. Reject it even when the parsed host is
+        // itself public — LLM browse URLs never carry credentials.
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://user:pass@example.com/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://attacker@example.com/"));
+        assertFalse(SsrfGuard.isUrlSafe("http://user:pass@example.com/"));
+    }
+
+    @Test
+    void assertUrlSafeRejectsBackslashAuthority() {
+        // Browsers remap '\' to '/', so the authority can end earlier than
+        // java.net.URI thinks: http://internal.example\@evil/ connects to
+        // internal.example in Chromium. Reject any backslash outright.
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://good.example\\@169.254.169.254/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://example.com\\..evil.com/"));
+    }
+
+    @Test
+    void assertUrlSafeRejectsControlAndSpaceChars() {
+        // Browsers strip tab/CR/LF mid-URL before re-parsing, moving the
+        // authority boundary. Reject raw control chars and spaces.
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://exa\tmple.com/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://exa\nmple.com/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://exam ple.com/"));
+    }
+
+    @Test
+    void pinnedUrlRewritesHostToValidatedLiteralIp() throws Exception {
+        // The pin resolves the host once, validates the IP, and hands back a
+        // URL whose authority IS that literal IP — so the string validated is
+        // byte-for-byte the string fetched (no hostname left to re-resolve).
+        var pinned = SsrfGuard.pinnedUrl("https://example.com/path?q=1#frag");
+        var pinnedHost = URI.create(pinned).getHost();
+        assertNotNull(pinnedHost, "pinned URL must have a host");
+        assertFalse(pinnedHost.contains("example.com"),
+                "pinned host must be a literal IP, not the hostname: " + pinned);
+        // The literal round-trips through InetAddress and is itself safe.
+        assertFalse(SsrfGuard.isUnsafe(InetAddress.getByName(
+                pinnedHost.replace("[", "").replace("]", ""))));
+        assertTrue(SsrfGuard.isUrlSafe(pinned),
+                "the pinned literal-IP URL must itself pass the guard");
+        // Path, query, and fragment survive the rewrite.
+        assertTrue(pinned.endsWith("/path?q=1#frag"),
+                "pin must preserve path/query/fragment: " + pinned);
+    }
+
+    @Test
+    void pinnedUrlLeavesApprovedLiteralIpUnchanged() {
+        // A public literal IP is already pinned — nothing to resolve, returned
+        // verbatim so port and path are untouched.
+        assertEquals("http://8.8.8.8:8080/x?y=1",
+                SsrfGuard.pinnedUrl("http://8.8.8.8:8080/x?y=1"));
+    }
+
+    @Test
+    void pinnedUrlRejectsUnsafeAndDifferentialUrls() {
+        // Pinning must fail closed on everything assertUrlSafe rejects.
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.pinnedUrl("http://169.254.169.254/latest/meta-data/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.pinnedUrl("http://127.0.0.1/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.pinnedUrl("http://localhost/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.pinnedUrl("http://user@example.com/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.pinnedUrl("file:///etc/passwd"));
+    }
+
     @Test
     void ipv4OctalPrefixDoesNotCollideWithLoopback() throws Exception {
         // Pin: modern JDKs do NOT interpret leading-zero octets as octal per
