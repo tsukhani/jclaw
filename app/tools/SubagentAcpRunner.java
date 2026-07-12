@@ -593,7 +593,8 @@ final class SubagentAcpRunner {
      *  JSON frame (when the line was JSON) as arguments; no result payload. */
     private static AgentRunner.ToolCallEvent toToolCallEvent(HarnessEvent ev) {
         var arguments = ev.raw() == null ? "" : ev.raw().toString();
-        return new AgentRunner.ToolCallEvent(null, ev.text(), "harness", arguments, "", null, null);
+        return new AgentRunner.ToolCallEvent(null, ev.text(), "harness", arguments, "", null, null,
+                java.util.List.of());
     }
 
     /**

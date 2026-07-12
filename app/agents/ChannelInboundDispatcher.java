@@ -225,7 +225,12 @@ final class ChannelInboundDispatcher {
                 sink::update,            // onToken — live preview edits
                 _ -> {},                 // onReasoning — not surfaced on Telegram
                 _ -> {},                 // onStatus — not surfaced on Telegram
-                tc -> sink.toolProgress(tc.name()),  // onToolCall — Slack off-thread draft preview (JCLAW-346); default no-op elsewhere
+                tc -> {                  // onToolCall — Slack off-thread draft preview (JCLAW-346); Telegram out-of-band media
+                    sink.toolProgress(tc.name());
+                    if (!tc.generatedAttachmentUuids().isEmpty()) {
+                        sink.collectGeneratedAttachments(tc.generatedAttachmentUuids());
+                    }
+                },
                 sink::seal,              // onComplete — final edit / planner fallback
                 sink::errorFallback,     // onError — delete placeholder + send error
                 sink::cancel);           // onCancel — quiesce typing heartbeat on /stop

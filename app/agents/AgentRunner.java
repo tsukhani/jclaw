@@ -137,7 +137,11 @@ public class AgentRunner {
         // JCLAW-228/562: JSON array of tool-produced attachments (generate_image's image,
         // diarize_audio's voice clips) so the live SSE tool_call frame can render them inline;
         // null for every ordinary tool call.
-        String generatedAttachmentsJson
+        String generatedAttachmentsJson,
+        // uuids of this call's persisted generated attachments. The web transport renders them
+        // from generatedAttachmentsJson above; external channels (Telegram) that deliver out-of-
+        // band resolve the persisted files by uuid and upload them. Empty for ordinary calls.
+        List<String> generatedAttachmentUuids
     ) {}
 
     /**

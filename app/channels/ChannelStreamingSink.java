@@ -39,4 +39,16 @@ public interface ChannelStreamingSink {
     default void toolProgress(String toolName) {
         // no-op by default
     }
+
+    /** Optional: record the uuids of a completed tool call's persisted generated
+     *  attachments (generate_image's image, diarize_audio's voice clips, a
+     *  finished generate_video clip) so a channel that delivers media out-of-band
+     *  can upload them at {@link #seal}. Fires once per tool call that produced
+     *  attachments; the list is this call's uuids only. Default no-op — the web
+     *  transport renders these inline from the SSE frame, and Slack has no native
+     *  file-upload send, so both ignore it; {@link TelegramStreamingSink}
+     *  overrides it to upload the files as native photo/voice/video messages. */
+    default void collectGeneratedAttachments(java.util.List<String> attachmentUuids) {
+        // no-op by default
+    }
 }

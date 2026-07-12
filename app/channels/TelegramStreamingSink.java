@@ -2,6 +2,7 @@ package channels;
 
 import models.Agent;
 import models.Conversation;
+import models.MessageAttachment;
 import models.TelegramBinding;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -11,12 +12,17 @@ import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import play.Play;
+import services.AgentService;
+import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
 import utils.VirtualThreads;
 
+import java.io.File;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -189,6 +195,19 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * is a no-op when null.
      */
     private final Long conversationId;
+
+    /**
+     * Uuids of the tool-produced generated attachments seen this turn (fed by
+     * {@link #collectGeneratedAttachments} from the runner's per-tool-call
+     * callback). Delivered at {@link #seal} as native Telegram media, out-of-
+     * band from the reply text — the generate-image/-video/diarize tools tell the
+     * model NOT to link the file in its prose (a fabricated URL would render as a
+     * broken link on the web transport), so the outbound planner never sees a
+     * workspace-file link to send. Concurrent list because
+     * {@code collectGeneratedAttachments} runs on the LLM streaming thread while
+     * {@code seal} may run on the flush scheduler thread.
+     */
+    private final List<String> generatedAttachmentUuids = new CopyOnWriteArrayList<>();
 
     // Why: flush()/seal()/update() run on virtual threads (telegram-stream-flush
     // / telegram-typing); under JEP-444 a synchronized block pins the carrier,
@@ -407,7 +426,29 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         // can't race past our HTML final edit.
         awaitInFlightFlush();
         if (finalResponse == null) finalResponse = "";
+        try {
+            sealTextDelivery(finalResponse);
+        } finally {
+            // Tool-generated media (image / voice note / finished video) rides
+            // out-of-band as native Telegram uploads once the reply text has
+            // landed — independent of which text branch ran, and in a finally so
+            // a generated image still reaches the user even when the text
+            // edit/send failed. No-op when the turn produced no attachments.
+            deliverGeneratedAttachments();
+            clearStreamCheckpoint();
+            ackSuccess();
+        }
+    }
 
+    /**
+     * The reply-text half of {@link #seal}: either one HTML edit of the live
+     * placeholder (happy path) or a delete-and-replan through
+     * {@link TelegramOutboundPlanner} when the response needs media/oversize
+     * handling. Extracted so {@code seal} runs the shared checkpoint-clear, ack,
+     * and out-of-band generated-media delivery in a single finally regardless of
+     * which branch here returned.
+     */
+    private void sealTextDelivery(String finalResponse) {
         // If we never got to send a placeholder (no tokens, or instant cap
         // overflow) OR the final response requires the planner (images,
         // workspace files, oversize), fall through to the planner's
@@ -427,8 +468,6 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
                     replyToMessageId, messageThreadId)) {
                 notifyDeliveryFailure();
             }
-            clearStreamCheckpoint();
-            ackSuccess();
             return;
         }
 
@@ -445,8 +484,6 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
                     replyToMessageId, messageThreadId)) {
                 notifyDeliveryFailure();
             }
-            clearStreamCheckpoint();
-            ackSuccess();
             return;
         }
         try {
@@ -465,9 +502,69 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
                                 + e.getMessage());
             }
         }
-        clearStreamCheckpoint();
-        ackSuccess();
     }
+
+    @Override
+    public void collectGeneratedAttachments(List<String> attachmentUuids) {
+        generatedAttachmentUuids.addAll(attachmentUuids);
+    }
+
+    /**
+     * Upload this turn's tool-generated attachments as native Telegram media,
+     * routed by extension exactly the way {@link TelegramOutboundPlanner#classify}
+     * routes text-linked workspace files (image → sendPhoto, ogg → sendVoice,
+     * mp4 → sendVideo, …). Each file is resolved to disk inside a short JPA
+     * transaction; the Bot API upload runs outside it so no JDBC connection is
+     * held across the network call (the project's no-HTTP-inside-Tx rule). A
+     * missing row or a not-yet-written file — e.g. an async {@code generate_video}
+     * placeholder whose job is still running — is skipped, never fatal, since the
+     * reply text has already been delivered.
+     */
+    private void deliverGeneratedAttachments() {
+        if (generatedAttachmentUuids.isEmpty()) return;
+        Integer threadId = TelegramSendPolicy.sendThreadIdForSink(messageThreadId);
+        var channel = TelegramChannel.forToken(botToken);
+        for (var uuid : generatedAttachmentUuids) {
+            try {
+                var media = Tx.run(() -> resolveGeneratedMedia(uuid));
+                if (media != null) sendGeneratedMedia(channel, media, threadId);
+            } catch (Exception e) {
+                EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
+                        "Generated media delivery failed for %s: %s".formatted(uuid, e.getMessage()));
+            }
+        }
+    }
+
+    /**
+     * Resolve a persisted generated attachment to a sendable on-disk file, or
+     * null (skip) when the row is gone, isn't a generated attachment, or its
+     * bytes were never written (a reserved video placeholder). Runs inside a JPA
+     * transaction so the {@code message.conversation.agent} chain that
+     * {@link services.AttachmentService#workspaceRelativePath} walks is loaded.
+     */
+    private GeneratedMedia resolveGeneratedMedia(String uuid) {
+        var att = MessageAttachment.findByUuid(uuid);
+        if (att == null || !att.generated) return null;
+        var rel = AttachmentService.workspaceRelativePath(att);
+        var file = AgentService.acquireWorkspacePath(agent.name, rel).toFile();
+        if (!file.exists() || !file.isFile() || file.length() == 0) return null;
+        return new GeneratedMedia(file, att.originalFilename);
+    }
+
+    /** Dispatch one resolved generated file to the native send matching its extension. */
+    private void sendGeneratedMedia(TelegramChannel channel, GeneratedMedia media, Integer threadId) {
+        var name = media.displayName();
+        switch (TelegramOutboundPlanner.classify(name)) {
+            case PHOTO -> channel.trySendPhoto(chatId, media.file(), name, null, threadId);
+            case VOICE -> channel.trySendVoice(chatId, media.file(), name, null, threadId);
+            case AUDIO -> channel.trySendAudio(chatId, media.file(), name, null, threadId);
+            case VIDEO -> channel.trySendVideo(chatId, media.file(), name, null, threadId);
+            case DOCUMENT -> channel.trySendDocument(chatId, media.file(), name, null, threadId);
+        }
+    }
+
+    /** A generated attachment resolved to a sendable on-disk file + its display name. */
+    private record GeneratedMedia(File file, String displayName) {}
 
     /** Telegram's "message is not modified" error — a benign no-op, not a
      *  failure. Returned when the new {@code editMessageText} content plus

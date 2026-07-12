@@ -343,7 +343,8 @@ public final class ParallelToolExecutor {
                         tc.function().arguments(),
                         text,
                         structured,
-                        generatedAttachmentsJson(attHolder.get())));
+                        generatedAttachmentsJson(attHolder.get()),
+                        attHolder.get().stream().map(a -> a.uuid).toList()));
             }
         }
     }

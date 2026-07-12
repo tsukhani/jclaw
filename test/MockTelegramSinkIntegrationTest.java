@@ -6,6 +6,11 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
+import services.AttachmentService;
+import services.ConversationService;
+import services.Tx;
+
+import java.util.List;
 
 /**
  * Wire-format integration tests for TelegramStreamingSink using the embedded
@@ -194,6 +199,66 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         assertEquals(1, server.countRequests("sendPhoto"),
                 "planner must dedupe the two references to one sendPhoto; requests="
                         + server.requests());
+    }
+
+    // ============ Out-of-band generated-media delivery (generate_image et al.) ============
+    //
+    // A tool-generated attachment (generate_image's image, diarize_audio's voice
+    // clip, a finished generate_video clip) is persisted out-of-band, and the
+    // generating tool tells the model NOT to link it in prose — a fabricated URL
+    // would render as a broken link on the web transport. So the outbound planner
+    // never sees a workspace-file link and, pre-fix, the media was silently
+    // dropped on Telegram while the web UI still rendered it from the DB/SSE. The
+    // runner now hands the sink the attachment uuids via collectGeneratedAttachments;
+    // seal must resolve each persisted file and upload it as the native media type
+    // its extension implies — independent of the reply text.
+
+    /** A seeded generated attachment: the conversation it lives in + its uuid handle. */
+    record Seed(Long conversationId, String uuid) {}
+
+    /** Persist a generated attachment (DB row + on-disk bytes) on a fresh assistant turn. */
+    private Seed seedGeneratedAttachment(byte[] bytes, String mime, String displayName) {
+        return Tx.run(() -> {
+            var conv = ConversationService.findOrCreate(agent, "telegram", CHAT_ID);
+            var msg = ConversationService.appendAssistantMessage(conv, null, "[]");
+            var att = AttachmentService.persistGeneratedAttachment(agent, msg, bytes, mime, "{}", displayName);
+            return new Seed(conv.id, att.uuid);
+        });
+    }
+
+    @Test
+    void generatedImageIsUploadedAsPhotoAtSeal() {
+        var seed = seedGeneratedAttachment(new byte[]{(byte) 0x89, 'P', 'N', 'G'}, "image/png", "sunrise.png");
+
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, seed.conversationId(), "private");
+        sink.collectGeneratedAttachments(List.of(seed.uuid()));
+        sink.seal("There you go — a daytime view.");
+
+        assertEquals(1, server.countRequests("sendPhoto"),
+                "the out-of-band generated image must be uploaded as a Telegram photo; requests="
+                        + server.requests());
+    }
+
+    @Test
+    void generatedVoiceClipRoutesToSendVoiceNotPhoto() {
+        var seed = seedGeneratedAttachment(new byte[]{'O', 'g', 'g', 'S'}, "audio/ogg", "speaker-1.ogg");
+
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, seed.conversationId(), "private");
+        sink.collectGeneratedAttachments(List.of(seed.uuid()));
+        sink.seal("Here are the separated speakers.");
+
+        assertEquals(1, server.countRequests("sendVoice"),
+                "a generated .ogg clip must route to sendVoice by extension; requests=" + server.requests());
+        assertEquals(0, server.countRequests("sendPhoto"), "a voice clip must not go out as a photo");
+    }
+
+    @Test
+    void turnWithoutGeneratedMediaSendsNoPhoto() {
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 77L, "private");
+        sink.seal("Just a text reply.");
+
+        assertEquals(0, server.countRequests("sendPhoto"),
+                "a turn that produced no generated attachment must not upload any media");
     }
 
     // ==================== Gap 7: delivery-failure notifier (JCLAW-106) ====================
