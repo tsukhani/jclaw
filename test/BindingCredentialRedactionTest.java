@@ -137,6 +137,21 @@ class BindingCredentialRedactionTest extends UnitTest {
         assertNull(effectiveWebhookUrl(polling));
     }
 
+    @Test
+    void gsonDoesNotSerializeCredentialFields() {
+        // JCLAW-730 follow-up: the app's primary serializer is Gson, which
+        // ignores @JsonIgnore — so GsonHolder now honors it via an
+        // ExclusionStrategy. A credential value must never appear in the output.
+        var t = new TelegramBinding();
+        t.botToken = "SECRET-bot-token-value";
+        t.webhookSecret = "SECRET-webhook-value";
+        var json = utils.GsonHolder.INSTANCE.toJson(t);
+        assertFalse(json.contains("SECRET-bot-token-value"),
+                "Gson must not serialize botToken in the clear");
+        assertFalse(json.contains("SECRET-webhook-value"),
+                "Gson must not serialize webhookSecret in the clear");
+    }
+
     private static String effectiveWebhookUrl(TelegramBinding b) throws Exception {
         var view = Class.forName("controllers.ApiTelegramBindingsController$BindingView");
         Method m = view.getDeclaredMethod("effectiveWebhookUrl", TelegramBinding.class);

@@ -71,6 +71,22 @@ public final class PasswordHasher {
         }
     }
 
+    /** Whether {@code stored} was written at a weaker work factor than the
+     *  current {@link #ITERATIONS} and should be transparently re-hashed on
+     *  the next successful login. False for a blank or malformed hash — there
+     *  is nothing safe to upgrade. */
+    public static boolean needsRehash(String stored) {
+        if (stored == null) return false;
+        var parts = stored.split(":");
+        if (parts.length != 4 || !PREFIX.equals(parts[0])) return false;
+        try {
+            return Integer.parseInt(parts[1]) < ITERATIONS;
+        }
+        catch (NumberFormatException _) {
+            return false;
+        }
+    }
+
     private static byte[] pbkdf2(char[] password, byte[] salt, int iterations, int keyBits) {
         try {
             var spec = new PBEKeySpec(password, salt, iterations, keyBits);

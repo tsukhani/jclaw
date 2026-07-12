@@ -96,4 +96,20 @@ class PasswordHasherTest extends UnitTest {
                 "a legacy 150k-iteration hash must still verify after the bump");
         assertFalse(PasswordHasher.verify("wrong-password", stored));
     }
+
+    @Test
+    void needsRehashTrueForLegacyWorkFactor() {
+        // A hash string written at 150k iterations is below the current 600k,
+        // so a successful login should transparently upgrade it (JCLAW-731).
+        assertTrue(PasswordHasher.needsRehash("pbkdf2-sha256:150000:c2FsdA:aGFzaA"));
+    }
+
+    @Test
+    void needsRehashFalseForCurrentAndMalformed() {
+        assertFalse(PasswordHasher.needsRehash(PasswordHasher.hash("pw")),
+                "a freshly written hash is already at the current work factor");
+        assertFalse(PasswordHasher.needsRehash(null));
+        assertFalse(PasswordHasher.needsRehash("not-a-hash"));
+        assertFalse(PasswordHasher.needsRehash("pbkdf2-sha256:notanumber:x:y"));
+    }
 }

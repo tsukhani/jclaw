@@ -345,4 +345,25 @@ class SsrfGuardTest extends UnitTest {
                 "0177.0.0.1 resolved to a loopback — JDK regression, SsrfGuard "
                         + "needs explicit octal handling");
     }
+
+    // --- hostResolverRule: browser DNS pin (JCLAW-731) ---
+
+    @Test
+    void hostResolverRuleEmptyForApprovedLiteralIp() {
+        // A public literal IP passes assertUrlSafe and needs no pin — it IS the IP.
+        assertTrue(SsrfGuard.hostResolverRule("http://1.1.1.1/").isEmpty());
+    }
+
+    @Test
+    void hostResolverRuleThrowsOnUnsafeLiteral() {
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.hostResolverRule("http://127.0.0.1/"));
+    }
+
+    @Test
+    void hostResolverRuleThrowsOnUnsafeHostname() {
+        // localhost resolves to loopback → rejected before any pin is emitted.
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.hostResolverRule("http://localhost:9000/"));
+    }
 }

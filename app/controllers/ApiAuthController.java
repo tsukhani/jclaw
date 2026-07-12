@@ -115,6 +115,19 @@ public class ApiAuthController extends Controller {
                 && PasswordHasher.verify(password, storedHash)) {
             session.put("authenticated", "true");
             session.put("username", username);
+            // JCLAW-731: transparent rehash-on-login. We hold the plaintext and
+            // the verify just succeeded, so upgrade a hash written at an older,
+            // weaker PBKDF2 work factor to the current one. Best-effort — a
+            // ConfigService hiccup must never fail an otherwise-valid login.
+            if (PasswordHasher.needsRehash(storedHash)) {
+                try {
+                    ConfigService.set(PASSWORD_HASH_KEY, PasswordHasher.hash(password));
+                    EventLogger.info("auth", "Upgraded admin password hash to the current work factor");
+                }
+                catch (Exception e) {
+                    EventLogger.warn("auth", "Password-hash upgrade failed (login still succeeds): " + e.getMessage());
+                }
+            }
             EventLogger.info("auth", "Admin login successful");
             renderJSON(gson.toJson(new LoginResponse("ok", username)));
         }

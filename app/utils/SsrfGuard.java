@@ -8,6 +8,7 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -288,6 +289,40 @@ public final class SsrfGuard {
             rebuilt.append('#').append(uri.getRawFragment());
         }
         return rebuilt.toString();
+    }
+
+    /**
+     * Browser-path DNS pin (JCLAW-731). Returns a Chromium
+     * {@code --host-resolver-rules} clause — {@code "MAP <host> <ip>"} — that
+     * forces the browser to connect only to the address this guard validated,
+     * closing the DNS-rebinding TOCTOU between our check and Chromium's own
+     * connect-time resolution. Unlike {@link #pinnedUrl}, the hostname stays in
+     * the URL, so the {@code Host} header and TLS SNI are preserved and
+     * name-based virtual hosts keep working.
+     *
+     * <p>Empty for a literal-IP URL (already pinned) or a URL with no host.
+     * Throws every {@link SecurityException} {@link #assertUrlSafe} does.
+     */
+    public static Optional<String> hostResolverRule(String url) {
+        assertUrlSafe(url);
+        var host = URI.create(url).getHost();
+        if (host == null || isLikelyIpLiteral(host)) {
+            return Optional.empty(); // already a validated literal IP — nothing to pin
+        }
+        InetAddress pinned;
+        try {
+            // assertUrlSafe already walked EVERY resolved address and rejected
+            // the host if any was unsafe; pin to the first.
+            pinned = InetAddress.getAllByName(host)[0];
+        } catch (UnknownHostException e) {
+            throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
+        }
+        if (isUnsafe(pinned)) { // defence in depth: never emit an unsafe pin
+            throw new SecurityException(
+                    "SSRF guard: host %s resolves to blocked address %s"
+                            .formatted(host, pinned.getHostAddress()));
+        }
+        return Optional.of("MAP %s %s".formatted(host, pinned.getHostAddress()));
     }
 
     /**

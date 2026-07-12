@@ -1,5 +1,8 @@
 package utils;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.google.gson.ExclusionStrategy;
+import com.google.gson.FieldAttributes;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.TypeAdapter;
@@ -39,6 +42,24 @@ public final class GsonHolder {
             .disableHtmlEscaping()
             .serializeNulls()
             .registerTypeAdapter(Instant.class, new InstantTypeAdapter())
+            // JCLAW-730: Gson does not honor Jackson's @JsonIgnore, so credential
+            // fields marked @JsonIgnore on the binding models would still serialize
+            // in the clear through this (the app's primary) serializer. Skip them
+            // here too, making redaction safe-by-construction instead of dependent
+            // on hand-written projections. Serialization-only: reading a credential
+            // back from a request body is unaffected. @JsonIgnore is used solely on
+            // those credential fields today, so this cannot over-exclude.
+            .addSerializationExclusionStrategy(new ExclusionStrategy() {
+                @Override
+                public boolean shouldSkipField(FieldAttributes f) {
+                    return f.getAnnotation(JsonIgnore.class) != null;
+                }
+
+                @Override
+                public boolean shouldSkipClass(Class<?> clazz) {
+                    return false;
+                }
+            })
             .create();
 
     private GsonHolder() {}

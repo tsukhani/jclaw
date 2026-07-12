@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -128,10 +129,26 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             return "Browser session closed.";
         }
 
+        // JCLAW-731: for a navigation, pin the browser's DNS to the guard-
+        // validated IP via --host-resolver-rules, so Chromium connects only
+        // where we checked (SNI-safe — the hostname stays in the URL, so the
+        // Host header and TLS SNI are preserved). Applied at launch, this pins
+        // the session's entry host; the route interceptor keeps re-validating
+        // every other request as before. An unsafe URL is rejected here, before
+        // a browser is even spun up.
+        Optional<String> pinRule = Optional.empty();
+        if (ACTION_NAVIGATE.equals(action)) {
+            try {
+                pinRule = SsrfGuard.hostResolverRule(args.get("url").getAsString());
+            } catch (SecurityException e) {
+                return "Error: " + e.getMessage();
+            }
+        }
+
         // Acquire the per-agent lock so parallel tool calls in the same round
         // (e.g. navigate + screenshot dispatched by executeToolsParallel) run
         // serially against the same Page. Playwright's Page is not thread-safe.
-        var session = getOrCreateSession(agent.name);
+        var session = getOrCreateSession(agent.name, pinRule);
         session.lock().lock();
         try {
             var page = session.page();
@@ -256,7 +273,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     // --- Session management ---
 
-    private BrowserSession getOrCreateSession(String agentName) {
+    private BrowserSession getOrCreateSession(String agentName, Optional<String> hostResolverRule) {
         // Use compute() for atomic get-or-create — prevents race between
         // concurrent getOrCreateSession and closeSession on the same key.
         return sessions.compute(agentName, (key, existing) -> {
@@ -265,6 +282,9 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 existing = null;
             }
             if (existing != null) {
+                // Reuse the live session as-is; the DNS pin is a launch-time arg,
+                // so a navigation to a host not covered by the original launch
+                // still relies on the route interceptor (unchanged behaviour).
                 return existing.withLastUsed();
             }
             EventLogger.info("tool", key, null, "Launching headless browser");
@@ -274,8 +294,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             // JCLAW-172: headless is hardcoded — there is no UX where running a
             // visible browser on the host serves an LLM-driven agent. The
             // previous {@code playwright.headless} config key is gone.
-            var browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(true));
+            var launchOptions = new BrowserType.LaunchOptions().setHeadless(true);
+            // JCLAW-731: pin DNS for the navigation's validated host so Chromium
+            // resolves it to exactly the IP the SSRF guard approved.
+            hostResolverRule.ifPresent(rule ->
+                    launchOptions.setArgs(List.of("--host-resolver-rules=" + rule)));
+            var browser = playwright.chromium().launch(launchOptions);
             var page = browser.newPage();
             // JCLAW-116: abort any request (main frame, subresource, or
             // redirect target) whose URL fails the SSRF guard. Catches
