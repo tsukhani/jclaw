@@ -168,7 +168,7 @@ public class ApiConversationsController extends Controller {
         // generated SQL for popular keywords.
         var ftsConvIds = ftsConversationIds(q);
 
-        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 100) : 20;
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, PagedJpqlQuery.MAX_LIMIT) : 20;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
         // Subagent child conversations (parentConversation != null) are
@@ -193,26 +193,20 @@ public class ApiConversationsController extends Controller {
             }
             fullWhere = fullWhere + " AND c.id IN (:fts)";
         }
-        String jpql = "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE "
-                + fullWhere + " " + orderByClause(sort, dir);
-        var jpaQ = JPA.em().createQuery(jpql, Conversation.class);
-        var params = filter.paramList();
-        for (int i = 0; i < params.size(); i++) {
-            jpaQ.setParameter(i + 1, params.get(i));
-        }
-        if (ftsConvIds != null) jpaQ.setParameter("fts", ftsConvIds);
+        // JCLAW-722: WHERE -> bind -> COUNT -> paginate assembled once, so the
+        // COUNT and the SELECT can't drift apart. The COUNT drops the JOIN FETCH
+        // (fetch joins are meaningless on a COUNT) but shares the WHERE + params.
+        var page = PagedJpqlQuery.of(Conversation.class, "Conversation c", "c")
+                .joinFetch("JOIN FETCH c.agent")
+                .where(fullWhere)
+                .positionalParams(filter.paramList())
+                .namedParam("fts", ftsConvIds)
+                .orderBy(orderByClause(sort, dir))
+                .page(effectiveOffset, effectiveLimit)
+                .execute();
+        List<Conversation> convos = page.rows();
 
-        String countJpql = "SELECT COUNT(c) FROM Conversation c WHERE " + fullWhere;
-        var countQ = JPA.em().createQuery(countJpql, Long.class);
-        for (int i = 0; i < params.size(); i++) {
-            countQ.setParameter(i + 1, params.get(i));
-        }
-        if (ftsConvIds != null) countQ.setParameter("fts", ftsConvIds);
-        long total = countQ.getSingleResult();
-        List<Conversation> convos = jpaQ.setFirstResult(effectiveOffset)
-                .setMaxResults(effectiveLimit).getResultList();
-
-        setPaginationHeaders(total);
+        setPaginationHeaders(page.total());
 
         // Bulk-fetch SessionCompaction counts for the page in one GROUP BY pass
         // so conversationToMap doesn't fire a per-row COUNT (N+1, up to 100/call).

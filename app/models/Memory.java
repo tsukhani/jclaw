@@ -123,11 +123,27 @@ public class Memory extends Model {
         var now = Instant.now();
         createdAt = now;
         updatedAt = now;
+        clampImportance();
     }
 
     @PreUpdate
     void onUpdate() {
         updatedAt = Instant.now();
+        clampImportance();
+    }
+
+    /**
+     * JCLAW-733: enforce the [0.0, 1.0] {@link #importance} bound at the persistence
+     * boundary. {@code importance} is a raw public field (Play active-record), so a
+     * direct write — {@code memory.importance = 42.0} from the auto-capture
+     * extractor, a store implementation, or any other writer — would otherwise
+     * persist out of range and skew core-memory ranking. The controller already
+     * 400s an out-of-range API edit; this is the defense-in-depth backstop for
+     * every other writer, applied on both insert and update.
+     */
+    private void clampImportance() {
+        if (importance < 0.0) importance = 0.0;
+        else if (importance > 1.0) importance = 1.0;
     }
 
     // JCLAW-415: index per-agent memories in the Lucene MEMORY scope (mirrors

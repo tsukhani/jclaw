@@ -4,18 +4,10 @@ import channels.ChannelTransport;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
-import play.db.jpa.Model;
 
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -45,7 +37,7 @@ import java.util.List;
 // findById per inbound event, so L2-cache this entity for the same transparent
 // caching Agent and TelegramBinding enjoy.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
-public class SlackBinding extends Model {
+public class SlackBinding extends AgentBoundBinding {
 
     /**
      * Slack bot token ({@code xoxb-...}). Globally unique on Slack's side; we
@@ -70,18 +62,6 @@ public class SlackBinding extends Model {
      */
     @Column(name = "app_token")
     public String appToken;
-
-    /**
-     * Agent uniqueness is a privacy constraint, not a modelling choice: agent
-     * memory is scoped by agentId only, so binding one agent to multiple bots
-     * (and thus multiple Slack workspaces/owners) would share memories across
-     * them. Enforced here at the schema, in
-     * {@link controllers.ApiSlackBindingsController}, and in the frontend.
-     */
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "agent_id", nullable = false, unique = true)
-    @OnDelete(action = OnDeleteAction.CASCADE)
-    public Agent agent;
 
     /**
      * Slack user id ({@code U...}) of the owner allowed to DM this bot.
@@ -122,9 +102,6 @@ public class SlackBinding extends Model {
     @Column(name = "team_id")
     public String teamId;
 
-    @Column(nullable = false)
-    public boolean enabled = true;
-
     /**
      * Per-binding override for the reply-targeting policy (JCLAW-354 reply-thread
      * modes). NULL falls back to the channel-wide default, mirroring
@@ -132,24 +109,6 @@ public class SlackBinding extends Model {
      */
     @Column(name = "reply_to_mode")
     public String replyToMode;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     public static SlackBinding findByBotToken(String botToken) {
         return SlackBinding.find("botToken", botToken).first();
@@ -160,24 +119,14 @@ public class SlackBinding extends Model {
     }
 
     /**
-     * Resolve a Slack binding by walking the {@link Agent#parentAgent} chain —
-     * the calling agent's own binding when present, else the nearest ancestor's,
-     * else null. Mirrors {@link TelegramBinding#findByAgentOrAncestor}: subagents
-     * have no binding of their own, so a child's outbound
-     * {@code message(channel="slack", ...)} reaches the bot its root ancestor
-     * owns. Bounded 64-hop walk guards against a cyclic {@code parent_agent_id}.
-     * CRUD callers (admin add/remove) must use {@link #findByAgent} — exact row
-     * identity, no inherited match.
+     * Resolve a Slack binding by walking the {@link Agent#parentAgent} chain
+     * (JCLAW-723: shared logic in {@link AgentBoundBinding#findByAgentOrAncestor}).
+     * Delivery-side inheritance so a subagent's outbound
+     * {@code message(channel="slack", ...)} reaches the bot its root ancestor owns.
+     * CRUD callers must keep using {@link #findByAgent} (exact row identity).
      */
     public static SlackBinding findByAgentOrAncestor(Agent agent) {
-        var cur = agent;
-        int hops = 0;
-        while (cur != null && hops++ < 64) {
-            var binding = findByAgent(cur);
-            if (binding != null) return binding;
-            cur = cur.parentAgent;
-        }
-        return null;
+        return findByAgentOrAncestor(agent, SlackBinding::findByAgent);
     }
 
     public static List<SlackBinding> findAllEnabled() {

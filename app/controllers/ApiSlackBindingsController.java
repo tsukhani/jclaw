@@ -12,9 +12,7 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.SlackBinding;
-import play.mvc.Controller;
 import play.mvc.With;
-import services.AgentService;
 import services.EventLogger;
 import utils.ApiResponses;
 
@@ -40,7 +38,7 @@ import static utils.GsonHolder.INSTANCE;
  * reconciliation arrives with JCLAW-351.
  */
 @With(AuthCheck.class)
-public class ApiSlackBindingsController extends Controller {
+public class ApiSlackBindingsController extends ApiBindingController {
 
     private static final Gson gson = INSTANCE;
 
@@ -145,19 +143,13 @@ public class ApiSlackBindingsController extends Controller {
             throw new AssertionError("unreachable: error() throws");
         }
 
-        Agent agent = AgentService.findById(agentId);
-        if (agent == null || !agent.enabled) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
-            throw new AssertionError("unreachable: error() throws");
-        }
+        Agent agent = requireEnabledAgent(agentId);
         if (SlackBinding.findByBotToken(botToken) != null) {
             ApiResponses.error(409, ApiResponses.CONFLICT, "A binding with this bot token already exists");
         }
-        // Agent uniqueness mirrors Telegram: agent memory is scoped per agent, so
-        // binding one agent to a second Slack workspace would share memory.
-        if (SlackBinding.findByAgent(agent) != null) {
-            ApiResponses.error(409, ApiResponses.CONFLICT, "Agent '%s' is already bound to another Slack binding".formatted(agent.name));
-        }
+        // JCLAW-723: 1:1 agent<->binding privacy invariant — a second binding on
+        // one agent would share its memory across Slack workspaces/owners.
+        rejectAgentAlreadyBound(agent, SlackBinding::findByAgent, "Slack", ApiResponses.CONFLICT);
 
         var binding = new SlackBinding();
         binding.botToken = botToken;
@@ -196,7 +188,7 @@ public class ApiSlackBindingsController extends Controller {
         if (body == null) badRequest();
 
         boolean tokenChanged = applyBotTokenUpdate(binding, body);
-        applyAgentUpdate(binding, body);
+        applyAgentUpdate(binding, body, SlackBinding::findByAgent, "Slack", ApiResponses.CONFLICT);
         applyOptionalFieldUpdates(binding, body);
         requireOwnerForMain(binding.agent, binding.ownerUserId);
         if (tokenChanged) cacheIdentity(binding);
@@ -273,22 +265,6 @@ public class ApiSlackBindingsController extends Controller {
         return true;
     }
 
-    @SuppressWarnings("java:S2259")
-    private static void applyAgentUpdate(SlackBinding binding, JsonObject body) {
-        if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
-        Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
-        if (agent == null || !agent.enabled) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
-        }
-        if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
-            var other = SlackBinding.findByAgent(agent);
-            if (other != null && !other.id.equals(binding.id)) {
-                ApiResponses.error(409, ApiResponses.CONFLICT, "Agent '%s' is already bound to another Slack binding".formatted(agent.name));
-            }
-        }
-        binding.agent = agent;
-    }
-
     private static void applyOptionalFieldUpdates(SlackBinding binding, JsonObject body) {
         if (body.has(KEY_SIGNING_SECRET)) {
             String v = readOptionalString(body, KEY_SIGNING_SECRET);
@@ -312,9 +288,4 @@ public class ApiSlackBindingsController extends Controller {
         }
     }
 
-    // ── shared helpers ──
-
-    private static String readOptionalString(JsonObject body, String key) {
-        return JsonBodyReader.optString(body, key, true);
-    }
 }

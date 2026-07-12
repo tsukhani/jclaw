@@ -13,9 +13,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jobs.TelegramCommandsRegistrationJob;
 import models.Agent;
 import models.TelegramBinding;
-import play.mvc.Controller;
 import play.mvc.With;
-import services.AgentService;
 import services.EventLogger;
 import utils.ApiResponses;
 
@@ -37,7 +35,7 @@ import static utils.GsonHolder.INSTANCE;
  * process restart.
  */
 @With(AuthCheck.class)
-public class ApiTelegramBindingsController extends Controller {
+public class ApiTelegramBindingsController extends ApiBindingController {
 
     private static final Gson gson = INSTANCE;
 
@@ -126,20 +124,13 @@ public class ApiTelegramBindingsController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "telegramUserId must be numeric");
         }
 
-        Agent agent = AgentService.findById(agentId);
-        if (agent == null || !agent.enabled) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
-            throw new AssertionError("unreachable: error() throws");
-        }
+        Agent agent = requireEnabledAgent(agentId);
         if (TelegramBinding.findByBotToken(botToken) != null) {
             ApiResponses.error(409, "bot_token_conflict", "A binding with this bot token already exists");
         }
-        // Agent uniqueness: planned agent memory is scoped per agent, so
-        // re-binding an agent to a second Telegram user would share memory
-        // across those users. Reject before the unique constraint fires.
-        if (TelegramBinding.findByAgent(agent) != null) {
-            ApiResponses.error(409, "agent_already_bound", "Agent '%s' is already bound to another Telegram binding".formatted(agent.name));
-        }
+        // JCLAW-723: 1:1 agent<->binding privacy invariant — agent memory is
+        // scoped per agent, so a second binding would share memory across users.
+        rejectAgentAlreadyBound(agent, TelegramBinding::findByAgent, "Telegram", "agent_already_bound");
 
         var binding = new TelegramBinding();
         binding.botToken = botToken;
@@ -174,7 +165,7 @@ public class ApiTelegramBindingsController extends Controller {
         if (body == null) badRequest();
 
         applyBotTokenUpdate(binding, body);
-        applyAgentUpdate(binding, body);
+        applyAgentUpdate(binding, body, TelegramBinding::findByAgent, "Telegram", "agent_already_bound");
         applyTelegramUserIdUpdate(binding, body);
         applyOptionalFieldUpdates(binding, body);
         ensureWebhookSecret(binding);
@@ -198,22 +189,6 @@ public class ApiTelegramBindingsController extends Controller {
             ApiResponses.error(409, "bot_token_conflict", "A binding with this bot token already exists");
         }
         binding.botToken = newToken;
-    }
-
-    @SuppressWarnings("java:S2259")
-    private static void applyAgentUpdate(TelegramBinding binding, JsonObject body) {
-        if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
-        Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
-        if (agent == null || !agent.enabled) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
-        }
-        if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
-            var other = TelegramBinding.findByAgent(agent);
-            if (other != null && !other.id.equals(binding.id)) {
-                ApiResponses.error(409, "agent_already_bound", "Agent '%s' is already bound to another Telegram binding".formatted(agent.name));
-            }
-        }
-        binding.agent = agent;
     }
 
     @SuppressWarnings("java:S2259")
@@ -367,11 +342,5 @@ public class ApiTelegramBindingsController extends Controller {
         TelegramWebhookRegistrar.onBindingDeleted(botToken, transport);
         TelegramPollingRunner.reconcile();
         ApiResponses.ok();
-    }
-
-    // ── helpers ──
-
-    private static String readOptionalString(JsonObject body, String key) {
-        return JsonBodyReader.optString(body, key, true);
     }
 }

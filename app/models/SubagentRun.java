@@ -47,6 +47,28 @@ public class SubagentRun extends Model {
 
     public enum Status { RUNNING, COMPLETED, FAILED, KILLED, TIMEOUT }
 
+    /**
+     * JCLAW-733: guard the run lifecycle. A row starts {@link Status#RUNNING}
+     * (constructor default) and settles exactly once into a terminal status
+     * (COMPLETED / FAILED / KILLED / TIMEOUT); a terminal row never transitions
+     * again. Sets {@link #status} to {@code next} when legal, otherwise throws
+     * {@link IllegalStateException} — so a double-settle (e.g. a late
+     * {@code COMPLETED} racing a {@code KILLED}) fails fast instead of silently
+     * overwriting the recorded outcome. A same-state assignment is an allowed
+     * no-op. Does not persist — callers {@code save()} as before.
+     */
+    public void transitionTo(Status next) {
+        if (next == null) {
+            throw new IllegalArgumentException("next status must not be null");
+        }
+        // Legal iff no-op, or leaving the sole non-terminal state RUNNING.
+        if (next != status && status != Status.RUNNING) {
+            throw new IllegalStateException(
+                    "Illegal subagent-run status transition: " + status + " -> " + next);
+        }
+        status = next;
+    }
+
     @ManyToOne(optional = false)
     @JoinColumn(name = "parent_agent_id", nullable = false)
     @OnDelete(action = OnDeleteAction.CASCADE)
