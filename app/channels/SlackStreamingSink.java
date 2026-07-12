@@ -1,7 +1,10 @@
 package channels;
 
+import services.AttachmentService;
 import services.EventLogger;
+import services.Tx;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -57,6 +60,8 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
         String postMessage(String channelId, String text, String threadTs);
         /** JCLAW-346: edit a message's text (chat.update); return true on success. */
         boolean editMessage(String channelId, String ts, String text);
+        /** Upload a file (the bot token is bound at construction); return true on success. */
+        boolean uploadFile(String peerId, String threadTs, File file, String displayName, String caption);
     }
 
     /** JCLAW-441: a live Slacker bound to one agent's bot token. The streaming +
@@ -71,6 +76,7 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
             @Override public void postFallback(String c, String text, String th) { SlackChannel.sendMessage(c, text, th, botToken); }
             @Override public String postMessage(String c, String text, String th) { return SlackChannel.postText(c, text, th, botToken); }
             @Override public boolean editMessage(String c, String ts, String text) { return SlackChannel.editMessage(c, ts, text, botToken); }
+            @Override public boolean uploadFile(String peer, String th, File f, String name, String cap) { return SlackFileUploader.upload(botToken, peer, th, f, name, cap); }
         };
     }
 
@@ -96,6 +102,11 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     private String lastDraftText;  // dedup consecutive identical edits
     private boolean draftStopped;  // stop the live loop (length cap / post-or-edit failure)
     private final List<String> toolLines = new ArrayList<>();
+    // Uuids of this turn's tool-produced generated attachments (generate_image's image,
+    // diarize voice clips, a finished generate_video clip), fed by the runner's
+    // per-tool-call callback and uploaded at seal. Plain list: the single-threaded
+    // contract means collect + seal run on the one streaming virtual thread.
+    private final List<String> generatedAttachmentUuids = new ArrayList<>();
 
     /** Production: stream as the binding's bot; {@code agentName} drives the
      *  seal-time upload of any files the agent linked in its reply (JCLAW-345). */
@@ -239,6 +250,9 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
         // already streamed above). No-op on the test-injected path (botToken/agentName
         // null) and when the reply has no workspace-file links.
         SlackOutboundPlanner.dispatchFiles(channelId, threadTs, agentName, fullText, botToken);
+        // Upload this turn's tool-generated media, which is delivered out-of-band and so
+        // is NOT linked in the prose above (dispatchFiles never sees it).
+        deliverGeneratedAttachments();
         clearStatus();
     }
 
@@ -275,6 +289,38 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
             sb.append("\n• ").append(line);
         }
         sendOrEditDraft(sb.toString());
+    }
+
+    @Override
+    public void collectGeneratedAttachments(List<String> attachmentUuids) {
+        generatedAttachmentUuids.addAll(attachmentUuids);
+    }
+
+    /**
+     * Upload this turn's tool-generated attachments as Slack files. They are
+     * persisted out-of-band and the generating tool tells the model NOT to link
+     * them in prose (a fabricated URL would render broken on the web transport),
+     * so {@link SlackOutboundPlanner#dispatchFiles} — which only sees text links —
+     * never sends them, while the web UI still renders them from the DB/SSE. Each
+     * file is resolved to disk in a short JPA transaction, then uploaded through
+     * the {@link Slacker} seam on a spawned virtual thread (mirroring
+     * {@code dispatchFiles}) so a large upload never blocks the turn. No-op when
+     * the turn produced none. Slack renders each file by type natively, so there's
+     * no per-kind routing as on Telegram.
+     */
+    private void deliverGeneratedAttachments() {
+        if (generatedAttachmentUuids.isEmpty()) return;
+        var files = new ArrayList<AttachmentService.ResolvedGeneratedFile>();
+        for (var uuid : generatedAttachmentUuids) {
+            var media = Tx.run(() -> AttachmentService.resolveGeneratedForSend(uuid));
+            if (media != null) files.add(media);
+        }
+        if (files.isEmpty()) return;
+        Thread.ofVirtual().name("slack-upload").start(() -> {
+            for (var m : files) {
+                slacker.uploadFile(channelId, threadTs, m.file(), m.displayName(), null);
+            }
+        });
     }
 
     private void clearStatus() {

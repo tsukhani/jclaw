@@ -7,6 +7,7 @@ import play.Logger;
 import utils.TikaHolder;
 import utils.WorkspacePathGuard;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -355,6 +356,26 @@ public final class AttachmentService {
     public static String workspaceRelativePath(MessageAttachment att) {
         var agentName = att.message.conversation.agent.name;
         return att.storagePath.substring(agentName.length() + 1);
+    }
+
+    /** A generated attachment resolved to a sendable on-disk file + the display name a
+     *  channel should title the upload with. */
+    public record ResolvedGeneratedFile(File file, String displayName) {}
+
+    /**
+     * Resolve a persisted generated attachment to a sendable on-disk file for
+     * out-of-band channel delivery (the Telegram / Slack upload paths), or
+     * {@code null} to skip: no such row, not a generated attachment, or its bytes
+     * were never written — e.g. a reserved {@code generate_video} placeholder whose
+     * job is still running. Caller must be inside a JPA transaction, since this walks
+     * {@code message.conversation.agent} to locate the workspace.
+     */
+    public static ResolvedGeneratedFile resolveGeneratedForSend(String uuid) {
+        var att = MessageAttachment.findByUuid(uuid);
+        if (att == null || !att.generated) return null;
+        var file = resolveOnDisk(att).toFile();
+        if (!file.exists() || !file.isFile() || file.length() == 0) return null;
+        return new ResolvedGeneratedFile(file, att.originalFilename);
     }
 
     /**
