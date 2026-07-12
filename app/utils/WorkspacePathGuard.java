@@ -39,18 +39,19 @@ public final class WorkspacePathGuard {
      * <ol>
      *   <li><b>Lexical</b>: collapse {@code ..} via {@code normalize()} and
      *       verify the result starts with {@code root}.</li>
-     *   <li><b>Canonical</b>: realpath the deepest existing ancestor of the
-     *       target (handles writes whose target doesn't exist yet), append the
-     *       missing suffix, and verify the resulting absolute path is still
-     *       inside the canonical root. Catches symlink escapes — a symlink
-     *       inside the root that points to {@code /etc} would pass step 1 but
-     *       fail step 2.</li>
+     *   <li><b>Canonical</b>: realpath the deepest existing ancestor of both
+     *       the root and the target (handles a not-yet-materialised root and
+     *       writes whose target doesn't exist yet), append the missing suffix,
+     *       and verify the resulting absolute path is still inside the
+     *       canonical root. Catches symlink escapes — a symlink inside the root
+     *       that points to {@code /etc} would pass step 1 but fail step 2.</li>
      * </ol>
      *
      * Returns the canonical absolute path on success, or {@code null} on any
-     * escape, missing root, or I/O error. Prefer {@link #acquireContained}
-     * when the result is about to be opened or executed against — it
-     * additionally double-resolves to shrink the validate→use TOCTOU window.
+     * escape or I/O error. This is a pure <b>read-only probe</b>: it never
+     * creates the root or any directory. Prefer {@link #acquireContained} when
+     * the result is about to be opened or executed against — it additionally
+     * double-resolves to shrink the validate→use TOCTOU window.
      *
      * @param root         the workspace root (or any other "must stay inside"
      *                     boundary)
@@ -66,30 +67,46 @@ public final class WorkspacePathGuard {
             var target = rootAbs.resolve(relativePath).normalize();
             if (!target.startsWith(rootAbs)) return null;
 
-            // Make sure the root exists so we can realpath it (idempotent).
-            Files.createDirectories(rootAbs);
-            var rootReal = rootAbs.toRealPath();
-
-            // Layer 2: canonical with missing-suffix walk-up. toRealPath()
-            // throws NoSuchFileException for not-yet-created targets, so for
-            // write paths we walk up to the deepest existing ancestor,
-            // realpath that, then re-attach the missing tail.
-            var existing = target;
-            var missingSuffix = new ArrayDeque<Path>();
-            while (existing != null && !Files.exists(existing)) {
-                missingSuffix.push(existing.getFileName());
-                existing = existing.getParent();
-            }
-            if (existing == null) return null;
-            var canonical = existing.toRealPath();
-            if (!canonical.startsWith(rootReal)) return null;
-
-            for (var seg : missingSuffix) canonical = canonical.resolve(seg);
-            canonical = canonical.normalize();
+            // Layer 2: canonical with missing-suffix walk-up. Read-only — never
+            // creates the root or any parent. Both the root and the target are
+            // canonicalized by realpath'ing their deepest existing ancestor
+            // (which resolves symlinks in the existing prefix) and re-attaching
+            // the not-yet-created tail; a symlink inside the root that points to
+            // /etc passes step 1 but fails the containment check here.
+            var rootReal = canonicalize(rootAbs);
+            var canonical = canonicalize(target);
+            if (rootReal == null || canonical == null) return null;
             return canonical.startsWith(rootReal) ? canonical : null;
         } catch (IOException _) {
             return null;
         }
+    }
+
+    /**
+     * Canonicalize {@code path} without creating anything: walk up to the
+     * deepest existing ancestor, {@code toRealPath()} it (resolving symlinks in
+     * the existing prefix), then re-attach the not-yet-created suffix verbatim.
+     * A read-only equivalent of {@link Path#toRealPath} that tolerates a path
+     * whose tail doesn't exist yet — the common case for write targets, and for
+     * a workspace root that hasn't been materialised on disk.
+     *
+     * @param path the absolute path to canonicalize
+     * @return the canonicalized absolute path, or {@code null} if no ancestor
+     *         exists (impossible for an absolute path, whose filesystem root
+     *         always exists)
+     * @throws IOException if realpath'ing the deepest existing ancestor fails
+     */
+    private static Path canonicalize(Path path) throws IOException {
+        var existing = path;
+        var missingSuffix = new ArrayDeque<Path>();
+        while (existing != null && !Files.exists(existing)) {
+            missingSuffix.push(existing.getFileName());
+            existing = existing.getParent();
+        }
+        if (existing == null) return null;
+        var canonical = existing.toRealPath();
+        for (var seg : missingSuffix) canonical = canonical.resolve(seg);
+        return canonical.normalize();
     }
 
     /**

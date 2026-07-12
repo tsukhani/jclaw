@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -58,7 +59,7 @@ public class ApiBindingsController extends Controller {
             throw new AssertionError("unreachable: badRequest() throws");
         }
 
-        var agentId = body.get(KEY_AGENT_ID).getAsLong();
+        var agentId = requiredLong(body, KEY_AGENT_ID);
         var agent = AgentService.findById(agentId);
         if (agent == null) {
             notFound();
@@ -93,7 +94,7 @@ public class ApiBindingsController extends Controller {
         }
 
         if (body.has(KEY_AGENT_ID)) {
-            var agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
+            var agent = AgentService.findById(requiredLong(body, KEY_AGENT_ID));
             if (agent == null) {
                 notFound();
                 throw new AssertionError("unreachable: notFound() throws");
@@ -117,6 +118,30 @@ public class ApiBindingsController extends Controller {
         }
         binding.delete();
         ApiResponses.ok();
+    }
+
+    /**
+     * Read a required numeric field as a {@code long}, sending a 400 (via
+     * {@link ApiResponses#error}) when the key is absent, JSON-null, not a JSON
+     * primitive, or not a parseable number. Guards the raw {@code getAsLong()},
+     * which would otherwise surface a 500 on missing or non-numeric input.
+     */
+    // Sonar java:S2259: ApiResponses.error() never returns (throws a Play result), so the
+    // element is non-null where getAsLong() is called — the analyzer can't see the throw.
+    @SuppressWarnings("java:S2259")
+    private static long requiredLong(JsonObject body, String key) {
+        var el = body.has(key) ? body.get(key) : null;
+        if (el == null || el.isJsonNull() || !el.isJsonPrimitive()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "Field '%s' is required and must be a number".formatted(key));
+        }
+        try {
+            return el.getAsLong();
+        } catch (NumberFormatException _) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "Field '%s' must be a number".formatted(key));
+            throw new AssertionError("unreachable: error() throws");
+        }
     }
 
 }
