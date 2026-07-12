@@ -2,6 +2,7 @@ package utils;
 
 import okhttp3.Dns;
 import okhttp3.OkHttpClient;
+import org.jspecify.annotations.NonNull;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -94,7 +95,7 @@ public final class SsrfGuard {
      * Visible for testing. Returns true if the address is in a range the
      * guard forbids for LLM-supplied URLs.
      */
-    public static boolean isUnsafe(InetAddress addr) {
+    public static boolean isUnsafe(@NonNull InetAddress addr) {
         return addr.isLoopbackAddress()       // 127.0.0.0/8, ::1
                 || addr.isAnyLocalAddress()   // 0.0.0.0, ::
                 || addr.isLinkLocalAddress()  // 169.254.0.0/16, fe80::/10
@@ -138,7 +139,7 @@ public final class SsrfGuard {
      *         {@code https}, the URI has no host, or the host parses as a
      *         literal IP in an unsafe range.
      */
-    public static void assertSafeScheme(URI uri) {
+    public static void assertSafeScheme(@NonNull URI uri) {
         var scheme = uri.getScheme();
         if (scheme == null || !ALLOWED_SCHEMES.contains(scheme.toLowerCase())) {
             throw new SecurityException(
@@ -199,7 +200,7 @@ public final class SsrfGuard {
      *         character or embedded credentials, or fails scheme, literal-IP, or
      *         any resolved-address check.
      */
-    public static void assertUrlSafe(String url) {
+    public static void assertUrlSafe(@NonNull String url) {
         rejectParserDifferentialChars(url);
         URI uri;
         try {
@@ -252,7 +253,7 @@ public final class SsrfGuard {
      *         bracketed); scheme, port, path, query and fragment preserved.
      * @throws SecurityException on every condition {@link #assertUrlSafe} rejects.
      */
-    public static String pinnedUrl(String url) {
+    public static @NonNull String pinnedUrl(@NonNull String url) {
         assertUrlSafe(url);
         var uri = URI.create(url);
         var host = uri.getHost();
@@ -303,7 +304,7 @@ public final class SsrfGuard {
      * <p>Empty for a literal-IP URL (already pinned) or a URL with no host.
      * Throws every {@link SecurityException} {@link #assertUrlSafe} does.
      */
-    public static Optional<String> hostResolverRule(String url) {
+    public static @NonNull Optional<String> hostResolverRule(@NonNull String url) {
         assertUrlSafe(url);
         var host = URI.create(url).getHost();
         if (host == null || isLikelyIpLiteral(host)) {
@@ -350,7 +351,7 @@ public final class SsrfGuard {
      * subresource requests per page without try/catch overhead on every
      * decision.
      */
-    public static boolean isUrlSafe(String url) {
+    public static boolean isUrlSafe(@NonNull String url) {
         try {
             assertUrlSafe(url);
             return true;
@@ -382,7 +383,7 @@ public final class SsrfGuard {
      * @param connectTimeoutSeconds connect timeout
      * @param callTimeoutSeconds    end-to-end timeout
      */
-    public static OkHttpClient buildGuardedClient(int connectTimeoutSeconds,
+    public static @NonNull OkHttpClient buildGuardedClient(int connectTimeoutSeconds,
                                                   int callTimeoutSeconds) {
         return new OkHttpClient.Builder()
                 .dns(SAFE_DNS)

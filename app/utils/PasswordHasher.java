@@ -1,5 +1,8 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 
@@ -40,7 +43,7 @@ public final class PasswordHasher {
 
     /** Hash a password for storage. Returns a self-describing string
      *  suitable for direct storage in ConfigService. */
-    public static String hash(String plaintext) {
+    public static @NonNull String hash(@NonNull String plaintext) {
         byte[] salt = new byte[SALT_BYTES];
         RANDOM.nextBytes(salt);
         byte[] hash = pbkdf2(plaintext.toCharArray(), salt, ITERATIONS, HASH_BITS);
@@ -54,7 +57,7 @@ public final class PasswordHasher {
     /** Constant-time verify a plaintext against a stored hash string.
      *  Returns false on any parse error rather than throwing — callers
      *  treat a malformed stored hash as "password unset". */
-    public static boolean verify(String plaintext, String stored) {
+    public static boolean verify(@Nullable String plaintext, @Nullable String stored) {
         if (plaintext == null || stored == null) return false;
         var parts = stored.split(":");
         if (parts.length != 4 || !PREFIX.equals(parts[0])) return false;
@@ -75,7 +78,7 @@ public final class PasswordHasher {
      *  current {@link #ITERATIONS} and should be transparently re-hashed on
      *  the next successful login. False for a blank or malformed hash — there
      *  is nothing safe to upgrade. */
-    public static boolean needsRehash(String stored) {
+    public static boolean needsRehash(@Nullable String stored) {
         if (stored == null) return false;
         var parts = stored.split(":");
         if (parts.length != 4 || !PREFIX.equals(parts[0])) return false;

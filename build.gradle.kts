@@ -214,6 +214,12 @@ repositories {
 }
 
 dependencies {
+    // JCLAW-735: JSpecify nullness annotations (@Nullable / @NonNull, TYPE_USE).
+    // The tree-wide standard for expressing null contracts; introduced first on
+    // the security-utility public surface (PasswordHasher / SsrfGuard /
+    // WorkspacePathGuard). Broadening to the rest of app/ is the next increment.
+    implementation("org.jspecify:jspecify:1.0.0")
+
     // jsoup 1.22.2 is one patch ahead of the 1.22.1 that Tika 3.3.0's
     // parent POM pins for its parser modules; keeps resolved/declared in sync.
     implementation("org.jsoup:jsoup:1.22.2")

@@ -1,5 +1,8 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -60,7 +63,7 @@ public final class WorkspacePathGuard {
      * @return the canonical absolute path inside {@code root}, or
      *         {@code null} on escape / missing root / I/O error
      */
-    public static Path resolveContained(Path root, String relativePath) {
+    public static @Nullable Path resolveContained(@NonNull Path root, @NonNull String relativePath) {
         try {
             // Layer 1: lexical
             var rootAbs = root.toAbsolutePath().normalize();
@@ -151,7 +154,7 @@ public final class WorkspacePathGuard {
      * @throws SecurityException on escape, mid-resolution divergence, or
      *                           hardlink violation
      */
-    public static Path acquireContained(Path root, String relativePath) {
+    public static @NonNull Path acquireContained(@NonNull Path root, @NonNull String relativePath) {
         var first = resolveContained(root, relativePath);
         if (first == null) {
             throw new SecurityException("Path '%s' escapes the workspace.".formatted(relativePath));
