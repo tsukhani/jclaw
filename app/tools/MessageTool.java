@@ -369,10 +369,10 @@ public class MessageTool implements ToolRegistry.Tool {
         String target = explicitTarget;
         // Channel inference: when the channel isn't given, read it off the calling
         // agent's most-recently-updated conversation ("the channel I'm operating on").
-        // Subagents inherit the parent's channel at spawn (JCLAW-327 AC-5).
+        // Subagents inherit the parent's channel at spawn (JCLAW-327 AC-5). The
+        // most-recent-conversation lookup is shared with TaskTool via DeliveryResolver.
         if (channel == null || channel.isBlank()) {
-            var conv = (Conversation) Conversation.find(
-                    "agent = ?1 ORDER BY updatedAt DESC", agent).first();
+            var conv = DeliveryResolver.mostRecentConversation(agent).orElse(null);
             if (conv == null) {
                 return "Error: no active conversation for agent '" + agent.name
                         + "'; pass explicit 'channel' and 'target' to send anyway.";
@@ -599,13 +599,11 @@ public class MessageTool implements ToolRegistry.Tool {
     }
 
     /** Chat id for a Telegram action: explicit {@code target} wins, else the
-     *  peer of the agent's most-recently-updated conversation (matches the
-     *  {@code send} inference rule). */
+     *  peer of the agent's most-recently-updated conversation (the same shared
+     *  {@link DeliveryResolver} lookup the {@code send} inference rule uses). */
     private static String resolveChatId(Agent agent, String explicitTarget) {
         if (explicitTarget != null && !explicitTarget.isBlank()) return explicitTarget;
-        var conv = (Conversation) Conversation.find(
-                "agent = ?1 ORDER BY updatedAt DESC", agent).first();
-        return conv == null ? null : conv.peerId;
+        return DeliveryResolver.mostRecentConversation(agent).map(c -> c.peerId).orElse(null);
     }
 
     /** Per-action capability toggle, read from {@code play.Play.configuration}

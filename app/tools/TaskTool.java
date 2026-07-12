@@ -5,7 +5,6 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
-import models.Conversation;
 import models.Task;
 import play.db.jpa.JPA;
 import services.DeliveryAdvisor;
@@ -14,12 +13,9 @@ import services.DeliverySpec;
 import services.EventLogger;
 import services.ScheduleShorthandParser;
 import services.TaskSchedulingService;
-import services.TimezoneResolver;
 import services.Tx;
 
-import java.time.DateTimeException;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -302,8 +298,8 @@ public class TaskTool implements ToolRegistry.Tool {
             case ACTION_RUN_NOW -> runNow(args, agent);
             case ACTION_CANCEL_TASK -> cancelTask(args, agent);
             case ACTION_DELETE_TASK -> deleteTask(args, agent);
-            case ACTION_LIST_RECURRING_TASKS -> listRecurringTasks(agent);
-            case ACTION_LIST_REMINDERS -> listReminders(agent);
+            case ACTION_LIST_RECURRING_TASKS -> TaskListRenderer.recurring(agent);
+            case ACTION_LIST_REMINDERS -> TaskListRenderer.reminders(agent);
             default -> "Error: Unknown action '%s'".formatted(action);
         };
     }
@@ -373,11 +369,11 @@ public class TaskTool implements ToolRegistry.Tool {
         }
         final ScheduleShorthandParser.ScheduleSpec spec;
         try {
-            // Resolve the zone up front so an absolute date-time schedule
-            // ("2026-06-13T15:00") is interpreted in the same timezone the task
-            // will be saved with (validated again in persistNewTask).
-            var zone = TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
-            spec = ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString(), zone);
+            // The zone is resolved up front (inside TaskScheduleSupport.parse) so
+            // an absolute date-time schedule ("2026-06-13T15:00") is interpreted
+            // in the same timezone the task is saved with (validated again in
+            // persistNewTask).
+            spec = TaskScheduleSupport.parse(args.get(KEY_SCHEDULE).getAsString(), optStr(args, KEY_TIMEZONE));
         } catch (IllegalArgumentException e) {
             return "Error: Invalid schedule: " + e.getMessage();
         }
@@ -409,7 +405,7 @@ public class TaskTool implements ToolRegistry.Tool {
 
         var base = switch (spec.type()) {
             case IMMEDIATE -> "Task '%s' created and queued for immediate execution.".formatted(name);
-            case SCHEDULED -> "Task '%s' scheduled for %s.".formatted(name, formatScheduledAt(saved));
+            case SCHEDULED -> "Task '%s' scheduled for %s.".formatted(name, TaskScheduleSupport.formatScheduledAt(saved));
             case INTERVAL -> "Interval task '%s' created (every %ds).".formatted(name, spec.intervalSeconds());
             case CRON -> "Recurring task '%s' created with schedule '%s'.".formatted(name, spec.scheduleDisplay());
         };
@@ -442,9 +438,9 @@ public class TaskTool implements ToolRegistry.Tool {
      * </ol>
      */
     private static String resolveDeliverySpec(String explicit, Agent agent) {
-        if (explicit == null) return inferDeliveryFromContext(agent);
+        if (explicit == null) return DeliveryResolver.inferSpec(agent).orElse(null);
         var trimmed = explicit.trim();
-        if (trimmed.isEmpty()) return inferDeliveryFromContext(agent);
+        if (trimmed.isEmpty()) return DeliveryResolver.inferSpec(agent).orElse(null);
         if (trimmed.indexOf(':') >= 0) return explicit;
         // Bare channel name. Fill target from the same conversation lookup
         // the no-arg path uses, then prepend the agent-supplied channel
@@ -454,67 +450,11 @@ public class TaskTool implements ToolRegistry.Tool {
         if (!DeliveryDispatcher.isSupported(trimmed.toLowerCase())) {
             return explicit;  // Unknown channel — let dispatchSpec surface it.
         }
-        var inferred = inferDeliveryFromContext(agent);
+        var inferred = DeliveryResolver.inferSpec(agent).orElse(null);
         if (inferred == null) return null;
         var colon = inferred.indexOf(':');
         if (colon < 0) return null;
         return "%s:%s".formatted(trimmed.toLowerCase(), inferred.substring(colon + 1));
-    }
-
-    /**
-     * Infer a {@link models.Task#delivery} spec for a task created via the
-     * agent-facing tool without an explicit {@code delivery} arg. Looks at
-     * the calling agent's most-recently-updated Conversation and formats
-     * the spec as {@code <channelType>:<target>}, where {@code target} is:
-     * <ul>
-     *   <li>{@link models.Conversation#peerId} for external channels
-     *       (telegram chat id, slack channel id, whatsapp e.164) — the
-     *       same shape {@link services.DeliveryDispatcher} parses.</li>
-     *   <li>{@link models.Conversation#id} for the web channel, because
-     *       web conversations don't always carry a peerId and the chat UI
-     *       is identified by conversation id. {@link services.DeliveryDispatcher#dispatchSpec}
-     *       routes this through the conv-id-aware web path.</li>
-     * </ul>
-     *
-     * <p>Returns null when the agent has no conversations (headless task
-     * creation via API), when the most-recent conversation is on a
-     * non-deliverable channel, or when the required target field is
-     * absent (no peerId on a non-web channel). Mirrors the inference
-     * shape that {@link tools.MessageTool} uses for mid-turn sends —
-     * agreeing on "most-recently-updated wins" keeps the two surfaces
-     * predictable.
-     */
-    private static String inferDeliveryFromContext(Agent agent) {
-        return Tx.run(() -> {
-            var conv = (Conversation) Conversation.find(
-                    "agent = ?1 ORDER BY updatedAt DESC", agent).first();
-            if (conv == null || conv.channelType == null) return null;
-            if (!DeliveryDispatcher.isSupported(conv.channelType)) return null;
-            String target;
-            if ("web".equalsIgnoreCase(conv.channelType)) {
-                target = conv.id != null ? conv.id.toString() : null;
-            } else {
-                target = conv.peerId;
-            }
-            if (target == null || target.isBlank()) return null;
-            return "%s:%s".formatted(conv.channelType, target);
-        });
-    }
-
-    /**
-     * Format a SCHEDULED task's fire instant in the task's effective IANA zone
-     * (per-task override → operator default → JVM default via
-     * {@link services.TimezoneResolver}). The returned string is a
-     * {@link java.time.ZonedDateTime#toString() ZonedDateTime ISO-8601
-     * representation} — local time + offset + bracketed zone, e.g.
-     * {@code 2026-05-26T23:17:31.538+08:00[Asia/Kuala_Lumpur]} — so the
-     * agent can't silently re-label the UTC {@code Z}-suffixed
-     * {@link java.time.Instant#toString() Instant.toString()} as the
-     * operator's local zone.
-     */
-    private static String formatScheduledAt(Task task) {
-        var zone = TimezoneResolver.resolve(task);
-        return task.scheduledAt.atZone(zone).toString();
     }
 
     /**
@@ -589,34 +529,13 @@ public class TaskTool implements ToolRegistry.Tool {
         if (hasValue(args, KEY_REPEAT_LIMIT)) {
             task.repeatLimit = args.get(KEY_REPEAT_LIMIT).getAsInt();
         }
-        // JCLAW-261: optional IANA timezone. Validated here so an invalid
-        // value surfaces as a tool error to the LLM rather than landing
-        // in the DB and silently falling through at fire time.
-        task.timezone = parseTimezoneOrNull(args);
+        // JCLAW-261: optional IANA timezone. Validated in TaskScheduleSupport so
+        // an invalid value surfaces as a tool error to the LLM rather than
+        // landing in the DB and silently falling through at fire time.
+        task.timezone = TaskScheduleSupport.parseTimezone(optStr(args, KEY_TIMEZONE));
 
         task.save();
         return task;
-    }
-
-    /**
-     * JCLAW-261: read the {@link #KEY_TIMEZONE} arg and validate as an
-     * IANA zone id. Returns the trimmed value when valid, null when
-     * absent or blank. Throws {@link IllegalArgumentException} on an
-     * invalid value so {@link #createTask}/{@link #updateTask} can
-     * surface a clear tool error.
-     */
-    private static String parseTimezoneOrNull(JsonObject args) {
-        var raw = optStr(args, KEY_TIMEZONE);
-        if (raw == null || raw.isBlank()) return null;
-        var trimmed = raw.trim();
-        try {
-            ZoneId.of(trimmed);
-        } catch (DateTimeException e) {
-            throw new IllegalArgumentException(
-                    "Invalid IANA timezone '" + trimmed + "': " + e.getMessage()
-                            + ". Use a value like 'America/New_York' or 'Asia/Tokyo'.");
-        }
-        return trimmed;
     }
 
     /** Parse the optional {@code schedule} shorthand into a spec, or null when absent. Throws
@@ -624,8 +543,7 @@ public class TaskTool implements ToolRegistry.Tool {
      *  Extracted to keep {@link #updateTask} under the cognitive-complexity bound (Sonar S3776). */
     private ScheduleShorthandParser.ScheduleSpec resolveScheduleSpec(JsonObject args) {
         if (!hasValue(args, KEY_SCHEDULE)) return null;
-        var zone = TimezoneResolver.resolve(optStr(args, KEY_TIMEZONE));
-        return ScheduleShorthandParser.parse(args.get(KEY_SCHEDULE).getAsString(), zone);
+        return TaskScheduleSupport.parse(args.get(KEY_SCHEDULE).getAsString(), optStr(args, KEY_TIMEZONE));
     }
 
     private String updateTask(JsonObject args, Agent agent) {
@@ -710,7 +628,7 @@ public class TaskTool implements ToolRegistry.Tool {
         boolean anyChange = false;
 
         if (spec != null) {
-            applyScheduleSpec(task, spec);
+            TaskScheduleSupport.applyScheduleSpec(task, spec);
             scheduleChanged = true;
             anyChange = true;
         }
@@ -725,22 +643,6 @@ public class TaskTool implements ToolRegistry.Tool {
 
         if (anyChange) task.save();
         return new PatchResult(anyChange, scheduleChanged, task);
-    }
-
-    /** Copy a parsed ScheduleSpec onto a Task (5 derived fields + nextRunAt). */
-    private static void applyScheduleSpec(Task task, ScheduleShorthandParser.ScheduleSpec spec) {
-        task.type = spec.type();
-        // Re-derive status from the (possibly new) type, but ONLY when the
-        // task is still alive — terminal states (COMPLETED, FAILED, CANCELLED,
-        // LOST) must not get resurrected to PENDING/ACTIVE by a schedule edit.
-        if (task.status == Task.Status.PENDING || task.status == Task.Status.ACTIVE) {
-            task.status = Task.initialStatusFor(spec.type());
-        }
-        task.scheduledAt = spec.scheduledAt();
-        task.cronExpression = spec.cronExpression();
-        task.intervalSeconds = spec.intervalSeconds();
-        task.scheduleDisplay = spec.scheduleDisplay();
-        task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
     }
 
     /** Patch the optional-string fields. Returns true iff any were touched. */
@@ -790,10 +692,9 @@ public class TaskTool implements ToolRegistry.Tool {
             if (el.isJsonNull()) {
                 task.timezone = null;
             } else {
-                // parseTimezoneOrNull treats blank as null and validates
-                // non-blank values; rewrap as a JsonObject lookup so the
-                // helper's contract stays consistent.
-                task.timezone = parseTimezoneOrNull(args);
+                // TaskScheduleSupport.parseTimezone treats blank as null and
+                // validates non-blank values as IANA zone ids.
+                task.timezone = TaskScheduleSupport.parseTimezone(optStr(args, KEY_TIMEZONE));
             }
             anyChange = true;
         }
@@ -986,65 +887,5 @@ public class TaskTool implements ToolRegistry.Tool {
         return deletedIds.size() == 1
                 ? "Task '%s' deleted.".formatted(name)
                 : "%d tasks named '%s' deleted.".formatted(deletedIds.size(), name);
-    }
-
-    private String listRecurringTasks(Agent agent) {
-        // Agent-scoped: one agent must not see another agent's recurring
-        // schedule (agent isolation). The finder also now
-        // includes INTERVAL alongside CRON since both are recurring.
-        var tasks = Tx.run(() -> Task.findRecurring(agent));
-        if (tasks.isEmpty()) return "No recurring tasks configured.";
-        var sb = new StringBuilder("Recurring tasks:\n");
-        for (var task : tasks) {
-            // Prefer scheduleDisplay (operator's original input) so the agent
-            // sees the same string the operator typed. Falls back to the
-            // type-specific field for legacy rows pre-JCLAW-294.
-            String typedCadence = task.type == Task.Type.CRON
-                    ? "cron: " + task.cronExpression
-                    : "every " + task.intervalSeconds + "s";
-            String cadence = task.scheduleDisplay != null ? task.scheduleDisplay : typedCadence;
-            // JCLAW-421: surface the typed delivery (channel / tool / none) so a
-            // re-normalization pass can spot tasks whose delivery still lives
-            // only in the prose and lift it into the field via updateTask.
-            String delivery = DeliverySpec.parse(task.delivery).label();
-            sb.append("- %s (%s) [delivery: %s] — %s\n".formatted(
-                    task.name, cadence, delivery,
-                    task.description != null && task.description.length() > 100
-                            ? task.description.substring(0, 100) + "..." : task.description));
-        }
-        return sb.toString();
-    }
-
-    private String listReminders(Agent agent) {
-        // Agent-scoped, same agent-isolation reason as listRecurringTasks.
-        // Scoped to upcoming fires (PENDING one-shots + ACTIVE recurring) so
-        // the agent sees reminders it can still edit or cancel — not fired/
-        // auto-deleted history. This is the one-shot-reminder discovery path
-        // listRecurringTasks deliberately omits: a one-time SCHEDULED reminder
-        // is neither CRON nor INTERVAL, so findRecurring never returns it.
-        var reminders = Tx.run(() -> Task.findReminders(agent));
-        if (reminders.isEmpty()) return "No upcoming reminders.";
-        var sb = new StringBuilder("Reminders:\n");
-        for (var task : reminders) {
-            // One-shot reminders: nextRunAt is the real fire instant (what the
-            // user cares about when editing). Recurring reminders: nextRunAt is
-            // only a create-time placeholder (the live next-fire lives in the
-            // scheduler), so show the cadence string instead — same choice
-            // listRecurringTasks makes.
-            boolean recurring = task.type == Task.Type.CRON || task.type == Task.Type.INTERVAL;
-            String when;
-            if (recurring) {
-                when = task.scheduleDisplay != null ? task.scheduleDisplay : task.type.name();
-            } else if (task.nextRunAt != null) {
-                when = task.nextRunAt.toString();
-            } else {
-                when = task.scheduleDisplay != null ? task.scheduleDisplay : "—";
-            }
-            sb.append("- %s (%s) [%s] — %s\n".formatted(
-                    task.name, when, task.status.name(),
-                    task.description != null && task.description.length() > 100
-                            ? task.description.substring(0, 100) + "..." : task.description));
-        }
-        return sb.toString();
     }
 }
