@@ -1,5 +1,6 @@
 package models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
@@ -53,6 +54,7 @@ public class WhatsAppBinding extends AgentBoundBinding {
 
     /** Cloud-API access token (Bearer) for Graph API calls. Null for WHATSAPP_WEB. */
     @Column(name = "access_token")
+    @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedAccessToken()).
     public String accessToken;
 
     /**
@@ -61,6 +63,7 @@ public class WhatsAppBinding extends AgentBoundBinding {
      * until the operator completes setup).
      */
     @Column(name = "app_secret")
+    @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedAppSecret()).
     public String appSecret;
 
     /**
@@ -68,6 +71,7 @@ public class WhatsAppBinding extends AgentBoundBinding {
      * (JCLAW-446). Null for WHATSAPP_WEB.
      */
     @Column(name = "verify_token")
+    @JsonIgnore // JCLAW-730: shared secret — never serialize in the clear (see maskedVerifyToken()).
     public String verifyToken;
 
     /**
@@ -180,5 +184,28 @@ public class WhatsAppBinding extends AgentBoundBinding {
      */
     public static List<WhatsAppBinding> findAllEnabledByTransport(WhatsAppTransport transport) {
         return WhatsAppBinding.find("enabled = true and transport = ?1", transport).fetch();
+    }
+
+    /** JCLAW-730: masked {@link #accessToken} for any display/log path — the raw
+     *  field is {@code @JsonIgnore} so callers reach for this safe form. */
+    public String maskedAccessToken() {
+        return mask(accessToken);
+    }
+
+    /** JCLAW-730: masked {@link #appSecret} for any display/log path. */
+    public String maskedAppSecret() {
+        return mask(appSecret);
+    }
+
+    /** JCLAW-730: masked {@link #verifyToken} for any display/log path. */
+    public String maskedVerifyToken() {
+        return mask(verifyToken);
+    }
+
+    /** Show only the first 4 characters of a secret, matching
+     *  {@code ConfigService.maskValue}'s house style; blank/null → null. */
+    private static String mask(String secret) {
+        if (secret == null || secret.isBlank()) return null;
+        return secret.length() > 4 ? secret.substring(0, 4) + "****" : "****";
     }
 }

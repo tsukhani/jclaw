@@ -23,6 +23,7 @@ import llm.LlmTypes.Usage;
 import llm.ToolCallChunkMerger.ToolCallBuilder;
 import services.EventLogger;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 import java.net.URI;
@@ -714,11 +715,28 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
         if (reply.statusCode() >= 400 && reply.statusCode() < 500) {
             throw new LlmException("HTTP %d from %s: %s".formatted(
-                    reply.statusCode(), config.name(), reply.body()));
+                    reply.statusCode(), config.name(), sanitizeErrorBody(reply.body(), config.apiKey())));
         }
 
         return new AttemptOutcome(null, new LlmException("HTTP %d from %s: %s".formatted(
-                reply.statusCode(), config.name(), reply.body())));
+                reply.statusCode(), config.name(), sanitizeErrorBody(reply.body(), config.apiKey()))));
+    }
+
+    /** Max characters of an upstream error body surfaced into an exception/log. */
+    private static final int MAX_ERROR_BODY_CHARS = 500;
+
+    /**
+     * JCLAW-730: scrub the provider secret and cap the length of an upstream
+     * error body before it enters an {@link LlmException} message — which flows
+     * on into event logs and the UI. Provider 4xx/5xx bodies are
+     * attacker-influenceable and can be large or echo the request (including the
+     * API key), so truncating and redacting the key keeps them from flooding the
+     * logs or leaking the credential downstream.
+     */
+    private static String sanitizeErrorBody(String body, String secret) {
+        if (body == null || body.isEmpty()) return "";
+        var scrubbed = (secret == null || secret.isEmpty()) ? body : body.replace(secret, "<redacted>");
+        return Strings.truncate(scrubbed, MAX_ERROR_BODY_CHARS);
     }
 
     private void backoffBeforeRetry(int attempt) {

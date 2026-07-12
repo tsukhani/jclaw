@@ -9,6 +9,7 @@ import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.Strings;
 
 import java.io.IOException;
 import java.net.URI;
@@ -107,7 +108,7 @@ final class OkHttpLlmHttpDriver {
                         try { body = resp.body().string(); }
                         catch (IOException _) { /* body already consumed or absent */ }
                         onError.accept(new LlmProvider.LlmException(
-                                "HTTP %d: %s".formatted(resp.code(), body)));
+                                "HTTP %d: %s".formatted(resp.code(), sanitizeErrorBody(body, authHeader))));
                     } else {
                         onError.accept(t != null ? t
                                 : new LlmProvider.LlmException("SSE failed without cause"));
@@ -136,5 +137,25 @@ final class OkHttpLlmHttpDriver {
     private static Optional<Long> parseRetryAfter(String value) {
         try { return Optional.of(Long.parseLong(value)); }
         catch (NumberFormatException _) { return Optional.empty(); }
+    }
+
+    /** Max characters of a non-200 SSE error body surfaced into an exception/log. */
+    private static final int MAX_ERROR_BODY_CHARS = 500;
+
+    /**
+     * JCLAW-730: scrub the bearer key and cap the length of a non-200 SSE error
+     * body before it enters an {@link LlmProvider.LlmException} message (which
+     * flows into event logs / the UI). {@code authHeader} is {@code "Bearer
+     * <key>"}; a provider that echoes the request could otherwise surface the raw
+     * key, and an oversized body would flood the logs.
+     */
+    private static String sanitizeErrorBody(String body, String authHeader) {
+        if (body == null || body.isEmpty()) return "";
+        var scrubbed = body;
+        if (authHeader != null && authHeader.startsWith(HttpKeys.BEARER_PREFIX)) {
+            var key = authHeader.substring(HttpKeys.BEARER_PREFIX.length());
+            if (!key.isEmpty()) scrubbed = scrubbed.replace(key, "<redacted>");
+        }
+        return Strings.truncate(scrubbed, MAX_ERROR_BODY_CHARS);
     }
 }

@@ -1,6 +1,7 @@
 package models;
 
 import channels.ChannelTransport;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
@@ -42,6 +43,7 @@ public class TelegramBinding extends AgentBoundBinding {
      * accidental double-binds (same operator adding the same token twice) fail fast.
      */
     @Column(name = "bot_token", nullable = false, unique = true)
+    @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedBotToken()).
     public String botToken;
 
     /**
@@ -61,6 +63,7 @@ public class TelegramBinding extends AgentBoundBinding {
      * {@code /…/{secret}} path segment and Telegram's {@code secret_token}.
      */
     @Column(name = "webhook_secret")
+    @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedWebhookSecret()).
     public String webhookSecret;
 
     /**
@@ -205,5 +208,23 @@ public class TelegramBinding extends AgentBoundBinding {
     public Agent resolveAgentForTopic(String chatId, Integer threadId) {
         var override = TelegramTopicBinding.findByBindingAndTopic(this, chatId, threadId);
         return override != null ? override.agent : agent;
+    }
+
+    /** JCLAW-730: masked {@link #botToken} for any display/log path — the raw
+     *  field is {@code @JsonIgnore} so callers reach for this safe form. */
+    public String maskedBotToken() {
+        return mask(botToken);
+    }
+
+    /** JCLAW-730: masked {@link #webhookSecret} for any display/log path. */
+    public String maskedWebhookSecret() {
+        return mask(webhookSecret);
+    }
+
+    /** Show only the first 4 characters of a secret, matching
+     *  {@code ConfigService.maskValue}'s house style; blank/null → null. */
+    private static String mask(String secret) {
+        if (secret == null || secret.isBlank()) return null;
+        return secret.length() > 4 ? secret.substring(0, 4) + "****" : "****";
     }
 }

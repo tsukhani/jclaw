@@ -16,6 +16,7 @@ import models.TelegramBinding;
 import play.mvc.With;
 import services.EventLogger;
 import utils.ApiResponses;
+import utils.Strings;
 
 import java.security.SecureRandom;
 import java.util.Base64;
@@ -58,8 +59,9 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     /** Flat projection the frontend consumes. {@code botToken} and
      *  {@code webhookSecret} are elided — they're secrets. {@code webhookBaseUrl}
      *  is the operator-editable public host; {@code effectiveWebhookUrl} is the
-     *  full URL to register (base + fixed path + secret), surfaced so the Edit UI
-     *  can show it. */
+     *  base + fixed path (binding id) surfaced so the Edit UI can show a preview.
+     *  JCLAW-730: the {@code /{secret}} tail Telegram actually receives is NEVER
+     *  included — the secret is a credential and must not enter a serialized body. */
     private record BindingView(Long id, Long agentId, String agentName,
                                 String telegramUserId, String transport,
                                 String webhookBaseUrl, boolean hasWebhookSecret,
@@ -83,16 +85,19 @@ public class ApiTelegramBindingsController extends ApiBindingController {
                     b.updatedAt != null ? b.updatedAt.toString() : null);
         }
 
-        /** The full webhook URL to register with Telegram (JCLAW-338/339):
-         *  {@code base + /api/webhooks/telegram/{id}/{secret}}. Null unless this is
-         *  a WEBHOOK binding with both a public base and a secret. */
+        /** The webhook URL preview surfaced for the Edit UI (JCLAW-338/339):
+         *  {@code base + /api/webhooks/telegram/{id}}. JCLAW-730: the
+         *  {@code /{secret}} tail that {@link TelegramWebhookRegistrar#webhookUrl}
+         *  builds for actual registration is deliberately omitted here so the
+         *  secret never enters the returned body. Null unless this is a WEBHOOK
+         *  binding with both a public base and a secret (unchanged null-ness). */
         private static String effectiveWebhookUrl(TelegramBinding b) {
             if (b.transport != ChannelTransport.WEBHOOK
                     || b.webhookBaseUrl == null || b.webhookBaseUrl.isBlank()
                     || b.webhookSecret == null || b.webhookSecret.isBlank()) {
                 return null;
             }
-            return TelegramWebhookRegistrar.webhookUrl(b.webhookBaseUrl, b.id, b.webhookSecret);
+            return Strings.trimTrailingSlash(b.webhookBaseUrl) + "/api/webhooks/telegram/" + b.id;
         }
     }
 
