@@ -9,8 +9,8 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
+import services.openaicompat.OpenAiCompatibleClientBase;
 import utils.HttpFactories;
-import utils.HttpKeys;
 import utils.Strings;
 
 import java.io.IOException;
@@ -25,6 +25,10 @@ import java.util.Base64;
  * bytes. Subclasses bind name + default model only, mirroring
  * {@code services.caption.OpenAiCompatibleImageCaptionClient}.
  *
+ * <p>Credential resolution and HTTP-error → typed-exception mapping live in
+ * {@link OpenAiCompatibleClientBase} (JCLAW-721); this class owns only the {@code /images/*}
+ * endpoints and the request/response body shaping.
+ *
  * <p>Configuration:
  * <ul>
  *   <li>{@code provider.{name}.baseUrl} — {@code /images/generations} or {@code /images/edits} is appended.</li>
@@ -34,15 +38,14 @@ import java.util.Base64;
  *   <li>{@code imagegen.imageSize} — default size string when the caller passes no dimensions.</li>
  * </ul>
  */
-public class OpenAiCompatibleImageGenerationClient implements ImageGenerationService {
+public class OpenAiCompatibleImageGenerationClient extends OpenAiCompatibleClientBase
+        implements ImageGenerationService {
 
     private static final MediaType JSON = MediaType.parse("application/json");
     private static final String B64_JSON = "b64_json";
     private static final String MIME_PNG = "image/png";
 
-    private final String providerName;
     private final String defaultModel;
-    private final OkHttpClient client;
 
     public OpenAiCompatibleImageGenerationClient(String providerName, String defaultModel) {
         this(providerName, defaultModel, HttpFactories.llmSingleShot());
@@ -50,9 +53,23 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
 
     /** Test seam — inject a MockWebServer-backed client. */
     public OpenAiCompatibleImageGenerationClient(String providerName, String defaultModel, OkHttpClient client) {
-        this.providerName = providerName;
+        super(providerName, client);
         this.defaultModel = defaultModel;
-        this.client = client;
+    }
+
+    @Override
+    protected String operationLabel() {
+        return "image generation";
+    }
+
+    @Override
+    protected RuntimeException newException(String message) {
+        return new ImageGenerationException(message);
+    }
+
+    @Override
+    protected RuntimeException newException(String message, Throwable cause) {
+        return new ImageGenerationException(message, cause);
     }
 
     @Override
@@ -73,37 +90,28 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
-        var baseUrl = ConfigService.get("provider." + providerName + ".baseUrl");
-        var apiKey = ConfigService.get("provider." + providerName + ".apiKey");
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new ImageGenerationException("provider." + providerName + ".baseUrl is not configured");
-        }
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new ImageGenerationException("provider." + providerName + ".apiKey is not configured");
-        }
+        var creds = resolveCredentials();
         var effModel = Strings.firstNonBlank(model, ConfigService.get("imagegen." + providerName + ".model"), defaultModel);
         if (effModel == null || effModel.isBlank()) {
             throw new ImageGenerationException(providerName + " image generation: no model configured");
         }
 
-        var base = Strings.trimTrailingSlash(baseUrl);
+        var base = creds.baseUrl();
         var size = sizeFor(width, height);
         boolean hasReference = referenceImage != null
                 && referenceImage.bytes() != null && referenceImage.bytes().length > 0;
         var request = hasReference
-                ? buildEditsRequest(base, apiKey, effModel, prompt, size, referenceImage)
-                : buildGenerationsRequest(base, apiKey, effModel, prompt, size);
+                ? buildEditsRequest(base, creds.apiKey(), effModel, prompt, size, referenceImage)
+                : buildGenerationsRequest(base, creds.apiKey(), effModel, prompt, size);
 
         try (var response = client.newCall(request).execute()) {
             var body = response.body().string();
             if (!response.isSuccessful()) {
-                throw new ImageGenerationException("%s image generation failed: HTTP %d %s%s".formatted(
-                        providerName, response.code(), response.message(),
-                        body.isEmpty() ? "" : (" — " + Strings.truncate(body, 500))));
+                throw httpError(response, body);
             }
             return parseImage(body, effModel);
         } catch (IOException e) {
-            throw new ImageGenerationException(providerName + " image generation transport failed: " + e.getMessage(), e);
+            throw transportError(e);
         }
     }
 
@@ -114,9 +122,7 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
         root.addProperty("prompt", prompt);
         root.addProperty("size", size);
         root.addProperty("n", 1);
-        return new Request.Builder()
-                .url(base + "/images/generations")
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
+        return bearer(new Request.Builder().url(base + "/images/generations"), apiKey)
                 .post(RequestBody.create(root.toString(), JSON))
                 .build();
     }
@@ -139,9 +145,7 @@ public class OpenAiCompatibleImageGenerationClient implements ImageGenerationSer
         if (model.startsWith("gpt-image")) {
             builder.addFormDataPart("input_fidelity", "high");
         }
-        return new Request.Builder()
-                .url(base + "/images/edits")
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
+        return bearer(new Request.Builder().url(base + "/images/edits"), apiKey)
                 .post(builder.build())
                 .build();
     }

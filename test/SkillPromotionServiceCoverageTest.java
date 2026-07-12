@@ -11,6 +11,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.NotificationBus;
 import services.SkillPromotionService;
+import services.SkillSanitizer;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -597,7 +598,9 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
     private java.util.List<java.util.List<java.util.Map.Entry<String, String>>>
             invokeBuildBatchesBySize(java.util.LinkedHashMap<String, String> input, int max)
             throws Exception {
-        var m = SkillPromotionService.class.getDeclaredMethod(
+        // JCLAW-727: the size-batching helper moved into SkillSanitizer with the
+        // rest of the LLM sanitizer pass; reflect there now.
+        var m = SkillSanitizer.class.getDeclaredMethod(
                 "buildBatchesBySize", java.util.LinkedHashMap.class, int.class);
         m.setAccessible(true);
         return (java.util.List<java.util.List<java.util.Map.Entry<String, String>>>)

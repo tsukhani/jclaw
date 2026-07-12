@@ -11,9 +11,8 @@ import okhttp3.RequestBody;
 import play.Logger;
 import services.AgentService;
 import services.ConfigService;
+import services.openaicompat.OpenAiCompatibleClientBase;
 import utils.HttpFactories;
-import utils.HttpKeys;
-import utils.Strings;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,6 +22,11 @@ import java.nio.file.Files;
  * {@code POST /audio/transcriptions} multipart shape — both OpenAI itself
  * and OpenRouter (which proxies the same wire format on its base URL).
  * Subclasses are name-only; the wire protocol is identical.
+ *
+ * <p>Credential resolution and HTTP-error → typed-exception mapping live in
+ * {@link OpenAiCompatibleClientBase} (JCLAW-721); this class owns only the
+ * {@code /audio/transcriptions} endpoint and the multipart request / JSON
+ * response shaping.
  *
  * <p>Configuration:
  * <ul>
@@ -36,15 +40,13 @@ import java.nio.file.Files;
  * {@link RequestBody#create(java.io.File, MediaType)} (Okio-backed source),
  * so the JVM never holds the full attachment in heap.
  */
-public class OpenAiCompatibleTranscriptionClient implements TranscriptionService {
+public class OpenAiCompatibleTranscriptionClient extends OpenAiCompatibleClientBase
+        implements TranscriptionService {
 
     /** Default model id when {@code transcription.model} isn't set. OpenAI
      *  ships {@code whisper-1} as their canonical transcription model and
      *  OpenRouter routes the same id through to OpenAI under the hood. */
     public static final String DEFAULT_MODEL = "whisper-1";
-
-    private final String providerName;
-    private final OkHttpClient client;
 
     public OpenAiCompatibleTranscriptionClient(String providerName) {
         this(providerName, HttpFactories.llmSingleShot());
@@ -52,8 +54,22 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
 
     /** Test seam — inject a custom client (e.g. backed by MockWebServer). */
     public OpenAiCompatibleTranscriptionClient(String providerName, OkHttpClient client) {
-        this.providerName = providerName;
-        this.client = client;
+        super(providerName, client);
+    }
+
+    @Override
+    protected String operationLabel() {
+        return "transcription";
+    }
+
+    @Override
+    protected RuntimeException newException(String message) {
+        return new TranscriptionException(message);
+    }
+
+    @Override
+    protected RuntimeException newException(String message, Throwable cause) {
+        return new TranscriptionException(message, cause);
     }
 
     @Override
@@ -62,16 +78,7 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
             throw new TranscriptionException("attachment is null");
         }
 
-        var baseUrl = ConfigService.get("provider." + providerName + ".baseUrl");
-        var apiKey = ConfigService.get("provider." + providerName + ".apiKey");
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new TranscriptionException(
-                    "provider." + providerName + ".baseUrl is not configured");
-        }
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new TranscriptionException(
-                    "provider." + providerName + ".apiKey is not configured");
-        }
+        var creds = resolveCredentials();
         var model = ConfigService.get("transcription.model");
         if (model == null || model.isBlank()) model = DEFAULT_MODEL;
 
@@ -95,10 +102,8 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
                 .addFormDataPart("response_format", "json")
                 .build();
 
-        var url = Strings.trimTrailingSlash(baseUrl) + "/audio/transcriptions";
-        var request = new Request.Builder()
-                .url(url)
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
+        var url = creds.baseUrl() + "/audio/transcriptions";
+        var request = bearer(new Request.Builder().url(url), creds.apiKey())
                 .post(multipart)
                 .build();
 
@@ -107,11 +112,7 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
             // synchronously-executed call, so no defensive null guards
             // are needed below — the body may be empty, but never null.
             if (!response.isSuccessful()) {
-                var snippet = Strings.truncate(response.body().string(), 500);
-                throw new TranscriptionException(
-                        "%s transcription failed: HTTP %d %s%s".formatted(
-                                providerName, response.code(), response.message(),
-                                snippet.isEmpty() ? "" : (" — " + snippet)));
+                throw httpError(response, response.body().string());
             }
             var json = JsonParser.parseString(response.body().string()).getAsJsonObject();
             // OpenAI/OpenRouter return {"text":"..."} for response_format=json.
@@ -124,8 +125,7 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
                     providerName, json);
             return "";
         } catch (IOException e) {
-            throw new TranscriptionException(
-                    providerName + " transcription transport failed: " + e.getMessage(), e);
+            throw transportError(e);
         }
     }
 

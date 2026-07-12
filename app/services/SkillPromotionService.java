@@ -6,13 +6,11 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import llm.LlmProvider;
-import llm.LlmTypes.ChatMessage;
-import llm.ProviderRegistry;
 import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import models.SkillRegistryTool;
+import play.Logger;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -20,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -122,7 +119,7 @@ public class SkillPromotionService {
         var stagingDir = agentSkillsDir.resolve(skillName + ".copying-" + System.currentTimeMillis());
         var backupDir = agentSkillsDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
 
-        stageAndSwap(targetDir, stagingDir, backupDir, replacing, staging -> {
+        AtomicDirSwap.stageAndSwap(targetDir, stagingDir, backupDir, replacing, staging -> {
             try (var walk = Files.walk(globalDir)) {
                 walk.forEach(source -> {
                     var staged = staging.resolve(globalDir.relativize(source));
@@ -146,6 +143,9 @@ public class SkillPromotionService {
                 });
             }
         });
+        // Refresh the skill cache now the swap is visible — used to live inside the
+        // (now generic) stageAndSwap; the orchestrator owns this policy post-swap.
+        SkillLoader.clearCache();
 
         // ── Snapshot per-agent allowlist contribution from the registry ──
         // AgentSkillAllowedTool rows for this (agent, skill) are the canonical
@@ -156,39 +156,6 @@ public class SkillPromotionService {
         // the threat model. Runs after the swap, so a sync failure leaves the
         // installed skill in place (staging is already gone).
         syncAgentAllowlistFromRegistry(agent, skillName);
-    }
-
-    /** A {@link Path}-consuming step that may throw {@link IOException}. */
-    @FunctionalInterface
-    private interface StagingPopulator {
-        void populate(Path stagingDir) throws IOException;
-    }
-
-    /**
-     * Shared staging spine for both install (copy) and promote: create the
-     * staging directory, let {@code populate} fill it, then atomically swap it
-     * into {@code targetDir}, backing up any existing target and refreshing the
-     * skill cache. On any failure the partially-built staging directory is
-     * removed and the cause is rethrown as an {@link IOException}; an
-     * {@link java.io.UncheckedIOException} from {@code populate} is unwrapped to
-     * its cause so callers see the underlying I/O error. Post-swap work (registry
-     * sync, notifications) belongs at the call site — by then staging no longer
-     * exists, so a later failure has nothing to clean up.
-     */
-    private static void stageAndSwap(Path targetDir, Path stagingDir, Path backupDir,
-                                     boolean replacing, StagingPopulator populate) throws IOException {
-        try {
-            Files.createDirectories(stagingDir);
-            populate.populate(stagingDir);
-            atomicSwap(targetDir, stagingDir, backupDir, replacing);
-            SkillLoader.clearCache();
-        } catch (IOException | RuntimeException e) {
-            if (Files.exists(stagingDir)) {
-                try { deleteRecursive(stagingDir); } catch (IOException _) {}
-            }
-            if (e instanceof UncheckedIOException uioe) throw uioe.getCause();
-            throw e instanceof IOException ioe ? ioe : new IOException(e.getMessage(), e);
-        }
     }
 
     /**
@@ -381,7 +348,12 @@ public class SkillPromotionService {
                     } else {
                         binaryFiles.add(relName);
                     }
-                } catch (IOException _) {}
+                } catch (IOException e) {
+                    // Don't silently drop a file the promotion is meant to carry:
+                    // an unreadable source is a real gap the operator should see.
+                    Logger.warn("Skipping unreadable skill file '%s' during promotion: %s",
+                            relName, e.getMessage());
+                }
             });
             return true;
         } catch (IOException e) {
@@ -517,13 +489,14 @@ public class SkillPromotionService {
         stampSkillVersion(sanitized, targetDir);
 
         try {
-            stageAndSwap(targetDir, stagingDir, backupDir, replacingExisting, staging -> {
+            AtomicDirSwap.stageAndSwap(targetDir, stagingDir, backupDir, replacingExisting, staging -> {
                 Files.createDirectories(staging.resolve("credentials"));
                 Files.createDirectories(staging.resolve("tools"));
                 writeSanitizedTextFiles(staging, sanitized);
                 stageBinaryFiles(skillDir, staging, binaryFiles);
                 pruneEmptyConventionDirs(staging);
             });
+            SkillLoader.clearCache();
 
             // ── Update registry allowlist blessings ──
             // Rewrite SkillRegistryTool rows from the just-promoted SKILL.md's
@@ -644,24 +617,12 @@ public class SkillPromotionService {
 
     /**
      * Atomically swap a staging directory into the target location, backing up
-     * any existing target first. On failure, the backup is restored.
+     * any existing target first. Thin delegate to {@link AtomicDirSwap#atomicSwap}
+     * (JCLAW-727) — retained here as the stable entry point for existing callers.
      */
     public static void atomicSwap(Path targetDir, Path stagingDir, Path backupDir,
                             boolean replacing) throws IOException {
-        if (replacing) {
-            Files.move(targetDir, backupDir);
-        }
-        try {
-            Files.move(stagingDir, targetDir);
-        } catch (IOException swapEx) {
-            if (replacing && Files.isDirectory(backupDir)) {
-                try { Files.move(backupDir, targetDir); } catch (IOException _) {}
-            }
-            throw swapEx;
-        }
-        if (replacing && Files.isDirectory(backupDir)) {
-            deleteRecursive(backupDir);
-        }
+        AtomicDirSwap.atomicSwap(targetDir, stagingDir, backupDir, replacing);
     }
 
     /**
@@ -674,13 +635,13 @@ public class SkillPromotionService {
         return path.substring(path.lastIndexOf('/') + 1);
     }
 
+    /**
+     * Recursively delete {@code dir}. Thin delegate to
+     * {@link AtomicDirSwap#deleteRecursive} (JCLAW-727) — retained here as the
+     * stable entry point for existing callers (controllers, importer, tests).
+     */
     public static void deleteRecursive(Path dir) throws IOException {
-        if (!Files.exists(dir)) return;
-        try (var walk = Files.walk(dir)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try { Files.delete(p); } catch (IOException _) {}
-            });
-        }
+        AtomicDirSwap.deleteRecursive(dir);
     }
 
     private static final Set<String> CREDENTIAL_EXTENSIONS = Set.of(
@@ -716,161 +677,13 @@ public class SkillPromotionService {
                 .collect(joining("; "));
     }
 
-    private static final int DEFAULT_BATCH_KB = 100;
-    private static final int DEFAULT_TIMEOUT_SECONDS = 300;
-
-    private static final String SANITIZE_SYSTEM_PROMPT = """
-            You are a security reviewer. You will receive text files from an AI agent's skill folder.
-            A skill folder has this structure:
-            - SKILL.md — the main skill instructions, BODY ONLY (the YAML frontmatter has already been extracted and will be reinjected verbatim after your review, so do NOT emit or fabricate frontmatter for SKILL.md)
-            - credentials.json — already pre-stripped, no action needed
-            - tools/ — optional tool scripts that may contain hardcoded secrets or personal data
-
-            Your job is to identify and redact any secrets, API keys, tokens, passwords, bearer tokens, \
-            webhook URLs, personal information (names, emails, phone numbers, addresses, usernames), \
-            or other sensitive data that may have been embedded in the files.
-
-            Replace each redacted value with a descriptive placeholder like [API_KEY], [PASSWORD], [EMAIL], \
-            [PHONE_NUMBER], [PERSONAL_NAME], [TOKEN], [WEBHOOK_URL], [USERNAME], etc.
-
-            Return ONLY a valid JSON object mapping each filename to its sanitized content. \
-            Do not include any other text, markdown formatting, or code fences. \
-            Example: {"SKILL.md": "sanitized content here"}
-
-            If no sensitive data is found in a file, return its content unchanged.
-            """;
-
+    /**
+     * LLM sanitizer pass over the skill's text payload. Thin delegate to
+     * {@link SkillSanitizer#sanitize} (JCLAW-727) — retained as the stable,
+     * reflectively-invoked entry point; the pipeline batches, prompts, and
+     * falls back to originals there.
+     */
     static LinkedHashMap<String, String> sanitizeWithLlm(LinkedHashMap<String, String> fileContents) {
-        // Resolve provider and model — prefer dedicated sanitization config, fall back to main agent
-        var configProvider = ConfigService.get("skillsPromotion.provider");
-        var configModel = ConfigService.get("skillsPromotion.model");
-        int batchKb = ConfigService.getInt("skillsPromotion.batchSizeKb", DEFAULT_BATCH_KB);
-        int timeoutSeconds = ConfigService.getInt("skillsPromotion.timeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
-
-        LlmProvider provider = null;
-        String modelId = null;
-
-        if (configProvider != null && !configProvider.isBlank()) {
-            provider = ProviderRegistry.get(configProvider);
-            modelId = configModel;
-        }
-
-        // Fall back to main agent's provider/model if not explicitly configured
-        if (provider == null || modelId == null || modelId.isBlank()) {
-            Agent mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
-            if (mainAgent == null) {
-                EventLogger.warn(EVENT_CATEGORY_SKILLS, "Sanitization skipped: main agent not found");
-                return fileContents;
-            }
-            if (provider == null) provider = ProviderRegistry.get(mainAgent.modelProvider);
-            if (modelId == null || modelId.isBlank()) modelId = mainAgent.modelId;
-        }
-
-        if (provider == null) {
-            EventLogger.warn(EVENT_CATEGORY_SKILLS, "Sanitization skipped: no provider configured");
-            return fileContents;
-        }
-
-        EventLogger.info(EVENT_CATEGORY_SKILLS, "Starting LLM sanitization of %d file(s) via %s / %s (batch=%dKB, timeout=%ds)"
-                .formatted(fileContents.size(), provider.config().name(), modelId, batchKb, timeoutSeconds));
-
-        for (var entry : fileContents.entrySet()) {
-            EventLogger.info(EVENT_CATEGORY_SKILLS, "Sanitizing file: %s (%d chars)"
-                    .formatted(entry.getKey(), entry.getValue().length()));
-        }
-
-        // Batch files by KB to avoid overwhelming the model with a single massive payload
-        var batches = buildBatchesBySize(fileContents, batchKb * 1024);
-        var result = new LinkedHashMap<String, String>();
-
-        for (int i = 0; i < batches.size(); i++) {
-            EventLogger.info(EVENT_CATEGORY_SKILLS, "Sending batch %d/%d (%d files)"
-                    .formatted(i + 1, batches.size(), batches.get(i).size()));
-
-            var batchResult = sanitizeBatch(provider, modelId, batches.get(i), fileContents, timeoutSeconds);
-            result.putAll(batchResult);
-        }
-
-        EventLogger.info(EVENT_CATEGORY_SKILLS, "Sanitization complete");
-        return result;
-    }
-
-    private static List<List<Map.Entry<String, String>>> buildBatchesBySize(
-            LinkedHashMap<String, String> fileContents, int maxBatchBytes) {
-
-        var batches = new ArrayList<List<Map.Entry<String, String>>>();
-        var currentBatch = new ArrayList<Map.Entry<String, String>>();
-        int currentSize = 0;
-
-        for (var entry : fileContents.entrySet()) {
-            int entrySize = entry.getValue().length() * 2; // rough byte estimate (UTF-16 chars → bytes)
-            // If this single file exceeds the limit, send it alone
-            if (!currentBatch.isEmpty() && currentSize + entrySize > maxBatchBytes) {
-                batches.add(currentBatch);
-                currentBatch = new ArrayList<>();
-                currentSize = 0;
-            }
-            currentBatch.add(entry);
-            currentSize += entrySize;
-        }
-        if (!currentBatch.isEmpty()) batches.add(currentBatch);
-        return batches;
-    }
-
-    private static LinkedHashMap<String, String> sanitizeBatch(
-            LlmProvider provider, String modelId,
-            List<Map.Entry<String, String>> batch,
-            LinkedHashMap<String, String> originals, int timeoutSeconds) {
-
-        var sb = new StringBuilder();
-        for (var entry : batch) {
-            sb.append("=== FILE: %s ===\n".formatted(entry.getKey()));
-            sb.append(entry.getValue());
-            sb.append("\n\n");
-        }
-
-        var messages = List.of(
-                ChatMessage.system(SANITIZE_SYSTEM_PROMPT),
-                ChatMessage.user(sb.toString())
-        );
-
-        try {
-            // No reasoning (null thinkingMode) — sanitization is classification, not reasoning.
-            // Skill promotion is a programmatic operation with no chat-channel
-            // context; dispatcher_wait records under "unknown".
-            var response = provider.chat(modelId, messages, null, null, null, timeoutSeconds, null);
-            var text = response.choices().getFirst().message().content().toString().strip();
-
-            EventLogger.info(EVENT_CATEGORY_SKILLS,
-                    "LLM sanitization batch response (%d chars)".formatted(text.length()));
-
-            if (text.startsWith("```")) {
-                text = text.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").strip();
-            }
-
-            var json = JsonParser.parseString(text).getAsJsonObject();
-            var result = new LinkedHashMap<String, String>();
-            for (var entry : batch) {
-                if (json.has(entry.getKey())) {
-                    var sanitized = json.get(entry.getKey()).getAsString();
-                    var changed = !sanitized.equals(entry.getValue());
-                    result.put(entry.getKey(), sanitized);
-                    EventLogger.info(EVENT_CATEGORY_SKILLS, "  %s: %s"
-                            .formatted(entry.getKey(), changed ? "REDACTED (content changed)" : "clean (no changes)"));
-                } else {
-                    result.put(entry.getKey(), originals.get(entry.getKey()));
-                    EventLogger.info(EVENT_CATEGORY_SKILLS, "  %s: not in LLM response, kept original"
-                            .formatted(entry.getKey()));
-                }
-            }
-            return result;
-        } catch (Exception e) {
-            EventLogger.warn(EVENT_CATEGORY_SKILLS, "LLM sanitization batch failed, using originals: " + e.getMessage());
-            var result = new LinkedHashMap<String, String>();
-            for (var entry : batch) {
-                result.put(entry.getKey(), originals.get(entry.getKey()));
-            }
-            return result;
-        }
+        return SkillSanitizer.sanitize(fileContents);
     }
 }
