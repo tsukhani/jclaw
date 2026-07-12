@@ -85,12 +85,26 @@ public final class TelegramInboundParser {
             } else if (result instanceof TelegramFileDownloader.DownloadFailed(var reason)) {
                 TelegramChannel.forToken(sendToken).sendText(sendChatId,
                         "Sorry, I couldn't download your file from Telegram.");
+                // JCLAW-730: a download reason is built from raw IO exception
+                // messages that often embed the request URL, and Telegram URLs
+                // carry the bot token — strip it before it reaches the warn log.
                 EventLogger.warn(LOG_CATEGORY, sendAgent.name, CHANNEL_NAME,
-                        "Download failed: %s".formatted(reason));
+                        "Download failed: %s".formatted(redact(reason, sendToken)));
                 return null;
             }
         }
         return inputs;
+    }
+
+    /**
+     * JCLAW-730: strip the bot token from a message before it is logged. Telegram
+     * network/IO failures surface the request URL in their message, and Telegram
+     * URLs embed the bot token ({@code .../bot<token>/...}). Mirrors the redaction
+     * {@link TelegramWebhookRegistrar} applies on its probe-failure path.
+     */
+    private static String redact(String s, String token) {
+        if (s == null) return "";
+        return (token == null || token.isEmpty()) ? s : s.replace(token, "<token>");
     }
 
     /** Parse a Gson {@link JsonObject} update (webhook payload) into {@link InboundMessage}. */

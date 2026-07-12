@@ -1,6 +1,7 @@
 package models;
 
 import channels.ChannelTransport;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
@@ -45,6 +46,7 @@ public class SlackBinding extends AgentBoundBinding {
      * into two bindings fails fast.
      */
     @Column(name = "bot_token", nullable = false, unique = true)
+    @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedBotToken()).
     public String botToken;
 
     /**
@@ -54,6 +56,7 @@ public class SlackBinding extends AgentBoundBinding {
      * without re-entering it).
      */
     @Column(name = "signing_secret", nullable = false)
+    @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedSigningSecret()).
     public String signingSecret;
 
     /**
@@ -61,6 +64,7 @@ public class SlackBinding extends AgentBoundBinding {
      * (JCLAW-351). Null for HTTP (Events API) transport bindings.
      */
     @Column(name = "app_token")
+    @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedAppToken()).
     public String appToken;
 
     /**
@@ -135,5 +139,28 @@ public class SlackBinding extends AgentBoundBinding {
 
     public static List<SlackBinding> findAllEnabledByTransport(ChannelTransport transport) {
         return SlackBinding.find("enabled = true AND transport = ?1", transport).fetch();
+    }
+
+    /** JCLAW-730: masked {@link #botToken} for any display/log path — the raw
+     *  field is {@code @JsonIgnore} so callers reach for this safe form. */
+    public String maskedBotToken() {
+        return mask(botToken);
+    }
+
+    /** JCLAW-730: masked {@link #signingSecret} for any display/log path. */
+    public String maskedSigningSecret() {
+        return mask(signingSecret);
+    }
+
+    /** JCLAW-730: masked {@link #appToken} for any display/log path. */
+    public String maskedAppToken() {
+        return mask(appToken);
+    }
+
+    /** Show only the first 4 characters of a secret, matching
+     *  {@code ConfigService.maskValue}'s house style; blank/null → null. */
+    private static String mask(String secret) {
+        if (secret == null || secret.isBlank()) return null;
+        return secret.length() > 4 ? secret.substring(0, 4) + "****" : "****";
     }
 }
