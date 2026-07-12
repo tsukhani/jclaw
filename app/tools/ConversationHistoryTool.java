@@ -10,6 +10,7 @@ import models.Message;
 import models.SubagentRun;
 import services.Tx;
 import utils.GsonHolder;
+import utils.JsonArgs;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -174,7 +175,7 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
     }
 
     private static ParsedArgs parseArgs(JsonObject args) {
-        var runIdStr = optString(args, PARAM_RUN_ID);
+        var runIdStr = JsonArgs.optString(args, PARAM_RUN_ID);
         if (runIdStr == null || runIdStr.isBlank()) {
             return ParsedArgs.fail("Error: 'runId' is required.");
         }
@@ -184,11 +185,11 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
         } catch (NumberFormatException _) {
             return ParsedArgs.fail("Error: 'runId' must be a numeric run id (got '" + runIdStr + "').");
         }
-        var requestedLimit = optInt(args, "limit", DEFAULT_LIMIT);
+        var requestedLimit = JsonArgs.optInt(args, "limit", DEFAULT_LIMIT);
         if (requestedLimit <= 0) requestedLimit = DEFAULT_LIMIT;
         if (requestedLimit > MAX_LIMIT) requestedLimit = MAX_LIMIT;
 
-        var beforeStr = optString(args, "beforeMessageId");
+        var beforeStr = JsonArgs.optString(args, "beforeMessageId");
         Long beforeMessageId = null;
         if (beforeStr != null && !beforeStr.isBlank()) {
             try {
@@ -248,17 +249,5 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
         payload.put("has_more", hasMore);
         payload.put("messages", messages);
         return GsonHolder.INSTANCE.toJson(payload, Map.class);
-    }
-
-    private static String optString(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        return el.getAsString();
-    }
-
-    private static int optInt(JsonObject obj, String key, int fallback) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return fallback; }
     }
 }

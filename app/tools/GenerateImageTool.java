@@ -13,6 +13,7 @@ import services.Tx;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
 import services.imagegen.ImageGenerationService;
+import utils.JsonArgs;
 
 import java.util.List;
 import java.util.Map;
@@ -105,7 +106,7 @@ public class GenerateImageTool implements ToolRegistry.Tool {
         } catch (RuntimeException _) {
             return ToolRegistry.ToolResult.text("Error: invalid arguments for generate_image.");
         }
-        var prompt = optString(args, ARG_PROMPT);
+        var prompt = JsonArgs.optString(args, ARG_PROMPT);
         if (prompt == null || prompt.isBlank()) {
             return ToolRegistry.ToolResult.text("Error: 'prompt' is required.");
         }
@@ -164,7 +165,7 @@ public class GenerateImageTool implements ToolRegistry.Tool {
      * (via {@link ToolContext}) to find the most recent uploaded image and reads its bytes.
      */
     private static ImageGenerationService.ReferenceImage resolveReferenceImage(JsonObject args) {
-        if (!optBool(args, ARG_USE_REFERENCE)) return null;
+        if (!JsonArgs.optBool(args, ARG_USE_REFERENCE)) return null;
         var conversationId = ToolContext.conversationId();
         // Tools execute on the dispatcher's virtual threads with no ambient EntityManager, so the
         // attachment lookup + byte read must open their own JPA transaction (JCLAW-694). Returns
@@ -185,10 +186,10 @@ public class GenerateImageTool implements ToolRegistry.Tool {
 
     /** {width, height} from explicit pixels or an aspect ratio; nulls mean "provider default". */
     private static Integer[] resolveDimensions(JsonObject args) {
-        Integer width = optInt(args, ARG_WIDTH);
-        Integer height = optInt(args, ARG_HEIGHT);
+        Integer width = JsonArgs.optInteger(args, ARG_WIDTH);
+        Integer height = JsonArgs.optInteger(args, ARG_HEIGHT);
         if (width != null && height != null) return new Integer[]{width, height};
-        var aspect = optString(args, ARG_ASPECT);
+        var aspect = JsonArgs.optString(args, ARG_ASPECT);
         if (aspect != null) {
             // True ratios at a Flux-safe scale (each side a multiple of 16; long side 1536). Providers
             // that take raw pixels (local Flux, BFL) render these exactly; Replicate maps them back to its
@@ -211,17 +212,5 @@ public class GenerateImageTool implements ToolRegistry.Tool {
         if (width != null) meta.addProperty(ARG_WIDTH, width);
         if (height != null) meta.addProperty(ARG_HEIGHT, height);
         return meta.toString();
-    }
-
-    private static String optString(JsonObject args, String key) {
-        return args.has(key) && !args.get(key).isJsonNull() ? args.get(key).getAsString() : null;
-    }
-
-    private static Integer optInt(JsonObject args, String key) {
-        return args.has(key) && !args.get(key).isJsonNull() ? args.get(key).getAsInt() : null;
-    }
-
-    private static boolean optBool(JsonObject args, String key) {
-        return args.has(key) && !args.get(key).isJsonNull() && args.get(key).getAsBoolean();
     }
 }

@@ -3,6 +3,7 @@ package services;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import play.Play;
+import utils.JsonArgs;
 
 import java.io.Closeable;
 import java.io.File;
@@ -181,7 +182,7 @@ public final class TailscaleFunnel {
     public static String publicBaseUrlFrom(String statusJson) {
         var self = selfObject(statusJson);
         if (self == null) return null;
-        var dns = optString(self, "DNSName");
+        var dns = JsonArgs.optString(self, "DNSName");
         if (dns != null && !dns.isBlank()) {
             return HTTPS_SCHEME + dns.replaceAll("\\.$", "");
         }
@@ -194,7 +195,7 @@ public final class TailscaleFunnel {
 
     public static String backendStateFrom(String statusJson) {
         var obj = parseNoisyJson(statusJson);
-        return obj != null ? optString(obj, "BackendState") : null;
+        return obj != null ? JsonArgs.optString(obj, "BackendState") : null;
     }
 
     private static JsonObject selfObject(String statusJson) {
@@ -218,11 +219,6 @@ public final class TailscaleFunnel {
         } catch (RuntimeException _) {
             return null;
         }
-    }
-
-    private static String optString(JsonObject o, String key) {
-        var el = o.get(key);
-        return el != null && el.isJsonPrimitive() ? el.getAsString() : null;
     }
 
     private static String firstNonBlank(String... vals) {

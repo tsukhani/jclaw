@@ -8,6 +8,7 @@ import models.Agent;
 import models.SubagentRun;
 import services.Tx;
 import utils.GsonHolder;
+import utils.JsonArgs;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -153,7 +154,7 @@ public class ConversationListTool implements ToolRegistry.Tool {
 
     private static ParsedArgs parseArgs(JsonObject args) {
         SubagentRun.Status status = null;
-        var statusStr = optString(args, PARAM_STATUS);
+        var statusStr = JsonArgs.optString(args, PARAM_STATUS);
         if (statusStr != null && !statusStr.isBlank()) {
             try {
                 status = SubagentRun.Status.valueOf(statusStr.toUpperCase());
@@ -163,16 +164,16 @@ public class ConversationListTool implements ToolRegistry.Tool {
                         + " (got '" + statusStr + "').");
             }
         }
-        var labelGlob = optString(args, PARAM_LABEL_GLOB);
+        var labelGlob = JsonArgs.optString(args, PARAM_LABEL_GLOB);
         String labelLike = null;
         if (labelGlob != null && !labelGlob.isBlank()) {
             labelLike = globToLike(labelGlob);
         }
-        Long agentId = optLong(args, PARAM_AGENT_ID);
-        var limit = optInt(args, PARAM_LIMIT, DEFAULT_LIMIT);
+        Long agentId = JsonArgs.optLong(args, PARAM_AGENT_ID);
+        var limit = JsonArgs.optInt(args, PARAM_LIMIT, DEFAULT_LIMIT);
         if (limit <= 0) limit = DEFAULT_LIMIT;
         if (limit > MAX_LIMIT) limit = MAX_LIMIT;
-        var offset = optInt(args, PARAM_OFFSET, 0);
+        var offset = JsonArgs.optInt(args, PARAM_OFFSET, 0);
         if (offset < 0) offset = 0;
         return ParsedArgs.ok(status, labelLike, agentId, limit, offset);
     }
@@ -256,23 +257,5 @@ public class ConversationListTool implements ToolRegistry.Tool {
         if (outcome == null) return null;
         if (outcome.length() <= OUTCOME_PREVIEW_MAX_CHARS) return outcome;
         return outcome.substring(0, OUTCOME_PREVIEW_MAX_CHARS - 3) + "...";
-    }
-
-    private static String optString(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        return el.getAsString();
-    }
-
-    private static Long optLong(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        try { return el.getAsLong(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return null; }
-    }
-
-    private static int optInt(JsonObject obj, String key, int fallback) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return fallback; }
     }
 }

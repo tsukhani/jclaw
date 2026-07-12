@@ -339,18 +339,31 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     /**
+     * Typed {@code Task.find(...).fetch()} (JCLAW-729). The play1 finder returns a
+     * raw {@code List} whose {@code (List<Task>)} cast won't compile, so copy the
+     * rows into a typed list once — the five callers then iterate {@code Task}
+     * directly instead of each repeating the raw cast + per-row {@code (Task)}
+     * downcast. Call inside an active Tx (the finder needs an EntityManager).
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Task> findTasks(String query, Object... params) {
+        var raw = (List<Object>) (List<?>) Task.find(query, params).fetch();
+        var tasks = new ArrayList<Task>(raw.size());
+        for (var row : raw) tasks.add((Task) row);
+        return tasks;
+    }
+
+    /**
      * Non-cancelled task ids matching (name, agent). Returns empty list
      * when nothing matches. Used by pause/resume/cancelTask — runNow uses
      * the any-state variant below because it explicitly revives CANCELLED.
      */
     private static List<Long> findTaskIds(String name, Agent agent) {
         return Tx.run(() -> {
-            @SuppressWarnings("unchecked")
-            var raw = (List<Object>) (List<?>) Task.find(
-                    "name = ?1 AND agent = ?2 AND status != ?3",
-                    name, agent, Task.Status.CANCELLED).fetch();
-            var ids = new ArrayList<Long>(raw.size());
-            for (var row : raw) ids.add(((Task) row).id);
+            var tasks = findTasks("name = ?1 AND agent = ?2 AND status != ?3",
+                    name, agent, Task.Status.CANCELLED);
+            var ids = new ArrayList<Long>(tasks.size());
+            for (var task : tasks) ids.add(task.id);
             return ids;
         });
     }
@@ -467,12 +480,10 @@ public class TaskTool implements ToolRegistry.Tool {
             return null;
         }
         var conflictId = Tx.run(() -> {
-            @SuppressWarnings("unchecked")
-            var existing = (List<Object>) (List<?>) Task.find(
+            var existing = findTasks(
                     "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5",
-                    name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED
-            ).fetch();
-            return existing.isEmpty() ? null : ((Task) existing.getFirst()).id;
+                    name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED);
+            return existing.isEmpty() ? null : existing.getFirst().id;
         });
         if (conflictId == null) return null;
         return "Error: A recurring task named '%s' already exists for this agent (id=%d). Use updateTask to modify it or cancelTask first."
@@ -775,12 +786,9 @@ public class TaskTool implements ToolRegistry.Tool {
      */
     private static List<Long> collectRunNowTargets(String name, Agent agent,
                                                    int[] revivedRef, List<Long> lostIds) {
-        @SuppressWarnings("unchecked")
-        var raw = (List<Object>) (List<?>) Task.find(
-                "name = ?1 AND agent = ?2", name, agent).fetch();
-        var ids = new ArrayList<Long>(raw.size());
-        for (var row : raw) {
-            var task = (Task) row;
+        var tasks = findTasks("name = ?1 AND agent = ?2", name, agent);
+        var ids = new ArrayList<Long>(tasks.size());
+        for (var task : tasks) {
             if (task.status == Task.Status.CANCELLED) {
                 // Revive — otherwise TaskExecutionHandler skips the fire body.
                 // Recurring tasks get ACTIVE; one-shot tasks get PENDING.
@@ -815,13 +823,10 @@ public class TaskTool implements ToolRegistry.Tool {
         // Agent-scoped: two agents naming a task "daily summary" must not
         // be able to cancel each other's — agent isolation.
         var cancelledIds = Tx.run(() -> {
-            @SuppressWarnings("unchecked")
-            var raw = (List<Object>) (List<?>) Task.find(
-                    "name = ?1 AND agent = ?2 AND status != ?3",
-                    name, agent, Task.Status.CANCELLED).fetch();
-            var ids = new ArrayList<Long>(raw.size());
-            for (var row : raw) {
-                var task = (Task) row;
+            var tasks = findTasks("name = ?1 AND agent = ?2 AND status != ?3",
+                    name, agent, Task.Status.CANCELLED);
+            var ids = new ArrayList<Long>(tasks.size());
+            for (var task : tasks) {
                 task.status = Task.Status.CANCELLED;
                 task.save();
                 ids.add(task.id);
@@ -856,13 +861,10 @@ public class TaskTool implements ToolRegistry.Tool {
         }
         var name = args.get(KEY_NAME).getAsString();
         var deletedIds = Tx.run(() -> {
-            @SuppressWarnings("unchecked")
-            var raw = (List<Object>) (List<?>) Task.find(
-                    "name = ?1 AND agent = ?2", name, agent).fetch();
-            var ids = new ArrayList<Long>(raw.size());
+            var tasks = findTasks("name = ?1 AND agent = ?2", name, agent);
+            var ids = new ArrayList<Long>(tasks.size());
             var em = JPA.em();
-            for (var row : raw) {
-                var task = (Task) row;
+            for (var task : tasks) {
                 var taskId = task.id;
                 em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
                         .setParameter("taskId", taskId).executeUpdate();

@@ -18,6 +18,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.Tx;
 import utils.HttpFactories;
+import utils.JsonArgs;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -171,7 +172,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return "Error: invalid arguments for " + TOOL_NAME + ".";
         }
 
-        var action = optString(args, ARG_ACTION);
+        var action = JsonArgs.optString(args, ARG_ACTION);
         if (action != null && !action.isBlank()
                 && !ACTION_DIARIZE.equals(action) && !ACTION_ENROLL.equals(action)) {
             return "Error: unknown action '%s' (expected %s or %s).".formatted(
@@ -199,7 +200,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     + "model under Settings → Transcription → Diarization.").formatted(model, provider);
         }
 
-        var attachment = Tx.run(() -> resolveAttachment(optString(args, ARG_UUID)));
+        var attachment = Tx.run(() -> resolveAttachment(JsonArgs.optString(args, ARG_UUID)));
         if (attachment.error() != null) return attachment.error();
         var att = attachment.value();
         var path = AgentService.workspaceRoot().resolve(att.storagePath);
@@ -208,18 +209,17 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
 
         if (ACTION_ENROLL.equals(action)) {
-            return enrollVoice(path, optString(args, ARG_SPEAKER_NAME));
+            return enrollVoice(path, JsonArgs.optString(args, ARG_SPEAKER_NAME));
         }
 
-        boolean emotionsArg = args.has(ARG_EMOTIONS) && !args.get(ARG_EMOTIONS).isJsonNull()
-                && args.get(ARG_EMOTIONS).getAsBoolean();
+        boolean emotionsArg = JsonArgs.optBool(args, ARG_EMOTIONS);
 
         try {
             var audio = services.transcription.LlmAudio.prepare(path, att.mimeType);
             boolean emotions = emotionsArg;
             var references = loadReferences();
-            var prompt = buildPrompt(optString(args, ARG_SPEAKER_NAMES),
-                    optString(args, ARG_LANGUAGE), emotions, references.keySet());
+            var prompt = buildPrompt(JsonArgs.optString(args, ARG_SPEAKER_NAMES),
+                    JsonArgs.optString(args, ARG_LANGUAGE), emotions, references.keySet());
             var transcript = chatWithAudioRetrying(baseUrl, provider, model, prompt,
                     audio.base64(), audio.format(), references);
             return "Diarized transcript of %s (via %s %s):\n\n%s"
@@ -469,9 +469,5 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     + "Ask the user to upload the recording first.");
         }
         return Resolved.of(att);
-    }
-
-    private static String optString(JsonObject args, String key) {
-        return args.has(key) && !args.get(key).isJsonNull() ? args.get(key).getAsString() : null;
     }
 }

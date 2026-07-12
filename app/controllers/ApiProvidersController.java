@@ -22,6 +22,7 @@ import services.PricingRefreshService;
 import services.video.VideoInterpretationClient;
 import services.video.VideoInterpretationRouter;
 import utils.ApiResponses;
+import utils.JsonArgs;
 import utils.Strings;
 
 import java.math.BigDecimal;
@@ -205,9 +206,9 @@ public class ApiProvidersController extends Controller {
         for (var el : arr) {
             if (!el.isJsonObject()) continue;
             var obj = el.getAsJsonObject();
-            var id = str(obj, "id");
+            var id = JsonArgs.optString(obj, "id", "");
             if (id.isBlank()) continue;
-            var displayName = str(obj, "name");
+            var displayName = JsonArgs.optString(obj, "name", "");
             refs.add(new ModelRef(id, displayName.isBlank() ? deriveName(id) : displayName));
         }
         renderJSON(gson.toJson(new ProviderModelsResponse(name, refs, refs.size())));
@@ -240,7 +241,7 @@ public class ApiProvidersController extends Controller {
         var key = modelsKey(name);
         var models = parseModelsArray(ConfigService.get(key));
         for (var el : models) {
-            if (el.isJsonObject() && id.equals(str(el.getAsJsonObject(), "id"))) {
+            if (el.isJsonObject() && id.equals(JsonArgs.optString(el.getAsJsonObject(), "id", ""))) {
                 ApiResponses.error(409, ApiResponses.CONFLICT, "Model '%s' already exists for provider '%s'".formatted(id, name));
             }
         }
@@ -303,13 +304,13 @@ public class ApiProvidersController extends Controller {
         var m = new JsonObject();
         m.addProperty("id", id);
         m.addProperty("name", name);
-        m.addProperty("contextWindow", optInt(body, "contextWindow"));
-        m.addProperty("maxTokens", optInt(body, "maxTokens"));
-        boolean thinking = optBool(body, "supportsThinking");
+        m.addProperty("contextWindow", JsonArgs.optInt(body, "contextWindow", 0));
+        m.addProperty("maxTokens", JsonArgs.optInt(body, "maxTokens", 0));
+        boolean thinking = JsonArgs.optBool(body, "supportsThinking");
         m.addProperty("supportsThinking", thinking);
-        if (thinking && optBool(body, "alwaysThinks")) m.addProperty("alwaysThinks", true);
-        m.addProperty(SUPPORTS_VISION, optBool(body, SUPPORTS_VISION));
-        m.addProperty("supportsAudio", optBool(body, "supportsAudio"));
+        if (thinking && JsonArgs.optBool(body, "alwaysThinks")) m.addProperty("alwaysThinks", true);
+        m.addProperty(SUPPORTS_VISION, JsonArgs.optBool(body, SUPPORTS_VISION));
+        m.addProperty("supportsAudio", JsonArgs.optBool(body, "supportsAudio"));
         addPriceIfSet(m, body, "promptPrice");
         addPriceIfSet(m, body, "completionPrice");
         addPriceIfSet(m, body, "cachedReadPrice");
@@ -322,24 +323,8 @@ public class ApiProvidersController extends Controller {
         if (v >= 0) out.addProperty(key, v);
     }
 
-    private static String str(JsonObject obj, String key) {
-        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : "";
-    }
-
     private static String deriveName(String id) {
         return id.contains("/") ? id.substring(id.lastIndexOf('/') + 1) : id;
-    }
-
-    private static int optInt(JsonObject body, String key) {
-        try {
-            return body.has(key) && !body.get(key).isJsonNull() ? body.get(key).getAsInt() : 0;
-        } catch (NumberFormatException _) {
-            return 0;
-        }
-    }
-
-    private static boolean optBool(JsonObject body, String key) {
-        return body.has(key) && !body.get(key).isJsonNull() && body.get(key).getAsBoolean();
     }
 
     private static double optPrice(JsonObject body, String key) {

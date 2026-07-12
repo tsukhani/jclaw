@@ -4,10 +4,10 @@ import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import utils.GsonHolder;
+import utils.JsonArgs;
 
 import java.util.List;
 import java.util.Map;
@@ -114,21 +114,15 @@ public class CheckListTool implements ToolRegistry.Tool {
             return ItemValidation.fail("Error: Item %d must be an object.".formatted(i));
         }
         var item = el.getAsJsonObject();
-        String content = optString(item, FIELD_CONTENT);
+        String content = JsonArgs.optString(item, FIELD_CONTENT);
         if (content == null) return ItemValidation.fail("Error: Item %d is missing required field `content`.".formatted(i));
-        String status = optString(item, FIELD_STATUS);
+        String status = JsonArgs.optString(item, FIELD_STATUS);
         if (status == null) return ItemValidation.fail("Error: Item %d is missing required field `status`.".formatted(i));
-        String activeForm = optString(item, FIELD_ACTIVE_FORM);
+        String activeForm = JsonArgs.optString(item, FIELD_ACTIVE_FORM);
         if (activeForm == null) return ItemValidation.fail("Error: Item %d is missing required field `activeForm`.".formatted(i));
 
         if (content.isBlank()) return ItemValidation.fail("Error: All items must have non-blank content.");
         if (activeForm.isBlank()) return ItemValidation.fail("Error: All items must have non-blank activeForm.");
         return ItemValidation.ok("in_progress".equals(status));
-    }
-
-    private static String optString(JsonObject item, String key) {
-        var el = item.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        return el.getAsString();
     }
 }

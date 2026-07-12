@@ -15,6 +15,7 @@ import play.Play;
 import services.DeliveryDispatcher;
 import services.Tx;
 import utils.GsonHolder;
+import utils.JsonArgs;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -275,7 +276,7 @@ public class MessageTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var action = optString(args, PARAM_ACTION);
+        var action = JsonArgs.optString(args, PARAM_ACTION);
         if (action == null || action.isBlank()) {
             return "Error: 'action' is required.";
         }
@@ -286,12 +287,12 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         final var finalCallerId = callingAgent.id;
         if (ACTION_SEND.equals(normalized)) {
-            var message = optString(args, PARAM_MESSAGE);
+            var message = JsonArgs.optString(args, PARAM_MESSAGE);
             if (message == null || message.isBlank()) {
                 return "Error: 'message' is required.";
             }
-            final var finalChannel = optString(args, PARAM_CHANNEL);
-            final var finalTarget = optString(args, PARAM_TARGET);
+            final var finalChannel = JsonArgs.optString(args, PARAM_CHANNEL);
+            final var finalTarget = JsonArgs.optString(args, PARAM_TARGET);
             final var finalMessage = message;
             return Tx.run(() -> dispatch(finalCallerId, finalChannel, finalTarget, finalMessage));
         }
@@ -302,22 +303,22 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         // JCLAW-374/381: reply / edit / delete / pin / unpin / react — Telegram
         // message actions, all keyed on message_id.
-        var messageId = optInteger(args, PARAM_MESSAGE_ID);
+        var messageId = JsonArgs.optInteger(args, PARAM_MESSAGE_ID);
         if (messageId == null) {
             return "Error: 'message_id' is required for action '" + normalized + "'.";
         }
         // JCLAW-381: reply and edit carry a text body in `message`.
-        var text = optString(args, PARAM_MESSAGE);
+        var text = JsonArgs.optString(args, PARAM_MESSAGE);
         if ((ACTION_REPLY.equals(normalized) || ACTION_EDIT.equals(normalized))
                 && (text == null || text.isBlank())) {
             return "Error: 'message' is required for action '" + normalized + "'.";
         }
-        final var finalTarget = optString(args, PARAM_TARGET);
-        final var finalEmoji = optString(args, PARAM_EMOJI);
+        final var finalTarget = JsonArgs.optString(args, PARAM_TARGET);
+        final var finalEmoji = JsonArgs.optString(args, PARAM_EMOJI);
         final var finalMessage = text;
         final var finalMessageId = messageId;
         // JCLAW-387 (A3): optional verbatim excerpt to natively quote on a reply.
-        final var finalQuote = optString(args, PARAM_QUOTE);
+        final var finalQuote = JsonArgs.optString(args, PARAM_QUOTE);
         return Tx.run(() -> telegramAction(
                 finalCallerId, normalized, finalTarget, finalMessageId, finalEmoji,
                 finalMessage, finalQuote));
@@ -337,7 +338,7 @@ public class MessageTool implements ToolRegistry.Tool {
                     "Action '" + ACTION_POLL + "' is disabled by configuration "
                             + "(" + cfgKeyFor(ACTION_POLL) + ").");
         }
-        var question = optString(args, PARAM_QUESTION);
+        var question = JsonArgs.optString(args, PARAM_QUESTION);
         if (question == null || question.isBlank()) {
             return "Error: 'question' is required for action 'poll'.";
         }
@@ -346,12 +347,12 @@ public class MessageTool implements ToolRegistry.Tool {
             return "Error: 'poll' requires between " + MIN_POLL_OPTIONS + " and "
                     + MAX_POLL_OPTIONS + " options (got " + options.size() + ").";
         }
-        final var finalTarget = optString(args, PARAM_TARGET);
+        final var finalTarget = JsonArgs.optString(args, PARAM_TARGET);
         final var finalQuestion = question;
         final var finalOptions = options;
-        final var finalAnonymous = optBoolean(args, PARAM_ANONYMOUS);
-        final var finalMultiple = optBoolean(args, PARAM_MULTIPLE);
-        final var finalOpenPeriod = optInteger(args, PARAM_OPEN_PERIOD);
+        final var finalAnonymous = JsonArgs.optBoolean(args, PARAM_ANONYMOUS);
+        final var finalMultiple = JsonArgs.optBoolean(args, PARAM_MULTIPLE);
+        final var finalOpenPeriod = JsonArgs.optInteger(args, PARAM_OPEN_PERIOD);
         return Tx.run(() -> poll(callingAgentId, finalTarget, finalQuestion, finalOptions,
                 finalAnonymous, finalMultiple, finalOpenPeriod));
     }
@@ -637,34 +638,6 @@ public class MessageTool implements ToolRegistry.Tool {
         payload.put("status", status);
         if (reason != null) payload.put("reason", reason);
         return GsonHolder.INSTANCE.toJson(payload, Map.class);
-    }
-
-    private static String optString(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        return el.getAsString();
-    }
-
-    private static Integer optInteger(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        try {
-            return el.getAsInt();
-        } catch (NumberFormatException | IllegalStateException _) {
-            return null;
-        }
-    }
-
-    /** Optional boolean, null when the key is absent/null (so an unset poll knob
-     *  leaves the Bot API default in {@link TelegramChannel#sendPoll}). */
-    private static Boolean optBoolean(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        try {
-            return el.getAsBoolean();
-        } catch (IllegalStateException | UnsupportedOperationException _) {
-            return null;
-        }
     }
 
     /**

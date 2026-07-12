@@ -1,6 +1,7 @@
 package tools;
 
 import com.google.gson.JsonObject;
+import utils.JsonArgs;
 
 import java.util.Set;
 
@@ -81,27 +82,21 @@ record SubagentSpawnArgs(
                 mode, context, timeoutSeconds, asyncRequested);
     }
 
+    // Thin forwarders to the shared {@link JsonArgs} accessors (JCLAW-729). Kept
+    // package-visible because SubagentSpawnTool / SubagentAcpRunner call them.
     static String optString(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        return el.getAsString();
+        return JsonArgs.optString(obj, key);
     }
 
     static Long optLong(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        try { return el.getAsLong(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return null; }
+        return JsonArgs.optLong(obj, key);
     }
 
     static int optInt(JsonObject obj, String key, int fallback) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return fallback; }
+        return JsonArgs.optInt(obj, key, fallback);
     }
 
     static boolean optBool(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return false;
-        try { return el.getAsBoolean(); } catch (UnsupportedOperationException | IllegalStateException _) { return false; }
+        return JsonArgs.optBool(obj, key);
     }
 }

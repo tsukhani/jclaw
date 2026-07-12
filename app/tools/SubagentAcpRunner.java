@@ -286,21 +286,7 @@ final class SubagentAcpRunner {
                 proc.destroyForcibly();
                 throw new IllegalStateException("ACP harness exceeded the %ds ceiling and was killed.".formatted(ceiling));
             }
-            int exit = proc.exitValue();
-            String stdout = out.get(10, TimeUnit.SECONDS);
-            if (exit != 0) {
-                String stderr = err.get(10, TimeUnit.SECONDS);
-                String detail;
-                if (!stderr.isBlank()) {
-                    detail = stderr.strip();
-                } else if (!stdout.isBlank()) {
-                    detail = stdout.strip();
-                } else {
-                    detail = NO_OUTPUT;
-                }
-                throw new IllegalStateException(ACP_EXIT_MSG.formatted(exit, detail));
-            }
-            return new AgentRunner.RunResult(stdout.strip(), null);
+            return finishAcpRun(proc, out, err);
         } catch (InterruptedException e) {
             // proc is non-null here: InterruptedException only comes from waitFor(),
             // which runs after ProcessBuilder.start() above has already succeeded.
@@ -357,21 +343,7 @@ final class SubagentAcpRunner {
             // partial transcript. So wait unbounded here: a timeout or a kill
             // destroys the process, which unblocks this waitFor.
             proc.waitFor();
-            int exit = proc.exitValue();
-            String stdout = reply.get(10, TimeUnit.SECONDS);
-            if (exit != 0) {
-                String stderr = err.get(10, TimeUnit.SECONDS);
-                String detail;
-                if (!stderr.isBlank()) {
-                    detail = stderr.strip();
-                } else if (!stdout.isBlank()) {
-                    detail = stdout.strip();
-                } else {
-                    detail = NO_OUTPUT;
-                }
-                throw new IllegalStateException(ACP_EXIT_MSG.formatted(exit, detail));
-            }
-            return new AgentRunner.RunResult(stdout.strip(), null);
+            return finishAcpRun(proc, reply, err);
         } catch (InterruptedException e) {
             // proc is non-null here: InterruptedException only comes from waitFor(),
             // which runs after ProcessBuilder.start() above has already succeeded.
@@ -433,21 +405,7 @@ final class SubagentAcpRunner {
             // See runAcpStreaming: the outer awaitFuture enforces the idle/ceiling
             // budgets and force-kills on expiry, which unblocks this waitFor.
             proc.waitFor();
-            int exit = proc.exitValue();
-            String stdout = reply.get(10, TimeUnit.SECONDS);
-            if (exit != 0) {
-                String stderr = err.get(10, TimeUnit.SECONDS);
-                String detail;
-                if (!stderr.isBlank()) {
-                    detail = stderr.strip();
-                } else if (!stdout.isBlank()) {
-                    detail = stdout.strip();
-                } else {
-                    detail = NO_OUTPUT;
-                }
-                throw new IllegalStateException(ACP_EXIT_MSG.formatted(exit, detail));
-            }
-            return new AgentRunner.RunResult(stdout.strip(), null);
+            return finishAcpRun(proc, reply, err);
         } catch (InterruptedException e) {
             // proc is non-null here: InterruptedException only comes from waitFor(),
             // which runs after ProcessBuilder.start() above has already succeeded.
@@ -461,6 +419,35 @@ final class SubagentAcpRunner {
             SubagentHarnessPermissions.closeQuietly(stdin);
             SubagentRegistry.unregisterProcess(runId);
         }
+    }
+
+    /**
+     * JCLAW-729: the exit-check the batch / streaming / rpc launch paths share.
+     * Read the process's exit code and captured stdout; on a non-zero exit raise
+     * {@link IllegalStateException} carrying the harness's stderr (falling back to
+     * stdout, then {@value #NO_OUTPUT}) so the spawn records a FAILED outcome; on a
+     * clean exit return the trimmed stdout as the child reply. The 10-second
+     * {@code .get} reads surface the same checked exceptions the callers already
+     * translate in their catch blocks.
+     */
+    private static AgentRunner.RunResult finishAcpRun(Process proc, CompletableFuture<String> stdout,
+                                                      CompletableFuture<String> stderr)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        int exit = proc.exitValue();
+        String out = stdout.get(10, TimeUnit.SECONDS);
+        if (exit != 0) {
+            String err = stderr.get(10, TimeUnit.SECONDS);
+            String detail;
+            if (!err.isBlank()) {
+                detail = err.strip();
+            } else if (!out.isBlank()) {
+                detail = out.strip();
+            } else {
+                detail = NO_OUTPUT;
+            }
+            throw new IllegalStateException(ACP_EXIT_MSG.formatted(exit, detail));
+        }
+        return new AgentRunner.RunResult(out.strip(), null);
     }
 
     /** JCLAW-665: the operator-facing (parent) conversation's channelType for a
