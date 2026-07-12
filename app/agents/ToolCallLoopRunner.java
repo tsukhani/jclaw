@@ -514,7 +514,7 @@ public final class ToolCallLoopRunner {
         // will be an incomplete JSON fragment. Passing that to ToolRegistry.execute causes
         // a Gson EOFException and the user sees a cryptic "End of input" error. Instead,
         // surface a clear message so the LLM can retry with a more concise approach.
-        if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
+        if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason()) && !accumulator.toolCalls().isEmpty()) {
             return handleTruncatedToolCallAccumulator(accumulator, agent, cb, round);
         }
 
@@ -522,9 +522,9 @@ public final class ToolCallLoopRunner {
         // collectedImages through so images from this round accumulate into
         // the deeper round's final buildImagePrefix call. channelType threads
         // through too so buildDownloadSuffix can stay channel-aware.
-        if (!accumulator.toolCalls.isEmpty()) {
+        if (!accumulator.toolCalls().isEmpty()) {
             return handleToolCallsStreaming(agent, conversation, conversationId, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, cb, thinkingMode,
+                    accumulator.toolCalls(), accumulator.content(), provider, cb, thinkingMode,
                     round + 1, isCancelled, trace, turnUsage, collectedImages, channelType, sink);
         }
 
@@ -532,15 +532,15 @@ public final class ToolCallLoopRunner {
         // on the continue-after-tool-results turn, treating the tool output as self-explanatory
         // even when the user clearly wants synthesis. Retry once with an explicit synthesis
         // nudge before giving up and emitting a diagnostic fallback.
-        if (accumulator.content == null || accumulator.content.isBlank()) {
+        if (accumulator.content() == null || accumulator.content().isBlank()) {
             return retryEmptyContinuation(agent, conversation, provider, cb, thinkingMode, round, isCancelled,
                     turnUsage, collectedImages, channelType, currentMessages, tools,
                     effectiveModelIdForCall, priorContent);
         }
 
-        return MessageDeduplicator.buildImagePrefix(collectedImages, accumulator.content)
-                + accumulator.content
-                + MessageDeduplicator.buildDownloadSuffix(collectedImages, accumulator.content, channelType);
+        return MessageDeduplicator.buildImagePrefix(collectedImages, accumulator.content())
+                + accumulator.content()
+                + MessageDeduplicator.buildDownloadSuffix(collectedImages, accumulator.content(), channelType);
     }
 
     /**
@@ -556,11 +556,11 @@ public final class ToolCallLoopRunner {
                                                               int round) {
         EventLogger.warn("tool", agent.name, null,
                 "Response truncated (finish_reason=%s) with pending tool calls in round %d — skipping execution of incomplete tool arguments"
-                        .formatted(accumulator.finishReason, round + 1));
-        var truncMsg = accumulator.content != null && !accumulator.content.isEmpty()
-                ? accumulator.content + "\n\n*[Response was truncated before the next tool call could complete. Try breaking the task into smaller steps.]*"
+                        .formatted(accumulator.finishReason(), round + 1));
+        var truncMsg = accumulator.content() != null && !accumulator.content().isEmpty()
+                ? accumulator.content() + "\n\n*[Response was truncated before the next tool call could complete. Try breaking the task into smaller steps.]*"
                 : "I tried to use a tool but the response exceeded the token limit before the tool arguments finished. Try breaking the task into smaller steps — for example, write large files in multiple append operations instead of one big write.";
-        cb.onToken().accept(accumulator.content != null && !accumulator.content.isEmpty()
+        cb.onToken().accept(accumulator.content() != null && !accumulator.content().isEmpty()
                 ? "\n\n*[Response was truncated before the next tool call could complete.]*"
                 : truncMsg);
         return truncMsg;

@@ -33,18 +33,20 @@ interface LlmStreamCarriers {
      * fold into a {@link TurnUsage} via {@link TurnUsage#addRound}.
      */
     // S1104: the fields kept public below stay public for a structural reason,
-    // not a measured performance one. content/toolCalls/finishReason/error are
-    // read via direct field access from app/agents (StreamingAgentRunner,
-    // ToolCallLoopRunner) which JCLAW-725's scope excludes from editing;
-    // usage / reasoningDetected / the *Estimate fields are written as value
-    // fixtures by the default-package usage-accounting unit tests. Fields used
-    // only inside package llm are package-private (with record-style accessors
-    // where the default-package streaming tests read them).
+    // not a measured performance one — they are value-fixture points for the
+    // default-package usage-accounting/streaming unit tests, which are outside
+    // this change's editable scope. content / toolCalls / error are read
+    // directly by LlmClientTest; usage / reasoningDetected / the three *Estimate
+    // fields are written as round fixtures by AgentRunnerUsageTest. app/agents
+    // now reads every field it needs through the record-style accessors below
+    // (content()/toolCalls()/finishReason()/error()); finishReason therefore
+    // dropped to package-private, since only LlmProvider (same package) still
+    // writes it and no default-package test touches it.
     @SuppressWarnings("java:S1104")
     class StreamAccumulator {
         public volatile String content = "";
         public volatile List<ToolCall> toolCalls = List.of();
-        public volatile String finishReason;
+        volatile String finishReason;
         volatile boolean complete = false;
         public volatile Exception error;
         public volatile boolean reasoningDetected = false;
@@ -173,14 +175,20 @@ interface LlmStreamCarriers {
             return latch.await(timeoutMs, TimeUnit.MILLISECONDS);
         }
 
-        // Record-style read accessors for the timing/status fields that are
-        // package-private (never read across the app boundary — only by the
-        // default-package streaming tests and, for the nanos, by TurnUsage in
-        // this same package via direct field access).
+        // Record-style read accessors. The timing/status group below is for the
+        // package-private fields (never read across the app boundary — only by
+        // the default-package streaming tests and, for the nanos, by TurnUsage
+        // in this same package via direct field access). The content/toolCalls/
+        // finishReason/error group is what app/agents reads through, so those
+        // call sites no longer reach into the fields directly (JCLAW-725).
         public boolean complete() { return complete; }
         public long reasoningStartNanos() { return reasoningStartNanos; }
         public long reasoningEndNanos() { return reasoningEndNanos; }
         public long firstContentNanos() { return firstContentNanos; }
+        public String content() { return content; }
+        public List<ToolCall> toolCalls() { return toolCalls; }
+        public String finishReason() { return finishReason; }
+        public Exception error() { return error; }
     }
 
     /**
@@ -204,10 +212,14 @@ interface LlmStreamCarriers {
      *
      * <p>See JCLAW-76 for the accounting defect this class fixes.
      */
-    // S1104: cumulative-usage value carrier. Every field below is read via
-    // direct field access from app/agents/UsageMetricsBuilder, which
-    // JCLAW-725's scope excludes from editing; the two turn-local nanos are
-    // the only fields with no cross-boundary reader and are private.
+    // S1104: cumulative-usage value carrier. app/agents/UsageMetricsBuilder now
+    // reads every field through the record-style accessors below, so the three
+    // fields with no default-package-test reader — jtokkitReasoningTokens,
+    // jtokkitEncoding, jtokkitModelMatched — dropped to package-private. The
+    // fields still public are read directly as value fixtures by the
+    // default-package AgentRunnerUsageTest (outside this change's editable
+    // scope), not for any measured hot-path reason; the two turn-local nanos
+    // have no cross-boundary reader and stay private.
     @SuppressWarnings("java:S1104")
     class TurnUsage {
         public int promptTokens;
@@ -227,10 +239,10 @@ interface LlmStreamCarriers {
         public boolean hasJtokkitUsage;
         public int jtokkitPromptTokens;
         public int jtokkitCompletionTokens;
-        public int jtokkitReasoningTokens;
+        int jtokkitReasoningTokens;
         public int jtokkitTotalTokens;
-        public String jtokkitEncoding;
-        public boolean jtokkitModelMatched = true;
+        String jtokkitEncoding;
+        boolean jtokkitModelMatched = true;
         /**
          * Wall-clock nanoTime at the first reasoning chunk anywhere in this
          * turn (any round). Set on the first {@code addRound} that sees a
@@ -325,5 +337,27 @@ interface LlmStreamCarriers {
             long diffNanos = endNanos - turnReasoningStartNanos;
             return diffNanos > 0L ? diffNanos / 1_000_000L : 0L;
         }
+
+        // Record-style read accessors so app/agents/UsageMetricsBuilder reads
+        // the cumulative counters without reaching into the fields directly
+        // (JCLAW-725). Plain reads, no synchronization — identical semantics to
+        // the former direct field access; the counters are only read after the
+        // turn's rounds have all folded in.
+        public int promptTokens() { return promptTokens; }
+        public int completionTokens() { return completionTokens; }
+        public int totalTokens() { return totalTokens; }
+        public int reasoningTokens() { return reasoningTokens; }
+        public int cachedTokens() { return cachedTokens; }
+        public int cacheCreationTokens() { return cacheCreationTokens; }
+        public int reasoningChars() { return reasoningChars; }
+        public boolean reasoningDetected() { return reasoningDetected; }
+        public boolean hasProviderUsage() { return hasProviderUsage; }
+        public boolean hasJtokkitUsage() { return hasJtokkitUsage; }
+        public int jtokkitPromptTokens() { return jtokkitPromptTokens; }
+        public int jtokkitCompletionTokens() { return jtokkitCompletionTokens; }
+        public int jtokkitReasoningTokens() { return jtokkitReasoningTokens; }
+        public int jtokkitTotalTokens() { return jtokkitTotalTokens; }
+        public String jtokkitEncoding() { return jtokkitEncoding; }
+        public boolean jtokkitModelMatched() { return jtokkitModelMatched; }
     }
 }
