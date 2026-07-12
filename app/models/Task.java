@@ -81,6 +81,45 @@ public class Task extends Model {
         return (type == Type.CRON || type == Type.INTERVAL) ? Status.ACTIVE : Status.PENDING;
     }
 
+    /**
+     * JCLAW-733: guard the documented lifecycle. Sets {@link #status} to
+     * {@code next} when the transition is legal, otherwise throws
+     * {@link IllegalStateException} rather than silently corrupting state. A
+     * same-state assignment is an allowed no-op (idempotent revive/reset paths).
+     * Does not persist — callers {@code save()} as before.
+     *
+     * <p>Owners of a status change route through here so an out-of-lifecycle
+     * write (e.g. {@code PENDING -> COMPLETED}, skipping {@code RUNNING}) fails
+     * fast. The legal edges follow the {@link Status} Javadoc: the two "alive"
+     * states fire into {@code RUNNING} or are {@code CANCELLED}; {@code RUNNING}
+     * settles to a terminal or back to its alive state; {@code LOST}/{@code
+     * FAILED} re-fire or are retried to an alive state; {@code CANCELLED}/{@code
+     * COMPLETED} are revived to an alive state (or re-fired).
+     */
+    public void transitionTo(Status next) {
+        if (next == null) {
+            throw new IllegalArgumentException("next status must not be null");
+        }
+        if (next != status && !isLegalTransition(status, next)) {
+            throw new IllegalStateException(
+                    "Illegal task status transition: " + status + " -> " + next);
+        }
+        status = next;
+    }
+
+    private static boolean isLegalTransition(Status from, Status to) {
+        return switch (from) {
+            case PENDING, ACTIVE -> to == Status.RUNNING || to == Status.CANCELLED;
+            case RUNNING -> to == Status.COMPLETED || to == Status.FAILED || to == Status.LOST
+                    || to == Status.ACTIVE || to == Status.PENDING || to == Status.CANCELLED;
+            case LOST -> to == Status.RUNNING || to == Status.FAILED
+                    || to == Status.ACTIVE || to == Status.PENDING;
+            case FAILED -> to == Status.ACTIVE || to == Status.PENDING || to == Status.RUNNING;
+            case CANCELLED -> to == Status.ACTIVE || to == Status.PENDING;
+            case COMPLETED -> to == Status.ACTIVE || to == Status.PENDING || to == Status.RUNNING;
+        };
+    }
+
     @ManyToOne
     @JoinColumn(name = "agent_id")
     @OnDelete(action = OnDeleteAction.CASCADE)

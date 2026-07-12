@@ -474,7 +474,7 @@ public class ApiTasksController extends Controller {
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
-        task.status = Task.Status.CANCELLED;
+        task.transitionTo(Task.Status.CANCELLED);
         task.save();
         TaskSchedulingService.cancel(task.id);
         EventLogger.info("TASK_MGMT_DELETE",
@@ -579,7 +579,7 @@ public class ApiTasksController extends Controller {
         if (task.status != Task.Status.CANCELLED) {
             badRequest();
         }
-        task.status = Task.initialStatusFor(task.type);
+        task.transitionTo(Task.initialStatusFor(task.type));
         task.paused = false;
         task.save();
         TaskSchedulingService.register(task);
@@ -609,7 +609,7 @@ public class ApiTasksController extends Controller {
         boolean revivedFromCancel = false;
         if (task.status == Task.Status.CANCELLED) {
             // Recurring tasks resume as ACTIVE, one-shot as PENDING.
-            task.status = Task.initialStatusFor(task.type);
+            task.transitionTo(Task.initialStatusFor(task.type));
             task.save();
             revivedFromCancel = true;
         }
@@ -643,7 +643,7 @@ public class ApiTasksController extends Controller {
         }
         task.retryCount = 0;
         // Recurring tasks return to ACTIVE, one-shot to PENDING.
-        task.status = Task.initialStatusFor(task.type);
+        task.transitionTo(Task.initialStatusFor(task.type));
         task.nextRunAt = Instant.now();
         task.lastError = null;
         task.save();
