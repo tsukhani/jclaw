@@ -3,18 +3,10 @@ package models;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
-import play.db.jpa.Model;
 
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -39,7 +31,7 @@ import java.util.List;
 // resolves a binding per event, so L2-cache this entity for the same transparent
 // caching the sibling bindings enjoy.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
-public class WhatsAppBinding extends Model {
+public class WhatsAppBinding extends AgentBoundBinding {
 
     /**
      * CLOUD_API = Meta's official Cloud API (the foundation default — what the
@@ -139,40 +131,6 @@ public class WhatsAppBinding extends Model {
     @Column(name = "template_language")
     public String templateLanguage;
 
-    /**
-     * Agent uniqueness is a privacy constraint, not a modelling choice: agent
-     * memory is scoped by agentId only, so binding one agent to multiple
-     * WhatsApp numbers (and thus multiple owners) would share memories across
-     * them. One WhatsApp presence per agent, across either transport. Enforced
-     * here at the schema, in {@link controllers.ApiWhatsAppBindingsController},
-     * and in the frontend.
-     */
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "agent_id", nullable = false, unique = true)
-    @OnDelete(action = OnDeleteAction.CASCADE)
-    public Agent agent;
-
-    @Column(nullable = false)
-    public boolean enabled = true;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
-
     public static WhatsAppBinding findByAgent(Agent agent) {
         return WhatsAppBinding.find("agent", agent).first();
     }
@@ -188,24 +146,14 @@ public class WhatsAppBinding extends Model {
     }
 
     /**
-     * Resolve a WhatsApp binding by walking the {@link Agent#parentAgent} chain —
-     * the calling agent's own binding when present, else the nearest ancestor's,
-     * else null. Mirrors {@link SlackBinding#findByAgentOrAncestor}: subagents
-     * have no binding of their own, so a child's outbound
-     * {@code message(channel="whatsapp", ...)} reaches the number its root
-     * ancestor owns. Bounded 64-hop walk guards against a cyclic
-     * {@code parent_agent_id}. CRUD callers (admin add/remove) must use
-     * {@link #findByAgent} — exact row identity, no inherited match.
+     * Resolve a WhatsApp binding by walking the {@link Agent#parentAgent} chain
+     * (JCLAW-723: shared logic in {@link AgentBoundBinding#findByAgentOrAncestor}).
+     * Delivery-side inheritance so a subagent's outbound
+     * {@code message(channel="whatsapp", ...)} reaches the number its root ancestor
+     * owns. CRUD callers must keep using {@link #findByAgent} (exact row identity).
      */
     public static WhatsAppBinding findByAgentOrAncestor(Agent agent) {
-        var cur = agent;
-        int hops = 0;
-        while (cur != null && hops++ < 64) {
-            var binding = findByAgent(cur);
-            if (binding != null) return binding;
-            cur = cur.parentAgent;
-        }
-        return null;
+        return findByAgentOrAncestor(agent, WhatsAppBinding::findByAgent);
     }
 
     /**

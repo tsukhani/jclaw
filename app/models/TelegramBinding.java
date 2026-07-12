@@ -4,19 +4,11 @@ import channels.ChannelTransport;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
-import play.db.jpa.Model;
 import services.Tx;
 
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -42,7 +34,7 @@ import java.util.List;
 // secondary-key Caches.named layer — re-scoped per the JCLAW-204 comment
 // thread, the only meaningful win is L2 here.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
-public class TelegramBinding extends Model {
+public class TelegramBinding extends AgentBoundBinding {
 
     /**
      * Bot token as issued by BotFather, e.g. {@code 123456:ABC-DEF...}. Telegram
@@ -51,18 +43,6 @@ public class TelegramBinding extends Model {
      */
     @Column(name = "bot_token", nullable = false, unique = true)
     public String botToken;
-
-    /**
-     * Agent uniqueness is a privacy constraint, not a modelling choice: planned
-     * agent memory is scoped by agentId only, so binding one agent to multiple
-     * end-users would share memories across them. Enforced here at the schema,
-     * in {@link controllers.ApiTelegramBindingsController}, and in the frontend
-     * autocomplete (hides already-bound agents).
-     */
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "agent_id", nullable = false, unique = true)
-    @OnDelete(action = OnDeleteAction.CASCADE)
-    public Agent agent;
 
     /**
      * Numeric Telegram user id (string-typed because the Telegram SDK exposes it
@@ -92,9 +72,6 @@ public class TelegramBinding extends Model {
      */
     @Column(name = "webhook_base_url")
     public String webhookBaseUrl;
-
-    @Column(nullable = false)
-    public boolean enabled = true;
 
     /**
      * JCLAW-378: per-binding override for the reply-targeting policy. NULL falls
@@ -126,24 +103,6 @@ public class TelegramBinding extends Model {
      */
     @Column(name = "notifier_cooldown_ms")
     public Long notifierCooldownMs;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     public static TelegramBinding findByBotToken(String botToken) {
         return TelegramBinding.find("botToken", botToken).first();
@@ -190,33 +149,14 @@ public class TelegramBinding extends Model {
     }
 
     /**
-     * Resolve a Telegram binding by walking the {@link Agent#parentAgent}
-     * chain — returns the calling agent's own binding when present,
-     * otherwise the nearest ancestor's binding, otherwise null.
-     *
-     * <p>Sub-agents (created by {@code subagent_spawn}) are fresh
-     * {@link Agent} rows with no Telegram binding of their own — the
-     * operator only wires bots to user-facing agents like {@code main}.
-     * Delivery-side lookups must follow the same parent-chain inheritance
-     * that {@code AgentService.workspacePath} already uses, so a child's
-     * outbound {@code message(channel="telegram", ...)} reaches the bot
-     * its root ancestor owns.
-     *
-     * <p>Bounded walk (64 hops) guards against an unlikely cyclic
-     * {@code parent_agent_id} corruption. CRUD callers (admin add/remove
-     * binding) must keep using {@link #findByAgent} — they manage a
-     * specific row by exact identity and should not be confused by an
-     * inherited match.
+     * Resolve a Telegram binding by walking the {@link Agent#parentAgent} chain
+     * (JCLAW-723: shared logic in {@link AgentBoundBinding#findByAgentOrAncestor}).
+     * Delivery-side inheritance so a subagent's outbound
+     * {@code message(channel="telegram", ...)} reaches the bot its root ancestor
+     * owns. CRUD callers must keep using {@link #findByAgent} (exact row identity).
      */
     public static TelegramBinding findByAgentOrAncestor(Agent agent) {
-        var cur = agent;
-        int hops = 0;
-        while (cur != null && hops++ < 64) {
-            var binding = findByAgent(cur);
-            if (binding != null) return binding;
-            cur = cur.parentAgent;
-        }
-        return null;
+        return findByAgentOrAncestor(agent, TelegramBinding::findByAgent);
     }
 
     public static TelegramBinding findEnabledByAgentAndUser(Agent agent, String telegramUserId) {
