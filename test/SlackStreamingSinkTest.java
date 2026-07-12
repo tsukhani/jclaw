@@ -2,7 +2,12 @@ import channels.SlackStreamingSink;
 import channels.SlackStreamingSink.Slacker;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.AgentService;
+import services.AttachmentService;
+import services.ConversationService;
+import services.Tx;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,6 +27,7 @@ class SlackStreamingSinkTest extends UnitTest {
         final List<String> statuses = new ArrayList<>();
         final List<String> posted = new ArrayList<>();   // JCLAW-346 draft placeholder posts
         final List<String> edited = new ArrayList<>();    // JCLAW-346 draft edits
+        final List<String> uploaded = new ArrayList<>();  // generated-media uploads (display names)
         boolean stopped = false;
         String startResult = "1700000000.0001";
         String postResult = "1700000099.0001";
@@ -63,6 +69,11 @@ class SlackStreamingSinkTest extends UnitTest {
         @Override public boolean editMessage(String channelId, String ts, String text) {
             edited.add(text);
             return editResult;
+        }
+
+        @Override public boolean uploadFile(String peerId, String threadTs, File file, String displayName, String caption) {
+            uploaded.add(displayName);
+            return true;
         }
     }
 
@@ -160,6 +171,49 @@ class SlackStreamingSinkTest extends UnitTest {
         sink.update("the answer");       // real token → edits to the reply, replacing progress
         assertEquals(List.of("Working…\n• search_web"), f.posted);
         assertEquals(List.of("Working…\n• search_web\n• read_file", "the answer"), f.edited);
+    }
+
+    // ── Out-of-band generated-media delivery (generate_image et al.) ──
+    //
+    // A tool-generated attachment is persisted out-of-band and the generating tool
+    // tells the model NOT to link it in prose, so SlackOutboundPlanner.dispatchFiles
+    // (text-links only) never sends it — the image was silently dropped on Slack while
+    // the web UI rendered it from the DB/SSE. The runner now feeds the sink the uuids;
+    // seal must resolve each persisted file and upload it via the Slacker seam.
+
+    @Test
+    void generatedAttachmentUploadedToSlackAtSeal() throws Exception {
+        var agent = AgentService.create("slack-genmedia-agent", "openrouter", "gpt-4.1");
+        var uuid = Tx.run(() -> {
+            var conv = ConversationService.findOrCreate(agent, "slack", "C-genmedia");
+            var msg = ConversationService.appendAssistantMessage(conv, null, "[]");
+            return AttachmentService.persistGeneratedAttachment(
+                    agent, msg, new byte[]{(byte) 0x89, 'P', 'N', 'G'}, "image/png", "{}", "chart.png").uuid;
+        });
+
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C-genmedia", null, "U1", f, 0L);
+        sink.collectGeneratedAttachments(List.of(uuid));
+        sink.seal("Here's the chart.");
+
+        // The upload runs on a spawned virtual thread — poll for it.
+        long deadline = System.currentTimeMillis() + 3000;
+        while (f.uploaded.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertEquals(List.of("chart.png"), f.uploaded,
+                "the out-of-band generated image must be uploaded to Slack at seal");
+    }
+
+    @Test
+    void noUploadWhenNoGeneratedMediaCollected() throws Exception {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", null, "U1", f, 0L);
+        sink.seal("just text");
+        // Nothing was collected → deliverGeneratedAttachments is a no-op; give any stray
+        // background thread a brief window to (not) fire.
+        Thread.sleep(50);
+        assertTrue(f.uploaded.isEmpty(), "a turn with no generated attachment must upload nothing");
     }
 
     @Test

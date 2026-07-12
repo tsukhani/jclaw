@@ -2,7 +2,6 @@ package channels;
 
 import models.Agent;
 import models.Conversation;
-import models.MessageAttachment;
 import models.TelegramBinding;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -12,13 +11,11 @@ import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import play.Play;
-import services.AgentService;
 import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
 import utils.VirtualThreads;
 
-import java.io.File;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -526,7 +523,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         var channel = TelegramChannel.forToken(botToken);
         for (var uuid : generatedAttachmentUuids) {
             try {
-                var media = Tx.run(() -> resolveGeneratedMedia(uuid));
+                var media = Tx.run(() -> AttachmentService.resolveGeneratedForSend(uuid));
                 if (media != null) sendGeneratedMedia(channel, media, threadId);
             } catch (Exception e) {
                 EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
@@ -535,24 +532,9 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         }
     }
 
-    /**
-     * Resolve a persisted generated attachment to a sendable on-disk file, or
-     * null (skip) when the row is gone, isn't a generated attachment, or its
-     * bytes were never written (a reserved video placeholder). Runs inside a JPA
-     * transaction so the {@code message.conversation.agent} chain that
-     * {@link services.AttachmentService#workspaceRelativePath} walks is loaded.
-     */
-    private GeneratedMedia resolveGeneratedMedia(String uuid) {
-        var att = MessageAttachment.findByUuid(uuid);
-        if (att == null || !att.generated) return null;
-        var rel = AttachmentService.workspaceRelativePath(att);
-        var file = AgentService.acquireWorkspacePath(agent.name, rel).toFile();
-        if (!file.exists() || !file.isFile() || file.length() == 0) return null;
-        return new GeneratedMedia(file, att.originalFilename);
-    }
-
     /** Dispatch one resolved generated file to the native send matching its extension. */
-    private void sendGeneratedMedia(TelegramChannel channel, GeneratedMedia media, Integer threadId) {
+    private void sendGeneratedMedia(TelegramChannel channel,
+                                    AttachmentService.ResolvedGeneratedFile media, Integer threadId) {
         var name = media.displayName();
         switch (TelegramOutboundPlanner.classify(name)) {
             case PHOTO -> channel.trySendPhoto(chatId, media.file(), name, null, threadId);
@@ -562,9 +544,6 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
             case DOCUMENT -> channel.trySendDocument(chatId, media.file(), name, null, threadId);
         }
     }
-
-    /** A generated attachment resolved to a sendable on-disk file + its display name. */
-    private record GeneratedMedia(File file, String displayName) {}
 
     /** Telegram's "message is not modified" error — a benign no-op, not a
      *  failure. Returned when the new {@code editMessageText} content plus
