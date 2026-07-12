@@ -10,7 +10,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import memory.MemoryCategory;
 import models.Agent;
 import models.Memory;
-import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
@@ -69,7 +68,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "List memories across agents with a filter query (q / agent / category / importance / status), paginated with X-Total-Count")
     public static void list(String q, String agent, String category, String importance,
                             String status, String sort, String dir, Integer limit, Integer offset) {
-        int effLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
+        int effLimit = (limit != null && limit > 0) ? Math.min(limit, PagedJpqlQuery.MAX_LIMIT) : 200;
         int effOffset = (offset != null && offset >= 0) ? offset : 0;
         var agentNames = agentNamesById();
 
@@ -78,8 +77,14 @@ public class ApiMemoryController extends Controller {
         // Lucene twice per request. `total` drives the frontend pager via the
         // X-Total-Count header, matching Conversations/Subagents.
         var resolved = resolveQuery(q, agent, category, importance);
-        long total = resolved.empty() ? 0 : runCount(resolved, status);
-        List<Memory> rows = resolved.empty() ? List.of() : runList(resolved, status, sort, dir, effOffset, effLimit);
+        long total = 0;
+        List<Memory> rows = List.of();
+        if (!resolved.empty()) {
+            // JCLAW-722: COUNT and SELECT bind from one source (no re-bind divergence).
+            var page = pagedQuery(resolved, status, sort, dir).page(effOffset, effLimit).execute();
+            total = page.total();
+            rows = page.rows();
+        }
 
         response.setHeader("X-Total-Count", String.valueOf(total));
         response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
@@ -96,7 +101,8 @@ public class ApiMemoryController extends Controller {
                                                int limit, int offset) {
         var resolved = resolveQuery(q, agent, category, importance);
         // bulkDelete doesn't care about order — pass null sort → server default.
-        return resolved.empty() ? List.of() : runList(resolved, status, null, null, offset, limit);
+        return resolved.empty() ? List.of()
+                : pagedQuery(resolved, status, null, null).page(offset, limit).rows();
     }
 
     /**
@@ -123,26 +129,18 @@ public class ApiMemoryController extends Controller {
         return new ResolvedQuery(filter, ftsResult.orElse(null), false);
     }
 
-    /** Page of memories for a resolved filter, ordered by sort/dir (server default when absent). */
-    private static List<Memory> runList(ResolvedQuery r, String status, String sort, String dir, int offset, int limit) {
-        var jpaQ = JPA.em().createQuery(buildSelectJpql(r.filter(), r.ftsIds() != null, status, sort, dir), Memory.class);
-        var params = r.filter().paramList();
-        for (int i = 0; i < params.size(); i++) {
-            jpaQ.setParameter(i + 1, params.get(i));
-        }
-        if (r.ftsIds() != null) jpaQ.setParameter("fts", r.ftsIds());
-        return jpaQ.setFirstResult(offset).setMaxResults(limit).getResultList();
-    }
-
-    /** Full matching count for a resolved filter (pre-pagination), for X-Total-Count. */
-    private static long runCount(ResolvedQuery r, String status) {
-        var jpaQ = JPA.em().createQuery(buildCountJpql(r.filter(), r.ftsIds() != null, status), Long.class);
-        var params = r.filter().paramList();
-        for (int i = 0; i < params.size(); i++) {
-            jpaQ.setParameter(i + 1, params.get(i));
-        }
-        if (r.ftsIds() != null) jpaQ.setParameter("fts", r.ftsIds());
-        return jpaQ.getSingleResult();
+    /**
+     * JCLAW-722: assemble the {@link PagedJpqlQuery} for a resolved filter, ordered
+     * by sort/dir (server default when absent). The shared helper runs the SELECT
+     * and the COUNT off the one WHERE body and parameter set, so the page and the
+     * X-Total-Count total can't drift apart.
+     */
+    private static PagedJpqlQuery<Memory> pagedQuery(ResolvedQuery r, String status, String sort, String dir) {
+        return PagedJpqlQuery.of(Memory.class, "Memory m", "m")
+                .where(whereClause(r.filter(), r.ftsIds() != null, status))
+                .positionalParams(r.filter().paramList())
+                .namedParam("fts", r.ftsIds())
+                .orderBy(orderByClause(sort, dir));
     }
 
     /**
@@ -180,16 +178,6 @@ public class ApiMemoryController extends Controller {
         return where;
     }
 
-    /** SELECT over {@link #whereClause}, ordered by the requested sort column. */
-    private static String buildSelectJpql(JpqlFilter filter, boolean hasFts, String status,
-                                          String sort, String dir) {
-        var where = whereClause(filter, hasFts, status);
-        var orderBy = orderByClause(sort, dir);
-        return where.isEmpty()
-                ? "SELECT m FROM Memory m " + orderBy
-                : "SELECT m FROM Memory m WHERE " + where + " " + orderBy;
-    }
-
     /**
      * Map the frontend sort column + direction to an ORDER BY. Columns are a
      * closed whitelist (switch) and direction resolves to the literal ASC/DESC,
@@ -210,14 +198,6 @@ public class ApiMemoryController extends Controller {
         if (col == null) return "ORDER BY m.updatedAt DESC";
         String direction = "desc".equalsIgnoreCase(dir) ? "DESC" : "ASC";
         return "ORDER BY " + col + " " + direction + ", m.id ASC";
-    }
-
-    /** COUNT over the same {@link #whereClause} — no ORDER BY. */
-    private static String buildCountJpql(JpqlFilter filter, boolean hasFts, String status) {
-        var where = whereClause(filter, hasFts, status);
-        return where.isEmpty()
-                ? "SELECT COUNT(m) FROM Memory m"
-                : "SELECT COUNT(m) FROM Memory m WHERE " + where;
     }
 
     /**

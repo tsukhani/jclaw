@@ -127,42 +127,23 @@ public class ApiSubagentRunsController extends Controller {
             where = where.isEmpty() ? "id IN (:fts)" : where + " AND id IN (:fts)";
         }
 
-        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 100;
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, PagedJpqlQuery.MAX_LIMIT) : 100;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        // Switch to JPA.em().createQuery so we can bind the named :fts
-        // parameter alongside JpqlFilter's positional ?1..?N values. The
-        // legacy SubagentRun.find() shorthand only supports positional
-        // params and JCLAW-304's IN-list shape would have to expand to a
-        // variable number of positional placeholders — uglier, and the
-        // direct-JPA path matches what ApiConversationsController and
-        // ApiTasksController already do for the same q-intersection
-        // pattern.
-        var orderBy = orderByClause(sort, dir);
-        var jpql = where.isEmpty()
-                ? "SELECT r FROM SubagentRun r " + orderBy
-                : "SELECT r FROM SubagentRun r WHERE " + where + " " + orderBy;
-        var jpaQ = JPA.em().createQuery(jpql, SubagentRun.class);
-        var params = filter.paramList();
-        for (int i = 0; i < params.size(); i++) {
-            jpaQ.setParameter(i + 1, params.get(i));
-        }
-        if (ftsRunIds != null) jpaQ.setParameter("fts", ftsRunIds);
+        // JCLAW-722: WHERE -> bind -> COUNT -> paginate assembled once. The named
+        // :fts id-set (JCLAW-304) binds alongside JpqlFilter's positional ?1..?N
+        // values through the same single binding path, so the COUNT and the SELECT
+        // can never diverge.
+        var page = PagedJpqlQuery.of(SubagentRun.class, "SubagentRun r", "r")
+                .where(where)
+                .positionalParams(filter.paramList())
+                .namedParam("fts", ftsRunIds)
+                .orderBy(orderByClause(sort, dir))
+                .page(effectiveOffset, effectiveLimit)
+                .execute();
+        List<SubagentRun> runs = page.rows();
 
-        String countJpql = where.isEmpty()
-                ? "SELECT COUNT(r) FROM SubagentRun r"
-                : "SELECT COUNT(r) FROM SubagentRun r WHERE " + where;
-        var countQ = JPA.em().createQuery(countJpql, Long.class);
-        for (int i = 0; i < params.size(); i++) {
-            countQ.setParameter(i + 1, params.get(i));
-        }
-        if (ftsRunIds != null) countQ.setParameter("fts", ftsRunIds);
-        long total = countQ.getSingleResult();
-
-        List<SubagentRun> runs = jpaQ.setFirstResult(effectiveOffset)
-                .setMaxResults(effectiveLimit).getResultList();
-
-        response.setHeader(HDR_TOTAL_COUNT, String.valueOf(total));
+        response.setHeader(HDR_TOTAL_COUNT, String.valueOf(page.total()));
         response.setHeader("Access-Control-Expose-Headers", HDR_TOTAL_COUNT);
 
         // Bulk-lookup modes from the SUBAGENT_SPAWN events so we don't issue
