@@ -13,11 +13,9 @@ import utils.Strings;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -43,35 +41,26 @@ public final class TelegramFileDownloader {
 
     private TelegramFileDownloader() {}
 
-    /** Telegram Bot API caps bot-downloadable files at 20 MiB. */
-    public static final long MAX_FILE_BYTES = 20L * 1024 * 1024;
+    /** Telegram Bot API caps bot-downloadable files at 20 MiB (single-sourced by
+     *  {@link StagedDownload#MAX_FILE_BYTES}). */
+    public static final long MAX_FILE_BYTES = StagedDownload.MAX_FILE_BYTES;
 
     private static final Duration GETFILE_TIMEOUT = Duration.ofSeconds(15);
-    private static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(90);
 
     /**
      * SSRF-hardened client for the second-step byte download. The download URL
      * embeds Telegram's opaque, server-supplied {@code file_path}; a compromised
      * or spoofed Bot API endpoint (or a DNS answer that resolves
      * {@code api.telegram.org} to an internal address) could otherwise steer the
-     * GET at loopback / RFC-1918 / link-local (cloud-metadata) ranges. We derive
-     * from {@link HttpFactories#general()} so the shared connection pool,
-     * dispatcher, timeouts, and protocol-logging event listener carry over, then
-     * layer on {@link SsrfGuard#SAFE_DNS} (every hostname resolution is gated —
-     * any unsafe resolved address throws before a socket opens) and disable
-     * redirect-following so a 302 can't bounce us past the DNS gate to a blocked
-     * target. Per SsrfGuard's documented contract: the {@code Dns} callback runs
-     * at connect time and binds the resolved IP, so there is no rebinding TOCTOU
-     * window, and {@link SsrfGuard#assertSafeScheme(URI)} covers the literal-IP /
-     * non-http(s)-scheme cases the {@code Dns} hook can't see.
+     * GET at loopback / RFC-1918 / link-local (cloud-metadata) ranges. The
+     * SSRF-hardening recipe ({@link SsrfGuard#SAFE_DNS} + disabled redirects) is
+     * single-sourced in {@link StagedDownload#newSsrfClient()};
+     * {@link SsrfGuard#assertSafeScheme(URI)} in {@link #streamFileToStaging}
+     * covers the literal-IP / non-http(s)-scheme cases the {@code Dns} hook can't see.
      */
     // Non-final + package-private so tests can swap a socket-free interceptor
     // client in for the loopback happy-path leg (mirrors WebFetchTool.CLIENT).
-    static OkHttpClient DOWNLOAD_CLIENT = HttpFactories.general().newBuilder()
-            .dns(SsrfGuard.SAFE_DNS)
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .build();
+    static OkHttpClient DOWNLOAD_CLIENT = StagedDownload.newSsrfClient();
 
     /** Visible for testing: assert the download client carries the SSRF DNS gate. */
     public static OkHttpClient downloadClient() {
@@ -204,43 +193,31 @@ public final class TelegramFileDownloader {
     }
 
     /**
-     * Stream the file bytes into {@code stagedPath}. Returns {@code null} on
-     * success, or a failure {@link Result} on HTTP error / IO error / size cap.
-     * On any failure the partial staging file is best-effort deleted.
+     * Stream the file bytes into {@code stagedPath} via {@link StagedDownload}.
+     * Returns {@code null} on success, or a failure {@link Result} on HTTP error /
+     * IO error / size cap. Scheme validation happens here (the SSRF DNS gate lives
+     * on {@link #DOWNLOAD_CLIENT}); the byte transfer, 20 MiB cap, and cleanup are
+     * owned by {@link StagedDownload#fetch}.
      */
     private static Result streamFileToStaging(String fileBaseUrl, String filePath, Path stagedPath) {
+        var downloadUrl = fileBaseUrl + "/" + filePath;
+        // Reject non-http(s) schemes and literal-IP hosts in a blocked range
+        // before opening a socket; SAFE_DNS on DOWNLOAD_CLIENT gates the
+        // hostname-resolution path the scheme check can't see.
         try {
-            var downloadUrl = fileBaseUrl + "/" + filePath;
-            // Reject non-http(s) schemes and literal-IP hosts in a blocked range
-            // before opening a socket; SAFE_DNS on DOWNLOAD_CLIENT gates the
-            // hostname-resolution path the scheme check can't see.
             SsrfGuard.assertSafeScheme(URI.create(downloadUrl));
-            var req = new Request.Builder().url(downloadUrl).get().build();
-            var call = DOWNLOAD_CLIENT.newCall(req);
-            call.timeout().timeout(DOWNLOAD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            try (var resp = call.execute()) {
-                if (resp.code() != 200) {
-                    return new DownloadFailed("download HTTP " + resp.code());
-                }
-                try (InputStream in = resp.body().byteStream()) {
-                    Files.copy(in, stagedPath, StandardCopyOption.REPLACE_EXISTING);
-                }
-            }
-            long actualSize = Files.size(stagedPath);
-            if (actualSize > MAX_FILE_BYTES) {
-                bestEffortDelete(stagedPath);
-                return new SizeExceeded(actualSize, MAX_FILE_BYTES);
-            }
-            return null;
         } catch (Exception e) {
-            bestEffortDelete(stagedPath);
+            StagedDownload.bestEffortDelete(stagedPath);
             return new DownloadFailed("download: " + e.getMessage());
         }
-    }
-
-    /** Best-effort delete used during download cleanup — swallows IO errors. */
-    private static void bestEffortDelete(Path path) {
-        try { Files.deleteIfExists(path); } catch (IOException _) { /* best-effort */ }
+        var req = new Request.Builder().url(downloadUrl).get().build();
+        return switch (StagedDownload.fetch(DOWNLOAD_CLIENT, req, stagedPath)) {
+            case StagedDownload.Ok _ -> null;
+            case StagedDownload.TooBig(long size) -> new SizeExceeded(size, MAX_FILE_BYTES);
+            case StagedDownload.Redirect(int code, String _) -> new DownloadFailed("download HTTP " + code);
+            case StagedDownload.HttpError(int code) -> new DownloadFailed("download HTTP " + code);
+            case StagedDownload.Failed(String message) -> new DownloadFailed("download: " + message);
+        };
     }
 
 }

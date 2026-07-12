@@ -6,7 +6,6 @@ import com.vladsch.flexmark.ast.BulletList;
 import com.vladsch.flexmark.ast.Code;
 import com.vladsch.flexmark.ast.Emphasis;
 import com.vladsch.flexmark.ast.FencedCodeBlock;
-import com.vladsch.flexmark.ast.HardLineBreak;
 import com.vladsch.flexmark.ast.Heading;
 import com.vladsch.flexmark.ast.HtmlBlock;
 import com.vladsch.flexmark.ast.HtmlInline;
@@ -14,10 +13,8 @@ import com.vladsch.flexmark.ast.IndentedCodeBlock;
 import com.vladsch.flexmark.ast.Link;
 import com.vladsch.flexmark.ast.OrderedList;
 import com.vladsch.flexmark.ast.Paragraph;
-import com.vladsch.flexmark.ast.SoftLineBreak;
 import com.vladsch.flexmark.ast.StrongEmphasis;
 import com.vladsch.flexmark.ast.Text;
-import com.vladsch.flexmark.ast.ThematicBreak;
 import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
 import com.vladsch.flexmark.ext.gfm.strikethrough.Strikethrough;
 import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension;
@@ -62,9 +59,7 @@ public final class SlackMarkdownFormatter {
     public static String format(String markdown) {
         if (markdown == null || markdown.isEmpty()) return "";
         Node doc = PARSER.parse(markdown);
-        var e = new Emitter();
-        e.emitChildren(doc);
-        return e.out.toString().stripTrailing();
+        return new Emitter().render(doc);
     }
 
     /** Slack treats {@code & < >} as control characters; escape them in literal
@@ -73,37 +68,46 @@ public final class SlackMarkdownFormatter {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    private static final class Emitter {
-        final StringBuilder out = new StringBuilder();
+    private static final class Emitter extends FlexmarkChannelEmitter {
 
-        void emitChildren(Node parent) {
-            for (Node c = parent.getFirstChild(); c != null; c = c.getNext()) emit(c);
+        @Override protected void emitHeading(Heading h) { out.append('*'); emitChildren(h); out.append("*\n\n"); }
+
+        @Override protected void emitParagraph(Paragraph p) { emitChildren(p); out.append("\n\n"); }
+
+        @Override protected void emitStrongEmphasis(StrongEmphasis s) { wrap(s, "*"); }
+
+        @Override protected void emitEmphasis(Emphasis em) { wrap(em, "_"); }
+
+        @Override protected void emitStrikethrough(Strikethrough st) { wrap(st, "~"); }
+
+        @Override protected void emitCode(Code code) {
+            out.append('`').append(escape(code.getText().toString())).append('`');
         }
 
-        void emit(Node node) {
-            switch (node) {
-                case Heading h -> { out.append('*'); emitChildren(h); out.append("*\n\n"); }
-                case Paragraph p -> { emitChildren(p); out.append("\n\n"); }
-                case StrongEmphasis s -> wrap(s, "*");
-                case Emphasis em -> wrap(em, "_");
-                case Strikethrough st -> wrap(st, "~");
-                case Code code -> out.append('`').append(escape(code.getText().toString())).append('`');
-                case FencedCodeBlock fcb -> emitFence(fcb.getContentChars().toString());
-                case IndentedCodeBlock icb -> emitFence(icb.getContentChars().toString());
-                case BlockQuote bq -> emitQuote(bq);
-                case BulletList bl -> emitBulletList(bl);
-                case OrderedList ol -> emitOrderedList(ol);
-                case TableBlock tb -> emitTable(tb);
-                case Link link -> emitLink(link.getUrl().toString(), link);
-                case AutoLink al -> out.append('<').append(al.getUrl().toString()).append('>');
-                case Text t -> out.append(escape(t.getChars().toString()));
-                case SoftLineBreak _ -> out.append('\n');
-                case HardLineBreak _ -> out.append('\n');
-                case ThematicBreak _ -> out.append("──────────\n\n");
-                case HtmlInline h -> out.append(escape(h.getChars().toString()));
-                case HtmlBlock h -> out.append(escape(h.getChars().toString()));
-                default -> emitChildren(node);
-            }
+        @Override protected void emitFencedCodeBlock(FencedCodeBlock fcb) { emitFence(fcb.getContentChars().toString()); }
+
+        @Override protected void emitIndentedCodeBlock(IndentedCodeBlock icb) { emitFence(icb.getContentChars().toString()); }
+
+        @Override protected void emitBlockQuote(BlockQuote bq) { emitQuote(bq); }
+
+        @Override protected void emitLink(Link link) { appendLink(link.getUrl().toString(), link); }
+
+        @Override protected void emitAutoLink(AutoLink al) { out.append('<').append(al.getUrl().toString()).append('>'); }
+
+        @Override protected void emitText(Text t) { out.append(escape(t.getChars().toString())); }
+
+        @Override protected void emitSoftLineBreak() { out.append('\n'); }
+
+        @Override protected void emitHardLineBreak() { out.append('\n'); }
+
+        @Override protected void emitThematicBreak() { out.append("──────────\n\n"); }
+
+        /** Slack has no heading/table/typographic grammar; the raw-HTML nodes are the
+         *  only extra types its parser produces — escape them (Slack displays them). */
+        @Override protected void emitFallback(Node node) {
+            if (node instanceof HtmlInline h) out.append(escape(h.getChars().toString()));
+            else if (node instanceof HtmlBlock h) out.append(escape(h.getChars().toString()));
+            else super.emitFallback(node);
         }
 
         void wrap(Node n, String delim) {
@@ -117,7 +121,7 @@ public final class SlackMarkdownFormatter {
             out.append("```\n").append(escape(c)).append("\n```\n\n");
         }
 
-        void emitLink(String url, Node link) {
+        void appendLink(String url, Node link) {
             String label = escape(collectText(link).trim());
             if (label.isEmpty() || label.equals(escape(url))) {
                 out.append('<').append(url).append('>');
@@ -135,7 +139,7 @@ public final class SlackMarkdownFormatter {
             out.append('\n');
         }
 
-        void emitBulletList(BulletList list) {
+        @Override protected void emitBulletList(BulletList list) {
             for (Node item = list.getFirstChild(); item != null; item = item.getNext()) {
                 out.append("• ");
                 emitChildren(item);
@@ -145,7 +149,7 @@ public final class SlackMarkdownFormatter {
             out.append('\n');
         }
 
-        void emitOrderedList(OrderedList list) {
+        @Override protected void emitOrderedList(OrderedList list) {
             int n = list.getStartNumber();
             for (Node item = list.getFirstChild(); item != null; item = item.getNext()) {
                 out.append(n++).append(". ");
@@ -154,12 +158,6 @@ public final class SlackMarkdownFormatter {
                 out.append('\n');
             }
             out.append('\n');
-        }
-
-        void trimTrailingNewlines() {
-            while (!out.isEmpty() && out.charAt(out.length() - 1) == '\n') {
-                out.setLength(out.length() - 1);
-            }
         }
 
         static String collectText(Node root) {
@@ -179,7 +177,7 @@ public final class SlackMarkdownFormatter {
         // keyed by the header cells — and crucially run the cell content through
         // the inline emitter so **bold** etc. convert (a code fence would keep
         // them literal). Mirrors TelegramMarkdownFormatter's BULLETS mode.
-        void emitTable(TableBlock table) {
+        @Override protected void emitTable(TableBlock table) {
             TableHead head = findChild(table, TableHead.class);
             TableBody body = findChild(table, TableBody.class);
             if (body == null) return;
@@ -219,13 +217,6 @@ public final class SlackMarkdownFormatter {
                 }
             }
             return labels;
-        }
-
-        static <T extends Node> T findChild(Node parent, Class<T> type) {
-            for (Node c = parent.getFirstChild(); c != null; c = c.getNext()) {
-                if (type.isInstance(c)) return type.cast(c);
-            }
-            return null;
         }
     }
 }

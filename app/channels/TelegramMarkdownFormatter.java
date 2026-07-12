@@ -6,7 +6,6 @@ import com.vladsch.flexmark.ast.BulletList;
 import com.vladsch.flexmark.ast.Code;
 import com.vladsch.flexmark.ast.Emphasis;
 import com.vladsch.flexmark.ast.FencedCodeBlock;
-import com.vladsch.flexmark.ast.HardLineBreak;
 import com.vladsch.flexmark.ast.Heading;
 import com.vladsch.flexmark.ast.HtmlBlock;
 import com.vladsch.flexmark.ast.HtmlCommentBlock;
@@ -16,10 +15,8 @@ import com.vladsch.flexmark.ast.IndentedCodeBlock;
 import com.vladsch.flexmark.ast.Link;
 import com.vladsch.flexmark.ast.OrderedList;
 import com.vladsch.flexmark.ast.Paragraph;
-import com.vladsch.flexmark.ast.SoftLineBreak;
 import com.vladsch.flexmark.ast.StrongEmphasis;
 import com.vladsch.flexmark.ast.Text;
-import com.vladsch.flexmark.ast.ThematicBreak;
 import com.vladsch.flexmark.ext.autolink.AutolinkExtension;
 import com.vladsch.flexmark.ext.gfm.strikethrough.Strikethrough;
 import com.vladsch.flexmark.ext.gfm.strikethrough.StrikethroughExtension;
@@ -108,55 +105,28 @@ public final class TelegramMarkdownFormatter {
     public static String toHtml(String markdown, TableMode tableMode) {
         if (markdown == null || markdown.isEmpty()) return "";
         Node doc = PARSER.parse(markdown);
-        var emitter = new Emitter(tableMode);
-        emitter.emitChildren(doc);
-        return emitter.out.toString().stripTrailing();
+        return new Emitter(tableMode).render(doc);
     }
 
     // ── Internal emitter ──
 
-    private static final class Emitter {
-        final StringBuilder out = new StringBuilder();
+    private static final class Emitter extends FlexmarkChannelEmitter {
         final TableMode tableMode;
 
         Emitter(TableMode m) { this.tableMode = m; }
 
-        void emitChildren(Node parent) {
-            for (Node child = parent.getFirstChild(); child != null; child = child.getNext()) {
-                emit(child);
-            }
-        }
+        @Override protected void emitHeading(Heading node) { wrapChildren(node, "<b>", "</b>\n\n"); }
 
-        void emit(Node node) {
-            if (emitWrapped(node)) return;
-            if (emitCodeOrQuote(node)) return;
-            if (emitListOrTable(node)) return;
-            if (emitLink(node)) return;
-            if (emitInline(node)) return;
-            // Fallback: walk children. Covers container nodes we haven't enumerated
-            // (e.g. ListItem is handled by its parent list's walker, but standalone
-            // parent nodes not covered above should still emit their text.)
+        @Override protected void emitParagraph(Paragraph node) {
             emitChildren(node);
+            out.append("\n\n");
         }
 
-        /** Simple wrapping nodes — emit open tag, children, close tag. */
-        private boolean emitWrapped(Node node) {
-            if (node instanceof Heading) {
-                wrapChildren(node, "<b>", "</b>\n\n");
-            } else if (node instanceof Paragraph) {
-                emitChildren(node);
-                out.append("\n\n");
-            } else if (node instanceof StrongEmphasis) {
-                wrapChildren(node, "<b>", "</b>");
-            } else if (node instanceof Emphasis) {
-                wrapChildren(node, "<i>", "</i>");
-            } else if (node instanceof Strikethrough) {
-                wrapChildren(node, "<s>", "</s>");
-            } else {
-                return false;
-            }
-            return true;
-        }
+        @Override protected void emitStrongEmphasis(StrongEmphasis node) { wrapChildren(node, "<b>", "</b>"); }
+
+        @Override protected void emitEmphasis(Emphasis node) { wrapChildren(node, "<i>", "</i>"); }
+
+        @Override protected void emitStrikethrough(Strikethrough node) { wrapChildren(node, "<s>", "</s>"); }
 
         private void wrapChildren(Node node, String open, String close) {
             out.append(open);
@@ -164,66 +134,58 @@ public final class TelegramMarkdownFormatter {
             out.append(close);
         }
 
-        /** Code spans/blocks and blockquotes. */
-        private boolean emitCodeOrQuote(Node node) {
-            if (node instanceof Code code) {
-                out.append("<code>");
-                out.append(escapeHtml(code.getText().toString()));
-                out.append("</code>");
-            } else if (node instanceof FencedCodeBlock fcb) {
-                emitFencedCodeBlock(fcb);
-            } else if (node instanceof IndentedCodeBlock icb) {
-                out.append(PRE_CODE_OPEN);
-                out.append(escapeHtml(icb.getContentChars().toString()));
-                out.append(PRE_CODE_CLOSE);
-                out.append("\n\n");
-            } else if (node instanceof BlockQuote) {
-                out.append("<blockquote>");
-                emitChildren(node);
-                trimTrailingNewlines();
-                out.append("</blockquote>\n\n");
-            } else {
-                return false;
-            }
-            return true;
+        @Override protected void emitCode(Code code) {
+            out.append("<code>");
+            out.append(escapeHtml(code.getText().toString()));
+            out.append("</code>");
         }
 
-        /** List and table nodes. */
-        private boolean emitListOrTable(Node node) {
-            return switch (node) {
-                case BulletList bl -> { emitBulletList(bl); yield true; }
-                case OrderedList ol -> { emitOrderedList(ol); yield true; }
-                case TableBlock tb -> { emitTable(tb); yield true; }
-                default -> false;
-            };
+        @Override protected void emitIndentedCodeBlock(IndentedCodeBlock icb) {
+            out.append(PRE_CODE_OPEN);
+            out.append(escapeHtml(icb.getContentChars().toString()));
+            out.append(PRE_CODE_CLOSE);
+            out.append("\n\n");
         }
 
-        /** Markdown link / autolink. */
-        private boolean emitLink(Node node) {
-            if (node instanceof Link link) {
-                out.append("<a href=\"");
-                out.append(escapeAttr(link.getUrl().toString()));
-                out.append("\">");
-                emitChildren(node);
-                out.append("</a>");
-                return true;
-            }
-            if (node instanceof AutoLink al) {
-                out.append("<a href=\"");
-                out.append(escapeAttr(al.getUrl().toString()));
-                out.append("\">");
-                out.append(escapeHtml(al.getUrl().toString()));
-                out.append("</a>");
-                return true;
-            }
-            return false;
+        @Override protected void emitBlockQuote(BlockQuote node) {
+            out.append("<blockquote>");
+            emitChildren(node);
+            trimTrailingNewlines();
+            out.append("</blockquote>\n\n");
         }
 
-        /** Text, typographic decorations, breaks, raw HTML pass-through. */
-        private boolean emitInline(Node node) {
-            if (node instanceof Text t) {
-                out.append(escapeHtml(t.getChars().toString()));
-            } else if (node instanceof TypographicSmarts ts) {
+        @Override protected void emitLink(Link link) {
+            out.append("<a href=\"");
+            out.append(escapeAttr(link.getUrl().toString()));
+            out.append("\">");
+            emitChildren(link);
+            out.append("</a>");
+        }
+
+        @Override protected void emitAutoLink(AutoLink al) {
+            out.append("<a href=\"");
+            out.append(escapeAttr(al.getUrl().toString()));
+            out.append("\">");
+            out.append(escapeHtml(al.getUrl().toString()));
+            out.append("</a>");
+        }
+
+        @Override protected void emitText(Text t) {
+            out.append(escapeHtml(t.getChars().toString()));
+        }
+
+        @Override protected void emitSoftLineBreak() { out.append("\n"); }
+
+        @Override protected void emitHardLineBreak() { out.append("\n"); }
+
+        // Telegram has no <hr>; emit a visual separator.
+        @Override protected void emitThematicBreak() { out.append("—\n\n"); }
+
+        /** Typographic decorations and raw HTML — the node types flexmark's
+         *  Typographic / (no-)HTML handling produces that the shared switch doesn't
+         *  enumerate. */
+        @Override protected void emitFallback(Node node) {
+            if (node instanceof TypographicSmarts ts) {
                 // --, ---, ..., etc. Flexmark stores replacements as HTML entity
                 // strings (e.g. "&ndash;"); we decode to the actual Unicode
                 // character so the emitted HTML reads cleanly and doesn't need
@@ -233,18 +195,12 @@ public final class TelegramMarkdownFormatter {
                 out.append(decodeTypographicEntities(tq.getTypographicOpening()));
                 emitChildren(tq);
                 out.append(decodeTypographicEntities(tq.getTypographicClosing()));
-            } else if (node instanceof SoftLineBreak || node instanceof HardLineBreak) {
-                out.append("\n");
-            } else if (node instanceof ThematicBreak) {
-                // Telegram has no <hr>; emit a visual separator.
-                out.append("—\n\n");
             } else if (node instanceof HtmlInline || node instanceof HtmlBlock
                     || node instanceof HtmlCommentBlock || node instanceof HtmlInlineComment) {
                 emitRawHtml(node);
             } else {
-                return false;
+                super.emitFallback(node);
             }
-            return true;
         }
 
         // Agents occasionally emit raw HTML instead of markdown — usually
@@ -264,7 +220,7 @@ public final class TelegramMarkdownFormatter {
             }
         }
 
-        private void emitFencedCodeBlock(FencedCodeBlock fcb) {
+        @Override protected void emitFencedCodeBlock(FencedCodeBlock fcb) {
             String lang = fcb.getInfo().toString().trim();
             out.append(PRE_OPEN);
             if (!lang.isEmpty()) {
@@ -277,7 +233,7 @@ public final class TelegramMarkdownFormatter {
             out.append("\n\n");
         }
 
-        private void emitBulletList(BulletList list) {
+        @Override protected void emitBulletList(BulletList list) {
             for (Node item = list.getFirstChild(); item != null; item = item.getNext()) {
                 // TaskListItem extends BulletListItem, so it rides through this same
                 // loop; swap the leading bullet for a Unicode checkbox glyph.
@@ -294,7 +250,7 @@ public final class TelegramMarkdownFormatter {
             out.append("\n");
         }
 
-        private void emitOrderedList(OrderedList list) {
+        @Override protected void emitOrderedList(OrderedList list) {
             int n = list.getStartNumber();
             for (Node item = list.getFirstChild(); item != null; item = item.getNext()) {
                 out.append(n).append(". ");
@@ -306,7 +262,7 @@ public final class TelegramMarkdownFormatter {
             out.append("\n");
         }
 
-        private void emitTable(TableBlock table) {
+        @Override protected void emitTable(TableBlock table) {
             if (tableMode == TableMode.OFF) return;
 
             TableHead head = findChild(table, TableHead.class);
@@ -386,20 +342,6 @@ public final class TelegramMarkdownFormatter {
             for (Node child = node.getFirstChild(); child != null; child = child.getNext()) {
                 collectInlineTextInto(child, sb);
             }
-        }
-
-        private void trimTrailingNewlines() {
-            while (!out.isEmpty() && out.charAt(out.length() - 1) == '\n') {
-                out.setLength(out.length() - 1);
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        private static <T extends Node> T findChild(Node parent, Class<T> type) {
-            for (Node child = parent.getFirstChild(); child != null; child = child.getNext()) {
-                if (type.isInstance(child)) return (T) child;
-            }
-            return null;
         }
 
         /**

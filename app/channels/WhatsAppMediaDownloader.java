@@ -16,11 +16,9 @@ import utils.SsrfGuard;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,12 +47,11 @@ public final class WhatsAppMediaDownloader {
     /** Per-message inbound media cap, matching Slack/Telegram. */
     static final int MAX_INBOUND_FILES = 8;
 
-    /** Cloud-API media size cap: 20 MiB (matches Telegram/Slack inbound). */
-    static final long MAX_FILE_BYTES = 20L * 1024 * 1024;
+    /** Cloud-API media size cap: 20 MiB (single-sourced by {@link StagedDownload#MAX_FILE_BYTES}). */
+    static final long MAX_FILE_BYTES = StagedDownload.MAX_FILE_BYTES;
 
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
     private static final Duration META_TIMEOUT = Duration.ofSeconds(15);
-    private static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(90);
     private static final String LOG_CATEGORY = "channel";
     private static final String CHANNEL_WHATSAPP = "whatsapp";
 
@@ -64,18 +61,12 @@ public final class WhatsAppMediaDownloader {
             List.of(".fbcdn.net", ".whatsapp.net", ".cdn.whatsapp.net");
 
     /**
-     * SSRF-hardened client for the second-step CDN byte fetch — same derivation as
-     * {@link TelegramFileDownloader#DOWNLOAD_CLIENT}/{@link SlackFileDownloader}:
-     * {@link HttpFactories#general()} for the shared pool/dispatcher/timeouts,
-     * layered with {@link SsrfGuard#SAFE_DNS} (every hostname resolution gated) and
-     * redirects disabled so a 302 can't bounce past the CDN host allowlist.
-     * Package-private non-final so tests can swap a socket-free interceptor client.
+     * SSRF-hardened client for the second-step CDN byte fetch — the shared recipe from
+     * {@link StagedDownload#newSsrfClient()} ({@link SsrfGuard#SAFE_DNS} + redirects
+     * disabled so a 302 can't bounce past the CDN host allowlist). Package-private
+     * non-final so tests can swap a socket-free interceptor client.
      */
-    static OkHttpClient DOWNLOAD_CLIENT = HttpFactories.general().newBuilder()
-            .dns(SsrfGuard.SAFE_DNS)
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .build();
+    static OkHttpClient DOWNLOAD_CLIENT = StagedDownload.newSsrfClient();
 
     /** Visible for testing: assert the download client carries the SSRF DNS gate. */
     public static OkHttpClient downloadClient() {
@@ -156,7 +147,7 @@ public final class WhatsAppMediaDownloader {
         }
         Path stagedPath = WorkspacePathGuard.acquireContained(stagingDir, leaf);
         if (!streamCdnToStaging(cdnUrl, token, stagedPath, agentName)) {
-            bestEffortDelete(stagedPath);
+            StagedDownload.bestEffortDelete(stagedPath);
             return null;
         }
 
@@ -211,49 +202,56 @@ public final class WhatsAppMediaDownloader {
     }
 
     /**
-     * Step 2: {@code GET <cdnUrl>} (Bearer) → bytes into {@code stagedPath}.
-     * Scheme + CDN-host allowlist validated before the socket opens (the SSRF DNS
-     * gate covers hostname resolution); the {@link #MAX_FILE_BYTES} cap is enforced
-     * on the staged size. Returns true on success.
+     * Step 2: {@code GET <cdnUrl>} (Bearer) → bytes into {@code stagedPath} via
+     * {@link StagedDownload}. Scheme + CDN-host allowlist are validated before the
+     * request is built (the SSRF DNS gate on {@link #DOWNLOAD_CLIENT} covers hostname
+     * resolution); the byte transfer, {@link #MAX_FILE_BYTES} cap, and cleanup are
+     * owned by {@link StagedDownload#fetch}. Returns true on success.
      */
     private static boolean streamCdnToStaging(String cdnUrl, String token,
                                               Path stagedPath, String agentName) {
+        final URI uri;
         try {
-            var uri = URI.create(cdnUrl);
+            uri = URI.create(cdnUrl);
             SsrfGuard.assertSafeScheme(uri);
-            if (!isCdnHost(uri.getHost())) {
-                EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
-                        "Cloud-API media: refusing non-CDN host " + uri.getHost());
-                return false;
-            }
-            var req = new Request.Builder()
-                    .url(cdnUrl)
-                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + token)
-                    .get()
-                    .build();
-            var call = DOWNLOAD_CLIENT.newCall(req);
-            call.timeout().timeout(DOWNLOAD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            try (var resp = call.execute()) {
-                if (resp.code() != 200) {
-                    EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
-                            "Cloud-API media download HTTP " + resp.code());
-                    return false;
-                }
-                try (InputStream in = resp.body().byteStream()) {
-                    Files.copy(in, stagedPath, StandardCopyOption.REPLACE_EXISTING);
-                }
-            }
-            if (Files.size(stagedPath) > MAX_FILE_BYTES) {
-                EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
-                        "Cloud-API media exceeds 20 MiB cap; dropped");
-                return false;
-            }
-            return true;
         } catch (Exception e) {
             EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
                     "Cloud-API media download failed: " + e.getMessage());
             return false;
         }
+        if (!isCdnHost(uri.getHost())) {
+            EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
+                    "Cloud-API media: refusing non-CDN host " + uri.getHost());
+            return false;
+        }
+        var req = new Request.Builder()
+                .url(cdnUrl)
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + token)
+                .get()
+                .build();
+        return switch (StagedDownload.fetch(DOWNLOAD_CLIENT, req, stagedPath)) {
+            case StagedDownload.Ok _ -> true;
+            case StagedDownload.TooBig _ -> {
+                EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
+                        "Cloud-API media exceeds 20 MiB cap; dropped");
+                yield false;
+            }
+            case StagedDownload.Redirect(int code, String _) -> {
+                EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
+                        "Cloud-API media download HTTP " + code);
+                yield false;
+            }
+            case StagedDownload.HttpError(int code) -> {
+                EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
+                        "Cloud-API media download HTTP " + code);
+                yield false;
+            }
+            case StagedDownload.Failed(String message) -> {
+                EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
+                        "Cloud-API media download failed: " + message);
+                yield false;
+            }
+        };
     }
 
     /** True when {@code host} resolves under one of WhatsApp's media CDN suffixes.
@@ -270,11 +268,6 @@ public final class WhatsAppMediaDownloader {
     private static String stripParams(String contentType) {
         int semi = contentType.indexOf(';');
         return (semi >= 0 ? contentType.substring(0, semi) : contentType).trim();
-    }
-
-    /** Best-effort delete used during download cleanup — swallows IO errors. */
-    private static void bestEffortDelete(Path path) {
-        try { Files.deleteIfExists(path); } catch (IOException _) { /* best-effort */ }
     }
 
     /** Bound on a single {@code downloadMedia} call before giving up on a part. */

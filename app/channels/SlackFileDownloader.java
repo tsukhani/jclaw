@@ -6,21 +6,16 @@ import okhttp3.Request;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
-import utils.HttpFactories;
 import utils.SsrfGuard;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Downloads inbound Slack files (JCLAW-344) authenticating with the agent's
@@ -47,10 +42,10 @@ public final class SlackFileDownloader {
 
     private SlackFileDownloader() {}
 
-    /** Cap inbound Slack downloads at 20 MiB (matches TelegramFileDownloader). */
-    public static final long MAX_FILE_BYTES = 20L * 1024 * 1024;
+    /** Cap inbound Slack downloads at 20 MiB (single-sourced by
+     *  {@link StagedDownload#MAX_FILE_BYTES}). */
+    public static final long MAX_FILE_BYTES = StagedDownload.MAX_FILE_BYTES;
 
-    private static final Duration DOWNLOAD_TIMEOUT = Duration.ofSeconds(90);
     private static final String AUDIO_SUBTYPE = "slack_audio";
     private static final String VIDEO_PREFIX = "video/";
 
@@ -60,18 +55,12 @@ public final class SlackFileDownloader {
             List.of(".slack.com", ".slack-edge.com", ".slack-files.com");
 
     /**
-     * SSRF-hardened client — same derivation as
-     * {@link TelegramFileDownloader#DOWNLOAD_CLIENT}: {@link HttpFactories#general()}
-     * for the shared pool/dispatcher/timeouts, layered with {@link SsrfGuard#SAFE_DNS}
-     * (every hostname resolution gated) and redirect-following disabled so we hop
-     * manually past the host allowlist. Package-private non-final so tests can swap a
-     * socket-free interceptor client in (mirrors {@code WebFetchTool.CLIENT}).
+     * SSRF-hardened client — the shared recipe from {@link StagedDownload#newSsrfClient()}
+     * ({@link SsrfGuard#SAFE_DNS} + redirect-following disabled so we hop manually past
+     * the host allowlist). Package-private non-final so tests can swap a socket-free
+     * interceptor client in (mirrors {@code WebFetchTool.CLIENT}).
      */
-    static OkHttpClient DOWNLOAD_CLIENT = HttpFactories.general().newBuilder()
-            .dns(SsrfGuard.SAFE_DNS)
-            .followRedirects(false)
-            .followSslRedirects(false)
-            .build();
+    static OkHttpClient DOWNLOAD_CLIENT = StagedDownload.newSsrfClient();
 
     /** Visible for testing: assert the download client carries the SSRF DNS gate. */
     public static OkHttpClient downloadClient() {
@@ -117,11 +106,11 @@ public final class SlackFileDownloader {
 
         var fetched = fetchToStaging(url, botToken, stagedPath, true, 1);
         if (fetched instanceof FetchFailed(String reason)) {
-            bestEffortDelete(stagedPath);
+            StagedDownload.bestEffortDelete(stagedPath);
             return new DownloadFailed(reason);
         }
         if (fetched instanceof FetchSize(long bytes)) {
-            bestEffortDelete(stagedPath);
+            StagedDownload.bestEffortDelete(stagedPath);
             return new SizeExceeded(bytes, MAX_FILE_BYTES);
         }
         var ok = (FetchOk) fetched;
@@ -143,10 +132,11 @@ public final class SlackFileDownloader {
 
     /**
      * GET {@code url} (optionally with the Bearer token) and stream the body into
-     * {@code stagedPath}. Validates scheme + Slack-host before opening a socket. A
-     * 3xx is followed once: the redirect target is re-validated, and the token is
-     * dropped on a cross-origin hop. Returns {@link FetchOk} with the response
-     * content-type + on-disk size, else a failure / size variant.
+     * {@code stagedPath} via {@link StagedDownload}. Validates scheme + Slack-host
+     * before the request is built. A 3xx is followed once: the redirect target is
+     * re-validated, and the token is dropped on a cross-origin hop. Returns
+     * {@link FetchOk} with the response content-type + on-disk size, else a failure /
+     * size variant.
      */
     private static FetchResult fetchToStaging(String url, String botToken,
                                               Path stagedPath, boolean withAuth, int redirectsLeft) {
@@ -164,49 +154,40 @@ public final class SlackFileDownloader {
         if (withAuth) {
             builder.header("Authorization", "Bearer " + botToken);
         }
-        try {
-            var call = DOWNLOAD_CLIENT.newCall(builder.build());
-            call.timeout().timeout(DOWNLOAD_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            try (var resp = call.execute()) {
-                int code = resp.code();
-                if (code >= 300 && code < 400) {
-                    if (redirectsLeft <= 0) {
-                        return new FetchFailed("too many redirects");
-                    }
-                    String loc = resp.header("Location");
-                    if (loc == null || loc.isBlank()) {
-                        return new FetchFailed("redirect without Location");
-                    }
-                    // Cross-origin hop (e.g. files.slack.com -> *.slack-edge.com CDN):
-                    // drop the bot token — CDN URLs are pre-signed. Same-host keeps it.
-                    boolean sameHost = uri.getHost() != null
-                            && uri.getHost().equalsIgnoreCase(URI.create(loc).getHost());
-                    return fetchToStaging(loc, botToken, stagedPath, sameHost && withAuth, redirectsLeft - 1);
-                }
-                if (code != 200) {
-                    return new FetchFailed("download HTTP " + code);
-                }
-                // OkHttp 5's Response.body is non-null (an empty body for bodyless
-                // responses), so a null-check here is dead — read the type directly.
-                var ct = resp.body().contentType();
-                String ctStr = ct != null ? ct.toString() : "";
+        return switch (StagedDownload.fetch(DOWNLOAD_CLIENT, builder.build(), stagedPath)) {
+            case StagedDownload.Redirect(int _, String loc) ->
+                    followRedirect(uri, loc, botToken, stagedPath, withAuth, redirectsLeft);
+            case StagedDownload.HttpError(int code) -> new FetchFailed("download HTTP " + code);
+            case StagedDownload.Failed(String message) -> new FetchFailed("download: " + message);
+            case StagedDownload.TooBig(long size) -> new FetchSize(size);
+            case StagedDownload.Ok(String ct, long size) -> {
                 // Slack serves an HTML login page (not bytes) when the token lacks
                 // files:read or url_private (not _download) was used. Reject it.
-                if (ctStr.toLowerCase(Locale.ROOT).startsWith("text/html")) {
-                    return new FetchFailed("got HTML (check files:read scope / url_private_download)");
+                if (ct.toLowerCase(Locale.ROOT).startsWith("text/html")) {
+                    StagedDownload.bestEffortDelete(stagedPath);
+                    yield new FetchFailed("got HTML (check files:read scope / url_private_download)");
                 }
-                try (InputStream in = resp.body().byteStream()) {
-                    Files.copy(in, stagedPath, StandardCopyOption.REPLACE_EXISTING);
-                }
-                long size = Files.size(stagedPath);
-                if (size > MAX_FILE_BYTES) {
-                    return new FetchSize(size);
-                }
-                return new FetchOk(ctStr.isBlank() ? null : ctStr, size);
+                yield new FetchOk(ct.isBlank() ? null : ct, size);
             }
-        } catch (Exception e) {
-            return new FetchFailed("download: " + e.getMessage());
+        };
+    }
+
+    /**
+     * Follow a single Slack CDN redirect. Re-validates the target through
+     * {@link #fetchToStaging} and drops the bot token on a cross-origin hop (e.g.
+     * files.slack.com → *.slack-edge.com), where the CDN URL is pre-signed.
+     */
+    private static FetchResult followRedirect(URI from, String loc, String botToken,
+                                              Path stagedPath, boolean withAuth, int redirectsLeft) {
+        if (redirectsLeft <= 0) {
+            return new FetchFailed("too many redirects");
         }
+        if (loc == null || loc.isBlank()) {
+            return new FetchFailed("redirect without Location");
+        }
+        boolean sameHost = from.getHost() != null
+                && from.getHost().equalsIgnoreCase(URI.create(loc).getHost());
+        return fetchToStaging(loc, botToken, stagedPath, sameHost && withAuth, redirectsLeft - 1);
     }
 
     /**
@@ -248,10 +229,5 @@ public final class SlackFileDownloader {
             }
         }
         return false;
-    }
-
-    /** Best-effort delete used during download cleanup — swallows IO errors. */
-    private static void bestEffortDelete(Path path) {
-        try { Files.deleteIfExists(path); } catch (IOException _) { /* best-effort */ }
     }
 }

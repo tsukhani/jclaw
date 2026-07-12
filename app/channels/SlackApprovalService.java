@@ -12,14 +12,8 @@ import services.EventLogger;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Generic Slack approve/deny Block Kit workflow (JCLAW-350) — the Slack analog of
@@ -42,10 +36,10 @@ import java.util.concurrent.TimeoutException;
  *       aborts.</li>
  * </ol>
  *
- * <p>The registry is process-local and in-memory: a JVM restart drops pending
- * approvals (the owner's tap then resolves to "no longer pending" and the requester
- * sees a timeout). That matches the ephemeral nature of an in-flight tool call —
- * there is nothing durable to recover.
+ * <p>The shared approve/deny lifecycle (pending registry, resolve, expiry, await)
+ * lives in {@link ApprovalRegistry}; this class supplies only the Slack-specific
+ * emit (Block Kit), the {@code Decision}→{@code Outcome} mapping, and how the live
+ * prompt is swapped to a static confirmation.
  */
 public final class SlackApprovalService {
 
@@ -57,11 +51,8 @@ public final class SlackApprovalService {
     /** How a resolved approval was decided. Mirrors {@link TelegramApprovalService.Outcome}. */
     public enum Outcome { APPROVED_ONCE, APPROVED_SESSION, APPROVED_ALWAYS, DENIED, TIMED_OUT, EXPIRED }
 
-    /** A pending approval awaiting a button tap. {@code messageTs} is the posted prompt's Slack ts. */
-    private record Pending(String botToken, String channelId, String messageTs,
-                           String authorizedUserId, CompletableFuture<Outcome> future) {}
-
-    private static final ConcurrentHashMap<String, Pending> PENDING = new ConcurrentHashMap<>();
+    private static final ApprovalRegistry<SlackApprovalCallback.Decision, Outcome> REGISTRY =
+            new ApprovalRegistry<>(CHANNEL_NAME, SlackApprovalService::toOutcome, o -> o == Outcome.DENIED);
 
     /**
      * Request an interactive approval. Posts approve/deny buttons to the given
@@ -82,7 +73,7 @@ public final class SlackApprovalService {
     public static CompletableFuture<Outcome> request(String botToken, String channelId, String threadTs,
                                                      String authorizedUserId, String prompt,
                                                      boolean allowScopes) {
-        var approvalId = newId();
+        var approvalId = ApprovalRegistry.newId();
         var future = new CompletableFuture<Outcome>();
         var blocks = approvalBlocks(approvalId, prompt, allowScopes);
         var fallback = "Approval required: %s".formatted(prompt);
@@ -93,10 +84,16 @@ public final class SlackApprovalService {
             future.complete(Outcome.EXPIRED);
             return future;
         }
-        PENDING.put(approvalId, new Pending(botToken, channelId, messageTs, authorizedUserId, future));
         EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
                 "Approval %s requested in channel %s".formatted(approvalId, channelId));
-        return future;
+        return REGISTRY.register(approvalId, authorizedUserId, future, new ApprovalRegistry.LivePrompt() {
+            @Override public void onResolved(boolean denied) {
+                swapToStatic(botToken, channelId, messageTs, denied ? "🚫 Denied." : "✅ Approved.");
+            }
+            @Override public void onExpired() {
+                swapToStatic(botToken, channelId, messageTs, "⏲ Approval request expired.");
+            }
+        });
     }
 
     /**
@@ -105,24 +102,7 @@ public final class SlackApprovalService {
      * with an "expired" line so the stale buttons can't be tapped afterwards.
      */
     public static Outcome await(CompletableFuture<Outcome> future, Duration timeout) {
-        try {
-            return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (TimeoutException _) {
-            PENDING.entrySet().stream()
-                    .filter(en -> en.getValue().future() == future)
-                    .map(Map.Entry::getKey)
-                    .findFirst()
-                    .ifPresent(id -> expire(id, Outcome.TIMED_OUT));
-            future.complete(Outcome.TIMED_OUT);
-            return Outcome.TIMED_OUT;
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-            return Outcome.TIMED_OUT;
-        } catch (ExecutionException e) {
-            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Approval await failed: %s".formatted(e.getMessage()));
-            return Outcome.TIMED_OUT;
-        }
+        return REGISTRY.await(future, timeout, Outcome.TIMED_OUT);
     }
 
     /**
@@ -138,27 +118,8 @@ public final class SlackApprovalService {
      * @return a {@link Resolution} describing what happened
      */
     public static Resolution resolve(String approvalId, SlackApprovalCallback.Decision decision, String fromId) {
-        var pending = PENDING.get(approvalId);
-        if (pending == null) {
-            return new Resolution(false, Optional.empty(), "This approval is no longer pending.");
-        }
-        if (pending.authorizedUserId() == null || !pending.authorizedUserId().equals(fromId)) {
-            EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Rejected approval %s tap from user %s: issued for user %s".formatted(
-                            approvalId, fromId, pending.authorizedUserId()));
-            return new Resolution(false, Optional.empty(), "This approval was not issued for you.");
-        }
-        // Won the race? Remove before completing so a double-tap can't resolve twice.
-        if (PENDING.remove(approvalId, pending)) {
-            var outcome = toOutcome(decision);
-            pending.future().complete(outcome);
-            swapToStatic(pending, outcome == Outcome.DENIED ? "🚫 Denied." : "✅ Approved.");
-            EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
-                    "Approval %s resolved as %s by user %s".formatted(approvalId, outcome, fromId));
-            return new Resolution(true, Optional.of(outcome),
-                    outcome == Outcome.DENIED ? "Denied." : "Approved.");
-        }
-        return new Resolution(false, Optional.empty(), "This approval is no longer pending.");
+        var r = REGISTRY.resolve(approvalId, decision, fromId);
+        return new Resolution(r.resolved(), r.outcome(), r.userMessage());
     }
 
     /**
@@ -167,39 +128,33 @@ public final class SlackApprovalService {
      * prompt for an "expired" line. No-op if already resolved.
      */
     public static void expire(String approvalId, Outcome outcome) {
-        var pending = PENDING.remove(approvalId);
-        if (pending == null) return;
-        pending.future().complete(outcome);
-        swapToStatic(pending, "⏲ Approval request expired.");
+        REGISTRY.expire(approvalId, outcome);
     }
 
     /** Visible only for testing: whether an approval id is still pending. */
     public static boolean isPending(String approvalId) {
-        return PENDING.containsKey(approvalId);
+        return REGISTRY.isPending(approvalId);
     }
 
     /** Visible only for testing: drop every pending entry. */
     public static void clearAll() {
-        PENDING.clear();
+        REGISTRY.clearAll();
     }
 
     /**
      * Visible only for testing: register a pending entry without the live Slack I/O
      * that {@link #request} performs. Exercises resolve/expire/gating against an
-     * in-memory future. {@code botToken} is null so {@link #swapToStatic} no-ops.
+     * in-memory future; the entry carries no live message so the swap-to-static
+     * no-ops.
      */
     public static CompletableFuture<Outcome> registerForTest(String approvalId, String authorizedUserId) {
-        var future = new CompletableFuture<Outcome>();
-        PENDING.put(approvalId, new Pending(null, "C0", "1.0", authorizedUserId, future));
-        return future;
+        return REGISTRY.registerForTest(approvalId, authorizedUserId);
     }
 
     // ── Internals ──────────────────────────────────────────────────────
 
-    private static void swapToStatic(Pending pending, String text) {
-        if (pending.botToken() == null) return; // test-registered entry: no live message
-        SlackWebApi.updateMessageWithBlocks(pending.botToken(), pending.channelId(), pending.messageTs(),
-                text, List.of(section(text)));
+    private static void swapToStatic(String botToken, String channelId, String messageTs, String text) {
+        SlackWebApi.updateMessageWithBlocks(botToken, channelId, messageTs, text, List.of(section(text)));
     }
 
     private static Outcome toOutcome(SlackApprovalCallback.Decision decision) {
@@ -209,11 +164,6 @@ public final class SlackApprovalService {
             case APPROVE_ALWAYS -> Outcome.APPROVED_ALWAYS;
             case DENY -> Outcome.DENIED;
         };
-    }
-
-    /** First 8 chars of a random UUID — collision-safe for the handful of in-flight approvals. */
-    private static String newId() {
-        return UUID.randomUUID().toString().substring(0, 8);
     }
 
     /**
