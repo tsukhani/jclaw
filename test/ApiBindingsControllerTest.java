@@ -228,6 +228,26 @@ class ApiBindingsControllerTest extends FunctionalTest {
         assertEquals(404, r.status.intValue());
     }
 
+    @Test
+    void createRejectsMissingOrNonNumericAgentIdWith400() {
+        // Regression (JCLAW-732): an unguarded body.get("agentId").getAsLong()
+        // NPE'd on a missing key and threw on a non-numeric/non-primitive one —
+        // both surfaced as HTTP 500. Malformed input must yield an actionable 400.
+        login();
+        // Missing agentId.
+        assertStatus(400, POST("/api/bindings", "application/json",
+                "{\"channelType\":\"telegram\",\"peerId\":\"123\"}"));
+        // Explicit JSON null.
+        assertStatus(400, POST("/api/bindings", "application/json",
+                "{\"agentId\":null,\"channelType\":\"telegram\"}"));
+        // Non-numeric string — getAsLong() threw NumberFormatException.
+        assertStatus(400, POST("/api/bindings", "application/json",
+                "{\"agentId\":\"abc\",\"channelType\":\"telegram\"}"));
+        // Non-primitive (object) — getAsLong() threw UnsupportedOperationException.
+        assertStatus(400, POST("/api/bindings", "application/json",
+                "{\"agentId\":{},\"channelType\":\"telegram\"}"));
+    }
+
     // ==========================================================
     // PUT /api/bindings/{id} (update)
     // ==========================================================
@@ -305,6 +325,17 @@ class ApiBindingsControllerTest extends FunctionalTest {
         var body = "{\"agentId\":999999}";
         var r = PUT("/api/bindings/" + bindingId, "application/json", body);
         assertEquals(404, r.status.intValue());
+    }
+
+    @Test
+    void updateWithNonNumericAgentIdReturns400() {
+        // JCLAW-732: a present-but-non-numeric agentId on update must 400, not 500.
+        login();
+        var agentId = seedAgent("alpha");
+        var bindingId = seedBinding(agentId, "telegram", "peer1", 0);
+
+        var r = PUT("/api/bindings/" + bindingId, "application/json", "{\"agentId\":\"abc\"}");
+        assertStatus(400, r);
     }
 
     // ==========================================================
