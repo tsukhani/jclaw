@@ -2,6 +2,7 @@ package channels;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import utils.JsonArgs;
 
 import java.util.List;
 
@@ -83,11 +84,11 @@ public final class WhatsAppCloudApiParser {
         if (messages == null || messages.isEmpty()) return null;
 
         var msg = messages.get(0).getAsJsonObject();
-        var type = optString(msg, "type");
+        var type = JsonArgs.optNonBlankString(msg, "type");
         if (type == null) return null;
 
-        var messageId = optString(msg, "id");
-        var from = optString(msg, "from");
+        var messageId = JsonArgs.optNonBlankString(msg, "id");
+        var from = JsonArgs.optNonBlankString(msg, "from");
         if (messageId == null || from == null) return null;
 
         var phoneNumberId = metadataPhoneNumberId(value);
@@ -114,7 +115,7 @@ public final class WhatsAppCloudApiParser {
     // ── per-type builders ──
 
     private static WhatsAppInboundMessage text(JsonObject msg, Envelope envelope) {
-        var body = msg.has("text") ? optString(msg.getAsJsonObject("text"), "body") : null;
+        var body = msg.has("text") ? JsonArgs.optNonBlankString(msg.getAsJsonObject("text"), "body") : null;
         if (body == null) return null;
         return base(MessageType.TEXT, body, null, null, List.of(), envelope);
     }
@@ -128,11 +129,11 @@ public final class WhatsAppCloudApiParser {
                                                 boolean voiceNote, Envelope envelope) {
         if (!msg.has(key)) return null;
         var obj = msg.getAsJsonObject(key);
-        var mediaId = optString(obj, "id");
+        var mediaId = JsonArgs.optNonBlankString(obj, "id");
         if (mediaId == null) return null;
-        var mime = optString(obj, "mime_type");
-        var filename = optString(obj, "filename");
-        var caption = optString(obj, "caption");
+        var mime = JsonArgs.optNonBlankString(obj, "mime_type");
+        var filename = JsonArgs.optNonBlankString(obj, "filename");
+        var caption = JsonArgs.optNonBlankString(obj, "caption");
         var pending = new WhatsAppInboundMessage.PendingMedia(mediaId, mime, 0L, filename, voiceNote);
         return base(type, caption, null, null, List.of(pending), envelope);
     }
@@ -142,9 +143,9 @@ public final class WhatsAppCloudApiParser {
     private static WhatsAppInboundMessage audio(JsonObject msg, Envelope envelope) {
         if (!msg.has(TYPE_AUDIO)) return null;
         var obj = msg.getAsJsonObject(TYPE_AUDIO);
-        var mediaId = optString(obj, "id");
+        var mediaId = JsonArgs.optNonBlankString(obj, "id");
         if (mediaId == null) return null;
-        var mime = optString(obj, "mime_type");
+        var mime = JsonArgs.optNonBlankString(obj, "mime_type");
         var voice = obj.has(FIELD_VOICE) && !obj.get(FIELD_VOICE).isJsonNull() && obj.get(FIELD_VOICE).getAsBoolean();
         var pending = new WhatsAppInboundMessage.PendingMedia(mediaId, mime, 0L, null, voice);
         return base(MessageType.AUDIO, null, null, null, List.of(pending), envelope);
@@ -157,18 +158,18 @@ public final class WhatsAppCloudApiParser {
         var loc = new WhatsAppInboundMessage.Location(
                 obj.get("latitude").getAsDouble(),
                 obj.get("longitude").getAsDouble(),
-                optString(obj, "name"),
-                optString(obj, "address"));
+                JsonArgs.optNonBlankString(obj, "name"),
+                JsonArgs.optNonBlankString(obj, "address"));
         return base(MessageType.LOCATION, null, loc, null, List.of(), envelope);
     }
 
     private static WhatsAppInboundMessage reaction(JsonObject msg, Envelope envelope) {
         if (!msg.has(TYPE_REACTION)) return null;
         var obj = msg.getAsJsonObject(TYPE_REACTION);
-        var targetId = optString(obj, "message_id");
+        var targetId = JsonArgs.optNonBlankString(obj, "message_id");
         if (targetId == null) return null;
         // emoji is omitted when a reaction is REMOVED — normalize to "" (blank).
-        var emoji = optString(obj, "emoji");
+        var emoji = JsonArgs.optNonBlankString(obj, "emoji");
         var r = new WhatsAppInboundMessage.Reaction(targetId, emoji != null ? emoji : "");
         return base(MessageType.REACTION, null, null, r, List.of(), envelope);
     }
@@ -189,8 +190,8 @@ public final class WhatsAppCloudApiParser {
             reply = obj.getAsJsonObject("list_reply");
         }
         if (reply == null) return null;
-        var title = optString(reply, "title");
-        var id = optString(reply, "id");
+        var title = JsonArgs.optNonBlankString(reply, "title");
+        var id = JsonArgs.optNonBlankString(reply, "id");
         var body = title != null ? title : id;
         if (body == null) return null;
         return base(MessageType.TEXT, body, null, null, List.of(), envelope);
@@ -242,7 +243,7 @@ public final class WhatsAppCloudApiParser {
     /** {@code value.metadata.phone_number_id}, used to route to a binding. */
     static String metadataPhoneNumberId(JsonObject value) {
         if (!value.has("metadata")) return null;
-        return optString(value.getAsJsonObject("metadata"), "phone_number_id");
+        return JsonArgs.optNonBlankString(value.getAsJsonObject("metadata"), "phone_number_id");
     }
 
     /** {@code value.contacts[0].profile.name} — the sender's display name. */
@@ -252,19 +253,13 @@ public final class WhatsAppCloudApiParser {
         if (contacts.isEmpty()) return null;
         var contact = contacts.get(0).getAsJsonObject();
         if (!contact.has("profile")) return null;
-        return optString(contact.getAsJsonObject("profile"), "name");
+        return JsonArgs.optNonBlankString(contact.getAsJsonObject("profile"), "name");
     }
 
     /** {@code message.context.id} — the quoted message id when this is a reply. */
     private static String quotedMessageId(JsonObject msg) {
         if (!msg.has("context")) return null;
-        return optString(msg.getAsJsonObject("context"), "id");
-    }
-
-    private static String optString(JsonObject obj, String key) {
-        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
-        var s = obj.get(key).getAsString();
-        return (s == null || s.isBlank()) ? null : s;
+        return JsonArgs.optNonBlankString(msg.getAsJsonObject("context"), "id");
     }
 
     /**

@@ -11,6 +11,7 @@ import services.Tx;
 import services.videogen.VideoGenerationJobService;
 import services.videogen.VideoGenerationRouter;
 import services.videogen.VideoGenerationService.VideoGenRequest;
+import utils.JsonArgs;
 
 import java.util.List;
 import java.util.Map;
@@ -101,7 +102,7 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
         } catch (RuntimeException _) {
             return ToolRegistry.ToolResult.text("Error: invalid arguments for generate_video.");
         }
-        var prompt = optString(args, ARG_PROMPT);
+        var prompt = JsonArgs.optString(args, ARG_PROMPT);
         if (prompt == null || prompt.isBlank()) {
             return ToolRegistry.ToolResult.text("Error: 'prompt' is required.");
         }
@@ -111,8 +112,8 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
                             + "Settings → Video Generation.");
         }
 
-        var req = new VideoGenRequest(prompt, null, optInt(args, ARG_DURATION), optString(args, ARG_ASPECT),
-                optInt(args, ARG_FPS));
+        var req = new VideoGenRequest(prompt, null, JsonArgs.optInteger(args, ARG_DURATION), JsonArgs.optString(args, ARG_ASPECT),
+                JsonArgs.optInteger(args, ARG_FPS));
         // Tool execution runs on the [agent-stream] thread, which Play's JPAPlugin never wraps in a JPA
         // transaction, so submit()'s job.save() has no EntityManager of its own. Open one here — the same
         // Tx.run convention every other DB-touching tool (ShellExecTool, TaskTool, …) follows.
@@ -141,13 +142,5 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
             meta.addProperty("durationSeconds", req.durationSeconds());
         }
         return meta.toString();
-    }
-
-    private static String optString(JsonObject args, String key) {
-        return args.has(key) && !args.get(key).isJsonNull() ? args.get(key).getAsString() : null;
-    }
-
-    private static Integer optInt(JsonObject args, String key) {
-        return args.has(key) && !args.get(key).isJsonNull() ? args.get(key).getAsInt() : null;
     }
 }

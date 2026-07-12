@@ -2,7 +2,6 @@ package tools;
 
 import agents.ToolAction;
 import agents.ToolRegistry;
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
@@ -12,6 +11,7 @@ import models.SubagentRun;
 import services.ConversationService;
 import services.Tx;
 import utils.GsonHolder;
+import utils.JsonArgs;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -170,24 +170,24 @@ public class ConversationSendTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var message = optString(args, PARAM_MESSAGE);
+        var message = JsonArgs.optString(args, PARAM_MESSAGE);
         if (message == null || message.isBlank()) {
             return "Error: 'message' is required.";
         }
-        var explicitTarget = optString(args, PARAM_TARGET);
+        var explicitTarget = JsonArgs.optString(args, PARAM_TARGET);
         if (explicitTarget != null && !explicitTarget.isBlank()
                 && !ALLOWED_TARGETS.contains(explicitTarget.toLowerCase())) {
             return "Error: 'target' must be one of " + ALLOWED_TARGETS
                     + " (got '" + explicitTarget + "').";
         }
-        var payloadType = optString(args, PARAM_PAYLOAD_TYPE);
+        var payloadType = JsonArgs.optString(args, PARAM_PAYLOAD_TYPE);
         if (payloadType == null || payloadType.isBlank()) {
             payloadType = DEFAULT_PAYLOAD_TYPE;
         } else if (!ALLOWED_PAYLOAD_TYPES.contains(payloadType.toLowerCase())) {
             return "Error: 'payloadType' must be one of " + ALLOWED_PAYLOAD_TYPES
                     + " (got '" + payloadType + "').";
         }
-        var runIdStr = optString(args, PARAM_RUN_ID);
+        var runIdStr = JsonArgs.optString(args, PARAM_RUN_ID);
         Long explicitRunId = null;
         if (runIdStr != null && !runIdStr.isBlank()) {
             try {
@@ -309,11 +309,5 @@ public class ConversationSendTool implements ToolRegistry.Tool {
         msg.metadata = GsonHolder.INSTANCE.toJson(metadata, Map.class);
         msg.save();
         return msg;
-    }
-
-    private static String optString(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        return el.getAsString();
     }
 }

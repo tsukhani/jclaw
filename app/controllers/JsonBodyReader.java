@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import play.mvc.Http;
 import utils.ApiResponses;
+import utils.JsonArgs;
 
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -36,12 +37,8 @@ public final class JsonBodyReader {
      * {@code null}); when false the raw value is returned verbatim.
      */
     public static String optString(JsonObject body, String key, boolean trim) {
-        if (!body.has(key)) return null;
-        var el = body.get(key);
-        if (el.isJsonNull()) return null;
-        var s = el.getAsString();
-        if (s == null || s.isBlank()) return null;
-        return trim ? s.trim() : s;
+        var s = JsonArgs.optNonBlankString(body, key);
+        return (s == null || !trim) ? s : s.trim();
     }
 
     /**
@@ -50,9 +47,8 @@ public final class JsonBodyReader {
      * aggregated {@code error()} so a single response can name every missing field.
      */
     public static String requiredString(JsonObject body, String key) {
-        if (!body.has(key) || body.get(key).isJsonNull()) return null;
-        String s = body.get(key).getAsString();
-        return (s == null || s.isBlank()) ? null : s.trim();
+        var s = JsonArgs.optNonBlankString(body, key);
+        return s == null ? null : s.trim();
     }
 
     /**

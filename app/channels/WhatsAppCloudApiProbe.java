@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import okhttp3.Request;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.JsonArgs;
 import utils.Strings;
 
 import java.util.concurrent.TimeUnit;
@@ -134,12 +135,12 @@ public final class WhatsAppCloudApiProbe {
         } catch (Exception _) {
             return new Failed("unexpected Graph response: " + Strings.truncate(body, 200));
         }
-        String verifiedName = optString(json, "verified_name");
+        String verifiedName = JsonArgs.optNonBlankString(json, "verified_name");
         if (verifiedName == null) {
             return new Failed("number is not a verified WhatsApp Business number "
                     + "(no verified_name returned)");
         }
-        return new Verified(verifiedName, optString(json, "display_phone_number"));
+        return new Verified(verifiedName, JsonArgs.optNonBlankString(json, "display_phone_number"));
     }
 
     /**
@@ -152,7 +153,7 @@ public final class WhatsAppCloudApiProbe {
             var json = JsonParser.parseString(body).getAsJsonObject();
             if (json.has(FIELD_ERROR) && json.get(FIELD_ERROR).isJsonObject()) {
                 var err = json.getAsJsonObject(FIELD_ERROR);
-                var msg = optString(err, "message");
+                var msg = JsonArgs.optNonBlankString(err, "message");
                 if (msg != null) {
                     return msg;
                 }
@@ -161,13 +162,5 @@ public final class WhatsAppCloudApiProbe {
             // Fall through to the generic message below.
         }
         return "Graph API HTTP " + httpCode + ": " + Strings.truncate(body, 200);
-    }
-
-    private static String optString(JsonObject json, String key) {
-        if (!json.has(key) || json.get(key).isJsonNull()) {
-            return null;
-        }
-        var s = json.get(key).getAsString();
-        return (s == null || s.isBlank()) ? null : s;
     }
 }

@@ -10,6 +10,7 @@ import models.SubagentRun;
 import services.SubagentRegistry;
 import services.Tx;
 import utils.GsonHolder;
+import utils.JsonArgs;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -287,8 +288,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
     }
 
     private static ParsedArgs parseYieldArgs(JsonObject args) {
-        var runIdStr = optString(args, PARAM_RUN_ID);
-        var convIdStr = optString(args, PARAM_CONVERSATION_ID);
+        var runIdStr = JsonArgs.optString(args, PARAM_RUN_ID);
+        var convIdStr = JsonArgs.optString(args, PARAM_CONVERSATION_ID);
         if ((runIdStr == null || runIdStr.isBlank())
                 && (convIdStr == null || convIdStr.isBlank())) {
             return ParsedArgs.fail("Error: one of 'runId' or 'conversationId' is required.");
@@ -309,7 +310,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 return ParsedArgs.fail("Error: 'conversationId' must be numeric (got '" + convIdStr + "').");
             }
         }
-        var timeout = optInt(args, PARAM_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
+        var timeout = JsonArgs.optInt(args, PARAM_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
         // 0 is a load-bearing sentinel: explicitly disables the yield watchdog
         // so the parent parks until the child terminates naturally via its own
         // runTimeoutSeconds. Negative values are nonsense — coerce to DEFAULT.
@@ -386,17 +387,5 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
             alreadyDone.put("conversation_id", String.valueOf(run.childConversation.id));
         }
         return GsonHolder.INSTANCE.toJson(alreadyDone, Map.class);
-    }
-
-    private static String optString(JsonObject obj, String key) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        return el.getAsString();
-    }
-
-    private static int optInt(JsonObject obj, String key, int fallback) {
-        var el = obj.get(key);
-        if (el == null || el.isJsonNull()) return fallback;
-        try { return el.getAsInt(); } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) { return fallback; }
     }
 }

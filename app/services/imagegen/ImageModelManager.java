@@ -1,6 +1,5 @@
 package services.imagegen;
 
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -11,6 +10,7 @@ import play.Play;
 import services.ConfigService;
 import services.EventLogger;
 import utils.HttpFactories;
+import utils.JsonArgs;
 
 import java.io.File;
 import java.io.IOException;
@@ -187,11 +187,11 @@ public final class ImageModelManager {
             throws IOException {
         if (line.isBlank()) return;
         var json = JsonParser.parseString(line).getAsJsonObject();
-        var status = optString(json, "status");
+        var status = JsonArgs.optString(json, "status", "");
         long done = json.has("bytesDownloaded") ? json.get("bytesDownloaded").getAsLong() : 0;
         long total = json.has("totalBytes") ? json.get("totalBytes").getAsLong() : 0;
         if ("error".equals(status)) {
-            throw new IOException("sidecar pull error: " + optString(json, "error"));
+            throw new IOException("sidecar pull error: " + JsonArgs.optString(json, "error", ""));
         }
         if ("done".equals(status)) {
             statuses.put(model, new ModelStatus(State.AVAILABLE, done, total, null));
@@ -201,10 +201,6 @@ public final class ImageModelManager {
                 onProgress.accept(new DownloadProgress(model, done, total));
             }
         }
-    }
-
-    private static String optString(JsonObject json, String key) {
-        return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : "";
     }
 
     /** Test-only: drop in-memory state so tests don't bleed into each other. */

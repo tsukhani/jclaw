@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
+import utils.JsonArgs;
 
 import java.io.InterruptedIOException;
 import java.util.ArrayList;
@@ -124,11 +125,10 @@ abstract class ConfiguredHashScanner implements Scanner {
 
     /**
      * Read {@code field} off {@code o} as a string, returning {@code def} when
-     * the field is absent or JSON null. Collapses the
-     * {@code has() && !isJsonNull() ? getAsString() : def} ternary the engine-
-     * label extractors otherwise repeat per field.
+     * the field is absent or JSON null. Thin forwarder to {@link JsonArgs} kept
+     * {@code protected} for the engine-label extractors in the scanner subclasses.
      */
     protected static String optString(JsonObject o, String field, String def) {
-        return o.has(field) && !o.get(field).isJsonNull() ? o.get(field).getAsString() : def;
+        return JsonArgs.optString(o, field, def);
     }
 }
