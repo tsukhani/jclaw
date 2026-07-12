@@ -1,8 +1,11 @@
 package services.transcription;
 
+import play.Logger;
+
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Static holder for in-flight transcription futures keyed by
@@ -38,11 +41,11 @@ public final class PendingTranscripts {
     /** Register a freshly-spawned future against {@code attachmentId}. */
     public static void register(Long attachmentId, CompletableFuture<String> future) {
         if (attachmentId == null || future == null) return;
-        var scheduler = java.util.concurrent.CompletableFuture.delayedExecutor(
-                EVICTION_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        var scheduler = CompletableFuture.delayedExecutor(
+                EVICTION_MS, TimeUnit.MILLISECONDS);
         scheduler.execute(() -> {
             if (futures.remove(attachmentId, future)) {
-                play.Logger.warn("PendingTranscripts: evicted abandoned entry for attachment %d",
+                Logger.warn("PendingTranscripts: evicted abandoned entry for attachment %d",
                         attachmentId);
             }
         });

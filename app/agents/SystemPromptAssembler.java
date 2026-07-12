@@ -14,6 +14,7 @@ import services.LoadTestRunner;
 import services.TimezoneResolver;
 import utils.GsonHolder;
 
+import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.ToDoubleFunction;
 
 /**
  * Assembles the system prompt for an LLM call by reading workspace files,
@@ -617,7 +619,7 @@ public class SystemPromptAssembler {
             double impWeight = ConfigService.getDouble("memory.recall.importanceWeight", 0.3);
             // JCLAW-526: the blend is multiplied by a half-life time decay, so
             // stale facts fade in ranking (never vanish — the factor is floored).
-            var now = java.time.Instant.now();
+            var now = Instant.now();
             var top = rankRecall(hits, excludeIds, relWeight, impWeight, recallLimit,
                     e -> MemoryDecay.factorFor(e, now));
             if (!top.isEmpty()) {
@@ -636,7 +638,7 @@ public class SystemPromptAssembler {
                 // JCLAW-526: an injected memory was "accessed" — refresh its
                 // decay anchor so referenced memories stay fresh. Last so a
                 // touch failure can never lose the already-built section.
-                models.Memory.touchAccessed(top.stream()
+                Memory.touchAccessed(top.stream()
                         .map(e -> Long.valueOf(e.id())).toList());
             }
         } catch (Exception e) {
@@ -669,7 +671,7 @@ public class SystemPromptAssembler {
      */
     public static List<MemoryStore.MemoryEntry> rankRecall(List<MemoryStore.MemoryEntry> hits,
             Set<String> excludeIds, double relWeight, double impWeight, int limit,
-            java.util.function.ToDoubleFunction<MemoryStore.MemoryEntry> decay) {
+            ToDoubleFunction<MemoryStore.MemoryEntry> decay) {
         var scored = new ArrayList<ScoredMemory>();
         for (var e : hits) {
             if (excludeIds.contains(e.id())) continue;  // already shown as a core memory

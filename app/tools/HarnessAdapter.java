@@ -66,8 +66,8 @@ public interface HarnessAdapter {
      * {@code none} disables defaults without adding flags). Adapters whose CLI
      * exposes no restriction surface return an empty list and document that.
      */
-    default java.util.List<String> defaultPermissionArgs() {
-        return java.util.List.of();
+    default List<String> defaultPermissionArgs() {
+        return List.of();
     }
 
     /**
@@ -76,7 +76,7 @@ public interface HarnessAdapter {
      * otherwise-sealed home when the sandbox is enabled. Everything not listed
      * stays inaccessible. Empty by default (a harness needing nothing from HOME).
      */
-    default java.util.List<String> sandboxAllowances() {
-        return java.util.List.of();
+    default List<String> sandboxAllowances() {
+        return List.of();
     }
 }

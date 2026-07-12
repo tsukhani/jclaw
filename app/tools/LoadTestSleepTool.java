@@ -29,8 +29,8 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
     @Override public String icon() { return "clock"; }
 
     @Override
-    public java.util.List<ToolAction> actions() {
-        return java.util.List.of(new ToolAction("sleep",
+    public List<ToolAction> actions() {
+        return List.of(new ToolAction("sleep",
                 "Block for the requested duration (load-test latency stand-in)"));
     }
     @Override public String shortDescription() {

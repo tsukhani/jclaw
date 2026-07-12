@@ -11,6 +11,7 @@ import utils.HttpFactories;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -48,7 +49,7 @@ public class AsrSidecarClient {
         // 1800s per-call callTimeout set on every request below — do not
         // "fix" the zero without replacing that bound.
         this(null, HttpFactories.general().newBuilder()
-                .readTimeout(java.time.Duration.ZERO)
+                .readTimeout(Duration.ZERO)
                 .build());
     }
 

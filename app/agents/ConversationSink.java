@@ -92,12 +92,12 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
-    public java.util.List<MessageAttachment> appendAssistantMessage(
-            String content, String toolCalls, java.util.List<GeneratedAttachment> attachments) {
+    public List<MessageAttachment> appendAssistantMessage(
+            String content, String toolCalls, List<GeneratedAttachment> attachments) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
-            return java.util.List.of();
+            return List.of();
         }
         var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
         // JCLAW-228/562: inline every tool-produced attachment on the ONE assistant turn that
