@@ -10,6 +10,7 @@ import llm.LlmTypes.ToolCallChunk;
 import llm.LlmTypes.ToolDef;
 import llm.LlmProvider;
 import llm.ProviderRegistry;
+import llm.ToolCallChunkMerger;
 import services.ConfigService;
 import com.google.gson.JsonParser;
 
@@ -158,7 +159,7 @@ class LlmClientTest extends UnitTest {
     @Test
     void streamAccumulatorStartsEmpty() {
         var acc = new LlmProvider.StreamAccumulator();
-        assertFalse(acc.complete);
+        assertFalse(acc.complete());
         assertEquals("", acc.content);
         assertTrue(acc.toolCalls.isEmpty());
         assertNull(acc.error);
@@ -168,8 +169,8 @@ class LlmClientTest extends UnitTest {
     void streamAccumulatorReasoningDurationIsZeroWhenNoReasoning() {
         var acc = new LlmProvider.StreamAccumulator();
         assertEquals(0L, acc.reasoningDurationMs());
-        assertEquals(0L, acc.reasoningStartNanos);
-        assertEquals(0L, acc.reasoningEndNanos);
+        assertEquals(0L, acc.reasoningStartNanos());
+        assertEquals(0L, acc.reasoningEndNanos());
     }
 
     @Test
@@ -182,14 +183,14 @@ class LlmClientTest extends UnitTest {
         Thread.sleep(5);
         acc.appendReasoningText(" because of Rayleigh.");
 
-        var firstStart = acc.reasoningStartNanos;
+        var firstStart = acc.reasoningStartNanos();
         var duration = acc.reasoningDurationMs();
         assertTrue(duration >= 1L, "duration must be >= 1ms");
         assertTrue(duration < 500L, "duration must be < 500ms (sleep was 5ms)");
 
         // Start is latched on first append — later appends extend end, not start.
         acc.appendReasoningText(" Done.");
-        assertEquals(firstStart, acc.reasoningStartNanos);
+        assertEquals(firstStart, acc.reasoningStartNanos());
         assertTrue(acc.reasoningDurationMs() >= duration,
                 "end must advance past the third chunk");
     }
@@ -198,7 +199,7 @@ class LlmClientTest extends UnitTest {
     void streamAccumulatorIgnoresNullReasoningText() {
         var acc = new LlmProvider.StreamAccumulator();
         acc.appendReasoningText(null);
-        assertEquals(0L, acc.reasoningStartNanos);
+        assertEquals(0L, acc.reasoningStartNanos());
         assertEquals(0L, acc.reasoningDurationMs());
     }
 
@@ -264,14 +265,14 @@ class LlmClientTest extends UnitTest {
         // Streaming lifecycle of a single call: first chunk carries id+name+"",
         // subsequent chunks carry just the arguments fragments. All share
         // index=0. Must collapse into exactly one ToolCall.
-        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
-        LlmProvider.mergeToolCallChunks(List.of(
+        var acc = new java.util.HashMap<Integer, ToolCallChunkMerger.ToolCallBuilder>();
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, "call_a", "function", new FunctionCall("web_search", ""))
         ), acc);
-        LlmProvider.mergeToolCallChunks(List.of(
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, null, null, new FunctionCall(null, "{\"query\":"))
         ), acc);
-        LlmProvider.mergeToolCallChunks(List.of(
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, null, null, new FunctionCall(null, "\"x\"}"))
         ), acc);
 
@@ -285,8 +286,8 @@ class LlmClientTest extends UnitTest {
     @Test
     void mergeToolCallChunks_parallelCallsWithDistinctIndicesStayDistinct() {
         // OpenAI-compliant: parallel calls get distinct index values.
-        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
-        LlmProvider.mergeToolCallChunks(List.of(
+        var acc = new java.util.HashMap<Integer, ToolCallChunkMerger.ToolCallBuilder>();
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, "call_a", "function", new FunctionCall("web_search", "{\"q\":\"a\"}")),
                 new ToolCallChunk(1, "call_b", "function", new FunctionCall("web_search", "{\"q\":\"b\"}"))
         ), acc);
@@ -302,17 +303,17 @@ class LlmClientTest extends UnitTest {
     void mergeToolCallChunks_reusedIndexWithDistinctIdsSplitsSlots() {
         // JCLAW-120 production offender: Gemini-via-Ollama sends every parallel
         // call at index=0 but with distinct ids. Must split into separate slots.
-        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
+        var acc = new java.util.HashMap<Integer, ToolCallChunkMerger.ToolCallBuilder>();
         // Separate deltas simulate per-chunk streaming.
-        LlmProvider.mergeToolCallChunks(List.of(
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, "functions.web_search:1", "function",
                         new FunctionCall("web_search", "{\"query\":\"tech\"}"))
         ), acc);
-        LlmProvider.mergeToolCallChunks(List.of(
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, "functions.web_search:2", "function",
                         new FunctionCall("web_search", "{\"query\":\"biz\"}"))
         ), acc);
-        LlmProvider.mergeToolCallChunks(List.of(
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, "functions.datetime:3", "function",
                         new FunctionCall("datetime", "{\"action\":\"now\"}"))
         ), acc);
@@ -332,11 +333,11 @@ class LlmClientTest extends UnitTest {
     void mergeToolCallChunks_reusedIndexWithDifferentNamesSplitsSlots() {
         // Provider sends two calls at index=0, same (null) id, different names.
         // Name mismatch alone must force a new slot.
-        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
-        LlmProvider.mergeToolCallChunks(List.of(
+        var acc = new java.util.HashMap<Integer, ToolCallChunkMerger.ToolCallBuilder>();
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, null, "function", new FunctionCall("web_search", "{\"q\":\"a\"}"))
         ), acc);
-        LlmProvider.mergeToolCallChunks(List.of(
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, null, "function", new FunctionCall("datetime", "{\"action\":\"now\"}"))
         ), acc);
 
@@ -350,8 +351,8 @@ class LlmClientTest extends UnitTest {
         // Defensive: provider bundles two parallel calls in one delta's
         // tool_calls list, both at index=0. Must split even if id/name
         // checks happen to pass (e.g., incomplete metadata).
-        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
-        LlmProvider.mergeToolCallChunks(List.of(
+        var acc = new java.util.HashMap<Integer, ToolCallChunkMerger.ToolCallBuilder>();
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(
                 new ToolCallChunk(0, "a", "function", new FunctionCall("web_search", "{\"q\":\"x\"}")),
                 new ToolCallChunk(0, "b", "function", new FunctionCall("web_search", "{\"q\":\"y\"}"))
         ), acc);
@@ -363,9 +364,9 @@ class LlmClientTest extends UnitTest {
 
     @Test
     void mergeToolCallChunks_nullInputIsNoOp() {
-        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
-        LlmProvider.mergeToolCallChunks(null, acc);
-        LlmProvider.mergeToolCallChunks(List.of(), acc);
+        var acc = new java.util.HashMap<Integer, ToolCallChunkMerger.ToolCallBuilder>();
+        ToolCallChunkMerger.mergeToolCallChunks(null, acc);
+        ToolCallChunkMerger.mergeToolCallChunks(List.of(), acc);
         assertEquals(0, acc.size());
     }
 

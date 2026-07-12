@@ -18,9 +18,9 @@ import llm.LlmTypes.EmbeddingResponse;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ProviderConfig;
 import llm.LlmTypes.ToolCall;
-import llm.LlmTypes.ToolCallChunk;
 import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
+import llm.ToolCallChunkMerger.ToolCallBuilder;
 import services.EventLogger;
 import utils.HttpKeys;
 
@@ -29,16 +29,12 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -54,7 +50,8 @@ import java.util.function.Function;
  * across 7 cloud runs, 0.85x local with NUM_PARALLEL=8). Validation for
  * the streaming SSE path lives in {@code test/ChatStreamSseTest}.
  */
-public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider, OpenRouterProvider, TogetherAiProvider {
+public abstract sealed class LlmProvider implements LlmStreamCarriers
+        permits OpenAiProvider, OllamaProvider, OpenRouterProvider, TogetherAiProvider {
 
     protected static final Gson gson = new GsonBuilder()
             .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
@@ -502,7 +499,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         // tool calls all at the same index. mergeToolCallChunks
         // detects id / function-name mismatches and allocates
         // fresh slots so parallel calls stay distinct.
-        mergeToolCallChunks(delta.toolCalls(), toolCallAccumulator);
+        ToolCallChunkMerger.mergeToolCallChunks(delta.toolCalls(), toolCallAccumulator);
         if (choice.finishReason() != null) {
             accumulator.finishReason = choice.finishReason();
         }
@@ -764,380 +761,6 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                 extractReasoningTokens(usageObj),
                 extractCachedTokens(usageObj),
                 extractCacheCreationTokens(usageObj));
-    }
-
-    // ─── Shared helper classes ───────────────────────────────────────────
-
-    // S1104: package-internal streaming accumulator with public mutable fields by design.
-    // Volatile field access from multiple agent/channel files is hotter than the
-    // accessor route would be; converting every read site across app/agents,
-    // app/channels, and the test suite would be churn far out of proportion to
-    // the warning's severity (LOW). Treat this class as a value carrier.
-    @SuppressWarnings("java:S1104")
-    public static class StreamAccumulator {
-        public volatile String content = "";
-        public volatile List<ToolCall> toolCalls = List.of();
-        public volatile String finishReason;
-        public volatile boolean complete = false;
-        public volatile Exception error;
-        public volatile boolean reasoningDetected = false;
-        public volatile int reasoningTokens = 0;
-        /**
-         * Accumulated reasoning text across all streamed deltas. Populated even
-         * when the provider doesn't report {@code reasoning_tokens} in the usage
-         * block, so callers can estimate a token count from the text length when
-         * needed (see {@code AgentRunner.emitUsageAndComplete}).
-         *
-         * <p>Guarded by {@link #reasoningLock} (a {@link java.util.concurrent.locks.ReentrantLock}
-         * rather than {@code synchronized}). The streaming callback fires on
-         * an OkHttp virtual thread; under JEP-444 a {@code synchronized} block
-         * pins the carrier for the duration of the lock — directly contradicting
-         * the architecture rationale ("zero Thread is pinned events"). A
-         * {@code ReentrantLock} parks the virtual thread instead, allowing
-         * the carrier to be reused for other work.
-         */
-        private final StringBuilder reasoningTextBuffer = new StringBuilder();
-        private final ReentrantLock reasoningLock =
-                new ReentrantLock();
-        public volatile Usage usage;
-        /** JTokkit-measured prompt tokens for this provider request, available even when provider usage is absent. */
-        public volatile TokenUsageEstimator.ChatRequestTokens promptTokenEstimate;
-        /** JTokkit-measured completion tokens for streamed content/tool calls/reasoning. */
-        public volatile TokenUsageEstimator.TokenCount completionTokenEstimate;
-        /** JTokkit-measured reasoning-token subset for streamed reasoning text. */
-        public volatile TokenUsageEstimator.TokenCount reasoningTokenEstimate;
-        // Wall-clock nanoTime at first and latest reasoning chunk. Both remain 0
-        // when the model emitted no reasoning. reasoningEndNanos is updated on
-        // every append so it naturally captures "end of reasoning phase" — the
-        // gap between the last reasoning chunk and the first content chunk is
-        // within one provider tick, accurate enough for a user-visible seconds
-        // label. See AgentRunner.buildUsageJson for the ms conversion.
-        public volatile long reasoningStartNanos = 0L;
-        public volatile long reasoningEndNanos = 0L;
-        /**
-         * Wall-clock nanoTime at the first content chunk of THIS round, or 0
-         * if the round produced no content (tool-only round, or reasoning-only
-         * response). {@link TurnUsage#addRound} aggregates the earliest
-         * non-zero value across rounds so the persisted "Thought for X
-         * seconds" matches what the user saw live: from first reasoning
-         * event to first content event of the entire turn (including any
-         * tool-execution gap between rounds).
-         */
-        public volatile long firstContentNanos = 0L;
-        private final CountDownLatch latch = new CountDownLatch(1);
-
-        public void appendReasoningText(String text) {
-            if (text == null) return;
-            reasoningLock.lock();
-            try {
-                reasoningTextBuffer.append(text);
-                var now = System.nanoTime();
-                if (reasoningStartNanos == 0L) reasoningStartNanos = now;
-                reasoningEndNanos = now;
-            } finally {
-                reasoningLock.unlock();
-            }
-        }
-
-        /**
-         * Record the timestamp of the first content chunk in this round.
-         * {@link TurnUsage#addRound} reads {@link #firstContentNanos} to
-         * compute turn-level reasoning duration (first reasoning event of the
-         * turn → first content event of the turn). Idempotent: only the first
-         * call records.
-         *
-         * <p>Also bookends {@link #reasoningEndNanos} for the single-chunk
-         * reasoning case, so the round-local {@link #reasoningDurationMs}
-         * still computes a non-zero value for diagnostic / per-round needs.
-         * Multi-chunk reasoning is unaffected (reasoningEndNanos was already
-         * advanced past reasoningStartNanos via prior appends).
-         */
-        public void noteFirstContentChunk() {
-            reasoningLock.lock();
-            try {
-                if (firstContentNanos != 0L) return;
-                firstContentNanos = System.nanoTime();
-                if (reasoningStartNanos != 0L && reasoningEndNanos == reasoningStartNanos) {
-                    reasoningEndNanos = firstContentNanos;
-                }
-            } finally {
-                reasoningLock.unlock();
-            }
-        }
-
-        /** Character count of accumulated reasoning text. Used for token estimation. */
-        public int reasoningChars() {
-            reasoningLock.lock();
-            try {
-                return reasoningTextBuffer.length();
-            } finally {
-                reasoningLock.unlock();
-            }
-        }
-
-        /**
-         * Full streamed reasoning text for this round. Returned as a plain
-         * {@link String} (buffer is copied) so callers can hand it to JPA /
-         * downstream consumers without racing against concurrent appends on
-         * the streaming thread.
-         */
-        public String reasoningText() {
-            reasoningLock.lock();
-            try {
-                return reasoningTextBuffer.toString();
-            } finally {
-                reasoningLock.unlock();
-            }
-        }
-
-        /**
-         * Milliseconds spent in the reasoning phase, or 0 when no reasoning was
-         * streamed. Computed lazily so callers get a stable snapshot even if the
-         * stream is still in flight.
-         */
-        public long reasoningDurationMs() {
-            if (reasoningStartNanos == 0L) return 0L;
-            return (reasoningEndNanos - reasoningStartNanos) / 1_000_000L;
-        }
-
-        void markComplete() { complete = true; latch.countDown(); }
-        public void awaitCompletion() throws InterruptedException { latch.await(); }
-        public boolean awaitCompletion(long timeoutMs) throws InterruptedException {
-            return latch.await(timeoutMs, TimeUnit.MILLISECONDS);
-        }
-    }
-
-    /**
-     * Cumulative token usage across every LLM round in a single user turn.
-     * A "turn" is one user message → one final assistant message, which for
-     * tool-using models can span many LLM API calls (each round has its own
-     * {@link StreamAccumulator}). Token counts get folded in via
-     * {@link #addRound(StreamAccumulator)} after each round's stream completes.
-     *
-     * <p>Summing per-round usage is the billing-correct behaviour because each
-     * round is a separate API call; it also matches user intuition for
-     * reasoning/completion counts (the user sees all reasoning and all
-     * synthesis output across rounds, not just round 1). Reasoning-phase
-     * <em>timing</em> is also turn-level (see {@link #turnReasoningStartNanos}
-     * and {@link #turnFirstContentNanos}): the persisted "Thought for X
-     * seconds" matches what the user saw live — from first reasoning event
-     * of the turn to first content event of the turn, including any tool-
-     * execution gap between rounds. Anchoring it to round 1 only (the
-     * pre-fix behaviour) made reloaded turns show e.g. 1.23s while the
-     * live UI showed 9.60s for the same turn.
-     *
-     * <p>See JCLAW-76 for the accounting defect this class fixes.
-     */
-    // S1104: cumulative-usage value carrier; see StreamAccumulator note above.
-    @SuppressWarnings("java:S1104")
-    public static class TurnUsage {
-        public int promptTokens;
-        public int completionTokens;
-        public int totalTokens;
-        /** Sum of provider-reported {@code reasoning_tokens} across all rounds. */
-        public int reasoningTokens;
-        public int cachedTokens;
-        public int cacheCreationTokens;
-        /** Sum of streamed reasoning-text chars, used as a token fallback when the provider returns 0 reasoning_tokens. */
-        public int reasoningChars;
-        /** True once any round has detected reasoning, used to gate the fallback estimate. */
-        public boolean reasoningDetected;
-        /** True once any round returned a non-null {@link Usage}. Gates the zero-usage JSON path. */
-        public boolean hasProviderUsage;
-        /** True once any round has a JTokkit request/response measurement. */
-        public boolean hasJtokkitUsage;
-        public int jtokkitPromptTokens;
-        public int jtokkitCompletionTokens;
-        public int jtokkitReasoningTokens;
-        public int jtokkitTotalTokens;
-        public String jtokkitEncoding;
-        public boolean jtokkitModelMatched = true;
-        /**
-         * Wall-clock nanoTime at the first reasoning chunk anywhere in this
-         * turn (any round). Set on the first {@code addRound} that sees a
-         * non-zero {@link StreamAccumulator#reasoningStartNanos}; never
-         * overwritten — matches the frontend's "stamp once" semantics.
-         */
-        public volatile long turnReasoningStartNanos = 0L;
-        /**
-         * Wall-clock nanoTime at the first content chunk anywhere in this
-         * turn (any round). Same first-non-zero-wins propagation rule as
-         * {@link #turnReasoningStartNanos}. Stays 0 if the turn was
-         * reasoning-only (no content streamed); see
-         * {@link #reasoningDurationMs} for that fallback.
-         */
-        public volatile long turnFirstContentNanos = 0L;
-        /**
-         * Concatenated reasoning text across every LLM round in the turn.
-         * Matches what the frontend bubble displays live (reasoning SSE
-         * events stream in across all rounds before the first content byte)
-         * so persisting this and rendering it on conversation reload keeps
-         * historical bubbles consistent with how they first appeared.
-         */
-        private final StringBuilder reasoningText = new StringBuilder();
-
-        public synchronized void addRound(StreamAccumulator acc) {
-            if (acc == null) return;
-            var u = acc.usage;
-            if (u != null) {
-                hasProviderUsage = true;
-                promptTokens += u.promptTokens();
-                completionTokens += u.completionTokens();
-                totalTokens += u.totalTokens();
-                reasoningTokens += u.reasoningTokens();
-                cachedTokens += u.cachedTokens();
-                cacheCreationTokens += u.cacheCreationTokens();
-            }
-            addJtokkitRound(acc);
-            if (acc.reasoningDetected) reasoningDetected = true;
-            reasoningChars += acc.reasoningChars();
-            reasoningText.append(acc.reasoningText());
-            if (acc.reasoningStartNanos != 0L && turnReasoningStartNanos == 0L) {
-                turnReasoningStartNanos = acc.reasoningStartNanos;
-            }
-            if (acc.firstContentNanos != 0L && turnFirstContentNanos == 0L) {
-                turnFirstContentNanos = acc.firstContentNanos;
-            }
-        }
-
-        private void addJtokkitRound(StreamAccumulator acc) {
-            if (acc.promptTokenEstimate == null && acc.completionTokenEstimate == null) return;
-            hasJtokkitUsage = true;
-            if (acc.promptTokenEstimate != null) {
-                jtokkitPromptTokens += acc.promptTokenEstimate.promptTokens();
-                noteJtokkitEncoding(acc.promptTokenEstimate.encodingName(), acc.promptTokenEstimate.modelMatched());
-            }
-            if (acc.completionTokenEstimate != null) {
-                jtokkitCompletionTokens += acc.completionTokenEstimate.tokens();
-                noteJtokkitEncoding(acc.completionTokenEstimate.encodingName(), acc.completionTokenEstimate.modelMatched());
-            }
-            if (acc.reasoningTokenEstimate != null) {
-                jtokkitReasoningTokens += acc.reasoningTokenEstimate.tokens();
-                noteJtokkitEncoding(acc.reasoningTokenEstimate.encodingName(), acc.reasoningTokenEstimate.modelMatched());
-            }
-            jtokkitTotalTokens = jtokkitPromptTokens + jtokkitCompletionTokens;
-        }
-
-        private void noteJtokkitEncoding(String encoding, boolean modelMatched) {
-            if (encoding != null && jtokkitEncoding == null) jtokkitEncoding = encoding;
-            jtokkitModelMatched &= modelMatched;
-        }
-
-        /** Returns the aggregated reasoning text, or {@code null} if nothing was streamed. */
-        public synchronized String reasoningText() {
-            return reasoningText.isEmpty() ? null : reasoningText.toString();
-        }
-
-        /**
-         * Milliseconds from the first reasoning chunk of this turn to the
-         * first content chunk of this turn. Matches the frontend's live
-         * {@code _thinkingDurationMs} measurement so a turn shows the same
-         * "Thought for X seconds" value during streaming and after reload.
-         *
-         * <p>Reasoning-only turns (no content ever streamed) fall back to
-         * {@code turnEndNanos} — pass {@code System.nanoTime()} from the
-         * caller at end-of-turn. Returns 0 when no reasoning was detected
-         * (so the persistence layer can omit the field, matching the
-         * pre-feature historical-message rendering).
-         */
-        public synchronized long reasoningDurationMs(long turnEndNanos) {
-            if (turnReasoningStartNanos == 0L) return 0L;
-            long endNanos = turnFirstContentNanos != 0L ? turnFirstContentNanos : turnEndNanos;
-            long diffNanos = endNanos - turnReasoningStartNanos;
-            return diffNanos > 0L ? diffNanos / 1_000_000L : 0L;
-        }
-    }
-
-    // S1104: tool-call builder; public mutable fields by design (see StreamAccumulator note).
-    @SuppressWarnings("java:S1104")
-    public static class ToolCallBuilder {
-        public String id;
-        public String type = TYPE_FUNCTION;
-        public String functionName;
-        public StringBuilder arguments = new StringBuilder();
-
-        public ToolCall build() {
-            return new ToolCall(id, type, new FunctionCall(functionName, arguments.toString()));
-        }
-    }
-
-    /**
-     * Route the {@code chunks} from a single streaming delta into slots of
-     * {@code accumulator} (JCLAW-120). OpenAI's spec says each parallel
-     * tool_call gets its own {@code index}; chunks of the same call share
-     * an index. Some providers — observed with gemini-3-flash-preview via
-     * ollama-cloud — emit every parallel call at {@code index=0} (or omit
-     * {@code index} entirely, which the primitive-int field defaults to 0).
-     * Without correction, the accumulator would merge all five parallel
-     * calls into slot 0: concatenated arguments, last-seen function name,
-     * one final ToolCall instead of five.
-     *
-     * <p>Detection signals (any triggers a fresh slot allocation):
-     * <ul>
-     *   <li>The same index appears twice within this one delta's chunk
-     *       list (defensive — covers providers that bundle fully-formed
-     *       parallel calls into a single delta).</li>
-     *   <li>The incoming chunk's non-null {@code id} differs from the
-     *       existing slot's id.</li>
-     *   <li>The incoming chunk's non-null {@code function.name} differs
-     *       from the existing slot's functionName.</li>
-     * </ul>
-     * A fresh slot is numbered {@code max(existing) + 1}. Well-behaved
-     * providers (OpenRouter, Anthropic) whose chunks share id and name
-     * across the call's streaming lifetime stay on the original slot.
-     *
-     * @param chunks      tool-call delta chunks emitted on the current SSE
-     *                    frame
-     * @param accumulator mutable per-call accumulator, keyed by slot
-     *                    number; mutated in place as chunks are folded in
-     */
-    public static void mergeToolCallChunks(
-            List<ToolCallChunk> chunks,
-            Map<Integer, ToolCallBuilder> accumulator) {
-        if (chunks == null || chunks.isEmpty()) return;
-        var seenInDelta = new HashSet<Integer>();
-        for (var tc : chunks) {
-            int slot = pickSlotForToolCall(tc, accumulator, seenInDelta);
-            seenInDelta.add(slot);
-            var builder = accumulator.computeIfAbsent(slot, _ -> new ToolCallBuilder());
-            if (tc.id() != null) builder.id = tc.id();
-            if (tc.type() != null) builder.type = tc.type();
-            if (tc.function() != null) {
-                if (tc.function().name() != null) builder.functionName = tc.function().name();
-                if (tc.function().arguments() != null) builder.arguments.append(tc.function().arguments());
-            }
-        }
-    }
-
-    /**
-     * Pick the destination slot for {@code chunk}. See
-     * {@link #mergeToolCallChunks} for the detection rules. Package-visible
-     * so unit tests can exercise the decision in isolation without driving
-     * a full streaming call.
-     */
-    static int pickSlotForToolCall(
-            ToolCallChunk chunk,
-            Map<Integer, ToolCallBuilder> accumulator,
-            Set<Integer> seenInDelta) {
-        int slot = chunk.index();
-        if (seenInDelta.contains(slot)) return nextSlot(accumulator);
-        var existing = accumulator.get(slot);
-        if (existing != null) {
-            if (chunk.id() != null && existing.id != null
-                    && !chunk.id().equals(existing.id)) {
-                return nextSlot(accumulator);
-            }
-            if (chunk.function() != null && chunk.function().name() != null
-                    && existing.functionName != null
-                    && !chunk.function().name().equals(existing.functionName)) {
-                return nextSlot(accumulator);
-            }
-        }
-        return slot;
-    }
-
-    private static int nextSlot(Map<Integer, ToolCallBuilder> accumulator) {
-        return accumulator.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
     }
 
     public static class LlmException extends RuntimeException {
