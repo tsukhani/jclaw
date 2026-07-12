@@ -125,4 +125,31 @@ class HarnessSandboxTest extends UnitTest {
                 "write to the home root (a denied path) must be blocked by the sandbox");
         Files.deleteIfExists(outside);
     }
+
+    // JCLAW-731: a session path containing a double-quote and parens cannot
+    // break out of the Seatbelt (subpath "...") string literal to widen the
+    // profile. The quote is backslash-escaped, so the injected clause stays
+    // inert text inside the literal rather than a new s-expression.
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macProfileEscapesHostileSessionPath() {
+        ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
+        // The '"' would close the intended subpath early; the ')(injected...'
+        // that follows would open a fresh grant if it escaped the literal.
+        var hostile = new java.io.File("/tmp/jclaw-evil\")(injected-grant");
+        var wrapped = HarnessSandbox.wrap(List.of("/bin/sh"), hostile, new GenericAdapter());
+        var profile = wrapped.get(2);
+
+        // The quote after 'evil' must be escaped (\"), keeping ')(injected...'
+        // inside the string literal.
+        assertTrue(profile.contains("evil\\\")(injected"),
+                "hostile quote must be backslash-escaped: " + profile);
+        // The UNescaped breakout form must be absent — its presence would mean
+        // the literal closed early and the injected clause became live syntax.
+        assertFalse(profile.contains("evil\")(injected"),
+                "an unescaped quote let the path break out of the string literal");
+        // The legit session grant survives escaping intact.
+        assertTrue(profile.contains("(allow file-write* (subpath \"/tmp/jclaw-evil"),
+                "the session path must still be granted (escaping must not corrupt it)");
+    }
 }

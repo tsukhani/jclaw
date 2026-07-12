@@ -3,6 +3,7 @@ package utils;
 import okhttp3.Dns;
 import okhttp3.OkHttpClient;
 
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -174,15 +175,41 @@ public final class SsrfGuard {
      * the OkHttp custom resolver) must use this method because {@link #SAFE_DNS}
      * only fires inside the OkHttp code path.
      *
-     * @throws SecurityException when the URL fails scheme, literal-IP, or any
-     *         resolved-address check.
+     * <p><strong>Parser-differential hardening (JCLAW-731).</strong> Chromium
+     * re-parses the URL string with the WHATWG algorithm, independently of
+     * {@link URI}. A character the two parsers treat differently moves the
+     * authority boundary, so the host this method validates may not be the host
+     * the browser connects to. Rather than hope both parsers agree, the known
+     * divergence classes are rejected outright:
+     * <ul>
+     *   <li>raw control characters, spaces, and backslashes — browsers strip or
+     *       remap these ({@code \\} is treated as {@code /}) before re-parsing,
+     *       shifting where the authority ends;</li>
+     *   <li>embedded credentials (userinfo, {@code user:pass@host}) — never
+     *       belong in an LLM-emitted browse URL and blur which token is the
+     *       host across parsers.</li>
+     * </ul>
+     * For the strongest guarantee — that the byte-for-byte string validated is
+     * the string fetched, defeating both the residual parser gap and DNS
+     * rebinding between our resolver and Chromium's — callers should connect via
+     * {@link #pinnedUrl(String)} instead of the raw hostname URL.
+     *
+     * @throws SecurityException when the URL carries a parser-differential
+     *         character or embedded credentials, or fails scheme, literal-IP, or
+     *         any resolved-address check.
      */
     public static void assertUrlSafe(String url) {
+        rejectParserDifferentialChars(url);
         URI uri;
         try {
             uri = URI.create(url);
         } catch (IllegalArgumentException e) {
             throw new SecurityException("SSRF guard: unparseable URL: " + url, e);
+        }
+        var authority = uri.getRawAuthority();
+        if (uri.getRawUserInfo() != null || (authority != null && authority.indexOf('@') >= 0)) {
+            throw new SecurityException(
+                    "SSRF guard: URL must not contain embedded credentials (userinfo)");
         }
         assertSafeScheme(uri);
         var host = uri.getHost();
@@ -199,6 +226,85 @@ public final class SsrfGuard {
         } catch (UnknownHostException e) {
             throw new SecurityException(
                     "SSRF guard: cannot resolve host: " + host, e);
+        }
+    }
+
+    /**
+     * Validate {@code url} and return it with the host swapped for the single
+     * literal IP the guard resolved and approved — the "pinned" form the browser
+     * path (Chromium/Playwright) should connect to.
+     *
+     * <p>Why (JCLAW-731): {@link #assertUrlSafe} validates the host that
+     * <em>Java's</em> {@link URI} parser and resolver see, but Chromium re-parses
+     * and re-resolves the same URL on its own. A residual parser divergence, or a
+     * DNS-rebinding flip between the two resolutions, could make the browser
+     * connect to an address the guard never validated. Pinning to the literal IP
+     * removes both gaps at once: there is no hostname left to re-parse or
+     * re-resolve, so the validated string is exactly what is fetched. Wire this
+     * into the route interceptor's {@code route.resume(...setUrl(pinnedUrl(...)))}
+     * so every request Chromium issues targets only the approved IP.
+     *
+     * <p>Literal-IP URLs are returned unchanged — {@link #assertUrlSafe} already
+     * validated the IP and there is nothing left to resolve.
+     *
+     * @return the URL with its host replaced by the validated literal IP (IPv6
+     *         bracketed); scheme, port, path, query and fragment preserved.
+     * @throws SecurityException on every condition {@link #assertUrlSafe} rejects.
+     */
+    public static String pinnedUrl(String url) {
+        assertUrlSafe(url);
+        var uri = URI.create(url);
+        var host = uri.getHost();
+        if (host == null || isLikelyIpLiteral(host)) {
+            return url; // already an approved literal IP — nothing to pin
+        }
+        InetAddress pinned;
+        try {
+            // assertUrlSafe already walked EVERY resolved address and rejected
+            // the host if any was unsafe; pin to the first.
+            pinned = InetAddress.getAllByName(host)[0];
+        } catch (UnknownHostException e) {
+            throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
+        }
+        if (isUnsafe(pinned)) { // defence in depth: never emit an unsafe pin
+            throw new SecurityException(
+                    "SSRF guard: host %s resolves to blocked address %s"
+                            .formatted(host, pinned.getHostAddress()));
+        }
+        var literal = pinned.getHostAddress();
+        var pinnedHost = pinned instanceof Inet6Address ? "[" + literal + "]" : literal;
+        var rebuilt = new StringBuilder()
+                .append(uri.getScheme()).append("://").append(pinnedHost);
+        if (uri.getPort() != -1) {
+            rebuilt.append(':').append(uri.getPort());
+        }
+        if (uri.getRawPath() != null) {
+            rebuilt.append(uri.getRawPath());
+        }
+        if (uri.getRawQuery() != null) {
+            rebuilt.append('?').append(uri.getRawQuery());
+        }
+        if (uri.getRawFragment() != null) {
+            rebuilt.append('#').append(uri.getRawFragment());
+        }
+        return rebuilt.toString();
+    }
+
+    /**
+     * Reject characters that {@link URI} and a browser's WHATWG parser handle
+     * differently, so a hostile URL can't validate here yet connect elsewhere in
+     * Chromium: raw control characters and spaces (stripped/remapped before a
+     * browser re-parses) and backslashes (WHATWG treats {@code \\} as {@code /},
+     * which can end the authority early).
+     */
+    private static void rejectParserDifferentialChars(String url) {
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (c < 0x20 || c == 0x7f || c == ' ' || c == '\\') {
+                throw new SecurityException(
+                        "SSRF guard: URL contains a parser-differential character "
+                                + "(control, space, or backslash)");
+            }
         }
     }
 

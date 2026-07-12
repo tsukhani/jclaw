@@ -168,7 +168,9 @@ public final class HarnessSandbox {
             sb.append(writeAllow(absHome(home, a)));
         }
         for (var s : DENY_READ_HOME) {
-            sb.append("(deny file-read* (subpath \"").append(absHome(home, s)).append("\"))\n");
+            sb.append("(deny file-read* (subpath \"")
+                    .append(escapeSeatbelt(absHome(home, s)))
+                    .append("\"))\n");
         }
         var out = new ArrayList<String>();
         out.add("sandbox-exec");
@@ -203,7 +205,29 @@ public final class HarnessSandbox {
     }
 
     private static String writeAllow(String path) {
-        return "(allow file-write* (subpath \"" + path + "\"))\n";
+        return "(allow file-write* (subpath \"" + escapeSeatbelt(path) + "\"))\n";
+    }
+
+    /**
+     * JCLAW-731: escape a path for safe embedding in a Seatbelt (SBPL /
+     * TinyScheme) double-quoted string literal. Backslash and double-quote are
+     * the only characters that can terminate or break out of a quoted string;
+     * escaping them keeps a hostile session path (e.g. one containing
+     * {@code "} and {@code )}) inside the literal, so it can never close the
+     * intended {@code (subpath "...")} early and inject a wider grant. Parens
+     * need no escaping — they are ordinary characters inside a quoted string.
+     * Control characters can't appear in a valid one-line profile and signal a
+     * malformed/hostile path, so they are rejected outright (fail closed).
+     */
+    private static String escapeSeatbelt(String path) {
+        for (int i = 0; i < path.length(); i++) {
+            if (path.charAt(i) < 0x20) {
+                throw new SandboxUnavailableException(
+                        "sandbox: refusing to build a profile for a path with control characters: "
+                                + path);
+            }
+        }
+        return path.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /** Resolve a possibly-$HOME-relative allowance path to absolute. */
