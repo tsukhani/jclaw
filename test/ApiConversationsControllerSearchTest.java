@@ -108,6 +108,29 @@ class ApiConversationsControllerSearchTest extends FunctionalTest {
                 "telegram conversation must be filtered out by channel=web: " + body);
     }
 
+    @Test
+    void searchWithQueryMatchingNothingShortCircuitsToZeroRows() {
+        // A conversation with messages exists, but none contains the keyword.
+        // The CONVERSATION_MESSAGE scope returns empty, so ftsConversationIds
+        // yields an empty list and the controller short-circuits to a zero-row
+        // response with X-Total-Count=0.
+        var convIds = commitInFreshTx(() -> {
+            var agent = AgentService.create("conv-nomatch-agent", "openrouter", "gpt-4.1");
+            var id = seedConversationWithMessages(agent, "web", "u-nomatch",
+                    new String[]{"nothing relevant here", "still nothing"});
+            return new long[]{id};
+        });
+
+        var resp = GET("/api/conversations?q=zzznosuchtokenzzz");
+        assertIsOk(resp);
+        assertEquals("[]", getContent(resp),
+                "no FTS match must render an empty array: " + getContent(resp));
+        assertEquals("0", resp.getHeader("X-Total-Count"),
+                "empty FTS result must report total=0");
+        assertFalse(getContent(resp).contains("\"id\":" + convIds[0]),
+                "the non-matching seeded conversation must be absent from the zero-row response");
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     /**
