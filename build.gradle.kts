@@ -398,13 +398,10 @@ dependencies {
     // (batched /embed, sherpa-onnx Python — same ONNX + feature pipeline).
     // The JVM-side sherpa-onnx JNI stack and its ivy repo are gone.
 
-    // JCLAW-563: speech emotion recognition — a wav2vec2 SER fine-tune (ONNX
-    // export, Apache-2.0) run in-process through ONNX Runtime's Java API. The
-    // jar bundles native libs for mac arm64/x64, linux x64/arm64 and win x64
-    // and self-extracts at load — same zero-setup, no-sidecar posture as
-    // whisper-jni above.
-    // copy statically; the two loads don't interact.)
-    implementation("com.microsoft.onnxruntime:onnxruntime:1.26.0")
+    // JCLAW-563/654: in-process wav2vec2 speech-emotion recognition (ONNX
+    // Runtime Java API) retired — per-turn emotion is now judged by the LLM
+    // from vocal prosody in DiarizeAudioTool, so the onnxruntime dep and its
+    // bundled multi-platform native libs are gone.
 
     // WebP decode for image captioning: caption models vary in format support — local Ollama vision
     // models reject WebP ("Failed to load image"). This TwelveMonkeys ImageIO plugin auto-registers a
