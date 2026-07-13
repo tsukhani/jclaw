@@ -131,6 +131,24 @@ class DangerousActionGateTest extends UnitTest {
                 "a non-dangerous tool must not raise an approval prompt");
     }
 
+    // ── why-rationale elevation in the approval prompt ─────────────────
+
+    @Test
+    void extractWhyReturnsRationaleWhenPresent() {
+        assertEquals("clear stale build output",
+                DangerousActionGate.extractWhy(
+                        "{\"command\":\"rm -rf build\",\"why\":\"clear stale build output\"}"));
+    }
+
+    @Test
+    void extractWhyNullWhenAbsentBlankOrMalformed() {
+        assertNull(DangerousActionGate.extractWhy("{\"command\":\"ls\"}"), "absent why → null");
+        assertNull(DangerousActionGate.extractWhy("{\"command\":\"ls\",\"why\":\"   \"}"), "blank why → null");
+        assertNull(DangerousActionGate.extractWhy("not json"), "malformed JSON → null");
+        assertNull(DangerousActionGate.extractWhy("[1,2,3]"), "non-object JSON → null");
+        assertNull(DangerousActionGate.extractWhy(null), "null args → null");
+    }
+
     // ── Non-Telegram agent → no gate, no prompt ────────────────────────
 
     @Test

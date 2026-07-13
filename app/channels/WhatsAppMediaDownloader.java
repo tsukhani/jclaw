@@ -236,7 +236,7 @@ public final class WhatsAppMediaDownloader {
                         "Cloud-API media exceeds 20 MiB cap; dropped");
                 yield false;
             }
-            case StagedDownload.Redirect(int code, String _) -> {
+            case StagedDownload.Redirect(int code, _) -> {
                 EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
                         "Cloud-API media download HTTP " + code);
                 yield false;

@@ -49,8 +49,8 @@ final class TelegramMediaSender {
      * uniform interface still uploads via the dedicated upload client.
      */
     SendResult sendPhoto(String peerId, File file, String caption) {
-        String fileName = file != null ? file.getName() : null;
-        return trySendPhoto(peerId, file, fileName, null, null, caption)
+        if (file == null) return SendResult.FAILED;
+        return trySendPhoto(peerId, file, file.getName(), null, null, caption)
                 ? SendResult.OK : SendResult.FAILED;
     }
 
@@ -60,8 +60,8 @@ final class TelegramMediaSender {
      * ReplyParameters, Integer, String)} (no reply/topic context).
      */
     SendResult sendDocument(String peerId, File file, String caption) {
-        String fileName = file != null ? file.getName() : null;
-        return trySendDocument(peerId, file, fileName, null, null, caption)
+        if (file == null) return SendResult.FAILED;
+        return trySendDocument(peerId, file, file.getName(), null, null, caption)
                 ? SendResult.OK : SendResult.FAILED;
     }
 
@@ -258,17 +258,7 @@ final class TelegramMediaSender {
                             .formatted(items == null ? 0 : items.size()));
             return false;
         }
-        var medias = new ArrayList<
-                InputMedia>(items.size());
-        for (int i = 0; i < items.size(); i++) {
-            var fs = items.get(i);
-            var file = fs.file();
-            var name = fs.displayName() != null ? fs.displayName() : file.getName();
-            // Caption rides the first item only — Telegram surfaces it as the
-            // album caption. Subsequent items carry none.
-            String itemCaption = i == 0 && caption != null && !caption.isBlank() ? caption : null;
-            medias.add(buildInputMedia(fs.kind(), file, name, itemCaption));
-        }
+        var medias = buildMediaGroupItems(items, caption);
         var builder = SendMediaGroup.builder()
                 .chatId(peerId)
                 .medias(medias);
@@ -296,6 +286,21 @@ final class TelegramMediaSender {
                             .formatted(medias.size(), elapsedMs, e.getMessage()));
             return false;
         }
+    }
+
+    /** Build the album's per-item {@link InputMedia} list. The caption rides the
+     *  first item only — Telegram surfaces it as the album caption; subsequent
+     *  items carry none. */
+    private List<InputMedia> buildMediaGroupItems(List<TelegramOutboundPlanner.FileSegment> items, String caption) {
+        var medias = new ArrayList<InputMedia>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            var fs = items.get(i);
+            var file = fs.file();
+            var name = fs.displayName() != null ? fs.displayName() : file.getName();
+            String itemCaption = i == 0 && caption != null && !caption.isBlank() ? caption : null;
+            medias.add(buildInputMedia(fs.kind(), file, name, itemCaption));
+        }
+        return medias;
     }
 
     /**

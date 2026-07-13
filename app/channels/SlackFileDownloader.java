@@ -155,7 +155,7 @@ public final class SlackFileDownloader {
             builder.header("Authorization", "Bearer " + botToken);
         }
         return switch (StagedDownload.fetch(DOWNLOAD_CLIENT, builder.build(), stagedPath)) {
-            case StagedDownload.Redirect(int _, String loc) ->
+            case StagedDownload.Redirect(_, String loc) ->
                     followRedirect(uri, loc, botToken, stagedPath, withAuth, redirectsLeft);
             case StagedDownload.HttpError(int code) -> new FetchFailed("download HTTP " + code);
             case StagedDownload.Failed(String message) -> new FetchFailed("download: " + message);

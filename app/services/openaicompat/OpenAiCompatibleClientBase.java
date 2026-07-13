@@ -47,13 +47,15 @@ public abstract class OpenAiCompatibleClientBase {
      * misconfiguration never leaks a request payload.
      */
     protected Credentials resolveCredentials() {
-        var baseUrl = ConfigService.get("provider." + providerName + ".baseUrl");
-        var apiKey = ConfigService.get("provider." + providerName + ".apiKey");
+        var baseUrlKey = "provider." + providerName + ".baseUrl";
+        var apiKeyKey = "provider." + providerName + ".apiKey";
+        var baseUrl = ConfigService.get(baseUrlKey);
+        var apiKey = ConfigService.get(apiKeyKey);
         if (baseUrl == null || baseUrl.isBlank()) {
-            throw newException("provider." + providerName + ".baseUrl is not configured");
+            throw newException(baseUrlKey + " is not configured");
         }
         if (apiKey == null || apiKey.isBlank()) {
-            throw newException("provider." + providerName + ".apiKey is not configured");
+            throw newException(apiKeyKey + " is not configured");
         }
         return new Credentials(Strings.trimTrailingSlash(baseUrl), apiKey);
     }

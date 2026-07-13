@@ -238,6 +238,29 @@ class ShellExecToolTest extends UnitTest {
     }
 
     @Test
+    void schemaMarksWhyRequired() {
+        var params = tool.parameters();
+        @SuppressWarnings("unchecked")
+        var required = (java.util.List<String>) params.get("required");
+        assertTrue(required.contains("command"), "command stays required");
+        assertTrue(required.contains("why"),
+                "why must be required so the model always states intent (operator audit trail)");
+        @SuppressWarnings("unchecked")
+        var props = (java.util.Map<String, Object>) params.get("properties");
+        assertTrue(props.containsKey("why"), "why must be declared in the schema properties");
+    }
+
+    @Test
+    void execRunsWithWhySupplied() {
+        // why rides alongside command; execution is unchanged and still succeeds.
+        var result = tool.execute("""
+                {"command": "echo hi", "why": "smoke-test the echo path"}
+                """, agent);
+        assertTrue(result.contains("\"exitCode\":0"));
+        assertTrue(result.contains("hi"));
+    }
+
+    @Test
     void emptyCommandReturnsError() {
         var result = tool.execute("""
                 {"command": "  "}

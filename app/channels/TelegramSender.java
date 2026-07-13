@@ -98,7 +98,7 @@ class TelegramSender {
      * the cache via the shared {@link TelegramSendContext#recordSent}.
      */
     public void recordSentForTest(String chatId, Integer messageId) {
-        sentCache.record(chatId, messageId);
+        sentCache.remember(chatId, messageId);
     }
 
     // ── Message sender delegation (text turns, retry, quote reply, plain edit) ──

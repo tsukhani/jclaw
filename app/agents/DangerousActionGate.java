@@ -3,6 +3,7 @@ package agents;
 import channels.SlackApprovalService;
 import channels.TelegramApprovalService;
 import channels.TelegramMarkdownFormatter;
+import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
 import models.SlackBinding;
@@ -394,9 +395,12 @@ public final class DangerousActionGate {
         if (args.length() > 600) {
             args = args.substring(0, 600) + "… (truncated)";
         }
+        var why = extractWhy(argsJson);
+        var whyLine = why == null ? ""
+                : "<b>Why:</b> " + TelegramMarkdownFormatter.escapeHtml(why) + "\n";
         return "⚠ <b>Approval required</b>\n"
                 + "The agent wants to run the <b>" + TelegramMarkdownFormatter.escapeHtml(toolName)
-                + "</b> action:\n<pre>" + TelegramMarkdownFormatter.escapeHtml(args) + "</pre>";
+                + "</b> action:\n" + whyLine + "<pre>" + TelegramMarkdownFormatter.escapeHtml(args) + "</pre>";
     }
 
     /**
@@ -409,7 +413,30 @@ public final class DangerousActionGate {
         if (args.length() > 600) {
             args = args.substring(0, 600) + "… (truncated)";
         }
-        return "The agent wants to run the *" + toolName + "* action:\n```" + args + "```";
+        var why = extractWhy(argsJson);
+        var whyLine = why == null ? "" : "*Why:* " + why + "\n";
+        return "The agent wants to run the *" + toolName + "* action:\n" + whyLine + "```" + args + "```";
+    }
+
+    /**
+     * Pull a human-readable {@code why} rationale out of the args JSON, if the tool
+     * supplied one (exec, and future consequential tools), for a prominent line in
+     * the approval prompt above the raw args. Defensive: returns {@code null} on
+     * malformed JSON or a missing/blank field, so the prompt still renders from the
+     * raw args alone. Public for direct test coverage.
+     */
+    public static String extractWhy(String argsJson) {
+        if (argsJson == null || argsJson.isBlank()) return null;
+        try {
+            var obj = JsonParser.parseString(argsJson).getAsJsonObject();
+            if (obj.has("why") && !obj.get("why").isJsonNull()) {
+                var why = obj.get("why").getAsString().strip();
+                return why.isEmpty() ? null : why;
+            }
+        } catch (RuntimeException _) {
+            // malformed / non-object JSON — fall back to the raw-args-only prompt
+        }
+        return null;
     }
 
     private static String grantKey(Agent agent, String toolName) {

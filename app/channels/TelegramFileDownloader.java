@@ -214,7 +214,7 @@ public final class TelegramFileDownloader {
         return switch (StagedDownload.fetch(DOWNLOAD_CLIENT, req, stagedPath)) {
             case StagedDownload.Ok _ -> null;
             case StagedDownload.TooBig(long size) -> new SizeExceeded(size, MAX_FILE_BYTES);
-            case StagedDownload.Redirect(int code, String _) -> new DownloadFailed("download HTTP " + code);
+            case StagedDownload.Redirect(int code, _) -> new DownloadFailed("download HTTP " + code);
             case StagedDownload.HttpError(int code) -> new DownloadFailed("download HTTP " + code);
             case StagedDownload.Failed(String message) -> new DownloadFailed("download: " + message);
         };

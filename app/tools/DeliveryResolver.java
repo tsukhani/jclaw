@@ -61,9 +61,12 @@ public final class DeliveryResolver {
         if (conv.channelType == null || !DeliveryDispatcher.isSupported(conv.channelType)) {
             return Optional.empty();
         }
-        var target = "web".equalsIgnoreCase(conv.channelType)
-                ? (conv.id != null ? conv.id.toString() : null)
-                : conv.peerId;
+        String target;
+        if ("web".equalsIgnoreCase(conv.channelType)) {
+            target = conv.id != null ? conv.id.toString() : null;
+        } else {
+            target = conv.peerId;
+        }
         if (target == null || target.isBlank()) return Optional.empty();
         return Optional.of("%s:%s".formatted(conv.channelType, target));
     }

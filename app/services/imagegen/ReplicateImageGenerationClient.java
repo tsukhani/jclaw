@@ -111,8 +111,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
         var current = prediction;
         while (true) {
-            var status = current.has(STATUS) && !current.get(STATUS).isJsonNull()
-                    ? current.get(STATUS).getAsString() : "";
+            var status = statusOf(current);
             if ("succeeded".equalsIgnoreCase(status)) {
                 var url = ReplicatePredictions.firstOutputUrl(current);
                 if (url == null) {
@@ -135,6 +134,11 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             }
             current = poll(pollUrl(current), apiKey);
         }
+    }
+
+    /** The prediction's {@code status} string, or {@code ""} when absent/JSON-null. */
+    private static String statusOf(JsonObject pred) {
+        return pred.has(STATUS) && !pred.get(STATUS).isJsonNull() ? pred.get(STATUS).getAsString() : "";
     }
 
     private String pollUrl(JsonObject prediction) {

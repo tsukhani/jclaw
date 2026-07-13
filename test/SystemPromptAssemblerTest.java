@@ -166,6 +166,35 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
+    void retrievalDisciplineSitsInTheCacheablePrefix() {
+        // The retrieval-calibration guidance is static, so it must stay above the
+        // cache boundary — below it would churn the per-agent-day prefix cache.
+        var agent = newAgent("spa-retrieval-discipline");
+        var prompt = SystemPromptAssembler.assemble(agent, "tell me about cats", null, "web").systemPrompt();
+
+        int retrieval = prompt.indexOf("## Retrieval Discipline");
+        int marker = prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        assertTrue(retrieval >= 0, "Retrieval Discipline header missing");
+        assertTrue(marker > retrieval,
+                "Retrieval Discipline must sit above the cache boundary (stable prefix)");
+    }
+
+    @Test
+    void roleFramingPresentAndInTheCacheablePrefix() {
+        // The harness/operator identity block is static, so it anchors the cacheable
+        // prefix; its lead position (before the persona) is guaranteed by buildPrompt.
+        var agent = newAgent("spa-role-framing");
+        var prompt = SystemPromptAssembler.assemble(agent, "hello", null, "web").systemPrompt();
+
+        int role = prompt.indexOf("## Your Role");
+        int marker = prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        assertTrue(role >= 0, "Your Role header missing");
+        assertTrue(marker > role, "Your Role must sit above the cache boundary (stable prefix)");
+        assertTrue(prompt.contains("single-operator automation harness"),
+                "role block must name JClaw's single-operator harness identity");
+    }
+
+    @Test
     void breakdownReportsPrefixAndSuffixCharsAroundMarker() {
         var agent = newAgent("spa-breakdown-split");
         var bd = SystemPromptAssembler.breakdown(agent, null, "web");

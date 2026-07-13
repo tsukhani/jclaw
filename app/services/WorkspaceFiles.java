@@ -239,11 +239,12 @@ public final class WorkspaceFiles {
             writeFile(dir.resolve("AGENT.md"), """
                     # Agent Instructions
 
-                    You are a helpful AI assistant. Follow these guidelines:
+                    You are a general-purpose agent, configured by your operator to get real
+                    work done on their behalf. Use your tools and skills freely, prefer taking
+                    action over describing it, and report results plainly and honestly.
 
-                    - Be concise and accurate
-                    - Ask for clarification when the request is ambiguous
-                    - Use tools when they would help accomplish the task
+                    Replace this file with instructions specific to what you want this agent to
+                    do — its job, its domain, and how it should behave.
                     """, overwrite);
 
         } catch (IOException e) {

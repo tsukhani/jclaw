@@ -48,6 +48,10 @@ public class OpenAiCompatibleTranscriptionClient extends OpenAiCompatibleClientB
      *  OpenRouter routes the same id through to OpenAI under the hood. */
     public static final String DEFAULT_MODEL = "whisper-1";
 
+    /** JSON field some Whisper variants use for the transcript instead of the
+     *  standard top-level {@code "text"}; probed as a fallback. */
+    private static final String TRANSCRIPTION_FIELD = "transcription";
+
     public OpenAiCompatibleTranscriptionClient(String providerName) {
         this(providerName, HttpFactories.llmSingleShot());
     }
@@ -120,7 +124,7 @@ public class OpenAiCompatibleTranscriptionClient extends OpenAiCompatibleClientB
             // a verbose envelope. Be lenient: prefer top-level text, fall
             // back to "transcription" or empty.
             if (json.has("text")) return json.get("text").getAsString();
-            if (json.has("transcription")) return json.get("transcription").getAsString();
+            if (json.has(TRANSCRIPTION_FIELD)) return json.get(TRANSCRIPTION_FIELD).getAsString();
             Logger.warn("OpenAiCompatibleTranscriptionClient: %s response had no text field: %s",
                     providerName, json);
             return "";
