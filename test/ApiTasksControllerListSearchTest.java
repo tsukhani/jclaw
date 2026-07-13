@@ -115,6 +115,28 @@ class ApiTasksControllerListSearchTest extends FunctionalTest {
                 "ACTIVE task must be filtered out by status=PENDING: " + body);
     }
 
+    @Test
+    void queryMatchingNothingShortCircuitsToEmptyWithZeroTotal() {
+        // JCLAW-707: the empty-FTS branch of list() — a non-blank q that runs
+        // through Lucene and matches nothing renders "[]" with X-Total-Count 0,
+        // rather than falling through to an unfiltered "return everything".
+        commitInFreshTx(() -> {
+            var agent = AgentService.create("task-empty-fts-agent", "openrouter", "gpt-4.1");
+            persistTask(agent, "present-task", "a task that exists");
+            return new long[]{0L};
+        });
+
+        var resp = GET("/api/tasks?q=zzznomatchtoken707");
+        assertIsOk(resp);
+        assertEquals("0", resp.getHeader("X-Total-Count"),
+                "an FTS query that hit nothing must report a total of 0");
+        var body = getContent(resp);
+        assertFalse(body.contains("present-task"),
+                "no rows may leak when the FTS hit set is empty: " + body);
+        assertFalse(body.contains("\"agentId\""),
+                "empty-FTS short-circuit must render an empty array: " + body);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private static long persistTask(Agent agent, String name, String description) {
