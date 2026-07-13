@@ -80,6 +80,14 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final int MAX_REFERENCE_CLIPS = 8;
     private static final int REFERENCE_SECONDS = 8;
 
+    /** Diarization output-token ceiling and per-call deadline for the audio LLM. */
+    private static final int MAX_OUTPUT_TOKENS = 8192;
+    private static final int AUDIO_CALL_TIMEOUT_SECONDS = 600;
+
+    /** Chars of an upstream/ffmpeg error kept when surfacing a failure. */
+    private static final int ERROR_BODY_SNIPPET_CHARS = 300;
+    private static final int FFMPEG_ERROR_TAIL_CHARS = 200;
+
 
     private static final Gson GSON = new Gson();
 
@@ -308,7 +316,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         var body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("temperature", 0);
-        body.addProperty("max_tokens", 8192);
+        body.addProperty("max_tokens", MAX_OUTPUT_TOKENS);
         var messages = new JsonArray();
         var user = new JsonObject();
         user.addProperty("role", "user");
@@ -325,7 +333,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         // Audio inference over a multi-minute recording routinely exceeds
         // the default single-shot timeout; give it room.
         var client = HttpFactories.llmSingleShot().newBuilder()
-                .callTimeout(Duration.ofSeconds(600)).build();
+                .callTimeout(Duration.ofSeconds(AUDIO_CALL_TIMEOUT_SECONDS)).build();
         try (var response = client.newCall(request.build()).execute()) {
             // OkHttp 5 guarantees a non-null body on a synchronously executed
             // call (may be empty, never null) — same contract note as
@@ -333,7 +341,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             var text = response.body().string();
             if (!response.isSuccessful()) {
                 throw new IOException("model call failed (HTTP %d): %s".formatted(
-                        response.code(), text.substring(0, Math.min(300, text.length()))));
+                        response.code(), text.substring(0, Math.min(ERROR_BODY_SNIPPET_CHARS, text.length()))));
             }
             var root = JsonParser.parseString(text).getAsJsonObject();
             var choices = root.getAsJsonArray("choices");
@@ -397,7 +405,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 String output = new String(proc.getInputStream().readAllBytes());
                 if (proc.waitFor() != 0) {
                     return "Error: could not extract a voice sample (%s).".formatted(
-                            output.substring(Math.max(0, output.length() - 200)));
+                            output.substring(Math.max(0, output.length() - FFMPEG_ERROR_TAIL_CHARS)));
                 }
                 Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING);
             } finally {

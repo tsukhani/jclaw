@@ -308,7 +308,7 @@ public final class PricingRefreshService {
         if (model.has(field) && !model.get(field).isJsonNull()) {
             try {
                 if (model.get(field).getAsDouble() != -1) return false;
-            } catch (NumberFormatException _) {}
+            } catch (NumberFormatException _) { /* unparseable existing value → treat as missing */ }
         }
         model.addProperty(field, newValue);
         return true;

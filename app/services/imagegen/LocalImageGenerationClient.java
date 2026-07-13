@@ -88,7 +88,7 @@ public class LocalImageGenerationClient implements ImageGenerationService {
             if (!resp.isSuccessful()) {
                 var body = resp.body().string();
                 throw new ImageGenerationException("flux-local generate failed: HTTP %d%s".formatted(
-                        resp.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, 500)));
+                        resp.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, Strings.ERROR_SNIPPET_MAX_CHARS)));
             }
             var contentType = resp.header("Content-Type", "image/png");
             var mimeType = contentType.split(";")[0].trim();

@@ -1,6 +1,7 @@
 package services.compression;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 
 import java.util.Optional;
@@ -44,7 +45,7 @@ public record JsonSpan(String prefix, JsonElement json) {
             if (el != null && (el.isJsonObject() || el.isJsonArray())) {
                 return Optional.of(new JsonSpan(content.substring(0, start), el));
             }
-        } catch (Exception _) {
+        } catch (JsonParseException _) {
             // Not parseable from the first brace — treat as non-JSON.
         }
         return Optional.empty();

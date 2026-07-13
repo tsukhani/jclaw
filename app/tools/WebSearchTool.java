@@ -42,6 +42,11 @@ public class WebSearchTool implements ToolRegistry.Tool {
     private static final int MAX_NUM_RESULTS = 10;
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json");
 
+    /** Chars of a provider error body echoed into the failure message/event. */
+    private static final int ERROR_BODY_SNIPPET_CHARS = 200;
+    /** Chars of a per-result content field kept as its snippet. */
+    private static final int CONTENT_SNIPPET_MAX_CHARS = 500;
+
     // Action / tool-call vocabulary
     private static final String ACTION_SEARCH = "search";
 
@@ -232,10 +237,10 @@ public class WebSearchTool implements ToolRegistry.Tool {
             if (statusCode != 200) {
                 EventLogger.error(ACTION_SEARCH, agent != null ? agent.name : null, null,
                         "%s API returned HTTP %d: %s".formatted(provider.displayName(), statusCode,
-                                responseBody.substring(0, Math.min(responseBody.length(), 200))));
+                                responseBody.substring(0, Math.min(responseBody.length(), ERROR_BODY_SNIPPET_CHARS))));
                 return SearchOutcome.error("Error: %s API returned HTTP %d: %s".formatted(
                         provider.displayName(), statusCode,
-                        responseBody.substring(0, Math.min(responseBody.length(), 200))));
+                        responseBody.substring(0, Math.min(responseBody.length(), ERROR_BODY_SNIPPET_CHARS))));
             }
 
             var results = provider.parseResults(responseBody);
@@ -320,7 +325,8 @@ public class WebSearchTool implements ToolRegistry.Tool {
         var content = nullableString(obj, "content");
         if (content == null) return null;
         content = content.strip();
-        return content.length() > 500 ? content.substring(0, 500) + "..." : content;
+        return content.length() > CONTENT_SNIPPET_MAX_CHARS
+                ? content.substring(0, CONTENT_SNIPPET_MAX_CHARS) + "..." : content;
     }
 
     private static JsonArray topLevelArray(String responseJson, String key) {
