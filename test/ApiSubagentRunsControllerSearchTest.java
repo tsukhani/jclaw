@@ -165,6 +165,33 @@ class ApiSubagentRunsControllerSearchTest extends FunctionalTest {
                 "agent-99 run must be filtered out by parentAgentId=42: " + body);
     }
 
+    @Test
+    void searchWithQueryMatchingNothingShortCircuitsToZeroRows() {
+        // A run exists, but the keyword appears in neither its label/outcome
+        // nor any child-transcript message. Both Lucene scopes return empty, so
+        // ftsSubagentRunIds yields an empty list and the controller
+        // short-circuits to a zero-row response with X-Total-Count=0 rather than
+        // falling through and listing the row.
+        var ids = commitInFreshTx(() -> {
+            var p = AgentService.create("sub-nomatch-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("sub-nomatch-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            var runId = persistRun(p, c, pc, cc, "ordinary-label", "ordinary outcome",
+                    SubagentRun.Status.COMPLETED);
+            return new long[]{runId};
+        });
+
+        var resp = GET("/api/subagent-runs?q=zzznosuchtokenzzz");
+        assertIsOk(resp);
+        assertEquals("[]", getContent(resp),
+                "no FTS match must render an empty array: " + getContent(resp));
+        assertEquals("0", resp.getHeader("X-Total-Count"),
+                "empty FTS result must report total=0");
+        assertFalse(getContent(resp).contains("\"id\":" + ids[0]),
+                "the non-matching seeded run must be absent from the zero-row response");
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private static long persistRun(Agent p, Agent c, Conversation pc, Conversation cc,
