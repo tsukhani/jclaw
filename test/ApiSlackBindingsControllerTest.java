@@ -414,6 +414,7 @@ class ApiSlackBindingsControllerTest extends FunctionalTest {
             b.agent = agent;
             b.botToken = token;
             b.appToken = "xapp-seed";
+            b.signingSecret = "seed-socket-secret"; // signing_secret is NOT NULL even for SOCKET
             b.transport = ChannelTransport.SOCKET;
             b.webhookBaseUrl = "https://example.com";
             b.enabled = true;

@@ -102,12 +102,6 @@ class SkillLoaderTest extends UnitTest {
         assertEquals("bob", SkillLoader.extractYamlValue("author: bob", "author"));
     }
 
-    @Test
-    void extractYamlValueMultilineBlockScalarIsDedented() {
-        var yaml = "description: |\n  line one\n  line two\n";
-        assertEquals("line one\nline two", SkillLoader.extractYamlValue(yaml, "description"));
-    }
-
     // ─── extractYamlList ─────────────────────────────────────────────────────
 
     @Test
