@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
@@ -132,7 +134,7 @@ public final class TransientErrorClassifier {
      * Classify a {@code Throwable} as transient (true) or permanent
      * (false). Null is permanent (no signal to retry on).
      */
-    public static boolean isTransient(Throwable t) {
+    public static boolean isTransient(@Nullable Throwable t) {
         if (t == null) return false;
         var visited = Collections.newSetFromMap(
                 new IdentityHashMap<Throwable, Boolean>());

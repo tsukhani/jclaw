@@ -1,5 +1,6 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
 import services.EventLogger;
 
 import java.util.concurrent.ExecutorService;
@@ -15,7 +16,7 @@ public final class VirtualThreads {
     private VirtualThreads() {}
 
     /** Create a single-thread scheduled executor backed by a virtual thread. */
-    public static ScheduledExecutorService newSingleThreadScheduledExecutor() {
+    public static @NonNull ScheduledExecutorService newSingleThreadScheduledExecutor() {
         return Executors.newSingleThreadScheduledExecutor(r -> Thread.ofVirtual().unstarted(r));
     }
 
@@ -30,7 +31,7 @@ public final class VirtualThreads {
      * @param name short identifier used in the timeout warning (e.g.
      *             "telegram-cooldown-reconcile")
      */
-    public static void gracefulShutdown(ExecutorService executor, String name) {
+    public static void gracefulShutdown(@NonNull ExecutorService executor, String name) {
         executor.shutdown();
         try {
             if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {

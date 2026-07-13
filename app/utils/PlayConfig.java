@@ -1,5 +1,6 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
 import play.Play;
 
 /**
@@ -15,7 +16,7 @@ public final class PlayConfig {
     private PlayConfig() {}
 
     /** Parse {@code key} as an int, or {@code fallback} if absent/blank/invalid. */
-    public static int intOr(String key, int fallback) {
+    public static int intOr(@NonNull String key, int fallback) {
         var raw = Play.configuration.getProperty(key);
         if (raw == null || raw.isBlank()) return fallback;
         try {
@@ -26,7 +27,7 @@ public final class PlayConfig {
     }
 
     /** Parse {@code key} as a long, or {@code fallback} if absent/blank/invalid. */
-    public static long longOr(String key, long fallback) {
+    public static long longOr(@NonNull String key, long fallback) {
         var raw = Play.configuration.getProperty(key);
         if (raw == null || raw.isBlank()) return fallback;
         try {

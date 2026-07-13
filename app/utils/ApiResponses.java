@@ -1,6 +1,8 @@
 package utils;
 
 import com.google.gson.Gson;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
 import play.mvc.results.RenderJson;
 import services.EventLogger;
@@ -84,7 +86,7 @@ public final class ApiResponses {
      * @param code       stable, machine-readable error code (snake or kebab case)
      * @param message    human-readable error message
      */
-    public static void error(int httpStatus, String code, String message) {
+    public static void error(int httpStatus, @NonNull String code, @NonNull String message) {
         Http.Response.current().status = httpStatus;
         throw new RenderJson(GSON.toJson(errorBody(code, message)));
     }
@@ -98,7 +100,7 @@ public final class ApiResponses {
      *
      * @param kv alternating key/value pairs (even length required)
      */
-    public static void error(int httpStatus, String code, String message, Object... kv) {
+    public static void error(int httpStatus, @NonNull String code, @NonNull String message, Object... kv) {
         if (kv.length % 2 != 0) {
             throw new IllegalArgumentException("ApiResponses.error(kv) requires an even number of extra arguments");
         }
@@ -121,7 +123,7 @@ public final class ApiResponses {
      * @param code       stable, machine-readable error code
      * @param message    human-readable error message
      */
-    public static void errorAndLog(Throwable t, int httpStatus, String code, String message) {
+    public static void errorAndLog(@Nullable Throwable t, int httpStatus, @NonNull String code, @NonNull String message) {
         EventLogger.error(LOG_CATEGORY, message, t);
         Http.Response.current().status = httpStatus;
         throw new RenderJson(GSON.toJson(errorBody(code, message)));

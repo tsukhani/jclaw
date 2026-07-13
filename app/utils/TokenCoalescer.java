@@ -1,5 +1,8 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 import java.util.function.Consumer;
 
 /**
@@ -26,14 +29,14 @@ public final class TokenCoalescer {
     private final Consumer<String> flushFn;
     private final StringBuilder buf = new StringBuilder();
 
-    public TokenCoalescer(int threshold, Consumer<String> flushFn) {
+    public TokenCoalescer(int threshold, @NonNull Consumer<String> flushFn) {
         if (flushFn == null) throw new IllegalArgumentException("flushFn must not be null");
         this.threshold = Math.max(0, threshold);
         this.flushFn = flushFn;
     }
 
     /** Accept one token. Flushes immediately when threshold is 0, otherwise buffers. */
-    public void accept(String token) {
+    public void accept(@Nullable String token) {
         if (token == null || token.isEmpty()) return;
         if (threshold == 0) {
             flushFn.accept(token);

@@ -6,6 +6,7 @@ import okhttp3.ConnectionPool;
 import okhttp3.Dispatcher;
 import okhttp3.EventListener;
 import okhttp3.OkHttpClient;
+import org.jspecify.annotations.NonNull;
 import play.Logger;
 import services.ConfigService;
 
@@ -215,7 +216,7 @@ public final class HttpFactories {
      * are bounded only by per-frame {@code readTimeout}, not by an overall
      * call deadline.
      */
-    public static OkHttpClient llmStreaming() {
+    public static @NonNull OkHttpClient llmStreaming() {
         return LLM_STREAMING_CLIENT;
     }
 
@@ -224,7 +225,7 @@ public final class HttpFactories {
      * override per-call via {@link okhttp3.Call#timeout() Call.timeout()}.
      * Always returns the same shared instance — no per-call client allocation.
      */
-    public static OkHttpClient llmSingleShot() {
+    public static @NonNull OkHttpClient llmSingleShot() {
         return LLM_SINGLE_SHOT_CLIENT;
     }
 
@@ -234,7 +235,7 @@ public final class HttpFactories {
      * Call.timeout()}. Always returns the same shared instance — no
      * per-call client allocation.
      */
-    public static OkHttpClient general() {
+    public static @NonNull OkHttpClient general() {
         return GENERAL_CLIENT;
     }
 }

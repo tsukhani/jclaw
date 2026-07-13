@@ -1,5 +1,8 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,7 +29,7 @@ public final class JpqlFilter {
     private int idx = 1;
 
     /** Add an equality predicate if the value is non-null (and non-blank for strings). */
-    public JpqlFilter eq(String field, Object value) {
+    public @NonNull JpqlFilter eq(@NonNull String field, @Nullable Object value) {
         return add("%1$s = ?%2$d", field, value);
     }
 
@@ -41,37 +44,37 @@ public final class JpqlFilter {
      * @param value value to exclude; null/blank skips the predicate entirely
      * @return this filter for chaining
      */
-    public JpqlFilter notEqOrNull(String field, Object value) {
+    public @NonNull JpqlFilter notEqOrNull(@NonNull String field, @Nullable Object value) {
         return add("(%1$s IS NULL OR %1$s <> ?%2$d)", field, value);
     }
 
     /** Add a LIKE predicate if the value is non-null and non-blank. */
-    public JpqlFilter like(String field, String value) {
+    public @NonNull JpqlFilter like(@NonNull String field, @Nullable String value) {
         return add("%1$s LIKE ?%2$d", field, value);
     }
 
     /** Add a >= predicate if the value is non-null. */
-    public JpqlFilter gte(String field, Object value) {
+    public @NonNull JpqlFilter gte(@NonNull String field, @Nullable Object value) {
         return add("%1$s >= ?%2$d", field, value);
     }
 
     /** Add a {@code <=} predicate if the value is non-null. */
-    public JpqlFilter lte(String field, Object value) {
+    public @NonNull JpqlFilter lte(@NonNull String field, @Nullable Object value) {
         return add("%1$s <= ?%2$d", field, value);
     }
 
     /** Add a strict {@code >} predicate if the value is non-null. */
-    public JpqlFilter gt(String field, Object value) {
+    public @NonNull JpqlFilter gt(@NonNull String field, @Nullable Object value) {
         return add("%1$s > ?%2$d", field, value);
     }
 
     /** Add a strict {@code <} predicate if the value is non-null. */
-    public JpqlFilter lt(String field, Object value) {
+    public @NonNull JpqlFilter lt(@NonNull String field, @Nullable Object value) {
         return add("%1$s < ?%2$d", field, value);
     }
 
     /** Returns the WHERE clause body (without the "WHERE" keyword), or empty string if no filters. */
-    public String toWhereClause() {
+    public @NonNull String toWhereClause() {
         return String.join(" AND ", clauses);
     }
 
@@ -81,12 +84,12 @@ public final class JpqlFilter {
     }
 
     /** Returns the parameter values in positional order. */
-    public Object[] params() {
+    public Object @NonNull [] params() {
         return params.toArray();
     }
 
     /** Returns the parameter values as a list. */
-    public List<Object> paramList() {
+    public @NonNull List<Object> paramList() {
         return List.copyOf(params);
     }
 

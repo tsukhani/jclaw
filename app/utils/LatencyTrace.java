@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -57,14 +59,14 @@ public final class LatencyTrace {
      * don't have a pre-runner timestamp (Telegram polling, scheduled tasks)
      * pass {@code null} — every other segment is still captured.
      */
-    public static LatencyTrace forTurn(String channel, Long acceptedAtNs) {
+    public static @NonNull LatencyTrace forTurn(@Nullable String channel, @Nullable Long acceptedAtNs) {
         return new LatencyTrace(channel, acceptedAtNs == null ? 0L : acceptedAtNs);
     }
 
     /** Tag this turn's persisted segment samples with the owning agent id (JCLAW-515).
      *  Called by AgentRunner once the conversation/agent is resolved. A null id leaves
      *  the samples agent-less — they still record, just without agent attribution. */
-    public void agentId(String id) {
+    public void agentId(@Nullable String id) {
         this.agentId = id;
     }
 
@@ -74,7 +76,7 @@ public final class LatencyTrace {
      * thread (e.g. background jobs, sub-agent spawns). Used by web entrypoints
      * so they can forward the stamp to {@link #forTurn} across a thread hop.
      */
-    public static Long acceptedAtNsFromCurrentRequest() {
+    public static @Nullable Long acceptedAtNsFromCurrentRequest() {
         var req = Http.Request.current();
         if (req != null && req.args != null && req.args.get("acceptedAtNanos") instanceof Long ns) {
             return ns;
@@ -83,7 +85,7 @@ public final class LatencyTrace {
     }
 
     /** Record a named mark. First writer wins; subsequent calls are no-ops. */
-    public void mark(String name) {
+    public void mark(@NonNull String name) {
         marks.putIfAbsent(name, System.nanoTime());
     }
 

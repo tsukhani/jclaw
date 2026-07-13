@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -38,14 +40,14 @@ public final class TokenHasher {
      *  once (the {@code auth.internal.apiToken} config row) and discard
      *  the in-memory copy after use — the database only ever sees
      *  {@link #hash}. */
-    public static String mint() {
+    public static @NonNull String mint() {
         var bytes = new byte[RANDOM_BYTES];
         RANDOM.nextBytes(bytes);
         return TOKEN_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     /** SHA-256 hex of the token. Deterministic — used as the DB lookup key. */
-    public static String hash(String token) {
+    public static @NonNull String hash(@NonNull String token) {
         if (token == null) throw new IllegalArgumentException("token required");
         try {
             var md = MessageDigest.getInstance("SHA-256");

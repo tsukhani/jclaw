@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Function;
@@ -31,7 +33,7 @@ public final class BoundedPatternCache {
         };
     }
 
-    public Pattern computeIfAbsent(String key, Function<String, Pattern> compiler) {
+    public Pattern computeIfAbsent(@NonNull String key, @NonNull Function<String, Pattern> compiler) {
         synchronized (store) {
             return store.computeIfAbsent(key, compiler);
         }

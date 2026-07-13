@@ -1,5 +1,8 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 /**
  * Filename inspection helpers. Centralizes the edge-case logic (leading
  * dot = hidden file, trailing dot = no extension, dot in a parent dir vs.
@@ -30,7 +33,7 @@ public final class Filenames {
      * source, salvage an extension for locally-staged downloads, produce a
      * reasonable leaf name when the source has multiple possible labels.
      */
-    public static String extensionOf(String... candidates) {
+    public static @NonNull String extensionOf(@Nullable String... candidates) {
         if (candidates == null) return "";
         for (var c : candidates) {
             var ext = candidateExtension(c);

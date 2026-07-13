@@ -3,6 +3,8 @@ package utils;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.HdrHistogram.AtomicHistogram;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import services.LatencyMetricRecorder;
 
 import java.util.HashMap;
@@ -46,7 +48,7 @@ public final class LatencyStats {
     // would force 16+ call sites across agents/, services/, tools/ to use a less
     // idiomatic name purely to avoid Java's contextual keyword.
     @SuppressWarnings("java:S6213")
-    public static void record(String channel, String segment, long valueMs) {
+    public static void record(@Nullable String channel, @NonNull String segment, long valueMs) {
         record(channel, segment, valueMs, null);
     }
 
@@ -59,7 +61,7 @@ public final class LatencyStats {
      * and batched off the turn path by {@link LatencyMetricRecorder}.
      */
     @SuppressWarnings("java:S6213")
-    public static void record(String channel, String segment, long valueMs, String agentId) {
+    public static void record(@Nullable String channel, @NonNull String segment, long valueMs, @Nullable String agentId) {
         var resolved = (channel == null || channel.isBlank()) ? UNKNOWN_CHANNEL : channel;
         BY_CHANNEL
                 .computeIfAbsent(resolved, _ -> new ConcurrentHashMap<>())
@@ -74,7 +76,7 @@ public final class LatencyStats {
      * a single aggregate view across channels can merge client-side (or
      * we can add a server-side merge later — JCLAW-102 defers that).
      */
-    public static JsonObject snapshot() {
+    public static @NonNull JsonObject snapshot() {
         var root = new JsonObject();
         for (Map.Entry<String, ConcurrentHashMap<String, Histogram>> channelEntry : BY_CHANNEL.entrySet()) {
             var channelObj = new JsonObject();
@@ -97,7 +99,7 @@ public final class LatencyStats {
      * HdrHistogram percentile machinery so server-side (windowed/filtered) and
      * live aggregation produce an identical shape from one code path.
      */
-    public static JsonObject aggregate(Map<String, ? extends Iterable<Long>> samplesBySegment) {
+    public static @NonNull JsonObject aggregate(@NonNull Map<String, ? extends Iterable<Long>> samplesBySegment) {
         var root = new JsonObject();
         for (var e : samplesBySegment.entrySet()) {
             var hist = new Histogram();
@@ -120,7 +122,7 @@ public final class LatencyStats {
      * the reset and add steps of the restore are lost — keep the window
      * narrow (snapshot → single warmup request → restore).
      */
-    public static Runnable captureResetPoint() {
+    public static @NonNull Runnable captureResetPoint() {
         Map<String, Map<String, HistogramCopy>> snap = new HashMap<>();
         for (var channelEntry : BY_CHANNEL.entrySet()) {
             var inner = new HashMap<String, HistogramCopy>();

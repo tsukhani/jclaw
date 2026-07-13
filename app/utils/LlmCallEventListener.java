@@ -3,6 +3,7 @@ package utils;
 import okhttp3.Call;
 import okhttp3.Connection;
 import okhttp3.EventListener;
+import org.jspecify.annotations.NonNull;
 import play.Logger;
 
 import java.util.Set;
@@ -35,17 +36,17 @@ public final class LlmCallEventListener extends EventListener {
 
     private static final Set<String> SEEN_HOSTS = ConcurrentHashMap.newKeySet();
 
-    public static EventListener.Factory factory() { return FACTORY; }
+    public static EventListener.@NonNull Factory factory() { return FACTORY; }
 
     private long callStartNs;
 
     @Override
-    public void callStart(Call call) {
+    public void callStart(@NonNull Call call) {
         callStartNs = System.nanoTime();
     }
 
     @Override
-    public void connectionAcquired(Call call, Connection connection) {
+    public void connectionAcquired(@NonNull Call call, @NonNull Connection connection) {
         if (callStartNs > 0L) {
             long deltaNs = System.nanoTime() - callStartNs;
             // Read the originating chat channel from the request tag (set by

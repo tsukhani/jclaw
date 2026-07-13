@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -42,7 +44,7 @@ public final class RetryScheduler {
     // that must surface Errors (OOM, StackOverflow, etc.) to the caller's get()
     // rather than let them die silently on the daemon scheduler thread.
     @SuppressWarnings("java:S1181")
-    public static <T> CompletableFuture<T> schedule(Callable<T> task, long delayMs) {
+    public static <T> @NonNull CompletableFuture<T> schedule(@NonNull Callable<T> task, long delayMs) {
         var future = new CompletableFuture<T>();
         SCHEDULER.schedule(() -> {
             try {

@@ -1,6 +1,8 @@
 package utils;
 
 import com.google.gson.JsonObject;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Null-tolerant readers for optional fields on a Gson {@link JsonObject} — the
@@ -24,7 +26,7 @@ public final class JsonArgs {
      * {@code getAsString()}; a non-primitive (object/array) value throws, as the
      * inline reads this replaces did.
      */
-    public static String optString(JsonObject obj, String key) {
+    public static @Nullable String optString(@NonNull JsonObject obj, @NonNull String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
         return el.getAsString();
@@ -35,7 +37,7 @@ public final class JsonArgs {
      * key is absent or JSON-null. A blank value is returned verbatim (it is not
      * collapsed to {@code def}).
      */
-    public static String optString(JsonObject obj, String key, String def) {
+    public static @Nullable String optString(@NonNull JsonObject obj, @NonNull String key, @Nullable String def) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return def;
         return el.getAsString();
@@ -46,7 +48,7 @@ public final class JsonArgs {
      * null, the key is absent/JSON-null, or the value is blank. The returned string
      * is never blank (blank collapses to {@code null}); it is not trimmed.
      */
-    public static String optNonBlankString(JsonObject obj, String key) {
+    public static @Nullable String optNonBlankString(@Nullable JsonObject obj, @NonNull String key) {
         if (obj == null) return null;
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
@@ -58,7 +60,7 @@ public final class JsonArgs {
      * The value at {@code key} as an {@code int}, or {@code fallback} when the key
      * is absent, JSON-null, or not coercible to an int.
      */
-    public static int optInt(JsonObject obj, String key, int fallback) {
+    public static int optInt(@NonNull JsonObject obj, @NonNull String key, int fallback) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return fallback;
         try {
@@ -72,7 +74,7 @@ public final class JsonArgs {
      * The value at {@code key} as an {@link Integer}, or {@code null} when the key
      * is absent, JSON-null, or not coercible to an int.
      */
-    public static Integer optInteger(JsonObject obj, String key) {
+    public static @Nullable Integer optInteger(@NonNull JsonObject obj, @NonNull String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
         try {
@@ -86,7 +88,7 @@ public final class JsonArgs {
      * The value at {@code key} as a {@link Long}, or {@code null} when the key is
      * absent, JSON-null, or not coercible to a long.
      */
-    public static Long optLong(JsonObject obj, String key) {
+    public static @Nullable Long optLong(@NonNull JsonObject obj, @NonNull String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
         try {
@@ -100,7 +102,7 @@ public final class JsonArgs {
      * The value at {@code key} as a {@code boolean}, or {@code false} when the key
      * is absent, JSON-null, or not coercible to a boolean.
      */
-    public static boolean optBool(JsonObject obj, String key) {
+    public static boolean optBool(@NonNull JsonObject obj, @NonNull String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return false;
         try {
@@ -114,7 +116,7 @@ public final class JsonArgs {
      * The value at {@code key} as a {@link Boolean}, or {@code null} when the key
      * is absent, JSON-null, or not coercible to a boolean.
      */
-    public static Boolean optBoolean(JsonObject obj, String key) {
+    public static @Nullable Boolean optBoolean(@NonNull JsonObject obj, @NonNull String key) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return null;
         try {

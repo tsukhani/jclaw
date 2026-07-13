@@ -1,5 +1,8 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 /**
  * Small string helpers shared across services and channel code.
  *
@@ -31,13 +34,13 @@ public final class Strings {
      * excerpts in HTTP failure paths, any "show a snippet, full data lives
      * elsewhere" rendering.
      */
-    public static String truncate(String s, int maxLen) {
+    public static @NonNull String truncate(@Nullable String s, int maxLen) {
         if (s == null) return "";
         return s.length() <= maxLen ? s : s.substring(0, maxLen) + "…";
     }
 
     /** First value that is non-null and not blank, or null if none qualify. */
-    public static String firstNonBlank(String... values) {
+    public static @Nullable String firstNonBlank(@Nullable String... values) {
         for (var v : values) {
             if (v != null && !v.isBlank()) return v;
         }
@@ -45,7 +48,7 @@ public final class Strings {
     }
 
     /** Strip a single trailing '/', if present. Assumes non-null input. */
-    public static String trimTrailingSlash(String s) {
+    public static @NonNull String trimTrailingSlash(@NonNull String s) {
         return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 }

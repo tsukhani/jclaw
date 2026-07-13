@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.NonNull;
+
 /**
  * Minimal thread-safe circuit breaker for guarding a failure-prone subsystem
  * (e.g. a background LLM extraction call). Trips OPEN when the failure rate over
@@ -86,7 +88,7 @@ public final class CircuitBreaker {
         }
     }
 
-    public synchronized State state() {
+    public synchronized @NonNull State state() {
         return state;
     }
 
