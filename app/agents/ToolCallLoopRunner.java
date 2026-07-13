@@ -604,10 +604,10 @@ public final class ToolCallLoopRunner {
         // Retry round is a real LLM call — its usage counts too (JCLAW-76).
         turnUsage.addRound(retry);
 
-        if (retry.content != null && !retry.content.isBlank()) {
-            return MessageDeduplicator.buildImagePrefix(collectedImages, retry.content)
-                    + retry.content
-                    + MessageDeduplicator.buildDownloadSuffix(collectedImages, retry.content, channelType);
+        if (retry.content() != null && !retry.content().isBlank()) {
+            return MessageDeduplicator.buildImagePrefix(collectedImages, retry.content())
+                    + retry.content()
+                    + MessageDeduplicator.buildDownloadSuffix(collectedImages, retry.content(), channelType);
         }
 
         // Retry also empty — emit a labeled diagnostic so the user knows why.
